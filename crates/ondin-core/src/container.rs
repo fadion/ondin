@@ -1393,7 +1393,10 @@ pub fn quantize(v: f32) -> f64 {
 /// used. The three: [`Self::parent_box`], the *used* box a pinned root is
 /// stretched against (§15 D933); and [`Self::measured`] and
 /// [`Self::content_widths`], a text's measurements, which a view may answer from
-/// a memo of the same answers (§15 D936).
+/// a memo of the same answers (§15 D936). ⚠️ **"Specified" has bindings resolved
+/// in it**: [`Self::display`] answers a layout's bound gaps and padding at their
+/// variables' numbers (§15 D1058) and [`Self::visible`] a bound visibility at
+/// its variable's value (§15 D1059) — never the literal a binding stands in for.
 pub trait LayoutView {
     fn parent(&self, id: crate::NodeId) -> Option<crate::NodeId>;
     fn children(&self, id: crate::NodeId) -> Vec<crate::NodeId>;

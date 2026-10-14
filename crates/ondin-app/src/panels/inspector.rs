@@ -2101,6 +2101,11 @@ impl OndinApp {
     /// and the way to give two of them different radii is to select them
     /// separately — which this field already does. The button holds the slot so
     /// the row keeps the shape it has on a rect.
+    ///
+    /// **And its radius does not bind to a variable, by decision** (§15 D1057):
+    /// a path's radii are indexed by anchor, and point editing adds and removes
+    /// anchors, so a binding would have to follow every one of those edits. A
+    /// rectangle's four corners bind; this field takes no `--` and no chip.
     fn points_appearance(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let opacity0 = self
             .session

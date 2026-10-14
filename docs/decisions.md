@@ -1311,7 +1311,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D911** — **The gesture preview lays out every layout root from a touched node up to its chain root.** `flex_relayout` laid out the chain root alone, and since D899 that root can sit above a plain group whose laid group is a root of its own, un-laid in the preview: a nested column's second rect previewed 20 wide at y 50 against the commit's 40 wide at y 70. `chain_root`'s doc now says it is the topmost root, not the only one. The repair D899 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_layout_nested_in_a_plain_group_previews_as_it_commits`. D899 amended; §5.3c, §6.2; `roadmap.md`'s *owed* item struck)*
 - **D912** — **The multi card's X/Y tooltip promises a reorder only where a drag makes one.** D903's hover said *"drag them on the canvas to reorder"* over any selection with an in-flow member, and a mixed selection's drag reorders nothing (D902). `inspector::drags_as_a_block` — every outermost member an in-flow item of one container — chooses that tail; otherwise *"select a container's items on their own to reorder them by dragging"*. Amended the same day: `inspector::laid_out_xy` answers the card's gate and hover both, its strings asserted; the card's call to it is read. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `only_one_containers_items_are_told_to_drag_to_reorder`, one flip not biting until a case was added. D903 amended; §9.4)*
 - **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, its preview and gestures, D916, which stores no track positions in `Resolved`, the inspector's track list, D920, and the canvas lines, D921. §5.3c; `roadmap.md`'s open paragraph struck)*
-- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916, and sub-step 3, D920; the two readings it left untested tested since, D919. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck. **Amended 2026-10-03**: `baseline` read as `start` on the inline axis only, the block axis shimmed (D939); the mapping pinned value by value, `tests/grid_mapping.rs`, the release review's `[X3.3-L6-01]`)*
+- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed (a `Cow` since D1058). `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916, and sub-step 3, D920; the two readings it left untested tested since, D919. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck. **Amended 2026-10-03**: `baseline` read as `start` on the inline axis only, the block axis shimmed (D939); the mapping pinned value by value, `tests/grid_mapping.rs`, the release review's `[X3.3-L6-01]`)*
 - **D915** — **Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as CSS does.** The maintainer's ruling, *"I'd lean into CSS parity as much as it makes sense"*, answering D914's open question. `Grid::justify_items` and `align_items` become `Option<AlignItems>`, `None` CSS's `normal` and the default, skipped in the file; under it a replaced item (`container::is_replaced`, D872) is held at `start` in its taffy style by `container::grid_held`, and text and a container with a layout stretch. `fit-content` is never stretched in a grid, D893's rule on both axes; an explicit `stretch` stretches a shape. Flex's `align_items` stays plain, its `normal` being `stretch`. The cards owe grid a `normal` entry — drawn since, D920. *(Ruled and built 2026-09-27, uncommitted when recorded; **Resolved**, answering D914. Test `normal_holds_a_shape_at_the_start_and_stretches_a_box`, two flips, one failing an assertion earlier than predicted. D914 amended; §5.3c; `roadmap.md` step 4's ⚠️ struck)*
 - **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. Several grid items dragged kept their cells, unruled, until D918; D913's *"cell under the pointer"* is read as the centre's — kept, amended 2026-09-27: D877's reading, and a pointer reading would snap a spanning or off-centre grab on release. `laid_grid` keeps a grid's last report — tested 2026-09-28, amended: a parent's measure can lay a grid out in full, taffy's flex baseline step, so the first report is the measure's. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck. **Annotated 2026-10-03**: its *"a start pushed before line 1 stops there"* is stale — the first and last laid tracks stop a drop, a negative line written before the explicit grid (D918's amendment, D927), `[R2-L8-02]`)*
 - **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. Amended the same day: a text pinned on both edges still wraps (D874), on purpose — pinning is the author choosing a width, a container's stretch is not; and the unreadable-box arm is unreachable. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected, D874 amended; §5.3c)*
@@ -1440,20 +1440,23 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1040** — **Styles and variables, build step 1's browser: a floating panel above the hexagon swapping in place with the insert picker, a fixed name column and a column per mode, variables grouped by the slash path in their names, cells edited in place — an alias typed as `--name` — and the delete verbs detaching in the deleting transaction.** `panels/variables.rs`; `Shift+S` (`Action::VariablesBrowser`) or `icon::SWATCHES`; either panel's toggle closes the other; `Escape` a rung after the picker's, a menu or a field first. Width `24 + 220 + 96·min(n,3)`, *Value* with one mode, sideways scrolling past three by wheel ~~with no drawn bar~~ (G3's bar since D1055); height 460, the picker's, so the swap does not jump (the session's). Flat headers per distinct group path; usage counts direct, not through an alias, selecting on a click; *In selection* direct bindings in the selection's subtrees. `Enter`/defocus commits, `Escape` abandons, `Tab` to the next mode; a hex with alpha, a number by `expr::eval`, **`--name` an alias — the session's call**, D1038 giving the cell no route until the popup's segment (a colour cell opens it since D1052); refusals a plain sentence, ~~not B4's manner~~ in B4's manner since D1053. A first variable creates *Mode 1*; *Boolean variable* left out of `+` with *String* (the session's reading); *Delete mode…* confirms with its frames; a group rename refuses a clash (G14 over ~~unruled~~ G13 — ruled so 2026-10-14, the session's call under the maintainer's delegation, leaves that do not collide merging). Core: `users`, `remove_ops`, `remove_mode_ops`, `frames_set_to`, `copy_mode_ops`, `split_name`, `rename_group_ops`. The delete status names a value only when every user read the same one in its own mode. ⚠️ *Delete group* takes the subgroups under a count that is the group's alone. 🚨 A refused `Tab` dropped the typed cell, two acts applied in order; now one, `Act::Cell` carrying the next cell, opened only when `var_cell` lands. *(Built 2026-10-14, `155846e`. **Keep**; ~~***Fix*** the refused `Tab`~~ **Fixed** before commit, with the delete status's value — test `a_refused_tab_keeps_the_typed_cell`, its flip failing *"the refused field is kept"*. ~~Still owed: a colour cell opening the colour popup, G3's bar, B4's manner, Alt-click and the per-document collapse~~ (D1052–D1055), and ~~the inspector's half~~ ~~the inspector's swatch segment~~ ~~and *Mode* row~~ (D1041; the *Mode* row D1042; the swatch segment D1043). D1039 amended; `architecture.md` §5.3f; `shortcuts.md` §14; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1052–D1055): the browser's leftovers built)*
 - **D1041** — **Styles and variables, build step 1's inspector half: a bound colour or corner radius is a chip, `--` typed into either opens the one list the app has, a field's right-click binds, extracts and detaches, and a radius written over a bound corner detaches it at the commit rather than at every door.** `panels/binding.rs`: `FieldKey` (`Paint { id, slot }`, `Radius { id }`); the chip a 20-pt capsule, text 11%/17% at rest, accent only focused, a hover × in its last 14 pt, `elide_groups` cutting whole groups from the left, `chip_tip` *name · value · Mode*; **focused it consumes `Backspace`/`Delete`** as the detach — an egui focus being the only other thing holding *Delete selection* off — and hands typed text on as a `Retype`, caret at the end. Paint: the chip in the hex's place, the swatch resolved, **the `%` the binding's alpha**; **a hex typed over a binding writes the literal outright** through `set_brush_at_all`, D1039's first edge fixed; a selection row a chip only when every target shares one variable, ~~A4's *Mixed* capsule not built~~ (D1045). Radius: the chip, a retype that detaches first, `--` read from the drag value's text under its response id (an egui internal); the card reads corners as drawn. **One `--` list**, re-asked each pass by its field, the one pass of grace what lets `Enter` bind; a paint's highlight previews, ~~a corner's cannot (`absorb`)~~ a corner's too since D1050; `Escape` a rung of `OndinApp::escape`. The field menu, §6.7's rows, its own `Area`. **Extract is one transaction** and then the browser renames it — no pending row, no dashed capsule (the session's). Core: `set_brush_at_all`, `bind_brush_at_all`, `detach_brush_at_all`, and **`keep_corner_bindings`, in `commit_inner` before `propagate::owed`**, 🚨 keeping a bound corner bound when written **what it draws or its own literal**, the literal put back to 0, anything else detaching to it — both halves load-bearing: literal alone (the first cut) detached all four on a per-corner edit or a bare click; drawn alone (the second) detached a bound corner square under the Scale tool or a per-corner ↺. **Price**: a 0 typed into a field over a bound corner is its literal and detaches nothing; the chip's retype is 0's door. Read and **fixed before commit**: extract squaring a translucent solid's alpha (now filed opaque); both cuts; a document switch leaving the binding chrome open. ~~⚠️ Read, not measured: the radius mark compares literals only, a ↺ dropping a main's binding (`sub_mark` cannot carry it).~~ (D1048.) *(Built 2026-10-14, `1cdc802`. **Keep**, *Extract*'s one transaction kept over the pending row on 2026-10-14 under the maintainer's delegation; ~~***Fix*** the radius mark~~ **Resolved** by D1048. Tests: `panels::binding::tests`' seven, the chip's `Backspace` and the extract's alpha flips run; `tests/variables.rs`' `a_radius_written_over_a_bound_corner_detaches_that_corner`, written as a field writes and as the Scale tool does, three flips run, and `binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour`. D1039, D1040 amended; `architecture.md` §5.3f, §5.9; `context-menus.md` §6.7; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1042): the *Mode* row and the canvas label's suffix built; (D1043) the swatch popup's segment built, the picker's *Solid* edge fixed on a row one variable binds; (D1044) B4's refusal built, the radius field's `--` handed to the retype buffer, which is now the unbound field's too; (D1045) the *Mixed* capsule; (D1046) the badge's no-scrub cursor; (D1048) the radius mark; (D1049) the per-corner chips; (D1050) the corner preview)*
 - **D1042** — **Styles and variables, build step 1's *Mode* row: a frame's mode is a dropdown row in its identity card under its name, *Inherit* first, an inherited mode read dim with where it comes from, and a mode the frame sets appended to its canvas tag.** `OndinApp::frame_mode_row`, after the name row and before the boolean row, on an `Artboard` only and only when the document has a mode: *Mode* 48 pt, a 28-pt field — set, the name bright; inherited, half ink and *· from ‹frame›* or *· default*. 🚨 `variables::inherited_mode` walks from the **parent**, where `Document::mode_at` counts the node — the row and *Inherit* name what the frame would read unset. `mode_menu_ui`: an `Area` of its own, *Inherit* with the inherited mode in the accelerator column, a rule, every mode, the current checked; a pick commits one `SetMode`; a press outside closes it; a rung of `Escape` beside the field menu and the `--` list; cleared on a document switch. The canvas: the plain-frame arm of `frame_label` appends *· ‹mode›* at 70% in its own ink when the frame sets one, an inherited mode nothing. **Departures**: no sun or moon (H1) — modes are user-named, so `icon::COLUMNS` on the menu's mode rows, none in the field (the session's). **Not built**: ~~the mode on a main's, a set's or an instance's tag~~ (D1051); H5's elision (no tag elides — not built by decision, D1051); ~~⚠️ D1038 (a)'s override dot and ↺ on a copy's row — `reset::overrides` finds the mode, the Component card's drift and *Reset all* reach it, but `card_of` files it under no header and the row asks no `sub_mark`~~ (D1048: the row asks one now). ~~The variables test's doc claiming the menu's commit~~ fixed before commit; ⚠️ nothing draws the row or the menu in a test (D1048's draws the row, not the menu). *(Built 2026-10-14, uncommitted. **Keep**; ~~***Fix*** the override mark~~ **Resolved** by D1048; ~~the test doc~~ **Fixed** before commit. Tests: `a_frame_inherits_from_the_nearest_frame_that_sets_a_mode`, `a_frames_tag_names_the_mode_it_sets_and_not_one_it_inherits`, no flip run. D1039, D1040, D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1048): the override mark; (D1051) the mode on every tag, H5 not built by decision)*
-- **D1043** — **Styles and variables, build step 1's swatch popup segment: the colour picker carries a fourth tab, *Variables*, on a slot a variable can bind, a bound paint opens on it, and leaving it for *Solid* detaches — which closes D1039's *Solid* edge on every row a variable binds alone.** D1038 E1. `picker_body` draws four tabs where `binding::paint_item(slot)` is `Some` (`Fill`, `Stroke`, `Selection`), three elsewhere; the face shows while `field_var` answers one variable or `Picker::browse` is set (`retarget` clears it). *Solid* over a binding is `detach_field`, the `%` folded in; *Linear*/*Radial* convert the drawn brush through `write_slot`, which detaches. `OndinApp::variables_face`: a search, every colour variable under a header per group (none for the top group), each row a swatch, the name by `elide_groups` and the hex **in the layer's mode**, the current one tinted and checked and scrolled to once per open; a click binds keeping the `%`, the picker staying up. **The picker widened 240 → 272**, E1's width, *Variables* not fitting a quarter of the old track; one test's expected colour re-measured. The face keeps the *Solid* face's height, measured in egui temp data, the mockup's 206-pt list before it has been; ⚠️ the gradient faces still differ. **Not built**: E1's kit group (no kit variables until step 4); a hover preview, the face committing on a click only (the session's call); ~~a browser cell opening the popup~~ (D1052). ⚠️ **What survives of D1039's edges**: the *Solid* face still opens over bound paints on a selection row whose targets disagree and on the *All* row, its writes as drawn through `edited_brush`, the picker's `%` clamping there — **kept** on 2026-10-14, the session's call under the maintainer's delegation: a write equal to what is drawn changes nothing drawn, and a `%` of at most 100% cannot draw more opaque than its variable. *(Built 2026-10-14, uncommitted when recorded; `1a24349`, recorded in `68aff8b`. **Keep**, the two survivors too. Tests: `the_pickers_variables_tab_binds_and_solid_detaches` (its flip run) and `a_bound_fill_opens_on_the_variables_face`. D1039, D1040, D1041 amended; `architecture.md` §5.3f and §9.2's module map; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1052): a browser cell opens the popup)*
+- **D1043** — **Styles and variables, build step 1's swatch popup segment: the colour picker carries a fourth tab, *Variables*, on a slot a variable can bind, a bound paint opens on it, and leaving it for *Solid* detaches — which closes D1039's *Solid* edge on every row a variable binds alone.** D1038 E1. `picker_body` draws four tabs where `binding::paint_item(slot)` is `Some` (`Fill`, `Stroke`, `Selection`), three elsewhere; the face shows while `field_var` answers one variable or `Picker::browse` is set (`retarget` clears it). *Solid* over a binding is `detach_field`, the `%` folded in; *Linear*/*Radial* convert the drawn brush through `write_slot`, which detaches. `OndinApp::variables_face`: a search, every colour variable under a header per group (none for the top group), each row a swatch, the name by `elide_groups` and the hex **in the layer's mode**, the current one tinted and checked and scrolled to once per open; a click binds keeping the `%`, the picker staying up. **The picker widened 240 → 272**, E1's width, *Variables* not fitting a quarter of the old track; one test's expected colour re-measured. The face keeps the *Solid* face's height, measured in egui temp data, the mockup's 206-pt list before it has been; ~~⚠️ the gradient faces still differ~~ the gradient faces too since D1057. **Not built**: E1's kit group (no kit variables until step 4); a hover preview, the face committing on a click only (the session's call); ~~a browser cell opening the popup~~ (D1052). ⚠️ **What survives of D1039's edges**: the *Solid* face still opens over bound paints on a selection row whose targets disagree and on the *All* row, its writes as drawn through `edited_brush`, the picker's `%` clamping there — **kept** on 2026-10-14, the session's call under the maintainer's delegation: a write equal to what is drawn changes nothing drawn, and a `%` of at most 100% cannot draw more opaque than its variable. *(Built 2026-10-14, uncommitted when recorded; `1a24349`, recorded in `68aff8b`. **Keep**, the two survivors too. Tests: `the_pickers_variables_tab_binds_and_solid_detaches` (its flip run) and `a_bound_fill_opens_on_the_variables_face`. D1039, D1040, D1041 amended; `architecture.md` §5.3f and §9.2's module map; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1052): a browser cell opens the popup)*
 - **D1044** — **Styles and variables, build step 1's B4: a `--` query naming a whole variable and going on is refused — only once nothing matches — the `--` list saying why in one sentence and the field dimming the refused tail over a dotted underline; the corner-radius `DragValue` hands `--` to the retype buffer so the tail can be drawn.** `binding::refused`: the longest variable of the field's kind whose name is a case-blind prefix of the query with a non-blank rest, asked only when `matches` is empty — 🚨 the guard keeps `--brand/500-` (of `brand/500-alt`) being typed rather than refused; another kind's name is B3's *no match*. The list: *A variable fills the whole field. Remove `* 2` to bind radius/md.*, the rest in monospace, no rows, so `Enter` binds nothing; not on a list the field menu opened. The field: `refusal_galley`, a `TextEdit::layouter` on the hex field and `radius_retype`, the tail at 40%, the rest in `TextEdit`'s own colour; `underline_refusal` paints the dots. 🚨 A `DragValue` lays out its own text, so the radius field hands `--` text to `var_retype` — `radius_retype` now the unbound field's buffer too, `Enter` writing a number typed back — detached first only when a chip was typed over, else through `keep_corner_bindings` as the `DragValue`'s edit — `Escape` nothing. 🚨 **A refused `Enter` keeps the field**: the `TextEdit` gives the keyboard up on it, so the hex field sends its text back through `var_retype` to be refocused, keeping `paint_hex` and asking for the list on that pass, and `radius_retype` keeps its buffer and returns before the commit. *(Built 2026-10-14, uncommitted when recorded; `a5e078a`, recorded in `68aff8b`. **Keep** the guard and the handoff; ~~***Fix*** the refused `Enter`~~ and ~~a partly bound rectangle detached whole~~, both read in the first cut, **Fixed** before commit, each by a test whose flip was run. Tests: six in `panels::binding::tests`, four flips run; the handoff not driven. ~~The browser's refusals not in this manner.~~ The browser's refusals in this manner since D1053. D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
 - **D1045** — **Styles and variables, build step 1's A4: layers all bound, to different variables, read *Mixed* in a capsule whose tooltip names them, with the chip's keys and neither a hover × nor a field menu.** `OndinApp::field_mixed_vars`: the distinct variables in name order when every target of a paint key is bound and there are two or more, else `None` — one unbound is the grey *Mixed* (D130), one variable `field_var`'s chip. `paint_row` asks it ahead of the `unknown` arm and the *Solid* arm unless the row is typed into, drawing `mixed_chip`. D1038 rules the look and not the keys — **the session's call**, the chip's: `Backspace` detaches every layer to what it draws, another key starts a literal over them all, `--` binds them all to one. No field menu, as on the grey *Mixed* row (`context-menus.md` §6.7). The swatch opens the picker on *Solid*, `field_var` answering none, whose *Variables* tab binds them all — D1043's surviving edge unchanged. *(Built 2026-10-14, uncommitted when recorded; `6a10a29`, recorded in `68aff8b`. **Keep**. Test `layers_bound_to_different_variables_read_mixed_in_a_capsule`, its flip run. D1041 amended; `architecture.md` §5.3f; `context-menus.md` §6.7; `roadmap.md` step 1 edited down)*
 - **D1046** — **Styles and variables, build step 1's no-scrub cursor: a bound radius field's corner badge asks `CursorIcon::NotAllowed` on hover.** D1038 (3)'s *"the cursor says the field will not scrub"*; D1041's chip already could not scrub. The glyph **the session's call**, D1038 naming none. The paint row has no scrub badge, so the radius is the only bound field it reaches; a later step's bound number owes it with its chip. *(Built 2026-10-14, uncommitted when recorded; `b8bfe34`, recorded in `68aff8b`. **Keep**. Test `a_bound_radius_badge_says_it_will_not_scrub`, at the badge's measured centre, its flip run. D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
 - **D1047** — **Styles and variables, build step 1's *Paste properties*: a bound paint pasted as a property lands by a paste's rule — kept where the document has the variable, else rebound to one of the same name and kind, else detached to what it drew at the copy.** The session's call under the maintainer's delegation of 2026-10-14 (*"You can make the decisions for the open issues"*), answering the half of D1037's premise (iv) D1038 did not put. Before it the binding was carried verbatim and, the property clipboard outliving a document switch, a paste into another document was refused at the commit (`BadBinding`). `build::Properties` gains `carried` (each bound variable's name and kind) and `drawn_fills`/`drawn_strokes` (each paint resolved as drawn); `properties_of` takes `(doc, id)`. 🚨 `variable::rebind`, new and public, is factored out of `land`'s closure and both call it, so the two pastes share one rule. ⚠️ The id is matched first, as for `land`. The preset half unanswered: the only preset, `prefs::ExportPreset`, holds nothing bindable. ⚠️ The status line does not say what was rebound or detached. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_property_paste_keeps_rebinds_or_detaches`, its flip run, failing at the apply's `BadBinding` one assertion before the predicted one. D1039 amended; `architecture.md` §5.3f, §5.7a; `roadmap.md` *Open* edited down to the preset)*
 - **D1048** — **Styles and variables, build step 1's override marks for a copy's bindings: a corner binding marks the radius field and its corner's, the ↺ putting the main's binding back beside its radii, and a copy's own mode marks the *Mode* row.** The session's call under the maintainer's delegation of 2026-10-14; D1041's *Fix* (3) and D1042's *Fix*. `appearance_marks`: the radius mark `OverrideMark::and(binding, literal)`, the binding a `sub_mark` over `SetCornerVars` first, its tip naming the main's variable (*per corner*, *unbound*), the ↺ writing the main's `SetCornerVars` beside `CornerRadii`, which `keep_corner_bindings` then leaves alone; each corner's mark the same pair. 🚨 `Corner::var_slot` maps reading order (TL, TR, BL, BR) to `CornerVars`' (TL, TR, BR, BL) — a cast swaps the bottom two. `radius_chip` takes the mark: the badge bright with the dot, ↺ while the pointer is on the row, a click the reset; ⚠️ marked, it drops D1046's cursor. `frame_mode_row`: a `sub_mark` over `SetMode`, the *Mode* label strong with the dot, ↺ on hover, a click the reset; `card_of` unchanged. *(Built 2026-10-14, uncommitted when recorded. **Keep**; D1041's *Fix* (3) and D1042's *Fix* **Resolved**. Tests `a_copys_corner_binding_marks_the_radius_and_its_reset_rebinds` and `a_copys_own_mode_is_marked_on_its_mode_row`, each flip run; ⚠️ the chip's marked badge drawn by no test. D1041, D1042 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
 - **D1049** — **Styles and variables, build step 1's per-corner chips: each corner of a rectangle binds, detaches and is typed over alone, in its own field of the per-corner disclosure.** The session's call under the maintainer's delegation of 2026-10-14, the layout included — no record specified it. `FieldKey::Corner { id, slot }` in `CornerVars` order; `FieldKey::badge()` the corner's elbow or `CORNERS_OUT`; `bind_tx` binds the slot alone; 🚨 `detach_tx` is the new `build::detach_corner_ops`, that corner alone — `detach_corners_ops` detaches every bound corner and agrees with it only while one is bound. Each corner: a chip with its mark (D1048), the retype buffer, or the plain field with the `--` handoff and the field menu. `radius_retype`'s `Corner` arm writes `CornerRadii` with that corner changed, detached first only when its chip was typed over. The all-corners field unchanged, a plain field over the drawn radii when the corners disagree. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `one_corner_binds_detaches_and_retypes_alone`, two flips run, the detach's green until a second corner was bound; ⚠️ the per-corner loop drawn by no test. D1041 amended; `architecture.md` §5.3f; `context-menus.md` §6.7; `roadmap.md` step 1 edited down)*
-- **D1050** — **Styles and variables, build step 1's corner preview: `RenderOverrides::absorb` draws a `SetCornerVars` as the radii its bound corners will resolve to, so the `--` list's highlight previews on a radius or corner field as on a paint.** The session's call under the maintainer's delegation of 2026-10-14; D1039 had refused the op. The arm reads the rect's literal kind from `current_kind` — the ops before it in the transaction, `bind_corners_ops` zeroing the bound literals first — resolves each `Some` slot through `resolve_var` as a number, patches the kind with `set_kind` and marks the node moved; a slot resolving to no number refuses the preview. ⚠️ The mode is the committed one; `SetMode` still refused, in its own arm. `var_complete_ui` previews the highlight for every key. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_corner_binding_previews_as_the_radius_it_will_draw`, through `assert_preview_matches_commit`, its flip run; ⚠️ the app's list preview driven by no test. D1039, D1041 amended; `architecture.md` §5.3f, §6.2; `roadmap.md` step 1 edited down)*
+- **D1050** — **Styles and variables, build step 1's corner preview: `RenderOverrides::absorb` draws a `SetCornerVars` as the radii its bound corners will resolve to, so the `--` list's highlight previews on a radius or corner field as on a paint.** The session's call under the maintainer's delegation of 2026-10-14; D1039 had refused the op. The arm reads the rect's literal kind from `current_kind` — the ops before it in the transaction, `bind_corners_ops` zeroing the bound literals first — resolves each `Some` slot through `resolve_var` as a number, patches the kind with `set_kind` and marks the node moved; a slot resolving to no number refuses the preview. ⚠️ The mode is the committed one; `SetMode` still refused, in its own arm. `var_complete_ui` previews the highlight for every key. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_corner_binding_previews_as_the_radius_it_will_draw`, through `assert_preview_matches_commit`, its flip run; ⚠️ the app's list preview driven by no test. D1039, D1041 amended; `architecture.md` §5.3f, §6.2; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (`b613a7b`): a radius write's kept bound corners preview at their variable through `SetGeometry`'s arm, and since `79ae5eb` any patch's, a resize's included)*
 - **D1051** — **Styles and variables, build step 1's mode on every frame tag: a set's tab, a main's chip and an instance's tag name the mode the frame sets, as a plain frame's has since D1042; and H5's elision not built, by decision.** The session's call under the maintainer's delegation of 2026-10-14. `frame_label`'s one `mode_word` closure on every arm, only for a mode the frame sets, in the tag's own dim ink — the tab's `text::DIM` before the count or clash, the chip's `COMPONENT_INK_DIM` before the instance count, the instance's `COMPONENT_DIM` before a renamed main's name and not on the entered path, the plain frame's `text_a(179)`. **H5 not built**: no tag in the app elides, so the mode follows the name rather than making mode tags the one that cuts. *(Built 2026-10-14, uncommitted when recorded. **Keep**; H5 **Intentional** while no tag elides. Test `a_frames_tag_names_the_mode_it_sets_and_not_one_it_inherits` extended to a main's chip, its flip run; ⚠️ the set's and instance's arms driven by no test. D1042 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
 - **D1052** — **Styles and variables, build step 1's browser cell popup: a colour variable's cell opens the colour popup beside the panel on a click, its *Variables* tab making the cell an alias, a row that would loop inert and saying why; a double-click types into the cell.** D1038's G-series and the mockup's. `PaintSlot::VarCell(VarId, ModeId)`, node-less, no gradient, alpha kept; `slot_brush` the drag's preview first, else the cell resolved; `slot_transaction` a `SetVariableCell(Color)`, ending an alias. The picker orphans with the browser, the variable or the mode — never the selection. 🚨 `OndinApp::var_cell_preview`, a fork beside `guide_previews`, because `absorb` no-ops table ops and the handle would not move; ~~⚠️ the canvas and the browser's cell draw the committed colour until release, premise (vi)~~ the browser's cell draws it too, the canvas through D1056, and the release frame keeps it (amended the same day). `variables_face` takes `FaceTarget`; a cell's hexes in its mode; a looping row (`would_loop`) at 40%, *this variable* or *uses ‹name›*, inert; a pick an `Alias`; *Solid* writes the drawn colour. The gesture split (single click popup, double-click text, a number cell unchanged) the session's call under the maintainer's delegation. ⚠️ A double-click's first click has opened the popup already. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_colour_cell_opens_the_popup_and_its_variables_tab_makes_an_alias`, through real clicks; 🚨 two defences against the loop, its flip run on the row's. D1040, D1043 amended; `architecture.md` §5.3f; `roadmap.md` step 1's browser bullet struck, (vi) amended)*
 - **D1053** — **Styles and variables, build step 1's browser refusals in B4's manner: a refused name, cell, mode or group keeps its text in the field at 40% over a dotted underline until it is changed, under the plain sentence that says why.** D1038 G14, G15. `variables::edit_field` places the four in-place fields through `binding::refusal_galley` and `underline_refusal`; `Browser::refused`, set in `var_refuse` from `Edit::text()`, cleared with `refusal`; dim while the field holds exactly that text. The sentence unchanged, muted, never red. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_refused_rename_keeps_its_text_dim_until_it_changes`, its flip run; the dots not asserted. D1040, D1044 amended; `architecture.md` §5.3f; `roadmap.md` step 1's browser bullet struck)*
 - **D1054** — **Styles and variables, build step 1's browser groups: `Alt`-click on a group's header opens or closes every group, and the collapsed groups are kept per document for the life of the process.** The convention (Figma's) and the keeping the session's calls under the maintainer's delegation. `Act::ToggleAll`: every group path, each name's prefixes, takes the clicked group's new state; the whole header senses it. `OndinApp::var_collapsed`, keyed by the root id, not saved; 🚨 loaded at the open, not on the first frame — the first cut overwrote earlier toggles there — reloaded on a document change, written through after the acts. ⚠️ A file's copy shares its root id and so its set. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `alt_toggles_every_group_and_the_document_keeps_them`, its flip run; the `Alt` read driven by none. D1040 amended; `architecture.md` §5.3f; `roadmap.md` step 1's browser bullet struck)*
 - **D1055** — **Styles and variables, build step 1's G3 bar: past three modes a sideways bar under the mode columns shows and drags their scroll.** `variables::scroll_bar` at the mockup's geometry — 4 pt tall, the name column's edge to 12 short of the right, 6 above the bottom, a ≈6% track and ≈22% thumb, radius 2 — the thumb as wide as the share shown (min 16), placed by `scroll_x`, painted on the browser's `Foreground` layer, dragged through `Browser::bar_drag`; the wheel as before; both only on the *Variables* tab with rows (~~⚠️ drawn and live on the *Styles* tab and the empty states too~~, fixed the same day). *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `past_three_modes_the_bar_scrolls_the_columns`, its flip run. D1040 amended; `architecture.md` §5.3f; `roadmap.md` step 1's browser bullet struck. **Amended 2026-10-14**: the bar and the wheel gated to the *Variables* tab with rows)*
 - **D1056** — **Styles and variables, build step 1's cell preview: a variable's previewed cell draws on every layer that reads it, `RenderOverrides::absorb` resolving each bound node against the table with that one cell changed.** D1037's premise (vi), the session's call under the maintainer's delegation of 2026-10-14. `Variables::with_cell` a clone with one cell changed; 🚨 `Document::resolve_var_in`, `resolve_brush_in`, `resolved_paint_in`, `resolve_corners_in` take the table, and the four public readers delegate to them — one rule for drawing and preview; `bound_nodes` public. `SetVariableCell`'s own arm: each non-ghost bound node's pending paint resolved against `t` as literals, a bound rect's pending kind set to the resolved radii and marked moved; a missing variable or mode refuses. ⚠️ One cell per transaction — a second finds literals. ⚠️ Every bound node is patched each frame, not only this variable's readers. The no-op fixture's table group is six. `has_gesture_preview` now true for such a preview, so a right-click cancel takes it. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_variable_cell_previews_on_what_reads_it`, through `assert_preview_matches_commit`, an alias and a corner included, its flip run. D1037, D1039, D1052 amended; `architecture.md` §5.3f, §6.2; `roadmap.md` premise (vi) struck)*
+- **D1057** — **Styles and variables, build step 1's leftovers closed: the colour popup's gradient faces are the *Solid* face's height, and a `Path`'s per-anchor radii stay unbindable, now by decision.** Measured headlessly, *Solid* and *Variables* 297, *Linear* and *Radial* 305; `picker_body`'s gradient `plane_h` 84 → 76. The path the session's call under the maintainer's delegation of 2026-10-14: radii indexed by anchor, which point editing inserts and deletes, and no per-anchor field to bind. E1's kit group to step 4. ⚠️ The equality is arithmetic in the plane's height, not a layout rule. *(Built 2026-10-14, `716e9c6`. **Keep**; D1043's limit **Resolved**. Test `every_face_of_the_colour_popup_is_one_height`, its flip run. D1039, D1043 amended; `architecture.md` §5.3f; `roadmap.md` step 1's leftovers struck)*
+- **D1058** — **Styles and variables, build step 2's first half: a container's gaps and padding bind to number variables — a sidecar of six beside the layout, resolved at read by every layout view, detached at the commit when written over; schema v8.** D1038's addition (7). `Node::spacing_vars: SpacingVars` in `Display::spacing`'s order; `SetSpacingVars`; `bind_spacing_ops` writes the bound literals 0, `detach_spacing_ops` the numbers drawn. 🚨 `LayoutView::display` a `Cow` (`Document::resolved_display`, `spacing_drawn_in`); an override's layout stored resolved. 🚨 `keep_spacing_bindings` after `keep_corner_bindings`, D1041's two halves, the literal half carrying the Container card's own writes, the flex↔grid switch and the Scale tool. `FieldKey::Spacing { id, slots }`; `radius_chip`/`radius_retype` renamed `number_chip`/`number_retype`. ~~⚠️ A partly bound field's scrub previews the variable's number and commits a detach (*Fix*).~~ Fixed in `b613a7b`: the pass's judgement is `build::kept_spacing_vars`, which `absorb`'s `SetDisplay` arm shares; the corner write's sibling, measured, fixed the same way (`kept_corner_vars`, `Document::corners_drawn_in`). ~~🚨 A resize (`Size` patch) of a rectangle with bound corners still previews them at the literal 0 — read, not reproduced (*Fix*).~~ The bound rect's resize preview, read in the code, fixed in `79ae5eb`: `SetGeometry`'s arm runs `kept_corner_vars` on any patch over bound corners. ⚠️ No canvas handle writes a gap. *(Built 2026-10-14, `34df81f`. **Keep**; the partly bound preview and the bound resize's **Resolved**. Five tests and the random incremental test's spacing ops, four flips run as reported; two preview halves since. D914 amended; `architecture.md` §5.3c, §5.3f, §5.7, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `b613a7b` and `79ae5eb`)*
+- **D1059** — **Styles and variables, build step 2's second half: a layer's visibility binds to a boolean variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws, picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule.** D1038 (d). `VarKind::Boolean`, `Cell::Boolean`, `Value::Boolean`; `Node::visible_var` beside the literal `visible`; `SetVisibleVar`; schema field in the unreleased v8. `bind_visible_ops` writes the literal `true`, canonical. 🚨 `shown`/`shown_in` read by every drawing, picking, layout and export reader — a hidden bound item leaves its flow. 🚨 `keep_visible_bindings` after `keep_spacing_bindings`: written what it shows stays bound, else detaches — **no literal half**, which would keep a layer the eye shows bound and hidden. `absorb`'s `SetVisibleVar` arm and D1056's cell arm patch a bound visibility; ~~⚠️ no visibility arm marks a node moved, so the eye's `--` preview over an in-flow item does not re-lay its layout (*Fix*)~~ — corrected: `flex_relayout` lays from every overridden node, not from `moved`, so the preview already re-lays an in-flow item's siblings (measured, test added). `FieldKey::Visible`, `typed()` false; the bound eye a 22×18 capsule, the browser's boolean box — the session's chrome. 🚨 Read, not reproduced, and **fixed in `79ae5eb`**: `is_placement` omitted `SetVisibleVar`, so a main root's binding followed to every instance root (tested, flip run); the layer menu's *Show*/*Hide* label read the literal; a ghost read the literal (now `ghost_shown`, the default mode); a Boolean property's reset and drift ignored the binding; `propagate::untouched` compared no binding — the last four untested. ⚠️ Owed: the Properties card's chip, the layers panel's bound mark, a detach's status message. *(Built 2026-10-14, `bf347f9`. **Keep**, the one-half pass and `shown` above all; the five read defects and the stale comments **Resolved** in `79ae5eb`; the relayout *Fix* **withdrawn**, a wrong premise. Eight tests and the random incremental test's visibility ops, six flips run as reported. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `79ae5eb`)*
 
 ---
 
@@ -24754,7 +24757,8 @@ its one `Literal(T) | Bound(VarId)`**, and each says why.
   **Fixed by D1041**, and not at each write: the Appearance card reads the corners as drawn, and
   `build::keep_corner_bindings`, a commit-time pass, detaches a bound corner a transaction writes to
   anything but the value it draws or its own literal. ⚠️ No canvas handle that writes a rectangle's radius was found when D1041 was recorded.
-  **Only a `Rect`'s corners bind in step 1**: a `Path`'s per-anchor radii do not — a limit, not a ruling.
+  **Only a `Rect`'s corners bind in step 1**: a `Path`'s per-anchor radii do not — ~~a limit, not a
+  ruling~~ by decision since D1057.
 - **A frame's mode is `Node::mode: Option<ModeId>`**, `None` to inherit. `Document::mode_at` walks up to
   the nearest node that sets one, **the node itself counting** — a frame's own fill reads in the mode it
   sets — else the default; `resolve_var`, `resolve_brush` (borrowed when literal, so a frame pays nothing
@@ -25143,7 +25147,9 @@ as its main was follows the detach as well as the radius: in a transaction that 
 (`CornerRadius`, `CornerRadii`) without setting its corner bindings itself, 🚨 **a bound corner stays
 bound when it is written either what it draws** (`resolve_corners`) **or its own literal**, its literal
 put back to 0 in the patch (the op rewritten to `CornerRadii`); written anything else, it detaches to
-that value. **That is D1039's *Fix with* for the corner writes**, made once rather than at every door:
+that value — the judgement lifted out as `build::kept_corner_vars` on 2026-10-14 (`b613a7b`) and shared
+with the preview's `SetGeometry` arm, which had drawn a literal-built write's bound corners square
+(D1058's amendment). **That is D1039's *Fix with* for the corner writes**, made once rather than at every door:
 the inspector's fields and every bulk verb write a radius as they did. **Both halves are load-bearing,
 and each was a cut that failed before commit.** *Drawn*: the fields read the corners as drawn, so a
 per-corner edit hands all four back and a bare click writes what is already drawn — compared with the
@@ -25343,8 +25349,9 @@ or *No colour variables yet — Shift+S to add one*.
 face's height, measured each time that face is drawn on a bindable slot and kept in egui temp data
 (`picker-solid-face-h`, one key for the process), falling back to `CONTROL_H`, the section gap and the
 mockup's 206-pt list until it has been — the case for a picker opened straight onto a bound paint before
-any *Solid* face on a bindable slot has been drawn. ⚠️ **The gradient faces still differ in height** —
-not made uniform; a limit of the build, not a ruling. 🚨 **The picker's pinned `WIDTH` went 240 → 272**,
+any *Solid* face on a bindable slot has been drawn. ~~⚠️ **The gradient faces still differ in height** —
+not made uniform; a limit of the build, not a ruling.~~ The gradient faces are its height too since D1057,
+their plane 76 where it was 84. 🚨 **The picker's pinned `WIDTH` went 240 → 272**,
 the width E1 draws the popup at: *Variables* does not fit a quarter of the old track, and every face
 stretches. `picker.rs`' `a_click_on_the_picker_writes_a_text_layers_colour` expected a colour measured
 at the old width, and moved 152 → 165, its doc saying why — the same point lies further left on a wider
@@ -25394,7 +25401,7 @@ green. D1039, D1040 and D1041 amended; `architecture.md` §5.3f and §9.2's modu
 disagreeing selection row and the *All* row ruled **Keep**, the session's call under the maintainer's
 delegation, no code changed; D1039 and D1041 amended, `architecture.md` §5.3f, the `roadmap.md` bullet
 struck. **Amended again 2026-10-14** (D1052): a browser cell opens the popup, the face taking a
-`FaceTarget`)*
+`FaceTarget`. **And again** (D1057): the gradient faces made the *Solid* face's height)*
 
 **D1044 — Styles and variables, build step 1's B4: a `--` query that names a whole variable and goes
 on is refused, the `--` list saying why in one sentence and the field dimming the refused tail over a
@@ -25711,11 +25718,20 @@ the caller reports it): a rectangle with literal radii 2, two of its four corner
 `assert_preview_matches_commit`, which draws the transaction as overrides and as committed and compares
 — the fill's path carries the corners. Flip, run: resolving no slot fails *"preview diverged from
 commit"*, the preview drawing the zeroed corners square where the commit drew 14. ⚠️ **No test drives
-the list's preview in the app**, nor a corner whose variable is an alias. *(Built 2026-10-14 by the
-session under the maintainer's delegation of the same day; uncommitted when recorded. **Keep**, the
+the list's preview in the app**, nor a corner whose variable is an alias.
+
+**Amended 2026-10-14 (`b613a7b`): a radius *write* previews its bound corners too.** This arm drew a
+binding; a `CornerRadius` or `CornerRadii` write over a rectangle with bound corners went through
+`SetGeometry`'s arm, which drew the written literals — the bound corners' 0 square, where
+`keep_corner_bindings` keeps them bound. That arm now resolves the corners the commit keeps
+(`build::kept_corner_vars`, `Document::corners_drawn_in`); D1058's amendment has the measurement and the
+test. ~~⚠️ **A `Size` patch over bound corners still draws the literal 0** — read in the code, not
+reproduced, *Fix* recorded in D1058's amendment.~~ **And since `79ae5eb` any patch does** — a resize's
+`Size` included — the arm running `kept_corner_vars` whatever the patch (D1058's amendment). *(Built 2026-10-14 by the session under the maintainer's delegation of the same day; uncommitted when recorded. **Keep**, the
 `current_kind` read above all: the ops before this one are what put the literals it overwrites.
 D1039 and D1041 amended; `architecture.md`
-§5.3f and §6.2; `roadmap.md` *Next · Styles and variables* step 1's corner-preview bullet struck)*
+§5.3f and §6.2; `roadmap.md` *Next · Styles and variables* step 1's corner-preview bullet struck.
+**Amended 2026-10-14**: the radius write's preview, `b613a7b`; any patch's, a resize's included, `79ae5eb`)*
 
 **D1051 — Styles and variables, build step 1's mode on every frame tag: a set's tab, a main's chip and
 an instance's tag name the mode the frame sets, as a plain frame's has since D1042; and H5's elision
@@ -25917,6 +25933,379 @@ each previewed. Flip, run: the arm put back in the no-op list fails *"brand reco
 from commit"*. *(Built 2026-10-14 by the session under the maintainer's delegation of the same day;
 uncommitted when recorded. **Keep**, the shared `_in` rule above all. D1037, D1039 and D1052 amended;
 `architecture.md` §5.3f and §6.2; `roadmap.md` *Next · Styles and variables*' premise (vi) struck)*
+
+**D1057 — Styles and variables, build step 1's leftovers closed: the colour popup's gradient faces are
+the *Solid* face's height, and a `Path`'s per-anchor radii stay unbindable, now by decision. *Built
+2026-10-14; the path the session's call under the maintainer's delegation; committed as `716e9c6`.***
+D1043 left *"the gradient faces still differ in height — not made uniform; a limit of the build, not a
+ruling"*, against E1's *"the popup keeps its height on every tab, so nothing jumps under the pointer"*;
+and D1039 left a path's radii unbound as a limit of step 1. **The height.** Measured headlessly as the
+bounds of everything the popup paints, shadow included: *Solid* and *Variables* 297, *Linear* and
+*Radial* 305 — a gradient face's geometry row and stop bar take 8 more than the *Solid* face's alpha
+slider and swatches. `picker_body`'s `plane_h` is **76 on a gradient face**, where it was 84, and still
+104 on *Solid*; the *Variables* face already fills the *Solid* face's measured height (D1043). ⚠️ **The
+equality is arithmetic, not a layout rule**: the plane absorbs the difference, so a row added to one
+face, or a change to the *Solid* face's alpha row, parts them again, and the test is what says so.
+⚠️ **Measured on a fill**, whose *Solid* face draws the alpha slider; on a slot `takes_alpha()` denies,
+the *Solid* face draws none, and no test sets the gradient faces against that one.
+
+**The path's radii stay unbindable.** A path's radii are indexed by anchor (`NodeKind::Path {
+corner_radii: Vec<f64> }`), and point editing inserts and deletes anchors, so a binding sidecar on
+`CornerVars`' model would have to follow every anchor edit, and the boolean and flatten paths that
+rebuild a path, or bind the wrong corner. Nor is there a per-anchor field to show a binding in:
+`points_appearance` writes one radius to the selected corner points while points are the subject, and
+to every corner point of the path otherwise (D119), its per-corner button dead by design. **The
+citation is planted on `inspector::points_appearance`' doc** — this half of the entry changes no
+production line, so nothing else would carry it (added after `716e9c6`, uncommitted when recorded). **E1's kit
+group** is not step 1's any more: it waits on step 4's kit variables, as D1043 said. Step 1 owes
+nothing.
+
+**Test** (`panels::binding::tests::every_face_of_the_colour_popup_is_one_height`, as the caller reports
+it): each tab clicked in turn on a fill, the whole painted rectangle compared with the *Solid* face's —
+so a width that moved would fail it too. Flip, run: the gradient plane back at 84 fails on *Linear*, 8
+points taller. *(Built 2026-10-14 by the session, the path's ruling under the maintainer's delegation of
+the same day; committed as `716e9c6`. **Keep**; D1043's height limit **Resolved**; the path's radii
+*Revisit if* the maintainer asks for them. D1039 and D1043 amended; `architecture.md` §5.3f; `roadmap.md` *Next ·
+Styles and variables* step 1's leftovers struck, E1's kit group moved to step 4)*
+
+**D1058 — Styles and variables, build step 2's first half: a container's gaps and padding bind to number
+variables — a sidecar of six beside the layout, resolved at read by every layout view, detached at the
+commit when written over — and the save format goes to v8. *Built 2026-10-14; committed as
+`34df81f`.*** D1038's addition (7) lists *"the layout gaps and padding"* among the bindable numbers, and
+the build's step 2 is *"Number variables in layout fields"*. The shape is D1039's corners', for six
+numbers.
+
+**Storage.** `variable::SpacingVars = [Option<VarId>; 6]` on `Node::spacing_vars`, beside `display` as
+`CornerVars` sits beside the radii, in `Display::spacing`'s order — column gap, row gap, then padding
+top, right, bottom, left (`Display::spacing` and `set_spacing`, new in `container.rs`). **`SetSpacingVars`
+writes the bindings alone**: it names its node for `overwrites` and `retargeted`, changes ink, is a no-op
+when equal, propagates `Whole`, is stated after `SetDisplay` by `reset::state_ops`, and the Component
+card files it under *Container*. `build::bind_spacing_ops` writes a bound slot's literal **0**, so a main
+and its copy bound alike compare equal; `build::detach_spacing_ops(doc, id, which)` writes the slots
+`which` names back as the numbers they lay out at.
+
+**Resolved at read.** 🚨 **`container::LayoutView::display` answers `Option<Cow<'_, Display>>`**, where
+D914 made it `Option<&Display>`: borrowed when nothing is bound, owned with the bound slots resolved
+where something is (`Document::resolved_display`). `DocView`, `UsedView` and `CommittedView` all answer
+it, so every layout pass lays a bound gap at its variable's number and none at the 0 its literal holds.
+`Document::spacing_drawn_in(t, id, display, vars)` is the `_in` door, D1056's shape: each bound slot its
+variable's number in the mode in force at `id`, floored at 0 as the engine floors a literal, a missing or
+non-number value 0; `vars` is named rather than read off the node, so a preview can resolve a binding it
+has not committed. *Do not* let a layout view answer the stored layout — that is the first flip below. In
+the app, `DisplayNode::display` reads the override, else a resolved layout `display_node` fills only where
+something is bound; `committed_node` leaves it `None`.
+
+**The preview.** 🚨 **An override's layout is stored resolved**, and `PreviewView::display` answers it
+as it is, the document's through `resolved_display`. `absorb`'s `SetDisplay` arm resolves the written
+layout with ~~the node's **committed** bindings~~ the bindings the commit will **keep**
+(`build::kept_spacing_vars`, since the amendment below); a new `SetSpacingVars` arm re-resolves the pending layout,
+else the document's resolved one, with the bindings it sets — the `--` list's highlight on a spacing
+field, as D1050 previews a corner's; and D1056's `SetVariableCell` arm also patches every node with a
+bound slot, resolved against the table with the cell changed, and marks it moved.
+
+**The commit-time pass.** `build::keep_spacing_bindings`, in `commit_inner` straight after
+`keep_corner_bindings` and so before `propagate::owed`, a copy bound as its main was following a detach
+as a `SetSpacingVars` of its own. D1041's two halves: for each `SetDisplay` on a node with a bound slot,
+in a transaction that does not set that node's `SetSpacingVars` itself, a bound slot written **what it
+lays out at, or its own literal**, stays bound (the judgement is `build::kept_spacing_vars` since the
+amendment below, shared with the preview), the literal put back to 0; written anything else, it
+detaches to the number written. A `SetDisplay` to `None` clears every binding. 🚨 **The literal half is
+the load-bearing one here**, where for corners it was the second: the Container card's `display_tx`
+writes one slot over the *committed* layout and carries the others' literal 0 forward, the flex↔grid
+switch keeps the padding and gaps it finds, and the Scale tool scales the literals
+(`tools::scaled_layout`) — so without it every one of those detaches each bound slot nobody touched (the
+second flip below). ⚠️ **The price is the corners'**: a 0 typed over a bound slot keeps the binding, and
+the chip's retype, which detaches first, is 0's door. ⚠️ **The Scale tool leaves a bound gap or padding
+unscaled**: its 0 scales to 0 and stays bound, laid at its variable's number — a bound corner's fate under
+the same tool. ⚠️ **Two `SetDisplay`s on one node in one transaction are each judged against the
+committed layout**, as corners are. ⚠️ **Propagation's own writes are not judged**: `propagate::owed`
+adds them after the pass, so a copy reaches a detach only through the main's `SetSpacingVars` following.
+
+**The rules.** `variable::check` holds a spacing binding to a number variable, and **not** to a node
+with a layout: a binding on a layout-less node is inert, and the pass clears it when the layout goes.
+`detached` — a kit's frozen copy, a foreign paste's twin — resolves and clears them; `carried` and
+`land` rebind slot by slot, the twin's laid-out number the fallback; `reads`, `users` and `bound_nodes`
+count them; `remove_ops` detaches the slots bound to a deleted variable, a `SetDisplay` and a
+`SetSpacingVars`.
+
+**Schema v8.** `migrate_7_to_8` is a number, the published document's moving with it
+(`migrate_6_to_7`'s rule); `NodeDto::spacing_vars` is skipped when nothing is bound. The bump is for the
+older build, and what it saves is **silent** rather than a wrong complaint: a v7 reader would drop
+`spacing_vars` without a word and lay every bound slot out at 0. Step 2's booleans ~~are to land~~
+landed in the same unreleased v8 (D1059).
+
+**The chrome** (`panels/layout.rs`, `panels/binding.rs`). `FieldKey::Spacing { id, slots: u8 }`, a bit
+per `SpacingVars` place, so one key is a gap field, a side's field or a padding pair (left and right,
+top and bottom); `id` is the card's first subject and `field_ids` answers every Container-card subject.
+**`radius_chip` and `radius_retype` are generalised and renamed `number_chip` and `number_retype`** —
+D1041–D1049 use the old names — a side's letter drawn as its badge (`FieldKey::badge_is_icon`). The gap
+row, the padding pair and the per-side fields each: bound, the chip — a gap field's trailing CSS name
+giving way, D1038 A1 — A4's *Mixed* capsule when every place is bound to different variables, a pair's
+two sides counting as two, and the retype buffer; unbound, `--` opens the list and hands its text to the
+buffer, and a right-click opens the field menu (`spacing_doors`). **Some places bound and some not read
+the plain grey *Mixed*** (`spacing_partly_bound`, A4's second case). **Opposite sides bound apart open
+the per-side padding rows**, as uneven numbers do. On an instance a binding mark (`spacing_vars_mark`)
+joins the literal mark, binding first — D1048's arrangement.
+
+🚨 **A partly bound field previews its scrub where the commit will not put it** (read in the code, not
+reproduced). The grey *Mixed* field is the plain value field, and it scrubs — a padding pair with its
+left side bound and its right not, on one frame, or a gap bound on one selected container and not on
+another. `display_tx` writes the scrubbed number over the bound slot as well; `absorb`'s `SetDisplay`
+arm resolves that slot with the **committed** binding, so the preview lays it at the variable's number,
+while `keep_spacing_bindings`, which the preview never runs, detaches it at the commit to the number
+written. The slot jumps on release — a preview that does not draw its commit (§6.2). ~~*Fix with* the
+pass's judgement in the arm — a bound slot written neither what it lays out at nor its literal laid at
+what was written — or with the pass run over the previewed edit as `preview_follows` runs `keep_insets`,
+and a test through `assert_preview_matches_commit` on a partly bound pair.~~ **Fixed 2026-10-14
+(`b613a7b`), the first of the two routes.** The pass's judgement is lifted out as
+**`build::kept_spacing_vars(doc, id, written)`** — the bindings a node keeps when its layout is written
+`written`, slot by slot, by the two halves — and `keep_spacing_bindings` calls it; `absorb`'s
+`SetDisplay` arm resolves the written layout through `spacing_drawn_in` with *those* bindings, so a
+slot the commit will detach is laid at the number written. ⚠️ **The preview still runs no keep pass as
+such**: `set_preview` and `preview_follows` run `keep_insets` and `keep_flex_sizes` alone, and the arm
+reproduces the judgement through the shared function — *do not* give the arm a copy of the comparison;
+the function is what keeps the two from parting. Pinned by the scrub half of
+`ondin-render/tests/overrides.rs`' `a_spacing_binding_previews_as_the_layout_it_will_lay_out`: a left
+padding bound and a right one not, both written 9 — the fixture asserting the commit detaches — drawn
+as overrides and as committed. Flip, run, as the caller reports it: the arm resolving with the
+committed bindings fails *"a scrub past a bound slot: preview diverged from commit"*.
+
+🚨 **The corner sibling was real, and it was measured.** `arch-scribe`'s first reading of this entry
+suspected the same shape in `SetGeometry`'s arm, and a probe confirmed it before the fix: a
+`CornerRadii` write keeping bound corners at their literal 0 — the Scale tool's drag, a per-corner ↺,
+which `keep_corner_bindings`' literal half keeps bound — previewed those corners **square**, while the
+commit drew them at their variable. Fixed the same way in `b613a7b`: **`build::kept_corner_vars(doc,
+id, written: [f64; 4])`** holds `keep_corner_bindings`' judgement, which now calls it, and
+**`Document::corners_drawn_in(t, id, radii, vars)`** resolves named bindings, `resolve_corners_in`
+delegating to it — D1056's `_in` shape; `absorb`'s `SetGeometry` arm, on a `CornerRadius` or
+`CornerRadii` patch over a rectangle with a bound corner, draws the corners the commit keeps at their
+variables. Pinned by the second half of `a_corner_binding_previews_as_the_radius_it_will_draw`, which
+failed before the fix with *"a write keeping bound corners: preview diverged from commit"*.
+
+🚨 **And a third of the shape, read in the code by the same reading and not reproduced: a resize of a
+rectangle with bound corners previews them square.** `absorb`'s `SetGeometry` arm builds the kind from
+`current_kind` — the document's kind, whose bound corners hold the literal 0 — and resolves the corners
+only on a `CornerRadius` or `CornerRadii` patch. A `Size` patch, which a resize handle writes, keeps the
+literal radii, and the override's kind is what the walk draws (`drawn_kind` asks it before the used
+kind, where `resolve::with_bound_corners` puts the variable's number). So for the whole drag the bound
+corners draw at 0, and on release at their variable — a preview that does not draw its commit (§6.2).
+~~No test resizes a bound rectangle. *Fix with* the arm resolving every patch's kind over a rectangle
+with a bound corner — the committed bindings for a patch that writes no radius, which the commit leaves
+bound, and `kept_corner_vars` for one that does — and a resize through `assert_preview_matches_commit`.~~
+**Fixed 2026-10-14 (`79ae5eb`)**, by one rule rather than the two this paragraph proposed: the arm runs
+`kept_corner_vars` over the patched kind's radii on **any** patch over a rectangle with a bound corner.
+A `Size` patch carries `current_kind`'s literals forward, and a bound corner written its own literal is
+kept — the pass's literal half — so the committed bindings come out of the same call. Pinned by
+`ondin-render/tests/overrides.rs`' `a_bound_rect_resized_previews_its_bound_corners`; flip, run, as the
+caller reports it: resolving only on a radius patch fails *"a bound rect resized"*.
+
+**No door but the inspector's yet.** D1038 (2)'s *"dragging a gap handle on a layout-styled container
+… detaches"* has no handle to happen on: no canvas gesture writes a gap or a padding, `canvas.rs`
+holding no production `SetDisplay`. And **the floating status says nothing of a detach**, here as for a
+corner — D1038 (2)'s *"the floating status says what was detached"* is unbuilt for both. **Not in this
+entry**: boolean variables bound to visibility, the rest of step 2 (D1059); and the other numbers D1038's (7)
+lists — W, H, layer opacity, stroke width, an effect's X, Y, blur and spread — bound by nothing and given
+no step by the record. Insets, grid tracks, flex grow and font size are not on that list.
+
+**Tests**, as the caller reports them. Core, `tests/variables.rs`:
+`a_bound_gap_and_padding_lay_out_at_the_variables_number` — flip, run: `UsedView` and `CommittedView`
+answering the stored layout fails at 0 against Light's 4; `a_spacing_written_over_a_bound_slot_detaches_it`
+— flip, run: the literal half dropped fails *"a write from the document's own layout keeps the binding"*;
+`spacing_bindings_detach_to_what_they_draw_and_round_trip`; and
+`incremental_update_equals_rebuild_over_random_variable_ops` authoring spacing binds and detaches on a
+flex frame. Render, `tests/overrides.rs`: `a_spacing_binding_previews_as_the_layout_it_will_lay_out`,
+through `assert_preview_matches_commit` — flip, run: the `SetSpacingVars` arm storing its base unresolved.
+App, `panels::layout::tests::a_gap_binds_through_the_container_card_and_detaches_when_typed_over` — flip,
+run: with no chip arm no run reads *space/4*. ⚠️ ~~**No test scrubs a partly bound field**, which is why the
+defect above stood.~~ The scrub half since `b613a7b`, above. *(Built 2026-10-14 by the session; committed as `34df81f`. **Keep**, the literal half
+and the resolved `LayoutView::display` above all; ~~**Fix** the partly bound field's preview~~ **Resolved**
+in `b613a7b`, with the corner write's sibling; ~~***Fix*** the bound rectangle's resize preview~~
+**Resolved** in `79ae5eb`. D914 amended;
+`architecture.md` §5.3c, §5.3f, §5.7, §5.11 and §6.2; `context-menus.md` §6.7; `roadmap.md` *Next ·
+Styles and variables* step 2 edited down. **Amended 2026-10-14** (`b613a7b`): the partly bound preview
+and the corner write's fixed through `kept_spacing_vars` and `kept_corner_vars`, D1041 and D1050
+amended, the roadmap's *Fix* struck; the resize read and left open. **Amended again 2026-10-14**
+(`79ae5eb`): the resize's preview fixed, its roadmap item struck)*
+
+**D1059 — Styles and variables, build step 2's second half: a layer's visibility binds to a boolean
+variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws,
+picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule
+and not two. *Built 2026-10-14; committed as `bf347f9`; the bound eye's chrome and the boolean cell's
+the session's.*** D1038 (d): *booleans bind visibility*, step 2's second half beside D1058's numbers.
+
+**The kind.** `VarKind::Boolean`, `Cell::Boolean(bool)`, `Value::Boolean(bool)`; a cell saves as
+`{"boolean": true}`. `impl From<Value> for Cell` is new, for `remove_ops`' alias rewrite — an alias to a
+deleted variable becomes the value it resolved to, which a boolean now can be.
+
+**Storage.** `Node::visible_var: Option<VarId>` beside `visible`, which **stays the literal** and says
+so in its doc. **`SetVisibleVar { id, var }` writes the binding alone**: it names its node for
+`overwrites` and `retargeted`, changes ink, is a no-op when equal, propagates `Whole`, is stated after
+`SetVisible` by `reset::state_ops`, and the Component card files it with `SetVisible`, under no card.
+`NodeDto::visible_var`, skipped when unset, in **the same unreleased v8** as D1058 — no second bump,
+v8 never having shipped. `build::bind_visible_ops` writes the literal **true** beside the binding — the
+canonical literal, D1039's 0 for a corner, so a main and its copy bound to one variable compare equal
+whatever either showed before; `detach_visible_ops` writes `SetVisible` of what the layer shows and
+clears the binding.
+
+**Resolved at read.** **`Document::shown(id)`** — and `shown_in(t, id)`, D1056's `_in` door — answers the
+bound variable's boolean in the mode in force at the layer, else the literal; a value that is not a
+boolean falls back to the literal. **The layer's own eye, not its ancestors'.** 🚨 **Every reader that
+draws, picks, lays out or exports asks `shown`, never `Node::visible`**: `resolve.rs`' `DocView::visible`
+— so a layer hidden by its variable **leaves its layout's flow**, `UsedView` and `CommittedView`
+delegating to it — `mask_extent`, the boolean's `visible_of` and `mask_path`; `query.rs`'
+`mask_extent_local` and the ancestor walk; `build::replace_with_path`, so a flattened or outlined path,
+unbound, gets what the layer showed; `variant.rs`' `field_value`, `set_property` and `hidden_by`; the
+render walk's own check, `scene.rs`' `visible` helper and `renderer.rs`' `operand_visible`; the SVG
+writer's node and alpha-mask arms and the snapshot; and in the app `DisplayNode::visible` (a `shown`
+field filled by `display_node`), the layers panel's row, `toggle_hidden`, the canvas's baseline and
+snap skips and the marquee's `selectable`, and `snap.rs`. A reader left on the literal draws a bound
+layer at `true` in silence — §5.3f's *cost is every reader*.
+
+**The commit-time pass.** `build::keep_visible_bindings`, in `commit_inner` after
+`keep_spacing_bindings` and so before `propagate::owed`: a `SetVisible` on a bound layer, in a
+transaction that does not set that layer's `SetVisibleVar` itself, **written what the layer shows**
+stays bound, the literal put back; **written anything else** detaches, the literal being what was
+written. 🚨 **One half, deliberately, where corners and spacing have two.** The literal half would
+excuse a write of `true` — and `true` is exactly what the eye, *Bring back into flow* and a boolean
+property write to show a layer its variable hides, so every one of them would have kept the layer bound
+and hidden, the edit doing nothing. No writer builds a visibility from the literal the way the Scale
+tool builds radii, which is all the second half was for. *Do not* add it for symmetry: that is the flip
+below.
+
+**The rules** (`variable.rs`). `check` holds a visibility binding to a boolean variable; `detached`
+writes the literal as shown and clears the binding; `carried` counts it; `land` rebinds it by name and
+kind, else takes the twin's literal, which is what the copy showed; `reads`, `users` and `bound_nodes`
+count it; `remove_ops` detaches it to `shown_in`. `variant::set_property` compares a Boolean property's
+value with `shown`, so a bound layer already showing the value keeps its binding and any other is
+written and detached by the pass.
+
+**The preview** (§6.2). `absorb`'s new `SetVisibleVar` arm writes the override's visibility as the
+variable's value, a non-boolean refusing; `None` keeps the visibility the ops before it left, else the
+document's literal — which a detach's own `SetVisible` has set first. D1056's `SetVariableCell` arm
+patches each bound visibility with `shown_in(&t, n)`. ~~⚠️ **None of the three marks a node moved**, and
+neither does the old `SetVisible` arm, so **a preview that changes an in-flow item's visibility does not
+lay its layout again**: the item vanishes or appears in place and its siblings move on release. […]
+*Fix with* the arms marking the node moved, as `SetLayoutItem`'s does, and the test below over an
+in-flow item.~~ 🚨 **Corrected 2026-10-14 (`79ae5eb`): that was a wrong premise, and the preview was
+right.** None of the visibility arms marks a node moved, true — but `flex_relayout` does not take its
+layout roots from `moved`: it walks **every node with an override** (`self.nodes.keys()`) up its chain
+to the layout roots and lays each, and `PreviewView::visible` reads the override's visibility. So a
+previewed visibility change on an in-flow item re-lays its siblings already. Measured, as the caller
+reports it: `mark_moved` added to the three arms and then taken out of `SetVisibleVar`'s left the new
+in-flow test green, and the additions were reverted — no code change remains. *Do not* add a
+`mark_moved` here on this paragraph's old word: the relayout is the override's being, not the mark's.
+The test is `ondin-render/tests/overrides.rs`' `hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved`,
+through `assert_preview_matches_commit`; its teeth are elsewhere, and its doc says so — flip, run:
+`PreviewView::visible` reading `doc.shown` rather than the override fails *"an in-flow item hidden by
+its binding: preview diverged from commit"*. The record's reading went from the `SetLayoutItem` arm's
+own `mark_moved` to the conclusion without reading what consumes `moved`.
+
+**The chrome.** `binding::FieldKey::Visible { id }`, kind `Boolean`, badge `EYE`, and **`typed()` false**
+— the eye is clicked, never typed into — so the field menu shows neither `--` nor `Backspace` in its
+accelerator column, there is no retype buffer, and `field_value`, what *Extract* files, is
+`Cell::Boolean(shown)`. **The identity card's eye** (`inspector_header`): bound, the eye sits in a
+22×18 capsule at `text_a(28)`, 44 under the pointer — D1038 A1's capsule rule, at the eye's own size
+since the row has no room for a name — with the chip's tooltip (`chip_tip`: *name · value · Mode*) and
+*Click to toggle and detach*; a click writes `SetVisible` of the other value, which the pass detaches; a
+right-click opens the field menu bound or not, *Bind to variable…* opening the `--` list with its own
+search under the eye. **D1038 draws no bound eye**; this is the session's. **The browser**: the `+`
+menu gains *Boolean variable* (glyph `CHECK`), new cells `true` in every mode; a boolean cell draws a
+12-pt box where a colour has its swatch — filled and checked when true — then *True* or *False*; a click
+on the box writes the other word through `Act::Cell`, a click on the word types (`true`/`false`,
+`yes`/`no`, `on`/`off`, `1`/`0`, any case), refused with *"True or false, or --name."*; the chip's
+tooltip, the `--` list's values and `value_text` say *True*/*False* (`binding::bool_word`). The box is
+the session's too — the mockup draws no boolean cell. ⚠️ Neither the capsule nor the list under it, a
+256-pt list hung from a 22-pt eye at the card's right, has been looked at.
+
+**Read in the code when recorded — not reproduced, each a *Fix*** — ~~*Fix*~~ **all fixed 2026-10-14 in
+`79ae5eb`**, as each item's last sentence says; (1) and the resize are tested, the rest are not:
+
+1. 🚨 **`propagate::is_placement` omits `SetVisibleVar`**, though it names `SetVisible`: an instance
+   root's visibility is its own (*"a main hidden on a components page must not hide every instance of
+   it"*), its binding is not. So binding a main's root visibility to a variable **follows to every
+   instance root** (`Whole`, the literal's `SetVisible(true)` skipped as placement) and hides each where
+   the variable is false; an instance root's own binding is an **override** in `reset::overrides`,
+   counted by the Component card and undone by *Reset all*, where its literal is skipped; a swapped
+   slot keeps its literal and takes the target's binding (`swap::is_slot_field`); and a variant switch
+   (`Keep::Placement`) keeps the root's literal and takes the new variant's binding. ~~*Fix with*
+   `SetVisibleVar` in `is_placement` — the four become five, and all four readers follow.~~ **Fixed**:
+   `is_placement` holds `SetVisibleVar` beside `SetVisible`, its doc saying so, and `is_slot_field`'s doc
+   says *the five*. Pinned by `tests/variables.rs`' `an_instance_roots_visibility_binding_is_its_own`: a
+   main's root bound does not reach the instance root, a child bound does reach its copy, and an
+   instance root's own binding is no `reset::overrides` entry. Flip, run, as the caller reports it:
+   `SetVisibleVar` out of `is_placement` fails *"the main's root binding stays the main's"*. ⚠️ The
+   swap's and the variant switch's halves are reached by the same predicate and driven by no test.
+2. **The layer context menu's *Show*/*Hide* label reads the literal** (`menu.rs`' `layer_menu_state`,
+   `hidden: !node.visible()`): a layer its variable hides reads *Hide*, and the row runs `toggle_hidden`,
+   which reads `shown` and **shows** it — the label the opposite of the act. ~~*Fix with*
+   `self.session.doc.shown(id)`.~~ **Fixed**: `hidden: !self.session.doc.shown(id)`. ⚠️ Untested —
+   `layer_menu_state` is private to `menu.rs`.
+3. **A ghost reads the literal** (`renderer.rs`' `build_ghost`, both its `visible` and its boolean's
+   `visible_of`): an Alt-drag copy of a group holding a layer its variable hides previews that layer
+   **shown** — and counts it as a boolean's operand — and drops it on release, the copy keeping the
+   binding within one document. A ghost's bound paint is resolved in the default mode
+   (`paint_ghost`, D1039); its visibility is not resolved at all. ~~*Fix with* the same reading, the
+   variable through `resolve_var` at the ghost's id.~~ **Fixed**: `ghost_subtree` and `build_ghost` take
+   `doc`, and `renderer::ghost_shown(doc, n)` resolves a bound visibility through `resolve_var` at the
+   node's id — the **default mode**, the ghost being in no frame, as `paint_ghost` resolves paint — for
+   both the ghost's `visible` and the boolean's `visible_of`; a non-boolean value falls back to the
+   literal. ⚠️ So an Alt-drag copy under a frame that sets another mode previews by the default mode's
+   value until it lands, the paint's approximation. ⚠️ Untested.
+4. **A Boolean property reads the binding nowhere but its value.** `variant::property_reset_ops` and
+   `component::prop_drift` take `SetVisible` alone, so a copy bound elsewhere than its main, both
+   literals the canonical `true`, reads **not overridden** while it shows otherwise; its property reset
+   leaves the binding; and the `SetVisibleVar` override is counted as a plain override, not the
+   property's. ~~*Fix with* `SetVisibleVar` beside `SetVisible` in both filters — part of the Properties
+   card's owed chrome (below).~~ **Fixed**: both filters count `SetVisibleVar` with `SetVisible` for a
+   Boolean property. ⚠️ Untested. The row's chip is still owed (below).
+5. **`propagate::untouched` compares none of the bindings** — `visible_var`, nor `corner_vars`,
+   `spacing_vars` or `mode`, the last three since D1039 and D1058. It is the structural pass's *"an item
+   the main loses goes from a copy only if it still equals its source"*, so a copy whose only difference
+   is its own binding reads untouched and goes with its main's deleted child. For a visibility the
+   canonical `true` matches an unbound source's, so the binding is the only difference there is. ~~*Fix
+   with* the four fields in `untouched`.~~ **Fixed**: `untouched` compares `mode`, `corner_vars`,
+   `spacing_vars` and `visible_var`. ⚠️ Untested — `untouched` is `pub(crate)`.
+6. **What was checked and does not matter**: `kit.rs`' `reach` blanks a captured main root's `visible`
+   to `true` and not its binding — but the copy it compares is `freeze`'s, which runs
+   `variable::detached` on every node, so no binding survives to compare.
+7. **Comments made false**: `app.rs`' `hide_switch` doc still says *"`toggle_hidden` reads
+   `n.visible()`"* — it reads `doc.shown`; `resolve::DocView`'s doc still says *"every answer a
+   **specified** value, read straight off the node"* — `display` has answered resolved since D1058 and
+   `visible` since this entry; `variable::detached`'s doc lists paint, corners and the mode, not the
+   spacing (D1058) or the visibility it now also detaches. And `session::committed_node` fills `shown`
+   with the **literal**: its contract is *no preview*, not *no binding*; nothing that reads it asks
+   visibility today (`typography.rs` alone), so it is latent — ~~*Fix with* `self.doc.shown(id)`~~.
+   **All corrected**: `hide_switch` says it reads `doc.shown`, `DocView` that the bindings are resolved,
+   `detached` names spacing and visibility; `committed_node` fills `shown` with `self.doc.shown(id)` —
+   a binding is not a preview — and `DisplayNode::shown`'s doc no longer names it the literal there.
+
+**Not built, and open** (`roadmap.md`): **the Properties card's Boolean property row draws no chip for
+a bound layer** — D1038 (d), *"the property is a view over the field, so it shows the chip"* — though it
+reads and writes what shows and an edit detaches; **the layers panel's eye carries no bound mark**,
+showing what the layer shows; and, as for corners and spacing, **no detach says anything on the floating
+status**.
+
+**Tests**, as the caller reports them. Core, `tests/variables.rs`:
+`a_bound_visibility_shows_by_its_variable_in_the_mode_in_force` — a flex row whose bound rect, hidden in
+*Dark*, leaves the flow; flip, run: `DocView::visible` reading the literal fails *"hidden in Dark, out of
+the flow"*; `a_visibility_written_over_a_bound_layer_detaches_it` — flip, run: the literal half added
+fails *"showing a hidden bound layer detaches it"*; `a_visibility_binding_detaches_to_what_it_shows_and_round_trips`,
+a number variable refused included; and `incremental_update_equals_rebuild_over_random_variable_ops`
+binding and detaching visibility — ⚠️ it authors no boolean cell edit, the variable's value moving only
+by a frame's mode or a mode added at the front. Render, `tests/overrides.rs`:
+`a_visibility_binding_previews_as_what_it_will_show`, through `assert_preview_matches_commit` — flip,
+run: `SetVisibleVar`'s arm writing no override fails *"bound to false: preview diverged from commit"*;
+~~its rect is in no layout, which is why the relayout gap above is green~~ its rect is in no layout —
+the in-flow case is `hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved` since
+`79ae5eb`, above, with `an_instance_roots_visibility_binding_is_its_own` in core. App: `panels::binding::tests::the_eye_binds_to_a_boolean_and_its_click_detaches`
+— flip, run: no `keep_visible_bindings` in `commit_inner` fails *"the eye's click detaches"*;
+`panels::variables::tests::a_boolean_variable_is_made_toggled_and_typed`. *(Built 2026-10-14 by the
+session; committed as `bf347f9`. **Keep**, the one-half pass and `shown` as every reader's door above
+all; ~~***Fix*** (1)–(5) and the preview's relayout; the comments in (7) and `committed_node` to be
+corrected~~ (1)–(5) and (7) **Resolved** in `79ae5eb`, (2)–(5) untested; the preview's relayout
+**withdrawn**, a wrong premise. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11 and §6.2; `context-menus.md` §6.7;
+`roadmap.md` *Next · Styles and variables* step 2 edited down. **Amended 2026-10-14** (`79ae5eb`): the
+read defects fixed, the relayout claim corrected, the roadmap's *Fix* list struck)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per
@@ -32686,7 +33075,8 @@ baseline is not. *(Grid's cards do not offer it since, D919.)* *(True of the inl
 block axis is shimmed to the row's baselines, and grid's align rows offer it since — D939.)* `Display::is_valid` and `Display::padding` are new, and **`Display` is no longer
 `Copy`**, a track list being a `Vec`; `LayoutView::display` returns `Option<&Display>`, borrowed,
 because most callers ask only whether there is a layout and an owned grid would clone a `Vec` per
-ask.
+ask. *(A `Cow` since D1058: still borrowed where nothing is bound, owned where a gap or a padding is,
+its bound slots resolved.)*
 
 **`justify-items` is a departure from §5.3c's first cut**, whose Container row did not list it. In a
 grid `align-items` is the vertical axis alone: the first test set only `align-items: start`, and item

@@ -1881,7 +1881,10 @@ impl RenderOverrides {
 /// A preview as the flex engine sees it (`ondin_core::container::LayoutView`):
 /// every answer the **specified** value the transaction leaves — its kind
 /// (`current_kind`, the one ops are applied to), its layout, item properties,
-/// insets and visibility — over the document's tree. `Resolved`'s `UsedView` is
+/// insets and visibility — over the document's tree, **bindings resolved**: an
+/// override's layout is stored resolved and the document's answered through
+/// `resolved_display` (§15 D1058), and a visibility is the override's else
+/// `doc.shown` (§15 D1059). `Resolved`'s `UsedView` is
 /// the committed twin (its `DocView` with the used box a pinned root stretches
 /// against, §15 D933); one engine runs over both.
 ///

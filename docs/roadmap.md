@@ -44,7 +44,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762); and, added 2026-10-07, a failed effect pass leaving that frame's atlas slots registered (D1003 (7)'s *Fix*), and a long chain of mains loading super-linearly, cause not found (D416's amendment). |
 | *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, begun on 2026-10-07 (§15 D1000 ruled on the Properties card and a hidden group); a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
-| *Next · Styles and variables* | **Opened 2026-10-11**, ruled (§15 D1037), leaving §0's non-goals: a six-step build; the Claude Design pass on the chrome **done and accepted** (§15 D1038), with the maintainer's rulings of 2026-10-13 on (a)–(d), (f) and premise (iv); **step 1 mostly built 2026-10-14** — the core (§15 D1039), the browser (§15 D1040), binding a field (§15 D1041), a frame's *Mode* row (§15 D1042), the swatch popup's *Variables* segment (§15 D1043), B4's refusal (§15 D1044), the *Mixed* capsule (§15 D1045), the no-scrub cursor (§15 D1046), *Paste properties* by a paste's rule (§15 D1047), a copy's binding and mode marks (§15 D1048), the per-corner chips (§15 D1049), a corner's preview (§15 D1050), the mode on every frame tag (§15 D1051), the browser's leftovers (§15 D1052–D1055) and a cell's preview on every bound layer (§15 D1056) — its leftovers owed, listed in full below and among them: E1's kit group, the gradient faces' height and a `Path`'s radii; open are (e), (g) and whether a preset follows a paste's rule. |
+| *Next · Styles and variables* | **Opened 2026-10-11**, ruled (§15 D1037), leaving §0's non-goals: a six-step build; the Claude Design pass on the chrome **done and accepted** (§15 D1038), with the maintainer's rulings of 2026-10-13 on (a)–(d), (f) and premise (iv); **step 1 built 2026-10-14** — the core (§15 D1039), the browser (§15 D1040), binding a field (§15 D1041), a frame's *Mode* row (§15 D1042), the swatch popup's *Variables* segment (§15 D1043), B4's refusal (§15 D1044), the *Mixed* capsule (§15 D1045), the no-scrub cursor (§15 D1046), *Paste properties* by a paste's rule (§15 D1047), a copy's binding and mode marks (§15 D1048), the per-corner chips (§15 D1049), a corner's preview (§15 D1050), the mode on every frame tag (§15 D1051), the browser's leftovers (§15 D1052–D1055) and a cell's preview on every bound layer (§15 D1056), its leftovers closed the same day (§15 D1057, E1's kit group moved to step 4); **step 2's gaps and padding built** the same day (§15 D1058, its partly bound and bound-resize previews fixed in its amendments), **and its booleans bound to visibility** (§15 D1059, its five read defects fixed in its amendment), W and H, the Properties card's chip and the layers panel's bound mark left; open are (e), (g), whether a preset follows a paste's rule, the rest of D1038's bindable numbers and its canvas detach. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
 | *Next · Shared component libraries* | **Closed into §15 on 2026-10-08** (D1010's amendment): every step is built — the vault and vendoring (§15 D1012) through the swap to a main never used (D1019), the pill noticing a publish while the document is open (D1020, the maintainer's ruling of 30 to 60 seconds) and 1D's count (D1021, the maintainer's ruling to load every file); the ⋯ menu's width was answered by reading (D1016 (d)). Its *Later* paragraph — the review table, the kit verbs in a palette, team publishing — moved to *Later · Components and layout, past the first build*. *The text below is the row as it stood before.* **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. **Step 1 built in core** the same day (§15 D1012 — the vault a second parentless root, refining D1011 (9)), no chrome; **the document menu, the insert picker, publishing, and updates with *Make local* built** the same day (§15 D1013–D1016), and the dashboard's kits with 1D's confirmation, less its count (§15 D1017), and a tile's drag and 3G's *Open library* (§15 D1018), and a swap to a kit main the document has never used (§15 D1019): open are the card ⋯ menu's width to measure, the pill's timing (unruled), and how 1D counts a kit's consumers. |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06; the kit review table, the kit verbs in a palette and team publishing — joined 2026-10-08; binding an extracted value's other users — joined 2026-10-11, §15 D1037, D1038); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
@@ -1603,9 +1603,9 @@ edited down to this the same day.*
 
 ## Next · Styles and variables
 
-**Ruled 2026-10-11 and 2026-10-13; step 1's core, browser, field binding, *Mode* row and swatch segment
-built 2026-10-14** — §15 D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
-maintainer's rulings on D1037's open questions, and §15 D1039–D1056 what is built; `architecture.md` §5.3f is the section. Variables are typed
+**Ruled 2026-10-11 and 2026-10-13; step 1 built 2026-10-14, and step 2's gaps, padding and visibility
+the same day** — §15 D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
+maintainer's rulings on D1037's open questions, and §15 D1039–D1059 what is built; `architecture.md` §5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
 whole set of values, read-only in the inspector and detached by any other door's edit.
@@ -1622,15 +1622,18 @@ accepted (D1038):
    is a frame's *Mode* row** with its canvas tag's suffix (§15 D1042), and **so is the swatch popup's
    *Variables* segment** (§15 D1043), **and the per-corner chips** (§15 D1049), with a copy's binding
    and mode marked as overrides (§15 D1048), a corner's binding previewed (§15 D1050), the mode on
-   every frame tag (§15 D1051) and the browser's leftovers (§15 D1052–D1055). **What is left is what
-   the builds leave**:
-   - what the swatch popup's segment (§15 D1043) left: E1's kit group, owed with step 4's kit
-     variables; the gradient faces' height, which still differs from the *Solid* and *Variables*
-     faces';
-   - a `Path`'s per-anchor radii are not bindable — a limit of step 1, not a ruling.
-2. Number variables in layout fields, and boolean variables bound to visibility (D1038 (d)).
+   every frame tag (§15 D1051) and the browser's leftovers (§15 D1052–D1055); the popup's faces made
+   one height and a `Path`'s radii left unbindable by decision (§15 D1057). **Step 1 owes nothing.**
+2. Number variables in layout fields, and boolean variables bound to visibility (D1038 (d)). **A
+   container's gaps and padding are built** (§15 D1058), **and a layer's visibility binds to a
+   boolean** (§15 D1059). **What is left**:
+   - W and H, the layout numbers of D1038's addition (7) not yet bound;
+   - the Properties card's Boolean property row draws no chip for a bound layer — D1038 (d), *"the
+     property is a view over the field, so it shows the chip"* — and the layers panel's eye carries no
+     bound mark (§15 D1059).
 3. Styles for fills, strokes and effects.
-4. Kits carrying both (the session's proposal, not objected to), with D1038 (b)'s per-kit mode mapping.
+4. Kits carrying both (the session's proposal, not objected to), with D1038 (b)'s per-kit mode mapping,
+   and the swatch popup's kit group, E1's (§15 D1043).
 5. The CSS export (the session's proposal, not ruled).
 6. Text styles, and string variables bound to text content and font family (D1038 (d)) — *String
    variable* hidden in the browser's `+` menu until then.
@@ -1642,6 +1645,11 @@ accepted (D1038):
 - **Whether a preset follows a paste's rule** across documents — D1037's premise (iv) named it beside
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
+- **The rest of D1038's bindable numbers** — layer opacity, stroke width, an effect's X, Y, blur and
+  spread — bound by nothing and given no step (§15 D1058); W and H are step 2's, above.
+- **D1038 (2)'s canvas half** — a gesture on a bound value detaching, *the floating status saying what
+  was detached*: no canvas handle writes a gap, a padding or a radius yet, and no detach says anything
+  on the floating status (§15 D1058).
 
 *Opened 2026-10-11, when styles and variables left §0's non-goals; the design pass and (a), (b), (c),
 (d), (f) and premise (iv) struck on 2026-10-14, ruled in §15 D1038; step 1's core and premises (i), (ii)
@@ -1658,7 +1666,14 @@ D1040, D1043 and D1041; the corner's live preview struck, built in §15 D1050, a
 three tags struck, built in §15 D1051, with H5's elision struck as decided there; the browser's
 leftovers — the colour cell's popup, B4's refusals, `Alt`-click and the per-document groups, G3's bar —
 struck, built in §15 D1052–D1055, and (vi) amended for the cell's drag; the owed premises' last,
-(vi), struck the same day, built in §15 D1056.*
+(vi), struck the same day, built in §15 D1056; step 1's last leftovers — the gradient faces' height and
+a `Path`'s radii — struck the same day, built and decided in §15 D1057, E1's kit group moved to step 4;
+step 2's gaps and padding built the same day in §15 D1058, its booleans, W and H and D1058's *Fix*
+left, and the rest of D1038's numbers and (2)'s canvas half opened in the list above; D1058's *Fix*
+struck the same day, fixed in its amendment, and the bound resize's preview opened in its place; the
+booleans struck the same day, built in §15 D1059, its owed chrome and its *Fix* list opened; the *Fix*
+list and the bound resize's preview struck the same day, fixed in the amendments to §15 D1058 and
+D1059, the relayout item withdrawn there as a wrong premise.*
 
 ## Next · The polishing pass over the accepted calls
 

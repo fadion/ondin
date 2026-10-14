@@ -4880,26 +4880,44 @@ impl OndinApp {
             _ => None,
         };
         if let (Some(mine), Some(main)) = (size_of(copy.kind()), size_of(src.kind())) {
+            // **The binding with the literal** (§15 D1061): a bound axis's literal
+            // is 0 on both, so an axis bound apart, or bound on one side only,
+            // differs by its binding alone — and the reset writes the main's
+            // binding beside its literal, which `keep_size_bindings` leaves as
+            // stated. Without it a copy detached from its main's variable was
+            // marked *Reset to main · 0* and the ↺ drew it 0 wide.
+            let (my_vars, main_vars) = (copy.size_vars(), src.size_vars());
+            let table = doc.variables();
+            let say = |axis: usize, v: f64| match main_vars[axis] {
+                Some(var) => table
+                    .get(var)
+                    .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+                None => num(v),
+            };
             // A size is a placement too to `keep_insets` (a layer pinned both
             // sides is sized by its insets), so it carries its axis's insets.
             let resize = |s: Size, horizontal: bool| {
+                let mut vars = my_vars;
+                let axis = if horizontal { 0 } else { 1 };
+                vars[axis] = main_vars[axis];
                 Transaction(vec![
                     Operation::SetGeometry {
                         id,
                         geometry: GeometryPatch::Size(s),
                     },
+                    Operation::SetSizeVars { id, vars },
                     insets(horizontal, !horizontal),
                 ])
             };
-            if mine.width != main.width {
+            if mine.width != main.width || my_vars[0] != main_vars[0] {
                 marks.w = Some(Mark {
-                    tip: format!("Reset to main · {}", num(main.width)),
+                    tip: format!("Reset to main · {}", say(0, main.width)),
                     tx: resize(Size::new(main.width, mine.height), true),
                 });
             }
-            if mine.height != main.height {
+            if mine.height != main.height || my_vars[1] != main_vars[1] {
                 marks.h = Some(Mark {
-                    tip: format!("Reset to main · {}", num(main.height)),
+                    tip: format!("Reset to main · {}", say(1, main.height)),
                     tx: resize(Size::new(mine.width, main.height), false),
                 });
             }
@@ -5322,6 +5340,22 @@ impl OndinApp {
                                 (m.h, m.h_pct)
                             }
                         });
+                        // **Bound, the field is a chip** (§15 D1061, D1038 A1) —
+                        // or the buffer a key on it began — the gap fields' own
+                        // drawing; and **only an axis the user sets takes a
+                        // binding**, the maintainer's ruling: a `%`, a
+                        // `fit-content`, a pin at both ends, growth or a stretch
+                        // sizes the axis instead (`build::size_axes_authored`), and
+                        // the field offers neither door there.
+                        let axis = usize::from(!horizontal);
+                        let key = super::binding::FieldKey::Size { id, axis };
+                        let bindable = ondin_core::bindable_size_axes(&app.session.doc, id)[axis];
+                        let held = if horizontal { &marks.w } else { &marks.h };
+                        if (bindable || app.field_var(key).is_some())
+                            && app.spacing_bound_ui(ui, key, slot.x, held)
+                        {
+                            continue;
+                        }
                         let mut v = drawn;
                         let (resp, typed) = match (&size_menu, mode) {
                             (Some(m), Some((mode, pct))) => {
@@ -5397,6 +5431,9 @@ impl OndinApp {
                             }
                         };
                         app.edit_valve(&resp, tx);
+                        if bindable {
+                            app.spacing_doors(ui, key, &resp);
+                        }
                     }
                     // The design's chain button. A *broken* chain when it is
                     // off, whole when on — the tint alone would say the same
@@ -8184,12 +8221,11 @@ impl OndinApp {
     fn shared_frame_size(&self, subjects: &[NodeId]) -> Option<Size> {
         let mut sizes = subjects
             .iter()
-            .filter_map(|id| match self.session.doc.get(*id) {
-                Some(n) => match n.kind() {
-                    NodeKind::Artboard { size, .. } => Some(*size),
-                    _ => None,
-                },
-                None => None,
+            // At its specified size, a bound width or height resolved (§15
+            // D1061) — the stored literal there is 0, and no template lit.
+            .filter_map(|id| match self.session.doc.resolved_kind(*id).as_deref() {
+                Some(NodeKind::Artboard { size, .. }) => Some(*size),
+                _ => None,
             });
         let first = sizes.next()?;
         sizes.all(|s| s == first).then_some(first)

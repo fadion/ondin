@@ -42,6 +42,10 @@ pub(crate) enum FieldKey {
     /// A layer's visibility — its eye in the identity card (§15 D1059), bound to
     /// a boolean variable. Not a typed field: no `--`, no retype.
     Visible { id: NodeId },
+    /// A layer's width (`axis` 0) or height (1) — the Transform card's W or H
+    /// (§15 D1061), on one layer: a selection's W and H are its union box's, which
+    /// no variable stands in for.
+    Size { id: NodeId, axis: usize },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -66,7 +70,8 @@ impl FieldKey {
             | FieldKey::Radius { id }
             | FieldKey::Corner { id, .. }
             | FieldKey::Spacing { id, .. }
-            | FieldKey::Visible { id } => id,
+            | FieldKey::Visible { id }
+            | FieldKey::Size { id, .. } => id,
         }
     }
 
@@ -90,6 +95,8 @@ impl FieldKey {
             FieldKey::Corner { .. } => icon::ARROW_ELBOW_LEFT_UP,
             FieldKey::Radius { .. } | FieldKey::Paint { .. } => icon::CORNERS_OUT,
             FieldKey::Visible { .. } => icon::EYE,
+            FieldKey::Size { axis: 0, .. } => "W",
+            FieldKey::Size { .. } => "H",
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -110,16 +117,17 @@ impl FieldKey {
             FieldKey::Spacing {
                 slots: PAD_TOP | PAD_RIGHT | PAD_BOTTOM | PAD_LEFT,
                 ..
-            }
+            } | FieldKey::Size { .. }
         )
     }
 
     pub(crate) fn kind(self) -> VarKind {
         match self {
             FieldKey::Paint { .. } => VarKind::Color,
-            FieldKey::Radius { .. } | FieldKey::Corner { .. } | FieldKey::Spacing { .. } => {
-                VarKind::Number
-            }
+            FieldKey::Radius { .. }
+            | FieldKey::Corner { .. }
+            | FieldKey::Spacing { .. }
+            | FieldKey::Size { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
         }
     }
@@ -463,7 +471,8 @@ impl OndinApp {
             FieldKey::Paint { id, .. }
             | FieldKey::Radius { id }
             | FieldKey::Corner { id, .. }
-            | FieldKey::Visible { id } => vec![id],
+            | FieldKey::Visible { id }
+            | FieldKey::Size { id, .. } => vec![id],
         }
     }
 
@@ -499,6 +508,11 @@ impl OndinApp {
                 )
             }
             FieldKey::Visible { id } => Transaction(ondin_core::bind_visible_ops(doc, id, var)),
+            FieldKey::Size { id, axis } => {
+                let mut vars = [None; 2];
+                vars[axis] = Some(var);
+                Transaction(ondin_core::bind_size_ops(doc, id, vars))
+            }
         }
     }
 
@@ -524,6 +538,11 @@ impl OndinApp {
                 )
             }
             FieldKey::Visible { id } => Transaction(ondin_core::detach_visible_ops(doc, id)),
+            FieldKey::Size { id, axis } => {
+                let mut which = [false; 2];
+                which[axis] = true;
+                Transaction(ondin_core::detach_size_ops(doc, id, which))
+            }
         }
     }
 
@@ -657,6 +676,7 @@ impl OndinApp {
                 vars.all(|v| v == Some(first)).then_some(first)
             }
             FieldKey::Visible { id } => doc.get(id)?.visible_var(),
+            FieldKey::Size { id, axis } => doc.get(id)?.size_vars()[axis],
         }
     }
 
@@ -694,7 +714,10 @@ impl OndinApp {
                     }
                 }
             }
-            FieldKey::Radius { .. } | FieldKey::Corner { .. } | FieldKey::Visible { .. } => {
+            FieldKey::Radius { .. }
+            | FieldKey::Corner { .. }
+            | FieldKey::Visible { .. }
+            | FieldKey::Size { .. } => {
                 return None;
             }
         }
@@ -1282,6 +1305,24 @@ impl OndinApp {
                             });
                         }
                     }
+                    // The typed axis, the other at its stored literal — the 0
+                    // a still-bound axis holds, which `keep_size_bindings`
+                    // keeps bound — at least 1, the W and H fields' own floor
+                    // (§15 D1061).
+                    FieldKey::Size { id, axis } => {
+                        let Some(mut s) = doc.get(id).and_then(|n| n.kind().box_size()) else {
+                            return;
+                        };
+                        if axis == 0 {
+                            s.width = r.max(1.0);
+                        } else {
+                            s.height = r.max(1.0);
+                        }
+                        ops.push(Operation::SetGeometry {
+                            id,
+                            geometry: ondin_core::GeometryPatch::Size(s),
+                        });
+                    }
                     FieldKey::Paint { .. } | FieldKey::Visible { .. } => return,
                 }
                 self.commit_edit(Transaction(ops));
@@ -1324,6 +1365,11 @@ impl OndinApp {
             }
             // Whether the layer shows.
             FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
+            // The axis as drawn.
+            FieldKey::Size { id, axis } => {
+                let s = self.session.resolved.used_kind(doc, id)?.box_size()?;
+                Some(Cell::Number(if axis == 0 { s.width } else { s.height }))
+            }
             FieldKey::Corner { id, slot } => match self.session.resolved.used_kind(doc, id)? {
                 ondin_core::NodeKind::Rect { corner_radii, .. } => Some(Cell::Number(match slot {
                     0 => corner_radii.top_left,
@@ -2610,5 +2656,125 @@ mod tests {
         }]));
         assert_eq!(app.field_var(key), None, "the eye's click detaches");
         assert!(app.session.doc.shown(rect), "and the layer shows");
+    }
+
+    /// **W binds through the field's verbs, a resize through the commit door
+    /// detaches it, and a number typed over the chip writes that width** (§15
+    /// D1061): bound to *radius/md* (6) the rect is drawn 6 wide with a literal
+    /// 0; a `Size` write of 25 × 20 — a side handle's — lands unbound at 25; bound
+    /// again, a chip retyped *14* lands 14 wide and unbound, the height as it was.
+    ///
+    /// Flip, run: `commit_inner` without its `keep_size_bindings` line fails *"a
+    /// resize through the commit detaches W"* — the binding kept over a literal of
+    /// 25, which it then draws as 6.
+    #[test]
+    fn w_binds_a_resize_detaches_it_and_a_retype_writes_it() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let key = FieldKey::Size { id: rect, axis: 0 };
+        let drawn = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            app.session
+                .resolved
+                .used_kind(doc, rect)
+                .and_then(|k| k.box_size())
+                .unwrap()
+        };
+        app.bind_field(key, radius);
+        assert_eq!(app.field_var(key), Some(radius));
+        assert_eq!(drawn(&app), Size::new(6.0, 20.0));
+        app.commit_edit(Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(25.0, 20.0)),
+        }]));
+        assert_eq!(
+            app.field_var(key),
+            None,
+            "a resize through the commit detaches W"
+        );
+        assert_eq!(drawn(&app), Size::new(25.0, 20.0));
+
+        app.bind_field(key, radius);
+        app.var_retype = Some(Retype {
+            key,
+            text: "14".into(),
+            focus: true,
+        });
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.number_retype(ui, key, rt, 160.0);
+                }
+            });
+        };
+        run(&mut app, vec![]);
+        run(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(app.field_var(key), None, "the retype detaches");
+        assert_eq!(
+            drawn(&app),
+            Size::new(14.0, 20.0),
+            "and writes the width typed"
+        );
+    }
+
+    /// **An axis something else sizes takes no binding** (§15 D1061, the
+    /// maintainer's ruling): the rect in a flex row with growth — its width the
+    /// line's — binds nothing on W, and its height, stretched under the row's
+    /// default, nothing on H.
+    #[test]
+    fn a_computed_axis_takes_no_binding() {
+        let (_ctx, mut app, rect, _, radius) = fixture();
+        let frame = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 100.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: rect,
+                new_parent: frame,
+                index: 0,
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(ondin_core::container::Display::Flex(Default::default())),
+            },
+            Operation::SetLayoutItem {
+                id: rect,
+                item: ondin_core::container::LayoutItem {
+                    grow: 1.0,
+                    ..Default::default()
+                },
+            },
+        ])));
+        assert_eq!(
+            ondin_core::bindable_size_axes(&app.session.doc, rect),
+            [false, false]
+        );
+        for axis in [0, 1] {
+            let key = FieldKey::Size { id: rect, axis };
+            app.bind_field(key, radius);
+            assert_eq!(app.field_var(key), None, "axis {axis} binds nothing");
+        }
     }
 }

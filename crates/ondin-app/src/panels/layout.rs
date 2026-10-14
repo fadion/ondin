@@ -2014,8 +2014,9 @@ impl OndinApp {
     /// A spacing field while bound or typed over (§15 D1058): the chip, A4's
     /// *Mixed* capsule, or the buffer a key on either began — `true` when it drew
     /// one, and the caller's plain field is not drawn. `mark` is the field's whole
-    /// override mark, binding and literal.
-    fn spacing_bound_ui(
+    /// override mark, binding and literal. Nothing in it is spacing's own: the
+    /// Transform card's W and H draw theirs through it too (§15 D1061).
+    pub(super) fn spacing_bound_ui(
         &mut self,
         ui: &mut egui::Ui,
         key: super::binding::FieldKey,
@@ -2079,8 +2080,9 @@ impl OndinApp {
     /// An unbound spacing field's two doors to a binding (§15 D1058, D1038 B1 and
     /// C1): `--` typed into it opens the list — and hands the text to the retype
     /// buffer, which can draw B4's refused tail where a `DragValue` cannot (§15
-    /// D1044) — and a right-click opens the field menu. The radius field's wiring.
-    fn spacing_doors(
+    /// D1044) — and a right-click opens the field menu. The radius field's wiring,
+    /// and W's and H's (§15 D1061).
+    pub(super) fn spacing_doors(
         &mut self,
         ui: &egui::Ui,
         key: super::binding::FieldKey,
@@ -2644,7 +2646,8 @@ impl OndinApp {
                         .session
                         .preview_local_box(*id)
                         .map(|b| if horizontal { b.width() } else { b.height() });
-                    let length = specified_along(node, was, horizontal, extent, drawn);
+                    let own = doc.resolved_kind(*id)?;
+                    let length = specified_along(&own, was, horizontal, extent, drawn);
                     let to = match m {
                         SizeMode::Auto => Some(Dimension::Auto),
                         SizeMode::FitContent => Some(Dimension::FitContent),
@@ -2707,7 +2710,10 @@ impl OndinApp {
             .parent()
             .and_then(|p| self.content_extent(p, horizontal));
         let dim = if horizontal { item.width } else { item.height };
-        let length = specified_along(node, dim, horizontal, extent, Some(along)).unwrap_or(along);
+        let own = doc
+            .resolved_kind(id)
+            .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned);
+        let length = specified_along(&own, dim, horizontal, extent, Some(along)).unwrap_or(along);
         let to = match (mode, node.kind()) {
             // A group's px is its box; anything else's is its stored size, written
             // where it is drawn, with the keyword back to `auto`.
@@ -2775,8 +2781,12 @@ impl OndinApp {
 /// it back as the specified size handed the item its share twice — a growing item
 /// picked from `px` to `%` jumped from 165 to 227 wide, its sibling squeezed. The
 /// specified length converts to itself, so the switch moves nothing, grown or not.
+///
+/// `kind` is the node's at its specified size, a bound width or height resolved
+/// (`Document::resolved_kind`, §15 D1061): the stored literal there is 0, and a
+/// bound `auto` axis converted to `Percent(0)`.
 fn specified_along(
-    node: &ondin_core::Node,
+    kind: &NodeKind,
     dim: Dimension,
     horizontal: bool,
     extent: Option<f64>,
@@ -2786,7 +2796,7 @@ fn specified_along(
         Dimension::Px(v) => Some(v),
         Dimension::Percent(p) => extent.map(|e| p * e / 100.0),
         // A text's `auto` is its content's, which only the layout knows.
-        Dimension::Auto => match node.kind() {
+        Dimension::Auto => match kind {
             NodeKind::Text { .. } => drawn,
             k => crate::tools::resizable_size(k)
                 .map(|s| if horizontal { s.width } else { s.height })

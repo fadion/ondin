@@ -2533,6 +2533,93 @@ mod tests {
         assert!(marks.corners[bl].is_none(), "the bottom left follows");
     }
 
+    /// **A copy's width bound as its main's draws the chip; resized, it detaches
+    /// and W is marked; the ↺ binds it back** (§15 D1061). The main's rect bound
+    /// to *size/w* (30): the copy follows the binding and draws 30 wide, its W a
+    /// chip naming the variable. A width written on the copy through the commit
+    /// door detaches it — `keep_size_bindings` — and W is then marked, its tip the
+    /// main's variable; clicking the prefix puts the binding back, 30 wide again.
+    ///
+    /// Flip, run: `transform_marks`' reset without its `SetSizeVars` fails *"the
+    /// reset puts the main's binding back"* — the copy's literal 0 written alone,
+    /// unbound, drawn 0 wide.
+    #[test]
+    fn a_copys_detached_width_marks_w_and_its_reset_rebinds() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let doc = &f.app.session.doc;
+        let r = doc.get(f.m).unwrap().children()[0];
+        let (mode, w) = (f.app.session.ids.mint_mode(), f.app.session.ids.mint_var());
+        let mut ops = vec![
+            Operation::AddMode {
+                mode: ondin_core::variable::Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: ondin_core::variable::Variable {
+                    id: w,
+                    name: "size/w".into(),
+                    kind: ondin_core::variable::VarKind::Number,
+                    cells: [(mode, ondin_core::variable::Cell::Number(30.0))].into(),
+                },
+            },
+        ];
+        ops.extend(ondin_core::bind_size_ops(doc, r, [Some(w), None]));
+        assert!(f.app.session.commit(Transaction(ops)));
+        let drawn = |f: &F| {
+            let doc = &f.app.session.doc;
+            f.app
+                .session
+                .resolved
+                .used_kind(doc, f.ir)
+                .and_then(|k| k.box_size())
+                .unwrap()
+        };
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().size_vars(),
+            [Some(w), None],
+            "the copy follows its main's binding"
+        );
+        assert_eq!(drawn(&f).width, 30.0);
+        let out = settled(&mut f.app, &ctx, f.ir);
+        assert!(
+            texts(&out).iter().any(|(t, _)| t == "size/w"),
+            "W is a chip naming the variable"
+        );
+
+        let h = drawn(&f).height;
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetGeometry {
+                    id: f.ir,
+                    geometry: ondin_core::GeometryPatch::Size(Size::new(18.0, h)),
+                }]))
+        );
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().size_vars(),
+            [None, None],
+            "a width written past the binding detaches it"
+        );
+        let out = settled(&mut f.app, &ctx, f.ir);
+        let at = inks(&out)
+            .into_iter()
+            .find(|(t, _, c)| t == "W" && *c == theme::text::STRONG)
+            .map(|(_, r, _)| r.center())
+            .expect("a marked W");
+        click(&mut f.app, &ctx, at);
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().size_vars(),
+            [Some(w), None],
+            "the reset puts the main's binding back"
+        );
+        assert_eq!(drawn(&f).width, 30.0, "and the copy draws its number again");
+    }
+
     /// **A copy's own mode is an override, marked on its *Mode* row** (D1038 (a),
     /// §15 D1048, D1042's *Fix*): the instance sets *Dark* where its main
     /// inherits, so the row's label is bright with a dot beside it and its tip

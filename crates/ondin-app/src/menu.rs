@@ -2995,7 +2995,9 @@ impl OndinApp {
         };
         let picture = tools::croppable_fill(node.paint());
         LayerState {
-            hidden: !node.visible(),
+            // What the layer shows, a bound visibility resolved (§15 D1059) —
+            // the row runs `toggle_hidden`, which reads the same.
+            hidden: !self.session.doc.shown(id),
             locked: node.locked(),
             // The **ancestors'** answer, asked of the parent so this node's own flag
             // is not folded in twice — `locked_within` derives the combination.

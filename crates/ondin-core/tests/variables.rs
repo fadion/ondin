@@ -643,6 +643,62 @@ fn a_main_rebinding_reaches_a_copy_bound_as_it_was() {
     assert_eq!(bound(own), Some(red), "the copy bound elsewhere keeps it");
 }
 
+/// **An instance root's visibility binding is its own, as its visibility is**
+/// (§15 D1059, `propagate::is_placement`): a main's root bound to a boolean
+/// reaches no instance root — which would hide every instance wherever the
+/// variable is false — while a layer inside the main, bound the same way, does
+/// reach its copy; and an instance root's own binding is no override, so *Reset
+/// all* leaves it.
+///
+/// Flip, run: `SetVisibleVar` out of `is_placement` fails *"the main's root
+/// binding stays the main's"*.
+#[test]
+fn an_instance_roots_visibility_binding_is_its_own() {
+    let mut f = fixture();
+    let show = show_var(&mut f);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetComponent {
+            id: f.frame,
+            component: true,
+        }]))
+        .unwrap();
+    let place = Placement {
+        nodes: f.doc.capture_subtree(f.frame).unwrap(),
+        parent: f.root,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+    f.doc.apply(&tx).unwrap();
+    let inst = made[0];
+    let copy_rect = f.doc.get(inst).unwrap().children()[0];
+    let mut tx = Transaction(
+        ondin_core::bind_visible_ops(&f.doc, f.frame, show)
+            .into_iter()
+            .chain(ondin_core::bind_visible_ops(&f.doc, f.rect, show))
+            .collect(),
+    );
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(inst).unwrap().visible_var(),
+        None,
+        "the main's root binding stays the main's"
+    );
+    assert_eq!(
+        f.doc.get(copy_rect).unwrap().visible_var(),
+        Some(show),
+        "a layer inside the main reaches its copy"
+    );
+    let own = Transaction(ondin_core::bind_visible_ops(&f.doc, inst, show));
+    f.doc.apply(&own).unwrap();
+    assert!(
+        !ondin_core::reset::overrides(&f.doc, inst)
+            .iter()
+            .any(|o| matches!(o.reset, Operation::SetVisibleVar { .. })),
+        "an instance root's own binding is no override"
+    );
+}
+
 /// **Deleting a variable detaches every user and every alias to it** — the fill
 /// to the colour it drew, the bound corner to its number, an alias to the value
 /// it resolved to — and one undo restores the lot (`variable::remove_ops`, D1038).

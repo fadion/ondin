@@ -1851,7 +1851,12 @@ fn property_reset_ops(doc: &Document, c: NodeId, kind: PropKind) -> Vec<Operatio
         .into_iter()
         .map(|o| o.reset)
         .filter(|op| match kind {
-            PropKind::Boolean => matches!(op, Operation::SetVisible { .. }),
+            // The visibility and its binding (§15 D1059): a copy bound apart
+            // from its source shows apart with both literals `true`.
+            PropKind::Boolean => matches!(
+                op,
+                Operation::SetVisible { .. } | Operation::SetVisibleVar { .. }
+            ),
             PropKind::Text => matches!(op, Operation::SetText { .. }),
             PropKind::Swap => matches!(op, Operation::SetSwap { .. }),
             PropKind::Nested => false,

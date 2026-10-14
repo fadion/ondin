@@ -1227,15 +1227,13 @@ impl RenderOverrides {
             Operation::SetGeometry { id, geometry } => {
                 let base = self.current_kind(doc, *id)?;
                 let mut patched = geometry.applied_to(&base)?;
-                // **A radius write over bound corners draws the ones the commit
-                // keeps at their variables** (`build::kept_corner_vars`): the
-                // Scale tool's drag writes a bound corner its literal 0, which
-                // `keep_corner_bindings` keeps bound, and this drew it square.
-                if let (
-                    ondin_core::GeometryPatch::CornerRadius(_)
-                    | ondin_core::GeometryPatch::CornerRadii(_),
-                    NodeKind::Rect { corner_radii, .. },
-                ) = (geometry, &mut patched)
+                // **Any geometry write on a rect with bound corners draws the ones
+                // the commit keeps at their variables** (`build::kept_corner_vars`):
+                // the Scale tool's drag writes a bound corner its literal 0, which
+                // `keep_corner_bindings` keeps bound, and this drew it square — and
+                // so did a plain resize, whose `Size` patch carries the kind's
+                // literal 0s forward (`arch-scribe`'s reading of D1059's batch).
+                if let NodeKind::Rect { corner_radii, .. } = &mut patched
                     && doc
                         .get(*id)
                         .is_some_and(|n| n.corner_vars().iter().any(Option::is_some))
@@ -1510,7 +1508,7 @@ impl RenderOverrides {
                 if nodes.iter().any(|n| doc.contains(n.id())) {
                     return None;
                 }
-                let node = ghost_subtree(nodes)?;
+                let node = ghost_subtree(doc, nodes)?;
                 if !build::can_parent(&parent_kind, &node.kind) {
                     return None;
                 }
@@ -2033,7 +2031,7 @@ fn frame_barred(nodes: &[ondin_core::Node], above_ok: bool) -> bool {
 /// root, or a child id the list does not contain. Those are the same conditions
 /// `Document::apply` rejects the op for, so a subtree that cannot be ghosted is
 /// one that was never going to be inserted either.
-fn ghost_subtree(nodes: &[ondin_core::Node]) -> Option<GhostNode> {
+fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode> {
     let by_id: FxHashMap<NodeId, &ondin_core::Node> = nodes.iter().map(|n| (n.id(), n)).collect();
     // The root is the one node whose parent is outside the list — the insert op
     // is what will give it a real one.
@@ -2044,7 +2042,21 @@ fn ghost_subtree(nodes: &[ondin_core::Node]) -> Option<GhostNode> {
     if roots.next().is_some() {
         return None;
     }
-    build_ghost(root, &by_id, &mut FxHashMap::default())
+    build_ghost(doc, root, &by_id, &mut FxHashMap::default())
+}
+
+/// Whether a captured node shows: its binding resolved through `doc` — in the
+/// **default mode**, the ghost's id being in no frame yet, as `paint_ghost`
+/// resolves a bound paint — else its literal (§15 D1059). An Alt-drag copy of a
+/// layer its variable hides previewed shown, and vanished on release.
+fn ghost_shown(doc: &Document, n: &ondin_core::Node) -> bool {
+    match n.visible_var() {
+        Some(v) => match doc.resolve_var(n.id(), v) {
+            Some(ondin_core::Value::Boolean(b)) => b,
+            _ => n.visible(),
+        },
+        None => n.visible(),
+    }
 }
 
 /// `derived` accumulates the boolean outlines built so far, so a boolean nested
@@ -2052,13 +2064,14 @@ fn ghost_subtree(nodes: &[ondin_core::Node]) -> Option<GhostNode> {
 /// children-first, which this recursion is by construction — the children are built
 /// before the node that reads them.
 fn build_ghost(
+    doc: &Document,
     node: &ondin_core::Node,
     by_id: &FxHashMap<NodeId, &ondin_core::Node>,
     derived: &mut FxHashMap<NodeId, kurbo::BezPath>,
 ) -> Option<GhostNode> {
     let mut children = Vec::with_capacity(node.children().len());
     for id in node.children() {
-        children.push(build_ghost(by_id.get(id)?, by_id, derived)?);
+        children.push(build_ghost(doc, by_id.get(id)?, by_id, derived)?);
     }
     // **The captured `Node`s, not the `GhostNode`s just built.** A capture is a real
     // subtree with its parent and child links intact, so `boolean`'s own recursion
@@ -2079,7 +2092,7 @@ fn build_ghost(
                             .map(|n| n.children().to_vec())
                             .unwrap_or_default()
                     },
-                    visible_of: &|c| by_id.get(&c).is_some_and(|n| n.visible()),
+                    visible_of: &|c| by_id.get(&c).is_some_and(|n| ghost_shown(doc, n)),
                     nested: &|c| derived.get(&c).cloned(),
                 },
             );
@@ -2102,7 +2115,7 @@ fn build_ghost(
         text: shaped(node.kind()),
         path,
         opacity: node.opacity(),
-        visible: node.visible(),
+        visible: ghost_shown(doc, node),
         clip: node.clip(),
         mask: node.mask(),
         mask_mode: node.mask_mode(),

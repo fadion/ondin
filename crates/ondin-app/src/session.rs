@@ -345,8 +345,7 @@ pub struct DisplayNode<'a> {
     /// their variables' numbers (§15 D1058) — `None` where nothing is bound, or
     /// for [`EditorSession::committed_node`], `used`'s reason.
     drawn: Option<ondin_core::container::Display>,
-    /// Whether the layer is shown, a bound visibility resolved (§15 D1059) —
-    /// the literal for [`EditorSession::committed_node`].
+    /// Whether the layer is shown, a bound visibility resolved (§15 D1059).
     shown: bool,
 }
 
@@ -723,7 +722,9 @@ impl EditorSession {
             over: None,
             used: None,
             drawn: None,
-            shown: node.visible(),
+            // What shows, not the literal (§15 D1059): a binding is not a
+            // preview, so the committed answer resolves it too.
+            shown: self.doc.shown(id),
         })
     }
 

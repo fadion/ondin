@@ -129,7 +129,10 @@ fn mode(op: &Operation) -> Mode {
 /// Fields that say where an **instance root** sits and whether it shows — its own
 /// placement, never its main's: the transform (§5.3d), its insets and item
 /// properties inside its parent, and its visibility (a main hidden on a
-/// components page must not hide every instance of it).
+/// components page must not hide every instance of it) — **its binding with it**
+/// (§15 D1059): a main's root bound to a boolean would otherwise hide every
+/// instance wherever the variable is false, the literal kept and the binding
+/// carried.
 pub(crate) fn is_placement(op: &Operation) -> bool {
     matches!(
         op,
@@ -137,6 +140,7 @@ pub(crate) fn is_placement(op: &Operation) -> bool {
             | Operation::SetInsets { .. }
             | Operation::SetLayoutItem { .. }
             | Operation::SetVisible { .. }
+            | Operation::SetVisibleVar { .. }
     )
 }
 
@@ -1035,6 +1039,12 @@ pub(crate) fn untouched(
         && c.insets == s.insets
         && c.display == s.display
         && c.item == s.item
+        // The bindings are overrides too (§5.3f): a copy differing from its
+        // source by a binding alone — both literals canonical — is touched.
+        && c.mode == s.mode
+        && c.corner_vars == s.corner_vars
+        && c.spacing_vars == s.spacing_vars
+        && c.visible_var == s.visible_var
         // A swap is an override (§15 D983): a swapped copy is never untouched.
         && c.swap.is_none()
         && c_kids.len() == s_kids.len();

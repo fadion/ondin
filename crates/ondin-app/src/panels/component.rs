@@ -139,7 +139,10 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
             ondin_core::reset::overrides(doc, *c)
                 .iter()
                 .any(|o| match kind {
-                    PropKind::Boolean => matches!(o.reset, Operation::SetVisible { .. }),
+                    PropKind::Boolean => matches!(
+                        o.reset,
+                        Operation::SetVisible { .. } | Operation::SetVisibleVar { .. }
+                    ),
                     PropKind::Text => matches!(o.reset, Operation::SetText { .. }),
                     PropKind::Swap => matches!(o.reset, Operation::SetSwap { .. }),
                     PropKind::Nested => false,

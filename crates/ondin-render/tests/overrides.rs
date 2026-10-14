@@ -4307,6 +4307,160 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
     assert_preview_matches_commit(&doc, &cell, "its cell flipped to true");
 }
 
+/// **Hiding an in-flow item through its binding previews its siblings moved**
+/// (§15 D1059): a flex row of two rects, the first bound to a boolean that is
+/// false — the `--` list's highlight on its eye — drawn as overrides and as
+/// committed; the second takes the first's place in both. Then the rect brought
+/// back by its cell, D1056's preview, the same way.
+///
+/// ⚠️ **No arm has to mark the node moved for this**, which D1059's record first
+/// read as a defect: `flex_relayout` lays every root reached from any node with
+/// an override (`self.nodes`), not from `moved`. Flip, run: a `mark_moved` taken
+/// out of the `SetVisibleVar` arm left this green. Flip, run: `PreviewView::visible`
+/// reading the document (`doc.shown`) rather than the override fails *"an in-flow
+/// item hidden by its binding: preview diverged from commit"*.
+#[test]
+fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
+    use ondin_core::container::{Display, Flex};
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCD);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, a, b, mode, var) = (
+        ids.mint(),
+        ids.mint(),
+        ids.mint(),
+        ids.mint_mode(),
+        ids.mint_var(),
+    );
+    let rect = |id, index| Operation::CreateNode {
+        id,
+        parent: frame,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(30.0, 20.0),
+            corner_radii: RoundedRectRadii::default(),
+        },
+        transform: None,
+        name: None,
+    };
+    let fill = |id| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+            visible: true,
+        }]),
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(200.0, 60.0),
+            },
+            transform: None,
+            name: None,
+        },
+        rect(a, 0),
+        rect(b, 1),
+        fill(a),
+        fill(b),
+        Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                column_gap: 4.0,
+                ..Flex::default()
+            })),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "state/open".into(),
+                kind: VarKind::Boolean,
+                cells: [(mode, Cell::Boolean(false))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_visible_ops(&doc, a, var));
+    assert_preview_matches_commit(&doc, &tx, "an in-flow item hidden by its binding");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Boolean(true),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "an in-flow item shown by its cell");
+}
+
+/// **A bound rect resized previews its bound corners at their variable** (§15
+/// D1058's corner *Fix*): a `Size` patch carries the kind's literal 0s forward,
+/// which `keep_corner_bindings` keeps bound — the preview had drawn them square.
+///
+/// Flip, run: the `SetGeometry` arm resolving kept corners only on a radius
+/// patch fails *"a bound rect resized"*.
+#[test]
+fn a_bound_rect_resized_previews_its_bound_corners() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCE);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(2.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "radius/lg".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(14.0))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    let bind = Transaction(ondin_core::bind_corners_ops(&doc, rect, [Some(var); 4]));
+    doc.apply(&bind).unwrap();
+    let resize = Transaction(vec![Operation::SetGeometry {
+        id: rect,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(120.0, 50.0)),
+    }]);
+    assert_preview_matches_commit(&doc, &resize, "a bound rect resized");
+}
+
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
 /// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
 /// whose corners read *radius*, previewed under a new *brand* colour and a new

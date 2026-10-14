@@ -148,8 +148,11 @@ struct Used {
 }
 
 /// The committed document as the flex engine sees it (`container::LayoutView`):
-/// every answer a **specified** value, read straight off the node. Crate-visible
-/// for `build`'s conversions, which ask the same questions of the same tree.
+/// every answer a **specified** value, read straight off the node — **bindings
+/// resolved**: a layout's bound gaps and padding (`Document::resolved_display`,
+/// §15 D1058) and a bound visibility (`Document::shown`, §15 D1059) answer what
+/// they draw, never the literal behind them. Crate-visible for `build`'s
+/// conversions, which ask the same questions of the same tree.
 pub(crate) struct DocView<'a>(pub(crate) &'a Document);
 
 impl crate::container::LayoutView for DocView<'_> {

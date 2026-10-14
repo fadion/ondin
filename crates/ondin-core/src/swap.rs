@@ -40,8 +40,9 @@ pub fn content_source(doc: &Document, id: NodeId) -> Option<NodeId> {
 }
 
 /// Whether `op` writes a field a swapped copy keeps from its **slot** — its
-/// placement and visibility (`propagate::is_placement`, the four an instance root
-/// keeps as its own) and its size (§15 D983 (3)).
+/// placement and visibility, a visibility's binding included
+/// (`propagate::is_placement`, the five an instance root keeps as its own, §15
+/// D1059) and its size (§15 D983 (3)).
 pub fn is_slot_field(op: &Operation) -> bool {
     crate::propagate::is_placement(op)
         || matches!(

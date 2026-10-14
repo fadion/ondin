@@ -414,8 +414,9 @@ pub type SpacingVars = [Option<VarId>; 6];
 
 /// `node` — a node of `doc`, or a copy of one still carrying its id — with every
 /// binding **detached to the value it draws** in `doc` (D1038's detach): a bound
-/// paint becomes a solid of its variable's colour times its `%`, a bound corner
-/// its number, and a frame's mode is dropped.
+/// paint becomes a solid of its variable's colour times its `%`, a bound corner,
+/// gap or padding its number (§15 D1058), a bound visibility what it shows (§15
+/// D1059), and a frame's mode is dropped.
 ///
 /// For a node leaving the document whose table it reads, into one that has none
 /// of it: a kit's frozen copy until kits carry variables (roadmap step 4, §15

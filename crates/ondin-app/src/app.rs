@@ -3318,8 +3318,9 @@ impl OndinApp {
     /// returns the `visible` they all move to.
     ///
     /// **The negation lives here rather than at the call site**, and that is the
-    /// point of the wrapper. `toggle_hidden` reads `n.visible()` — the field's own
-    /// name, no `!` — so a polarity slip would mean *adding* a negation for no
+    /// point of the wrapper. `toggle_hidden` reads `doc.shown(id)` — whether the
+    /// layer shows, a bound visibility resolved (§15 D1059), no `!` — so a
+    /// polarity slip would mean *adding* a negation for no
     /// reason rather than forgetting one, which is a much harder mistake to make
     /// and a much easier one to see. It also puts the inversion somewhere a test
     /// can hold it: an earlier test undid the polarity itself and so passed

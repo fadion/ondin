@@ -33,6 +33,9 @@ use ondin_core::{Keyed, NodeId, Transaction, component, swap};
 
 /// A row's label column, the width the Component card's dropdowns sit after.
 const LABEL_W: f32 = 76.0;
+/// The capsule's ground around a bound boolean property's switch, each side
+/// (§15 D1060): 38×22 around the 26×16 switch, a chip's height.
+const BOUND_SWITCH_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 /// A value chip's height.
 const CHIP_H: f32 = 22.0;
 /// The inner width of a value chip's menu — the top bar's View and Snap menus'
@@ -637,11 +640,19 @@ fn row_label(ui: &mut egui::Ui, text: &str, mark: Option<&super::component::Over
 /// 11.5pt, lit while on, the switch against the right margin — and among the
 /// card's labelled fields it read as a row from another panel: smaller, brighter,
 /// out of the label column, and its switch nowhere near the fields' edge.
+///
+/// **`bound`, the switch sits in the capsule** (§15 D1060): every layer the
+/// property views bound to a boolean variable, the property shows the chip
+/// (D1038 (d), *"the property is a view over the field (D982), so it shows
+/// the chip"*) — the identity card's bound eye's capsule (§15 D1059), `text_a(28)`
+/// and 44 under the pointer, around the switch, its left edge on the fields'
+/// edge. The switch's own click still writes past the binding, which detaches it.
 fn toggle_row(
     ui: &mut egui::Ui,
     name: &str,
     on: Option<bool>,
     mark: Option<&super::component::OverrideMark>,
+    bound: bool,
 ) -> (egui::Response, bool) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -651,11 +662,26 @@ fn toggle_row(
             egui::Sense::click(),
         );
         let p = ui.painter();
+        let inset = if bound { BOUND_SWITCH_PAD.x } else { 0.0 };
+        if bound {
+            let cap = egui::Rect::from_min_size(
+                egui::pos2(
+                    rect.left(),
+                    rect.center().y - ui::SWITCH_SIZE.y / 2.0 - BOUND_SWITCH_PAD.y,
+                ),
+                ui::SWITCH_SIZE + BOUND_SWITCH_PAD * 2.0,
+            );
+            let fill = if resp.hovered() { 44 } else { 28 };
+            p.rect_filled(cap, cap.height() / 2.0, theme::color::text_a(fill));
+        }
         match on {
             Some(on) => ui::paint_switch(
                 p,
                 egui::Rect::from_min_size(
-                    egui::pos2(rect.left(), rect.center().y - ui::SWITCH_SIZE.y / 2.0),
+                    egui::pos2(
+                        rect.left() + inset,
+                        rect.center().y - ui::SWITCH_SIZE.y / 2.0,
+                    ),
                     ui::SWITCH_SIZE,
                 ),
                 on,
@@ -663,7 +689,7 @@ fn toggle_row(
             ),
             None => {
                 p.text(
-                    egui::pos2(rect.left(), rect.center().y),
+                    egui::pos2(rect.left() + inset, rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     ui::MIXED_WORD,
                     egui::FontId::proportional(12.0),
@@ -1667,13 +1693,75 @@ impl OndinApp {
                 PropKind::Nested => {}
                 PropKind::Boolean => {
                     let on = matches!(value, PropValue::Boolean(true));
-                    let (resp, reset_hit) =
-                        toggle_row(ui, &p.name, (!mixed).then_some(on), mark.as_ref());
+                    // **Every layer the property views bound, the switch sits in
+                    // the capsule** (§15 D1060), D1038 A4's rule as the fields
+                    // keep it (§15 D1045): one variable, the chip's tooltip —
+                    // *name · value · Mode*, or *name · Mixed* where modes give
+                    // the layers different values; several, the capsule over the
+                    // switch or *Mixed* with their names listed. A binding on
+                    // some and not others draws none, D130's plain row.
+                    let chip = cache
+                        .chips
+                        .entry((roots.to_vec(), p.id))
+                        .or_insert_with(|| {
+                            let cps: Vec<NodeId> = roots
+                                .iter()
+                                .flat_map(|r| variant::counterparts(doc, *r, p))
+                                .collect();
+                            let mut vars = Vec::new();
+                            for c in &cps {
+                                let v = doc.get(*c)?.visible_var()?;
+                                if !vars.contains(&v) {
+                                    vars.push(v);
+                                }
+                            }
+                            let table = doc.variables();
+                            let name = |v| table.get(v).map(|x| x.name.clone()).unwrap_or_default();
+                            Some(match vars.as_slice() {
+                                [] => return None,
+                                [var] if mixed => format!("{} · {}", name(*var), ui::MIXED_WORD),
+                                [var] => {
+                                    let at = cps[0];
+                                    let mode = doc.mode_at(at).and_then(|m| table.mode(m));
+                                    super::binding::chip_tip(
+                                        &name(*var),
+                                        doc.resolve_var(at, *var),
+                                        mode,
+                                    )
+                                }
+                                many => {
+                                    many.iter().map(|v| name(*v)).collect::<Vec<_>>().join("\n")
+                                }
+                            })
+                        });
+                    let chip = chip.clone();
+                    let (resp, reset_hit) = toggle_row(
+                        ui,
+                        &p.name,
+                        (!mixed).then_some(on),
+                        mark.as_ref(),
+                        chip.is_some(),
+                    );
                     if reset_hit {
                         out.extend(reset());
                     }
-                    let resp = match &mark {
-                        Some(m) => resp.on_hover_text(&m.tip),
+                    // **What the click does, said truly**: over a *Mixed* row it
+                    // shows every layer, and only those it changes — the hidden
+                    // ones — detach; the shown keep their binding
+                    // (`variant::set_property` writes against what shows).
+                    let verb = if mixed {
+                        "Click to show all; the hidden ones detach"
+                    } else {
+                        "Click to toggle and detach"
+                    };
+                    let tip = match (&chip, &mark) {
+                        (Some(c), Some(m)) => Some(format!("{c}\n{verb}\n{}", m.tip)),
+                        (Some(c), None) => Some(format!("{c}\n{verb}")),
+                        (None, Some(m)) => Some(m.tip.clone()),
+                        (None, None) => None,
+                    };
+                    let resp = match tip {
+                        Some(t) => resp.on_hover_text(t),
                         None => resp,
                     };
                     if resp.clicked() {

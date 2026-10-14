@@ -212,6 +212,10 @@ pub(crate) struct PropCache {
     /// of roots and property: built only for a row that is overridden.
     pub(super) marks:
         std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), (String, Vec<Operation>)>,
+    /// A boolean property row's chip — its tooltip, or `None` unless every layer
+    /// it views is bound — per set of roots and property
+    /// (§15 D1060): a walk of every root, as the states are.
+    pub(super) chips: std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), Option<String>>,
 }
 
 impl PropCache {
@@ -4928,6 +4932,163 @@ mod tests {
             PropValue::Text(format!("{before}!")),
             "the typed text survived the toggle's click"
         );
+    }
+
+    /// **A boolean property over a bound layer shows the chip** (§15 D1060,
+    /// D1038 (d)): *Interesante*'s counterpart on the instance bound to a true
+    /// boolean, the row's switch sits in a 38×22 capsule; unbound, it does not;
+    /// and the switch's click writes past the binding — the layer hidden and
+    /// detached, as the identity card's eye does.
+    ///
+    /// Flip, run: `toggle_row` handed `false` for `bound` fails *"bound: the
+    /// capsule"* at 0.
+    #[test]
+    fn a_boolean_property_over_a_bound_layer_shows_the_chip() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        with_a_toggle(&mut v);
+        let cap = ui::SWITCH_SIZE + egui::vec2(12.0, 6.0);
+        let capsules = |out: &egui::FullOutput| {
+            fills(out)
+                .into_iter()
+                .filter(|(r, _)| r.size() == cap)
+                .map(|(r, _)| r)
+                .collect::<Vec<_>>()
+        };
+        let out = settled(&mut v.app, &ctx, v.i);
+        assert!(capsules(&out).is_empty(), "unbound: no capsule");
+
+        let p = v
+            .app
+            .session
+            .doc
+            .get(v.set)
+            .unwrap()
+            .props()
+            .iter()
+            .find(|p| p.name == "Interesante")
+            .unwrap()
+            .value
+            .clone();
+        let c = ondin_core::variant::counterparts(&v.app.session.doc, v.i, &p)[0];
+        let (mode, on) = (v.app.session.ids.mint_mode(), v.app.session.ids.mint_var());
+        assert!(v.app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: on,
+                    name: "state/on".into(),
+                    kind: VarKind::Boolean,
+                    cells: [(mode, Cell::Boolean(true))].into(),
+                },
+            },
+        ])));
+        let ops = ondin_core::bind_visible_ops(&v.app.session.doc, c, on);
+        assert!(v.app.commit_edit(Transaction(ops)));
+        assert_eq!(v.app.session.doc.get(c).unwrap().visible_var(), Some(on));
+
+        let out = settled(&mut v.app, &ctx, v.i);
+        let found = capsules(&out);
+        assert_eq!(found.len(), 1, "bound: the capsule");
+        click(&mut v.app, &ctx, found[0].center());
+        settle(&mut v.app, &ctx);
+        let doc = &v.app.session.doc;
+        assert!(!doc.shown(c), "the switch's click hid the layer");
+        assert_eq!(doc.get(c).unwrap().visible_var(), None, "and detached it");
+    }
+
+    /// **Over several layers, A4's rule** (§15 D1060, D1045): *Interesante*
+    /// viewing the label and a dot beside it, one bound and one not draws no
+    /// capsule; both bound, to **two** variables, draws it.
+    ///
+    /// Flip, run: the chip read as the first counterpart's variable shared by
+    /// all — the first cut, which drew the plain switch over two variables —
+    /// fails *"two variables: the capsule"* at 0.
+    #[test]
+    fn a_boolean_property_over_layers_bound_apart_follows_a4() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        with_a_toggle(&mut v);
+        let dot = v.app.session.ids.mint();
+        assert!(v.app.commit_edit(Transaction(vec![Operation::CreateNode {
+            id: dot,
+            parent: v.small,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: Some("Dot".into()),
+        }])));
+        let mut props = v.app.session.doc.get(v.set).unwrap().props().to_vec();
+        let at = props.iter().position(|p| p.name == "Interesante").unwrap();
+        props[at].value.bound.push(dot);
+        assert!(
+            v.app
+                .commit_edit(Transaction(vec![Operation::SetProperties {
+                    id: v.set,
+                    props: props.clone(),
+                }]))
+        );
+        let p = props[at].value.clone();
+        let cps = ondin_core::variant::counterparts(&v.app.session.doc, v.i, &p);
+        assert_eq!(
+            cps.len(),
+            2,
+            "the property views two layers of the instance"
+        );
+
+        let mode = v.app.session.ids.mint_mode();
+        let [a, b] = [(); 2].map(|_| v.app.session.ids.mint_var());
+        let var = |id, name: &str| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Boolean,
+                cells: [(mode, Cell::Boolean(true))].into(),
+            },
+        };
+        assert!(v.app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            var(a, "state/a"),
+            var(b, "state/b"),
+        ])));
+        let cap = ui::SWITCH_SIZE + egui::vec2(12.0, 6.0);
+        let capsules = |out: &egui::FullOutput| {
+            fills(out)
+                .into_iter()
+                .filter(|(r, _)| r.size() == cap)
+                .count()
+        };
+
+        let ops = ondin_core::bind_visible_ops(&v.app.session.doc, cps[0], a);
+        assert!(v.app.commit_edit(Transaction(ops)));
+        let out = settled(&mut v.app, &ctx, v.i);
+        assert_eq!(capsules(&out), 0, "one bound and one not: no capsule");
+
+        let ops = ondin_core::bind_visible_ops(&v.app.session.doc, cps[1], b);
+        assert!(v.app.commit_edit(Transaction(ops)));
+        let out = settled(&mut v.app, &ctx, v.i);
+        assert_eq!(capsules(&out), 1, "two variables: the capsule");
     }
 
     /// Click into the field showing `text`, send End and type `typed`, leaving it

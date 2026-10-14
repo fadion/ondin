@@ -147,6 +147,11 @@ fn wears_thumbnail(hexagon: Option<bool>) -> bool {
 /// pitch left them almost touching.
 const EYE_PITCH: f32 = 23.0;
 
+/// The capsule a bound layer's eye sits in (§15 D1060) — the identity card's
+/// bound eye's 22×18 (§15 D1059), clear of the lock glyph by 4.5 at
+/// [`EYE_PITCH`].
+const BOUND_EYE: egui::Vec2 = egui::vec2(22.0, 18.0);
+
 /// Where a row's kind glyph is centred, measured from the row rect's left edge.
 ///
 /// Extracted from the row walk **so that [`MIN_W`] can be argued from the same
@@ -1914,6 +1919,9 @@ impl OndinApp {
         // What the layer shows, a bound visibility resolved (§15 D1059): the eye
         // states it, and its click writes the opposite, which detaches the binding.
         let visible = self.session.doc.shown(id);
+        // Bound to a boolean variable, the eye stays drawn in the capsule (§15
+        // D1060).
+        let bound_eye = node.visible_var().is_some();
         let locked = node.locked();
         let name = node.name().to_string();
         let (glyph, mut glyph_col) = node_icon(node.kind());
@@ -2138,7 +2146,9 @@ impl OndinApp {
             // between the two points.
             let lock_x = rect.right() - LOCK_INSET;
             let eye_x = lock_x - EYE_PITCH;
-            let show_eye = hovered || !visible;
+            // **And while bound** (§15 D1060): the binding is a fact about the
+            // layer no other row says, as a hidden layer's eye is.
+            let show_eye = hovered || !visible || bound_eye;
             let show_lock = hovered || locked;
             let targets = RowTargets {
                 caret: has_children.then_some(caret_x),
@@ -2308,6 +2318,18 @@ impl OndinApp {
             }
 
             if show_eye {
+                // **Bound, in the capsule** (§15 D1060): the identity card's
+                // bound eye (§15 D1059) at the row's size — D1038 A1's capsule
+                // rule, `text_a(28)`, 44 under the pointer. The click still
+                // writes the other value, which detaches.
+                if bound_eye {
+                    let fill = if under == Some(RowHit::Eye) { 44 } else { 28 };
+                    p.rect_filled(
+                        egui::Rect::from_center_size(egui::pos2(eye_x, cy), BOUND_EYE),
+                        BOUND_EYE.y / 2.0,
+                        theme::color::text_a(fill),
+                    );
+                }
                 p.text(
                     egui::pos2(eye_x, cy),
                     egui::Align2::CENTER_CENTER,
@@ -2357,8 +2379,17 @@ impl OndinApp {
                 };
                 // Clear of a component mark, which holds the very edge.
                 let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
+                // **A worded badge ends before a resting eye** (§15 D1060): even
+                // a frame's *40 × 40* reaches 44 px in from the edge, and the
+                // eye's glyph spans 30–45 in, so a hidden or bound frame drew the
+                // two over each other (measured, `bound_eye_tests`).
+                // A glyph badge clears it where it is.
+                let right = match b {
+                    RowBadge::Text(_) if show_eye => eye_x - BOUND_EYE.x / 2.0 - 4.0,
+                    _ => rect.right() - edge,
+                };
                 p.text(
-                    egui::pos2(rect.right() - edge, cy),
+                    egui::pos2(right, cy),
                     egui::Align2::RIGHT_CENTER,
                     s,
                     font,
@@ -6939,5 +6970,155 @@ mod row_mark_tests {
         );
         app.collapsed.insert(i);
         assert_eq!(marks(&mut app, &ctx), (1, 0), "collapsed: a removed child");
+    }
+}
+
+#[cfg(test)]
+mod bound_eye_tests {
+    //! A bound layer's eye in the capsule, and a worded badge clear of a resting
+    //! eye (§15 D1060).
+    use super::*;
+
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::variable::{Cell, VarKind, Variable};
+
+    /// One frame of the tree, 300 wide, with the pointer nowhere.
+    fn frame(app: &mut OndinApp, ctx: &egui::Context) -> egui::FullOutput {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(300.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| app.layers_tree(ui))
+    }
+
+    /// Every filled rect and every text galley the frame painted.
+    fn painted(out: &egui::FullOutput) -> (Vec<egui::Rect>, Vec<(String, egui::Rect)>) {
+        fn walk(s: &egui::Shape, r: &mut Vec<egui::Rect>, t: &mut Vec<(String, egui::Rect)>) {
+            match s {
+                egui::Shape::Rect(x) if x.fill.a() > 0 => r.push(x.rect),
+                egui::Shape::Text(x) => t.push((
+                    x.galley.text().to_string(),
+                    x.galley.rect.translate(x.pos.to_vec2()),
+                )),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, r, t)),
+                _ => {}
+            }
+        }
+        let (mut r, mut t) = (Vec::new(), Vec::new());
+        for s in &out.shapes {
+            walk(&s.shape, &mut r, &mut t);
+        }
+        (r, t)
+    }
+
+    /// A headless app holding one 40×40 frame at the root, hidden or not, and
+    /// a boolean variable `on` that is true.
+    fn app_with_a_frame(
+        ctx: &egui::Context,
+        hidden: bool,
+    ) -> (OndinApp, NodeId, ondin_core::VarId) {
+        theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0xBE);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let f = ids.mint();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: f,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(40.0, 40.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetVisible {
+                id: f,
+                visible: !hidden,
+            },
+        ]))
+        .expect("a frame");
+        app.session.adopt_document(doc, None);
+        let mode = app.session.ids.mint_mode();
+        let on = app.session.ids.mint_var();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: ondin_core::variable::Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: on,
+                    name: "state/on".into(),
+                    kind: VarKind::Boolean,
+                    cells: [(mode, Cell::Boolean(true))].into(),
+                },
+            },
+        ])));
+        (app, f, on)
+    }
+
+    /// The capsule's rect: 22×18 on the row.
+    fn capsules(out: &egui::FullOutput) -> usize {
+        painted(out)
+            .0
+            .iter()
+            .filter(|r| r.size() == BOUND_EYE)
+            .count()
+    }
+
+    /// **A bound layer's eye stays drawn, in the capsule; an unbound one at rest
+    /// draws neither** — the pointer nowhere, the row resting and shown.
+    ///
+    /// Flip, run: `show_eye` without its `|| bound_eye` fails *"bound: the
+    /// capsule"* at 0 — the capsule is drawn only inside the eye's `if`.
+    #[test]
+    fn a_bound_layers_eye_rests_in_the_capsule() {
+        let ctx = egui::Context::default();
+        let (mut app, f, on) = app_with_a_frame(&ctx, false);
+        let _ = frame(&mut app, &ctx);
+        assert_eq!(capsules(&frame(&mut app, &ctx)), 0, "unbound: no capsule");
+        let ops = ondin_core::bind_visible_ops(&app.session.doc, f, on);
+        assert!(app.commit_edit(Transaction(ops)));
+        assert_eq!(app.session.doc.get(f).unwrap().visible_var(), Some(on));
+        let _ = frame(&mut app, &ctx);
+        assert_eq!(capsules(&frame(&mut app, &ctx)), 1, "bound: the capsule");
+    }
+
+    /// **A frame's worded size ends before a resting eye**: hidden, the frame's
+    /// eye is drawn at rest, and *40 × 40* used to end at the row's edge, over it.
+    ///
+    /// Flip, run: the badge's `right` back to `rect.right() - edge` fails *"the
+    /// size ends before the eye"*, *40 × 40* spanning 256.3–296.0 over the eye
+    /// glyph's 255.5–270.5.
+    #[test]
+    fn a_worded_badge_ends_before_a_resting_eye() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app_with_a_frame(&ctx, true);
+        let _ = frame(&mut app, &ctx);
+        let (_, texts) = painted(&frame(&mut app, &ctx));
+        let at = |s: &str| {
+            texts
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s:?} painted: {texts:?}"))
+                .1
+        };
+        let size = at("40 × 40");
+        let eye = at(icon::EYE_SLASH);
+        assert!(
+            size.right() <= eye.left(),
+            "the size ends before the eye: {size:?} against {eye:?}"
+        );
     }
 }

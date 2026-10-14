@@ -67,8 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1042 index rows, 1042 body headings, next free
-D1043** (measured 2026-10-14 at `5e14af1`; ⚠️ **the styles-and-variables build step 1 request
+anywhere cited either. **The live figures: 1046 index rows, 1046 body headings, next free
+D1047** (measured 2026-10-14 over the uncommitted tree on `b443418`; ⚠️ **the step-1 leftovers request
+reserved D1044–D1053 at `b443418` and spent three** — D1044 (B4's refusal, and the radius `DragValue`
+handing `--` to the retype buffer), D1045 (A4's *Mixed* capsule), D1046 (the badge's no-scrub cursor);
+`arch-scribe` read two defects in D1044's first cut — a refused `Enter` dropping the field's text, a
+partly bound rect detached whole — each reproduced by a test and fixed before commit. **D1047–D1053
+found at zero sites and released.** Census **945**, arrivals D1044–D1046, none unresolved. Before
+that, ⚠️ **the swatch-segment request
+reserved D1043–D1052 at `b443418` through the `dnumber-guard` mod and spent one** — D1043, the
+colour picker's *Variables* tab (and the picker widened 240 → 272). **D1044–D1052 found at zero
+sites and released.** Census **942**, arrival D1043, none unresolved. Before that, measured at
+`5e14af1`; ⚠️ **the styles-and-variables build step 1 request
 reserved D1039–D1048 at `66a5afd` through the `dnumber-guard` mod and spent four**, one per build
 commit — D1039 the core (the variables table, `BrushSource`, corner bindings, frame modes,
 schema v7, the paste rule; `a23b53a`), D1040 the browser on `Shift+S` (`155846e`), D1041 the

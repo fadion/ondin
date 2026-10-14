@@ -1436,10 +1436,14 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1036** — **Ten rulings from the `v0.5.0..fb90943` release review, each the review's recommendation; ~~(1)–(8), (10)'s `[X3.1-L1-03]` and both calls~~ every ruling and both calls built since, and the review's fix phase closed.** The maintainer accepted every recommendation of `review/release-v0.5.0/triage.md` §5 as presented, and asked that its two backlog findings be fixed too. (1) *Make local* on a vault main another vault main nests reveals it as the user's own fork and, in the same transaction, vendors a fresh copy for the nesting main, so the vault never links out and the kit's components keep the kit's version — the dialog says so; plus a `kit::check` rule that a vault node's link, swap and bound targets lie inside the vault (`[R1-L2-02]` + `[R3-L5-02]`; extends D1016, D1012). (2) `vendor` refuses another kit's main that nests one of this kit's own, a named `KitError` (*"Card2 in M uses this kit's Icon"*), keeping D1019's *"a kit main reaches only kit mains"*; a frozen own-copy left for later (`[X1-L1-02]`). (3) An instance copied inside the kit itself and pasted into a consumer detaches, D979 (d), and the paste's status says so; carrying the published copy declined (`[X1-L1-03]`). (4) A variant the kit deletes from a published set detaches its instances, D982 (c), and the accept's toast names them; lifting it out as a local main declined, a variant outside its set not being a model shape (`[R3-L5-03]`). (5) *Updated N* counts only mains whose sync changed more than the version; one unreadable kit and *Accept all* applies nothing — as the code already does — saying *"Nothing was updated, because ‹kit› could not be read"* (`[X3.2-L1-02]`; D1016, D1022, D1024). (6) On the dashboard every file is closed for D1017's routing, the session's included: `store::set_kit`, the session's meta patched, the dialog reading disk (`[X3.1-L5-01]`). (7) A carrying paste of a kit main nesting a main held at an older version is refused `NeedsUpdate`-shaped, *"accept ‹kit›'s update first"*, the picker's answer (`[X1-L1-01]`; D1012, D1014). (8) D1035's late-font question measured and closed in §15 — ⚠️ D1035 says a font's arrival cannot be faked headlessly, and a kit's tiles are the shelf worker's (`kits/index.rs`), not `LocalTiles`'. (9) The X7 tooling findings fixed in this phase, `[X7-L1-03]` first. (10) The backlog's `[X3.1-L1-03]` and `[X7-L1-09]` fixed. The session's two calls, not objected to: the kit dialogs drawn outside present mode's guard (`[X5-L1-01]`); a ↺ clicked over typed text wins (`[X6-L1-02]`) — which D1008 already claims, its *"drawn later"* backwards of the code. *(Ruled 2026-10-13 by the maintainer. **Keep**; ~~**not built**~~ each recorded as built by amendment, `triage.md` §7 the order. ~~Record-only, no citation in `crates/` yet. No entry amended; `architecture.md` untouched;~~ nothing struck from `roadmap.md`. **Amended 2026-10-13**: (1)–(5), (7) and the dialogs' call built — `make_local` copying back what the vault still nests, `VaultRule::LinksOut`, `KitError::Circular`, the paste's detach count, `Update::changed`/`removed` and the toast, `adopt` refusing `NeedsUpdate`/`Circular`, the kit dialogs outside the `!present` guard; two defects read, ~~***Fix***~~ each — the make-local card's vault sentence never drawn and its count taking nested copies, and `changed` missing a deleted last layer — **Resolved** in `4974d79`. **Amended again 2026-10-13**: (6) built — `set_kit_at` through `store::set_kit` on the dashboard, the held copy's id and mark patched from disk (`39fc2e2`); (8) measured, a kit's tiles never redrawn for a late font, and fixed — `KitShelf::fonts_changed` re-reading a kit whose text names an arriving family (`12aafc7`), three edges read, one an idle 20 Hz repaint; (10)'s `[X3.1-L1-03]` through `kits::index::kit_file`; the ↺ call built (`e53a48f`); the paste's detach count read off the result, and `adopt` cutting a fresh copy's reference to a carried main it leaves out (`4974d79`). **Amended a third time 2026-10-13 — D1036 built whole**: (9) and (10)'s `[X7-L1-09]` built in the three Claude Code mods, not shipped — dnumber-guard letting an owed entry be written, skipping ignored files, keeping blocks per worktree with an overlap refusal and a high-water mark; doc-run-guard seeing a run stranded by a blank line and a duplicated pair; edit-guard judging the command as the shell parses it, two risks left (`git add` of a new directory refused; a scratchpad splice copied back later passes) (`c34f092`, `b3fa054`, `85f8c2e`); (8)'s three edges, two ordinary kit files' tie, the order-only toast and `changes`' doc fixed (`9b1af2f`); `[R2-L8-01]` (`ad23f6b`); twelve tests for the review's coverage findings, `menu_context`'s `instance_root == id` filter found redundant and kept (`c304532`); four coverage gaps and two edges kept as known limits; all 50 findings closed, `triage.md`'s FIX PHASE table the status)*
 - **D1037** — **Styles and variables: a variable is a typed, named value with one value per mode, a bindable field stores its binding and resolves it at read, and a style is one slot's isolated set of values — applied whole, detached by any edit, never stacked.** Ruled 2026-10-11 by the maintainer, in conversation; reverses `roadmap.md` §0's *styles/variables* non-goal. **Variables** (≈ CSS custom properties): colour, number, string and boolean, and aliases; **modes set per frame**, inherited by descendants — the maintainer's, over once per document; usable in layout fields from the start. **Storage**, the session's proposal and the ground every later ruling stood on: a bindable field holds `Literal(T) | Bound(VarId)`, resolved at read — so D979 (a)'s comparison compares the **binding** (a main rebinding *brand* → *accent* reaches a copy still bound to *brand*; a copy bound elsewhere keeps it as an override), a variable's edit writes no node and propagates nothing, and §12's fourth property holds as written, where D978 bent it; the cost, every reader of a bindable field must resolve and one that skips it draws the fallback in silence, `Bindable<T>` reachable only through `resolve` the proposed guard. Deleting a used variable **detaches** its fields to the resolved value, D979 (c)'s rule. **Styles** (≈ an isolated CSS class): **one per slot** — fills, strokes, effects, text, layout — at most one per slot per node, no stacking; **a card is styled or not, as a whole**, any edit to its fields detaching it, no partial override and no inheritance — *"Styles are much simpler and it's not an issue to have a Body style, plus a Body Large"*; a style's values may be variables; text styles last (§5.4's spans). **The inspector**: a bound field is a **chip with the variable's name at the field's own width**, the resolved value in its tooltip, a typed literal or `Backspace` detaching, *Mixed* across disagreeing bindings, marked by shape and not hue (D981, D1001), beside the override dot; binding by typing **`--`** — `ui::parse_hex` takes `bad` and `facade` as colours, token names open with digits, and `expr.rs` has no names by design — a binding taking the whole field, `--x * 2` refused (§13 decision 1); never on the label badge (the maintainer's refusal); a field's right-click *Bind to variable…*, *Extract into variable* (its value into every mode, the maintainer's) and *Detach*; a *Variables* tab in the swatch popup; a styled card one row, *Detach* on hover, its menu in the header (D1005's precedent). **The browser**: a floating panel on the insert picker's model (D1014), its button at the toolbar's foot, taking turns with the picker, *Variables* / *Styles* tabs, modes as columns up to a capped width, an *In selection* filter, a usage count that selects (D1007), kit variables read-only. The session's, not ruled: kits carry what a vendored main uses (D1010, D1016, not objected to); a CSS export. **Open**: a frame's mode in the UI; the mode list's scope, and a kit's modes in a consumer; the shortcut; what string and boolean variables bind beyond text content and visibility, D982's properties being views over those fields; text styles over spans; a layout style's item-side properties; the export's CSS. *(Ruled 2026-10-11 by the maintainer; **not built**, so no code cites this number — the first build commit plants it. **Keep.** `architecture.md` §5.3f written; invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12's fourth property pointed; `roadmap.md` §0's non-goal struck, *Next · Styles and variables* opened, the rebinding offer added to *Later · Components and layout, past the first build*. **Amended 2026-10-14** (D1038): the design pass done and accepted; (a), (b), (c), (d), (f) and premise (iv) ruled 2026-10-13, (e) and (g) still open; a styled card's menu a `⋯`, not D1005's `+`, and the card read-only in the inspector, any other door's edit still detaching it)*
 - **D1038** — **Styles and variables: the accepted chrome — a fully rounded capsule means a reference and nothing else in the inspector is round, a styled card is read-only there and edited in the browser alone, a field's right-click binds, extracts and detaches, and the browser swaps in place with the insert picker at a width its modes set — with the maintainer's rulings on D1037's open questions.** `design/Styles and Variables.dc.html` (Claude Design, revised 2026-10-14), its substance written here because `design/` is regenerated; the maintainer's *"Agree with all"* on the session's recommendations, 2026-10-13. **Overruling the mockup**, D982's precedent: H2's per-kit *Mode* row (a frame carries one mode), G5's *String variable* (hidden until step 6), and C1's always-three-row field menu (*Detach variable* omitted on an unbound field, `context-menus.md` §3's exception; 2026-10-14). **Rulings**: (a) a *Mode* row in a frame's identity card — inherited dim, naming the nearest ancestor frame that sets one or the document's default, its first mode; set bright and appended to the canvas label; *Inherit* first; frames only, not groups; a mode set on a copy an override; (b) one mode list per document, a per-kit mapping at document level edited in the kit's browser row, by name, else the kit's first mode; (c) `Shift+S`, agreed and unbound; (d) booleans bind visibility (step 2), strings text content and font family (step 6); (f) a layout style the container's fields only; (e), (g) open. A colour variable binds a whole solid paint, never a gradient stop, and carries its own alpha, the fill's `%` separate and unbindable; a paste into another document rebinds by name and type or detaches, within one keeps its binding; deleting a mode returns its frames to *Inherit*, confirmed with their count. **Additions accepted**: a styled card read-only in the inspector, its values edited only in the browser, any other door's edit still detaching; a canvas gesture on a bound or styled value detaches, the floating status naming it; no scrubbing on a bound field; a hover × in the chip; a header `⋯` on the five slot cards, after the `+`; deleting a style detaches its users; bindable numbers W, H, corner radius, layer opacity, stroke width, effect X/Y/blur/spread, gaps and padding — not X, Y or rotation. **Chrome**: the capsule rule (a reference, no hue); the bound field, two *Mixed* cases, left-eliding by group; the `--` list and B4's refusal manner; the field menu's three fixed rows; *Extract*'s dashed capsule; the swatch popup's *Variables* segment; the styled card; the browser above the hexagon, 340/436/532 wide by mode count, aliases per-mode cell values, *In selection* never falling back, groups, refusals, empty states, kit updates. ⚠️ G13's merge of two groups holding one leaf name is the design's, unruled. *(Ruled 2026-10-13 by the maintainer; **not built**, record-only, no code cites this number. **Keep.** D1037 amended; `architecture.md` §5.3e, §5.3f and §5.11 amended; `shortcuts.md` §14; `context-menus.md` §6.7; `roadmap.md` *Next · Styles and variables* edited down, its *Later* rebinding row's attribution corrected)*
-- **D1039** — **Styles and variables, build step 1's core: a variables table, the binding stored in three shapes rather than D1037's one `Literal | Bound` — a paint's `BrushSource` carrying the fill's `%` beside its variable, a rectangle's corners bound from `Node::corner_vars` and drawn from `Resolved`'s used kind, a frame's `Node::mode` — schema v7, and a paste that keeps, rebinds or detaches per field.** `variable.rs`: `VarId`/`ModeId` minted like `GuideId`, colour and number kinds, a cell a value or an alias, the first mode the default; `variable::check` a commit post-condition and a load check, **a dangling binding refused on load**. The `%` rides in the binding because a literal solid's `%` is its colour's alpha; no `Deref`, so the compiler listed every reader; `drawn()` answers transparent and is called only below `resolved_paint`. Corners on a sidecar for ~250 `Rect` sites (the caller's reason), literals written 0, every geometry reader following the used kind — **but the inspector's radius field and the canvas handle write a literal nobody draws**. Seven table ops and two node ops; table ops dirty every bound node by a scan and propagate nothing; `absorb` no-ops the seven table ops — pinned by `overrides.rs`' fixture since a same-day fix — and refuses `SetMode`/`SetCornerVars`. A fourth `update` ≡ `rebuild` run. Ghosts in the default mode; the snapshot the resolved value; Group Colors literal only; an edit as drawn keeps a binding for a `%` alone. v7 a number, the published document's too; `kit::freeze` detaches; *Paste properties* across documents refused at the commit. *(Built 2026-10-14, `a23b53a`. **Keep**; the fixture and four docs **Fixed** before commit; ~~***Fix with* the chip commit** the corner writes and `edited_brush`'s three edges~~ the corner writes and the retyped hex **Fixed** by D1041, the picker's *Solid* and `%` edges still open; `architecture.md` §5.3, §5.3b, §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12 amended; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1040): the browser, `Shift+S` and the delete verbs built; (D1041) the chip, the `--` list and the field menu; (D1042) the *Mode* row and the canvas label's suffix)*
-- **D1040** — **Styles and variables, build step 1's browser: a floating panel above the hexagon swapping in place with the insert picker, a fixed name column and a column per mode, variables grouped by the slash path in their names, cells edited in place — an alias typed as `--name` — and the delete verbs detaching in the deleting transaction.** `panels/variables.rs`; `Shift+S` (`Action::VariablesBrowser`) or `icon::SWATCHES`; either panel's toggle closes the other; `Escape` a rung after the picker's, a menu or a field first. Width `24 + 220 + 96·min(n,3)`, *Value* with one mode, sideways scrolling past three by wheel with no drawn bar; height 460, the picker's, so the swap does not jump (the session's). Flat headers per distinct group path; usage counts direct, not through an alias, selecting on a click; *In selection* direct bindings in the selection's subtrees. `Enter`/defocus commits, `Escape` abandons, `Tab` to the next mode; a hex with alpha, a number by `expr::eval`, **`--name` an alias — the session's call**, D1038 giving the cell no route until the popup's segment; refusals a plain sentence, not B4's manner. A first variable creates *Mode 1*; *Boolean variable* left out of `+` with *String* (the session's reading); *Delete mode…* confirms with its frames; a group rename refuses a clash (G14 over unruled G13). Core: `users`, `remove_ops`, `remove_mode_ops`, `frames_set_to`, `copy_mode_ops`, `split_name`, `rename_group_ops`. The delete status names a value only when every user read the same one in its own mode. ⚠️ *Delete group* takes the subgroups under a count that is the group's alone. 🚨 A refused `Tab` dropped the typed cell, two acts applied in order; now one, `Act::Cell` carrying the next cell, opened only when `var_cell` lands. *(Built 2026-10-14, `155846e`. **Keep**; ~~***Fix*** the refused `Tab`~~ **Fixed** before commit, with the delete status's value — test `a_refused_tab_keeps_the_typed_cell`, its flip failing *"the refused field is kept"*. Still owed: a colour cell opening the colour popup, G3's bar, B4's manner, Alt-click and the per-document collapse, and ~~the inspector's half~~ the inspector's swatch segment ~~and *Mode* row~~ (D1041; the *Mode* row D1042). D1039 amended; `architecture.md` §5.3f; `shortcuts.md` §14; `roadmap.md` step 1 edited down)*
-- **D1041** — **Styles and variables, build step 1's inspector half: a bound colour or corner radius is a chip, `--` typed into either opens the one list the app has, a field's right-click binds, extracts and detaches, and a radius written over a bound corner detaches it at the commit rather than at every door.** `panels/binding.rs`: `FieldKey` (`Paint { id, slot }`, `Radius { id }`); the chip a 20-pt capsule, text 11%/17% at rest, accent only focused, a hover × in its last 14 pt, `elide_groups` cutting whole groups from the left, `chip_tip` *name · value · Mode*; **focused it consumes `Backspace`/`Delete`** as the detach — an egui focus being the only other thing holding *Delete selection* off — and hands typed text on as a `Retype`, caret at the end. Paint: the chip in the hex's place, the swatch resolved, **the `%` the binding's alpha**; **a hex typed over a binding writes the literal outright** through `set_brush_at_all`, D1039's first edge fixed; a selection row a chip only when every target shares one variable, A4's *Mixed* capsule not built. Radius: the chip, a retype that detaches first, `--` read from the drag value's text under its response id (an egui internal); the card reads corners as drawn. **One `--` list**, re-asked each pass by its field, the one pass of grace what lets `Enter` bind; a paint's highlight previews, a corner's cannot (`absorb`); `Escape` a rung of `OndinApp::escape`. The field menu, §6.7's rows, its own `Area`. **Extract is one transaction** and then the browser renames it — no pending row, no dashed capsule (the session's). Core: `set_brush_at_all`, `bind_brush_at_all`, `detach_brush_at_all`, and **`keep_corner_bindings`, in `commit_inner` before `propagate::owed`**, 🚨 keeping a bound corner bound when written **what it draws or its own literal**, the literal put back to 0, anything else detaching to it — both halves load-bearing: literal alone (the first cut) detached all four on a per-corner edit or a bare click; drawn alone (the second) detached a bound corner square under the Scale tool or a per-corner ↺. **Price**: a 0 typed into a field over a bound corner is its literal and detaches nothing; the chip's retype is 0's door. Read and **fixed before commit**: extract squaring a translucent solid's alpha (now filed opaque); both cuts; a document switch leaving the binding chrome open. ⚠️ Read, not measured: the radius mark compares literals only, a ↺ dropping a main's binding (`sub_mark` cannot carry it). *(Built 2026-10-14, `1cdc802`. **Keep**; ***Fix*** the radius mark. Tests: `panels::binding::tests`' seven, the chip's `Backspace` and the extract's alpha flips run; `tests/variables.rs`' `a_radius_written_over_a_bound_corner_detaches_that_corner`, written as a field writes and as the Scale tool does, three flips run, and `binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour`. D1039, D1040 amended; `architecture.md` §5.3f, §5.9; `context-menus.md` §6.7; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1042): the *Mode* row and the canvas label's suffix built)*
+- **D1039** — **Styles and variables, build step 1's core: a variables table, the binding stored in three shapes rather than D1037's one `Literal | Bound` — a paint's `BrushSource` carrying the fill's `%` beside its variable, a rectangle's corners bound from `Node::corner_vars` and drawn from `Resolved`'s used kind, a frame's `Node::mode` — schema v7, and a paste that keeps, rebinds or detaches per field.** `variable.rs`: `VarId`/`ModeId` minted like `GuideId`, colour and number kinds, a cell a value or an alias, the first mode the default; `variable::check` a commit post-condition and a load check, **a dangling binding refused on load**. The `%` rides in the binding because a literal solid's `%` is its colour's alpha; no `Deref`, so the compiler listed every reader; `drawn()` answers transparent and is called only below `resolved_paint`. Corners on a sidecar for ~250 `Rect` sites (the caller's reason), literals written 0, every geometry reader following the used kind — **but the inspector's radius field and the canvas handle write a literal nobody draws**. Seven table ops and two node ops; table ops dirty every bound node by a scan and propagate nothing; `absorb` no-ops the seven table ops — pinned by `overrides.rs`' fixture since a same-day fix — and refuses `SetMode`/`SetCornerVars`. A fourth `update` ≡ `rebuild` run. Ghosts in the default mode; the snapshot the resolved value; Group Colors literal only; an edit as drawn keeps a binding for a `%` alone. v7 a number, the published document's too; `kit::freeze` detaches; *Paste properties* across documents refused at the commit. *(Built 2026-10-14, `a23b53a`. **Keep**; the fixture and four docs **Fixed** before commit; ~~***Fix with* the chip commit** the corner writes and `edited_brush`'s three edges~~ the corner writes and the retyped hex **Fixed** by D1041, the picker's *Solid* edge by D1043 on a row one variable binds, it and the `%` edge still open on a disagreeing selection row and the *All* row; `architecture.md` §5.3, §5.3b, §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12 amended; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1040): the browser, `Shift+S` and the delete verbs built; (D1041) the chip, the `--` list and the field menu; (D1042) the *Mode* row and the canvas label's suffix; (D1043) the swatch popup's segment)*
+- **D1040** — **Styles and variables, build step 1's browser: a floating panel above the hexagon swapping in place with the insert picker, a fixed name column and a column per mode, variables grouped by the slash path in their names, cells edited in place — an alias typed as `--name` — and the delete verbs detaching in the deleting transaction.** `panels/variables.rs`; `Shift+S` (`Action::VariablesBrowser`) or `icon::SWATCHES`; either panel's toggle closes the other; `Escape` a rung after the picker's, a menu or a field first. Width `24 + 220 + 96·min(n,3)`, *Value* with one mode, sideways scrolling past three by wheel with no drawn bar; height 460, the picker's, so the swap does not jump (the session's). Flat headers per distinct group path; usage counts direct, not through an alias, selecting on a click; *In selection* direct bindings in the selection's subtrees. `Enter`/defocus commits, `Escape` abandons, `Tab` to the next mode; a hex with alpha, a number by `expr::eval`, **`--name` an alias — the session's call**, D1038 giving the cell no route until the popup's segment; refusals a plain sentence, not B4's manner. A first variable creates *Mode 1*; *Boolean variable* left out of `+` with *String* (the session's reading); *Delete mode…* confirms with its frames; a group rename refuses a clash (G14 over unruled G13). Core: `users`, `remove_ops`, `remove_mode_ops`, `frames_set_to`, `copy_mode_ops`, `split_name`, `rename_group_ops`. The delete status names a value only when every user read the same one in its own mode. ⚠️ *Delete group* takes the subgroups under a count that is the group's alone. 🚨 A refused `Tab` dropped the typed cell, two acts applied in order; now one, `Act::Cell` carrying the next cell, opened only when `var_cell` lands. *(Built 2026-10-14, `155846e`. **Keep**; ~~***Fix*** the refused `Tab`~~ **Fixed** before commit, with the delete status's value — test `a_refused_tab_keeps_the_typed_cell`, its flip failing *"the refused field is kept"*. Still owed: a colour cell opening the colour popup, G3's bar, B4's manner, Alt-click and the per-document collapse, and ~~the inspector's half~~ ~~the inspector's swatch segment~~ ~~and *Mode* row~~ (D1041; the *Mode* row D1042; the swatch segment D1043). D1039 amended; `architecture.md` §5.3f; `shortcuts.md` §14; `roadmap.md` step 1 edited down)*
+- **D1041** — **Styles and variables, build step 1's inspector half: a bound colour or corner radius is a chip, `--` typed into either opens the one list the app has, a field's right-click binds, extracts and detaches, and a radius written over a bound corner detaches it at the commit rather than at every door.** `panels/binding.rs`: `FieldKey` (`Paint { id, slot }`, `Radius { id }`); the chip a 20-pt capsule, text 11%/17% at rest, accent only focused, a hover × in its last 14 pt, `elide_groups` cutting whole groups from the left, `chip_tip` *name · value · Mode*; **focused it consumes `Backspace`/`Delete`** as the detach — an egui focus being the only other thing holding *Delete selection* off — and hands typed text on as a `Retype`, caret at the end. Paint: the chip in the hex's place, the swatch resolved, **the `%` the binding's alpha**; **a hex typed over a binding writes the literal outright** through `set_brush_at_all`, D1039's first edge fixed; a selection row a chip only when every target shares one variable, ~~A4's *Mixed* capsule not built~~ (D1045). Radius: the chip, a retype that detaches first, `--` read from the drag value's text under its response id (an egui internal); the card reads corners as drawn. **One `--` list**, re-asked each pass by its field, the one pass of grace what lets `Enter` bind; a paint's highlight previews, a corner's cannot (`absorb`); `Escape` a rung of `OndinApp::escape`. The field menu, §6.7's rows, its own `Area`. **Extract is one transaction** and then the browser renames it — no pending row, no dashed capsule (the session's). Core: `set_brush_at_all`, `bind_brush_at_all`, `detach_brush_at_all`, and **`keep_corner_bindings`, in `commit_inner` before `propagate::owed`**, 🚨 keeping a bound corner bound when written **what it draws or its own literal**, the literal put back to 0, anything else detaching to it — both halves load-bearing: literal alone (the first cut) detached all four on a per-corner edit or a bare click; drawn alone (the second) detached a bound corner square under the Scale tool or a per-corner ↺. **Price**: a 0 typed into a field over a bound corner is its literal and detaches nothing; the chip's retype is 0's door. Read and **fixed before commit**: extract squaring a translucent solid's alpha (now filed opaque); both cuts; a document switch leaving the binding chrome open. ⚠️ Read, not measured: the radius mark compares literals only, a ↺ dropping a main's binding (`sub_mark` cannot carry it). *(Built 2026-10-14, `1cdc802`. **Keep**; ***Fix*** the radius mark. Tests: `panels::binding::tests`' seven, the chip's `Backspace` and the extract's alpha flips run; `tests/variables.rs`' `a_radius_written_over_a_bound_corner_detaches_that_corner`, written as a field writes and as the Scale tool does, three flips run, and `binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour`. D1039, D1040 amended; `architecture.md` §5.3f, §5.9; `context-menus.md` §6.7; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1042): the *Mode* row and the canvas label's suffix built; (D1043) the swatch popup's segment built, the picker's *Solid* edge fixed on a row one variable binds; (D1044) B4's refusal built, the radius field's `--` handed to the retype buffer, which is now the unbound field's too; (D1045) the *Mixed* capsule; (D1046) the badge's no-scrub cursor)*
 - **D1042** — **Styles and variables, build step 1's *Mode* row: a frame's mode is a dropdown row in its identity card under its name, *Inherit* first, an inherited mode read dim with where it comes from, and a mode the frame sets appended to its canvas tag.** `OndinApp::frame_mode_row`, after the name row and before the boolean row, on an `Artboard` only and only when the document has a mode: *Mode* 48 pt, a 28-pt field — set, the name bright; inherited, half ink and *· from ‹frame›* or *· default*. 🚨 `variables::inherited_mode` walks from the **parent**, where `Document::mode_at` counts the node — the row and *Inherit* name what the frame would read unset. `mode_menu_ui`: an `Area` of its own, *Inherit* with the inherited mode in the accelerator column, a rule, every mode, the current checked; a pick commits one `SetMode`; a press outside closes it; a rung of `Escape` beside the field menu and the `--` list; cleared on a document switch. The canvas: the plain-frame arm of `frame_label` appends *· ‹mode›* at 70% in its own ink when the frame sets one, an inherited mode nothing. **Departures**: no sun or moon (H1) — modes are user-named, so `icon::COLUMNS` on the menu's mode rows, none in the field (the session's). **Not built**: the mode on a main's, a set's or an instance's tag; H5's elision (no tag elides); ⚠️ D1038 (a)'s override dot and ↺ on a copy's row — `reset::overrides` finds the mode, the Component card's drift and *Reset all* reach it, but `card_of` files it under no header and the row asks no `sub_mark`. ~~The variables test's doc claiming the menu's commit~~ fixed before commit; ⚠️ nothing draws the row or the menu in a test. *(Built 2026-10-14, uncommitted. **Keep**; ***Fix*** the override mark; ~~the test doc~~ **Fixed** before commit. Tests: `a_frame_inherits_from_the_nearest_frame_that_sets_a_mode`, `a_frames_tag_names_the_mode_it_sets_and_not_one_it_inherits`, no flip run. D1039, D1040, D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
+- **D1043** — **Styles and variables, build step 1's swatch popup segment: the colour picker carries a fourth tab, *Variables*, on a slot a variable can bind, a bound paint opens on it, and leaving it for *Solid* detaches — which closes D1039's *Solid* edge on every row a variable binds alone.** D1038 E1. `picker_body` draws four tabs where `binding::paint_item(slot)` is `Some` (`Fill`, `Stroke`, `Selection`), three elsewhere; the face shows while `field_var` answers one variable or `Picker::browse` is set (`retarget` clears it). *Solid* over a binding is `detach_field`, the `%` folded in; *Linear*/*Radial* convert the drawn brush through `write_slot`, which detaches. `OndinApp::variables_face`: a search, every colour variable under a header per group (none for the top group), each row a swatch, the name by `elide_groups` and the hex **in the layer's mode**, the current one tinted and checked and scrolled to once per open; a click binds keeping the `%`, the picker staying up. **The picker widened 240 → 272**, E1's width, *Variables* not fitting a quarter of the old track; one test's expected colour re-measured. The face keeps the *Solid* face's height, measured in egui temp data, the mockup's 206-pt list before it has been; ⚠️ the gradient faces still differ. **Not built**: E1's kit group (no kit variables until step 4); a hover preview, the face committing on a click only (the session's call); a browser cell opening the popup. ⚠️ **What survives of D1039's edges**: the *Solid* face still opens over bound paints on a selection row whose targets disagree and on the *All* row, its writes as drawn through `edited_brush`, the picker's `%` clamping there. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Tests: `the_pickers_variables_tab_binds_and_solid_detaches` (its flip run) and `a_bound_fill_opens_on_the_variables_face`. D1039, D1040, D1041 amended; `architecture.md` §5.3f and §9.2's module map; `roadmap.md` step 1 edited down)*
+- **D1044** — **Styles and variables, build step 1's B4: a `--` query naming a whole variable and going on is refused — only once nothing matches — the `--` list saying why in one sentence and the field dimming the refused tail over a dotted underline; the corner-radius `DragValue` hands `--` to the retype buffer so the tail can be drawn.** `binding::refused`: the longest variable of the field's kind whose name is a case-blind prefix of the query with a non-blank rest, asked only when `matches` is empty — 🚨 the guard keeps `--brand/500-` (of `brand/500-alt`) being typed rather than refused; another kind's name is B3's *no match*. The list: *A variable fills the whole field. Remove `* 2` to bind radius/md.*, the rest in monospace, no rows, so `Enter` binds nothing; not on a list the field menu opened. The field: `refusal_galley`, a `TextEdit::layouter` on the hex field and `radius_retype`, the tail at 40%, the rest in `TextEdit`'s own colour; `underline_refusal` paints the dots. 🚨 A `DragValue` lays out its own text, so the radius field hands `--` text to `var_retype` — `radius_retype` now the unbound field's buffer too, `Enter` writing a number typed back — detached first only when a chip was typed over, else through `keep_corner_bindings` as the `DragValue`'s edit — `Escape` nothing. 🚨 **A refused `Enter` keeps the field**: the `TextEdit` gives the keyboard up on it, so the hex field sends its text back through `var_retype` to be refocused, keeping `paint_hex` and asking for the list on that pass, and `radius_retype` keeps its buffer and returns before the commit. *(Built 2026-10-14, uncommitted when recorded. **Keep** the guard and the handoff; ~~***Fix*** the refused `Enter`~~ and ~~a partly bound rectangle detached whole~~, both read in the first cut, **Fixed** before commit, each by a test whose flip was run. Tests: six in `panels::binding::tests`, four flips run; the handoff not driven. The browser's refusals not in this manner. D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
+- **D1045** — **Styles and variables, build step 1's A4: layers all bound, to different variables, read *Mixed* in a capsule whose tooltip names them, with the chip's keys and neither a hover × nor a field menu.** `OndinApp::field_mixed_vars`: the distinct variables in name order when every target of a paint key is bound and there are two or more, else `None` — one unbound is the grey *Mixed* (D130), one variable `field_var`'s chip. `paint_row` asks it ahead of the `unknown` arm and the *Solid* arm unless the row is typed into, drawing `mixed_chip`. D1038 rules the look and not the keys — **the session's call**, the chip's: `Backspace` detaches every layer to what it draws, another key starts a literal over them all, `--` binds them all to one. No field menu, as on the grey *Mixed* row (`context-menus.md` §6.7). The swatch opens the picker on *Solid*, `field_var` answering none, whose *Variables* tab binds them all — D1043's surviving edge unchanged. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `layers_bound_to_different_variables_read_mixed_in_a_capsule`, its flip run. D1041 amended; `architecture.md` §5.3f; `context-menus.md` §6.7; `roadmap.md` step 1 edited down)*
+- **D1046** — **Styles and variables, build step 1's no-scrub cursor: a bound radius field's corner badge asks `CursorIcon::NotAllowed` on hover.** D1038 (3)'s *"the cursor says the field will not scrub"*; D1041's chip already could not scrub. The glyph **the session's call**, D1038 naming none. The paint row has no scrub badge, so the radius is the only bound field it reaches; a later step's bound number owes it with its chip. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_bound_radius_badge_says_it_will_not_scrub`, at the badge's measured centre, its flip run. D1041 amended; `architecture.md` §5.3f; `roadmap.md` step 1 edited down)*
 
 ---
 
@@ -24823,7 +24827,10 @@ at 1, so the paint draws less than the `%` typed. While a bound paint is shown a
 with no chip and no *Variables* segment, none of the three has a door that tells them apart. **After
 D1041**: the first is fixed, a hex typed over the chip writing the literal outright; the second stands,
 the picker writing through `edited_brush`; the third no longer arises from the row's own `%`, which
-writes the binding's alpha, and still does through the picker's alpha and the *All* row's `%`.
+writes the binding's alpha, and still does through the picker's alpha and the *All* row's `%`. **After
+D1043**: the second is fixed on every row one variable binds, the picker opening there on *Variables*
+and *Solid* from it detaching; the second and third both survive only where the picker's *Solid* face
+still opens over bound paints — a selection row whose targets disagree, and the *All* row.
 
 **Save: v7** (`CURRENT_SCHEMA_VERSION`). `migrate_6_to_7` is a number, `migrate_5_to_6`'s reason
 exactly — a v6 file has no variables, modes or bindings, which is what v7 reads absent keys as, and a v6
@@ -24856,7 +24863,7 @@ code, not run; reachable only from a file that carries a binding. Whether *Paste
 paste's rule is `roadmap.md`'s open question, D1038 having put the ruling for a paste.
 
 **Not built**, the chrome's half of step 1, each owed by the UI commits: ~~the chip and its `--`, the field
-menu,~~ the swatch popup's *Variables* segment, ~~the browser and `Shift+S`,~~ ~~the *Mode* row and the canvas
+menu,~~ ~~the swatch popup's *Variables* segment,~~ ~~the browser and `Shift+S`,~~ ~~the *Mode* row and the canvas
 label's suffix,~~ ~~the delete-variable and delete-mode verbs,~~ ~~and the canvas radius handle's detach~~ — plus
 string and boolean variables, steps 2 and 6. ⚠️ **The `--` list's live preview (D1038 B) meets
 `absorb`'s refusal for a corner**: a highlighted row binding a fill is a `SetFills`, which previews, but
@@ -24871,14 +24878,17 @@ the parent it lands in) and `DocumentDto::variables`' doc (*"as it was before v7
 number"*); ~~***Fix with* the chip commit** the inspector's and the canvas's writes to a bound corner and
 `edited_brush`'s three edges~~ — D1041: the corner writes **Fixed** by a commit-time pass, the retyped
 hex **Fixed**, the picker's *Solid* on its own colour still keeping the binding and the picker's `%`
-still clamping, both owed with the swatch popup's segment. Cites D1037 and D1038 from `variable.rs`. `architecture.md` §5.3, §5.3b,
+still clamping, both owed with the swatch popup's segment — D1043: the *Solid* edge **Fixed** on a
+row one variable binds, both still owed on a selection row whose targets disagree and on the *All*
+row, which the segment does not reach. Cites D1037 and D1038 from `variable.rs`. `architecture.md` §5.3, §5.3b,
 §5.3d's v6 line, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12's fourth property amended;
 `roadmap.md` *Next · Styles and variables* step 1 edited to what the UI owes, premises (i), (ii) and
 (v) struck from its owed list and (vi) edited down to the preview. **Amended 2026-10-14** (D1040): the
 browser, `Shift+S` and the delete-variable and delete-mode verbs built, struck from the lists above.
 **Amended again 2026-10-14** (D1041): the chip, its `--` list and the field menu built, the corner
 writes and the first edge fixed, as above. **Amended a third time 2026-10-14** (D1042): the *Mode* row
-and the canvas label's suffix built)*
+and the canvas label's suffix built. **Amended a fourth time 2026-10-14** (D1043): the swatch popup's
+segment built, the second edge fixed on a row one variable binds, as above)*
 
 **D1040 — Styles and variables, build step 1's browser: a floating panel above the hexagon that swaps
 in place with the insert picker, a fixed name column and a column per mode, variables grouped by the
@@ -24924,7 +24934,8 @@ defocus commits through `ui::defocus_commits`, so `Escape` abandons**; `Tab` com
 mode's cell. A colour cell takes a hex, its alpha too — a colour variable carries its own (D1038) —
 where the inspector's hex field drops the last pair; a number cell `expr::eval`'s answer, finite.
 🚨 **An alias is typed as `--name`, the session's call**: D1038 makes an alias only through the colour
-popup's *Variables* segment, which is not built, and gives a number alias no route at all, so the cell
+popup's *Variables* segment, which is not built (built since by D1043, for a layer's paint only — no
+browser cell opens it yet), and gives a number alias no route at all, so the cell
 borrows the field binding's spelling (D1037). **A refusal is one plain sentence under the search, the
 field kept open and given the keyboard back** — a taken name (G14's natural answer), an empty name or
 group part, an alias that would loop, of the wrong kind or to no variable, an unparsable value. ⚠️
@@ -24975,7 +24986,7 @@ and its *Select n layers* reach the subgroups the same way, which for a rename i
 moving"*. One `Ctrl+Z` restores; read, not ruled.
 
 **Not built**, still owed by step 1: ~~the chip and its `--` list, `--` in the inspector's fields, the
-field menu,~~ the swatch popup's *Variables* segment, ~~*Extract*,~~ ~~the *Mode* row and the canvas label's
+field menu,~~ ~~the swatch popup's *Variables* segment,~~ ~~*Extract*,~~ ~~the *Mode* row and the canvas label's
 suffix~~ — and in the browser itself, **a colour cell opening the colour popup beside the panel** (D1038:
 the popup's *Variables* segment is where it makes an alias), G3's scrollbar, B4's refusal manner,
 Alt-click on a caret and the collapsed state kept per document (`collapsed` lives as long as the panel
@@ -24993,7 +25004,8 @@ One flip reported, the refused `Tab`'s. D1039 amended; `architecture.md` §5.3f;
 `roadmap.md` *Next · Styles and variables* step 1 edited down. **Amended 2026-10-14** (D1041): the chip,
 its `--` list, `--` in the inspector's fields, the field menu and *Extract* built, struck from the list
 above; committed as `155846e`. **Amended again 2026-10-14** (D1042): the *Mode* row and the canvas
-label's suffix built, struck from the list above)*
+label's suffix built, struck from the list above. **Amended a third time 2026-10-14** (D1043): the
+swatch popup's segment built, struck from the list above; a colour cell opening it still owed)*
 
 **D1041 — Styles and variables, build step 1's inspector half: a bound colour or corner radius is a
 chip, `--` typed into either opens the one list the app has, a field's right-click binds, extracts and
@@ -25019,7 +25031,8 @@ there is the start of `--`. 🚨 **Consumed, not read**: an egui focus is the on
 keymap's *Delete selection* off, so a `Backspace` read with `key_pressed` would detach the chip and
 reach the keymap as well (`a_focused_chip_takes_backspace_and_hands_on_a_key`, its flip run). `Delete`
 beside `Backspace` is the session's; D1038 names `Backspace` alone. A right-click opens the field menu.
-The chip senses clicks only, so it cannot scrub (D1038 (3)); the cursor saying so is not built. ⚠️
+The chip senses clicks only, so it cannot scrub (D1038 (3)); ~~the cursor saying so is not built~~ the
+radius field's badge says so since D1046. ⚠️
 **`Backspace` does not leave the resolved literal selected**, as A3 has it: the detach commits and the
 next frame draws the plain field unfocused, the chip's id gone with it — read in the code.
 
@@ -25028,8 +25041,8 @@ the swatch beside it showing the resolved colour (A1); a key typed onto it, or t
 open, puts the hex field back. **The `%` reads and writes the binding's own alpha** (`field_alpha`,
 `rebind_alpha_tx`) — D1038's *"the variable's colour times that `%`"* as a field — so D1039's third
 edge, a `%` above the variable's alpha clamping, no longer arises from this field. **A selection row is
-a chip only when every target is bound to one variable** (`field_var`), else the plain row: A4's
-*Mixed* capsule is not built. `paint_hex_field` has an explicit id now, lifts the hex's character limit
+a chip only when every target is bound to one variable** (`field_var`), else the plain row: ~~A4's
+*Mixed* capsule is not built~~ every target bound, to different variables, is A4's capsule since D1045. `paint_hex_field` has an explicit id now, lifts the hex's character limit
 for text opening with `-`, hands what is typed to `bind_typing` while it holds the keyboard, and opens
 the field menu on a right-click, except on a mixed row. 🚨 **A hex typed over a binding writes the
 literal outright**, through `build::set_brush_at_all`, even the variable's own value — a bound field is
@@ -25042,8 +25055,11 @@ binding for any answer equal to the colour drawn, which is that edge exactly.
 `expr::eval`'s answer — detached first, so the radius written is the one drawn, 0 included. Unbound, a
 `--` is read from the drag value's in-progress text, which egui 0.35's `drag_value.rs` keeps in temp
 data under the response's id (`get_temp::<String>(rr.id)`). ⚠️ **That is an egui internal**, and an
-upgrade that moves it leaves the radius field silently unable to open the list; no test drives it. A
-right-click opens the field menu. **The Appearance card and `shared_radius_shown` read the corners as
+upgrade that moves it leaves the radius field silently unable to open the list; no test drives it.
+**Since D1044 a `--` read there is handed to `radius_retype`'s buffer**, the `DragValue` being unable to
+draw B4's dimmed tail — so the A3 buffer is the unbound field's as well as the chip's, and detaches
+first only when a chip was typed over. A right-click
+opens the field menu. **The Appearance card and `shared_radius_shown` read the corners as
 drawn** (`resolve_corners`), which closes D1039's *"the inspector's radius field shows 0"*.
 
 **The `--` list** (`Complete`, the app's `var_complete`): **one in the whole app**, keyed by its field.
@@ -25059,8 +25075,8 @@ live for a paint only** (`set_preview` of the bind): a corner's cannot, `absorb`
 `SetCornerVars` (D1039) — still owed. Its footer names the mode the values read in, the field's node's.
 `Escape` is **a rung of `OndinApp::escape`, first among the floating panels**, with the field menu,
 and clears the preview and any retype. Opened from the menu it carries a search of its own with the
-current variable highlighted, and a press outside it closes it. **B4's refusal is not built**: `--x * 2`
-simply matches nothing; and with no kit variables yet, nothing is grouped last.
+current variable highlighted, and a press outside it closes it. ~~**B4's refusal is not built**: `--x * 2`
+simply matches nothing~~ B4's refusal is D1044's; and with no kit variables yet, nothing is grouped last.
 
 **The field menu** (`field_menu_ui`, `context-menus.md` §6.7): an `Area` of its own over everything,
 not the canvas menu's `open_context_menu`, drawn with `ui::menu_frame` and `ui::menu_row`; *Bind to
@@ -25141,16 +25157,20 @@ corners staying bound and a wholly bound one bound and unscaled; and ~~a documen
 `field_menu` nor `var_retype`~~ — **fixed before commit**, the switch clearing all three beside
 `var_browser`, their keys naming the old document's nodes.
 
-**D1039's edges, after this.** Retyping the variable's own hex detaches — fixed above. **Picking
+**D1039's edges, after this.** Retyping the variable's own hex detaches — fixed above. ~~**Picking
 *Solid* on a bound paint's own colour still keeps the binding**: the picker writes through
-`slot_transaction` and `edited_brush`, D1038's E1 rule unmet until the popup's segment. **A `%` above
-the variable's alpha still clamps** through the picker's alpha and the *All* row's `%`, which go through
-`edit_paints_all` and `edited_brush`; the bound row's own `%` no longer does. ⚠️ **D1039 named the canvas
+`slot_transaction` and `edited_brush`, D1038's E1 rule unmet until the popup's segment.~~ **Fixed by
+D1043** on every row one variable binds: the picker opens there on *Variables*, and *Solid* from it is
+`detach_field`; the *Solid* face, writing as drawn, still opens over bound paints on a selection row
+whose targets disagree and on the *All* row. **A `%` above the variable's alpha still clamps** through
+the picker's alpha and the *All* row's `%`, which go through `edit_paints_all` and `edited_brush`; the
+bound row's own `%` no longer does — and since D1043 the picker's alpha reaches a bound paint only on
+those two rows. ⚠️ **D1039 named the canvas
 radius handle as a second writer to a bound corner, and none was found**: `canvas::corner_radius_tx`
 writes a `Path`'s anchors; whatever writes a rectangle's radius, the pass catches it.
 
-**Not built**, still owed by step 1: the swatch popup's *Variables* segment (E1); A4's *Mixed* capsule
-for layers bound to different variables; B4's refusal manner; *Extract*'s pending row and dashed capsule;
+**Not built**, still owed by step 1: ~~the swatch popup's *Variables* segment (E1)~~ (D1043); ~~A4's *Mixed* capsule
+for layers bound to different variables~~ (D1045); ~~B4's refusal manner~~ (D1044); *Extract*'s pending row and dashed capsule;
 per-corner chips; the corner's live preview; ~~the *Mode* row and the canvas label's suffix~~. *(Built
 2026-10-14 by the session; `Delete` beside `Backspace` and *Extract*'s filing before the name the
 session's calls; uncommitted when recorded. **Keep** the chip, the one list, the menu and the commit-time
@@ -25165,7 +25185,11 @@ before commit; ***Fix*** (3); the 0 typed into a field over a bound corner the p
 in `tests/variables.rs` above; `app.rs`'s panel commit-scan gate lists `binding.rs` and `variables.rs`.
 D1039 and D1040 amended; `architecture.md` §5.3f and §5.9's used-kind bullet; `context-menus.md` §6.7;
 `roadmap.md` *Next · Styles and variables* step 1 edited down; committed as `1cdc802`. **Amended
-2026-10-14** (D1042): the *Mode* row and the canvas label's suffix built, struck from the list above)*
+2026-10-14** (D1042): the *Mode* row and the canvas label's suffix built, struck from the list above.
+**Amended again 2026-10-14** (D1043): the swatch popup's segment built, struck from the list above, and
+the *Solid* edge fixed on every row one variable binds. **Amended a third time 2026-10-14** (D1044, D1045,
+D1046): B4's refusal and the *Mixed* capsule built, struck from the list above, the radius field's `--`
+handed to the A3 buffer, and the badge's no-scrub cursor built)*
 
 **D1042 — Styles and variables, build step 1's *Mode* row: a frame's mode is a dropdown row in its
 identity card under its name, *Inherit* first, an inherited mode read dim with where it comes from,
@@ -25230,6 +25254,215 @@ menu~~ **Fixed** before commit; the
 mode on the other three tags and H5's elision owed by step 1 (`roadmap.md`). No flip run, as the caller
 reports it. D1039, D1040 and D1041 amended; `architecture.md` §5.3f; `roadmap.md` *Next · Styles and
 variables* step 1 edited down)*
+
+**D1043 — Styles and variables, build step 1's swatch popup segment: the colour picker carries a
+fourth tab, *Variables*, on a slot a variable can bind; a bound paint opens on it; and leaving it for
+*Solid* detaches to the colour drawn. *Built 2026-10-14, uncommitted when recorded; E1's kit group and a
+hover preview not.*** D1038's E1 (`panels/picker.rs`'s `picker_body`, `panels/binding.rs`'s
+`variables_face`). **The tab.** `picker_body` draws *Variables* after *Solid*, *Linear* and *Radial*
+**only on a slot a variable can bind** — `binding::paint_item(slot)` answering `Some`, which is `Fill`,
+`Stroke` and a `Selection` row, `paint_item` made `pub(crate)` for it; every other slot, the *All* row
+(`SelectionAll`) among them, keeps three. A binding is another kind of paint, so it sits with the kinds.
+**The face shows while the paint is bound** — `field_var` answering one variable, which on a selection
+row means every target bound to the same one — **or while `Picker::browse` is set**, by a click on the
+tab over an unbound paint; `retarget` clears it with the search and the scroll. So a bound paint's
+picker opens on *Variables*, and a click on the tab writes nothing.
+
+**Leaving it.** 🚨 ***Solid* over a binding is `detach_field`** — `detach_brush_at_all`, the colour
+drawn with the `%` folded in — **not `write_slot` of the drawn colour**, which is every other kind
+change's route: that goes through `edited_brush`, whose *as drawn* reading keeps a binding for an answer
+equal to what it draws, so *Solid* on a bound paint would keep the binding — D1039's second edge
+exactly. *Do not* fold the arm into the general one. *Linear* or *Radial* over a binding converts the
+drawn brush through `write_slot`, which detaches because `edited_brush` detaches on any gradient. Over an
+unbound paint, leaving clears `browse` and converts only if the kind differs.
+
+**The face** (`OndinApp::variables_face`). A search field, *Search colours* behind a magnifier, then a
+scroll list of every colour variable — `matches(table, Color, query)`, the `--` list's own filter and
+order — with a header, the group path uppercase at 9.5 pt and 38%, wherever `split_name`'s group
+changes, none for the unnamed top group, as in the browser (D1040). A row is 24 high: a 12-pt swatch
+over a checkerboard, 3-pt corners and a 35% black inner edge; the full name elided by `elide_groups`;
+the hex right-aligned **in the layer's mode**, `resolve_var` at the picker's node; on the current
+variable a check and a 10% row tint, and `scroll_to_me` once per open (`Picker::scrolled`). **A click on
+another row binds** through `bind_field`, keeping the `%` (`bind_brush_at_all`), and the picker stays up
+with the check on the new row; a click on the current row does nothing. Empty: *No variable matches*,
+or *No colour variables yet — Shift+S to add one*.
+
+**Height and width.** E1's *"the popup keeps its height on every tab"*: the face fills the *Solid*
+face's height, measured each time that face is drawn on a bindable slot and kept in egui temp data
+(`picker-solid-face-h`, one key for the process), falling back to `CONTROL_H`, the section gap and the
+mockup's 206-pt list until it has been — the case for a picker opened straight onto a bound paint before
+any *Solid* face on a bindable slot has been drawn. ⚠️ **The gradient faces still differ in height** —
+not made uniform; a limit of the build, not a ruling. 🚨 **The picker's pinned `WIDTH` went 240 → 272**,
+the width E1 draws the popup at: *Variables* does not fit a quarter of the old track, and every face
+stretches. `picker.rs`' `a_click_on_the_picker_writes_a_text_layers_colour` expected a colour measured
+at the old width, and moved 152 → 165, its doc saying why — the same point lies further left on a wider
+plane. It locates the plane by a measured coordinate, so the next change to `WIDTH` moves it again.
+
+**Not built.** E1's kit group — a package glyph and dimmed rows — the table holding no kit variables
+until step 4. **No hover preview** of a row on the canvas, where the `--` list previews its highlight
+(D1041): the face commits on a click only — the session's call. And a colour cell in the browser opening
+this popup to make an alias (D1038's route; D1040's `--name` stands in).
+
+**D1039's edges, after this.** ***Solid* no longer keeps a binding on any row one variable binds**: a
+`Fill`, a `Stroke` or a selection row whose targets share one variable opens on *Variables*, and *Solid*
+from there detaches. **What survives is the *Solid* face over bound paints it cannot name** — a selection
+row whose targets are bound to different variables, or some bound and some not (`field_var` answering
+`None`), and the *All* row, which has no *Variables* tab. There the *Solid* tab is already the selected
+one, so a click on it does nothing; but the face's plane, hue, alpha, hex and swatches write through
+`edit_brush_at_all` or `edit_paints_all`, so `edited_brush` per target: a write equal to what a bound
+paint draws keeps its binding, the same RGB at another alpha keeps it with a new `%`, anything else
+detaches it. **The `%` clamp survives on the same two rows**: the picker's alpha slider is on the
+*Solid* face only, so it no longer reaches a paint one variable binds, and still clamps where it reaches
+a bound paint on a disagreeing selection row or the *All* row — as the *All* row's own `%` does.
+
+**Tests** (`panels::binding::tests`). `the_pickers_variables_tab_binds_and_solid_detaches`, driven
+through the popup's own clicks, each located from the frame's text shapes: the tab over an unbound fill
+writes nothing; *brand/500* binds it keeping 0.5; the face stays up under its *BRAND* header; *Solid*
+detaches to white × 0.5. Flip, run: sending *Solid* over a binding through `write_slot` fails *"Solid
+off a binding detaches"* with the binding kept. `a_bound_fill_opens_on_the_variables_face`: a bound
+fill's picker draws *Search colours* and the row. ⚠️ **Its doc's second half, *"a slot no variable can
+bind has no such tab"*, is asserted through `paint_item(PaintSlot::Effect(0))`**, not by drawing an
+effect's picker and counting three tabs — read in the code. *(Built 2026-10-14 by the session; the
+hover preview's absence the session's call; uncommitted when recorded. **Keep**, the
+*Solid* arm through `detach_field` above all. Tests and the flip as the caller reports them, all gates
+green. D1039, D1040 and D1041 amended; `architecture.md` §5.3f and §9.2's module map; `roadmap.md`
+*Next · Styles and variables* step 1 edited down)*
+
+**D1044 — Styles and variables, build step 1's B4: a `--` query that names a whole variable and goes
+on is refused, the `--` list saying why in one sentence and the field dimming the refused tail over a
+dotted underline; and the corner-radius field hands `--` to its retype buffer so the tail can be
+drawn. *Built 2026-10-14, uncommitted when recorded; the browser's refusals in this manner not.***
+D1038's B4: *"A refused `--space/4 * 2`: the trailing text dims with a dotted underline, one plain
+sentence says why, `Enter` is inert — no red, no shake."* D1041 left it unbuilt, `--x * 2` simply
+matching nothing; the rule it enforces is D1037's, a binding taking the whole field because `expr.rs`
+has no names (§13 decision 1).
+
+**What is refused** (`binding::refused(table, kind, text)`): text opening `--` whose query `matches`
+nothing, and then the longest variable of the field's kind whose name is a case-blind prefix of the
+query with something other than blanks after it — the answer that variable and the byte of `text`
+where the rest begins. 🚨 **The empty-match guard is load-bearing**: a whole name that begins a longer
+one — `brand/500` of `brand/500-alt` — is still being typed while the longer one matches, and without
+the guard `--brand/500-` reads as `brand/500` and a refused `-` (the flip below). A name of another kind
+is not a refusal but B3's *no match*, the lists being filtered by type; a whole name alone, or with
+trailing blanks, binds.
+
+**The list** (`var_complete_ui`): refused, it is one sentence — *A variable fills the whole field.
+Remove `* 2` to bind radius/md.* — the remainder trimmed, in monospace at full ink, the rest dim, wrapped
+to the list. It has no rows, so `Enter` finds nothing to bind. Not on a list the field menu opened
+(`own_search`): its search holds no `--` and keeps B3's *no match*.
+
+**The field.** The hex field (`inspector::paint_hex_field`) and `radius_retype`'s `TextEdit` lay their
+text out through `binding::refusal_galley`, a `TextEdit::layouter`: the refused tail at 40%
+(`color::text_a(102)`), the rest in the colour `TextEdit` would choose itself — `override_text_color`,
+else `widgets.inactive.text_color()` — so an unrefused field draws as it did. `binding::underline_refusal`
+paints the dotted underline under the tail from the `TextEditOutput`'s galley, egui underlining solid
+only.
+
+🚨 **The corner-radius field is an egui `DragValue`, which lays out its own text**, so no layouter
+reaches it. Once its typed text — read through D1041's egui internal — opens with `--`, it hands the
+text to the retype buffer (`var_retype`, `focus: true`), and from the next pass `radius_retype`'s
+`TextEdit` is the field, caret at the end. **That changes D1041's A3 buffer**: `radius_retype` is now the
+unbound field's buffer as well as a bound chip's. `Enter` with a number typed back over the `--` writes
+`CornerRadius`; `Escape` writes nothing. 🚨 **Detached first only when a chip was typed over**
+(`field_var(key)` answering a variable — A3, D1041's door for 0); otherwise the write carries no detach
+and the commit's `keep_corner_bindings` judges each corner as it would the `DragValue`'s edit. ~~⚠️ **On
+a partly bound rectangle `detach_corners_ops` is not empty**, so a number reached through `--` detaches
+every corner, where the same number typed straight into the `DragValue` goes through
+`keep_corner_bindings` and keeps a corner written what it draws. Read in the code.~~ **Fixed before
+commit** — the first cut detached first for every field, which on a rectangle with some corners bound
+detached them all. *Do not* make the detach unconditional again: a field that shows no chip has no
+binding the user asked to drop.
+
+🚨 **A refused `Enter` keeps the field as typed.** A single-line `TextEdit` gives up the keyboard on
+`Enter` in the pass it is pressed — D1041's one pass of grace rests on exactly that — and ~~so the hex
+field drops its buffer (`paint_hex` cleared on `lost_focus`) and `radius_retype` drops `var_retype`;
+the field draws its value again and the list, no longer asked for, closes a pass later — the typed text,
+the thing B4 asks the user to correct, gone, where D1038 has `Enter` do nothing~~ the first cut let both
+fields drop their text there, read and **fixed before commit**. The hex field
+(`inspector::paint_hex_field`) now reads `refused_enter` — `lost_focus`, a refusal in the text, `Enter`
+pressed — and then hands the text to `var_retype` with `focus: true`, so the A3 path refocuses it with the
+caret at the end; it keeps `paint_hex` on that `lost_focus`, and asks `bind_typing` while focused, while
+retyped or on that pass, so the list is asked for through the `Enter` pass and the refocus. `radius_retype`,
+on `lost_focus` with a refusal and `Enter`, sets its own `focus` again, keeps `var_retype` and returns
+before the commit. ⚠️ **The older test cannot see either half**:
+`a_refused_query_says_why_and_enter_is_inert` drives `bind_typing` and `var_complete_ui` with no field,
+asking on the `Enter` pass, and asserts the list on that pass alone — it stands as it was;
+`enter_on_a_refusal_leaves_the_field_as_typed` is the one that draws the fields.
+
+**Not built**: the browser's own refusals (G14's taken name, G15's alias loop) in this manner — still
+D1040's plain sentences.
+
+**Tests** (`panels::binding::tests`, as the caller reports them). `a_whole_name_with_more_after_it_is_refused`:
+the refused byte, case aside; not refused, a name still being typed, the whole name alone or with
+trailing blanks, an unknown name, a colour's name in a number field and `--brand/500-` against `brand/500-alt` — flip, run:
+dropping the `matches(..).is_empty()` guard fails *"a longer name still matching is not refused"*.
+`a_refused_query_says_why_and_enter_is_inert`, two passes before the sentence is read, an `Area`'s first
+being egui's sizing pass — and the limit above. `enter_on_a_refusal_leaves_the_field_as_typed`: the hex
+field (`paint_hex_field`, made `pub(super)` for it) and then the radius buffer, each drawn for real with
+`var_complete_ui` every pass, seeded through `var_retype` rather than typed; three passes after `Enter`
+the buffer is the typed text and the list is up, and the fill is unchanged — flip, run: forcing
+`refused_enter` false fails *"the hex buffer is kept"*, and forcing `radius_retype`'s arm off fails *"the
+radius buffer is kept"*.
+`a_number_typed_back_keeps_a_partly_bound_rects_binding`: the top-left corner bound to *radius/md* (6),
+the rest not, `6` typed into the buffer and `Enter` — the corner stays bound; flip, run: detaching first
+for every field fails *"the bound corner written 6 stays bound"*. `a_refused_tail_is_laid_out_dim`, the
+galley's two sections and their colours; the underline is not asserted.
+`the_radius_buffer_writes_a_number_and_escape_leaves_it`, from a seeded `var_retype`. ⚠️ **No test drives
+the `DragValue`'s handoff**, which is in the inspector's corner row and rests on the same egui internal as
+D1041's read. *(Built 2026-10-14 by the session; uncommitted when recorded. **Keep** the empty-match
+guard, the handoff, the refused `Enter`'s two arms and the conditional detach; ~~***Fix*** the refused
+`Enter`~~ and the partly bound detach, both read in the first cut, **Fixed** before commit, tests and
+flips as the caller reports them. D1041 amended; `architecture.md` §5.3f; `roadmap.md` *Next · Styles and
+variables* step 1 edited down)*
+
+**D1045 — Styles and variables, build step 1's A4: layers all bound, to different variables, read
+*Mixed* in a capsule whose tooltip names them, with the chip's keys and neither a hover × nor a field
+menu. *Built 2026-10-14, uncommitted when recorded.*** D1038's A4: every selected layer bound, to
+different variables, is a capsule reading *Mixed*, its tooltip listing them; some bound and some not is
+the plain grey *Mixed* of Variants 4G, no capsule. D1041 drew a selection row as a chip only when every
+target shared one variable, and the plain row otherwise.
+
+**When.** `OndinApp::field_mixed_vars(key)` answers the distinct variables, in name order, when every
+target of a paint key is bound and there are two or more; `None` when a target is unbound (the grey
+*Mixed*, D130's) or all share one (`field_var`'s chip), and for a radius key, which names one node.
+`paint_row` asks it **ahead of** the `unknown` arm — the grey *Mixed* hex — and the *Solid* arm, unless
+the row is being typed into (`paint_hex` or a `var_retype` for its key), and draws `mixed_chip` in the
+hex's place: `binding::chip` reading *Mixed*, the names one per line its tooltip, no hover × — the chip's
+doc already gave a mixed row none.
+
+**The keys are the session's call**: D1038 rules the look and not the keys, and the capsule takes the
+single chip's. Focused, `Backspace` detaches every layer, each to what it draws (`detach_field` over the
+selection); any other key starts a literal over them all (`chip_typed`, then the hex buffer, which writes
+the literal outright, D1041); `--` binds them all to one. **No field menu**: `mixed_chip` ignores the
+chip's right-click, as `paint_hex_field` does on the grey *Mixed* row (`context-menus.md` §6.7). The
+swatch beside it opens the picker on *Solid*, `field_var` answering none; its *Variables* tab is there
+(`paint_item` answering for a `Selection` row) and a row of it binds every layer to one — so D1043's
+surviving edge, the *Solid* face writing as drawn over bound paints it cannot name, stands unchanged on
+this row.
+
+**Test** (`panels::binding::tests::layers_bound_to_different_variables_read_mixed_in_a_capsule`, as the
+caller reports it): one bound and one not answers `None`, both on one variable `None`, two variables both
+in name order; the capsule draws *Mixed*; focused, `Backspace` detaches each layer to what it drew. Flip,
+run: `> 0` for `> 1` fails *"one variable is the chip's"*. ⚠️ `paint_row`'s ordering is not driven by a
+test — the test draws `mixed_chip` directly. *(Built 2026-10-14 by the session; the keys the session's
+call; uncommitted when recorded. **Keep**. D1041 amended; `architecture.md` §5.3f; `context-menus.md`
+§6.7; `roadmap.md` *Next · Styles and variables* step 1 edited down)*
+
+**D1046 — Styles and variables, build step 1's no-scrub cursor: a bound radius field's corner badge asks
+`CursorIcon::NotAllowed` on hover. *Built 2026-10-14, uncommitted when recorded.*** D1038 (3): a bound
+field does not scrub, and the cursor says so. D1041's chip senses clicks only, so it already could not
+scrub; the cursor was owed. `radius_chip`'s badge — `icon::CORNERS_OUT`, the scrub handle while the field
+is unbound — now carries `on_hover_cursor(NotAllowed)`. **The glyph is the session's call**; D1038 names
+none. The paint row has no scrub badge, so the radius is the only bound field it reaches; each number a
+later step binds (D1038's list) owes it with its chip.
+
+**Test** (`panels::binding::tests::a_bound_radius_badge_says_it_will_not_scrub`, as the caller reports
+it): the pointer at the badge's measured centre, `(17, 14)` — the badge draws at `(10, 7)–(24, 21)` in the
+test's `ui`. Flip, run: removing the `on_hover_cursor` fails with `Default`. ⚠️ **The coordinate is
+measured, not derived**: the caller's first cut aimed below the badge and failed for that reason rather
+than the code's, and a change to `field_row`'s padding or the badge's size moves it again. *(Built
+2026-10-14 by the session; the glyph the session's call; uncommitted when recorded. **Keep**. D1041
+amended; `architecture.md` §5.3f; `roadmap.md` *Next · Styles and variables* step 1 edited down)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

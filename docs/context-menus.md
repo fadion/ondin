@@ -904,7 +904,8 @@ right-click menu before it (`decisions.md` §15 D1037, premise (iii)). ✅ **Bui
 D1041): `OndinApp::field_menu_ui` in `panels/binding.rs`, an `Area` of its own drawn with
 `ui::menu_frame` and `ui::menu_row` rather than through `open_context_menu`, closed by its act, a press
 outside it or `Escape`. **It is offered on a solid paint row's hex field (not on a *Mixed* row), on
-every bound field's chip, and on a single layer's corner-radius field** — the two fields step 1 binds;
+every bound field's chip but A4's *Mixed* capsule (§15 D1045, a *Mixed* row too), and on a single
+layer's corner-radius field** — the two fields step 1 binds;
 not yet on the several-selected radius field, the per-corner fields, or the other numbers below. Specified by the *Styles and Variables* design (C1–C2), accepted with the maintainer's rulings
 (§15 D1038); `architecture.md` §5.3f. It opens on a **bindable** field — §15 D1038 (7) and §5.3f list
 them; X, Y and rotation are not.

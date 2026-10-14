@@ -3333,7 +3333,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core, browser, field binding and *Mode* row built; §15 D1037–D1042)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core, browser, field binding, *Mode* row and swatch segment built; §15 D1037–D1046)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3343,8 +3343,9 @@ and the dashboard's 1B §15 D1017).
 > rectangle's corners, saved, resolved by every reader and carried by a paste — *What is built*, at the
 > end of this section. **Of the chrome, the browser is** (2026-10-14, §15 D1040), and **so is binding a
 > field** — the chip, the `--` list, the field menu and *Extract* (2026-10-14, §15 D1041) — **and a
-> frame's *Mode* row** (2026-10-14, §15 D1042), but not the swatch popup's segment or the *Mixed*
-> capsule; the build order and what is open are `roadmap.md`'s
+> frame's *Mode* row** (2026-10-14, §15 D1042), **and the swatch popup's *Variables* segment**
+> (2026-10-14, §15 D1043), **and B4's refusal, the *Mixed* capsule and the no-scrub cursor** (2026-10-14,
+> §15 D1044–D1046); the build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
 
@@ -3468,7 +3469,7 @@ group is everything before a name's last `/`** (`variable::split_name`), each di
 header, so a subgroup is a header of its own. A usage count is the layers whose own fields read the
 variable, **not through an alias** (`variable::users`). Cells edit in place — `Enter` or a defocus
 commits, `Escape` abandons, `Tab` moves to the next mode — and **an alias is typed as `--name`**, the
-session's call while the swatch popup's segment is unbuilt. **Deleting goes through core verbs that put
+session's call while no colour cell opens the swatch popup's segment. **Deleting goes through core verbs that put
 the detaches in the deleting transaction**, the commit refusing a bare removal: `variable::remove_ops`
 detaches each bound field to what it drew and each alias to what it resolved to, `remove_mode_ops`
 returns the frames to *Inherit*. A first variable brings the document's first mode with it. ⚠️ **Not
@@ -3484,13 +3485,24 @@ left, its tooltip *name · value · Mode*, a hover × detaching. Focused, **it c
 field's own buffer as the start of a literal. A paint row's swatch shows the resolved colour and **its `%`
 is the binding's alpha**; **a hex typed over a binding writes the literal outright** (`build::set_brush_at_all`),
 never through `edited_brush`'s *as drawn* reading. A selection row is a chip only when every target
-shares one variable. **`--` typed into either field opens the one list the app has**, which the field
-re-asks for every pass and which closes a pass after it stops; it lists the field's kind by substring,
-previews a paint's highlight live (a corner's cannot, `absorb` refusing `SetCornerVars`), and is a rung of
-`Escape`. **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one transaction — the
-variable, a first mode if the document has none, and the bind — and then the browser renames it, with
-no pending row or dashed capsule. ⚠️ **Not yet D1038's**: the swatch popup's *Variables* segment, the
-*Mixed* capsule across different bindings, B4's refusal manner and per-corner chips.
+shares one variable; **every target bound, to different variables, is A4's *Mixed* capsule**
+(`field_mixed_vars`, §15 D1045), its tooltip the names, with the chip's keys and no hover × or field
+menu; some bound and some not stays the grey *Mixed*. **`--` typed into either field opens the one list
+the app has**, which the field re-asks for every pass and which closes a pass after it stops; it lists
+the field's kind by substring, previews a paint's highlight live (a corner's cannot, `absorb` refusing
+`SetCornerVars`), and is a rung of `Escape`. **A whole name with more after it is B4's refusal**
+(`binding::refused`, §15 D1044), asked only once nothing matches, so a name that begins a longer one is
+still being typed: the list becomes one sentence saying what to remove, and the field dims the refused
+tail over a dotted underline (`refusal_galley`, `underline_refusal`). The radius `DragValue` lays out its
+own text, so it hands `--` to the chip's retype buffer, which is the unbound field's buffer too and
+detaches the corners before its write only when a chip was typed over — otherwise
+`keep_corner_bindings` judges each corner, as for the `DragValue`'s edit. **A refused `Enter` leaves
+either field as typed** — focused, its list up — though the `TextEdit` gives the keyboard up on it: the
+hex field sends its text back through the retype buffer to be refocused, and `radius_retype` keeps its
+buffer. A bound radius field's badge asks the not-allowed cursor, saying it will
+not scrub (§15 D1046). **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one
+transaction — the variable, a first mode if the document has none, and the bind — and then the browser
+renames it, with no pending row or dashed capsule. ⚠️ **Not yet D1038's**: per-corner chips.
 *Extract* files a solid at full alpha, the `%` staying the bind's. ⚠️ **Read and owed** (§15 D1041's
 *Fix*): the radius field's override mark compares literals only, its ↺ dropping a main's binding.
 
@@ -3505,6 +3517,19 @@ draws there. A plain frame's canvas tag appends *· ‹mode›* when it sets one
 elides, so H5's *"the name elides first"* has nothing to act on; and a copy's own mode, an override
 `reset::overrides` already finds, draws no dot or ↺ on the row (§15 D1042's *Fix*). Modes have no
 glyph of their own, being named by the user, where the mockup draws a sun and a moon.
+
+**The swatch popup's segment** (§15 D1043 in full): the colour picker carries a fourth tab, *Variables*,
+on a slot a variable can bind (`binding::paint_item` — a `Fill`, a `Stroke`, a `Selection` row), and the
+picker's pinned width is 272, E1's, to fit it. **A bound paint opens on it**; a click on it over an
+unbound paint shows it and writes nothing. The face (`OndinApp::variables_face`) is a search and every
+colour variable under its group's header, each row a swatch, the elided name and the hex in the layer's
+mode, the current one checked and scrolled to; a click binds, keeping the `%`, and it fills the *Solid*
+face's height. 🚨 ***Solid* over a binding detaches** (`detach_field`) rather than writing the drawn
+colour through `edited_brush`, which would keep the binding; *Linear* and *Radial* convert the drawn
+brush, which detaches. ⚠️ **Not yet D1038's**: the kit group, a row's hover preview, and a browser cell
+opening the popup. ⚠️ **The *Solid* face still opens over bound paints it cannot name** — a selection row
+whose targets disagree, and the *All* row, which has no *Variables* tab — and there writes as drawn,
+keeping a binding for its own colour and clamping a `%` above the variable's alpha.
 
 ### 5.4 Text node
 
@@ -8430,7 +8455,7 @@ ondin-app/src/
                   #   (+ pen_path, map_subpaths, rewrite_path)
 ├─ panels/         # layers.rs   docked layers tree (multi-drag reorder/reparent, rename, filter)
 │                  # inspector.rs floating, individually collapsible property panels
-│                  # picker.rs    the detached colour picker (solid / linear / radial)
+│                  # picker.rs    the detached colour picker (solid / linear / radial / variables)
 │                  # paint.rs     pure Brush algebra shared by the two + the list-generic reorder
 │                  #              (PaintList, PaintDrag, Slots, display_order, landing, reordered)
 ├─ ui.rs           # shared chrome widgets (cards, fields, segmented controls, colour ramps, Hsv,

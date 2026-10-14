@@ -1603,9 +1603,9 @@ edited down to this the same day.*
 
 ## Next · Styles and variables
 
-**Ruled 2026-10-11 and 2026-10-13; step 1's core, browser and field binding built 2026-10-14** — §15
-D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the maintainer's
-rulings on D1037's open questions, and §15 D1039–D1041 what is built; `architecture.md` §5.3f is the section. Variables are typed
+**Ruled 2026-10-11 and 2026-10-13; step 1's core, browser, field binding and *Mode* row built
+2026-10-14** — §15 D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
+maintainer's rulings on D1037's open questions, and §15 D1039–D1042 what is built; `architecture.md` §5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
 whole set of values, read-only in the inspector and detached by any other door's edit.
@@ -1618,12 +1618,16 @@ accepted (D1038):
    corners and a frame's mode, v7, every reader resolving, the paste rule), and **so is the browser**
    (§15 D1040: the panel, `Shift+S`, the table and its in-place edits, the menus, and the delete-variable
    and delete-mode verbs), and **so is binding a field** (§15 D1041: the chip, the `--` list, the field
-   menu, *Extract*, and the commit-time pass that detaches a radius written over a bound corner). **What
+   menu, *Extract*, and the commit-time pass that detaches a radius written over a bound corner), and **so
+   is a frame's *Mode* row** with its canvas tag's suffix (§15 D1042). **What
    is left is the rest of the inspector's half**, the browser's leftovers, and what the builds leave:
    - the swatch popup's *Variables* segment; the *Mixed* capsule for layers bound to different
      variables (A4); B4's refusal manner in the `--` list (`--x * 2` matches nothing today); per-corner
-     chips; the cursor saying a bound field does not scrub; the frame's *Mode* row and the canvas label's
-     suffix;
+     chips; the cursor saying a bound field does not scrub;
+   - what the *Mode* row (§15 D1042) left: the mode on a main's chip, a set's tab and an instance's tag,
+     only a plain frame's naming it; H5's elision, the name first and never the mode, no tag eliding
+     today; and **D1042's *Fix***, the dot and ↺ on a copy's own mode, which `reset::overrides` finds and
+     the row does not draw;
    - the `--` list's live preview **for a corner**, which meets `absorb`'s refusal of `SetCornerVars` —
      a preview of the used kind or a patch is owed (a paint's previews);
    - *Extract*'s pending row and dashed capsule, D1041 having built it as one transaction and a rename;
@@ -1665,7 +1669,8 @@ previewed cell draws the committed value; D1038 commits a cell on `Enter`, so no
 and (v) struck the same day, built in §15 D1039; the browser, `Shift+S` and the delete verbs struck the
 same day, built in §15 D1040; the chip, the `--` list, the field menu, *Extract*, premise (iii), the
 corner writes, the retyped-hex edge, *Extract*'s alpha, the per-corner detach and the literal-built
-writers struck the same day, built or fixed in §15 D1041.*
+writers struck the same day, built or fixed in §15 D1041; the frame's *Mode* row and the canvas label's
+suffix struck the same day, built in §15 D1042.*
 
 ## Next · The polishing pass over the accepted calls
 

@@ -10038,6 +10038,12 @@ impl OndinApp {
                 if clashing { 4.0 } else { 0.0 },
                 egui::Color32::PLACEHOLDER,
             );
+            // **A mode the frame sets is named after it**, *Hero / Desktop ·
+            // Dark* (D1038 (a), H5; §15 D1042); an inherited one stays off the
+            // canvas.
+            if let Some(m) = node.mode().and_then(|m| doc.variables().mode(m)) {
+                words(&mut job, &format!("· {}", m.name), 4.0, color::text_a(179));
+            }
         }
         let galley = ui.painter().layout_job(job);
         let size = galley.size();
@@ -21436,6 +21442,58 @@ mod frame_menu_door_tests {
         );
         assert!(app.session.commit(tx));
         made[0]
+    }
+
+    /// **A frame's tag names the mode it sets, after its name, and not one it
+    /// inherits** (D1038 (a), H5; §15 D1042): *Board · Dark* once the frame sets
+    /// Dark, and the bare name while it reads the default.
+    #[test]
+    fn a_frames_tag_names_the_mode_it_sets_and_not_one_it_inherits() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, frame) = app_with_an_occupied_frame(&ctx);
+        let (light, dark) = (app.session.ids.mint_mode(), app.session.ids.mint_mode());
+        let mode = |id, name: &str| ondin_core::Mode {
+            id,
+            name: name.into(),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: mode(light, "Light"),
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddMode {
+                mode: mode(dark, "Dark"),
+                index: 1,
+                cells: vec![],
+            },
+        ])));
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let tag = |app: &OndinApp| {
+            let mut out = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    let (_, g) = app.frame_label(ui, frame, rect, 1.0).expect("a tag");
+                    out = Some(g.text().to_string());
+                },
+            );
+            out.expect("the closure ran")
+        };
+        assert!(
+            !tag(&app).contains('·'),
+            "an inherited mode stays off the canvas"
+        );
+        assert!(app.session.commit(Transaction(vec![Operation::SetMode {
+            id: frame,
+            mode: Some(dark),
+        }])));
+        assert!(tag(&app).ends_with("· Dark"), "{:?}", tag(&app));
     }
 
     /// **A main's tag is a chip with the filled hexagon, an instance's names its

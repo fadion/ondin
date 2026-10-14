@@ -1613,6 +1613,179 @@ fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
     );
 }
 
+/// The mode frame `id` inherits when it sets none — the nearest ancestor frame's
+/// that sets one, and that frame, else the document's default (D1038 (a)).
+pub(crate) fn inherited_mode(doc: &Document, id: NodeId) -> Option<(ModeId, Option<NodeId>)> {
+    let mut at = doc.get(id)?.parent();
+    while let Some(p) = at {
+        let n = doc.get(p)?;
+        if let Some(m) = n.mode() {
+            return Some((m, Some(p)));
+        }
+        at = n.parent();
+    }
+    Some((doc.variables().default_mode()?, None))
+}
+
+impl OndinApp {
+    /// A frame's *Mode* row, in its identity card under its name (D1038 (a); §15
+    /// D1042): set, the mode reads bright; inherited, dim and naming its source —
+    /// *Light · from Hero / Desktop*, *Light · default*. A click opens the menu,
+    /// *Inherit* first. Drawn only for a frame, and only in a document that has
+    /// a mode to set.
+    pub(crate) fn frame_mode_row(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        let doc = &self.session.doc;
+        let Some(node) = doc.get(id) else { return };
+        if !matches!(node.kind(), ondin_core::NodeKind::Artboard { .. }) {
+            return;
+        }
+        let table = doc.variables();
+        if table.modes().is_empty() {
+            return;
+        }
+        let (value, suffix, set) = match node.mode().and_then(|m| table.mode(m)) {
+            Some(m) => (m.name.clone(), None, true),
+            None => {
+                let Some((m, from)) = inherited_mode(doc, id) else {
+                    return;
+                };
+                let name = table.mode(m).map(|m| m.name.clone()).unwrap_or_default();
+                let from = match from.and_then(|f| doc.get(f)) {
+                    Some(f) => format!("· from {}", f.name()),
+                    None => "· default".into(),
+                };
+                (name, Some(from), false)
+            }
+        };
+        let open = self.mode_menu.is_some_and(|(n, _)| n == id);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            let (label, _) = ui.allocate_exact_size(egui::vec2(48.0, 28.0), egui::Sense::hover());
+            ui.painter().text(
+                label.left_center(),
+                egui::Align2::LEFT_CENTER,
+                "Mode",
+                egui::FontId::proportional(10.5),
+                theme::text::DIM,
+            );
+            let w = ui.available_width();
+            let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
+            let p = ui.painter();
+            let border = if open {
+                color::ACCENT.gamma_multiply(0.65)
+            } else if resp.hovered() {
+                color::text_a(38)
+            } else {
+                color::text_a(20)
+            };
+            p.rect(
+                rect,
+                5,
+                color::text_a(13),
+                egui::Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+            let ink = if set { color::TEXT } else { color::text_a(128) };
+            let galley = p.layout_no_wrap(value, egui::FontId::proportional(12.0), ink);
+            let x = rect.left() + 9.0;
+            let gw = galley.size().x;
+            p.galley(
+                egui::pos2(x, rect.center().y - galley.size().y / 2.0),
+                galley,
+                ink,
+            );
+            if let Some(s) = suffix {
+                p.text(
+                    egui::pos2(x + gw + 5.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    s,
+                    egui::FontId::proportional(10.5),
+                    color::text_a(89),
+                );
+            }
+            p.text(
+                egui::pos2(rect.right() - 9.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                icon::CARET_DOWN,
+                egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
+                theme::text::DIM,
+            );
+            let resp = resp.on_hover_text(if set {
+                "The mode this frame sets for itself and everything in it"
+            } else {
+                "Inherited — pick a mode to set one for this frame and everything in it"
+            });
+            if resp.clicked() {
+                self.mode_menu = if open { None } else { Some((id, rect)) };
+            }
+        });
+    }
+
+    /// The *Mode* menu: *Inherit* with the mode it would inherit, then every
+    /// mode, the frame's own checked (H1).
+    pub(crate) fn mode_menu_ui(&mut self, ctx: &egui::Context) {
+        let Some((id, under)) = self.mode_menu else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let Some(node) = doc.get(id) else {
+            self.mode_menu = None;
+            return;
+        };
+        let table = doc.variables();
+        let modes: Vec<Mode> = table.modes().to_vec();
+        let current = node.mode();
+        let inherits = inherited_mode(doc, id)
+            .and_then(|(m, _)| table.mode(m))
+            .map(|m| m.name.clone());
+        let w = under.width().max(200.0);
+        let size = egui::vec2(w, (modes.len() as f32 + 1.0) * MENU_ROW_H + 18.0);
+        let pos = ui::menu_place(ctx, under.left_bottom() + egui::vec2(0.0, 4.0), size);
+        let mut pick: Option<Option<ModeId>> = None;
+        let rect = egui::Area::new(egui::Id::new("frame-mode-menu"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(4.0).show(ui, |ui| {
+                    ui.set_width(w - 8.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let inherit = ui::MenuRow::new(icon::ARROW_ELBOW_LEFT_UP, "Inherit")
+                        .accel(inherits.as_deref())
+                        .checked(current.is_none());
+                    if ui::menu_row(ui, inherit, MENU_ROW_H).clicked() {
+                        pick = Some(None);
+                    }
+                    ui::menu_sep(ui);
+                    for m in &modes {
+                        let row =
+                            ui::MenuRow::new(icon::COLUMNS, &m.name).checked(current == Some(m.id));
+                        if ui::menu_row(ui, row, MENU_ROW_H).clicked() {
+                            pick = Some(Some(m.id));
+                        }
+                    }
+                });
+            })
+            .response
+            .rect;
+        if let Some(mode) = pick {
+            self.mode_menu = None;
+            if mode != current {
+                self.commit_edit(Transaction(vec![Operation::SetMode { id, mode }]));
+            }
+            return;
+        }
+        let away = ctx.input(|i| {
+            i.pointer.any_pressed()
+                && i.pointer
+                    .interact_pos()
+                    .is_some_and(|p| !rect.contains(p) && !under.contains(p))
+        });
+        if away {
+            self.mode_menu = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1843,6 +2016,52 @@ mod tests {
         );
         app.escape(&ctx);
         assert!(app.var_browser.is_none(), "then the browser");
+    }
+
+    /// **A frame inherits from the nearest ancestor frame that sets a mode, else
+    /// the default** (D1038 (a)) — what the *Mode* row names, *from Outer* or
+    /// *default*. The row and its menu are not drawn here; this pins what they
+    /// read.
+    #[test]
+    fn a_frame_inherits_from_the_nearest_frame_that_sets_a_mode() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewMode);
+        let modes: Vec<ModeId> = app
+            .session
+            .doc
+            .variables()
+            .modes()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        let (outer, inner) = (app.session.ids.mint(), app.session.ids.mint());
+        let root = app.session.doc.root();
+        let frame = |id, parent| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: ondin_core::NodeKind::Artboard {
+                size: Size::new(50.0, 50.0),
+            },
+            transform: None,
+            name: None,
+        };
+        assert!(app.commit_edit(Transaction(vec![frame(outer, root), frame(inner, outer)])));
+        let doc = &app.session.doc;
+        assert_eq!(
+            inherited_mode(doc, inner),
+            Some((modes[0], None)),
+            "the default"
+        );
+        assert!(app.commit_edit(Transaction(vec![Operation::SetMode {
+            id: outer,
+            mode: Some(modes[1]),
+        }])));
+        let doc = &app.session.doc;
+        assert_eq!(inherited_mode(doc, inner), Some((modes[1], Some(outer))));
+        assert_eq!(doc.mode_at(inner), Some(modes[1]));
     }
 
     /// The panel is 340 wide with one mode and 436 with two (G2), and draws

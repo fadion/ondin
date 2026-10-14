@@ -2260,6 +2260,8 @@ impl OndinApp {
                     }
                 });
             });
+            // A frame's *Mode*, under its name (D1038 (a); §15 D1042).
+            self.frame_mode_row(ui, id);
             // The design's second row, inside the same card.
             self.identity_boolean_row(ui);
             // What the layer is inside a component — *In Card instance*, *Local to

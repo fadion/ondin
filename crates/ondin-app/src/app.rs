@@ -1368,6 +1368,8 @@ pub struct OndinApp {
     /// A bindable field's right-click menu: the field, the point, the field's
     /// rect the `--` list would hang under (`context-menus.md` §6.7).
     pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
+    /// A frame's *Mode* menu, open under its row (D1038 (a); §15 D1042).
+    pub(crate) mode_menu: Option<(NodeId, egui::Rect)>,
     /// The publish dialog, while it is open (§5.3e, 2B; §15 D1015).
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
     /// This kit's changes since its last publish, with the session revision and
@@ -2379,6 +2381,7 @@ impl OndinApp {
             var_complete: None,
             var_retype: None,
             field_menu: None,
+            mode_menu: None,
             publishing: None,
             kit_changes: None,
             making_local: None,
@@ -2893,6 +2896,7 @@ impl eframe::App for OndinApp {
             self.var_browser_ui(&ctx);
             self.field_menu_ui(&ctx);
             self.var_complete_ui(&ctx);
+            self.mode_menu_ui(&ctx);
         }
         // 🚨 **The kit dialogs are outside the `!present` guard**, because two
         // of their doors are not hidden by present mode: `Ctrl+Alt+P` opens the
@@ -3725,7 +3729,10 @@ impl OndinApp {
         if self.present {
             self.present = false;
             self.session.info("Left present mode");
-        } else if self.field_menu.take().is_some() || self.var_complete.take().is_some() {
+        } else if self.field_menu.take().is_some()
+            || self.var_complete.take().is_some()
+            || self.mode_menu.take().is_some()
+        {
             // A bindable field's menu and its `--` list (§15 D1041) float over
             // everything, and the list's `Escape` restores what it previewed.
             self.var_retype = None;
@@ -7666,6 +7673,7 @@ impl OndinApp {
         self.var_complete = None;
         self.var_retype = None;
         self.field_menu = None;
+        self.mode_menu = None;
         // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
         // sets it again after the open that cleared it.
         self.kit_return = None;

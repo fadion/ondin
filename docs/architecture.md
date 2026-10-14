@@ -3333,7 +3333,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core, browser and field binding built; §15 D1037–D1041)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core, browser, field binding and *Mode* row built; §15 D1037–D1042)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3342,8 +3342,9 @@ and the dashboard's 1B §15 D1017).
 > (2026-10-14, §15 D1039): colour and number variables with aliases and modes, bound to paint and a
 > rectangle's corners, saved, resolved by every reader and carried by a paste — *What is built*, at the
 > end of this section. **Of the chrome, the browser is** (2026-10-14, §15 D1040), and **so is binding a
-> field** — the chip, the `--` list, the field menu and *Extract* (2026-10-14, §15 D1041) — but not the
-> swatch popup's segment, the *Mixed* capsule or the *Mode* row; the build order and what is open are `roadmap.md`'s
+> field** — the chip, the `--` list, the field menu and *Extract* (2026-10-14, §15 D1041) — **and a
+> frame's *Mode* row** (2026-10-14, §15 D1042), but not the swatch popup's segment or the *Mixed*
+> capsule; the build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
 
@@ -3489,9 +3490,21 @@ previews a paint's highlight live (a corner's cannot, `absorb` refusing `SetCorn
 `Escape`. **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one transaction — the
 variable, a first mode if the document has none, and the bind — and then the browser renames it, with
 no pending row or dashed capsule. ⚠️ **Not yet D1038's**: the swatch popup's *Variables* segment, the
-*Mixed* capsule across different bindings, B4's refusal manner, per-corner chips and the *Mode* row.
+*Mixed* capsule across different bindings, B4's refusal manner and per-corner chips.
 *Extract* files a solid at full alpha, the `%` staying the bind's. ⚠️ **Read and owed** (§15 D1041's
 *Fix*): the radius field's override mark compares literals only, its ↺ dropping a main's binding.
+
+**A frame's mode** (§15 D1042 in full) is `OndinApp::frame_mode_row`, in the identity card under the
+name row, drawn on an `Artboard` only and only in a document that has a mode: set, the mode's name
+bright; inherited, dim, with *· from ‹frame›* or *· default*. A click opens `mode_menu_ui` — *Inherit*,
+naming what it would inherit, then every mode — and a pick is one `SetMode`; the menu is a rung of
+`Escape`. 🚨 **What the row inherits is `variables::inherited_mode`, which starts at the parent**, where
+`Document::mode_at` counts the node itself: the row asks what the frame would read unset, `mode_at` what
+draws there. A plain frame's canvas tag appends *· ‹mode›* when it sets one, never an inherited one.
+⚠️ **Not yet D1038's**: a main's chip, a set's tab and an instance's tag do not show the mode; no tag
+elides, so H5's *"the name elides first"* has nothing to act on; and a copy's own mode, an override
+`reset::overrides` already finds, draws no dot or ↺ on the row (§15 D1042's *Fix*). Modes have no
+glyph of their own, being named by the user, where the mockup draws a sun and a moon.
 
 ### 5.4 Text node
 

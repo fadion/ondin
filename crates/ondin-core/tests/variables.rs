@@ -478,6 +478,102 @@ fn a_paste_keeps_rebinds_or_detaches() {
     bare.clone().apply(&tx).expect("a detached paste lands");
 }
 
+/// **A property paste follows a paste's rule** (§15 D1047): copied off a fill
+/// bound to *brand/500* at 50% in Dark, it stays bound in the same document,
+/// rebinds to another document's *brand/500*, and detaches to the navy it drew
+/// where there is none — each landing a commit accepts. Until D1047 the binding
+/// was carried verbatim and the commit refused it anywhere but at home.
+///
+/// Flip, run: carrying the bound brush verbatim fails at *"lands rebound"* —
+/// `BadBinding`, the commit's refusal this closes — before the predicted
+/// *"rebound to theirs"* is reached.
+#[test]
+fn a_property_paste_keeps_rebinds_or_detaches() {
+    let mut f = fixture();
+    bind_fill(&mut f.doc, f.rect, f.brand, 0.5);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    let props = ondin_core::build::properties_of(&f.doc, f.rect).unwrap();
+
+    let target = |doc: &mut Document, ids: &mut IdSource| {
+        let id = ids.mint();
+        let root = doc.root();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+        id
+    };
+    let fill0 = |doc: &Document, id: NodeId| doc.get(id).unwrap().paint().fills[0].brush.clone();
+
+    // The same document: kept, `%` and all.
+    let mut ids = IdSource::new(0xCE);
+    let here = target(&mut f.doc, &mut ids);
+    let tx = ondin_core::build::paste_properties(&f.doc, &[here], &props, &mut ids);
+    f.doc.apply(&tx).expect("lands at home");
+    assert_eq!(
+        fill0(&f.doc, here),
+        BrushSource::Bound {
+            var: f.brand,
+            alpha: 0.5
+        }
+    );
+
+    // Another document holding a `brand/500` colour of its own.
+    let mut other = Document::new(ids.mint());
+    let (m, theirs) = (ids.mint_mode(), ids.mint_var());
+    other
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: mode(m, "Default"),
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: theirs,
+                    name: "brand/500".into(),
+                    kind: VarKind::Color,
+                    cells: [(m, Cell::Color(RED))].into(),
+                },
+            },
+        ]))
+        .unwrap();
+    let there = target(&mut other, &mut ids);
+    let tx = ondin_core::build::paste_properties(&other, &[there], &props, &mut ids);
+    other.apply(&tx).expect("lands rebound");
+    assert_eq!(
+        fill0(&other, there),
+        BrushSource::Bound {
+            var: theirs,
+            alpha: 0.5
+        },
+        "rebound to theirs"
+    );
+
+    // A document with none: detached to what it drew — navy at 50%.
+    let mut bare = Document::new(ids.mint());
+    let nowhere = target(&mut bare, &mut ids);
+    let tx = ondin_core::build::paste_properties(&bare, &[nowhere], &props, &mut ids);
+    bare.apply(&tx).expect("lands detached");
+    assert_eq!(
+        fill0(&bare, nowhere),
+        BrushSource::Literal(Brush::Solid(NAVY.multiply_alpha(0.5)))
+    );
+}
+
 /// **An instance's binding is an override compared by the binding** (§5.3d): a
 /// main rebinding *brand* → *accent* reaches a copy still bound to *brand*, and
 /// a copy bound elsewhere keeps its own.

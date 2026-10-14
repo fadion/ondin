@@ -1080,10 +1080,10 @@ fn a_group_has_no_properties_to_copy_and_a_frame_does() {
     f.paint(shape, vec![solid_fill(RED)], vec![solid_stroke(BLUE)]);
 
     assert!(
-        build::properties_of(f.doc.get(group).unwrap()).is_none(),
+        build::properties_of(&f.doc, group).is_none(),
         "a group's empty paint list is not an appearance — pasting it would clear"
     );
-    assert!(build::properties_of(f.doc.get(shape).unwrap()).is_some());
+    assert!(build::properties_of(&f.doc, shape).is_some());
 
     // A frame is the container that *is* a thing, and it carries an ordinary fill
     // list, so its colour can be handed to a rectangle. This used to go through a
@@ -1096,7 +1096,7 @@ fn a_group_has_no_properties_to_copy_and_a_frame_does() {
             visible: true,
         }]),
     }]));
-    let props = build::properties_of(f.doc.get(f.artboard).unwrap()).expect("a frame has paint");
+    let props = build::properties_of(&f.doc, f.artboard).expect("a frame has paint");
     assert_eq!(props.fills.len(), 1);
     assert_eq!(props.fills[0].brush, Brush::Solid(GREEN).into());
 }
@@ -1131,7 +1131,7 @@ fn pasting_properties_paints_through_a_group_and_fades_only_the_group() {
     f.paint(a, vec![solid_fill(BLUE)], vec![]);
     f.paint(b, vec![solid_fill(BLUE)], vec![]);
 
-    let props = build::properties_of(f.doc.get(source).unwrap()).unwrap();
+    let props = build::properties_of(&f.doc, source).unwrap();
     let tx = build::paste_properties(&f.doc, &[group], &props, &mut f.ids);
     f.commit(tx);
 
@@ -1171,7 +1171,7 @@ fn pasting_the_properties_a_layer_already_has_is_not_an_edit() {
         f.paint(id, vec![solid_fill(RED)], vec![solid_stroke(BLUE)]);
     }
 
-    let props = build::properties_of(f.doc.get(a).unwrap()).unwrap();
+    let props = build::properties_of(&f.doc, a).unwrap();
     assert!(
         build::paste_properties(&f.doc, &[b], &props, &mut f.ids)
             .0

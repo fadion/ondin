@@ -6072,7 +6072,7 @@ impl OndinApp {
     pub(crate) fn properties_source(&self) -> Option<(NodeId, build::Properties)> {
         let sel = &self.session.selection;
         let id = sel.key().or_else(|| sel.single())?;
-        let props = build::properties_of(self.session.doc.get(id)?)?;
+        let props = build::properties_of(&self.session.doc, id)?;
         Some((id, props))
     }
 

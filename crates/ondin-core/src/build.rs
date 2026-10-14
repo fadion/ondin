@@ -3643,7 +3643,8 @@ pub fn retarget_strokes_all(
 /// same one — the payload behind *Copy properties* / *Paste properties*
 /// (`docs/context-menus.md` §3's Properties group, `docs/shortcuts.md` §7).
 ///
-/// **Three fields, and what is *not* here is the decision.** Position, size,
+/// **Three appearance fields, and what is *not* here is the decision** — the
+/// other three carry the bindings across documents (§15 D1047). Position, size,
 /// rotation, the name, the pivot and the lock are all excluded, because the verb
 /// is "make this look like that" and every one of those is about *which layer this
 /// is* rather than how it is drawn — Figma draws the same line. Geometry is
@@ -3665,6 +3666,14 @@ pub struct Properties {
     pub fills: Vec<Fill>,
     pub strokes: Vec<Stroke>,
     pub opacity: f32,
+    /// **What a bound paint needs to land in another document** (§15 D1047):
+    /// the name and kind of every variable the fills and strokes bind, and each
+    /// paint as it drew in the copying document — the detach a paste falls back
+    /// to. The clipboard is the app's and outlives a document switch, so a paste
+    /// cannot ask the copying document for either.
+    pub carried: Vec<crate::variable::CarriedVar>,
+    pub drawn_fills: Vec<Brush>,
+    pub drawn_strokes: Vec<Brush>,
 }
 
 /// A layer's appearance, or `None` for a kind that has none to give.
@@ -3675,15 +3684,45 @@ pub struct Properties {
 /// paste as an instruction to *clear* whatever it landed on. Its opacity is real
 /// and is deliberately not a reason to allow it — one field is not an appearance,
 /// and the Transform card already has that number.
-pub fn properties_of(node: &Node) -> Option<Properties> {
+pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
+    let node = doc.get(id)?;
     // One predicate, not a predicate and a frame-shaped `||` beside it (§15 D400).
     if !node.kind().takes_paint() {
         return None;
     }
+    let fills = crate::item::values(&node.paint().fills);
+    let strokes = crate::item::values(&node.paint().strokes);
+    let t = doc.variables();
+    let mut carried: Vec<crate::variable::CarriedVar> = Vec::new();
+    for v in fills
+        .iter()
+        .map(|f| &f.brush)
+        .chain(strokes.iter().map(|s| &s.brush))
+        .filter_map(crate::BrushSource::var)
+    {
+        if let Some(var) = t.get(v)
+            && !carried.iter().any(|c| c.id == v)
+        {
+            carried.push(crate::variable::CarriedVar {
+                id: v,
+                name: var.name.clone(),
+                kind: var.kind,
+            });
+        }
+    }
     Some(Properties {
-        fills: crate::item::values(&node.paint().fills),
-        strokes: crate::item::values(&node.paint().strokes),
+        drawn_fills: fills
+            .iter()
+            .map(|f| doc.resolve_brush(id, &f.brush).into_owned())
+            .collect(),
+        drawn_strokes: strokes
+            .iter()
+            .map(|s| doc.resolve_brush(id, &s.brush).into_owned())
+            .collect(),
+        fills,
+        strokes,
         opacity: node.opacity(),
+        carried,
     })
 }
 
@@ -3700,14 +3739,54 @@ pub fn properties_of(node: &Node) -> Option<Properties> {
 ///
 /// Each of the three drops the targets that already agree, so pasting the
 /// properties a layer already has produces an empty transaction and no undo step.
+///
+/// **A bound paint lands by a paste's rule** (D1038, §15 D1047): kept where this
+/// document has the variable — a paste into the document it was copied from —
+/// else rebound to this document's variable of the same name and kind
+/// ([`crate::variable::rebind`], the rule [`crate::variable::land`] uses), else
+/// detached to what it drew at the copy. Until D1047 the bindings were carried
+/// verbatim, and a paste into another document was refused at the commit.
 pub fn paste_properties(
     doc: &Document,
     ids: &[NodeId],
     props: &Properties,
     src: &mut IdSource,
 ) -> Transaction {
-    let mut ops = set_fills_all(doc, ids, &props.fills, src).0;
-    ops.extend(set_strokes_all(doc, ids, &props.strokes, src).0);
+    let t = doc.variables();
+    let landed = |b: &crate::BrushSource, drawn: Option<&Brush>| -> crate::BrushSource {
+        match b {
+            crate::BrushSource::Bound { var, alpha } => {
+                match crate::variable::rebind(t, &props.carried, *var) {
+                    Some(var) => crate::BrushSource::Bound { var, alpha: *alpha },
+                    None => drawn
+                        .cloned()
+                        .unwrap_or(Brush::Solid(peniko::Color::TRANSPARENT))
+                        .into(),
+                }
+            }
+            literal => literal.clone(),
+        }
+    };
+    let fills: Vec<Fill> = props
+        .fills
+        .iter()
+        .enumerate()
+        .map(|(i, f)| Fill {
+            brush: landed(&f.brush, props.drawn_fills.get(i)),
+            ..f.clone()
+        })
+        .collect();
+    let strokes: Vec<Stroke> = props
+        .strokes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| Stroke {
+            brush: landed(&s.brush, props.drawn_strokes.get(i)),
+            ..s.clone()
+        })
+        .collect();
+    let mut ops = set_fills_all(doc, ids, &fills, src).0;
+    ops.extend(set_strokes_all(doc, ids, &strokes, src).0);
     ops.extend(set_opacity_all(doc, ids, props.opacity).0);
     Transaction(ops)
 }

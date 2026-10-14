@@ -468,6 +468,23 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
     out
 }
 
+/// D1038's paste rule for one binding, landing in table `t`: `v` itself where
+/// `t` has it at the kind the copy knew, else `t`'s variable of the same name and
+/// kind, else `None` — the caller detaches. Shared by [`land`] and a property
+/// paste (`build::paste_properties`, §15 D1047), so the two cannot drift.
+pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId) -> Option<VarId> {
+    let known = carried.iter().find(|c| c.id == v);
+    if let Some(var) = t.get(v)
+        && known.is_none_or(|c| c.kind == var.kind)
+    {
+        return Some(v);
+    }
+    let c = known?;
+    t.by_name(&c.name)
+        .filter(|var| var.kind == c.kind)
+        .map(|var| var.id)
+}
+
 /// `nodes` — copied layers carrying `carried` — rebound for a paste into `doc`
 /// (D1038): each binding kept where `doc` has the variable itself (a paste into
 /// the document it came from), else rebound to `doc`'s variable of the **same
@@ -478,18 +495,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
 /// keeps a binding beside a corner whose variable has none.
 pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -> Vec<crate::Node> {
     let t = doc.variables();
-    let rebind = |v: VarId| -> Option<VarId> {
-        let known = carried.vars.iter().find(|c| c.id == v);
-        if let Some(var) = t.get(v)
-            && known.is_none_or(|c| c.kind == var.kind)
-        {
-            return Some(v);
-        }
-        let c = known?;
-        t.by_name(&c.name)
-            .filter(|var| var.kind == c.kind)
-            .map(|var| var.id)
-    };
+    let rebind = |v: VarId| rebind(t, &carried.vars, v);
     nodes
         .into_iter()
         .map(|mut n| {

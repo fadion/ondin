@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1038 index rows, 1038 body headings, next free
-D1039** (measured 2026-10-14 at `2c4c786` plus the uncommitted record; ⚠️ **the styles-and-variables
+anywhere cited either. **The live figures: 1042 index rows, 1042 body headings, next free
+D1043** (measured 2026-10-14 at `5e14af1`; ⚠️ **the styles-and-variables build step 1 request
+reserved D1039–D1048 at `66a5afd` through the `dnumber-guard` mod and spent four**, one per build
+commit — D1039 the core (the variables table, `BrushSource`, corner bindings, frame modes,
+schema v7, the paste rule; `a23b53a`), D1040 the browser on `Shift+S` (`155846e`), D1041 the
+inspector's bindings — the chip, the `--` list, the field menu, `keep_corner_bindings` (`1cdc802`)
+— and D1042 a frame's *Mode* row (`5e14af1`). **D1043–D1048 found at zero sites and released.**
+Census **941**, none unresolved. D1037 and D1038 are cited from code now. ⚠️ **`arch-scribe` found
+real defects in every one of the four batches** — among them a refused `Tab` dropping a typed cell,
+extracting a translucent fill squaring its alpha, and the corner pass detaching a whole bound rect
+on a per-corner edit and then, once fixed, turning the Scale tool's bound corners square — each
+fixed before its commit, the last two by the pass's two-half rule (drawn value *or* own literal
+stays bound). Before that, ⚠️ **the styles-and-variables
 rulings request reserved D1038–D1043 at `2c4c786` and spent one** — D1038, the accepted Claude
 Design chrome and the maintainer's rulings on D1037's open questions, record-only: **no code cites
 it yet**. **D1039–D1043 found at zero sites and released.** Before that, measured 2026-10-13 at

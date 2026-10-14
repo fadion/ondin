@@ -400,6 +400,15 @@ pub enum PaintSlot {
     /// the grid was removed while the picker was open — reads back `None` from
     /// `slot_brush` and closes the picker.
     Grid(usize),
+    /// A colour variable's value in one mode — a cell of the styles and variables
+    /// browser (D1038 G-series, §15 D1052).
+    ///
+    /// Node-less like `Canvas` and `Guide`, and for their reason: the picker is
+    /// written against a slot, so a cell riding one gets the whole colour panel,
+    /// its *Variables* face making the cell an **alias** where a layer's makes a
+    /// binding. Solid only, no gradient (a variable holds a colour), alpha kept —
+    /// a colour variable carries its own (D1038).
+    VarCell(ondin_core::VarId, ondin_core::ModeId),
 }
 
 /// Which of a text node's two decorations a [`PaintSlot::TextDecoration`] names.
@@ -582,6 +591,8 @@ impl PaintSlot {
                 | PaintSlot::TextColor
                 | PaintSlot::Effect(_)
                 | PaintSlot::Grid(_)
+                // A colour variable holds a colour (D1038: never a gradient).
+                | PaintSlot::VarCell(..)
         )
     }
 

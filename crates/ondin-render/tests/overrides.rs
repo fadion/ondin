@@ -2500,8 +2500,11 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     ];
 
     // And the variables table's (§15 D1039): no override carries the table, so
-    // all seven are no-ops here — four of them draw nothing, and a cell or a
-    // mode coming or going changes what every bound layer draws.
+    // these six are no-ops here — four of them draw nothing, and a mode coming
+    // or going changes what every bound layer draws. **Seven until
+    // `SetVariableCell` left the list** (§15 D1056): a cell's edit now previews
+    // on what reads it, so it is no longer absorbed as nothing
+    // (`a_variable_cell_previews_on_what_reads_it`).
     let (var, mode) = (ids.mint_var(), ids.mint_mode());
     let table_chrome = [
         Operation::AddVariable {
@@ -2523,11 +2526,6 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         },
     ];
     let table_ink = [
-        Operation::SetVariableCell {
-            id: var,
-            mode,
-            cell: ondin_core::Cell::Number(1.0),
-        },
         Operation::AddMode {
             mode: ondin_core::Mode {
                 id: mode,
@@ -2546,8 +2544,8 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(
         table_chrome.len() + table_ink.len(),
-        7,
-        "and the table's seven"
+        6,
+        "and the table's six"
     );
 
     let res = Resolved::rebuild(&f.doc);
@@ -2567,8 +2565,8 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     }
 
     // The half the design got wrong: every chrome no-op is `changes_ink`'s
-    // `false`, and not every no-op is — the image pair and three of the table's
-    // seven change ink. (Nor is every `false` a no-op: `absorb` refuses the
+    // `false`, and not every no-op is — the image pair and two of the table's
+    // six change ink. (Nor is every `false` a no-op: `absorb` refuses the
     // vault's two and `SetOrigin`, which this does not list.)
     for op in chrome.iter().chain(table_chrome.iter()) {
         assert!(!op.changes_ink(), "{op:?} is chrome and draws nothing");
@@ -4084,4 +4082,78 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
     ));
     assert!(!tx.0.is_empty(), "the fixture binds something");
     assert_preview_matches_commit(&doc, &tx, "two corners bound");
+}
+
+/// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
+/// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
+/// whose corners read *radius*, previewed under a new *brand* colour and a new
+/// *radius*, each drawn as overrides and as committed. The alias is the case a
+/// preview reading only the edited variable's own users would miss.
+///
+/// Flip, run: the `SetVariableCell` arm back in the no-op list fails *"brand
+/// recoloured: preview diverged from commit"*.
+#[test]
+fn a_variable_cell_previews_on_what_reads_it() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xC8);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode) = (ids.mint(), ids.mint_mode());
+    let (brand, accent, radius) = (ids.mint_var(), ids.mint_var(), ids.mint_var());
+    let var = |id, name: &str, kind, cell| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind,
+            cells: [(mode, cell)].into(),
+        },
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        var(brand, "brand", VarKind::Color, Cell::Color(Color::WHITE)),
+        var(accent, "accent", VarKind::Color, Cell::Alias(brand)),
+        var(radius, "radius", VarKind::Number, Cell::Number(4.0)),
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: ondin_core::BrushSource::Bound {
+                    var: accent,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        },
+    ]))
+    .unwrap();
+    doc.apply(&Transaction(ondin_core::bind_corners_ops(
+        &doc,
+        rect,
+        [Some(radius); 4],
+    )))
+    .unwrap();
+    let cell = |id, cell| Transaction(vec![Operation::SetVariableCell { id, mode, cell }]);
+    assert_preview_matches_commit(
+        &doc,
+        &cell(brand, Cell::Color(Color::from_rgba8(200, 30, 30, 255))),
+        "brand recoloured",
+    );
+    assert_preview_matches_commit(&doc, &cell(radius, Cell::Number(12.0)), "radius changed");
 }

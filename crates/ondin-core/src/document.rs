@@ -373,7 +373,20 @@ impl Document {
         id: NodeId,
         var: crate::variable::VarId,
     ) -> Option<crate::variable::Value> {
-        self.variables.resolve(var, self.mode_at(id)?)
+        self.resolve_var_in(&self.variables, id, var)
+    }
+
+    /// [`Self::resolve_var`] against table `t` rather than the document's own —
+    /// a previewed cell's (`Variables::with_cell`, §15 D1056). The `_in` doors
+    /// below are the same rule with the table named, so the preview and the
+    /// committed drawing cannot read a binding two ways.
+    pub fn resolve_var_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        var: crate::variable::VarId,
+    ) -> Option<crate::variable::Value> {
+        t.resolve(var, self.mode_at(id)?)
     }
 
     /// The brush `brush` draws at `id`: itself when literal, a solid of its
@@ -391,14 +404,26 @@ impl Document {
         id: NodeId,
         brush: &'a crate::variable::BrushSource,
     ) -> std::borrow::Cow<'a, crate::Brush> {
+        self.resolve_brush_in(&self.variables, id, brush)
+    }
+
+    /// [`Self::resolve_brush`] against table `t` (§15 D1056).
+    pub fn resolve_brush_in<'a>(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        brush: &'a crate::variable::BrushSource,
+    ) -> std::borrow::Cow<'a, crate::Brush> {
         use crate::variable::{BrushSource, Value};
         use std::borrow::Cow;
         match brush {
             BrushSource::Literal(b) => Cow::Borrowed(b),
-            BrushSource::Bound { var, alpha } => Cow::Owned(match self.resolve_var(id, *var) {
-                Some(Value::Color(c)) => crate::Brush::Solid(c.multiply_alpha(*alpha)),
-                _ => crate::Brush::Solid(Color::TRANSPARENT),
-            }),
+            BrushSource::Bound { var, alpha } => {
+                Cow::Owned(match self.resolve_var_in(t, id, *var) {
+                    Some(Value::Color(c)) => crate::Brush::Solid(c.multiply_alpha(*alpha)),
+                    _ => crate::Brush::Solid(Color::TRANSPARENT),
+                })
+            }
         }
     }
 
@@ -413,6 +438,16 @@ impl Document {
     /// passes the ghost's own id, which `mode_at` finds no node for, so a ghost
     /// reads in the **default** mode (`scene::paint_ghost`).
     pub fn resolved_paint<'a>(&self, id: NodeId, paint: &'a Paint) -> std::borrow::Cow<'a, Paint> {
+        self.resolved_paint_in(&self.variables, id, paint)
+    }
+
+    /// [`Self::resolved_paint`] against table `t` (§15 D1056).
+    pub fn resolved_paint_in<'a>(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        paint: &'a Paint,
+    ) -> std::borrow::Cow<'a, Paint> {
         use std::borrow::Cow;
         let bound = paint.fills.iter().any(|f| f.brush.is_bound())
             || paint.strokes.iter().any(|s| s.brush.is_bound());
@@ -422,12 +457,12 @@ impl Document {
         let mut out = paint.clone();
         for f in out.fills.iter_mut() {
             if f.brush.is_bound() {
-                f.brush = self.resolve_brush(id, &f.brush).into_owned().into();
+                f.brush = self.resolve_brush_in(t, id, &f.brush).into_owned().into();
             }
         }
         for s in out.strokes.iter_mut() {
             if s.brush.is_bound() {
-                s.brush = self.resolve_brush(id, &s.brush).into_owned().into();
+                s.brush = self.resolve_brush_in(t, id, &s.brush).into_owned().into();
             }
         }
         Cow::Owned(out)
@@ -437,12 +472,22 @@ impl Document {
     /// the mode in force, each other corner its literal. `None` when `id` binds no
     /// corner — the stored radii are the drawn ones.
     pub fn resolve_corners(&self, id: NodeId, radii: RoundedRectRadii) -> Option<RoundedRectRadii> {
+        self.resolve_corners_in(&self.variables, id, radii)
+    }
+
+    /// [`Self::resolve_corners`] against table `t` (§15 D1056).
+    pub fn resolve_corners_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        radii: RoundedRectRadii,
+    ) -> Option<RoundedRectRadii> {
         let n = self.nodes.get(&id)?;
         if n.corner_vars.iter().all(Option::is_none) {
             return None;
         }
         let read = |var: Option<crate::variable::VarId>, lit: f64| match var {
-            Some(v) => match self.resolve_var(id, v) {
+            Some(v) => match self.resolve_var_in(t, id, v) {
                 Some(crate::variable::Value::Number(x)) => x.max(0.0),
                 _ => 0.0,
             },
@@ -460,7 +505,7 @@ impl Document {
     /// Every node whose fields read a variable — what an edit to the table
     /// dirties, since no node of it changed and every one of them may draw
     /// differently (§5.3f premise (ii)).
-    pub(crate) fn bound_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+    pub fn bound_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.nodes
             .values()
             .filter(|n| n.reads_variables())

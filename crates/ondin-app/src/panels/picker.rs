@@ -22,7 +22,7 @@
 //! **click** sets neither `dragged` nor `changed`, so it commits directly; a **press**
 //! sets neither either, so the frames before the gesture travels far enough to count
 //! as a drag preview through `preview_slot` (§15 D129).
-use super::binding::FieldKey;
+use super::binding::{FaceTarget, FieldKey};
 use super::paint::{self, PaintKind, PaintSlot};
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
@@ -332,8 +332,26 @@ impl OndinApp {
                 !self.session.selection.contains(node)
                     || self.shared_grids(&self.frame_subjects()).is_none()
             }
+            // **A variable's cell belongs to the browser, not to the selection**
+            // (§15 D1052): it goes when the browser does, or the variable or its
+            // mode does — never because a layer was selected beside it.
+            PaintSlot::VarCell(var, mode) => {
+                self.var_browser.is_none()
+                    || self.session.doc.variables().get(var).is_none()
+                    || self.session.doc.variables().mode(mode).is_none()
+            }
             _ => !self.session.selection.contains(node),
         };
+        // A cell's previewed colour lives only while a button is held — the drag
+        // that made it — so a cancelled press cannot leave the picker reading a
+        // colour the table never took (`OndinApp::var_cell_preview`). **Not on
+        // the frame it is released**: the valve commits inside this frame's
+        // body, after `slot_brush` has read, so dropping it here drew the old
+        // colour for that one frame (`arch-scribe`'s read of §15 D1052's first
+        // cut; reasoned, not measured). The valve's release clears it itself.
+        if !ctx.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
+            self.var_cell_preview = None;
+        }
         let Some(brush) = self.slot_brush(node, slot).filter(|_| !orphaned) else {
             self.picker = None;
             return;
@@ -408,8 +426,27 @@ impl OndinApp {
         const CLOSE_W: f32 = 18.0;
         const TAB_GAP: f32 = 6.0;
         let gradients = slot.takes_gradients();
-        let key = super::binding::paint_item(slot).map(|_| FieldKey::Paint { id: node, slot });
-        let bound = key.and_then(|k| self.field_var(k));
+        // A variable's cell rides the same tab (§15 D1052): there a pick makes the
+        // cell an alias, and *Solid* writes the colour drawn, ending it.
+        let key = match slot {
+            PaintSlot::VarCell(var, mode) => Some(FaceTarget::Cell(var, mode)),
+            _ => super::binding::paint_item(slot)
+                .map(|_| FaceTarget::Field(FieldKey::Paint { id: node, slot })),
+        };
+        let bound = match key {
+            Some(FaceTarget::Field(k)) => self.field_var(k),
+            Some(FaceTarget::Cell(var, mode)) => {
+                self.session
+                    .doc
+                    .variables()
+                    .get(var)
+                    .and_then(|v| match v.cells.get(&mode) {
+                        Some(ondin_core::variable::Cell::Alias(t)) => Some(*t),
+                        _ => None,
+                    })
+            }
+            None => None,
+        };
         let browse = self.picker.as_ref().is_some_and(|p| p.browse);
         let on_vars = key.is_some() && (bound.is_some() || browse);
         let tabs = if key.is_some() { 4 } else { 3 };
@@ -453,7 +490,9 @@ impl OndinApp {
                     let to = PaintKind::ALL[i];
                     match (bound, key) {
                         // Solid off a binding: the colour drawn, `%` folded in.
-                        (Some(_), Some(k)) if to == PaintKind::Solid => self.detach_field(k),
+                        (Some(_), Some(FaceTarget::Field(k))) if to == PaintKind::Solid => {
+                            self.detach_field(k)
+                        }
                         _ if to != kind || bound.is_some() => {
                             let next = paint::convert(brush, to, box_size);
                             self.write_slot(node, slot, next);

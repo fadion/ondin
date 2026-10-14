@@ -12288,6 +12288,20 @@ impl OndinApp {
             PaintSlot::Canvas => {
                 return Some(Brush::Solid(self.session.preview_canvas_background()));
             }
+            // A variable's cell, as it resolves — an alias followed — or the
+            // colour a drag is previewing, which the table does not have yet
+            // (§15 D1052, `preview_var_cell`).
+            PaintSlot::VarCell(var, mode) => {
+                if let Some((v, m, c)) = self.var_cell_preview
+                    && (v, m) == (var, mode)
+                {
+                    return Some(Brush::Solid(c));
+                }
+                return match self.session.doc.variables().resolve(var, mode)? {
+                    ondin_core::Value::Color(c) => Some(Brush::Solid(c)),
+                    ondin_core::Value::Number(_) => None,
+                };
+            }
             // The shared colour where the selected guides agree, and the first
             // one's where they do not — the picker has to *start* somewhere real
             // even over a mixed set, which is `Spread::base`'s rule.
@@ -12381,7 +12395,8 @@ impl OndinApp {
             | PaintSlot::GroupColor(_)
             | PaintSlot::GroupGradient(_)
             | PaintSlot::TextDecoration(_)
-            | PaintSlot::TextColor => unreachable!("answered above"),
+            | PaintSlot::TextColor
+            | PaintSlot::VarCell(..) => unreachable!("answered above"),
         }
     }
     /// The brush at a location, read through the preview so the picker tracks a live
@@ -12591,6 +12606,17 @@ impl OndinApp {
                     background: colour.with_alpha(1.0),
                 }]),
                 None => Transaction(Vec::new()),
+            },
+            // A variable's cell takes the colour as a value — alpha and all, a
+            // colour variable carrying its own — which ends an alias it held
+            // (§15 D1052). A gradient is refused: the tabs are disabled for it.
+            PaintSlot::VarCell(var, mode) => match brush {
+                Brush::Solid(c) => Transaction(vec![Operation::SetVariableCell {
+                    id: var,
+                    mode,
+                    cell: ondin_core::Cell::Color(c),
+                }]),
+                _ => Transaction(Vec::new()),
             },
             // One row of the shared list, changed on every target at once.
             PaintSlot::Selection(target, i) => {
@@ -12868,6 +12894,8 @@ impl OndinApp {
         // fact it is the same panel with one of its two preview paths unforked.
         // Reported as the wheel and the hue strip not answering a mousedown.
         self.preview_guide(&tx);
+        // And a variable's cell, the table having no override either (§15 D1052).
+        self.preview_var_cell(&tx);
         // **And the grid fork beside it**, which is the same missing-fork bug
         // waiting to be made a third time: a layout grid is chrome too, so
         // `SetLayoutGrids` reaches `RenderOverrides` and is absorbed. Written here

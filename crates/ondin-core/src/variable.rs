@@ -193,6 +193,18 @@ impl Variables {
         None
     }
 
+    /// This table with `var`'s cell in `mode` set to `cell` — what a previewed
+    /// `SetVariableCell` resolves against (§15 D1056), the document's own table
+    /// left as committed. `None` when the variable or the mode is not here. A
+    /// loop the cell would close resolves to nothing, as [`Self::resolve`]'s walk
+    /// is bounded; the commit refuses it.
+    pub fn with_cell(&self, var: VarId, mode: ModeId, cell: Cell) -> Option<Variables> {
+        self.mode(mode)?;
+        let mut t = self.clone();
+        t.vars.get_mut(&var)?.cells.insert(mode, cell);
+        Some(t)
+    }
+
     /// The kind `var` resolves to.
     pub fn kind_of(&self, var: VarId) -> Option<VarKind> {
         self.vars.get(&var).map(|v| v.kind)

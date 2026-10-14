@@ -1547,19 +1547,62 @@ impl RenderOverrides {
             // two higher since `SetComponent` and `SetLink` joined the chrome arm,
             // §15 D978, three higher again with the variant ops, §15 D982, and one
             // higher with `SetSwap`, §15 D983: nineteen no-ops here, seventeen of
-            // them `changes_ink`'s — and seven more since the variables table's arm
-            // below, §15 D1039, four of them `changes_ink`'s `false`. The fixture
-            // lists all three groups.)
+            // them `changes_ink`'s — and six more in the variables table's arm
+            // below, four of them `changes_ink`'s `false`: seven since §15 D1039,
+            // until `SetVariableCell` took an arm of its own, §15 D1056. The
+            // fixture lists all three groups.)
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
-            // **The variables table has no override either** (§15 D1039): the
-            // walk reads it off the document, so a previewed cell edit draws the
-            // committed value — `AddImage`'s gap, for the same reason. Nothing
-            // drags one: a cell commits on `Enter` (D1038). Absorbed rather than
-            // refused so a transaction carrying one still previews the rest.
+            // **A cell's new value previews on everything that reads it** (§15
+            // D1056, D1037's premise (vi)): the colour popup drags a variable's
+            // colour now (D1052). The table has no override, so each node that
+            // reads a variable is patched with what it draws against the table
+            // with this one cell changed (`Variables::with_cell`, the document's
+            // `_in` doors — the committed rule, the table named): its paint as
+            // literals, a bound rect's kind as resolved radii. Built on the node's
+            // pending paint and kind, so ops before this one compose. ⚠️ **One
+            // cell per transaction**: the paint written is resolved, so a second
+            // `SetVariableCell` after it finds literals and moves nothing — the
+            // popup writes one. A cell or mode not in the table refuses.
+            Operation::SetVariableCell { id: var, mode, cell } => {
+                let t = doc.variables().with_cell(*var, *mode, *cell)?;
+                let bound: Vec<NodeId> = doc.bound_nodes().collect();
+                for n in bound {
+                    if self.ghost(n).is_some() {
+                        continue;
+                    }
+                    let Some(paint) = self.current_paint(doc, n) else {
+                        continue;
+                    };
+                    let reads = paint.fills.iter().any(|f| f.brush.is_bound())
+                        || paint.strokes.iter().any(|s| s.brush.is_bound());
+                    if reads {
+                        let drawn = doc.resolved_paint_in(&t, n, &paint).into_owned();
+                        self.set_paint(n, drawn);
+                    }
+                    if let Some(NodeKind::Rect { size, corner_radii }) = self.current_kind(doc, n)
+                        && let Some(radii) = doc.resolve_corners_in(&t, n, corner_radii)
+                    {
+                        self.set_kind(
+                            doc,
+                            res,
+                            n,
+                            NodeKind::Rect {
+                                size,
+                                corner_radii: radii,
+                            },
+                        );
+                        self.moved.insert(n);
+                    }
+                }
+            }
+            // **The rest of the table has no override** (§15 D1039): the walk
+            // reads it off the document, so a previewed rename, a new mode, or a
+            // variable added draws as committed — `AddImage`'s gap, for the same
+            // reason, and none of them is dragged. Absorbed rather than refused so
+            // a transaction carrying one still previews the rest.
             Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
-            | Operation::SetVariableCell { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. } => {}

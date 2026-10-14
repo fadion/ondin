@@ -1329,6 +1329,19 @@ pub struct OndinApp {
     /// inspector's field — which reports `Mixed` exactly when they disagree —
     /// flickered between the value and the word for the whole of a drag.
     pub(crate) guide_previews: Vec<Guide>,
+    /// The colour a drag on the picker is previewing for a variable's cell, and
+    /// which cell — [`Self::guide_previews`]' twin for the table (§15 D1052).
+    /// The picker and the browser's cell read the table, not the canvas's
+    /// overrides — which draw the cell's new value on what reads it since §15
+    /// D1056 — so without this the picker read the committed colour back every
+    /// frame of a drag and its handle stayed where it started. Set where a guide's preview is, and
+    /// dropped wherever it is — and by the picker whenever no button is held, so
+    /// it cannot outlive the gesture that made it.
+    pub(crate) var_cell_preview: Option<(
+        ondin_core::VarId,
+        ondin_core::ModeId,
+        ondin_core::peniko::Color,
+    )>,
     /// Which of the top bar's dropdowns is open, if any.
     ///
     /// One field rather than a `bool` each, because they are mutually exclusive
@@ -1357,6 +1370,10 @@ pub struct OndinApp {
     /// The styles and variables browser, while it is open (§5.3f, D1038 G; §15
     /// D1040) — it and the insert picker share a place, one open at a time.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
+    /// The browser's collapsed groups per document, keyed by the document's
+    /// root (D1038 G-series, §15 D1054): kept for the life of the process, not
+    /// saved — a view state, as the panels' scroll positions are.
+    pub(crate) var_collapsed: std::collections::HashMap<NodeId, HashSet<String>>,
     /// Where the rail's swatches button was drawn last frame, directly above the
     /// hexagon (G11). `NOTHING` until the rail has drawn.
     pub(crate) var_button: egui::Rect,
@@ -2377,6 +2394,7 @@ impl OndinApp {
             kit_users: None,
             kit_button: egui::Rect::NOTHING,
             var_browser: None,
+            var_collapsed: Default::default(),
             var_button: egui::Rect::NOTHING,
             var_complete: None,
             var_retype: None,
@@ -2444,6 +2462,7 @@ impl OndinApp {
             // are both off four dozen lines above), for `present`'s own reason.
             lock_guides: false,
             guide_previews: Vec::new(),
+            var_cell_preview: None,
             guide_clipboard: None,
             property_clipboard: None,
             // **Editor, and the launch path overrides it** — see
@@ -3597,6 +3616,7 @@ impl OndinApp {
         // (`rulers.rs`), so it has to be dropped by name or the line stays
         // where the cancelled scrub left it.
         self.guide_previews.clear();
+        self.var_cell_preview = None;
         // A row being dragged in the layers tree is the third kind, and it has
         // to be dropped here rather than left to `finish_layer_drag`: that runs
         // on the release, which is still coming. A paint row being dragged to
@@ -7683,6 +7703,7 @@ impl OndinApp {
         self.unsharing_kit = None;
         self.paint_hex = None;
         self.guide_previews.clear();
+        self.var_cell_preview = None;
         // Ids from the old document's stream, and the one field in this struct
         // that was cleared **nowhere else in the workspace** (§15 D447) — inserted at the
         // Appearance panel's disclosure and removed only when the same node's
@@ -10808,8 +10829,10 @@ impl OndinApp {
             self.session.set_preview(&tx);
             self.preview_guide(&tx);
             self.preview_grid(&tx);
+            self.preview_var_cell(&tx);
         } else if was_engaged {
             self.guide_previews.clear();
+            self.var_cell_preview = None;
             self.in_flight.grid_paint = None;
             // **`Escape` abandons the edit; every other way out of the field
             // confirms it.** egui does not revert a `DragValue`'s number on
@@ -10880,6 +10903,26 @@ impl OndinApp {
             match self.guide_previews.iter_mut().find(|g| g.id == id) {
                 Some(slot) => *slot = guide,
                 None => self.guide_previews.push(guide),
+            }
+        }
+    }
+
+    /// The variables-table half of [`EditorSession::set_preview`] (§15 D1052):
+    /// a colour a drag on the picker gives a variable's cell, held where the
+    /// picker reads it back ([`Self::var_cell_preview`]) since the canvas has no
+    /// override for the table — what draws with the variable keeps its committed
+    /// colour until the release, D1037's premise (vi).
+    ///
+    /// [`EditorSession::set_preview`]: crate::session::EditorSession::set_preview
+    pub(crate) fn preview_var_cell(&mut self, tx: &Transaction) {
+        for op in &tx.0 {
+            if let Operation::SetVariableCell {
+                id,
+                mode,
+                cell: ondin_core::Cell::Color(c),
+            } = op
+            {
+                self.var_cell_preview = Some((*id, *mode, *c));
             }
         }
     }

@@ -36,6 +36,16 @@ pub(crate) enum FieldKey {
 }
 
 impl FieldKey {
+    /// The node the field belongs to — where its binding resolves, in the mode
+    /// in force there.
+    pub(crate) fn at(self) -> NodeId {
+        match self {
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
+                id
+            }
+        }
+    }
+
     /// The glyph a radius field's badge carries: the corners icon for all four,
     /// the elbow pointing into its corner for one — the per-corner fields' own
     /// (§15 D1049). `CORNERS_OUT` for a paint, which draws no badge.
@@ -1188,16 +1198,11 @@ impl OndinApp {
     pub(crate) fn variables_face(
         &mut self,
         ui: &mut egui::Ui,
-        key: FieldKey,
+        target: FaceTarget,
         bound: Option<VarId>,
         w: f32,
         h: f32,
     ) {
-        let at = match key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
-                id
-            }
-        };
         let Some(p) = self.picker.as_mut() else {
             return;
         };
@@ -1247,12 +1252,33 @@ impl OndinApp {
                         }
                     }
                     let on = bound == Some(v.id);
-                    let resp = face_row(ui, v, doc.resolve_var(at, v.id), on, w);
+                    // A layer's hexes read in its mode; a cell's in the cell's
+                    // own, and a row that would loop is inert and says why (G15:
+                    // *this variable*, or *uses* the name it would go round by).
+                    let (value, refusal) = match target {
+                        FaceTarget::Field(key) => (doc.resolve_var(key.at(), v.id), None),
+                        FaceTarget::Cell(var, mode) => (
+                            table.resolve(v.id, mode),
+                            table.would_loop(var, mode, v.id).then(|| {
+                                if v.id == var {
+                                    "this variable".to_owned()
+                                } else {
+                                    let via = match v.cells.get(&mode) {
+                                        Some(ondin_core::variable::Cell::Alias(t)) => *t,
+                                        _ => var,
+                                    };
+                                    let name = table.get(via).map_or("", |x| x.name.as_str());
+                                    format!("uses {name}")
+                                }
+                            }),
+                        ),
+                    };
+                    let resp = face_row(ui, v, value, on, w, refusal.as_deref());
                     if on && !scrolled {
                         resp.scroll_to_me(Some(egui::Align::Center));
                         scrolled = true;
                     }
-                    if resp.clicked() {
+                    if resp.clicked() && refusal.is_none() {
                         chosen = Some(v.id);
                     }
                 }
@@ -1261,10 +1287,29 @@ impl OndinApp {
             p.search = search;
             p.scrolled = scrolled;
         }
-        if let Some(var) = chosen.filter(|v| bound != Some(*v)) {
-            self.bind_field(key, var);
+        let Some(var) = chosen.filter(|v| bound != Some(*v)) else {
+            return;
+        };
+        match target {
+            FaceTarget::Field(key) => self.bind_field(key, var),
+            FaceTarget::Cell(of, mode) => {
+                self.commit_edit(Transaction(vec![Operation::SetVariableCell {
+                    id: of,
+                    mode,
+                    cell: Cell::Alias(var),
+                }]));
+            }
         }
     }
+}
+
+/// What the picker's *Variables* face picks for: a bindable field, a pick
+/// binding it; or a colour variable's cell in one mode, a pick making it an
+/// alias (D1038 G-series, §15 D1052).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FaceTarget {
+    Field(FieldKey),
+    Cell(VarId, ondin_core::ModeId),
 }
 
 /// A group's header in the picker's *Variables* face: its path, uppercase and
@@ -1288,12 +1333,13 @@ fn face_row(
     value: Option<Value>,
     on: bool,
     w: f32,
+    refusal: Option<&str>,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, FACE_ROW_H), egui::Sense::click());
     let p = ui.painter();
     if on {
         p.rect_filled(rect, 4, color::text_a(26));
-    } else if resp.hovered() {
+    } else if resp.hovered() && refusal.is_none() {
         p.rect_filled(rect, 4, color::text_a(15));
     }
     let y = rect.center().y;
@@ -1312,8 +1358,10 @@ fn face_row(
         egui::StrokeKind::Inside,
     );
     let check_w = 12.0;
-    let hex = match value {
-        Some(Value::Color(c)) => ui::hex_of(c),
+    // A row that would loop dims and reads why in place of its hex (G15).
+    let hex = match (refusal, value) {
+        (Some(why), _) => why.to_owned(),
+        (None, Some(Value::Color(c))) => ui::hex_of(c),
         _ => String::new(),
     };
     let hex_right = rect.right() - 3.0 - check_w - 8.0;
@@ -1328,7 +1376,10 @@ fn face_row(
         egui::Align2::LEFT_CENTER,
         shown,
         font,
-        color::TEXT,
+        match refusal {
+            Some(_) => color::text_a(102),
+            None => color::TEXT,
+        },
     );
     p.galley(
         egui::pos2(

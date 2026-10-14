@@ -13,6 +13,8 @@
 //! tab is the empty state until styles are built (roadmap step 3).
 
 use crate::app::OndinApp;
+use crate::panels::PaintSlot;
+use crate::panels::picker::Picker;
 use crate::theme::{self, color, icon};
 use crate::ui;
 use eframe::egui;
@@ -79,6 +81,18 @@ enum Edit {
     },
 }
 
+impl Edit {
+    /// What the field holds.
+    fn text(&self) -> &str {
+        match self {
+            Edit::Name { text, .. }
+            | Edit::Cell { text, .. }
+            | Edit::Mode { text, .. }
+            | Edit::Group { text, .. } => text,
+        }
+    }
+}
+
 /// The menu open over the browser, and where.
 #[derive(Clone, Debug, PartialEq)]
 enum Menu {
@@ -100,16 +114,25 @@ pub(crate) struct Browser {
     focus: bool,
     /// *In selection*, kept pressed across selection changes (G4).
     in_selection: bool,
-    /// Collapsed group paths. Kept for as long as the browser is open.
+    /// Collapsed group paths — a copy of the document's own set
+    /// (`OndinApp::var_collapsed`), loaded for [`Self::root`] (§15 D1054).
     collapsed: HashSet<String>,
+    /// The root of the document `collapsed` was loaded for.
+    root: Option<NodeId>,
     edit: Option<Edit>,
     /// Whether the field `edit` names still has to take the keyboard.
     edit_focus: bool,
     menu: Option<(Menu, egui::Pos2)>,
     /// The sentence a refused edit is answered with, until the next edit.
     refusal: Option<String>,
+    /// The text that refusal answered, which the field draws dim and dotted
+    /// while it still holds it (B4's manner, §15 D1053).
+    refused: Option<String>,
     /// How far the mode columns are scrolled sideways, past three modes (G3).
     scroll_x: f32,
+    /// A drag on the sideways bar's thumb: the pointer's x and `scroll_x` where
+    /// it pressed (§15 D1055).
+    bar_drag: Option<(f32, f32)>,
     /// The table's width this frame. **Handed to the rows rather than asked of
     /// them**: inside the scroll area of an `Area` that sizes to its content,
     /// `available_width` has nothing to measure against and answers NaN.
@@ -126,6 +149,7 @@ impl Browser {
         self.edit = Some(Edit::Name { var, text: name });
         self.edit_focus = true;
         self.refusal = None;
+        self.refused = None;
     }
 
     /// Whether something inside the browser answers `Escape` before the browser
@@ -136,6 +160,7 @@ impl Browser {
         }
         if self.edit.take().is_some() {
             self.refusal = None;
+            self.refused = None;
             return true;
         }
         false
@@ -159,8 +184,14 @@ enum Act {
     DeleteMode(ModeId),
     Select(Vec<NodeId>),
     Toggle(String),
+    /// `Alt`+click on a caret (D1038 G-series, §15 D1054): every group takes the
+    /// state this one's click gives it — all open, or all closed.
+    ToggleAll(String),
     StartEdit(Edit),
     OpenMenu(Menu, egui::Pos2),
+    /// A colour cell's colour popup, opened beside the panel at this point
+    /// (D1038 G-series, §15 D1052).
+    OpenPicker(VarId, ModeId, egui::Pos2),
 }
 
 /// One row of the table as drawn: a group's header or a variable.
@@ -182,8 +213,13 @@ impl OndinApp {
             Some(_) => None,
             None => {
                 self.kit_picker = None;
+                // Loaded at the open, not on the first frame, so nothing done
+                // before that frame is overwritten by the load (§15 D1054).
+                let root = self.session.doc.root();
                 Some(Browser {
                     focus: true,
+                    collapsed: self.var_collapsed.get(&root).cloned().unwrap_or_default(),
+                    root: Some(root),
                     ..Browser::default()
                 })
             }
@@ -200,6 +236,17 @@ impl OndinApp {
         let Some(mut b) = self.var_browser.take() else {
             return;
         };
+        // **Collapsed groups are the document's, not the panel's** (D1038
+        // G-series, §15 D1054): loaded from the app's per-document sets — keyed
+        // by the root's id, which a file keeps across saves and loads — whenever
+        // the document under the browser is not the one it loaded for, and
+        // written back after the frame's acts.
+        let root = self.session.doc.root();
+        if b.root != Some(root) {
+            b.collapsed = self.var_collapsed.get(&root).cloned().unwrap_or_default();
+            b.root = Some(root);
+        }
+        let pending = self.var_cell_preview;
         let doc = &self.session.doc;
         let table = doc.variables();
         let modes: Vec<Mode> = table.modes().to_vec();
@@ -325,7 +372,7 @@ impl OndinApp {
                                                 ),
                                                 Line::Var(v) => var_row(
                                                     ui, doc, v, &modes, &users[&v.id], &mut b,
-                                                    &mut acts,
+                                                    &mut acts, pending,
                                                 ),
                                             }
                                         }
@@ -340,7 +387,11 @@ impl OndinApp {
 
         // Past three modes the columns scroll sideways under the fixed name
         // column (G3), by a horizontal wheel or `Shift` and the wheel.
-        let over = ctx.pointer_hover_pos().is_some_and(|p| panel.contains(p));
+        // Only where there are columns to scroll: the *Variables* tab with rows
+        // on it — not the *Styles* tab nor an empty state (`arch-scribe`'s read
+        // of §15 D1055's first cut).
+        let columns = matches!(b.tab, Tab::Variables) && !lines.is_empty();
+        let over = ctx.pointer_hover_pos().is_some_and(|p| panel.contains(p)) && columns;
         if over && modes.len() > MAX_COLS {
             let (dx, dy, shift) = ctx.input(|i| {
                 (
@@ -361,6 +412,11 @@ impl OndinApp {
         } else if modes.len() <= MAX_COLS {
             b.scroll_x = 0.0;
         }
+        if columns && modes.len() > MAX_COLS {
+            scroll_bar(ctx, panel, modes.len(), &mut b);
+        } else {
+            b.bar_drag = None;
+        }
 
         if let Some((menu, at)) = b.menu.clone() {
             self.var_menu(ctx, &mut b, menu, at, &users, &mut acts);
@@ -369,6 +425,14 @@ impl OndinApp {
         self.var_browser = Some(b);
         for act in acts {
             self.var_act(act);
+        }
+        // The collapsed groups written through to the document's own set, so
+        // they outlive the browser and follow the document (§15 D1054).
+        let root = self.session.doc.root();
+        if let Some(b) = &self.var_browser
+            && self.var_collapsed.get(&root) != Some(&b.collapsed)
+        {
+            self.var_collapsed.insert(root, b.collapsed.clone());
         }
     }
 
@@ -590,6 +654,34 @@ impl OndinApp {
         let doc = &self.session.doc;
         let table = doc.variables();
         match act {
+            // The picker rides a node-less slot, so its node is the document's
+            // root, which the slot never reads (`PaintSlot::VarCell`).
+            Act::OpenPicker(var, mode, at) => {
+                let root = doc.root();
+                let slot = PaintSlot::VarCell(var, mode);
+                match self.picker.as_mut() {
+                    Some(p) => p.retarget(root, slot),
+                    None => self.picker = Some(Picker::new(root, slot, at)),
+                }
+            }
+            Act::ToggleAll(path) => {
+                // Every group path the table has: each name's every prefix
+                // before a `/`, so a nested group closes with its parent.
+                let mut all: HashSet<String> = HashSet::new();
+                for v in table.iter() {
+                    let mut at = 0;
+                    while let Some(i) = v.name[at..].find('/') {
+                        all.insert(v.name[..at + i].to_string());
+                        at += i + 1;
+                    }
+                }
+                if let Some(b) = self.var_browser.as_mut() {
+                    match b.collapsed.contains(&path) {
+                        true => b.collapsed.retain(|p| !all.contains(p)),
+                        false => b.collapsed.extend(all),
+                    }
+                }
+            }
             Act::Toggle(path) => {
                 if let Some(b) = self.var_browser.as_mut()
                     && !b.collapsed.remove(&path)
@@ -602,6 +694,7 @@ impl OndinApp {
                     b.edit = Some(edit);
                     b.edit_focus = true;
                     b.refusal = None;
+                    b.refused = None;
                 }
             }
             Act::OpenMenu(menu, at) => {
@@ -850,6 +943,7 @@ impl OndinApp {
     fn var_refuse(&mut self, why: String) {
         if let Some(b) = self.var_browser.as_mut() {
             b.refusal = Some(why);
+            b.refused = b.edit.as_ref().map(|e| e.text().to_owned());
             b.edit_focus = true;
         }
     }
@@ -858,6 +952,7 @@ impl OndinApp {
         if let Some(b) = self.var_browser.as_mut() {
             b.edit = None;
             b.refusal = None;
+            b.refused = None;
         }
     }
 }
@@ -1192,17 +1287,12 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
             continue;
         }
         let id = ui.id().with(("var-mode-head", m.id));
+        let refused = b.refused.clone();
         if let Some(Edit::Mode { mode, text }) = b.edit.as_mut()
             && *mode == m.id
         {
             let r = cell.shrink2(egui::vec2(3.0, 2.0)).intersect(clip);
-            let resp = ui.put(
-                r,
-                egui::TextEdit::singleline(text)
-                    .id(id.with("edit"))
-                    .frame(egui::Frame::NONE)
-                    .font(egui::FontId::proportional(11.0)),
-            );
+            let resp = edit_field(ui, r, text, id.with("edit"), 11.0, None, refused.as_deref());
             ui.painter().rect_stroke(
                 r,
                 4,
@@ -1264,6 +1354,7 @@ fn group_row(
     let w = b.inner_w;
     let id = ui.id().with(("var-group", path));
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, GROUP_H), egui::Sense::click());
+    let refused = b.refused.clone();
     if let Some(Edit::Group { path: p, text }) = b.edit.as_mut()
         && p == path
     {
@@ -1271,13 +1362,7 @@ fn group_row(
             rect.min + egui::vec2(20.0, 2.0),
             egui::vec2(NAME_W - 26.0, GROUP_H - 4.0),
         );
-        let resp = ui.put(
-            r,
-            egui::TextEdit::singleline(text)
-                .id(id.with("edit"))
-                .frame(egui::Frame::NONE)
-                .font(egui::FontId::proportional(11.5)),
-        );
+        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
         ui.painter().rect_stroke(
             r,
             4,
@@ -1338,6 +1423,8 @@ fn group_row(
             path: path.to_string(),
             text: path.to_string(),
         }));
+    } else if resp.clicked() && ui.input(|i| i.modifiers.alt) {
+        acts.push(Act::ToggleAll(path.to_string()));
     } else if resp.clicked() {
         acts.push(Act::Toggle(path.to_string()));
     } else if resp.secondary_clicked()
@@ -1351,6 +1438,7 @@ fn group_row(
 }
 
 /// A variable's row: its leaf name and usage count, then a cell per mode.
+#[allow(clippy::too_many_arguments)]
 fn var_row(
     ui: &mut egui::Ui,
     doc: &Document,
@@ -1359,6 +1447,7 @@ fn var_row(
     users: &[NodeId],
     b: &mut Browser,
     acts: &mut Vec<Act>,
+    pending: Option<(VarId, ModeId, Color)>,
 ) {
     let table = doc.variables();
     let w = b.inner_w;
@@ -1374,18 +1463,20 @@ fn var_row(
 
     // The name: the leaf, or the whole name while it is being renamed.
     let editing_name = matches!(&b.edit, Some(Edit::Name { var, .. }) if *var == v.id);
+    let refused = b.refused.clone();
     if let Some(Edit::Name { var: _, text }) = b.edit.as_mut().filter(|_| editing_name) {
         let r = egui::Rect::from_min_size(
             rect.min + egui::vec2(INDENT - 6.0, 3.0),
             egui::vec2(NAME_W - INDENT, ROW_H - 6.0),
         );
-        let field = ui.put(
+        let field = edit_field(
+            ui,
             r,
-            egui::TextEdit::singleline(text)
-                .id(id.with("name"))
-                .frame(egui::Frame::NONE)
-                .font(egui::FontId::proportional(11.5))
-                .hint_text("name, / to group"),
+            text,
+            id.with("name"),
+            11.5,
+            Some("name, / to group"),
+            refused.as_deref(),
         );
         ui.painter().rect_stroke(
             r,
@@ -1492,12 +1583,14 @@ fn var_row(
             };
             let r = cell.shrink2(egui::vec2(3.0, 3.0)).intersect(clip);
             ui.painter().rect_filled(r, 4, color::text_a(13));
-            let field = ui.put(
+            let field = edit_field(
+                ui,
                 r.shrink2(egui::vec2(4.0, 0.0)),
-                egui::TextEdit::singleline(text)
-                    .id(id.with(("cell", m.id)))
-                    .frame(egui::Frame::NONE)
-                    .font(egui::FontId::proportional(11.0)),
+                text,
+                id.with(("cell", m.id)),
+                11.0,
+                None,
+                refused.as_deref(),
             );
             ui.painter().rect_stroke(
                 r,
@@ -1533,13 +1626,34 @@ fn var_row(
             egui::Sense::click(),
         );
         let p = ui.painter().with_clip_rect(clip);
-        draw_cell(&p, table, cell, c);
-        if cell_resp.clicked() {
-            acts.push(Act::StartEdit(Edit::Cell {
-                var: v.id,
-                mode: m.id,
-                text: cell_text(table, c),
-            }));
+        // The colour a drag on the popup is giving this cell, which the table
+        // does not hold yet (§15 D1052's preview fork).
+        let shown = match pending {
+            Some((pv, pm, colour)) if pv == v.id && pm == m.id => Cell::Color(colour),
+            _ => *c,
+        };
+        draw_cell(&p, table, cell, &shown);
+        // **A colour cell opens the colour popup; a double-click types into it**
+        // (D1038 G-series, §15 D1052 — the gesture split the session's call): the
+        // popup beside the panel, its *Variables* tab making an alias, and the
+        // text for a hex or `--name` one click further. A number keeps the
+        // single click, having no popup.
+        let colour = v.kind == VarKind::Color;
+        let start = Edit::Cell {
+            var: v.id,
+            mode: m.id,
+            text: cell_text(table, c),
+        };
+        if colour && ui::double_clicked(ui, &cell_resp) {
+            acts.push(Act::StartEdit(start));
+        } else if colour && cell_resp.clicked() {
+            acts.push(Act::OpenPicker(
+                v.id,
+                m.id,
+                egui::pos2(rect.right() + 20.0, cell.top() - 12.0),
+            ));
+        } else if !colour && cell_resp.clicked() {
+            acts.push(Act::StartEdit(start));
         } else if cell_resp.secondary_clicked()
             && let Some(at) = cell_resp.interact_pointer_pos()
         {
@@ -1598,6 +1712,98 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
             );
         }
     }
+}
+
+/// G3's sideways bar under the mode columns, past three modes (§15 D1055): 4
+/// points tall from the name column's edge to 12 short of the panel's right, 6
+/// above its bottom — the mockup's — a 6% track and a 22% thumb as wide as the
+/// share of the columns on show, where `scroll_x` puts it. Its thumb drags; the
+/// wheel scrolls as before.
+fn scroll_bar(ctx: &egui::Context, panel: egui::Rect, modes: usize, b: &mut Browser) {
+    let track = egui::Rect::from_min_max(
+        egui::pos2(panel.left() + PAD + NAME_W, panel.bottom() - 10.0),
+        egui::pos2(panel.right() - 12.0, panel.bottom() - 6.0),
+    );
+    let total = MODE_W * modes as f32;
+    let shown = MODE_W * MAX_COLS as f32;
+    let max = total - shown;
+    let thumb_w = (track.width() * shown / total).max(16.0);
+    let room = (track.width() - thumb_w).max(1.0);
+    let thumb = egui::Rect::from_min_size(
+        egui::pos2(track.left() + room * (b.scroll_x / max), track.top()),
+        egui::vec2(thumb_w, track.height()),
+    );
+    let (pos, pressed, down) = ctx.input(|i| {
+        (
+            i.pointer.interact_pos(),
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+        )
+    });
+    match (b.bar_drag, pos) {
+        (None, Some(p)) if pressed && thumb.expand2(egui::vec2(0.0, 5.0)).contains(p) => {
+            b.bar_drag = Some((p.x, b.scroll_x));
+        }
+        (Some((x0, s0)), Some(p)) if down => {
+            b.scroll_x = (s0 + (p.x - x0) * max / room).clamp(0.0, max);
+        }
+        _ if !down => b.bar_drag = None,
+        _ => {}
+    }
+    let p = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::new("var-browser"),
+    ));
+    p.rect_filled(track, 2, color::text_a(15));
+    let thumb = egui::Rect::from_min_size(
+        egui::pos2(track.left() + room * (b.scroll_x / max), track.top()),
+        thumb.size(),
+    );
+    p.rect_filled(thumb, 2, color::text_a(56));
+}
+
+/// One of the browser's in-place fields, placed in `r` as `ui.put` places a
+/// widget — the four were `ui.put` each — and **refused in B4's manner** (D1038
+/// G14, G15; §15 D1053): while its text is still the text a refusal answered
+/// (`refused`), that text is laid out dim over a dotted underline, the
+/// inspector's fields' own layouter and dots (`binding::refusal_galley`,
+/// `underline_refusal`), and the sentence above the table says why. A keystroke
+/// makes it ordinary text again.
+fn edit_field(
+    ui: &mut egui::Ui,
+    r: egui::Rect,
+    text: &mut String,
+    id: egui::Id,
+    pt: f32,
+    hint: Option<&str>,
+    refused: Option<&str>,
+) -> egui::Response {
+    let font = egui::FontId::proportional(pt);
+    let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
+        let at = (refused == Some(buf.as_str()) && !buf.as_str().is_empty()).then_some(0);
+        super::binding::refusal_galley(ui, buf.as_str(), at, &font)
+    };
+    let mut edit = egui::TextEdit::singleline(text)
+        .id(id)
+        .frame(egui::Frame::NONE)
+        .font(egui::FontId::proportional(pt))
+        .layouter(&mut layouter);
+    if let Some(h) = hint {
+        edit = edit.hint_text(h);
+    }
+    let out = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(r)
+                .layout(egui::Layout::centered_and_justified(
+                    egui::Direction::TopDown,
+                )),
+            |ui| edit.show(ui),
+        )
+        .inner;
+    let at = (refused == Some(text.as_str())).then_some(0);
+    super::binding::underline_refusal(ui, &out, at);
+    out.response.response
 }
 
 /// A 12×12 colour chip, the checkerboard under a translucent one (G1).
@@ -2140,5 +2346,312 @@ mod tests {
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
         assert_eq!(w(&app), 436.0, "two modes");
+    }
+
+    /// **A refused rename keeps its text, dim and dotted, until it is changed**
+    /// (B4's manner, D1038 G14; §15 D1053): *colour 2* renamed *colour 1* is
+    /// refused as taken, the sentence says so, and the field still holding
+    /// *colour 1* lays it out at 40% over dots; typed into, it is plain again.
+    ///
+    /// Flip, run: `var_refuse` without `refused` set fails *"the refused text is
+    /// dim"*.
+    #[test]
+    fn a_refused_rename_keeps_its_text_dim_until_it_changes() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewVar(VarKind::Color));
+        let b = app.session.doc.variables().by_name("colour 2").unwrap().id;
+        app.var_act(Act::StartEdit(Edit::Name {
+            var: b,
+            text: "colour 1".into(),
+        }));
+        app.var_act(Act::Name(b, "colour 1".into()));
+        assert!(
+            app.var_browser.as_ref().unwrap().refusal.is_some(),
+            "refused"
+        );
+        let ink = |app: &mut OndinApp| {
+            let mut shapes = vec![];
+            for _ in 0..2 {
+                shapes = pass(&ctx, app, vec![], |app, ctx| app.var_browser_ui(ctx));
+            }
+            fn find(shape: &egui::Shape, out: &mut Vec<egui::Color32>) {
+                match shape {
+                    egui::Shape::Text(t) if t.galley.text() == "colour 1" => {
+                        out.extend(t.galley.job.sections.iter().map(|s| s.format.color))
+                    }
+                    egui::Shape::Vec(v) => v.iter().for_each(|x| find(x, out)),
+                    _ => {}
+                }
+            }
+            let mut out = vec![];
+            shapes.iter().for_each(|c| find(&c.shape, &mut out));
+            out
+        };
+        assert!(
+            ink(&mut app).contains(&color::text_a(102)),
+            "the refused text is dim"
+        );
+        if let Some(Edit::Name { text, .. }) =
+            app.var_browser.as_mut().and_then(|b| b.edit.as_mut())
+        {
+            text.push('0');
+        }
+        let shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        assert!(
+            last_text(&shapes, "colour 10").is_some(),
+            "the changed text is drawn"
+        );
+        let dim = shapes.iter().any(|c| {
+            matches!(&c.shape, egui::Shape::Text(t) if t.galley.text() == "colour 10"
+                && t.galley.job.sections.iter().any(|s| s.format.color == color::text_a(102)))
+        });
+        assert!(!dim, "changed, it is plain again");
+    }
+
+    /// **`Alt`-click on a caret closes or opens every group, and the collapsed
+    /// groups outlive the browser** (D1038 G-series, §15 D1054): two groups both
+    /// close on one `Alt`-click and both open on the next; closed, they stay closed
+    /// through closing and reopening the browser.
+    ///
+    /// Flip, run: without the write-through to `var_collapsed` fails *"kept for
+    /// the document"*. ⚠️ **Its first run failed there with the write-through in
+    /// place**: the browser loaded the document's set on its first *frame*, so the
+    /// toggles made before it were overwritten — the load moved to the open
+    /// (`toggle_var_browser`), the per-frame load kept for a document switch.
+    #[test]
+    fn alt_toggles_every_group_and_the_document_keeps_them() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewVar(VarKind::Color));
+        let (a, b) = {
+            let t = app.session.doc.variables();
+            (
+                t.by_name("colour 1").unwrap().id,
+                t.by_name("colour 2").unwrap().id,
+            )
+        };
+        app.var_act(Act::Name(a, "brand/500".into()));
+        app.var_act(Act::Name(b, "surface/base".into()));
+        let collapsed = |app: &OndinApp| app.var_browser.as_ref().unwrap().collapsed.clone();
+        app.var_act(Act::ToggleAll("brand".into()));
+        assert!(
+            collapsed(&app).contains("brand") && collapsed(&app).contains("surface"),
+            "both closed: {:?}",
+            collapsed(&app)
+        );
+        app.var_act(Act::ToggleAll("brand".into()));
+        assert!(collapsed(&app).is_empty(), "both open again");
+        app.var_act(Act::ToggleAll("surface".into()));
+        frame(&mut app, &ctx);
+        app.toggle_var_browser();
+        app.toggle_var_browser();
+        frame(&mut app, &ctx);
+        assert!(
+            collapsed(&app).contains("brand") && collapsed(&app).contains("surface"),
+            "kept for the document"
+        );
+    }
+
+    /// **Past three modes a bar under the columns scrolls them sideways** (G3, §15
+    /// D1055): with four modes, a drag on its thumb moves `scroll_x` by the share
+    /// of the hidden column the drag covers, and a long drag stops at the last
+    /// column.
+    ///
+    /// Flip, run: the `Some((x0, s0))` arm's write removed fails *"the drag
+    /// scrolls"*.
+    #[test]
+    fn past_three_modes_the_bar_scrolls_the_columns() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        for _ in 0..3 {
+            app.var_act(Act::NewMode);
+        }
+        if let Some(b) = app.var_browser.as_mut() {
+            b.edit = None;
+        }
+        assert_eq!(app.session.doc.variables().modes().len(), 4, "the fixture");
+        frame(&mut app, &ctx);
+        frame(&mut app, &ctx);
+        let panel = app.var_browser.as_ref().unwrap().panel.expect("drawn");
+        // The thumb's middle at rest: the track's left plus half its width.
+        let track_l = panel.left() + PAD + NAME_W;
+        let track_w = panel.right() - 12.0 - track_l;
+        let thumb_w = track_w * 3.0 / 4.0;
+        let at = egui::pos2(track_l + thumb_w / 2.0, panel.bottom() - 8.0);
+        let ev = |pos, pressed: Option<bool>| match pressed {
+            Some(pressed) => egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            },
+            None => egui::Event::PointerMoved(pos),
+        };
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            pass(&ctx, app, events, |app, ctx| app.var_browser_ui(ctx));
+        };
+        run(&mut app, vec![ev(at, None)]);
+        run(&mut app, vec![ev(at, Some(true))]);
+        let to = at + egui::vec2(10.0, 0.0);
+        run(&mut app, vec![ev(to, None)]);
+        let s = app.var_browser.as_ref().unwrap().scroll_x;
+        let room = track_w - thumb_w;
+        assert!(
+            (s - 10.0 * MODE_W / room).abs() < 0.5,
+            "the drag scrolls: {s}"
+        );
+        run(&mut app, vec![ev(to + egui::vec2(500.0, 0.0), None)]);
+        assert_eq!(
+            app.var_browser.as_ref().unwrap().scroll_x,
+            MODE_W,
+            "stops at the last column"
+        );
+        run(&mut app, vec![ev(to, Some(false))]);
+        assert!(app.var_browser.as_ref().unwrap().bar_drag.is_none());
+    }
+
+    /// Where text `s` was last drawn this frame, by its galley's centre.
+    fn last_text(shapes: &[egui::epaint::ClippedShape], s: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, s: &str, out: &mut Option<egui::Pos2>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    *out = Some(t.pos + t.galley.rect.center().to_vec2());
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|x| find(x, s, out)),
+                _ => {}
+            }
+        }
+        let mut out = None;
+        shapes.iter().for_each(|c| find(&c.shape, s, &mut out));
+        out
+    }
+
+    /// One pass of `draw` on the 1200×800 screen, its shapes returned.
+    fn pass(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+        draw: fn(&mut OndinApp, &egui::Context),
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| draw(app, ctx)).shapes
+    }
+
+    /// Click the text `s` that `draw` lays out — moved to, pressed, released.
+    fn click_text(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        s: &str,
+        draw: fn(&mut OndinApp, &egui::Context),
+    ) {
+        let mut shapes = vec![];
+        for _ in 0..2 {
+            shapes = pass(ctx, app, vec![], draw);
+        }
+        let at = last_text(&shapes, s).unwrap_or_else(|| panic!("{s:?} is drawn"));
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        pass(ctx, app, vec![egui::Event::PointerMoved(at)], draw);
+        pass(ctx, app, vec![button(true)], draw);
+        pass(ctx, app, vec![button(false)], draw);
+    }
+
+    /// **A colour cell opens the colour popup, whose *Variables* tab makes it an
+    /// alias and whose *Solid* writes the colour back** (D1038 G-series, §15
+    /// D1052), each through the real clicks: the browser's cell, then the
+    /// popup's rows and tabs. *colour 1* itself is refused (*this variable*), and
+    /// from *colour 2*'s cell once *colour 1* uses it, *colour 1* is refused too
+    /// (*uses colour 2*, the loop it would close).
+    ///
+    /// ⚠️ **Two defences against the loop**: the row's refusal, and the commit's
+    /// own table check. Flip, run: dropping the face's `refusal.is_none()` gate
+    /// left *"a loop is not written"* green — the commit refused it — and fails
+    /// *"an inert row, not a refused commit"*, the status reading *Edit failed: …
+    /// aliases make a loop*, which is what the refusal spares the user.
+    #[test]
+    fn a_colour_cell_opens_the_popup_and_its_variables_tab_makes_an_alias() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_act(Act::NewVar(VarKind::Color));
+        let table = app.session.doc.variables();
+        let mode = table.default_mode().unwrap();
+        let a = table.by_name("colour 1").unwrap().id;
+        let b = table.by_name("colour 2").unwrap().id;
+        app.var_act(Act::Cell(a, mode, "#8BA5E0".into(), None));
+        app.var_act(Act::Cell(b, mode, "#102030".into(), None));
+        if let Some(br) = app.var_browser.as_mut() {
+            br.edit = None;
+        }
+        let browser: fn(&mut OndinApp, &egui::Context) = |app, ctx| {
+            app.var_browser_ui(ctx);
+            app.picker_ui(ctx);
+        };
+        let popup: fn(&mut OndinApp, &egui::Context) = |app, ctx| app.picker_ui(ctx);
+        click_text(&ctx, &mut app, "8BA5E0", browser);
+        assert_eq!(
+            app.picker.as_ref().map(|p| p.slot),
+            Some(PaintSlot::VarCell(a, mode)),
+            "the cell opened the popup on itself"
+        );
+        assert!(
+            app.var_browser.as_ref().unwrap().edit.is_none(),
+            "not the text"
+        );
+
+        click_text(&ctx, &mut app, "Variables", popup);
+        let shapes = pass(&ctx, &mut app, vec![], popup);
+        assert!(
+            last_text(&shapes, "this variable").is_some(),
+            "itself is refused"
+        );
+        click_text(&ctx, &mut app, "colour 2", popup);
+        let cell = |app: &OndinApp, v| app.session.doc.variables().get(v).unwrap().cells[&mode];
+        assert_eq!(cell(&app, a), Cell::Alias(b), "a row makes the alias");
+
+        app.var_act(Act::OpenPicker(b, mode, egui::pos2(500.0, 200.0)));
+        click_text(&ctx, &mut app, "Variables", popup);
+        let shapes = pass(&ctx, &mut app, vec![], popup);
+        assert!(
+            last_text(&shapes, "uses colour 2").is_some(),
+            "colour 1 would close a loop"
+        );
+        let before = app.session.doc.clone();
+        click_text(&ctx, &mut app, "colour 1", popup);
+        assert_eq!(app.session.doc, before, "a loop is not written");
+        // The commit would refuse it anyway — what the row's refusal adds is that
+        // the click never reaches it, so the user is not told an edit *failed*.
+        assert!(
+            !app.session.status().text.starts_with("Edit failed"),
+            "an inert row, not a refused commit: {:?}",
+            app.session.status().text
+        );
+
+        app.var_act(Act::OpenPicker(a, mode, egui::pos2(500.0, 200.0)));
+        click_text(&ctx, &mut app, "Solid", popup);
+        assert_eq!(
+            cell(&app, a),
+            Cell::Color(Color::from_rgba8(0x10, 0x20, 0x30, 0xff)),
+            "Solid writes the colour it drew, ending the alias"
+        );
     }
 }

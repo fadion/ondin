@@ -776,12 +776,16 @@ impl RenderOverrides {
             .collect();
         for id in released {
             let Some(node) = doc.get(id) else { continue };
+            // Its specified kind, a bound size resolved (§15 D1061).
+            let Some(own) = doc.resolved_kind(id) else {
+                continue;
+            };
             let moved = res.used_local(doc, id) != Some(node.transform());
-            let resized = res.used_kind(doc, id) != Some(node.kind());
+            let resized = res.used_kind(doc, id) != Some(&*own);
             if moved || resized || res.used_frame(id).is_some() {
                 self.entry(id).transform = Some(node.transform());
                 if resized {
-                    self.set_kind(doc, res, id, node.kind().clone());
+                    self.set_kind(doc, res, id, own.into_owned());
                 }
                 self.entry(id).frame = None;
                 self.mark_moved(doc, id);
@@ -835,10 +839,13 @@ impl RenderOverrides {
                 .unwrap_or_else(|| node.transform());
             self.entry(id).transform = Some(placed.local.unwrap_or(specified));
         }
-        let base = self
-            .get(id)
-            .and_then(|o| o.kind.clone())
-            .unwrap_or_else(|| node.kind().clone());
+        // At its specified size — a bound width or height resolved, never the 0
+        // its literal holds (§15 D1061): an item the pass does not resize answers
+        // no kind, and the stored one drew a bound rect 0 wide in a row the
+        // preview re-laid.
+        let Some(base) = self.current_kind(doc, id) else {
+            return;
+        };
         let kind = placed.kind.unwrap_or(base);
         let now = self
             .get(id)
@@ -970,11 +977,10 @@ impl RenderOverrides {
                 .unwrap_or(*node.insets());
             // The kind this preview has given it — a new corner radius, say — else
             // the document's; either way at its specified size, which `place`
-            // stretches from.
-            let mut base = self
-                .get(id)
-                .and_then(|o| o.kind.clone())
-                .unwrap_or_else(|| node.kind().clone());
+            // stretches from — a bound width or height resolved (§15 D1061).
+            let Some(mut base) = self.current_kind(doc, id) else {
+                continue;
+            };
             // **A layer with no insets is not this pass's business** unless this
             // preview unpinned it (§15 D933): with its kind changed it is drawn
             // with that kind where it is, and **untouched it is drawn where the
@@ -1246,6 +1252,18 @@ impl RenderOverrides {
                     ];
                     let kept = ondin_core::build::kept_corner_vars(doc, *id, w);
                     *corner_radii = doc.corners_drawn_in(doc.variables(), *id, *corner_radii, kept);
+                }
+                // **And a bound width or height is drawn where the commit puts
+                // it** (`build::kept_size_vars`, §15 D1061): an axis written what
+                // it draws keeps its variable's number, one written past it — a
+                // resize — the written size, as `keep_size_bindings` detaches it.
+                if let Some(written) = patched.box_size()
+                    && doc
+                        .get(*id)
+                        .is_some_and(|n| n.size_vars().iter().any(Option::is_some))
+                {
+                    let kept = ondin_core::build::kept_size_vars(doc, *id, written);
+                    patched = doc.size_drawn_in(doc.variables(), *id, &patched, kept);
                 }
                 self.set_kind(doc, res, *id, patched);
                 // A geometry change can move the node's own painted area but
@@ -1657,6 +1675,18 @@ impl RenderOverrides {
                         );
                         self.moved.insert(n);
                     }
+                    // A bound width or height the same way (§15 D1061), over the
+                    // kind pending or committed — after the corners above, whose
+                    // kind it starts from — and the layout pass lays the chain
+                    // again.
+                    if let Some(node) = doc.get(n)
+                        && node.size_vars().iter().any(Option::is_some)
+                        && let Some(base) = self.current_kind(doc, n)
+                    {
+                        let drawn = doc.size_drawn_in(&t, n, &base, node.size_vars());
+                        self.set_kind(doc, res, n, drawn);
+                        self.mark_moved(doc, n);
+                    }
                     // A bound visibility the same way (§15 D1059).
                     if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
                         self.entry(n).visible = Some(doc.shown_in(&t, n));
@@ -1717,6 +1747,18 @@ impl RenderOverrides {
                     }
                 }
                 self.set_kind(doc, res, *id, NodeKind::Rect { size, corner_radii });
+                self.moved.insert(*id);
+            }
+            // **A width's or a height's binding previews as the size it will
+            // draw** (§15 D1061) — the `--` list's highlight on W or H, D1050's
+            // corner preview for a size. Over the kind the ops before this one
+            // left, else the document's at its drawn size; an axis `vars` leaves
+            // unbound keeps what that holds, which for a detach is what it drew.
+            Operation::SetSizeVars { id, vars } => {
+                let base = self.current_kind(doc, *id)?;
+                base.box_size()?;
+                let drawn = doc.size_drawn_in(doc.variables(), *id, &base, *vars);
+                self.set_kind(doc, res, *id, drawn);
                 self.moved.insert(*id);
             }
             // A frame's mode changes what a whole subtree resolves to — read
@@ -1799,9 +1841,13 @@ impl RenderOverrides {
         if let Some(g) = self.ghost(id) {
             return Some(g.kind.clone());
         }
+        // **At its drawn size** where a width or a height is bound (§15 D1061):
+        // the stored literal there is 0, and a patch over it — a corner, a side
+        // count, a corner binding's preview — carried that 0 into the override
+        // and drew the layer with no size. Unbound, this is the stored kind.
         self.get(id)
             .and_then(|o| o.kind.clone())
-            .or_else(|| doc.get(id).map(|n| n.kind().clone()))
+            .or_else(|| doc.resolved_kind(id).map(std::borrow::Cow::into_owned))
     }
 
     /// The kind to **measure and draw** `id` with: a ghost's, then the override's,
@@ -2048,6 +2094,14 @@ fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode
     build_ghost(doc, root, &by_id, &mut FxHashMap::default())
 }
 
+/// A captured node's kind at its drawn size: a bound width or height resolved
+/// through `doc` in the default mode, [`ghost_shown`]'s reading (§15 D1061). The
+/// literal is 0 there, and an Alt-drag copy of a bound layer previewed with no
+/// size.
+fn ghost_kind(doc: &Document, n: &ondin_core::Node) -> NodeKind {
+    doc.size_drawn_in(doc.variables(), n.id(), n.kind(), n.size_vars())
+}
+
 /// Whether a captured node shows: its binding resolved through `doc` — in the
 /// **default mode**, the ghost's id being in no frame yet, as `paint_ghost`
 /// resolves a bound paint — else its literal (§15 D1059). An Alt-drag copy of a
@@ -2088,7 +2142,7 @@ fn build_ghost(
                 *op,
                 &ondin_core::boolean::Operands {
                     local_of: &|c| by_id.get(&c).map(|n| n.transform()).unwrap_or_default(),
-                    kind_of: &|c| by_id.get(&c).map(|n| n.kind().clone()),
+                    kind_of: &|c| by_id.get(&c).map(|n| ghost_kind(doc, n)),
                     children_of: &|c| {
                         by_id
                             .get(&c)
@@ -2109,7 +2163,7 @@ fn build_ghost(
     Some(GhostNode {
         id: node.id(),
         transform: node.transform(),
-        kind: node.kind().clone(),
+        kind: ghost_kind(doc, node),
         paint: node.paint().clone(),
         effects: node.effects().to_vec(),
         // A captured subtree carries its own text, but not the *shaped* layout —

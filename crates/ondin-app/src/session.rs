@@ -1263,6 +1263,10 @@ impl EditorSession {
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
         // And a visibility written over a bound layer (§15 D1059).
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
+        // And a width or a height written over a bound axis, or made computed by
+        // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
+        // item are among the layout writes it reads.
+        let tx = ondin_core::build::keep_size_bindings(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —

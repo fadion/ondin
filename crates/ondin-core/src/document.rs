@@ -144,6 +144,7 @@ impl Document {
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
+            size_vars: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -592,6 +593,60 @@ impl Document {
             },
             None => n.visible,
         }
+    }
+
+    /// `kind` with the axes `vars` binds read from table `t`, in the mode in
+    /// force at `id` (§15 D1061) — each its variable's number, never below 0, the
+    /// other axis as it is; `kind` unchanged when nothing is bound or it has no
+    /// stored size. `vars` is named rather than read off the node so a preview
+    /// can resolve a binding it has not committed.
+    pub fn size_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        kind: &NodeKind,
+        vars: crate::variable::SizeVars,
+    ) -> NodeKind {
+        let mut out = kind.clone();
+        if vars.iter().all(Option::is_none) {
+            return out;
+        }
+        let Some(size) = out.box_size_mut() else {
+            return out;
+        };
+        for (k, var) in vars.iter().enumerate() {
+            if let Some(v) = var {
+                let x = match self.resolve_var_in(t, id, *v) {
+                    Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                    _ => 0.0,
+                };
+                if k == 0 {
+                    size.width = x;
+                } else {
+                    size.height = x;
+                }
+            }
+        }
+        out
+    }
+
+    /// `id`'s kind at the size it is drawn at: its bound width and height
+    /// resolved ([`Self::size_drawn_in`] against this document's table),
+    /// borrowed when neither is bound. **What every layout view answers `kind`
+    /// with, and what `Resolved`'s used kind starts from**, so a bound size is
+    /// laid out and drawn at its variable's number and never at the 0 its
+    /// literal holds (§15 D1061).
+    pub fn resolved_kind(&self, id: NodeId) -> Option<std::borrow::Cow<'_, NodeKind>> {
+        let n = self.nodes.get(&id)?;
+        if n.size_vars.iter().all(Option::is_none) {
+            return Some(std::borrow::Cow::Borrowed(&n.kind));
+        }
+        Some(std::borrow::Cow::Owned(self.size_drawn_in(
+            &self.variables,
+            id,
+            &n.kind,
+            n.size_vars,
+        )))
     }
 
     /// Every node whose fields read a variable — what an edit to the table
@@ -1075,6 +1130,12 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetVisibleVar { id: *id, var: old })
             }
+            Operation::SetSizeVars { id, vars } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.size_vars, *vars);
+                dirty.0.insert(*id);
+                Ok(Operation::SetSizeVars { id: *id, vars: old })
+            }
         }
     }
 
@@ -1320,6 +1381,7 @@ impl Document {
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
+            size_vars: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2749,6 +2811,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             corner_vars: n.corner_vars,
             spacing_vars: n.spacing_vars,
             visible_var: n.visible_var,
+            size_vars: n.size_vars,
         });
     }
     Some((out, new_root?))
@@ -2974,6 +3037,7 @@ mod tests {
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
+            size_vars: Default::default(),
         }
     }
 

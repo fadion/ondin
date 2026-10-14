@@ -848,7 +848,11 @@ pub fn add_variant(
     // **`SET_PAD` under it, the air `combine` leaves** (§15 D1000). It was
     // `VARIANT_GAP` again, so a set of two variants had 24 under the last where a
     // set of one had 10, which the maintainer read as the padding doubling.
-    if let NodeKind::Artboard { size } = &s.kind {
+    // **From the size it is drawn at** (§15 D1061): a set whose width is bound
+    // holds 0 there, and growing from that shrank it to the new variant's edge;
+    // an axis that need not grow is written as drawn, which keeps its binding.
+    let drawn = res.used_kind(doc, set).and_then(NodeKind::box_size);
+    if let (NodeKind::Artboard { .. }, Some(size)) = (&s.kind, drawn.as_ref()) {
         let src = doc.get(source)?;
         let local = crate::query::local_box(doc, res, source)?;
         let placed = crate::geometry::transform_rect(src.transform, local);

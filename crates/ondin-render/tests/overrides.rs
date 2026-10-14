@@ -4461,6 +4461,242 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
     assert_preview_matches_commit(&doc, &resize, "a bound rect resized");
 }
 
+/// **A bound width and height preview where the commit draws them** (§15
+/// D1061), each against the commit made through `keep_size_bindings`, as
+/// `session::commit_inner` makes it: a corner radius written on a rect whose size
+/// is bound — the patch over a stored kind whose bound axes hold 0; a resize
+/// from a side handle, the width as drawn and the height dragged past its
+/// variable, which detaches; and the `--` list's binding of the width to another
+/// variable.
+///
+/// Flips, run: the `SetGeometry` arm resolving the node's whole binding rather
+/// than `kept_size_vars`' fails *"a side handle past the bound height"*, the
+/// height drawn at its variable while the commit detaches it. (Resolving none
+/// passes: the width written is the width drawn, so drawing the written size is
+/// right here — the half that is not the plausible wrong version.) ⚠️ **`current_kind` falling back to the stored
+/// kind leaves this test green**: the corner write and the corner binding
+/// (`bind_corners_ops` writes a radius patch before its `SetCornerVars`) both
+/// pass through that arm, whose resolve lifts the stored 0 back to the bound
+/// number — two defences for those two. The flip bites in the test below,
+/// where nothing in the gesture writes the bound layer.
+#[test]
+fn a_bound_size_previews_where_the_commit_draws_it() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCF);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, w, wide) = (ids.mint(), ids.mint_mode(), ids.mint_var(), ids.mint_var());
+    let number = |id, name: &str, x: f64| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Number,
+            cells: [(mode, Cell::Number(x))].into(),
+        },
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(2.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        number(w, "size/w", 60.0),
+        number(wide, "size/wide", 140.0),
+    ]))
+    .unwrap();
+    let bind = Transaction(ondin_core::bind_size_ops(&doc, rect, [Some(w), Some(w)]));
+    doc.apply(&bind).unwrap();
+    let check = |tx: Transaction, what: &str| {
+        let res = Resolved::rebuild(&doc);
+        let overrides = RenderOverrides::from_transaction(&doc, &res, &tx)
+            .unwrap_or_else(|| panic!("{what}: not representable"));
+        let previewed = record(&doc, &res, &overrides);
+        let mut committed_doc = doc.clone();
+        committed_doc
+            .apply(&ondin_core::keep_size_bindings(&doc, tx))
+            .expect("transaction applies");
+        let committed_res = Resolved::rebuild(&committed_doc);
+        let committed = record(&committed_doc, &committed_res, &RenderOverrides::default());
+        assert_eq!(previewed, committed, "{what}: preview diverged from commit");
+    };
+    check(
+        Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::CornerRadius(9.0),
+        }]),
+        "a corner written on a bound size",
+    );
+    check(
+        Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(60.0, 75.0)),
+        }]),
+        "a side handle past the bound height",
+    );
+    check(
+        Transaction(ondin_core::bind_size_ops(&doc, rect, [Some(wide), None])),
+        "the width bound to another variable",
+    );
+    check(
+        Transaction(ondin_core::bind_corners_ops(&doc, rect, [Some(w); 4])),
+        "a corner binding on a bound size",
+    );
+}
+
+/// **A bound item the gesture does not touch is laid out at its number in the
+/// preview** (§15 D1061): a flex row of two rects, the first's width bound, the
+/// second resized — the preview re-lays the row through `PreviewView::kind`,
+/// which answers the first from `current_kind`.
+///
+/// **Written as a check and found a defect**: `apply_laid` took the kind of an
+/// item the pass does not resize from the stored one, and the preview drew the
+/// bound rect 0 wide while laying its neighbour past its 90 — fixed by asking
+/// `current_kind`, as were the insets pass's base and a released item's.
+///
+/// And then a cell of its variable scrubbed, and an Alt-drag copy of it dropped
+/// — two readers of the stored size a sweep of the renderer found, each fixed.
+///
+/// Flips, run: `current_kind` falling back to the stored kind, and
+/// `apply_laid`'s base back to the stored kind, each fail *"the neighbour of a
+/// bound item resized"*, the bound rect drawn 0 wide; the `SetVariableCell`
+/// arm without its size block fails *"the bound width's cell scrubbed"*, the
+/// rect still 90; and `ghost_kind` answering the stored kind fails *"an
+/// Alt-drag copy of a bound rect"*.
+#[test]
+fn a_bound_item_beside_a_resize_previews_at_its_number() {
+    use ondin_core::container::{Display, Flex};
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xDB);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, a, b, mode, w) = (
+        ids.mint(),
+        ids.mint(),
+        ids.mint(),
+        ids.mint_mode(),
+        ids.mint_var(),
+    );
+    let rect = |id, index| Operation::CreateNode {
+        id,
+        parent: frame,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(40.0, 20.0),
+            corner_radii: RoundedRectRadii::from_single_radius(0.0),
+        },
+        transform: None,
+        name: None,
+    };
+    let fill = |id| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+            visible: true,
+        }]),
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(300.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        },
+        rect(a, 0),
+        rect(b, 1),
+        fill(a),
+        fill(b),
+        Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                column_gap: 5.0,
+                align_items: ondin_core::container::AlignItems::Start,
+                ..Flex::default()
+            })),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: w,
+                name: "size/w".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(90.0))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    doc.apply(&Transaction(ondin_core::bind_size_ops(
+        &doc,
+        a,
+        [Some(w), None],
+    )))
+    .unwrap();
+    let resize = Transaction(vec![Operation::SetGeometry {
+        id: b,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(40.0, 50.0)),
+    }]);
+    assert_preview_matches_commit(&doc, &resize, "the neighbour of a bound item resized");
+
+    // The variable's cell scrubbed: the bound rect and its neighbour move
+    // together (the `SetVariableCell` arm's size, the reader sweep's finding).
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: w,
+        mode,
+        cell: Cell::Number(120.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the bound width's cell scrubbed");
+
+    // An Alt-drag copy of the bound rect, dropped at the root: the ghost is
+    // drawn at its number (`ghost_kind`), never at the 0 its literal holds.
+    let template = doc.capture_subtree(a).expect("capture the bound rect");
+    let mut fresh = IdSource::new(0xDC);
+    let (nodes, new_root) = ondin_core::remap_subtree(&template, &mut fresh).expect("remap");
+    let index = doc.get(root).unwrap().children().len();
+    let copy = Transaction(vec![
+        Operation::InsertSubtree {
+            nodes,
+            parent: root,
+            index,
+        },
+        Operation::SetTransform {
+            id: new_root,
+            transform: kurbo::Affine::translate((0.0, 200.0)),
+        },
+    ]);
+    assert_preview_matches_commit(&doc, &copy, "an Alt-drag copy of a bound rect");
+}
+
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
 /// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
 /// whose corners read *radius*, previewed under a new *brand* colour and a new

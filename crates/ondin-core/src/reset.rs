@@ -85,6 +85,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         corner_vars,
         spacing_vars,
         visible_var,
+        size_vars,
     } = node;
     let id = *id;
     use Operation as O;
@@ -163,6 +164,13 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetVisibleVar {
             id,
             var: *visible_var,
+        },
+        // And a width's or a height's (§15 D1061): stated in the transaction, so
+        // the commit's `keep_size_bindings` leaves it as written beside the size
+        // `kind_ops` writes below.
+        O::SetSizeVars {
+            id,
+            vars: *size_vars,
         },
     ];
     ops.extend(kind_ops(id, kind));

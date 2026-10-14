@@ -1556,7 +1556,10 @@ pub fn text_on_new_path(
     if node.mask() {
         return Err(OpError::WrongKindForOp);
     }
-    let rail = crate::geometry::local_path(node.kind()).ok_or(OpError::EmptyGeometry)?;
+    // The outline as drawn — a bound width or height at its number, never the 0
+    // its literal holds (§15 D1061) — as `outline` reads it.
+    let rail = crate::geometry::local_path(res.used_kind(doc, path).unwrap_or(node.kind()))
+        .ok_or(OpError::EmptyGeometry)?;
     if rail.elements().is_empty() {
         return Err(OpError::EmptyGeometry);
     }
@@ -3740,6 +3743,341 @@ pub fn keep_visible_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
+/// Which of `id`'s width and height **the user sets** — the axes a number
+/// variable may bind (§15 D1061, the maintainer's ruling: *only a hand-set size
+/// is bindable*). `[false; 2]` for a kind with no stored size
+/// ([`NodeKind::box_size`]), a text box among them: its size is its sizing
+/// mode's.
+///
+/// An axis is computed, and so not bindable, when:
+///
+/// - its own keyword is `%` or `fit-content` — a frame that hugs its layout
+///   (`container::root_sized`) or an item sized against its container;
+/// - it is **pinned at both ends** by insets in a container with a box — the
+///   space between them is its size (`container::place`);
+/// - it is an in-flow flex item's **main** axis with growth or a basis — the
+///   line deals out that size — or its **cross** axis drawn stretched
+///   ([`stretched_across`]);
+/// - it is an in-flow grid item stretched across its cell on that axis — a
+///   `stretch` keyword or a box under `normal`, its size `auto` (the rule
+///   `container::grid_held` releases).
+///
+/// Asked of a [`crate::container::LayoutView`] so the commit can ask it of the
+/// tree an edit leaves ([`keep_size_bindings`]). ⚠️ **Not a measurement of the
+/// laid-out box**: shrink, `min-` and `max-` can still squeeze an authored
+/// axis, and the binding keeps its number while they do — the stored size is
+/// what it stands in for, which is the CSS reading of `width`.
+pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -> [bool; 2] {
+    use crate::container::{AlignItems, Dimension, Display};
+    let Some(kind) = view.kind(id) else {
+        return [false; 2];
+    };
+    if kind.box_size().is_none() {
+        return [false; 2];
+    }
+    let item = view.item(id);
+    let dims = [item.width, item.height];
+    let mut out = dims.map(|d| matches!(d, Dimension::Auto | Dimension::Px(_)));
+    let boxed = view.parent(id).is_some_and(|p| match view.kind(p) {
+        Some(NodeKind::Artboard { .. }) => true,
+        Some(NodeKind::Group) => view.display(p).is_some(),
+        _ => false,
+    });
+    let ins = view.insets(id);
+    if boxed && ins.left.is_some() && ins.right.is_some() {
+        out[0] = false;
+    }
+    if boxed && ins.top.is_some() && ins.bottom.is_some() {
+        out[1] = false;
+    }
+    if crate::container::parent_lays_out(view, id) && crate::container::in_flow(view, id) {
+        let parent = view.parent(id).and_then(|p| view.display(p));
+        match parent.as_deref() {
+            Some(Display::Flex(flex)) => {
+                let main = if flex.direction.is_row() { 0 } else { 1 };
+                if item.grow > 0.0 || item.basis != Dimension::Auto {
+                    out[main] = false;
+                }
+                if stretched_across(flex, &item, &kind, false) {
+                    out[1 - main] = false;
+                }
+            }
+            Some(Display::Grid(grid)) => {
+                let replaced = crate::container::is_replaced(view, id);
+                let axes = [
+                    (item.justify_self, grid.justify_items),
+                    (item.align_self, grid.align_items),
+                ];
+                for (k, (own, items)) in axes.into_iter().enumerate() {
+                    let normal = own.is_none() && items.is_none();
+                    let stretched =
+                        (normal && !replaced) || own.or(items) == Some(AlignItems::Stretch);
+                    if stretched && dims[k] == Dimension::Auto {
+                        out[k] = false;
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+/// [`size_axes_authored`] of `doc` as committed — the inspector's question
+/// before it offers a W or H a chip (§15 D1061).
+pub fn bindable_size_axes(doc: &Document, id: NodeId) -> [bool; 2] {
+    size_axes_authored(&crate::resolve::DocView(doc), id)
+}
+
+/// Bind layer `id`'s width and height to `vars` — `None` leaving an axis as it
+/// is (§15 D1061), [`bind_corners_ops`]' shape: a bound axis's literal is written
+/// **0**, so a main and its copy bound to one variable compare equal, and the
+/// literal is never drawn while bound. Empty for a kind with no stored size, for
+/// an axis something else sizes ([`size_axes_authored`]), or when nothing would
+/// change.
+pub fn bind_size_ops(doc: &Document, id: NodeId, vars: crate::SizeVars) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let Some(size) = node.kind().box_size() else {
+        return Vec::new();
+    };
+    let authored = size_axes_authored(&crate::resolve::DocView(doc), id);
+    let mut next = node.size_vars();
+    for k in 0..2 {
+        if vars[k].is_some() && authored[k] {
+            next[k] = vars[k];
+        }
+    }
+    let mut s = [size.width, size.height];
+    for k in 0..2 {
+        if next[k].is_some() {
+            s[k] = 0.0;
+        }
+    }
+    let mut ops = Vec::new();
+    if s != [size.width, size.height] {
+        ops.push(Operation::SetGeometry {
+            id,
+            geometry: crate::GeometryPatch::Size(kurbo::Size::new(s[0], s[1])),
+        });
+    }
+    if next != node.size_vars() {
+        ops.push(Operation::SetSizeVars { id, vars: next });
+    }
+    ops
+}
+
+/// Detach the axes of layer `id` that `which` names to the sizes they are drawn
+/// at (D1038's detach, §15 D1061): each literal becomes its variable's number
+/// and the binding goes, the other axis as it is. Empty when neither is bound.
+pub fn detach_size_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let Some(size) = node.kind().box_size() else {
+        return Vec::new();
+    };
+    let mut vars = node.size_vars();
+    if !(0..2).any(|k| which[k] && vars[k].is_some()) {
+        return Vec::new();
+    }
+    let drawn = doc
+        .size_drawn_in(doc.variables(), id, node.kind(), vars)
+        .box_size()
+        .unwrap_or(size);
+    let (d, mut s) = ([drawn.width, drawn.height], [size.width, size.height]);
+    for k in 0..2 {
+        if which[k] && vars[k].is_some() {
+            s[k] = d[k];
+            vars[k] = None;
+        }
+    }
+    vec![
+        Operation::SetGeometry {
+            id,
+            geometry: crate::GeometryPatch::Size(kurbo::Size::new(s[0], s[1])),
+        },
+        Operation::SetSizeVars { id, vars },
+    ]
+}
+
+/// The bindings layer `id` keeps when its size is written `written` —
+/// [`keep_size_bindings`]' judgement, axis by axis (§15 D1061): a bound axis
+/// written what it draws, or its own literal, keeps its variable; any other comes
+/// back `None`. **Shared with the preview** (`absorb`'s `SetGeometry` arm), so a
+/// resize draws a bound axis where the commit will put it — D1058's lesson for
+/// gaps, taken before it could be learned again.
+pub fn kept_size_vars(doc: &Document, id: NodeId, written: kurbo::Size) -> crate::SizeVars {
+    let Some(node) = doc.get(id) else {
+        return Default::default();
+    };
+    let bound = node.size_vars();
+    let Some(literal) = node.kind().box_size() else {
+        return Default::default();
+    };
+    let drawn = doc
+        .size_drawn_in(doc.variables(), id, node.kind(), bound)
+        .box_size()
+        .unwrap_or(literal);
+    let (l, d, w) = (
+        [literal.width, literal.height],
+        [drawn.width, drawn.height],
+        [written.width, written.height],
+    );
+    std::array::from_fn(|k| bound[k].filter(|_| w[k] == d[k] || w[k] == l[k]))
+}
+
+/// **A size written over a bound axis detaches it** (D1038 (2), §15 D1061) —
+/// [`keep_corner_bindings`]' rule for a width and a height, so no writer of a
+/// size has to know about bindings: the W and H fields, every resize handle, the
+/// Scale tool, an arrow-key resize and the layout passes write
+/// `GeometryPatch::Size` as they did, and this adds the `SetSizeVars` that lets
+/// the written size be the one drawn. Propagation runs after it
+/// (`propagate::owed`), so a copy follows a detach through the main's
+/// `SetSizeVars`, which propagates whole.
+///
+/// **The corners' two halves, for the same two kinds of writer.** An axis
+/// written **what it draws** stays bound — a resize from a side handle, or the W
+/// field, writes the other axis as drawn — and so does one written **its own
+/// literal**, 0, which is what a writer building the size from the stored kind
+/// does (a `GeometryPatch` that is not a size carries the stored size, D874).
+/// Either way the literal goes back to 0 in the patch. Anything else detaches the
+/// axis to the size written. **A 0 typed over a bound axis keeps the binding**,
+/// the corners' price; the chip's retype, which detaches first, is its door.
+///
+/// **And an axis an edit makes computed is detached** — the ruling's *only a
+/// hand-set size is bindable*, kept as true after the edit as at the bind: a
+/// keyword set to `%` or `fit-content`, a pin at the second end, growth, a basis
+/// or a stretch, a reparent into a layout. Asked of the tree the transaction
+/// leaves ([`size_axes_authored`] on a scratch copy), and only when the
+/// transaction touches the layout of a bound layer or its parent, so an
+/// ordinary commit pays nothing. The literal it detaches to is the size drawn
+/// before the edit, which is what the axis returns to if it is made hand-set
+/// again.
+///
+/// A transaction that sets a layer's size bindings itself — a bind, a detach,
+/// a reset — is left to say what it means.
+pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_vars: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetSizeVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let bound = |id: NodeId| {
+        !sets_vars.contains(&id)
+            && doc
+                .get(id)
+                .is_some_and(|n| n.size_vars().iter().any(Option::is_some))
+    };
+    let mut vars: FxHashMap<NodeId, crate::SizeVars> = FxHashMap::default();
+    for op in tx.0.iter_mut() {
+        let Operation::SetGeometry {
+            id,
+            geometry: crate::GeometryPatch::Size(size),
+        } = op
+        else {
+            continue;
+        };
+        if !bound(*id) {
+            continue;
+        }
+        let Some(node) = doc.get(*id) else { continue };
+        let Some(literal) = node.kind().box_size() else {
+            continue;
+        };
+        let v = vars.entry(*id).or_insert(node.size_vars());
+        let kept = kept_size_vars(doc, *id, *size);
+        if v[0].is_some() {
+            if kept[0].is_some() {
+                size.width = literal.width;
+            } else {
+                v[0] = None;
+            }
+        }
+        if v[1].is_some() {
+            if kept[1].is_some() {
+                size.height = literal.height;
+            } else {
+                v[1] = None;
+            }
+        }
+    }
+    // The layout half: a bound layer whose own layout fields, insets, parent or
+    // parent's layout the transaction writes.
+    let mut touched: Vec<NodeId> = Vec::new();
+    for op in &tx.0 {
+        match op {
+            Operation::SetLayoutItem { id, .. }
+            | Operation::SetInsets { id, .. }
+            | Operation::Reparent { id, .. } => touched.push(*id),
+            Operation::SetDisplay { id, .. } => {
+                if let Some(n) = doc.get(*id) {
+                    touched.extend(n.children().iter().copied());
+                }
+            }
+            _ => {}
+        }
+    }
+    touched.retain(|id| bound(*id));
+    touched.sort();
+    touched.dedup();
+    let mut extra: Vec<Operation> = Vec::new();
+    if !touched.is_empty() {
+        let mut after = doc.clone();
+        if after.apply(&tx).is_ok() {
+            let view = crate::resolve::DocView(&after);
+            for id in touched {
+                // Gone by the end of the edit: nothing to detach, and a write
+                // to it would fail the commit (`arch-scribe`'s reading).
+                let (Some(node), Some(kept)) = (doc.get(id), after.get(id)) else {
+                    continue;
+                };
+                let authored = size_axes_authored(&view, id);
+                let v = vars.entry(id).or_insert(node.size_vars());
+                let which = [
+                    v[0].is_some() && !authored[0],
+                    v[1].is_some() && !authored[1],
+                ];
+                if !which.iter().any(|w| *w) {
+                    continue;
+                }
+                let drawn = doc
+                    .resolved_kind(id)
+                    .and_then(|k| k.box_size())
+                    .unwrap_or_default();
+                let Some(mut s) = kept.kind().box_size() else {
+                    continue;
+                };
+                if which[0] {
+                    s.width = drawn.width;
+                    v[0] = None;
+                }
+                if which[1] {
+                    s.height = drawn.height;
+                    v[1] = None;
+                }
+                extra.push(Operation::SetGeometry {
+                    id,
+                    geometry: crate::GeometryPatch::Size(s),
+                });
+            }
+        }
+    }
+    tx.0.extend(extra);
+    let mut ids: Vec<NodeId> = vars.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let v = vars[&id];
+        if doc.get(id).is_some_and(|n| n.size_vars() != v) {
+            tx.0.push(Operation::SetSizeVars { id, vars: v });
+        }
+    }
+    tx
+}
+
 /// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
 /// of the shared list, written in place so every target keeps its own item ids
 /// (§15 D980).
@@ -5874,8 +6212,13 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     // The document as the edit leaves it — parents, insets and sizes all read
     // from here. A transaction the model refuses is returned as it came, for the
     // commit to refuse on its own terms.
+    // **With its size bindings as the commit will leave them** (§15 D1061):
+    // `keep_size_bindings` runs later, and before it a bound axis written its
+    // drawn number or its literal reads 0 off the kind, and one written past
+    // its variable still reads the variable — so sizes below are read as
+    // `resolved_kind` of a document that has had that pass.
     let mut after = doc.clone();
-    if after.apply(&tx).is_err() {
+    if after.apply(&keep_size_bindings(doc, tx.clone())).is_err() {
         return tx;
     }
     let mut ids: Vec<(NodeId, (Option<Affine>, bool))> = placed.into_iter().collect();
@@ -5906,9 +6249,13 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         // The frame's used size where the edit leaves the frame alone; its new
         // size where the edit resizes it too.
         let parent_kind = if resized.contains(&parent.id()) {
-            parent.kind()
+            after
+                .resolved_kind(parent.id())
+                .map_or_else(|| parent.kind().clone(), std::borrow::Cow::into_owned)
         } else {
-            res.used_kind(doc, parent.id()).unwrap_or(parent.kind())
+            res.used_kind(doc, parent.id())
+                .unwrap_or(parent.kind())
+                .clone()
         };
         // **A group with a layout pins too** (§15 D871, D887) — against its laid
         // box, which is what `resolve::frame_box` places the child against. This
@@ -5925,7 +6272,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         // corner. A frame's box needed no such pass: its size is in its kind,
         // `parent_kind` above.
         let frame = match parent_kind {
-            NodeKind::Artboard { size } => *size,
+            NodeKind::Artboard { size } => size,
             NodeKind::Group if parent.display().is_some() => {
                 match laid_group_box(&after, parent.id()) {
                     Some(size) => size,
@@ -5940,7 +6287,9 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
             .or_else(|| res.used_local(doc, id))
             .unwrap_or(node.transform());
         let kind = if geometry_changed {
-            node.kind().clone()
+            after
+                .resolved_kind(id)
+                .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned)
         } else {
             res.used_kind(doc, id)
                 .cloned()

@@ -72,7 +72,8 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetMode { .. }
         | Operation::SetCornerVars { .. }
         | Operation::SetSpacingVars { .. }
-        | Operation::SetVisibleVar { .. } => Mode::Whole,
+        | Operation::SetVisibleVar { .. }
+        | Operation::SetSizeVars { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }
@@ -1045,6 +1046,7 @@ pub(crate) fn untouched(
         && c.corner_vars == s.corner_vars
         && c.spacing_vars == s.spacing_vars
         && c.visible_var == s.visible_var
+        && c.size_vars == s.size_vars
         // A swap is an override (§15 D983): a swapped copy is never untouched.
         && c.swap.is_none()
         && c_kids.len() == s_kids.len();

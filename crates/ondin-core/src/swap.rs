@@ -51,6 +51,9 @@ pub fn is_slot_field(op: &Operation) -> bool {
                 geometry: GeometryPatch::Size(_),
                 ..
             }
+            // And its binding (§15 D1061): the size a slot keeps is its literal
+            // and its variable together, or a bound slot kept its 0 and drew it.
+            | Operation::SetSizeVars { .. }
         )
 }
 

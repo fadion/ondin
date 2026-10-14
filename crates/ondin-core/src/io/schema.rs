@@ -356,6 +356,16 @@ pub(crate) struct NodeDto {
     /// absent when unbound. New in v8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_var: Option<crate::variable::VarId>,
+    /// The number variables a layer's width and height are bound to (§15
+    /// D1061), absent when neither is. New in v8 — the version D1058 opened,
+    /// unreleased when this joined it, so no released build reads v8 without it
+    /// (a local build of D1058's or D1059's commit would drop it in silence).
+    #[serde(default, skip_serializing_if = "no_size_vars")]
+    pub size_vars: crate::variable::SizeVars,
+}
+
+fn no_size_vars(v: &crate::variable::SizeVars) -> bool {
+    v.iter().all(Option::is_none)
 }
 
 fn no_corner_vars(v: &crate::variable::CornerVars) -> bool {
@@ -462,6 +472,7 @@ impl NodeDto {
             corner_vars: n.corner_vars(),
             spacing_vars: n.spacing_vars(),
             visible_var: n.visible_var(),
+            size_vars: n.size_vars(),
         }
     }
 
@@ -576,6 +587,7 @@ impl NodeDto {
             corner_vars: self.corner_vars,
             spacing_vars: self.spacing_vars,
             visible_var: self.visible_var,
+            size_vars: self.size_vars,
         })
     }
 }

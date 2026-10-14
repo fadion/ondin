@@ -412,6 +412,18 @@ pub type CornerVars = [Option<VarId>; 4];
 /// (`crate::build::keep_spacing_bindings`).
 pub type SpacingVars = [Option<VarId>; 6];
 
+/// A layer's width and height bindings, in that order (§15 D1061).
+///
+/// **On the node beside the kind's `size`, as [`CornerVars`] sits beside the
+/// radii**: a bound axis's literal is written 0 by the verb that binds it
+/// (`crate::build::bind_size_ops`), so a main and a copy bound alike compare
+/// equal, and is never drawn — every layout view and `Resolved`'s used kind read
+/// the kind through [`crate::Document::resolved_kind`]. Only the five kinds with a
+/// stored `size` bind, and only on an axis whose size the user sets
+/// (`crate::build::size_axes_authored`); an axis something else comes to size
+/// is detached (`crate::build::keep_size_bindings`).
+pub type SizeVars = [Option<VarId>; 2];
+
 /// `node` — a node of `doc`, or a copy of one still carrying its id — with every
 /// binding **detached to the value it draws** in `doc` (D1038's detach): a bound
 /// paint becomes a solid of its variable's colour times its `%`, a bound corner,
@@ -443,6 +455,8 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.display = Some(doc.spacing_drawn_in(doc.variables(), id, d, node.spacing_vars));
     }
     node.spacing_vars = Default::default();
+    node.kind = doc.size_drawn_in(doc.variables(), id, &node.kind, node.size_vars);
+    node.size_vars = Default::default();
     if node.visible_var.is_some() {
         node.visible = doc.shown(id);
         node.visible_var = None;
@@ -494,6 +508,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
             .chain(n.corner_vars.iter().flatten().copied())
             .chain(n.spacing_vars.iter().flatten().copied())
+            .chain(n.size_vars.iter().flatten().copied())
             .chain(n.visible_var);
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
@@ -626,6 +641,24 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
                 d.set_spacing(s);
             }
+            // A width's or a height's binding the same way, axis by axis, its
+            // fallback the twin's drawn size (§15 D1061).
+            if n.size_vars.iter().any(Option::is_some) {
+                let fallback = twin.and_then(|t| t.kind.box_size());
+                let mut vars = n.size_vars;
+                if let Some(size) = n.kind.box_size_mut() {
+                    let slots: [&mut f64; 2] = [&mut size.width, &mut size.height];
+                    for (k, slot) in slots.into_iter().enumerate() {
+                        if let Some(v) = vars[k] {
+                            vars[k] = rebind(v);
+                            if vars[k].is_none() {
+                                *slot = fallback.map_or(*slot, |f| [f.width, f.height][k]);
+                            }
+                        }
+                    }
+                }
+                n.size_vars = vars;
+            }
             // A visibility's binding the same way, its fallback whether the twin
             // was shown (§15 D1059).
             if let Some(v) = n.visible_var {
@@ -670,6 +703,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.paint.strokes.iter().any(|s| hit(s.brush.var()))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
+        || n.size_vars.iter().any(|v| hit(*v))
         || hit(n.visible_var)
 }
 
@@ -772,6 +806,27 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 display: Some(display),
             });
             ops.push(O::SetSpacingVars { id, vars: kept });
+        }
+        if let Some(size) = n.kind.box_size()
+            && n.size_vars.iter().flatten().any(|v| vars.contains(v))
+        {
+            let drawn = doc
+                .size_drawn_in(t, id, &n.kind, n.size_vars)
+                .box_size()
+                .unwrap_or(size);
+            let mut out = [size.width, size.height];
+            let mut kept = n.size_vars;
+            for k in 0..2 {
+                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                    out[k] = [drawn.width, drawn.height][k];
+                    kept[k] = None;
+                }
+            }
+            ops.push(O::SetGeometry {
+                id,
+                geometry: crate::GeometryPatch::Size(kurbo::Size::new(out[0], out[1])),
+            });
+            ops.push(O::SetSizeVars { id, vars: kept });
         }
         if n.visible_var.is_some_and(|v| vars.contains(&v)) {
             ops.push(O::SetVisible {
@@ -1021,6 +1076,17 @@ pub(crate) fn check<'a>(
             .iter()
             .flatten()
             .any(|v| t.kind_of(*v) != Some(VarKind::Number))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
+        // A width or a height binds a number, and only on a kind with a stored
+        // size to stand in for (§15 D1061).
+        if n.size_vars.iter().any(Option::is_some)
+            && (n.kind.box_size().is_none()
+                || n.size_vars
+                    .iter()
+                    .flatten()
+                    .any(|v| t.kind_of(*v) != Some(VarKind::Number)))
         {
             return Err(VarRule::BadBinding(n.id));
         }

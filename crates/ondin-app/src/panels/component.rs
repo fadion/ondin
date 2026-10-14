@@ -1109,7 +1109,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
     use Operation as O;
     use ondin_core::GeometryPatch as G;
     match op {
-        O::SetTransform { .. } | O::SetPivot { .. } => Some("Transform"),
+        // A width's or a height's binding is the W or H field's (§15 D1061).
+        O::SetTransform { .. } | O::SetPivot { .. } | O::SetSizeVars { .. } => Some("Transform"),
         O::SetGeometry { geometry, .. } => match geometry {
             G::Size(_) | G::LineEnd(_) => Some("Transform"),
             G::CornerRadius(_) | G::CornerRadii(_) | G::Sides(_) | G::InnerRatio(_) => {

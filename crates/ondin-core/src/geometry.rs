@@ -1567,6 +1567,7 @@ mod tests {
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
             visible_var: None,
+            size_vars: Default::default(),
         }
     }
 

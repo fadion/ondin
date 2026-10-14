@@ -230,6 +230,9 @@ pub struct Node {
     /// The boolean variable this layer's visibility is bound to (§15 D1059),
     /// `visible` its literal, never read while bound.
     pub(crate) visible_var: Option<crate::variable::VarId>,
+    /// The number variables this layer's width and height are bound to (§15
+    /// D1061), all `None` on a kind with no stored size.
+    pub(crate) size_vars: crate::variable::SizeVars,
 }
 
 impl Node {
@@ -297,15 +300,22 @@ impl Node {
     pub fn visible_var(&self) -> Option<crate::variable::VarId> {
         self.visible_var
     }
+    /// The variables this layer's width and height are bound to (§15 D1061).
+    /// The size it is drawn at is [`crate::Document::resolved_kind`]'s; the
+    /// kind's own `size` is the literal, 0 on a bound axis.
+    pub fn size_vars(&self) -> crate::variable::SizeVars {
+        self.size_vars
+    }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
-    /// corner, gap, padding or visibility. What a variable's edit dirties
-    /// (`Document::bound_nodes`).
+    /// corner, gap, padding, visibility, width or height. What a variable's edit
+    /// dirties (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self.paint.strokes.iter().any(|s| s.brush.is_bound())
             || self.corner_vars.iter().any(Option::is_some)
             || self.spacing_vars.iter().any(Option::is_some)
             || self.visible_var.is_some()
+            || self.size_vars.iter().any(Option::is_some)
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across
@@ -939,6 +949,32 @@ impl<'a> TextRef<'a> {
 }
 
 impl NodeKind {
+    /// The stored `size` of a frame, rectangle, ellipse, polygon or star — the
+    /// five kinds whose width and height bind (§15 D1061) — and `None` for every
+    /// other kind, a text box included: its size is its sizing mode's.
+    pub fn box_size(&self) -> Option<Size> {
+        match self {
+            NodeKind::Artboard { size }
+            | NodeKind::Rect { size, .. }
+            | NodeKind::Ellipse { size }
+            | NodeKind::Polygon { size, .. }
+            | NodeKind::Star { size, .. } => Some(*size),
+            _ => None,
+        }
+    }
+
+    /// [`Self::box_size`], to write.
+    pub fn box_size_mut(&mut self) -> Option<&mut Size> {
+        match self {
+            NodeKind::Artboard { size }
+            | NodeKind::Rect { size, .. }
+            | NodeKind::Ellipse { size }
+            | NodeKind::Polygon { size, .. }
+            | NodeKind::Star { size, .. } => Some(size),
+            _ => None,
+        }
+    }
+
     /// Whether every **geometry** number in this kind is finite (§15 D421).
     ///
     /// ⚠️ **A non-finite number here makes the document permanently unopenable,

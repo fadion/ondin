@@ -122,7 +122,8 @@ fn entry(id: NodeId, r: Rect) -> BoundsEntry {
 /// **Sparse, and that is the whole contract.** A node has an entry only when
 /// container layout placed or sized it somewhere other than the document says —
 /// or when a rectangle's corners are bound to variables, whose resolved radii are
-/// drawn from here (`with_bound_corners`, §15 D1039) — so a document with neither
+/// drawn from here (`with_bound_corners`, §15 D1039), or a layer's width or height
+/// is (`with_bound_size`, §15 D1061) — so a document with none of these
 /// holds nothing here and every read falls back to [`Node::transform`] and
 /// [`Node::kind`]. The two fields are separate `Option`s
 /// because the two are separate facts: a flex item that moves along its row keeps
@@ -150,8 +151,9 @@ struct Used {
 /// The committed document as the flex engine sees it (`container::LayoutView`):
 /// every answer a **specified** value, read straight off the node — **bindings
 /// resolved**: a layout's bound gaps and padding (`Document::resolved_display`,
-/// §15 D1058) and a bound visibility (`Document::shown`, §15 D1059) answer what
-/// they draw, never the literal behind them. Crate-visible for `build`'s
+/// §15 D1058), a bound visibility (`Document::shown`, §15 D1059) and a bound
+/// width or height (`Document::resolved_kind`, §15 D1061) answer what they draw,
+/// never the literal behind them. Crate-visible for `build`'s
 /// conversions, which ask the same questions of the same tree.
 pub(crate) struct DocView<'a>(pub(crate) &'a Document);
 
@@ -165,8 +167,10 @@ impl crate::container::LayoutView for DocView<'_> {
             .map(|n| n.children().to_vec())
             .unwrap_or_default()
     }
+    /// At its drawn size, a bound width or height resolved (§15 D1061): a bound
+    /// item is laid out at its variable's number.
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
-        self.0.get(id).map(|n| n.kind().clone())
+        self.0.resolved_kind(id).map(std::borrow::Cow::into_owned)
     }
     fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
         self.0.resolved_display(id)
@@ -439,8 +443,8 @@ fn used_geometry(
     }
     let parent = doc.get(node.parent()?)?;
     let frame = frame_box(used, parent)?;
-    let (local, kind) =
-        crate::container::place(node.insets(), frame, node.transform(), node.kind())?;
+    let own = doc.resolved_kind(id)?;
+    let (local, kind) = crate::container::place(node.insets(), frame, node.transform(), &own)?;
     Some(Used {
         local: Some(local),
         kind,
@@ -465,7 +469,10 @@ fn root_used(
         .and_then(|p| doc.get(p))
         .and_then(|p| frame_box(used, p))
         .and_then(|f| {
-            let k = kind.clone().unwrap_or_else(|| node.kind().clone());
+            let k = kind.clone().unwrap_or_else(|| {
+                doc.resolved_kind(node.id())
+                    .map_or_else(|| node.kind().clone(), std::borrow::Cow::into_owned)
+            });
             crate::container::place(node.insets(), f, node.transform(), &k)
         });
     match pinned {
@@ -495,7 +502,36 @@ fn place_node(
             laid.insert(l.id, l);
         }
     }
-    with_bound_corners(view.doc, id, used_geometry(view, laid, id))
+    let used = with_bound_size(view.doc, id, used_geometry(view, laid, id));
+    with_bound_corners(view.doc, id, used)
+}
+
+/// `used` with a layer's **bound width and height** in its kind where nothing
+/// else sized it (§15 D1061) — the variable's number in the mode in force there,
+/// against the 0 its literal holds.
+///
+/// Layout and insets already size from the bound number, since every layout
+/// view answers `kind` through `Document::resolved_kind` and [`used_geometry`]
+/// places from it; what is left is a bound layer neither laid nor pinned, whose
+/// `Used` would otherwise be absent and read as the stored kind. Corners follow
+/// ([`with_bound_corners`] keeps the size of the kind it is handed).
+fn with_bound_size(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Used> {
+    let Some(node) = doc.get(id) else {
+        return used;
+    };
+    if node.size_vars().iter().all(Option::is_none)
+        || used.as_ref().is_some_and(|u| u.kind.is_some())
+    {
+        return used;
+    }
+    let kind = doc.resolved_kind(id)?.into_owned();
+    let mut u = used.unwrap_or(Used {
+        local: None,
+        kind: None,
+        frame: None,
+    });
+    u.kind = Some(kind);
+    Some(u)
 }
 
 /// `used` with a rectangle's **bound corners** resolved into its kind (§15

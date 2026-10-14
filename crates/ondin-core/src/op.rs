@@ -467,6 +467,13 @@ pub enum Operation {
         id: NodeId,
         var: Option<crate::variable::VarId>,
     },
+    /// The number variables a layer's width and height are bound to (§15
+    /// D1061). Writes the bindings alone — the verb that binds writes the bound
+    /// axis's literal 0 beside it (`build::bind_size_ops`).
+    SetSizeVars {
+        id: NodeId,
+        vars: crate::variable::SizeVars,
+    },
 }
 
 impl Operation {
@@ -530,6 +537,7 @@ impl Operation {
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
+            | Operation::SetSizeVars { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -603,7 +611,8 @@ impl Operation {
             | Operation::SetMode { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
-            | Operation::SetVisibleVar { id, .. } => id,
+            | Operation::SetVisibleVar { id, .. }
+            | Operation::SetSizeVars { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -826,7 +835,8 @@ impl Operation {
             | Operation::SetMode { .. }
             | Operation::SetCornerVars { .. }
             | Operation::SetSpacingVars { .. }
-            | Operation::SetVisibleVar { .. } => true,
+            | Operation::SetVisibleVar { .. }
+            | Operation::SetSizeVars { .. } => true,
         }
     }
 
@@ -898,6 +908,7 @@ impl Operation {
             Operation::SetVisibleVar { id, var } => {
                 node(id).is_some_and(|n| n.visible_var() == *var)
             }
+            Operation::SetSizeVars { id, vars } => node(id).is_some_and(|n| n.size_vars() == *vars),
 
             // **The index is read the way `apply` writes it** — the child is
             // removed from its parent's list and re-inserted at `index`, so the

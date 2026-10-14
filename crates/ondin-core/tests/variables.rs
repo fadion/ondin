@@ -1280,7 +1280,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
         for step in 0..50 {
             let modes: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
             let rect = rects[rng.below(rects.len())];
-            let tx = match rng.below(12) {
+            let tx = match rng.below(14) {
                 0 => {
                     let id = f.ids.mint();
                     rects.push(id);
@@ -1359,6 +1359,23 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                 // Bind a rect's visibility, or detach it.
                 9 => Transaction(ondin_core::bind_visible_ops(&f.doc, rect, show)),
                 10 => Transaction(ondin_core::detach_visible_ops(&f.doc, rect)),
+                // Bind a rect's or a frame's width or height, or detach one
+                // (§15 D1061) — a bound item's size moves its flex neighbours.
+                11 | 12 => {
+                    let id = if rng.below(3) == 0 {
+                        frames[rng.below(2)]
+                    } else {
+                        rect
+                    };
+                    let mut axes = [false; 2];
+                    axes[rng.below(2)] = true;
+                    if step % 2 == 0 {
+                        let vars = axes.map(|a| a.then_some(f.radius));
+                        Transaction(ondin_core::bind_size_ops(&f.doc, id, vars))
+                    } else {
+                        Transaction(ondin_core::detach_size_ops(&f.doc, id, axes))
+                    }
+                }
                 // Remove a mode (never the last), returning its frames to Inherit.
                 _ if modes.len() > 1 => {
                     let gone = modes[rng.below(modes.len())];
@@ -1414,4 +1431,263 @@ fn an_edit_as_drawn_keeps_a_binding_for_a_percent_and_detaches_for_a_colour() {
     }
     let recoloured = ondin_core::edited_brush(&f.doc, f.rect, &src, |_| Brush::Solid(RED));
     assert_eq!(recoloured, BrushSource::Literal(Brush::Solid(RED)));
+}
+
+/// A number variable `size/w`: 60 in Light, 80 in Dark.
+fn width_var(f: &mut F) -> VarId {
+    let w = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                w,
+                "size/w",
+                VarKind::Number,
+                [(f.light, Cell::Number(60.0)), (f.dark, Cell::Number(80.0))],
+            ),
+        }]))
+        .unwrap();
+    w
+}
+
+/// `id`'s stored size.
+fn stored_size(doc: &Document, id: NodeId) -> Size {
+    doc.get(id).unwrap().kind().box_size().unwrap()
+}
+
+/// **A bound width is drawn and laid out at its variable's number, in the mode
+/// in force** (§15 D1061), never at the 0 its literal holds — on the layer
+/// itself, on a child pinned against a bound frame, and on an item's flex
+/// neighbour; and a live `Resolved` updated by a cell's edit and a mode's
+/// switch agrees with a rebuild.
+///
+/// Flips, run: `DocView::kind` answering the stored kind (`n.kind().clone()`)
+/// fails *"the neighbour sits past the bound width"* at 5 — the first rect laid
+/// at 0 wide, the neighbour one gap in; `with_bound_size` dropped from
+/// `place_node` fails *"the rect is drawn at Light's 60"* at 0; and
+/// `Node::reads_variables` leaving the size out — a cell's edit dirtying no
+/// bound size — fails *"a cell's edit places it again"* at 70, and the random
+/// test below with a frame's used size a cell behind.
+#[test]
+fn a_bound_size_is_drawn_and_laid_out_at_the_variables_number() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(
+        stored_size(&f.doc, f.rect),
+        Size::new(0.0, 20.0),
+        "the literal is 0"
+    );
+    let width = |doc: &Document, id| Resolved::rebuild(doc).world_bounds(id).unwrap().width();
+    assert_eq!(
+        width(&f.doc, f.rect),
+        60.0,
+        "the rect is drawn at Light's 60"
+    );
+
+    // A child pinned 10 from the right of a frame whose width is bound.
+    let pinned = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: pinned,
+            parent: f.frame,
+            index: 1,
+            kind: NodeKind::Ellipse {
+                size: Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetInsets {
+            id: pinned,
+            insets: ondin_core::Insets {
+                right: Some(ondin_core::LengthPct::Px(10.0)),
+                ..Default::default()
+            },
+        }]))
+        .unwrap();
+    let ops = ondin_core::bind_size_ops(&f.doc, f.frame, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let mut live = Resolved::rebuild(&f.doc);
+    let right = |live: &Resolved| live.world_bounds(pinned).unwrap().max_x();
+    assert_eq!(right(&live), 50.0, "pinned against the frame's bound 60");
+    let out = f
+        .doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    live.update(&f.doc, &out.dirty);
+    assert_eq!(right(&live), 70.0, "Dark's 80");
+    assert_matches_rebuild(&f.doc, &live);
+    let out = f
+        .doc
+        .apply(&Transaction(vec![Operation::SetVariableCell {
+            id: w,
+            mode: f.dark,
+            cell: Cell::Number(100.0),
+        }]))
+        .unwrap();
+    live.update(&f.doc, &out.dirty);
+    assert_eq!(right(&live), 90.0, "a cell's edit places it again");
+    assert_matches_rebuild(&f.doc, &live);
+
+    // A flex row: the second item follows the first's bound width.
+    let mut g = fixture();
+    let w = width_var(&mut g);
+    let second = flex_frame(&mut g);
+    let ops = ondin_core::bind_size_ops(&g.doc, g.rect, [Some(w), None]);
+    g.doc.apply(&Transaction(ops)).unwrap();
+    let x = Resolved::rebuild(&g.doc)
+        .world_bounds(second)
+        .unwrap()
+        .min_x();
+    assert_eq!(x, 65.0, "the neighbour sits past the bound width");
+}
+
+/// **A size written over a bound axis detaches it, with the corners' two
+/// halves** (§15 D1061): an axis written what it draws, or its own 0 literal,
+/// stays bound with its literal put back; written anything else it detaches to
+/// that size.
+///
+/// Flip, run: dropping the literal half (`|| w[k] == l[k]`) fails *"a write of
+/// the stored size keeps the binding"*.
+#[test]
+fn a_size_written_over_a_bound_axis_detaches_it() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), Some(w)]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let write = |doc: &Document, s: Size| {
+        ondin_core::keep_size_bindings(
+            doc,
+            Transaction(vec![Operation::SetGeometry {
+                id: f.rect,
+                geometry: ondin_core::GeometryPatch::Size(s),
+            }]),
+        )
+    };
+    f.doc.apply(&write(&f.doc, Size::new(0.0, 0.0))).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().size_vars(),
+        [Some(w), Some(w)],
+        "a write of the stored size keeps the binding"
+    );
+    // A side handle: the width as drawn, the height dragged to 30.
+    f.doc.apply(&write(&f.doc, Size::new(60.0, 30.0))).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().size_vars(),
+        [Some(w), None],
+        "the width written as drawn stays bound, the height detaches"
+    );
+    assert_eq!(stored_size(&f.doc, f.rect), Size::new(0.0, 30.0));
+}
+
+/// **Only a hand-set axis binds, and an axis an edit makes computed is
+/// detached** (§15 D1061, the maintainer's ruling): in a flex row the rect's
+/// width — its main axis — binds; given growth it is the line's, so the commit
+/// detaches it to the width it drew; and with growth already set, the bind
+/// refuses the width and takes the height, which `align-self: start` keeps from
+/// the row's stretch.
+///
+/// Flip, run: `keep_size_bindings` without its layout half (the `touched`
+/// block) fails *"growth detaches the width"* — the width still bound.
+#[test]
+fn an_axis_made_computed_detaches_and_a_computed_axis_does_not_bind() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    flex_frame(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [Some(w), None]);
+    // Aligned to the start, so its height — stretched under the row's default —
+    // is its own.
+    let grow = ondin_core::container::LayoutItem {
+        grow: 1.0,
+        align_self: Some(ondin_core::container::AlignItems::Start),
+        ..*f.doc.get(f.rect).unwrap().item()
+    };
+    let tx = ondin_core::keep_size_bindings(
+        &f.doc,
+        Transaction(vec![Operation::SetLayoutItem {
+            id: f.rect,
+            item: grow,
+        }]),
+    );
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().size_vars(),
+        [None, None],
+        "growth detaches the width"
+    );
+    assert_eq!(
+        stored_size(&f.doc, f.rect).width,
+        60.0,
+        "to the width it drew"
+    );
+    assert_eq!(
+        ondin_core::bindable_size_axes(&f.doc, f.rect),
+        [false, true],
+        "a growing item's width is the line's"
+    );
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), Some(w)]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [None, Some(w)]);
+}
+
+/// Detaching an axis keeps the size it drew; deleting the variable detaches
+/// every axis bound to it the same way; the bindings survive a save; and a
+/// path refuses one at the commit.
+#[test]
+fn size_bindings_detach_to_what_they_draw_round_trip_and_fit_their_kind() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), Some(w)]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    let back = ondin_core::io::load(&bytes).unwrap();
+    assert_eq!(back, f.doc, "the bindings round-trip");
+    let ops = ondin_core::detach_size_ops(&f.doc, f.rect, [true, false]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [None, Some(w)]);
+    assert_eq!(stored_size(&f.doc, f.rect), Size::new(60.0, 0.0));
+    let tx = Transaction(ondin_core::variable::remove_ops(&f.doc, &[w]));
+    f.doc.apply(&tx).expect("detach, then remove");
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [None, None]);
+    assert_eq!(
+        stored_size(&f.doc, f.rect),
+        Size::new(60.0, 60.0),
+        "the height too"
+    );
+
+    let w = width_var(&mut f);
+    let line = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: line,
+            parent: f.frame,
+            index: 0,
+            kind: NodeKind::Line {
+                end: ondin_core::kurbo::Point::new(10.0, 0.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    assert!(
+        ondin_core::bind_size_ops(&f.doc, line, [Some(w), None]).is_empty(),
+        "no stored size, no binding"
+    );
+    assert!(
+        f.doc
+            .apply(&Transaction(vec![Operation::SetSizeVars {
+                id: line,
+                vars: [Some(w), None],
+            }]))
+            .is_err(),
+        "the commit refuses one"
+    );
 }

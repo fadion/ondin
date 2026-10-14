@@ -71,7 +71,7 @@ pub fn fixture() -> Fixture {
         Operation::SetFills {
             id: artboard,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(245, 245, 245, 255)),
+                brush: Brush::Solid(Color::from_rgba8(245, 245, 245, 255)).into(),
                 visible: true,
             }]),
         },
@@ -170,14 +170,14 @@ pub fn fixture() -> Fixture {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)),
+                brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetStrokes {
             id: rect,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::BLACK),
+                brush: Brush::Solid(Color::BLACK).into(),
                 width: 2.0,
                 join: ondin_core::kurbo::Join::Round,
                 cap: ondin_core::kurbo::Cap::Round,
@@ -211,7 +211,7 @@ pub fn fixture_with_stroke_align(align: StrokeAlign) -> Fixture {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.rect,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::BLACK),
+                brush: Brush::Solid(Color::BLACK).into(),
                 width: 3.0,
                 join: ondin_core::kurbo::Join::Round,
                 cap: ondin_core::kurbo::Cap::Round,

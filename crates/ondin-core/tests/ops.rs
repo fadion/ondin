@@ -52,7 +52,7 @@ fn text_style(size: f64) -> TextStyle {
 
 fn solid(r: u8, g: u8, b: u8) -> Fill {
     Fill {
-        brush: Brush::Solid(Color::from_rgba8(r, g, b, 255)),
+        brush: Brush::Solid(Color::from_rgba8(r, g, b, 255)).into(),
         visible: true,
     }
 }
@@ -471,7 +471,7 @@ fn set_fills_and_strokes_paintable_only() {
             Operation::SetStrokes {
                 id: r,
                 strokes: keyed_by_position([Stroke {
-                    brush: Brush::Solid(Color::BLACK),
+                    brush: Brush::Solid(Color::BLACK).into(),
                     width: 1.0,
                     join: ondin_core::kurbo::Join::Miter,
                     cap: ondin_core::kurbo::Cap::Butt,
@@ -714,7 +714,7 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
             Operation::SetFills {
                 id: r1,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
                     visible: true,
                 }]),
             },
@@ -1560,7 +1560,7 @@ fn deleting_the_last_layer_showing_an_image_leaves_the_table_alone() {
             Operation::SetFills {
                 id: rect,
                 fills: keyed_by_position([Fill {
-                    brush: image_brush(id.clone()),
+                    brush: image_brush(id.clone()).into(),
                     visible: true,
                 }]),
             },
@@ -1583,7 +1583,7 @@ fn deleting_the_last_layer_showing_an_image_leaves_the_table_alone() {
     let fills = &doc.get(rect).unwrap().paint().fills;
     assert_eq!(
         fills[0].brush,
-        image_brush(id),
+        image_brush(id).into(),
         "the restored layer points at the image it always did"
     );
 }

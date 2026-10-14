@@ -1563,6 +1563,8 @@ mod tests {
             variant: Vec::new(),
             props: Vec::new(),
             origin: None,
+            mode: None,
+            corner_vars: Default::default(),
         }
     }
 

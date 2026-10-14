@@ -2001,7 +2001,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     // A node the importer just made, so a list built whole
                     // (`item::keyed_by_position`).
                     fills: crate::item::keyed_by_position([Fill {
-                        brush,
+                        brush: brush.into(),
                         visible: true,
                     }]),
                 });
@@ -2807,7 +2807,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             .fill
             .as_ref()
             .map(|p| Fill {
-                brush: p.brush(bounds, local, style.fill_opacity),
+                brush: p.brush(bounds, local, style.fill_opacity).into(),
                 visible: true,
             })
             .into_iter()
@@ -2825,7 +2825,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             .as_ref()
             .filter(|_| style.stroke_width > 0.0)
             .map(|p| Stroke {
-                brush: p.brush(bounds, local, style.stroke_opacity),
+                brush: p.brush(bounds, local, style.stroke_opacity).into(),
                 width: style.stroke_width,
                 join: style.stroke_join,
                 cap: style.stroke_cap,
@@ -4650,8 +4650,8 @@ mod tests {
         // Read as four channels rather than as one packed integer, which is worth a
         // line: `Rgba8::to_u32` packs little-endian, so green is `0xff00ff00` and a
         // hand-written `0x00ff00ff` is a plausible expectation that is simply wrong.
-        let fill = |id: NodeId| match &doc.get(id).unwrap().paint().fills[0].brush {
-            Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+        let fill = |id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+            Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
             other => panic!("a solid fill, got {other:?}"),
         };
         // `ids[0]` is the group, which takes no paint of its own.
@@ -4791,7 +4791,7 @@ mod tests {
             kurbo::Rect::new(5.0, 7.0, 45.0, 27.0),
             "at its own x and y, at its own size"
         );
-        let Brush::Image(b) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Image(b)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("an image fill")
         };
         assert_eq!(
@@ -4882,7 +4882,7 @@ mod tests {
                </svg>"#,
         );
         let id = shapes(&doc, &out)[0];
-        let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient fill")
         };
         let alphas: Vec<f32> = g
@@ -4920,7 +4920,7 @@ mod tests {
                </svg>"#,
         );
         let id = shapes(&doc, &out)[0];
-        let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient fill")
         };
         let peniko::GradientKind::Linear(l) = g.gradient.kind else {
@@ -4996,7 +4996,9 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, id)| {
-                let Brush::Gradient(g) = &doc.get(*id).unwrap().paint().fills[0].brush else {
+                let Some(Brush::Gradient(g)) =
+                    doc.get(*id).unwrap().paint().fills[0].brush.literal()
+                else {
                     panic!("rect {i}: a gradient fill")
                 };
                 let c = g.gradient.stops[0].color;
@@ -5020,7 +5022,7 @@ mod tests {
         out: &Import,
     ) -> (peniko::Gradient, peniko::LinearGradientPosition) {
         let id = shapes(doc, out)[0];
-        let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient fill")
         };
         let peniko::GradientKind::Linear(l) = g.gradient.kind else {
@@ -5186,7 +5188,7 @@ mod tests {
                </svg>"##,
         );
         let id = shapes(&doc, &out)[0];
-        let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient fill")
         };
         let peniko::GradientKind::Radial(r) = g.gradient.kind else {
@@ -5237,7 +5239,7 @@ mod tests {
             out.approximated
         );
         let id = shapes(&doc, &out)[0];
-        let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a gradient fill")
         };
         let peniko::GradientKind::Radial(r) = g.gradient.kind else {
@@ -5298,7 +5300,8 @@ mod tests {
                    </svg>"##
             ));
             let id = shapes(&doc, &out)[0];
-            let Brush::Gradient(g) = &doc.get(id).unwrap().paint().fills[0].brush else {
+            let Some(Brush::Gradient(g)) = doc.get(id).unwrap().paint().fills[0].brush.literal()
+            else {
                 panic!("a gradient fill")
             };
             g.transform
@@ -5362,15 +5365,15 @@ mod tests {
         let ids = shapes(&doc, &out);
         let brush = |i: usize| doc.get(ids[i]).unwrap().paint().fills[0].brush.clone();
         assert!(
-            matches!(brush(0), Brush::Gradient(_)),
+            matches!(brush(0).literal(), Some(Brush::Gradient(_))),
             "the reference resolves despite the fallback beside it"
         );
         assert_eq!(
             brush(1),
-            Brush::Solid(Color::from_rgb8(0, 128, 0)),
+            Brush::Solid(Color::from_rgb8(0, 128, 0)).into(),
             "and an unresolvable one falls back to the colour, parens and all"
         );
-        assert_eq!(brush(2), Brush::Solid(Color::from_rgb8(0, 255, 0)));
+        assert_eq!(brush(2), Brush::Solid(Color::from_rgb8(0, 255, 0)).into());
     }
 
     /// **An unequal `rx`/`ry` is three shapes, not one rounded rect.** SVG's corner is
@@ -6673,8 +6676,8 @@ mod tests {
         );
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         let ids = shapes(&doc, &out);
-        let fill = |id: NodeId| match &doc.get(id).unwrap().paint().fills[0].brush {
-            Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+        let fill = |id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+            Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
             other => panic!("a solid fill, got {other:?}"),
         };
         assert_eq!(
@@ -6743,8 +6746,8 @@ mod tests {
                 out.approximated
             );
             let ids = shapes(&doc, &out);
-            let fill = |id: NodeId| match &doc.get(id).unwrap().paint().fills[0].brush {
-                Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+            let fill = |id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+                Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
                 other => panic!("a solid fill, got {other:?}"),
             };
             (fill(ids[0]), fill(ids[1]))
@@ -6814,8 +6817,8 @@ mod tests {
                 </svg>"##,
         );
         let ids = shapes(&doc, &out);
-        let fill = |id: NodeId| match &doc.get(id).unwrap().paint().fills[0].brush {
-            Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+        let fill = |id: NodeId| match doc.get(id).unwrap().paint().fills[0].brush.literal() {
+            Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
             other => panic!("a solid fill, got {other:?}"),
         };
         assert_eq!(fill(ids[0]), [0, 0, 255, 255], "the id wins");
@@ -6888,7 +6891,8 @@ mod tests {
         // too — the rects are 1, 2, 4 and 5, not 0..4.
         let ids = shapes(&doc, &out);
         let fill = |id| {
-            let Brush::Solid(c) = &doc.get(id).unwrap().paint().fills[0].brush else {
+            let Some(Brush::Solid(c)) = doc.get(id).unwrap().paint().fills[0].brush.literal()
+            else {
                 panic!("a solid fill")
             };
             c.to_rgba8().to_u8_array()
@@ -6958,7 +6962,7 @@ mod tests {
         ));
         let ids = shapes(&doc, &out);
         let rect = *ids.last().expect("the rect is the innermost shape");
-        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(rect).unwrap().paint().fills[0].brush.literal() else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -7013,7 +7017,8 @@ mod tests {
             out.skipped
         );
         let ids = shapes(&doc, &out);
-        let Brush::Solid(c) = &doc.get(ids[0]).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(ids[0]).unwrap().paint().fills[0].brush.literal()
+        else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -7060,7 +7065,7 @@ mod tests {
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         let ids = shapes(&doc, &out);
         let rect = *ids.last().expect("the rect is the innermost shape");
-        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(rect).unwrap().paint().fills[0].brush.literal() else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -7105,7 +7110,7 @@ mod tests {
                 </svg>"##,
         );
         let rect = shapes(&doc, &out)[0];
-        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(rect).unwrap().paint().fills[0].brush.literal() else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -7138,7 +7143,7 @@ mod tests {
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         let ids = shapes(&doc, &out);
         let rect = *ids.last().expect("the rect is the innermost shape");
-        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(rect).unwrap().paint().fills[0].brush.literal() else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -7211,7 +7216,7 @@ mod tests {
         );
         assert_eq!(out.skipped, vec!["style (complex selector)"]);
         let id = shapes(&doc, &out)[0];
-        let Brush::Solid(c) = &doc.get(id).unwrap().paint().fills[0].brush else {
+        let Some(Brush::Solid(c)) = doc.get(id).unwrap().paint().fills[0].brush.literal() else {
             panic!("a solid fill")
         };
         assert_eq!(
@@ -8410,8 +8415,8 @@ mod tests {
     #[test]
     fn a_paint_this_reader_cannot_parse_leaves_the_inherited_one_and_says_so() {
         let red = |doc: &Document, id: NodeId| match &doc.get(id).unwrap().paint().fills[..] {
-            [f] => match &f.brush {
-                Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+            [f] => match f.brush.literal() {
+                Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
                 other => panic!("expected a solid, got {other:?}"),
             },
             other => panic!("expected exactly one fill, got {}", other.len()),
@@ -8586,7 +8591,7 @@ mod tests {
         fn walk(doc: &Document, id: NodeId, out: &mut Vec<Vec<f32>>) {
             if let Some(n) = doc.get(id) {
                 for f in &n.paint().fills {
-                    if let crate::Brush::Gradient(g) = &f.brush {
+                    if let Some(crate::Brush::Gradient(g)) = f.brush.literal() {
                         out.push(g.gradient.stops.iter().map(|s| s.offset).collect());
                     }
                 }
@@ -8607,7 +8612,7 @@ mod tests {
         fn walk(doc: &Document, id: NodeId, out: &mut Vec<f32>) {
             if let Some(n) = doc.get(id) {
                 for f in &n.paint().fills {
-                    if let crate::Brush::Gradient(g) = &f.brush
+                    if let Some(crate::Brush::Gradient(g)) = f.brush.literal()
                         && let Some(s) = g.gradient.stops.first()
                     {
                         out.push(s.offset);

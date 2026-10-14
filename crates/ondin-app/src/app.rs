@@ -114,6 +114,10 @@ pub(crate) struct Clip {
     /// `insert_all` adds to the target document if it does not already have them.
     /// Empty for everything that is not a picture, which is most copies.
     pub(crate) images: Vec<(ondin_core::ImageId, ondin_core::ImageEntry)>,
+    /// The variables those subtrees read and a detached twin of each layer that
+    /// reads one (`ondin_core::variable::carried`, §15 D1039), so a paste into
+    /// another document rebinds by name or detaches (`variable::land`).
+    pub(crate) vars: ondin_core::variable::Carried,
 }
 
 /// A cut that detached instances, kept so its paste can make it a **move**
@@ -5543,6 +5547,7 @@ impl OndinApp {
             subtrees: payload.subtrees,
             kits: payload.kits,
             images: payload.images,
+            vars: payload.vars,
         });
         // The stamp is written here for the same reason `stamp_clipboard` writes
         // one at a copy: it is what makes `owns_the_clipboard` answer *yes* from
@@ -5634,6 +5639,9 @@ impl OndinApp {
             .into_iter()
             .filter_map(|id| Some((id.clone(), self.session.doc.image(&id)?.clone())))
             .collect();
+        // And what the copied layers' variables are, for the same last-moment
+        // reason: only this document can say what a binding draws (§15 D1039).
+        let vars = ondin_core::variable::carried(&self.session.doc, &templates);
         // **The stand-in carries the payload now** (§15 D823). It is still the
         // layer names on the first line, for the reason this function's doc gives
         // and for the reason D17 gave before it — but the real subtrees follow it
@@ -5650,6 +5658,7 @@ impl OndinApp {
             &templates,
             &kits,
             &images,
+            &vars,
             self.clipboard_from,
             &heading,
         )
@@ -5661,6 +5670,7 @@ impl OndinApp {
             subtrees: templates,
             kits,
             images,
+            vars,
         });
         // One clipboard, two typed fields — see `OndinApp::guide_clipboard`.
         self.guide_clipboard = None;
@@ -6139,7 +6149,9 @@ impl OndinApp {
                 })
                 .map(|i| i + 1);
             placements.push(build::Placement {
-                nodes: template.clone(),
+                // Rebound for this document, or detached where it has no variable
+                // of the name (§15 D1039, D1038's paste rule).
+                nodes: ondin_core::variable::land(&self.session.doc, &clip.vars, template.clone()),
                 parent,
                 index,
             });
@@ -6211,7 +6223,7 @@ impl OndinApp {
         let placements: Vec<build::Placement> = templates
             .iter()
             .map(|template| build::Placement {
-                nodes: template.clone(),
+                nodes: ondin_core::variable::land(&self.session.doc, &clip.vars, template.clone()),
                 parent,
                 index: Some(above),
             })
@@ -8344,16 +8356,18 @@ impl OndinApp {
             return false;
         };
         let known = self.session.doc.has_image(&image.id);
-        fill.brush = match &fill.brush {
+        fill.brush = match fill.brush.literal() {
             // Keep the crop, the mode, the tile scale, the orientation and the
             // sampler's alpha — everything but which picture it is.
-            ondin_core::Brush::Image(_) => crate::panels::map_image(&fill.brush, |r| {
+            Some(b @ ondin_core::Brush::Image(_)) => crate::panels::map_image(b, |r| {
                 r.id = image.id.clone();
             }),
             // A shape that was not showing a picture becomes one that is, at the
-            // defaults. There is no framing to keep, so there is nothing to say.
+            // defaults — a bound one detached (§15 D1039). There is no framing to
+            // keep, so there is nothing to say.
             _ => ondin_core::image_brush(image.id.clone()),
-        };
+        }
+        .into();
         let mut ops = Vec::new();
         if !known {
             ops.push(Operation::AddImage {
@@ -12130,7 +12144,7 @@ mod image_edit_lock_tests {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: image_brush(ondin_core::ImageId("a-photo".into())),
+                brush: image_brush(ondin_core::ImageId("a-photo".into())).into(),
                 visible: true,
             }]),
         }]))
@@ -12422,7 +12436,7 @@ mod image_edit_lock_tests {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: child,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: image_brush(ondin_core::ImageId("a-photo".into())),
+                brush: image_brush(ondin_core::ImageId("a-photo".into())).into(),
                 visible: true,
             }]),
         }]))
@@ -12480,7 +12494,7 @@ mod copy_as_png_tests {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(200, 40, 60, 255)),
+                brush: Brush::Solid(Color::from_rgba8(200, 40, 60, 255)).into(),
                 visible: true,
             }]),
         }]))
@@ -19509,7 +19523,7 @@ mod clipboard_crossing_tests {
             Operation::SetFills {
                 id: rect,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: image_brush(id.clone()),
+                    brush: image_brush(id.clone()).into(),
                     visible: true,
                 }]),
             },

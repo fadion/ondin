@@ -399,6 +399,61 @@ pub enum Operation {
         id: NodeId,
         origin: Option<crate::kit::Origin>,
     },
+    /// Put a variable in the document's table (§5.3f, §15 D1039). Its cells must
+    /// cover every mode and its name be free — `crate::variable::check`, after
+    /// the last op. Inverts to [`Self::RemoveVariable`], and that back to this,
+    /// carrying the whole variable as [`Self::AddImage`] carries its bytes.
+    AddVariable {
+        var: crate::variable::Variable,
+    },
+    /// Take a variable out of the table. **Refused at the commit while anything is
+    /// bound to it**: the delete verb detaches its users to the value they drew,
+    /// as ops in the same transaction (D1038).
+    RemoveVariable {
+        id: crate::variable::VarId,
+    },
+    /// Rename a variable — a slash path, whose groups are the browser's (D1038 G).
+    SetVariableName {
+        id: crate::variable::VarId,
+        name: String,
+    },
+    /// One cell of a variable: its value, or an alias, in one mode.
+    SetVariableCell {
+        id: crate::variable::VarId,
+        mode: crate::variable::ModeId,
+        cell: crate::variable::Cell,
+    },
+    /// Add a mode at `index` of the list, with **every variable's cell in it** —
+    /// the column a mode is, so the table is whole after this one op. Inverts to
+    /// [`Self::RemoveMode`].
+    AddMode {
+        mode: crate::variable::Mode,
+        index: usize,
+        cells: Vec<(crate::variable::VarId, crate::variable::Cell)>,
+    },
+    /// Remove a mode and its column. Inverts to [`Self::AddMode`] with the column
+    /// it took; the frames set to it are returned to *Inherit* by ops in the same
+    /// transaction (D1038), refused at the commit otherwise.
+    RemoveMode {
+        id: crate::variable::ModeId,
+    },
+    SetModeName {
+        id: crate::variable::ModeId,
+        name: String,
+    },
+    /// The mode a frame sets for itself and its contents, `None` to inherit
+    /// (§5.3f). Only on a frame.
+    SetMode {
+        id: NodeId,
+        mode: Option<crate::variable::ModeId>,
+    },
+    /// The variables a rectangle's corners are bound to (§15 D1039). Writes the
+    /// bindings alone — the verbs that bind write the bound corners' literals 0
+    /// beside it (`build::bind_corners_ops`).
+    SetCornerVars {
+        id: NodeId,
+        vars: crate::variable::CornerVars,
+    },
 }
 
 impl Operation {
@@ -458,6 +513,8 @@ impl Operation {
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
+            | Operation::SetMode { id, .. }
+            | Operation::SetCornerVars { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -476,7 +533,16 @@ impl Operation {
             | Operation::RemoveImage { .. }
             // Structural: the vault is a root coming and going (§15 D1012).
             | Operation::OpenVault { .. }
-            | Operation::CloseVault { .. } => None,
+            | Operation::CloseVault { .. }
+            // The variables table is document-level too (§5.3f): these name a
+            // variable or a mode, never a node.
+            | Operation::AddVariable { .. }
+            | Operation::RemoveVariable { .. }
+            | Operation::SetVariableName { .. }
+            | Operation::SetVariableCell { .. }
+            | Operation::AddMode { .. }
+            | Operation::RemoveMode { .. }
+            | Operation::SetModeName { .. } => None,
         }
     }
 
@@ -518,7 +584,9 @@ impl Operation {
             | Operation::SetSwap { id, .. }
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
-            | Operation::SetProperties { id, .. } => id,
+            | Operation::SetProperties { id, .. }
+            | Operation::SetMode { id, .. }
+            | Operation::SetCornerVars { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -600,13 +668,18 @@ impl Operation {
     /// panel and a tag over a frame, and a guide is a line over the artwork rather
     /// than part of it.
     ///
-    /// **The seventeen operations of `RenderOverrides::absorb`'s chrome no-op arm**
-    /// (its no-ops are nineteen: the image pair is the other arm, a no-op there
-    /// without being invisible — §15 D659), and deliberately the same list: "the renderer has nothing to do with this" and
-    /// "this changes nothing drawn" are one fact asked by two callers. They are not
-    /// one function because `absorb` also has to separate the *patchable* ops from
-    /// the structural ones, which is a distinction this question does not make —
-    /// but if the two lists ever disagree, one of them is wrong.
+    /// **Close kin of `RenderOverrides::absorb`'s no-op arms, and not the same
+    /// list.** Its chrome arm is "the renderer has nothing to do with this" and
+    /// this is "this changes nothing drawn" — one fact asked by two callers, and
+    /// every op of that arm answers `false` here. The lists part in both
+    /// directions, each for a stated reason: `absorb` no-ops the image pair, which
+    /// changes ink with no override to carry it (§15 D659), and the variables
+    /// table's seven operations, which have none either (§15 D1039) — three of
+    /// those seven change ink, and four draw nothing and are `false` here, too —
+    /// and this answers `false` for the vault's
+    /// two and `SetOrigin`, which `absorb` *refuses* (§15 D1012, D1016).
+    /// `overrides.rs` · `every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
+    /// pins the no-op side.
     ///
     /// **The two image operations are the standing exception, and it is a gap
     /// rather than a disagreement.** They answer `true` here and are absorbed as
@@ -657,7 +730,15 @@ impl Operation {
             | Operation::OpenVault { .. }
             | Operation::CloseVault { .. }
             // Provenance is a label on a node, never ink (§15 D1016).
-            | Operation::SetOrigin { .. } => false,
+            | Operation::SetOrigin { .. }
+            // A name is a row in the browser, and a new variable is read by
+            // nothing yet. A removed one was read by nothing either — the commit
+            // refuses a removal while anything is bound to it, and the detaches
+            // beside it are the ink.
+            | Operation::AddVariable { .. }
+            | Operation::RemoveVariable { .. }
+            | Operation::SetVariableName { .. }
+            | Operation::SetModeName { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -718,7 +799,15 @@ impl Operation {
             // rather than a blank, §15 D179. Either way the entry going back is
             // what changes the picture.)
             | Operation::AddImage { .. }
-            | Operation::RemoveImage { .. } => true,
+            | Operation::RemoveImage { .. }
+            // **True, though none names a node**: a cell is what every layer bound
+            // to it draws, and adding or removing a mode can move which one is
+            // first — the default every unset frame reads in (D1038 (a)).
+            | Operation::SetVariableCell { .. }
+            | Operation::AddMode { .. }
+            | Operation::RemoveMode { .. }
+            | Operation::SetMode { .. }
+            | Operation::SetCornerVars { .. } => true,
         }
     }
 
@@ -764,7 +853,26 @@ impl Operation {
             | Operation::AddImage { .. }
             | Operation::RemoveImage { .. }
             | Operation::OpenVault { .. }
-            | Operation::CloseVault { .. } => false,
+            | Operation::CloseVault { .. }
+            | Operation::AddVariable { .. }
+            | Operation::RemoveVariable { .. }
+            | Operation::AddMode { .. }
+            | Operation::RemoveMode { .. } => false,
+
+            Operation::SetVariableName { id, name } => {
+                doc.variables().get(*id).is_some_and(|v| v.name == *name)
+            }
+            Operation::SetVariableCell { id, mode, cell } => doc
+                .variables()
+                .get(*id)
+                .is_some_and(|v| v.cells.get(mode) == Some(cell)),
+            Operation::SetModeName { id, name } => {
+                doc.variables().mode(*id).is_some_and(|m| m.name == *name)
+            }
+            Operation::SetMode { id, mode } => node(id).is_some_and(|n| n.mode() == *mode),
+            Operation::SetCornerVars { id, vars } => {
+                node(id).is_some_and(|n| n.corner_vars() == *vars)
+            }
 
             // **The index is read the way `apply` writes it** — the child is
             // removed from its parent's list and re-inserted at `index`, so the
@@ -1249,6 +1357,19 @@ pub enum OpError {
     CannotModifyRoot,
     #[error("no such guide: {0:?}")]
     NoSuchGuide(GuideId),
+    #[error("no such variable: {0:?}")]
+    NoSuchVariable(crate::variable::VarId),
+    #[error("duplicate variable id: {0:?}")]
+    DuplicateVariable(crate::variable::VarId),
+    #[error("no such mode: {0:?}")]
+    NoSuchMode(crate::variable::ModeId),
+    #[error("duplicate mode id: {0:?}")]
+    DuplicateMode(crate::variable::ModeId),
+    /// A variables rule broken (§5.3f, `crate::variable::check`) — a binding to
+    /// nothing, a column missing, an alias loop. Checked after the last op, as
+    /// [`Self::BadLink`] is.
+    #[error("{0}")]
+    Variables(crate::variable::VarRule),
     #[error("duplicate guide id: {0:?}")]
     DuplicateGuide(GuideId),
     #[error("no such image: {0}")]
@@ -1688,7 +1809,7 @@ mod changes_nothing_tests {
                 Operation::SetFills {
                     id: a,
                     fills: crate::keyed_by_position([Fill {
-                        brush: Brush::Solid(peniko::Color::BLACK),
+                        brush: Brush::Solid(peniko::Color::BLACK).into(),
                         visible: true,
                     }]),
                 },

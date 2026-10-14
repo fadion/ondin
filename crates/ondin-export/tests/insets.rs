@@ -57,7 +57,8 @@ fn pinned() -> (Document, Vec<NodeId>) {
             ops.push(Operation::SetFills {
                 id,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(colour, 90, 200 - colour / 2, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(colour, 90, 200 - colour / 2, 255))
+                        .into(),
                     visible: true,
                 }]),
             });

@@ -216,7 +216,8 @@ impl TypeSubject {
             .fills
             .iter()
             .find(|f| f.visible)
-            .map(|f| f.brush.clone());
+            // As drawn: a bound fill is its variable's colour (§15 D1039).
+            .map(|f| app.session.doc.resolve_brush(id, &f.brush).into_owned());
         let parts = TextRef::of(&kind)?;
         let len = parts.content.len();
         // A live session's selection is the range, and its *own* spans are the

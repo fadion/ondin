@@ -51,7 +51,7 @@ fn frame_with_a_small_rect() -> (Document, Resolved, NodeId, NodeId) {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(RED),
+                brush: Brush::Solid(RED).into(),
                 visible: true,
             }]),
         },
@@ -334,7 +334,7 @@ fn thin_rect(w: f64, h: f64) -> (Document, Resolved, NodeId) {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(RED),
+                brush: Brush::Solid(RED).into(),
                 visible: true,
             }]),
         },

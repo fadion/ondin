@@ -2806,7 +2806,7 @@ mod tests {
             ops.push(ondin_core::Operation::SetFills {
                 id: frame,
                 fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                    brush: ondin_core::Brush::Solid(ground),
+                    brush: ondin_core::Brush::Solid(ground).into(),
                     visible: true,
                 }]),
             });

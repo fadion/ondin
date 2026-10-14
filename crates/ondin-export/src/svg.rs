@@ -30,7 +30,7 @@ use ondin_core::peniko::{Color, Extend, GradientKind};
 use ondin_core::{Brush, Keyed};
 use ondin_core::{
     Decoration, Document, Effect, EffectKind, Fill, Framing, LineStyle, MaskMode, Node, NodeId,
-    NodeKind, Resolved, Shadow, Stroke, StrokeAlign, geometry,
+    NodeKind, Paint, Resolved, Shadow, Stroke, StrokeAlign, geometry,
 };
 use std::fmt::Write;
 
@@ -724,8 +724,13 @@ fn shadow_graph(out: &mut String, graphic: &str, s: &Shadow, n: usize, inner: bo
 /// The paint list's visible entries, paired with their index in it — the index
 /// the gradient slot and the alignment clip are named after, so a hidden paint
 /// does not renumber the ones after it.
-fn visible_fills(node: &Node) -> impl Iterator<Item = (usize, &Fill)> {
-    node.paint()
+///
+/// **Of a paint already resolved** (`Document::resolved_paint`, §15 D1039), so a
+/// bound fill arrives as the solid it draws and every reader below takes its
+/// brush with `BrushSource::drawn` — the writer's one resolve per node, as the
+/// scene walk's is.
+fn visible_fills(paint: &Paint) -> impl Iterator<Item = (usize, &Fill)> {
+    paint
         .fills
         .iter()
         .enumerate()
@@ -733,8 +738,8 @@ fn visible_fills(node: &Node) -> impl Iterator<Item = (usize, &Fill)> {
         .map(|(i, f)| (i, &f.value))
 }
 
-fn visible_strokes(node: &Node) -> impl Iterator<Item = (usize, &Stroke)> {
-    node.paint()
+fn visible_strokes(paint: &Paint) -> impl Iterator<Item = (usize, &Stroke)> {
+    paint
         .strokes
         .iter()
         .enumerate()
@@ -854,11 +859,12 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
             Brush::Solid(_) => {}
         }
     };
-    for (i, f) in visible_fills(node) {
-        consider(&f.brush, &format!("fill-{i}"));
+    let paint = doc.resolved_paint(id, node.paint());
+    for (i, f) in visible_fills(&paint) {
+        consider(f.brush.drawn(), &format!("fill-{i}"));
     }
-    for (i, s) in visible_strokes(node) {
-        consider(&s.brush, &format!("stroke-{i}"));
+    for (i, s) in visible_strokes(&paint) {
+        consider(s.brush.drawn(), &format!("stroke-{i}"));
     }
     // A frame's ground used to need a `consider(bg, "bg")` of its own here. It is
     // an entry in `visible_fills` now (§15 D400), so the loop above collects its
@@ -1400,10 +1406,13 @@ fn report_node(node: &Node, filter_written: bool, report: &mut Report) {
         )
     };
     let picture = |brush: &Brush| matches!(brush, Brush::Image(_));
+    // **Unresolved, and `drawn` is still the honest reading here**: a bound
+    // paint is a solid whatever its variable says, so it is neither a sweep nor
+    // a picture, and the transparent stand-in answers that (§15 D1039).
     let brushes = || {
-        visible_fills(node)
-            .map(|(_, f)| &f.brush)
-            .chain(visible_strokes(node).map(|(_, s)| &s.brush))
+        visible_fills(node.paint())
+            .map(|(_, f)| f.brush.drawn())
+            .chain(visible_strokes(node.paint()).map(|(_, s)| s.brush.drawn()))
     };
     if brushes().any(sweep) {
         report.approximate("a sweep gradient, written as a radial one");
@@ -1529,7 +1538,8 @@ fn emit_node(
 
     // Root carries nothing of its own; skip its wrapper to keep output tidy.
     let wrap = !matches!(node.kind(), NodeKind::Root);
-    let strokes: Vec<(usize, &Stroke)> = visible_strokes(node).collect();
+    let paint = doc.resolved_paint(id, node.paint());
+    let strokes: Vec<(usize, &Stroke)> = visible_strokes(&paint).collect();
     // **A frame's stroke cannot live inside the group that clips its contents**, so
     // when there is both a clip and a stroke the frame becomes two groups: an outer
     // one carrying the transform and the opacity, an inner one carrying only the
@@ -1608,20 +1618,20 @@ fn emit_node(
     // to, so it has to be the same string `collect_defs` wrote — which is now the
     // one `visible_fills` hands both of them.
     if let NodeKind::Artboard { size } = res.used_kind_of(node) {
-        for (i, f) in visible_fills(node) {
+        for (i, f) in visible_fills(&paint) {
             let slot = format!("fill-{i}");
-            if missing_picture(doc, &f.brush) {
+            if missing_picture(doc, f.brush.drawn()) {
                 emit_missing(out, node, res, id, None, &slot, &content_pad);
                 continue;
             }
-            let clip = framing_of(doc, node, res, id, &f.brush).and_then(|f| f.clip);
+            let clip = framing_of(doc, node, res, id, f.brush.drawn()).and_then(|f| f.clip);
             with_image_clip(out, clip, id, &slot, &content_pad, |out, pad| {
                 let _ = writeln!(
                     out,
                     "{pad}<rect x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\"{fill}/>",
                     w = fmt(size.width),
                     h = fmt(size.height),
-                    fill = paint_attr("fill", &f.brush, id, &slot, defs),
+                    fill = paint_attr("fill", f.brush.drawn(), id, &slot, defs),
                 );
             });
         }
@@ -1846,8 +1856,9 @@ fn emit_shape(
     if emit_failed_boolean(out, doc, res, id, pad) {
         return;
     }
-    let fills: Vec<(usize, &Fill)> = visible_fills(node).collect();
-    let strokes: Vec<(usize, &Stroke)> = visible_strokes(node).collect();
+    let paint = doc.resolved_paint(id, node.paint());
+    let fills: Vec<(usize, &Fill)> = visible_fills(&paint).collect();
+    let strokes: Vec<(usize, &Stroke)> = visible_strokes(&paint).collect();
     let derived = res.boolean_path(id);
     let shape = outline(node, res, id);
     // **A letterboxing image is as much a reason to stack as an aligned stroke
@@ -1856,13 +1867,15 @@ fn emit_shape(
     // and the strokes both, since either can carry a picture.
     let letterboxed = fills
         .iter()
-        .map(|(_, f)| &f.brush)
-        .chain(strokes.iter().map(|(_, s)| &s.brush))
+        .map(|(_, f)| f.brush.drawn())
+        .chain(strokes.iter().map(|(_, s)| s.brush.drawn()))
         .any(|b| framing_of(doc, node, res, id, b).is_some_and(|f| f.clip.is_some()));
     // And so is a picture that is not there: the placeholder is a ground, a rim
     // and a cross — three elements and a clip, where a fill attribute is one
     // word (§15 D179).
-    let missing = fills.iter().any(|(_, f)| missing_picture(doc, &f.brush));
+    let missing = fills
+        .iter()
+        .any(|(_, f)| missing_picture(doc, f.brush.drawn()));
     let plain = !letterboxed
         && !missing
         && fills.len() <= 1
@@ -1892,7 +1905,7 @@ fn emit_shape(
     let t = format!("{}{}", name_attr(node), transform_attr(transform));
     let op = opacity_attr(opacity);
     let fill = match fills.first() {
-        Some((i, f)) => paint_attr("fill", &f.brush, id, &format!("fill-{i}"), defs),
+        Some((i, f)) => paint_attr("fill", f.brush.drawn(), id, &format!("fill-{i}"), defs),
         // **A text node with no ink at all is black here too**, which the walk has
         // always done and this writer did not: it wrote `fill="none"`, so an
         // unpainted text node was in the file, in the viewBox and invisible. Found
@@ -2022,11 +2035,11 @@ fn emit_stacked(
     );
     for (i, f) in fills {
         let slot = format!("fill-{i}");
-        if missing_picture(doc, &f.brush) {
+        if missing_picture(doc, f.brush.drawn()) {
             emit_missing(out, node, res, id, derived, &slot, &inner);
             continue;
         }
-        let clip = framing_of(doc, node, res, id, &f.brush).and_then(|f| f.clip);
+        let clip = framing_of(doc, node, res, id, f.brush.drawn()).and_then(|f| f.clip);
         // Per fill, so one contained picture does not cut the fill under it.
         with_image_clip(out, clip, id, &slot, &inner, |out, pad| {
             // ⚠️ **Through `with_fill_rule`, which this loop used to skip.** The
@@ -2039,7 +2052,7 @@ fn emit_stacked(
             // export read its outline as a **union** — the exclusion's holes
             // filled in — while the canvas drew it correctly. Same document, two
             // pictures, no warning.
-            let fill = with_fill_rule(paint_attr("fill", &f.brush, id, &slot, defs), node);
+            let fill = with_fill_rule(paint_attr("fill", f.brush.drawn(), id, &slot, defs), node);
             write_element(
                 out,
                 node,
@@ -2162,7 +2175,7 @@ fn emit_strokes(
         // keeps the half of a doubled stroke that is on the right side, and this
         // keeps the part of the frame the picture actually reaches. Nesting them
         // the other way round would work as geometry and read as an accident.
-        let box_clip = framing_of(doc, node, res, id, &s.brush).and_then(|f| f.clip);
+        let box_clip = framing_of(doc, node, res, id, s.brush.drawn()).and_then(|f| f.clip);
         with_image_clip(
             out,
             box_clip,
@@ -2793,7 +2806,13 @@ fn stroke_attr(
     dashes: &[f64],
     defs: &Defs,
 ) -> String {
-    let paint = paint_attr("stroke", &s.brush, id, &format!("stroke-{index}"), defs);
+    let paint = paint_attr(
+        "stroke",
+        s.brush.drawn(),
+        id,
+        &format!("stroke-{index}"),
+        defs,
+    );
     let join = match s.join {
         ondin_core::kurbo::Join::Miter => "miter",
         ondin_core::kurbo::Join::Round => "round",
@@ -3045,7 +3064,7 @@ mod def_count_tests {
             ops.push(Operation::SetFills {
                 id,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: Brush::Gradient(g.into()),
+                    brush: Brush::Gradient(g.into()).into(),
                     visible: true,
                 }]),
             });

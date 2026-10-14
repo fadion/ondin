@@ -597,7 +597,7 @@ fn a_consumer_and_a_kit_round_trip_through_a_file() {
     let back = io::load(&bytes).unwrap();
     assert_eq!(back, d);
     assert_eq!(io::save(&back).unwrap(), bytes);
-    assert_eq!(back.schema_version(), 6);
+    assert_eq!(back.schema_version(), 7);
 }
 
 /// A file whose `vault` key went missing — what a v5 build would make of a v6
@@ -646,9 +646,10 @@ fn a_published_state_inside_a_published_state_is_refused() {
     );
 }
 
-/// A v5 file loads as v6 — a number and nothing else.
+/// A v5 file loads as the current version — two steps that are each a number
+/// and nothing else (`migrate_5_to_6`, `migrate_6_to_7`).
 #[test]
-fn a_v5_file_loads_as_v6() {
+fn a_v5_file_loads_as_the_current_version() {
     let (d, _) = consumer();
     let mut v: serde_json::Value = serde_json::from_slice(&io::save(&d).unwrap()).unwrap();
     v["schema_version"] = 5.into();
@@ -673,7 +674,8 @@ fn try_paste_across(
 ) -> Result<(Transaction, Vec<NodeId>), kit::KitError> {
     let subtrees = vec![from.capture_subtree(inst).unwrap()];
     let kits = kit::carried(from, &subtrees);
-    let text = io::clip::write_carrying(&subtrees, &kits, &[], None, "Icon").unwrap();
+    let text =
+        io::clip::write_carrying(&subtrees, &kits, &[], &Default::default(), None, "Icon").unwrap();
     let payload = io::clip::read(&text).unwrap().unwrap();
     let root = to.root();
     let placements: Vec<Placement> = payload
@@ -1569,7 +1571,7 @@ fn picture(
         height: 10,
     };
     let fill = Fill {
-        brush: image_brush(id.clone()),
+        brush: image_brush(id.clone()).into(),
         visible: true,
     };
     (id, entry, fill)

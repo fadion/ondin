@@ -1115,7 +1115,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
             | G::TextPathOffset(_)
             | G::BoolOp(_) => None,
         },
-        O::SetOpacity { .. } | O::SetClip { .. } => Some("Appearance"),
+        // A corner's binding is the radius field's (§15 D1039).
+        O::SetOpacity { .. } | O::SetClip { .. } | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
         O::SetFills { .. } => Some("Fill"),
         O::SetStrokes { .. } => Some("Stroke"),
@@ -1158,7 +1159,16 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::RemoveImage { .. }
         | O::OpenVault { .. }
         | O::CloseVault { .. }
-        | O::SetOrigin { .. } => None,
+        | O::SetOrigin { .. }
+        // A frame's mode is a row of the identity card, under its name (D1038).
+        | O::SetMode { .. }
+        | O::AddVariable { .. }
+        | O::RemoveVariable { .. }
+        | O::SetVariableName { .. }
+        | O::SetVariableCell { .. }
+        | O::AddMode { .. }
+        | O::RemoveMode { .. }
+        | O::SetModeName { .. } => None,
     }
 }
 
@@ -2613,7 +2623,7 @@ mod tests {
         let mut f = fixture(&ctx);
         let r = f.app.session.doc.get(f.m).unwrap().children()[0];
         let fills = keyed_by_position([Fill {
-            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, 2, 30)),
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, 2, 30)).into(),
             visible: true,
         }]);
         let exports = keyed_by_position([ExportSpec::new(
@@ -2679,7 +2689,7 @@ mod tests {
         let mut f = fixture(&ctx);
         let r = f.app.session.doc.get(f.m).unwrap().children()[0];
         let solid = |g: u8| Fill {
-            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)),
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)).into(),
             visible: true,
         };
         let main = keyed_by_position([solid(1), solid(2)]);
@@ -2892,7 +2902,7 @@ mod tests {
         let r = f.app.session.doc.get(f.m).unwrap().children()[0];
         let rgb = |g: u8| ondin_core::peniko::Color::from_rgb8(10, g, 30);
         let stroke = |g: u8| Stroke {
-            brush: ondin_core::Brush::Solid(rgb(g)),
+            brush: ondin_core::Brush::Solid(rgb(g)).into(),
             ..Default::default()
         };
         let strokes_of =

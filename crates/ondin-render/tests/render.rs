@@ -130,14 +130,14 @@ fn two_rect_doc() -> (Document, Resolved, NodeId, NodeId) {
         Operation::SetFills {
             id: near,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+                brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: far,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+                brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
                 visible: true,
             }]),
         },
@@ -348,7 +348,7 @@ fn gradient_fills_reach_the_backend_intact() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: near,
         fills: keyed_by_position([Fill {
-            brush: Brush::Gradient(gradient.into()),
+            brush: Brush::Gradient(gradient.into()).into(),
             visible: true,
         }]),
     }]))
@@ -449,14 +449,14 @@ fn an_image_is_framed_by_its_shape_and_its_stroke_agrees() {
         Operation::SetFills {
             id: near,
             fills: keyed_by_position([Fill {
-                brush: image_brush(id.clone()),
+                brush: image_brush(id.clone()).into(),
                 visible: true,
             }]),
         },
         Operation::SetStrokes {
             id: near,
             strokes: keyed_by_position([ondin_core::Stroke {
-                brush: image_brush(id.clone()),
+                brush: image_brush(id.clone()).into(),
                 width: 10.0,
                 align: ondin_core::StrokeAlign::Center,
                 ..Default::default()
@@ -599,7 +599,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: shape,
         strokes: keyed_by_position([ondin_core::Stroke {
-            brush: Brush::Solid(Color::BLACK),
+            brush: Brush::Solid(Color::BLACK).into(),
             width: 4.0,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,
@@ -738,14 +738,14 @@ fn solid(red: u8) -> Brush {
 
 fn fill(red: u8, visible: bool) -> Fill {
     Fill {
-        brush: solid(red),
+        brush: solid(red).into(),
         visible,
     }
 }
 
 fn stroke(red: u8, visible: bool) -> ondin_core::Stroke {
     ondin_core::Stroke {
-        brush: solid(red),
+        brush: solid(red).into(),
         width: 2.0,
         join: ondin_core::kurbo::Join::Miter,
         cap: ondin_core::kurbo::Cap::Butt,
@@ -1167,7 +1167,7 @@ fn stroked_frame(strokes: Vec<ondin_core::Stroke>, opacity: f32) -> (Document, R
         Operation::SetFills {
             id: ab,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -1390,15 +1390,15 @@ fn a_frames_fill_stack_paints_in_order_behind_its_children() {
         id: ab,
         fills: keyed_by_position([
             Fill {
-                brush: Brush::Solid(ground),
+                brush: Brush::Solid(ground).into(),
                 visible: true,
             },
             Fill {
-                brush: Brush::Solid(never),
+                brush: Brush::Solid(never).into(),
                 visible: false,
             },
             Fill {
-                brush: Brush::Solid(over),
+                brush: Brush::Solid(over).into(),
                 visible: true,
             },
         ]),
@@ -1588,7 +1588,7 @@ fn a_second_mask_ends_the_first_ones_run_instead_of_nesting() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: top,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -1986,14 +1986,14 @@ fn a_group_masked_by_a_group_that_masks_internally_is_not_culled_away() {
             Operation::SetFills {
                 id: outer_big,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
                     visible: true,
                 }]),
             },
             Operation::SetFills {
                 id: inner_big,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::WHITE),
+                    brush: Brush::Solid(Color::WHITE).into(),
                     visible: true,
                 }]),
             },
@@ -2077,7 +2077,7 @@ fn parked_containers(kind: NodeKind, n: usize) -> (Document, Resolved) {
     let mut doc = Document::new(root);
     let solid = || {
         keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+            brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
             visible: true,
         }])
     };

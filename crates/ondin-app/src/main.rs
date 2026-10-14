@@ -1117,7 +1117,8 @@ mod tests {
                 fills: ondin_core::keyed_by_position([Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         10, 20, 30, 255,
-                    )),
+                    ))
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -1193,7 +1194,8 @@ mod tests {
                 fills: ondin_core::keyed_by_position([Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         10, 20, 30, 255,
-                    )),
+                    ))
+                    .into(),
                     visible: true,
                 }]),
             },

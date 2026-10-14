@@ -73,9 +73,31 @@ pub struct Payload {
     /// and the document carries the bytes, so a picture that crossed without
     /// these would arrive as the missing-picture placeholder in silence.
     pub images: Vec<(ImageId, ImageEntry)>,
+    /// The variables the subtrees read, by name and kind, with a detached twin
+    /// of each layer that reads one (`crate::variable::carried`, §15 D1039) — so
+    /// a paste into another document rebinds by name or falls back to the value
+    /// drawn at the copy.
+    pub vars: crate::variable::Carried,
     /// The world box the copy was taken from, for *Paste here* to aim with.
     /// Absent when the source could not measure one.
     pub from: Option<Rect>,
+}
+
+/// [`crate::variable::Carried`] on the wire.
+#[derive(Default, Serialize, Deserialize)]
+struct CarriedDto {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    vars: Vec<crate::variable::CarriedVar>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    modes: Vec<crate::variable::Mode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    detached: Vec<NodeDto>,
+}
+
+impl CarriedDto {
+    fn is_empty(&self) -> bool {
+        self.vars.is_empty() && self.modes.is_empty() && self.detached.is_empty()
+    }
 }
 
 /// The envelope, which is everything a document has that a clip does not need.
@@ -95,6 +117,9 @@ struct ClipDto {
     kits: Vec<Vec<NodeDto>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     images: Vec<ImageDto>,
+    /// Absent for a copy whose layers read no variable.
+    #[serde(default, skip_serializing_if = "CarriedDto::is_empty")]
+    vars: CarriedDto,
     /// `[x0, y0, x1, y1]`, absent when the copy had no measurable box.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     from: Option<[f64; 4]>,
@@ -112,15 +137,17 @@ pub fn write(
     from: Option<Rect>,
     heading: &str,
 ) -> Result<String, IoError> {
-    write_carrying(subtrees, &[], images, from, heading)
+    write_carrying(subtrees, &[], images, &Default::default(), from, heading)
 }
 
 /// [`write()`], carrying the kit mains the copy reaches (`crate::kit::carried`,
-/// §15 D1012).
+/// §15 D1012) and what its layers' variables are (`crate::variable::carried`,
+/// §15 D1039).
 pub fn write_carrying(
     subtrees: &[Vec<Node>],
     kits: &[Vec<Node>],
     images: &[(ImageId, ImageEntry)],
+    vars: &crate::variable::Carried,
     from: Option<Rect>,
     heading: &str,
 ) -> Result<String, IoError> {
@@ -133,6 +160,11 @@ pub fn write_carrying(
             .iter()
             .map(|(id, entry)| ImageDto::from_entry(id, entry))
             .collect(),
+        vars: CarriedDto {
+            vars: vars.vars.clone(),
+            modes: vars.modes.clone(),
+            detached: vars.detached.iter().map(NodeDto::from_node).collect(),
+        },
         from: from.map(|r| [r.x0, r.y0, r.x1, r.y1]),
     };
     // **Not pretty-printed, unlike `io::save`.** That printer is there for
@@ -285,10 +317,21 @@ fn parse(json: &str) -> Result<Payload, IoError> {
         .flat_map(|nodes| crate::build::image_ids_in(nodes))
         .collect();
     images.retain(|(id, _)| referenced.contains(id));
+    let vars = crate::variable::Carried {
+        vars: dto.vars.vars,
+        modes: dto.vars.modes,
+        detached: dto
+            .vars
+            .detached
+            .into_iter()
+            .map(NodeDto::into_node)
+            .collect::<Result<_, _>>()?,
+    };
     Ok(Payload {
         subtrees,
         kits,
         images,
+        vars,
         // A non-finite box would sit in every comparison `paste_aim` makes and
         // match none of them, so it is dropped rather than carried — the copy
         // still pastes, at the fallback the app uses for a copy that never had

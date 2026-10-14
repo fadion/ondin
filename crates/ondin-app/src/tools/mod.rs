@@ -2519,7 +2519,7 @@ pub fn create_artboard(
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(background),
+                brush: Brush::Solid(background).into(),
                 visible: true,
             }]),
         },
@@ -2553,7 +2553,7 @@ pub fn create_rect(
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(fill),
+                brush: Brush::Solid(fill).into(),
                 visible: true,
             }]),
         },
@@ -2746,7 +2746,7 @@ fn image_ops(
     ops.push(Operation::SetFills {
         id,
         fills: keyed_by_position([Fill {
-            brush: ondin_core::image_brush(image),
+            brush: ondin_core::image_brush(image).into(),
             visible: true,
         }]),
     });
@@ -2881,7 +2881,7 @@ pub fn create_ellipse(
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(fill),
+                brush: Brush::Solid(fill).into(),
                 visible: true,
             }]),
         },
@@ -2993,7 +2993,7 @@ fn shape_at(
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(fill),
+                brush: Brush::Solid(fill).into(),
                 visible: true,
             }]),
         },
@@ -3029,7 +3029,7 @@ pub fn create_line(
         Operation::SetStrokes {
             id,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(color),
+                brush: Brush::Solid(color).into(),
                 width,
                 ..Default::default()
             }]),
@@ -4240,7 +4240,7 @@ pub fn create_path(
         Operation::SetStrokes {
             id,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(color),
+                brush: Brush::Solid(color).into(),
                 width,
                 ..Default::default()
             }]),
@@ -4399,11 +4399,11 @@ mod tests {
     fn the_cropped_fill_is_the_first_visible_image() {
         use ondin_core::{Fill, Paint, image_brush};
         let img = |v: bool| Fill {
-            brush: image_brush(ondin_core::ImageId("a".into())),
+            brush: image_brush(ondin_core::ImageId("a".into())).into(),
             visible: v,
         };
         let solid = Fill {
-            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::BLACK),
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
             visible: true,
         };
         let paint = |fills: Vec<Fill>| Paint {
@@ -10768,7 +10768,7 @@ mod tests {
         let Operation::SetFills { fills, .. } = &tx.0[2] else {
             panic!("expected the fill last, got {:?}", tx.0[2]);
         };
-        assert_eq!(fills[0].brush, ondin_core::image_brush(id));
+        assert_eq!(fills[0].brush, ondin_core::image_brush(id).into());
 
         // The layer is named for the file — an auto "Rectangle 3" would lose the
         // one piece of identity an image arrives with.
@@ -10805,7 +10805,7 @@ mod tests {
         };
         assert_eq!(
             fills[0].brush,
-            ondin_core::image_brush(id),
+            ondin_core::image_brush(id).into(),
             "the second layer still points at the one copy"
         );
     }

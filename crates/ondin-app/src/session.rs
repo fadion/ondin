@@ -1786,21 +1786,21 @@ fn starter_document() -> (Document, IdSource) {
         Operation::SetFills {
             id: artboard,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)),
+                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)),
+                brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: ellipse,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(235, 110, 90, 255)),
+                brush: Brush::Solid(Color::from_rgba8(235, 110, 90, 255)).into(),
                 visible: true,
             }]),
         },

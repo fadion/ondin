@@ -66,7 +66,11 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetClip { .. }
         | Operation::SetMask { .. }
         | Operation::SetMaskMode { .. }
-        | Operation::SetFillRule { .. } => Mode::Whole,
+        | Operation::SetFillRule { .. }
+        // A copy's mode is an override like any field (§5.3f), and so is a
+        // corner's binding: overrides compare the binding (§5.3d).
+        | Operation::SetMode { .. }
+        | Operation::SetCornerVars { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }
@@ -107,7 +111,16 @@ fn mode(op: &Operation) -> Mode {
         | Operation::OpenVault { .. }
         | Operation::CloseVault { .. }
         // A copy is never vendored, so no copy follows a main's provenance.
-        | Operation::SetOrigin { .. } => Mode::Skip,
+        | Operation::SetOrigin { .. }
+        // The variables table is the document's, read by main and copy alike:
+        // an edit to it writes no node, so nothing propagates (§5.3f).
+        | Operation::AddVariable { .. }
+        | Operation::RemoveVariable { .. }
+        | Operation::SetVariableName { .. }
+        | Operation::SetVariableCell { .. }
+        | Operation::AddMode { .. }
+        | Operation::RemoveMode { .. }
+        | Operation::SetModeName { .. } => Mode::Skip,
     }
 }
 

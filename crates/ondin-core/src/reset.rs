@@ -81,6 +81,8 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         // A vendored node's provenance (§15 D1012) — never on a copy, so never an
         // override.
         origin: _,
+        mode,
+        corner_vars,
     } = node;
     let id = *id;
     use Operation as O;
@@ -141,6 +143,13 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
             display: display.clone(),
         },
         O::SetLayoutItem { id, item: *item },
+        // A copy's mode and its corners' bindings are overrides like any field
+        // (§5.3f): compared by the binding, never by what it resolves to.
+        O::SetMode { id, mode: *mode },
+        O::SetCornerVars {
+            id,
+            vars: *corner_vars,
+        },
     ];
     ops.extend(kind_ops(id, kind));
     ops
@@ -1079,7 +1088,7 @@ mod tests {
         .expect("the fixture");
         let fill = |r| {
             crate::item::keyed_by_position([Fill {
-                brush: crate::Brush::Solid(peniko::Color::from_rgba8(r, 0, 0, 255)),
+                brush: crate::Brush::Solid(peniko::Color::from_rgba8(r, 0, 0, 255)).into(),
                 visible: true,
             }])
         };

@@ -48,6 +48,7 @@ pub mod svg_in;
 pub mod swap;
 pub mod text;
 pub mod typography;
+pub mod variable;
 pub mod variant;
 
 // Re-export the geometry/paint crates whose types appear in our public API, so
@@ -58,13 +59,13 @@ pub use peniko;
 pub use boolean::evaluate as evaluate_boolean;
 pub use build::{
     ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_paint_in, any_rect_in,
-    boolean, can_parent, colors_in, edit_fill_at_all, edit_fills_all, edit_stroke_at_all,
-    edit_strokes_all, gradients_in, group, insert_subtrees, local_for_world, move_by_world,
-    outermost, paint_at, paint_targets, place_at_world, recolor, repaint,
-    reparent_preserving_world, retarget_fills_all, retarget_strokes_all, set_boolean_op,
-    set_corner_radius_all, set_fills_all, set_opacity_all, set_strokes_all, shared_corner_radius,
-    shared_fills, shared_over_fills, shared_over_strokes, shared_strokes, subtree_nodes, ungroup,
-    valid_opacity,
+    bind_corners_ops, boolean, can_parent, colors_in, detach_corners_ops, edit_brush_at_all,
+    edit_brushes_all, edit_fill_at_all, edit_fills_all, edit_stroke_at_all, edit_strokes_all,
+    edited_brush, gradients_in, group, insert_subtrees, local_for_world, move_by_world, outermost,
+    paint_at, paint_targets, place_at_world, recolor, repaint, reparent_preserving_world,
+    retarget_fills_all, retarget_strokes_all, set_boolean_op, set_corner_radius_all, set_fills_all,
+    set_opacity_all, set_strokes_all, shared_corner_radius, shared_fills, shared_over_fills,
+    shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
 };
 pub use container::{AutoMargins, Insets, LengthPct};
 pub use document::{DEFAULT_CANVAS_BACKGROUND, Document, remap_subtree, reserve_existing_ids};
@@ -113,4 +114,8 @@ pub use typography::{
     ParaAttr, ParaAttrKind, ParaSpan, ParaSpans, ParagraphStyle, SLNT, Span, SpanAttr, Spans, Tag,
     TextAlign, TextCase, TextDirection, TextOverflow, TextStyle, VerticalAlign, WGHT, WordBreak,
     WrapMode, character_variant, stylistic_set,
+};
+pub use variable::{
+    BrushSource, Cell, CornerVars, Mode, ModeId, Value, VarId, VarKind, VarRule, Variable,
+    Variables,
 };

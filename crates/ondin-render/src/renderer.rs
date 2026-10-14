@@ -1547,8 +1547,27 @@ impl RenderOverrides {
             // two higher since `SetComponent` and `SetLink` joined the chrome arm,
             // §15 D978, three higher again with the variant ops, §15 D982, and one
             // higher with `SetSwap`, §15 D983: nineteen no-ops here, seventeen of
-            // them `changes_ink`'s.)
+            // them `changes_ink`'s — and seven more since the variables table's arm
+            // below, §15 D1039, four of them `changes_ink`'s `false`. The fixture
+            // lists all three groups.)
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
+            // **The variables table has no override either** (§15 D1039): the
+            // walk reads it off the document, so a previewed cell edit draws the
+            // committed value — `AddImage`'s gap, for the same reason. Nothing
+            // drags one: a cell commits on `Enter` (D1038). Absorbed rather than
+            // refused so a transaction carrying one still previews the rest.
+            Operation::AddVariable { .. }
+            | Operation::RemoveVariable { .. }
+            | Operation::SetVariableName { .. }
+            | Operation::SetVariableCell { .. }
+            | Operation::AddMode { .. }
+            | Operation::RemoveMode { .. }
+            | Operation::SetModeName { .. } => {}
+            // A frame's mode and a corner's binding change what a whole subtree,
+            // or a used kind, resolves to — read through the document and
+            // `Resolved`, neither of which an override patches. Both are a click
+            // or a typed `--`, committed rather than dragged.
+            Operation::SetMode { .. } | Operation::SetCornerVars { .. } => return None,
             // **Structural in the sense that matters here**: a mask changes which
             // *other* nodes the walk clips, and an override is a patch on one
             // node. Nothing sets it mid-gesture — it is a click on the identity

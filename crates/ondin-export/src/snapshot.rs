@@ -475,7 +475,11 @@ fn node_snapshot(
             .fills
             .iter()
             .filter(|f: &&ondin_core::Keyed<Fill>| f.visible)
-            .map(|f| paint_summary(&f.brush))
+            // **The resolved value, not the binding** (§15 D1039, D1037 premise
+            // (v)): the snapshot's shape is unchanged, and an agent reading it sees
+            // what is drawn. Reporting the binding as well is a change of shape
+            // left for when an agent can write one.
+            .map(|f| paint_summary(&doc.resolve_brush(id, &f.brush)))
             .collect(),
         strokes: node
             .paint()
@@ -483,7 +487,7 @@ fn node_snapshot(
             .iter()
             .filter(|s: &&ondin_core::Keyed<Stroke>| s.visible)
             .map(|s| StrokeSummary {
-                paint: paint_summary(&s.brush),
+                paint: paint_summary(&doc.resolve_brush(id, &s.brush)),
                 width: s.width,
             })
             .collect(),

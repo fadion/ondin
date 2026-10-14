@@ -495,8 +495,9 @@ pub(crate) fn picture_missing(store: &ondin_render::ImageStore, node: &ondin_cor
         .filter(|f| f.visible)
         .map(|f| &f.brush)
         .chain(paint.strokes.iter().filter(|s| s.visible).map(|s| &s.brush))
-        .any(|b| match b {
-            ondin_core::Brush::Image(img) => store.get(&img.image.id).is_none(),
+        // A bound paint is a solid, never a picture.
+        .any(|b| match b.literal() {
+            Some(ondin_core::Brush::Image(img)) => store.get(&img.image.id).is_none(),
             _ => false,
         })
 }
@@ -537,8 +538,8 @@ fn picture_of(node: &ondin_core::Node) -> Option<&ondin_core::ImageBrush> {
         .fills
         .iter()
         .filter(|f| f.visible)
-        .find_map(|f| match &f.brush {
-            ondin_core::Brush::Image(img) => Some(img),
+        .find_map(|f| match f.brush.literal() {
+            Some(ondin_core::Brush::Image(img)) => Some(img),
             _ => None,
         })
 }
@@ -3597,12 +3598,15 @@ mod missing_picture_tests {
     }
 
     fn fill(brush: Brush, visible: bool) -> Fill {
-        Fill { brush, visible }
+        Fill {
+            brush: brush.into(),
+            visible,
+        }
     }
 
     fn stroke(brush: Brush, visible: bool) -> Stroke {
         Stroke {
-            brush,
+            brush: brush.into(),
             width: 1.0,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,

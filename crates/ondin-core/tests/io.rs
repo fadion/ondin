@@ -49,7 +49,7 @@ fn rich_document() -> (Document, NodeId) {
             Operation::SetFills {
                 id: ab,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)).into(),
                     visible: true,
                 }]),
             },
@@ -140,14 +140,14 @@ fn rich_document() -> (Document, NodeId) {
             Operation::SetFills {
                 id: r,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
                     visible: true,
                 }]),
             },
             Operation::SetStrokes {
                 id: r,
                 strokes: keyed_by_position([Stroke {
-                    brush: Brush::Solid(Color::from_rgba8(20, 20, 20, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(20, 20, 20, 255)).into(),
                     width: 2.5,
                     join: ondin_core::kurbo::Join::Bevel,
                     cap: ondin_core::kurbo::Cap::Square,
@@ -351,7 +351,7 @@ fn a_v1_file_carrying_all_three_old_shapes_migrates_through_every_step() {
     assert_eq!(
         values(&frame.paint().fills),
         vec![Fill {
-            brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
+            brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)).into(),
             visible: true,
         }],
         "v3→v4: and the ground it was saved with is fill 0"
@@ -458,7 +458,7 @@ fn migration_moves_a_v3_frame_background_into_its_fill_list() {
     assert_eq!(
         values(&frame.paint().fills),
         vec![Fill {
-            brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
+            brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)).into(),
             visible: true,
         }],
         "the ground it was saved with, visible, as fill 0"
@@ -1822,7 +1822,7 @@ fn a_dangling_image_reference_loads_rather_than_failing() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
         fills: keyed_by_position([Fill {
-            brush: image_brush(ImageId("sha256:gone".into())),
+            brush: image_brush(ImageId("sha256:gone".into())).into(),
             visible: true,
         }]),
     }]))
@@ -1833,7 +1833,7 @@ fn a_dangling_image_reference_loads_rather_than_failing() {
     assert_eq!(loaded.image_count(), 0);
     assert_eq!(
         loaded.get(rect).unwrap().paint().fills[0].brush,
-        image_brush(ImageId("sha256:gone".into())),
+        image_brush(ImageId("sha256:gone".into())).into(),
         "and the reference survives, so a relink has something to repair"
     );
 }
@@ -2949,7 +2949,8 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                         ),
                         transform: ondin_core::kurbo::Affine::IDENTITY,
                         opacity: 1.0,
-                    }),
+                    })
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -2963,7 +2964,8 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                         gradient: peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)),
                         transform: ondin_core::kurbo::Affine::new([f64::INFINITY; 6]),
                         opacity: 1.0,
-                    }),
+                    })
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -2973,7 +2975,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             Operation::SetStrokes {
                 id: rect,
                 strokes: keyed_by_position([Stroke {
-                    brush: Brush::Solid(peniko::color::palette::css::BLACK),
+                    brush: Brush::Solid(peniko::color::palette::css::BLACK).into(),
                     width: f64::NAN,
                     ..Default::default()
                 }]),
@@ -2987,7 +2989,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             Operation::SetStrokes {
                 id: rect,
                 strokes: keyed_by_position([Stroke {
-                    brush: Brush::Solid(peniko::color::palette::css::BLACK),
+                    brush: Brush::Solid(peniko::color::palette::css::BLACK).into(),
                     width: 1.0,
                     dashes: vec![f64::INFINITY, 5.0],
                     ..Default::default()
@@ -3398,7 +3400,7 @@ fn a_clipboard_payload_carries_the_image_table_entries_it_keys_into() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: painted,
         fills: keyed_by_position([Fill {
-            brush: image_brush(id.clone()),
+            brush: image_brush(id.clone()).into(),
             visible: true,
         }]),
     }]))
@@ -3799,7 +3801,7 @@ fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: kid,
             fills: keyed_by_position([Fill {
-                brush: Brush::Gradient(brush),
+                brush: Brush::Gradient(brush).into(),
                 visible: true,
             }]),
         }]))

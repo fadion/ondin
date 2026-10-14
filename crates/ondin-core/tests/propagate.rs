@@ -83,11 +83,11 @@ fn fixture() -> F {
             id: a,
             fills: keyed_by_position([
                 Fill {
-                    brush: solid(10),
+                    brush: solid(10).into(),
                     visible: true,
                 },
                 Fill {
-                    brush: solid(20),
+                    brush: solid(20).into(),
                     visible: true,
                 },
             ]),
@@ -143,7 +143,7 @@ fn fills(doc: &Document, id: NodeId) -> Vec<Keyed<Fill>> {
 fn a_main_fill_reaches_its_instance() {
     let mut f = fixture();
     let mut next = fills(&f.doc, f.a);
-    next[0].brush = solid(99);
+    next[0].brush = solid(99).into();
     commit(
         &mut f.doc,
         vec![Operation::SetFills {
@@ -151,7 +151,7 @@ fn a_main_fill_reaches_its_instance() {
             fills: next,
         }],
     );
-    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(99));
+    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(99).into());
 }
 
 /// Item by item and field by field: the instance recoloured fill 0; the main
@@ -161,7 +161,7 @@ fn a_main_fill_reaches_its_instance() {
 fn an_overridden_fill_is_kept_while_its_sibling_follows() {
     let mut f = fixture();
     let mut mine = fills(&f.doc, f.ia);
-    mine[0].brush = solid(55);
+    mine[0].brush = solid(55).into();
     f.doc
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.ia,
@@ -169,7 +169,7 @@ fn an_overridden_fill_is_kept_while_its_sibling_follows() {
         }]))
         .unwrap();
     let mut next = fills(&f.doc, f.a);
-    next[0].brush = solid(99);
+    next[0].brush = solid(99).into();
     next[1].visible = false;
     commit(
         &mut f.doc,
@@ -179,7 +179,7 @@ fn an_overridden_fill_is_kept_while_its_sibling_follows() {
         }],
     );
     let got = fills(&f.doc, f.ia);
-    assert_eq!(got[0].brush, solid(55), "the override is kept");
+    assert_eq!(got[0].brush, solid(55).into(), "the override is kept");
     assert!(!got[1].visible, "the untouched fill follows");
 }
 
@@ -208,7 +208,7 @@ fn a_fill_added_to_a_main_and_its_instance_together_is_one_item() {
     edited.push(Keyed::new(
         f.ids.mint_item(),
         Fill {
-            brush: solid(30),
+            brush: solid(30).into(),
             visible: true,
         },
     ));
@@ -223,7 +223,7 @@ fn a_fill_added_to_a_main_and_its_instance_together_is_one_item() {
         "an edit made to both is no override"
     );
     let mut next = main;
-    next[2].brush = solid(99);
+    next[2].brush = solid(99).into();
     commit(
         &mut f.doc,
         vec![Operation::SetFills {
@@ -233,7 +233,7 @@ fn a_fill_added_to_a_main_and_its_instance_together_is_one_item() {
     );
     assert_eq!(
         fills(&f.doc, f.ia)[2].brush,
-        solid(99),
+        solid(99).into(),
         "the copy follows its main's new fill"
     );
 }
@@ -249,7 +249,7 @@ fn a_paste_onto_a_main_and_its_instance_gives_a_new_fill_one_id() {
     let mut f = fixture();
     let both = [f.a, f.ia];
     let pasted = [10, 20, 30].map(|r| Fill {
-        brush: solid(r),
+        brush: solid(r).into(),
         visible: true,
     });
     let tx = ondin_core::set_fills_all(&f.doc, &both, &pasted, &mut f.ids);
@@ -259,7 +259,7 @@ fn a_paste_onto_a_main_and_its_instance_gives_a_new_fill_one_id() {
     assert_eq!(copy[2].id, main[2].id, "one id past the end");
     assert_eq!(copy[0].id, main[0].id, "the kept ids, by position");
     let mut next = main;
-    next[2].brush = solid(99);
+    next[2].brush = solid(99).into();
     commit(
         &mut f.doc,
         vec![Operation::SetFills {
@@ -267,7 +267,11 @@ fn a_paste_onto_a_main_and_its_instance_gives_a_new_fill_one_id() {
             fills: next,
         }],
     );
-    assert_eq!(fills(&f.doc, f.ia)[2].brush, solid(99), "the copy follows");
+    assert_eq!(
+        fills(&f.doc, f.ia)[2].brush,
+        solid(99).into(),
+        "the copy follows"
+    );
 }
 
 /// A text style follows field by field: the instance's own size stays when the
@@ -345,9 +349,9 @@ fn an_instance_keeps_its_own_place_while_its_members_follow() {
 fn an_edit_to_the_instance_in_the_same_transaction_wins() {
     let mut f = fixture();
     let mut theirs = fills(&f.doc, f.a);
-    theirs[0].brush = solid(99);
+    theirs[0].brush = solid(99).into();
     let mut mine = fills(&f.doc, f.ia);
-    mine[0].brush = solid(77);
+    mine[0].brush = solid(77).into();
     commit(
         &mut f.doc,
         vec![
@@ -361,7 +365,7 @@ fn an_edit_to_the_instance_in_the_same_transaction_wins() {
             },
         ],
     );
-    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(77));
+    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(77).into());
 }
 
 /// Through a nested chain: main `outer` holds an instance of `m`; an instance of
@@ -409,7 +413,7 @@ fn an_edit_reaches_through_a_nested_instance() {
     let deep = f.doc.get(nested_copy).unwrap().children()[0];
 
     let mut next = fills(&f.doc, f.a);
-    next[0].brush = solid(99);
+    next[0].brush = solid(99).into();
     commit(
         &mut f.doc,
         vec![Operation::SetFills {
@@ -417,8 +421,8 @@ fn an_edit_reaches_through_a_nested_instance() {
             fills: next,
         }],
     );
-    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(99), "one level");
-    assert_eq!(fills(&f.doc, deep)[0].brush, solid(99), "two levels");
+    assert_eq!(fills(&f.doc, f.ia)[0].brush, solid(99).into(), "one level");
+    assert_eq!(fills(&f.doc, deep)[0].brush, solid(99).into(), "two levels");
 }
 
 /// Text spans index into the content, so they follow only onto a copy whose
@@ -984,7 +988,8 @@ fn a_loaded_value_the_operations_refuse_does_not_panic_a_mains_edit() {
                 gradient: ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)),
                 transform: Affine::IDENTITY,
                 opacity,
-            }),
+            })
+            .into(),
             visible: true,
         }])
     };
@@ -1000,7 +1005,7 @@ fn a_loaded_value_the_operations_refuse_does_not_panic_a_mains_edit() {
     assert_eq!(text.matches("0.25").count(), 2, "the main's and the copy's");
     f.doc = ondin_core::io::load(text.replace("0.25", "5.0").as_bytes()).expect("it loads");
     let new = keyed_by_position([Fill {
-        brush: solid(90),
+        brush: solid(90).into(),
         visible: true,
     }]);
     commit_all(
@@ -1058,7 +1063,7 @@ fn a_member_dragged_out_of_a_main_leaves_its_instances() {
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.ia,
             fills: keyed_by_position([Fill {
-                brush: solid(77),
+                brush: solid(77).into(),
                 visible: true,
             }]),
         }]))

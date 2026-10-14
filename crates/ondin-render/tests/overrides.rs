@@ -250,7 +250,7 @@ fn fixture() -> Fixture {
         Operation::SetFills {
             id: artboard,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
+                brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)).into(),
                 visible: true,
             }]),
         },
@@ -315,7 +315,7 @@ fn fixture() -> Fixture {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)),
+            brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -534,7 +534,7 @@ fn a_gradient_fill_matches_its_commit() {
         &Transaction(vec![Operation::SetFills {
             id: f.rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Gradient(gradient.into()),
+                brush: Brush::Gradient(gradient.into()).into(),
                 visible: true,
             }]),
         }]),
@@ -563,7 +563,7 @@ fn a_shape_being_drawn_matches_the_shape_that_lands() {
         Operation::SetFills {
             id: new_id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(217, 217, 217, 255)),
+                brush: Brush::Solid(Color::from_rgba8(217, 217, 217, 255)).into(),
                 visible: true,
             }]),
         },
@@ -1095,7 +1095,7 @@ fn boolean_fixture(op: ondin_core::BoolOp) -> (Document, NodeId, NodeId, NodeId)
     };
     let fill = |c: Color| {
         keyed_by_position([Fill {
-            brush: Brush::Solid(c),
+            brush: Brush::Solid(c).into(),
             visible: true,
         }])
     };
@@ -1584,7 +1584,7 @@ fn a_ghost_operand_folds_in_the_slot_its_insert_names() {
     ops.push(Operation::SetFills {
         id: b,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgb8(0x40, 0x80, 0xC0)),
+            brush: Brush::Solid(Color::from_rgb8(0x40, 0x80, 0xC0)).into(),
             visible: true,
         }]),
     });
@@ -1637,7 +1637,7 @@ fn a_ghost_draws_at_its_index_not_on_top() {
         ops.push(Operation::SetFills {
             id: *id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(10 * i as u8, 0, 0, 255)),
+                brush: Brush::Solid(Color::from_rgba8(10 * i as u8, 0, 0, 255)).into(),
                 visible: true,
             }]),
         });
@@ -1712,7 +1712,7 @@ fn a_reorder_changes_the_paint_order_it_commits() {
         ops.push(Operation::SetFills {
             id: *id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(60 * i as u8 + 40, 0, 0, 255)),
+                brush: Brush::Solid(Color::from_rgba8(60 * i as u8 + 40, 0, 0, 255)).into(),
                 visible: true,
             }]),
         });
@@ -1788,7 +1788,7 @@ fn a_chrome_ghost_draws_under_its_layer_without_counting_as_a_preview() {
                 },
                 paint: ondin_core::Paint {
                     fills: keyed_by_position([Fill {
-                        brush: marker.clone(),
+                        brush: marker.clone().into(),
                         visible: true,
                     }]),
                     strokes: Vec::new(),
@@ -1950,7 +1950,7 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
             Operation::SetFills {
                 id: f.rect,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Image(brush.clone()),
+                    brush: Brush::Image(brush.clone()).into(),
                     visible: true,
                 }]),
             },
@@ -1984,7 +1984,7 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
                     },
                     paint: ondin_core::Paint {
                         fills: keyed_by_position([Fill {
-                            brush: Brush::Image(whole),
+                            brush: Brush::Image(whole).into(),
                             visible: true,
                         }]),
                         strokes: Vec::new(),
@@ -2229,7 +2229,7 @@ fn shadowed_layer() -> (Document, NodeId) {
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -2384,8 +2384,10 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 /// joined the chrome arm, §15 D978, eighteen and sixteen since the three
 /// variant ops did, §15 D982, and nineteen and seventeen since `SetSwap`, §15
 /// D983 — which the first build added to `op.rs`' list and not to this one,
-/// `arch-scribe`'s find; the paragraphs below keep the counts of the finding
-/// they record.)
+/// `arch-scribe`'s find; and twenty-six no-ops since the variables table's seven,
+/// §15 D1039, four of them `changes_ink`'s `false` and three its `true`, left
+/// out by that build too and added before its commit. The paragraphs below keep
+/// the counts of the finding they record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
 /// certified that they were.** `op::changes_ink` answers `false` for eleven
@@ -2497,14 +2499,64 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         Operation::RemoveImage { id: pic },
     ];
 
+    // And the variables table's (§15 D1039): no override carries the table, so
+    // all seven are no-ops here — four of them draw nothing, and a cell or a
+    // mode coming or going changes what every bound layer draws.
+    let (var, mode) = (ids.mint_var(), ids.mint_mode());
+    let table_chrome = [
+        Operation::AddVariable {
+            var: ondin_core::Variable {
+                id: var,
+                name: "v".into(),
+                kind: ondin_core::VarKind::Number,
+                cells: Default::default(),
+            },
+        },
+        Operation::RemoveVariable { id: var },
+        Operation::SetVariableName {
+            id: var,
+            name: "w".into(),
+        },
+        Operation::SetModeName {
+            id: mode,
+            name: "m".into(),
+        },
+    ];
+    let table_ink = [
+        Operation::SetVariableCell {
+            id: var,
+            mode,
+            cell: ondin_core::Cell::Number(1.0),
+        },
+        Operation::AddMode {
+            mode: ondin_core::Mode {
+                id: mode,
+                name: "m".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::RemoveMode { id: mode },
+    ];
+
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
     assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
+    assert_eq!(
+        table_chrome.len() + table_ink.len(),
+        7,
+        "and the table's seven"
+    );
 
     let res = Resolved::rebuild(&f.doc);
-    for op in chrome.iter().chain(images.iter()) {
+    for op in chrome
+        .iter()
+        .chain(images.iter())
+        .chain(table_chrome.iter())
+        .chain(table_ink.iter())
+    {
         let ov = RenderOverrides::from_transaction(&f.doc, &res, &Transaction(vec![op.clone()]))
             .unwrap_or_else(|| panic!("{op:?} must be absorbed rather than refused"));
         assert!(
@@ -2514,11 +2566,14 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         );
     }
 
-    // The half the design got wrong: `changes_ink` is a strict subset.
-    for op in &chrome {
+    // The half the design got wrong: every chrome no-op is `changes_ink`'s
+    // `false`, and not every no-op is — the image pair and three of the table's
+    // seven change ink. (Nor is every `false` a no-op: `absorb` refuses the
+    // vault's two and `SetOrigin`, which this does not list.)
+    for op in chrome.iter().chain(table_chrome.iter()) {
         assert!(!op.changes_ink(), "{op:?} is chrome and draws nothing");
     }
-    for op in &images {
+    for op in images.iter().chain(table_ink.iter()) {
         assert!(
             op.changes_ink(),
             "{op:?} changes what is drawn and is a no-op here anyway — that \
@@ -2554,7 +2609,7 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
             ops.push(Operation::SetFills {
                 id,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)).into(),
                     visible: true,
                 }]),
             });
@@ -2738,7 +2793,7 @@ fn flex_fixture() -> (Document, NodeId, NodeId, NodeId) {
             ops.push(Operation::SetFills {
                 id,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)).into(),
                     visible: true,
                 }]),
             });
@@ -3028,7 +3083,7 @@ fn a_layout_nested_in_a_plain_group_previews_as_it_commits() {
     let fill = |id| Operation::SetFills {
         id,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+            brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)).into(),
             visible: true,
         }]),
     };
@@ -3326,7 +3381,7 @@ fn grid_fixture() -> (Document, NodeId, [NodeId; 4]) {
             Operation::SetFills {
                 id,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)).into(),
                     visible: true,
                 }]),
             },
@@ -3498,7 +3553,7 @@ fn painted(
         ops.push(Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)).into(),
                 visible: true,
             }]),
         });

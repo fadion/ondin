@@ -722,7 +722,9 @@ fn ghost_mask_geometry(ghost: &GhostNode) -> Option<BezPath> {
 /// The visual state of a node once overrides are taken into account.
 struct Painted<'a> {
     kind: &'a NodeKind,
-    paint: &'a Paint,
+    /// Resolved (`Document::resolved_paint`, §15 D1039): every brush literal, so
+    /// the code below reads them with `BrushSource::drawn`.
+    paint: std::borrow::Cow<'a, Paint>,
     text: Option<&'a TextLayout>,
     /// The outline `Resolved` derived for a `Boolean` node, in its local space.
     ///
@@ -836,7 +838,10 @@ fn paint_node<P: ScenePainter>(
             .and_then(|o| o.kind.as_ref())
             .or_else(|| res.used_kind(doc, id))
             .unwrap_or(node.kind()),
-        paint: over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
+        paint: doc.resolved_paint(
+            id,
+            over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
+        ),
         // Committed only: a preview cannot change the rule (`absorb` refuses
         // `SetFillRule`), so there is no override to prefer here.
         rule: node.fill_rule().into(),
@@ -1119,7 +1124,7 @@ fn paint_node<P: ScenePainter>(
             painter,
             shape_world,
             painted.kind,
-            painted.paint,
+            &painted.paint,
             &frame,
             box_,
         );
@@ -1177,7 +1182,7 @@ fn effect_bounds(
         // this kind" answer the container arm gives.
         _ => ondin_core::geometry::world_bounds_of_parts(
             painted.kind,
-            painted.paint,
+            &painted.paint,
             world,
             painted.text,
         )
@@ -1260,6 +1265,10 @@ fn paint_ghost<P: ScenePainter>(
     if !ghost.visible {
         return;
     }
+    // A ghost is not in the document yet, so a bound paint on it reads in the
+    // **default mode** (`mode_at` meets no node): a paste previews under a frame
+    // that sets another mode in the default's colours until it lands (§15 D1039).
+    let paint = doc.resolved_paint(ghost.id, &ghost.paint);
     let world = parent_world * ghost.transform;
     // **A ghost snaps exactly as the node it will become does.** It is the same
     // pixel grid and the same rule, and skipping it here is not the harmless
@@ -1340,7 +1349,7 @@ fn paint_ghost<P: ScenePainter>(
         doc,
         &Painted {
             kind: &ghost.kind,
-            paint: &ghost.paint,
+            paint: std::borrow::Cow::Borrowed(&*paint),
             // **Non-zero, and a ghost has no field for anything else.** A `GhostNode`
             // carries what the scene walk reads off a `Node`, and nothing that builds
             // one can author a rule: a shape tool drags out a default node, and an
@@ -1454,15 +1463,7 @@ fn paint_ghost<P: ScenePainter>(
         let box_ = frame.bounding_box();
         // `shape_world`, as in `paint_node`: the border runs along the box the
         // background filled.
-        paint_strokes(
-            doc,
-            painter,
-            shape_world,
-            &ghost.kind,
-            &ghost.paint,
-            &frame,
-            box_,
-        );
+        paint_strokes(doc, painter, shape_world, &ghost.kind, &paint, &frame, box_);
     }
     if outer_opacity {
         painter.pop_layer();
@@ -1777,14 +1778,14 @@ fn paint_shape<P: ScenePainter>(
         let frame = Rect::new(0.0, 0.0, size.width, size.height);
         let path = frame.to_path(TOLERANCE);
         for fill in painted.paint.fills.iter().filter(|f| f.visible) {
-            let framing = framing_of(doc, &fill.brush, frame);
+            let framing = framing_of(doc, fill.brush.drawn(), frame);
             // A frame's outline is a rectangle: one subpath, so the node's fill
             // rule has nothing to decide and non-zero is the honest constant.
             fill_or_placeholder(
                 painter,
                 world,
                 &path,
-                &fill.brush,
+                fill.brush.drawn(),
                 framing,
                 ClipRule::NonZero,
             );
@@ -1807,7 +1808,7 @@ fn paint_shape<P: ScenePainter>(
             .fills
             .iter()
             .filter(|f| f.visible)
-            .map(|f| &f.brush)
+            .map(|f| f.brush.drawn())
             .collect();
         // **The black fallback is for a text node with no ink at all**, not for one
         // with no fill. Outlined type is a stroke and no fill, and a fallback that
@@ -1888,7 +1889,7 @@ fn paint_shape<P: ScenePainter>(
                     painter,
                     world,
                     painted.kind,
-                    painted.paint,
+                    &painted.paint,
                     &outline,
                     layout.bounds(),
                 );
@@ -1976,8 +1977,15 @@ fn paint_shape<P: ScenePainter>(
     let frame = path.bounding_box();
     if !matches!(painted.kind, NodeKind::Line { .. }) {
         for fill in painted.paint.fills.iter().filter(|f| f.visible) {
-            let framing = framing_of(doc, &fill.brush, frame);
-            fill_or_placeholder(painter, world, &path, &fill.brush, framing, painted.rule);
+            let framing = framing_of(doc, fill.brush.drawn(), frame);
+            fill_or_placeholder(
+                painter,
+                world,
+                &path,
+                fill.brush.drawn(),
+                framing,
+                painted.rule,
+            );
         }
     }
 
@@ -1986,7 +1994,7 @@ fn paint_shape<P: ScenePainter>(
         painter,
         world,
         painted.kind,
-        painted.paint,
+        &painted.paint,
         &path,
         frame,
     );
@@ -2063,7 +2071,7 @@ fn paint_strokes<P: ScenePainter>(
 
         if align == StrokeAlign::Center {
             for s in run {
-                let framing = framing_of(doc, &s.brush, frame);
+                let framing = framing_of(doc, s.brush.drawn(), frame);
                 clipped(painter, world, framing, |p| {
                     lay_sides(p, world, kind, s, shape, framing, false)
                 });
@@ -2094,7 +2102,7 @@ fn paint_strokes<P: ScenePainter>(
         };
         painter.push_layer(world, Some(complement.as_ref().unwrap_or(shape)), rule, 1.0);
         for s in run {
-            let framing = framing_of(doc, &s.brush, frame);
+            let framing = framing_of(doc, s.brush.drawn(), frame);
             clipped(painter, world, framing, |p| {
                 lay_sides(p, world, kind, s, shape, framing, true)
             });
@@ -2152,7 +2160,7 @@ fn lay_dashed<P: ScenePainter>(
 ) {
     let laid = if doubled { width * 2.0 } else { width };
     let paint = |dashes: Vec<f64>| StrokePaint {
-        brush: &s.brush,
+        brush: s.brush.drawn(),
         framing,
         width: laid,
         join: s.join,

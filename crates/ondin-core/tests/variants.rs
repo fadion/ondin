@@ -20,7 +20,7 @@ fn solid(r: u8) -> Brush {
 
 fn fills(r: u8) -> Vec<Keyed<Fill>> {
     keyed_by_position([Fill {
-        brush: solid(r),
+        brush: solid(r).into(),
         visible: true,
     }])
 }
@@ -194,7 +194,11 @@ impl F {
     }
 
     fn fill(&self, id: NodeId) -> Brush {
-        self.doc.get(id).unwrap().paint().fills[0].brush.clone()
+        self.doc.get(id).unwrap().paint().fills[0]
+            .brush
+            .literal()
+            .unwrap()
+            .clone()
     }
 
     fn content(&self, id: NodeId) -> String {
@@ -722,7 +726,7 @@ fn a_switch_carries_a_fill_override_between_variants_made_apart() {
         vec![Keyed::new(
             ids.mint_item(),
             Fill {
-                brush: solid(r),
+                brush: solid(r).into(),
                 visible: true,
             },
         )]
@@ -763,7 +767,7 @@ fn a_switch_carries_a_fill_override_between_variants_made_apart() {
         fills: vec![Keyed::new(
             small_fill[0].id,
             Fill {
-                brush: solid(77),
+                brush: solid(77).into(),
                 visible: true,
             },
         )],
@@ -779,7 +783,7 @@ fn a_switch_carries_a_fill_override_between_variants_made_apart() {
             .paint()
             .fills
             .iter()
-            .map(|k| k.value.brush.clone())
+            .map(|k| k.value.brush.literal().unwrap().clone())
             .collect()
     };
     assert_eq!(

@@ -41,6 +41,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             3 => migrate_3_to_4(&mut value),
             4 => migrate_4_to_5(&mut value),
             5 => migrate_5_to_6(&mut value),
+            6 => migrate_6_to_7(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -248,4 +249,24 @@ fn migrate_4_to_5(value: &mut Value) {
 /// which is true.
 fn migrate_5_to_6(value: &mut Value) {
     value["schema_version"] = Value::from(6u32);
+}
+
+/// v6 → v7: variables and modes (§5.3f, §15 D1039). **A number and nothing
+/// else**, `migrate_5_to_6`'s reason exactly: a v6 file has no variables, no
+/// modes and no bindings, which is what v7 reads absent keys as, and a v6 reader
+/// would drop the `variables` key and then refuse a bound fill as a malformed
+/// brush — the wrong complaint.
+///
+/// **The published document too** (§5.11's debt, D1037 premise (i)): it is a
+/// document of the outer one's version, nested where the ladder does not look,
+/// so its number is moved here with the outer one's.
+fn migrate_6_to_7(value: &mut Value) {
+    value["schema_version"] = Value::from(7u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(7u32);
+    }
 }

@@ -44,7 +44,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762); and, added 2026-10-07, a failed effect pass leaving that frame's atlas slots registered (D1003 (7)'s *Fix*), and a long chain of mains loading super-linearly, cause not found (D416's amendment). |
 | *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, begun on 2026-10-07 (§15 D1000 ruled on the Properties card and a hidden group); a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
-| *Next · Styles and variables* | **Opened 2026-10-11**, ruled and not built (§15 D1037), leaving §0's non-goals: a six-step build; the Claude Design pass on the chrome **done and accepted** (§15 D1038), with the maintainer's rulings of 2026-10-13 on (a)–(d), (f) and premise (iv); open are (e), (g), a group merge the design leaves undrawn, and whether *Paste properties* and a preset follow a paste's rule. |
+| *Next · Styles and variables* | **Opened 2026-10-11**, ruled (§15 D1037), leaving §0's non-goals: a six-step build; the Claude Design pass on the chrome **done and accepted** (§15 D1038), with the maintainer's rulings of 2026-10-13 on (a)–(d), (f) and premise (iv); **step 1's core built 2026-10-14** (§15 D1039), its chrome owed; open are (e), (g), a group merge the design leaves undrawn, and whether *Paste properties* and a preset follow a paste's rule. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
 | *Next · Shared component libraries* | **Closed into §15 on 2026-10-08** (D1010's amendment): every step is built — the vault and vendoring (§15 D1012) through the swap to a main never used (D1019), the pill noticing a publish while the document is open (D1020, the maintainer's ruling of 30 to 60 seconds) and 1D's count (D1021, the maintainer's ruling to load every file); the ⋯ menu's width was answered by reading (D1016 (d)). Its *Later* paragraph — the review table, the kit verbs in a palette, team publishing — moved to *Later · Components and layout, past the first build*. *The text below is the row as it stood before.* **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. **Step 1 built in core** the same day (§15 D1012 — the vault a second parentless root, refining D1011 (9)), no chrome; **the document menu, the insert picker, publishing, and updates with *Make local* built** the same day (§15 D1013–D1016), and the dashboard's kits with 1D's confirmation, less its count (§15 D1017), and a tile's drag and 3G's *Open library* (§15 D1018), and a swap to a kit main the document has never used (§15 D1019): open are the card ⋯ menu's width to measure, the pill's timing (unruled), and how 1D counts a kit's consumers. |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06; the kit review table, the kit verbs in a palette and team publishing — joined 2026-10-08; binding an extracted value's other users — joined 2026-10-11, §15 D1037, D1038); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
@@ -457,7 +457,7 @@ feature and did not leave with them**; that document's §1 still defers them.
 *Styles and variables* left the list on 2026-10-11, **a non-goal reversed by the maintainer's ruling**
 (§15 D1037, which records that this line was the rule it changed): variables as typed values with a
 value per mode set on a frame, bound fields storing the binding, and styles as one slot's whole set of
-values. Designed, not built — *Next · Styles and variables* below.
+values. Designed, and step 1's core built (§15 D1039) — *Next · Styles and variables* below.
 
 ---
 
@@ -1602,17 +1602,32 @@ edited down to this the same day.*
 
 ## Next · Styles and variables
 
-**Ruled 2026-10-11 and 2026-10-13, nothing built** — §15 D1037 is the design and says whose each
-part is, and §15 D1038 the accepted chrome and the maintainer's rulings on D1037's open questions;
-`architecture.md` §5.3f is the section. Variables are typed (colour, number, string, boolean) with
-aliases and a value per mode, one mode list per document and a mode set per frame; a bindable field
-stores `Literal | Bound` and resolves at read; a style is one slot's whole set of values, read-only in
-the inspector and detached by any other door's edit.
+**Ruled 2026-10-11 and 2026-10-13; step 1's core built 2026-10-14** — §15 D1037 is the design and
+says whose each part is, §15 D1038 the accepted chrome and the maintainer's rulings on D1037's open
+questions, and §15 D1039 what is built; `architecture.md` §5.3f is the section. Variables are typed
+(colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
+mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
+whole set of values, read-only in the inspector and detached by any other door's edit.
 
 **The build**, in the session's order, accepted — the Claude Design pass that came first is done and
 accepted (D1038):
 
-1. Colour and number variables, with aliases and modes, bound to paint and corner radius.
+1. Colour and number variables, with aliases and modes, bound to paint and corner radius. **The core is
+   built** (§15 D1039: the table, its operations and rules, the bindings on paint, a rectangle's
+   corners and a frame's mode, v7, every reader resolving, the paste rule). **What is left is the UI**,
+   and what the core leaves it:
+   - the chip and its `--` list, with the list's live preview — which for a corner meets `absorb`'s
+     refusal of `SetCornerVars`, so a preview of the used kind or a patch is owed too; the field menu;
+     the swatch popup's *Variables* segment; the browser and `Shift+S`; the frame's *Mode* row and the
+     canvas label's suffix;
+   - the delete-variable and delete-mode verbs, which put the users' detaches or the frames' *Inherit*
+     in the deleting transaction — the commit refuses either removal alone;
+   - **every write to a bound corner carrying `build::detach_corners_ops`** — the inspector's radius field
+     shows and writes the literal 0, and the canvas radius handle writes it, neither drawn;
+   - **`build::edited_brush`'s three edges**: retyping the variable's own hex or picking *Solid* on its
+     own colour keeps the binding, where D1037 and D1038 detach, and a `%` above the variable's alpha
+     clamps;
+   - a `Path`'s per-anchor radii are not bindable — a limit of step 1, not a ruling.
 2. Number variables in layout fields, and boolean variables bound to visibility (D1038 (d)).
 3. Styles for fills, strokes and effects.
 4. Kits carrying both (the session's proposal, not objected to), with D1038 (b)'s per-kit mode mapping.
@@ -1629,16 +1644,19 @@ accepted (D1038):
   nothing for this; G14's refusal of a taken name is the natural answer and is not ruled (D1038).
 - **Whether *Paste properties* and a preset follow a paste's rule** across documents — D1037's premise
   (iv) named both, and the 2026-10-13 ruling (rebind by name and type, else detach) was put for a paste.
+  ⚠️ **Today *Paste properties* into another document is refused at the commit** for a bound paint: the
+  property clipboard is the app's and outlives a document switch, and it does not go through
+  `variable::land` (§15 D1039; read in the code, not run).
 
-**Owed by the build, read and not ruled** (D1037's premises (i)–(vi), (iv) ruled by D1038): (i) a v7
-bump with a migration, the nested published document included; (ii) dirtying the nodes a variable's
-edit or a frame's mode change reaches, and the `update` ≡ `rebuild` property test authoring it; (iii) a
-right-click menu on inspector fields, which nothing has today — its rows now specified,
-`context-menus.md` §6.7; (v) the snapshot's shape; and (vi) a variable's edit an undoable `Operation`
-whose preview reaches every bound node.
+**Owed by the build, read and not ruled** (D1037's premises; (iv) ruled by D1038, and (i), (ii) and (v)
+built in step 1's core, §15 D1039): (iii) a right-click menu on inspector fields, which nothing has
+today — its rows now specified, `context-menus.md` §6.7; and (vi) a variable's edit is an undoable
+`Operation` now, but **its preview reaches no bound node** — `absorb` no-ops the table's operations, so a
+previewed cell draws the committed value; D1038 commits a cell on `Enter`, so nothing asks for one yet.
 
 *Opened 2026-10-11, when styles and variables left §0's non-goals; the design pass and (a), (b), (c),
-(d), (f) and premise (iv) struck on 2026-10-14, ruled in §15 D1038.*
+(d), (f) and premise (iv) struck on 2026-10-14, ruled in §15 D1038; step 1's core and premises (i), (ii)
+and (v) struck the same day, built in §15 D1039.*
 
 ## Next · The polishing pass over the accepted calls
 

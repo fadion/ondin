@@ -176,7 +176,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
         Operation::SetStrokes {
             id: line,
             strokes: keyed_by_position([ondin_core::Stroke {
-                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
+                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0, 0, 0, 255)).into(),
                 width: 2.0,
                 join: ondin_core::kurbo::Join::Miter,
                 cap: ondin_core::kurbo::Cap::Butt,
@@ -353,7 +353,7 @@ fn an_exclusion_comes_back_with_its_hole() {
         Operation::SetFills {
             id: bool_id,
             fills: keyed_by_position([ondin_core::Fill {
-                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(255, 0, 0, 255)),
+                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
                 visible: true,
             }]),
         },
@@ -946,7 +946,7 @@ fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([ondin_core::Fill {
-                brush: ondin_core::Brush::Gradient(gradient.into()),
+                brush: ondin_core::Brush::Gradient(gradient.into()).into(),
                 visible: true,
             }]),
         },
@@ -965,7 +965,9 @@ fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
         .copied()
         .find(|id| !matches!(back.get(*id).unwrap().kind(), NodeKind::Group))
         .expect("the shape came back");
-    let ondin_core::Brush::Gradient(g) = &back.get(shape).unwrap().paint().fills[0].brush else {
+    let Some(ondin_core::Brush::Gradient(g)) =
+        back.get(shape).unwrap().paint().fills[0].brush.literal()
+    else {
         panic!("still a gradient fill");
     };
     let GradientKind::Radial(p) = g.gradient.kind else {
@@ -1023,7 +1025,8 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
                     ]),
                     transform: squash,
                     opacity: 1.0,
-                }),
+                })
+                .into(),
                 visible: true,
             }]),
         },
@@ -1043,7 +1046,9 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
         .copied()
         .find(|id| !matches!(back.get(*id).unwrap().kind(), NodeKind::Group))
         .expect("the rect came back");
-    let ondin_core::Brush::Gradient(g) = &back.get(shape).unwrap().paint().fills[0].brush else {
+    let Some(ondin_core::Brush::Gradient(g)) =
+        back.get(shape).unwrap().paint().fills[0].brush.literal()
+    else {
         panic!("still a gradient fill");
     };
     // The two circles must be *unmapped*: a reader that folded the squash into
@@ -1266,7 +1271,8 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
                 brush: Brush::Image(ondin_core::ImageBrush {
                     image: ImageRef::new(pic),
                     sampler: Default::default(),
-                }),
+                })
+                .into(),
                 visible: true,
             }]),
         },
@@ -1328,7 +1334,7 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
     assert!(
         !fills
             .iter()
-            .any(|f| matches!(&f.brush, Brush::Solid(c) if *c == black)),
+            .any(|f| matches!(f.brush.literal(), Some(Brush::Solid(c)) if *c == black)),
         "a picture that could not be read must not become an opaque black \
          rectangle — the reference needs its `none` fallback: {fills:?}"
     );
@@ -1427,11 +1433,13 @@ fn a_layers_name_survives_the_round_trip() {
         id: stacked,
         fills: keyed_by_position([
             ondin_core::Fill {
-                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0xC0, 0x20, 0x20, 255)),
+                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0xC0, 0x20, 0x20, 255))
+                    .into(),
                 visible: true,
             },
             ondin_core::Fill {
-                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0x20, 0x20, 0xC0, 0x80)),
+                brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0x20, 0x20, 0xC0, 0x80))
+                    .into(),
                 visible: true,
             },
         ]),

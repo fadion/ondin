@@ -29,14 +29,14 @@ fn rect() -> NodeKind {
 
 fn solid_fill(c: Color) -> Fill {
     Fill {
-        brush: Brush::Solid(c),
+        brush: Brush::Solid(c).into(),
         visible: true,
     }
 }
 
 fn solid_stroke(c: Color) -> Stroke {
     Stroke {
-        brush: Brush::Solid(c),
+        brush: Brush::Solid(c).into(),
         width: 1.0,
         join: Join::Miter,
         cap: Cap::Butt,
@@ -130,7 +130,11 @@ impl Fixture {
     }
 
     fn fill0(&self, id: NodeId) -> Brush {
-        self.doc.get(id).unwrap().paint().fills[0].brush.clone()
+        self.doc.get(id).unwrap().paint().fills[0]
+            .brush
+            .literal()
+            .unwrap()
+            .clone()
     }
 }
 
@@ -201,7 +205,7 @@ fn the_color_census_leaves_gradients_out() {
         a,
         vec![
             Fill {
-                brush: Brush::Gradient(Gradient::new_linear((0.0, 0.0), (10.0, 0.0)).into()),
+                brush: Brush::Gradient(Gradient::new_linear((0.0, 0.0), (10.0, 0.0)).into()).into(),
                 visible: true,
             },
             solid_fill(GREEN),
@@ -223,7 +227,7 @@ fn the_color_census_counts_paints_that_are_switched_off() {
     f.paint(
         a,
         vec![Fill {
-            brush: Brush::Solid(RED),
+            brush: Brush::Solid(RED).into(),
             visible: false,
         }],
         vec![],
@@ -232,7 +236,7 @@ fn the_color_census_counts_paints_that_are_switched_off() {
 
     f.commit(build::recolor(&f.doc, &[a], RED, GREEN));
     let fill = &f.doc.get(a).unwrap().paint().fills[0];
-    assert_eq!(fill.brush, Brush::Solid(GREEN));
+    assert_eq!(fill.brush, Brush::Solid(GREEN).into());
     assert!(!fill.visible, "recolouring must not switch it back on");
 }
 
@@ -257,7 +261,7 @@ fn recoloring_changes_every_use_and_nothing_else() {
     assert_eq!(f.fill0(a), Brush::Solid(GREEN), "the fill changed");
     assert_eq!(
         f.doc.get(a).unwrap().paint().strokes[0].brush,
-        Brush::Solid(GREEN),
+        Brush::Solid(GREEN).into(),
         "the stroke of the same colour changed with it"
     );
     assert_eq!(f.fill0(b), Brush::Solid(BLUE), "a colour not asked about");
@@ -272,7 +276,7 @@ fn recoloring_changes_every_use_and_nothing_else() {
     assert_eq!(f.fill0(a), Brush::Solid(RED));
     assert_eq!(
         f.doc.get(a).unwrap().paint().strokes[0].brush,
-        Brush::Solid(RED)
+        Brush::Solid(RED).into()
     );
 }
 
@@ -314,7 +318,7 @@ fn recoloring_reaches_every_one_of_a_frames_fills() {
     let fills = &f.doc.get(f.artboard).unwrap().paint().fills;
     assert_eq!(
         fills.iter().map(|f| f.brush.clone()).collect::<Vec<_>>(),
-        vec![Brush::Solid(BLUE), Brush::Solid(BLUE)],
+        vec![Brush::Solid(BLUE).into(), Brush::Solid(BLUE).into()],
         "both, not just the bottom one"
     );
 }
@@ -506,7 +510,7 @@ fn a_mixed_row_states_what_the_paints_agree_on_and_edits_one_property() {
     assert_eq!(build::shared_fills(&f.doc, &[g]), build::PaintShown::Mixed);
     assert_eq!(
         build::shared_over_fills(&f.doc, &[g], |x| x.brush.clone()),
-        Some(Brush::Solid(RED)),
+        Some(Brush::Solid(RED).into()),
         "three fills, one colour: the row says red rather than mixed"
     );
 
@@ -520,7 +524,7 @@ fn a_mixed_row_states_what_the_paints_agree_on_and_edits_one_property() {
     );
     assert_eq!(
         build::shared_over_fills(&f.doc, &[g], |x| x.brush.clone()),
-        Some(Brush::Solid(RED)),
+        Some(Brush::Solid(RED).into()),
         "and the colour was not touched on the way past"
     );
     assert_eq!(
@@ -600,7 +604,7 @@ fn setting_the_fill_list_replaces_it_everywhere() {
     for id in [two, none] {
         let fills = &f.doc.get(id).unwrap().paint().fills;
         assert_eq!(fills.len(), 1, "one fill each now");
-        assert_eq!(fills[0].brush, Brush::Solid(GREEN));
+        assert_eq!(fills[0].brush, Brush::Solid(GREEN).into());
     }
     assert_eq!(
         shown_values(build::shared_fills(&f.doc, &[g])),
@@ -711,7 +715,7 @@ fn a_frames_fill_list_reorders_hides_and_removes_like_any_other() {
             .iter()
             .map(|x| x.brush.clone())
             .collect::<Vec<_>>(),
-        vec![Brush::Solid(BLUE), Brush::Solid(RED)],
+        vec![Brush::Solid(BLUE).into(), Brush::Solid(RED).into()],
         "blue is the ground now and red is over it"
     );
 
@@ -782,12 +786,12 @@ fn a_frame_is_counted_in_a_shared_stroke() {
     f.commit(tx);
     assert_eq!(
         f.doc.get(f.artboard).unwrap().paint().strokes[0].brush,
-        Brush::Solid(GREEN),
+        Brush::Solid(GREEN).into(),
         "the frame took the stroke"
     );
     assert_eq!(
         f.doc.get(loose).unwrap().paint().strokes[0].brush,
-        Brush::Solid(GREEN)
+        Brush::Solid(GREEN).into()
     );
     // And they now agree, which is the other half of being counted.
     assert_eq!(
@@ -944,7 +948,7 @@ fn the_census_counts_gradients_separately_from_colours() {
     let b = f.add(f.artboard, rect());
     let c = f.add(f.artboard, rect());
     let ramp = |from: (f64, f64), to: (f64, f64)| Fill {
-        brush: Brush::Gradient(Gradient::new_linear(from, to).into()),
+        brush: Brush::Gradient(Gradient::new_linear(from, to).into()).into(),
         visible: true,
     };
     // Two layers share one ramp; the third has the same one turned on its side.
@@ -1001,7 +1005,7 @@ fn a_gradient_is_keyed_by_where_it_was_found_and_the_key_survives_the_edit() {
         vec![
             solid_fill(RED),
             Fill {
-                brush: across.clone(),
+                brush: across.clone().into(),
                 visible: true,
             },
         ],
@@ -1011,7 +1015,7 @@ fn a_gradient_is_keyed_by_where_it_was_found_and_the_key_survives_the_edit() {
         b,
         vec![],
         vec![Stroke {
-            brush: across.clone(),
+            brush: across.clone().into(),
             ..solid_stroke(BLUE)
         }],
     );
@@ -1028,31 +1032,31 @@ fn a_gradient_is_keyed_by_where_it_was_found_and_the_key_survives_the_edit() {
         },
         "the first place in document order, index and all"
     );
-    assert_eq!(build::paint_at(&f.doc, at).as_ref(), Some(&across));
+    assert_eq!(build::paint_at(&f.doc, at), Some(across.clone().into()));
 
     // The edit the row makes: read the brush back from the place, change every use.
     let down = ramp((0.0, 10.0));
     f.commit(build::repaint(&f.doc, &[f.artboard], &across, &down));
     assert_eq!(
         f.doc.get(a).unwrap().paint().fills[1].brush,
-        down,
+        down.clone().into(),
         "the fill followed"
     );
     assert_eq!(
         f.doc.get(b).unwrap().paint().strokes[0].brush,
-        down,
+        down.clone().into(),
         "and so did the stroke, in the same transaction"
     );
     assert_eq!(
         f.doc.get(a).unwrap().paint().fills[0].brush,
-        Brush::Solid(RED),
+        Brush::Solid(RED).into(),
         "and nothing else was touched"
     );
 
     // **The key still names the paint.** This is the whole reason it is a place.
     assert_eq!(
-        build::paint_at(&f.doc, at).as_ref(),
-        Some(&down),
+        build::paint_at(&f.doc, at),
+        Some(down.clone().into()),
         "the place holds the new gradient, so the picker keeps editing it"
     );
     assert_eq!(build::gradients_in(&f.doc, &[f.artboard])[0].at, at);
@@ -1088,13 +1092,13 @@ fn a_group_has_no_properties_to_copy_and_a_frame_does() {
     f.commit(Transaction(vec![Operation::SetFills {
         id: f.artboard,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(GREEN),
+            brush: Brush::Solid(GREEN).into(),
             visible: true,
         }]),
     }]));
     let props = build::properties_of(f.doc.get(f.artboard).unwrap()).expect("a frame has paint");
     assert_eq!(props.fills.len(), 1);
-    assert_eq!(props.fills[0].brush, Brush::Solid(GREEN));
+    assert_eq!(props.fills[0].brush, Brush::Solid(GREEN).into());
 }
 
 /// **Pasting properties uses the scope each property already has, and the two

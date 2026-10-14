@@ -204,7 +204,7 @@ fn gradients_are_described_not_just_flagged() {
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Gradient(gradient.into()),
+                brush: Brush::Gradient(gradient.into()).into(),
                 visible: true,
             }]),
         }]))
@@ -316,7 +316,8 @@ fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
                             ..ImageRef::new(id)
                         },
                         sampler: Default::default(),
-                    }),
+                    })
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -368,7 +369,8 @@ fn an_adjusted_picture_summarises_only_the_sliders_that_moved() {
                                 ..ImageRef::new(id)
                             },
                             sampler: Default::default(),
-                        }),
+                        })
+                        .into(),
                         visible: true,
                     }]),
                 },

@@ -64,6 +64,13 @@ pub(crate) struct DocumentDto {
     /// none, which is what the empty default reproduces.
     #[serde(default)]
     pub guides: Vec<GuideDto>,
+    /// The variables and the mode list (§5.3f, §15 D1039), absent in a document
+    /// that has neither — so such a document is written as it was before v7 but
+    /// for its version number.
+    /// Above the images for their diff reason: a variable edit is small and
+    /// frequent, the table below it large and still.
+    #[serde(default, skip_serializing_if = "VariablesDto::is_empty")]
+    pub variables: VariablesDto,
     /// The image table, sorted by id on save (invariant 9).
     ///
     /// **Last, and that is a decision about diffs rather than about serde.** An
@@ -98,6 +105,47 @@ pub(crate) struct PublishedDto {
     /// The kit's name at the publish (§15 D1014).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+
+/// The variables table on disk: the modes **in their order** — the first is the
+/// default (D1038 (a)) — and the variables sorted by id (invariant 9), each with
+/// its cells keyed by mode id.
+#[derive(Default, Serialize, Deserialize)]
+pub(crate) struct VariablesDto {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<crate::variable::Mode>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vars: Vec<crate::variable::Variable>,
+}
+
+impl VariablesDto {
+    fn is_empty(&self) -> bool {
+        self.modes.is_empty() && self.vars.is_empty()
+    }
+
+    fn from_table(t: &crate::variable::Variables) -> Self {
+        // `iter` is in id order already — a `BTreeMap` — so this is the sort.
+        Self {
+            modes: t.modes().to_vec(),
+            vars: t.iter().cloned().collect(),
+        }
+    }
+
+    /// The table, refusing a repeated variable id; its rules are checked with the
+    /// nodes' bindings once the tree is built (`variable::check`).
+    fn into_table(self) -> Result<crate::variable::Variables, IoError> {
+        let mut vars = std::collections::BTreeMap::new();
+        for v in self.vars {
+            let id = v.id;
+            if vars.insert(id, v).is_some() {
+                return Err(IoError::Integrity(format!("duplicate variable id {id:?}")));
+            }
+        }
+        Ok(crate::variable::Variables {
+            modes: self.modes,
+            vars,
+        })
+    }
 }
 
 /// One published main or set and the top-level frame it sat in (§15 D1011 (4)).
@@ -293,6 +341,17 @@ pub(crate) struct NodeDto {
     /// outside the vault — which `crate::kit::check` holds on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<OriginDto>,
+    /// The mode a frame sets (§5.3f), absent to inherit. New in v7.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::variable::ModeId>,
+    /// A rectangle's corner bindings (§15 D1039), absent when none is bound.
+    /// New in v7.
+    #[serde(default, skip_serializing_if = "no_corner_vars")]
+    pub corner_vars: crate::variable::CornerVars,
+}
+
+fn no_corner_vars(v: &crate::variable::CornerVars) -> bool {
+    v.iter().all(Option::is_none)
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -387,6 +446,8 @@ impl NodeDto {
                 version: o.version,
                 name: o.name.clone(),
             }),
+            mode: n.mode(),
+            corner_vars: n.corner_vars(),
         }
     }
 
@@ -497,6 +558,8 @@ impl NodeDto {
                     })
                 })
                 .transpose()?,
+            mode: self.mode,
+            corner_vars: self.corner_vars,
         })
     }
 }
@@ -599,6 +662,7 @@ impl DocumentDto {
             nodes,
             canvas_background: doc.canvas_background(),
             guides,
+            variables: VariablesDto::from_table(doc.variables()),
             images,
             meta: doc.meta().clone(),
             published: doc.published().map(|p| PublishedDto {
@@ -694,6 +758,14 @@ impl DocumentDto {
 
         verify_integrity(&nodes, root, vault)?;
 
+        // The variables rules (§5.3f, §15 D1039), the post-condition `apply`
+        // holds, over the table and every binding. **Refused, not repaired**, as a
+        // dangling component link is: a binding to nothing has no value to draw,
+        // and dropping it would hand the layer a literal nobody chose.
+        let variables = self.variables.into_table()?;
+        crate::variable::check(&variables, nodes.values())
+            .map_err(|rule| IoError::Integrity(rule.to_string()))?;
+
         // The published state is a document of its own, held to the same rules
         // by the same loader (§15 D1012) — but one level deep only: a frozen copy
         // never carries a frozen copy, and refusing one here bounds the
@@ -722,6 +794,7 @@ impl DocumentDto {
             ground,
             guides,
             images,
+            variables,
             // ⚠️ **Taken as it was written, with nothing filled in.** A loader
             // that minted a missing id would make `load` non-deterministic —
             // reading the same bytes twice would give two documents that

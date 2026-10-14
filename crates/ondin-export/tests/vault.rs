@@ -52,7 +52,7 @@ fn consumer() -> (Document, Vec<String>) {
         Operation::SetFills {
             id: secret,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(1, 2, 3, 255)),
+                brush: Brush::Solid(Color::from_rgba8(1, 2, 3, 255)).into(),
                 visible: true,
             }]),
         },

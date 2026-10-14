@@ -56,7 +56,7 @@ fn abutting_pair() -> (Document, Resolved) {
         Operation::SetFills {
             id: ab,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -88,7 +88,7 @@ fn abutting_pair() -> (Document, Resolved) {
         d.apply(&Transaction(vec![Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(GREY),
+                brush: Brush::Solid(GREY).into(),
                 visible: true,
             }]),
         }]))
@@ -177,7 +177,7 @@ fn a_sub_pixel_shape_survives_snapping() {
     d.apply(&Transaction(vec![Operation::SetFills {
         id: bar,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::BLACK),
+            brush: Brush::Solid(Color::BLACK).into(),
             visible: true,
         }]),
     }]))

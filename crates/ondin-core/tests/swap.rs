@@ -15,7 +15,7 @@ use ondin_core::{
 
 fn fills(r: u8) -> Vec<Keyed<Fill>> {
     keyed_by_position([Fill {
-        brush: Brush::Solid(Color::from_rgba8(r, 0, 0, 255)),
+        brush: Brush::Solid(Color::from_rgba8(r, 0, 0, 255)).into(),
         visible: true,
     }])
 }
@@ -213,7 +213,11 @@ impl F {
     }
 
     fn fill(&self, id: NodeId) -> Brush {
-        self.node(id).paint().fills[0].brush.clone()
+        self.node(id).paint().fills[0]
+            .brush
+            .literal()
+            .unwrap()
+            .clone()
     }
 
     fn size(&self, id: NodeId) -> Size {

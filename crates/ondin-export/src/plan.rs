@@ -276,12 +276,14 @@ fn frame_background(doc: &Document, node: NodeId) -> Option<Color> {
     while let Some(id) = at {
         let n = doc.get(id)?;
         if matches!(n.kind(), NodeKind::Artboard { .. }) {
-            let visible: Vec<&ondin_core::Brush> = n
-                .paint()
+            // Resolved: a frame bound to a colour variable is that colour's ground
+            // in the mode in force (§15 D1039).
+            let paint = doc.resolved_paint(id, n.paint());
+            let visible: Vec<&ondin_core::Brush> = paint
                 .fills
                 .iter()
                 .filter(|f| f.visible)
-                .map(|f| &f.brush)
+                .map(|f| f.brush.drawn())
                 .collect();
             let ondin_core::Brush::Solid(c) = visible.last()? else {
                 return None;
@@ -448,7 +450,7 @@ mod tests {
             Operation::SetFills {
                 id: frame,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: ondin_core::Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
+                    brush: ondin_core::Brush::Solid(Color::from_rgba8(10, 20, 30, 255)).into(),
                     visible: true,
                 }]),
             },

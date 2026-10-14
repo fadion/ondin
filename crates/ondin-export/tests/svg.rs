@@ -199,7 +199,7 @@ fn a_nested_frame_clips_inside_its_parent() {
             Operation::SetFills {
                 id: card,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(Color::from_rgba8(9, 9, 9, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(9, 9, 9, 255)).into(),
                     visible: true,
                 }]),
             },
@@ -258,7 +258,7 @@ fn gradients_become_real_defs_not_a_flat_grey() {
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Gradient(gradient.into()),
+                brush: Brush::Gradient(gradient.into()).into(),
                 visible: true,
             }]),
         }]))
@@ -420,11 +420,11 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
                 id: f.rect,
                 fills: keyed_by_position([
                     Fill {
-                        brush: solid(0x11),
+                        brush: solid(0x11).into(),
                         visible: true,
                     },
                     Fill {
-                        brush: solid(0x22),
+                        brush: solid(0x22).into(),
                         visible: true,
                     },
                 ]),
@@ -433,7 +433,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
                 id: f.rect,
                 strokes: keyed_by_position([
                     Stroke {
-                        brush: solid(0x33),
+                        brush: solid(0x33).into(),
                         width: 1.0,
                         join: ondin_core::kurbo::Join::Miter,
                         cap: ondin_core::kurbo::Cap::Butt,
@@ -446,7 +446,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
                         visible: true,
                     },
                     Stroke {
-                        brush: solid(0x44),
+                        brush: solid(0x44).into(),
                         width: 1.0,
                         join: ondin_core::kurbo::Join::Miter,
                         cap: ondin_core::kurbo::Cap::Butt,
@@ -537,7 +537,7 @@ fn a_per_side_stroke_is_exported_as_one_path_per_edge() {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.rect,
             strokes: keyed_by_position([Stroke {
-                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK),
+                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
                 width: 9.0,
                 sides: StrokeSides::Custom {
                     top: 1.0,
@@ -588,7 +588,7 @@ fn a_dotted_stroke_exports_as_numbers_svg_can_draw() {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.rect,
             strokes: keyed_by_position([Stroke {
-                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK),
+                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
                 width: 2.0,
                 // A dot: zero length, 6 apart centre to centre.
                 dashes: vec![0.0, 6.0],
@@ -626,7 +626,7 @@ fn the_mitre_limit_reaches_the_file_only_when_it_is_not_the_default() {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.rect,
             strokes: keyed_by_position([Stroke {
-                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK),
+                brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
                 width: 2.0,
                 miter_limit: 1.5,
                 ..Default::default()
@@ -991,7 +991,8 @@ fn a_frames_border_is_written_outside_the_group_that_clips_it() {
                 strokes: keyed_by_position([Stroke {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         255, 0, 0, 255,
-                    )),
+                    ))
+                    .into(),
                     width: 3.0,
                     ..Default::default()
                 }]),
@@ -1084,7 +1085,7 @@ fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.text,
             strokes: keyed_by_position([Stroke {
-                brush: red.clone(),
+                brush: red.clone().into(),
                 width: 2.0,
                 ..Default::default()
             }]),
@@ -1106,7 +1107,7 @@ fn text_carries_its_stroke_and_an_outside_one_gets_a_glyph_clip() {
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.text,
             strokes: keyed_by_position([Stroke {
-                brush: red,
+                brush: red.into(),
                 width: 2.0,
                 align: StrokeAlign::Outside,
                 ..Default::default()
@@ -1259,7 +1260,8 @@ fn an_unpainted_text_node_exports_the_black_the_canvas_draws() {
             strokes: keyed_by_position([Stroke {
                 brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                     255, 0, 0, 255,
-                )),
+                ))
+                .into(),
                 width: 2.0,
                 ..Default::default()
             }]),
@@ -1725,7 +1727,8 @@ fn image_fixture_adjusted(
                             ..ImageRef::new(id)
                         },
                         sampler: Default::default(),
-                    }),
+                    })
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -1837,7 +1840,7 @@ fn an_image_with_no_table_entry_exports_as_the_placeholder() {
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.rect,
             fills: keyed_by_position([Fill {
-                brush: ondin_core::image_brush(ImageId("missing".into())),
+                brush: ondin_core::image_brush(ImageId("missing".into())).into(),
                 visible: true,
             }]),
         }]))
@@ -1902,7 +1905,7 @@ fn an_image_filled_text_node_is_framed_by_its_layout_box() {
             Operation::SetFills {
                 id: f.text,
                 fills: keyed_by_position([Fill {
-                    brush: ondin_core::image_brush(id.clone()),
+                    brush: ondin_core::image_brush(id.clone()).into(),
                     visible: true,
                 }]),
             },
@@ -1964,7 +1967,7 @@ fn a_picture_at_its_frames_own_size_writes_no_pattern_transform() {
             Operation::SetFills {
                 id: f.rect,
                 fills: keyed_by_position([Fill {
-                    brush: ondin_core::image_brush(id),
+                    brush: ondin_core::image_brush(id).into(),
                     visible: true,
                 }]),
             },
@@ -2006,7 +2009,7 @@ fn a_frames_missing_background_exports_the_placeholder_too() {
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.artboard,
             fills: keyed_by_position([Fill {
-                brush: ondin_core::image_brush(ImageId("gone".into())),
+                brush: ondin_core::image_brush(ImageId("gone".into())).into(),
                 visible: true,
             }]),
         }]))
@@ -2261,14 +2264,14 @@ fn an_adjustment_reaches_a_stroke_and_a_frames_background_as_well_as_a_fill() {
             Operation::SetFills {
                 id: f.artboard,
                 fills: keyed_by_position([Fill {
-                    brush: brush(),
+                    brush: brush().into(),
                     visible: true,
                 }]),
             },
             Operation::SetStrokes {
                 id: f.rect,
                 strokes: keyed_by_position([Stroke {
-                    brush: brush(),
+                    brush: brush().into(),
                     width: 6.0,
                     ..Default::default()
                 }]),
@@ -2590,7 +2593,8 @@ fn a_mask_inside_a_clipping_stroked_frame_nests_and_closes() {
                 strokes: keyed_by_position([Stroke {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         255, 0, 0, 255,
-                    )),
+                    ))
+                    .into(),
                     width: 3.0,
                     ..Default::default()
                 }]),
@@ -2745,7 +2749,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: node,
         fills: keyed_by_position([ondin_core::Fill {
-            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)),
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)).into(),
             visible: true,
         }]),
     }]))
@@ -2808,7 +2812,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
         svg(&d, &r, None)
     };
     let black = ondin_core::Fill {
-        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)),
+        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)).into(),
         visible: true,
     };
     let two_fills = stacked(Transaction(vec![Operation::SetFills {
@@ -2822,7 +2826,7 @@ fn an_exclusion_exports_the_even_odd_rule() {
     let with_stroke = stacked(Transaction(vec![Operation::SetStrokes {
         id: node,
         strokes: keyed_by_position([ondin_core::Stroke {
-            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)),
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(0, 0, 0)).into(),
             width: 4.0,
             align: ondin_core::StrokeAlign::Inside,
             ..Default::default()
@@ -3203,7 +3207,7 @@ fn a_frames_fill_stack_is_written_in_order_before_its_children() {
     use ondin_core::Fill;
     let mut f = common::fixture();
     let solid = |r, g, b, visible| Fill {
-        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(r, g, b)),
+        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(r, g, b)).into(),
         visible,
     };
     f.doc
@@ -3401,7 +3405,7 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: ondin_core::Brush::Gradient(g.into()),
+                brush: ondin_core::Brush::Gradient(g.into()).into(),
                 visible: true,
             }]),
         }]))
@@ -3429,7 +3433,9 @@ fn an_svg_export_clamps_a_descending_ramp_the_model_still_holds() {
     );
 
     // The model is untouched: exporting is a read.
-    let ondin_core::Brush::Gradient(g) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+    let Some(ondin_core::Brush::Gradient(g)) =
+        doc.get(rect).unwrap().paint().fills[0].brush.literal()
+    else {
         panic!("the fixture's fill is a gradient")
     };
     assert_eq!(
@@ -3715,7 +3721,8 @@ fn shared_image_export(n: usize) -> String {
                 brush: Brush::Image(ImageBrush {
                     image: ImageRef::new(pic.clone()),
                     sampler: Default::default(),
-                }),
+                })
+                .into(),
                 visible: true,
             }]),
         });
@@ -3847,7 +3854,7 @@ fn a_sweep_gradients_radius_is_the_shapes_and_is_measured_from_its_centre() {
                 Operation::SetFills {
                     id: f.rect,
                     fills: keyed_by_position([Fill {
-                        brush: Brush::Gradient(gradient.into()),
+                        brush: Brush::Gradient(gradient.into()).into(),
                         visible: true,
                     }]),
                 },

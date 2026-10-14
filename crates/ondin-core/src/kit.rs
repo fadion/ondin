@@ -360,7 +360,14 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         if let Some(g) = top_frame_name(doc, *t) {
             groups.push((*t, g));
         }
-        nodes.extend(captured.into_iter().map(|n| (n.id, n)));
+        // **Detached, until kits carry variables** (roadmap step 4, §15 D1039):
+        // the frozen copy has no table, and a binding into this document's would
+        // leave every consumer refusing the main it vendors.
+        nodes.extend(
+            captured
+                .into_iter()
+                .map(|n| (n.id, crate::variable::detached(doc, n))),
+        );
     }
 
     // The vault mains the published ones reach, transitively.
@@ -378,7 +385,11 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         let captured = doc.capture_subtree(t)?;
         pending.extend(refs_out(&captured));
         vault_tops.push(t);
-        nodes.extend(captured.into_iter().map(|n| (n.id, n)));
+        nodes.extend(
+            captured
+                .into_iter()
+                .map(|n| (n.id, crate::variable::detached(doc, n))),
+        );
     }
     let vault = if vault_tops.is_empty() {
         None
@@ -405,6 +416,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         doc.canvas_background(),
         Vec::new(),
         images,
+        Default::default(),
         Default::default(),
         None,
     );
@@ -593,6 +605,7 @@ fn empty_published(doc: &Document) -> Published {
             doc.canvas_background(),
             Vec::new(),
             FxHashMap::default(),
+            Default::default(),
             Default::default(),
             None,
         ),

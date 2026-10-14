@@ -1145,6 +1145,19 @@ pub fn label_of(brush: &Brush) -> String {
     }
 }
 
+/// [`label_of`] for a paint as held: a bound one is named by its variable (§15
+/// D1039) — the name the chip shows — and a literal one by its own label.
+pub fn source_label(doc: &ondin_core::Document, src: &ondin_core::BrushSource) -> String {
+    match src {
+        ondin_core::BrushSource::Literal(b) => label_of(b),
+        ondin_core::BrushSource::Bound { var, .. } => doc
+            .variables()
+            .get(*var)
+            .map(|v| v.name.clone())
+            .unwrap_or_default(),
+    }
+}
+
 /// Sample a stop list at `t`, for adding a stop where the user clicked without
 /// visibly changing the ramp.
 pub fn sample(stops: &[(f32, Color)], t: f32) -> Color {

@@ -5045,7 +5045,7 @@ impl OndinApp {
     /// and the other fills is carried through untouched.
     fn crop_tx(&self, id: NodeId, fill: usize, crop: KRect) -> Option<Transaction> {
         let mut fills = self.session.doc.get(id)?.paint().fills.clone();
-        let ondin_core::Brush::Image(img) = &mut fills.get_mut(fill)?.brush else {
+        let Some(ondin_core::Brush::Image(img)) = fills.get_mut(fill)?.brush.literal_mut() else {
             return None;
         };
         img.image.fit = ondin_core::ImageFit::Crop;
@@ -5099,7 +5099,7 @@ impl OndinApp {
             return None;
         }
         let mut fills = self.session.doc.get(id)?.paint().fills.clone();
-        let ondin_core::Brush::Image(img) = &mut fills.get_mut(fill)?.brush else {
+        let Some(ondin_core::Brush::Image(img)) = fills.get_mut(fill)?.brush.literal_mut() else {
             return None;
         };
         img.image.fit = ondin_core::ImageFit::Crop;
@@ -5117,8 +5117,15 @@ impl OndinApp {
     /// is the other half — the same two numbers as they are *right now*, which is
     /// what the chrome and the ghost want.
     fn crop_state(&self, id: NodeId, fill: usize) -> Option<(KRect, KRect)> {
-        let ondin_core::Brush::Image(img) =
-            &self.session.doc.get(id)?.paint().fills.get(fill)?.brush
+        let Some(ondin_core::Brush::Image(img)) = self
+            .session
+            .doc
+            .get(id)?
+            .paint()
+            .fills
+            .get(fill)?
+            .brush
+            .literal()
         else {
             return None;
         };
@@ -5136,7 +5143,8 @@ impl OndinApp {
     /// one, or it compounds.
     fn shown_crop(&self, id: NodeId, fill: usize) -> Option<(KRect, KRect, KRect)> {
         let node = self.session.display_node(id)?;
-        let ondin_core::Brush::Image(img) = &node.paint().fills.get(fill)?.brush else {
+        let Some(ondin_core::Brush::Image(img)) = node.paint().fills.get(fill)?.brush.literal()
+        else {
             return None;
         };
         let frame = self.session.preview_local_box(id)?;
@@ -5213,7 +5221,7 @@ impl OndinApp {
             return false;
         };
         matches!(
-            node.paint().fills.get(fill).map(|f| &f.brush),
+            node.paint().fills.get(fill).and_then(|f| f.brush.literal()),
             Some(ondin_core::Brush::Image(img)) if img.image.fit == ondin_core::ImageFit::Crop
         )
     }
@@ -5256,7 +5264,8 @@ impl OndinApp {
             .iter()
             .position(|c| *c == id)?;
         let display = self.session.display_node(id)?;
-        let ondin_core::Brush::Image(img) = &display.paint().fills.get(fill)?.brush else {
+        let Some(ondin_core::Brush::Image(img)) = display.paint().fills.get(fill)?.brush.literal()
+        else {
             return None;
         };
         let image = ondin_core::ImageBrush {
@@ -5296,7 +5305,7 @@ impl OndinApp {
                     paint: ondin_core::Paint {
                         // A node being created, so a list built whole.
                         fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                            brush: ondin_core::Brush::Image(image),
+                            brush: ondin_core::Brush::Image(image).into(),
                             visible: true,
                         }]),
                         strokes: Vec::new(),
@@ -19414,7 +19423,7 @@ mod headless_app_tests {
                 Operation::SetFills {
                     id: a,
                     fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE),
+                        brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE).into(),
                         visible: true,
                     }]),
                 },
@@ -19481,7 +19490,7 @@ mod headless_app_tests {
             .try_commit(Transaction(vec![Operation::SetFills {
                 id: a,
                 fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                    brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE),
+                    brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE).into(),
                     visible: true,
                 }]),
             }]))
@@ -19506,7 +19515,7 @@ mod headless_app_tests {
         let previewed = shown(&app);
         assert_eq!(
             previewed,
-            Some(red.clone()),
+            Some(red.clone().into()),
             "and the panel reads it back through the override, or the drag shows \
              the old colour"
         );
@@ -22100,7 +22109,7 @@ mod locked_picture_tests {
             Operation::SetFills {
                 id: rect,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: image_brush(ondin_core::ImageId("a-photo".into())),
+                    brush: image_brush(ondin_core::ImageId("a-photo".into())).into(),
                     visible: true,
                 }]),
             },
@@ -22357,7 +22366,7 @@ mod crop_click_tests {
             Operation::SetFills {
                 id: rect,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: image_brush(image),
+                    brush: image_brush(image).into(),
                     visible: true,
                 }]),
             },
@@ -22380,8 +22389,11 @@ mod crop_click_tests {
     }
 
     fn fit(app: &OndinApp, id: NodeId) -> ImageFit {
-        match &app.session.doc.get(id).expect("the rect").paint().fills[0].brush {
-            ondin_core::Brush::Image(img) => img.image.fit,
+        match app.session.doc.get(id).expect("the rect").paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(ondin_core::Brush::Image(img)) => img.image.fit,
             other => panic!("the fixture paints a picture, not {other:?}"),
         }
     }

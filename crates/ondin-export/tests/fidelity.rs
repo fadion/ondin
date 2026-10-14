@@ -82,14 +82,15 @@ fn everything_lossy() -> common::Fixture {
                 id: f.rect,
                 fills: keyed_by_position([
                     Fill {
-                        brush: sweep(),
+                        brush: sweep().into(),
                         visible: true,
                     },
                     Fill {
                         brush: Brush::Image(ImageBrush {
                             image: ImageRef::new(pic),
                             sampler: Default::default(),
-                        }),
+                        })
+                        .into(),
                         visible: true,
                     },
                 ]),
@@ -131,7 +132,7 @@ fn everything_lossy() -> common::Fixture {
             Operation::SetFills {
                 id: hidden,
                 fills: keyed_by_position([Fill {
-                    brush: sweep(),
+                    brush: sweep().into(),
                     visible: true,
                 }]),
             },

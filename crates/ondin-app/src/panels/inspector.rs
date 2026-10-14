@@ -6144,6 +6144,12 @@ impl OndinApp {
             let mut slots = paint::Slots::default();
             for &index in &order {
                 let salt = ("fill-row", index);
+                // As drawn: a bound fill shows its variable's colour (D1038 A1).
+                let shown = app
+                    .session
+                    .doc
+                    .resolve_brush(anchor, &fills[index].brush)
+                    .into_owned();
                 let (out, rect) = carried_unit(ui, carrying == Some(index), salt, |ui| {
                     app.paint_row(
                         ui,
@@ -6157,7 +6163,7 @@ impl OndinApp {
                             mixed: None,
                             item: states.as_ref().map(|s| s[index]),
                         },
-                        &fills[index].brush,
+                        &shown,
                     )
                 });
                 slots.push(rect.top(), rect.bottom());
@@ -6173,7 +6179,8 @@ impl OndinApp {
                 .unwrap_or_default()
             {
                 let lead = super::component::GhostLead::Chip;
-                if super::component::ghost_row(ui, lead, &paint::label_of(&gone.brush)) {
+                let label = paint::source_label(&app.session.doc, &gone.brush);
+                if super::component::ghost_row(ui, lead, &label) {
                     restore = Some(gone.id);
                 }
             }
@@ -6210,7 +6217,7 @@ impl OndinApp {
             next.push(Keyed::new(
                 self.session.ids.mint_item(),
                 Fill {
-                    brush: paint::new_solid(),
+                    brush: paint::new_solid().into(),
                     visible: true,
                 },
             ));
@@ -6292,6 +6299,7 @@ impl OndinApp {
             let mut slots = paint::Slots::default();
             for (pos, &index) in order.iter().enumerate() {
                 let s = &strokes[index];
+                let shown = app.session.doc.resolve_brush(anchor, &s.brush).into_owned();
                 // **Both rows travel together.** A colour without its weight is not
                 // a stroke, so the unit the grip carries is the unit the panel
                 // presents — which is also why the span pushed below is the pair's
@@ -6317,7 +6325,7 @@ impl OndinApp {
                                         mixed: None,
                                         item: states.as_ref().map(|s| s[index]),
                                     },
-                                    &s.brush,
+                                    &shown,
                                 )
                             },
                             |app, ui| app.stroke_properties(ui, scope, index, s),
@@ -6337,7 +6345,8 @@ impl OndinApp {
                 .unwrap_or_default()
             {
                 let lead = super::component::GhostLead::Chip;
-                if super::component::ghost_row(ui, lead, &paint::label_of(&gone.brush)) {
+                let label = paint::source_label(&app.session.doc, &gone.brush);
+                if super::component::ghost_row(ui, lead, &label) {
                     restore = Some(gone.id);
                 }
             }
@@ -6385,7 +6394,7 @@ impl OndinApp {
             next.push(Keyed::new(
                 self.session.ids.mint_item(),
                 Stroke {
-                    brush: paint::new_solid(),
+                    brush: paint::new_solid().into(),
                     ..Default::default()
                 },
             ));
@@ -9328,15 +9337,10 @@ impl OndinApp {
         target: ondin_core::PaintTarget,
         brush_of: impl Fn(&Brush) -> Brush,
     ) -> Transaction {
+        // As drawn, so a `%` on a bound paint keeps its binding and a colour
+        // detaches it (`edited_brush`, §15 D1039).
         let (doc, ids) = (&self.session.doc, self.session.selection.ids());
-        match target {
-            ondin_core::PaintTarget::Fill => {
-                ondin_core::edit_fills_all(doc, ids, |f| f.brush = brush_of(&f.brush))
-            }
-            ondin_core::PaintTarget::Stroke => {
-                ondin_core::edit_strokes_all(doc, ids, |s| s.brush = brush_of(&s.brush))
-            }
-        }
+        ondin_core::edit_brushes_all(doc, ids, target, brush_of)
     }
     /// Every fill in scope's value for one property, **as it is being shown** — a
     /// [`Spread`], which the caller asks either of its two questions.
@@ -9422,7 +9426,10 @@ impl OndinApp {
             let Some(node) = self.session.display_node(id) else {
                 continue;
             };
-            let paints = list(node.paint());
+            // **As drawn** (§15 D1039): a bound paint arrives as the solid its
+            // variable resolves to here, so `of` reads its brush with `drawn`.
+            let paint = self.session.doc.resolved_paint(id, node.paint());
+            let paints = list(&paint);
             // **§9.4's rule, in one place** — verbatim, *"**Any** disagreement, one
             // unpainted layer among painted ones included"*. A target carrying no
             // paint contributes no *value*, so without this a bare layer beside a
@@ -9445,8 +9452,8 @@ impl OndinApp {
     /// read, and the one the picker is handed.
     fn shown_brushes(&self, target: ondin_core::PaintTarget) -> Spread<Brush> {
         match target {
-            ondin_core::PaintTarget::Fill => self.shown_over_fills(|f| f.brush.clone()),
-            ondin_core::PaintTarget::Stroke => self.shown_over_strokes(|s| s.brush.clone()),
+            ondin_core::PaintTarget::Fill => self.shown_over_fills(|f| f.brush.drawn().clone()),
+            ondin_core::PaintTarget::Stroke => self.shown_over_strokes(|s| s.brush.drawn().clone()),
         }
     }
     /// What the mixed row says about itself, and what its controls **operate from**.
@@ -12009,15 +12016,21 @@ impl OndinApp {
                 return Some(Brush::Solid(colour));
             }
             PaintSlot::Selection(target, i) => {
+                // As drawn, at the first selected layer — the list is shared, and
+                // a binding resolves in the mode in force where it sits.
+                let at = *self.session.selection.ids().first()?;
+                let drawn = |b: &ondin_core::BrushSource| {
+                    self.session.doc.resolve_brush(at, b).into_owned()
+                };
                 return match target {
                     PaintTarget::Fill => self
                         .fills_in_scope(PaintScope::Selection)
                         .get(i)
-                        .map(|f| f.brush.clone()),
+                        .map(|f| drawn(&f.brush)),
                     PaintTarget::Stroke => self
                         .strokes_in_scope(PaintScope::Selection)
                         .get(i)
-                        .map(|s| s.brush.clone()),
+                        .map(|s| drawn(&s.brush)),
                 };
             }
             // **Gone the moment the panel stops being mixed**, because the row this
@@ -12048,9 +12061,11 @@ impl OndinApp {
             _ => {}
         }
         let node = self.session.display_node(id)?;
+        let drawn =
+            |b: &ondin_core::BrushSource| self.session.doc.resolve_brush(id, b).into_owned();
         match slot {
-            PaintSlot::Fill(i) => node.paint().fills.get(i).map(|f| f.brush.clone()),
-            PaintSlot::Stroke(i) => node.paint().strokes.get(i).map(|s| s.brush.clone()),
+            PaintSlot::Fill(i) => node.paint().fills.get(i).map(|f| drawn(&f.brush)),
+            PaintSlot::Stroke(i) => node.paint().strokes.get(i).map(|s| drawn(&s.brush)),
             // **`None` for the two kinds that have no colour**, not a placeholder,
             // which is what closes a picker left open on a row that has been
             // retyped from a shadow into a blur under it. The panel never opens one
@@ -12094,14 +12109,17 @@ impl OndinApp {
         // Two lists and an index, on every kind — a frame had an arm of its own
         // until its ground joined the fill list (§15 D400), and `build::paint_at`
         // dropped the same one.
+        let drawn =
+            |b: &ondin_core::BrushSource| self.session.doc.resolve_brush(at.node, b).into_owned();
         match at.target {
-            PaintTarget::Fill => node.paint().fills.get(at.index).map(|f| f.brush.clone()),
-            PaintTarget::Stroke => node.paint().strokes.get(at.index).map(|s| s.brush.clone()),
+            PaintTarget::Fill => node.paint().fills.get(at.index).map(|f| drawn(&f.brush)),
+            PaintTarget::Stroke => node.paint().strokes.get(at.index).map(|s| drawn(&s.brush)),
         }
     }
-    /// Whether `brush` is exactly the solid colour `key`.
-    fn is_key(brush: &Brush, key: [u8; 4]) -> bool {
-        matches!(brush, Brush::Solid(c) if c.to_rgba8().to_u8_array() == key)
+    /// Whether `brush` is exactly the solid colour `key` **of its own** — the
+    /// census lists no bound paint (`build::census`, §15 D1039).
+    fn is_key(brush: &ondin_core::BrushSource, key: [u8; 4]) -> bool {
+        matches!(brush.literal(), Some(Brush::Solid(c)) if c.to_rgba8().to_u8_array() == key)
     }
     /// The layers the Group Colors census is taken over: **the contents of a single
     /// selected container, or the selection itself.**
@@ -12166,7 +12184,7 @@ impl OndinApp {
                     .paint()
                     .fills
                     .get(i)
-                    .map(|f| f.brush.clone())
+                    .map(|f| self.session.doc.resolve_brush(id, &f.brush).into_owned())
                     .or(Some(Brush::Solid(key_color(key))));
             }
             if let Some(i) = committed
@@ -12179,7 +12197,7 @@ impl OndinApp {
                     .paint()
                     .strokes
                     .get(i)
-                    .map(|s| s.brush.clone())
+                    .map(|s| self.session.doc.resolve_brush(id, &s.brush).into_owned())
                     .or(Some(Brush::Solid(key_color(key))));
             }
             // A frame needed a third search here, over the `background` field the
@@ -12256,11 +12274,16 @@ impl OndinApp {
         let Some(node) = self.session.display_node(id) else {
             return Transaction(Vec::new());
         };
+        // `brush` is what the slot is to draw; `edited_brush` keeps a binding when
+        // only its `%` moved and detaches it otherwise (§15 D1039).
+        let doc = &self.session.doc;
         match slot {
             PaintSlot::Fill(i) => {
                 let mut fills = node.paint().fills.clone();
                 match fills.get_mut(i) {
-                    Some(f) => f.brush = brush,
+                    Some(f) => {
+                        f.brush = ondin_core::edited_brush(doc, id, &f.brush, |_| brush.clone())
+                    }
                     None => return Transaction(Vec::new()),
                 }
                 Transaction(vec![Operation::SetFills { id, fills }])
@@ -12268,7 +12291,9 @@ impl OndinApp {
             PaintSlot::Stroke(i) => {
                 let mut strokes = node.paint().strokes.clone();
                 match strokes.get_mut(i) {
-                    Some(s) => s.brush = brush,
+                    Some(s) => {
+                        s.brush = ondin_core::edited_brush(doc, id, &s.brush, |_| brush.clone())
+                    }
                     None => return Transaction(Vec::new()),
                 }
                 Transaction(vec![Operation::SetStrokes { id, strokes }])
@@ -12287,22 +12312,12 @@ impl OndinApp {
             },
             // One row of the shared list, changed on every target at once.
             PaintSlot::Selection(target, i) => {
+                // Row `i` on each target, in place, so every target keeps its own
+                // item ids (§15 D980) — this wrote the anchor's whole list over
+                // every target, ids and all. As drawn, so a bound row keeps its
+                // binding through a `%` (§15 D1039).
                 let ids = self.session.selection.ids();
-                match target {
-                    // Row `i` on each target, in place, so every target keeps its
-                    // own item ids (§15 D980) — this wrote the anchor's whole list
-                    // over every target, ids and all.
-                    PaintTarget::Fill => {
-                        ondin_core::edit_fill_at_all(&self.session.doc, ids, i, |f| {
-                            f.brush = brush.clone()
-                        })
-                    }
-                    PaintTarget::Stroke => {
-                        ondin_core::edit_stroke_at_all(&self.session.doc, ids, i, |s| {
-                            s.brush = brush.clone()
-                        })
-                    }
-                }
+                ondin_core::edit_brush_at_all(&self.session.doc, ids, target, i, |_| brush.clone())
             }
             // Every paint in scope takes this brush, and keeps its place in its own
             // list. The whole brush, gradient and all: this is the picker's write,
@@ -12336,10 +12351,14 @@ impl OndinApp {
             // Any brush is accepted, unlike the colour arm: a gradient row can be
             // turned into a solid, which the picker's kind tabs offer and this can
             // honour. Whatever it becomes, the row's key still names the place.
-            PaintSlot::GroupGradient(at) => match ondin_core::paint_at(&self.session.doc, at) {
+            // The census lists literal paints only, so `from` is one (§15 D1039).
+            PaintSlot::GroupGradient(at) => match ondin_core::paint_at(&self.session.doc, at)
+                .as_ref()
+                .and_then(ondin_core::BrushSource::literal)
+            {
                 // Scoped like the colour arm above, and for the same reason.
                 Some(from) => {
-                    ondin_core::repaint(&self.session.doc, &self.group_color_scope(), &from, &brush)
+                    ondin_core::repaint(&self.session.doc, &self.group_color_scope(), from, &brush)
                 }
                 None => Transaction(Vec::new()),
             },
@@ -17451,11 +17470,11 @@ mod frame_fill_tests {
     fn a_frames_fill_card_draws_one_row_per_fill_just_as_a_rects_does() {
         let two = vec![
             Fill {
-                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x01, 0x02, 0x03)),
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x01, 0x02, 0x03)).into(),
                 visible: true,
             },
             Fill {
-                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x07, 0x08, 0x09)),
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x07, 0x08, 0x09)).into(),
                 visible: true,
             },
         ];
@@ -17559,7 +17578,7 @@ mod frame_fill_tests {
         let child_ink = "070809";
         let solid = |r, g, b| {
             vec![Fill {
-                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(r, g, b)),
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(r, g, b)).into(),
                 visible: true,
             }]
         };
@@ -17625,7 +17644,7 @@ mod frame_fill_tests {
             NodeKind::Group,
             Vec::new(),
             vec![Fill {
-                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x07, 0x08, 0x09)),
+                brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(0x07, 0x08, 0x09)).into(),
                 visible: true,
             }],
         );
@@ -17683,7 +17702,7 @@ mod frame_fill_tests {
         let blue = ondin_core::peniko::Color::from_rgb8(0x3C, 0x78, 0xDC);
         let solid = |c| {
             ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(c),
+                brush: Brush::Solid(c).into(),
                 visible: true,
             }])
         };
@@ -17806,7 +17825,7 @@ mod frame_fill_tests {
         let blue = ondin_core::peniko::Color::from_rgb8(0x3C, 0x78, 0xDC);
         let solid = |c| {
             ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(c),
+                brush: Brush::Solid(c).into(),
                 visible: true,
             }])
         };
@@ -19253,14 +19272,14 @@ mod fill_row_door_tests {
 
     fn picture(visible: bool) -> Fill {
         Fill {
-            brush: image_brush(ondin_core::ImageId("a-photo".into())),
+            brush: image_brush(ondin_core::ImageId("a-photo".into())).into(),
             visible,
         }
     }
 
     fn colour() -> Fill {
         Fill {
-            brush: Brush::Solid(Color::from_rgba8(1, 2, 3, 255)),
+            brush: Brush::Solid(Color::from_rgba8(1, 2, 3, 255)).into(),
             visible: true,
         }
     }
@@ -21756,7 +21775,8 @@ mod rhythm_tests {
                 fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(
                         200, 90, 60,
-                    )),
+                    ))
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -22016,7 +22036,7 @@ mod rhythm_tests {
             Operation::SetFills {
                 id,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: super::paint::new_solid(),
+                    brush: super::paint::new_solid().into(),
                     visible: true,
                 }]),
             },
@@ -23076,7 +23096,7 @@ mod mixed_opacity_tests {
         let paint = |id, alpha: f32| Operation::SetFills {
             id,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(Color::new([1.0, 0.0, 0.0, alpha])),
+                brush: Brush::Solid(Color::new([1.0, 0.0, 0.0, alpha])).into(),
                 visible: true,
             }]),
         };
@@ -23094,8 +23114,11 @@ mod mixed_opacity_tests {
 
     /// The alpha of `id`'s first fill.
     fn alpha_of(app: &OndinApp, id: NodeId) -> f32 {
-        match &app.session.doc.get(id).expect("node").paint().fills[0].brush {
-            Brush::Solid(c) => c.components[3],
+        match app.session.doc.get(id).expect("node").paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Solid(c)) => c.components[3],
             other => panic!("the fixture's fill is a solid colour, got {other:?}"),
         }
     }
@@ -23344,7 +23367,8 @@ mod paint_hex_field_tests {
                     // **Off the 8-bit lattice** — which is anything the picker's
                     // HSV plane produced, and the only kind of colour the
                     // quantisation is visible on.
-                    brush: Brush::Solid(ondin_core::peniko::Color::new([0.5, 0.25, 0.125, 1.0])),
+                    brush: Brush::Solid(ondin_core::peniko::Color::new([0.5, 0.25, 0.125, 1.0]))
+                        .into(),
                     visible: true,
                 }]),
             },
@@ -23355,6 +23379,8 @@ mod paint_hex_field_tests {
 
         let brush = app.session.doc.get(id).unwrap().paint().fills[0]
             .brush
+            .literal()
+            .expect("the fixture's fill is literal")
             .clone();
         let at = egui::Pos2::new(20.0, 20.0);
         let frame = |app: &mut crate::app::OndinApp, events: Vec<egui::Event>| {
@@ -23403,7 +23429,10 @@ mod paint_hex_field_tests {
                 }],
             );
         }
-        let brush = &app.session.doc.get(id).expect("a live node").paint().fills[0].brush;
+        let brush = app.session.doc.get(id).expect("a live node").paint().fills[0]
+            .brush
+            .literal()
+            .expect("the fill stays literal");
         (
             paint::stops_of(brush)[0].1.components,
             app.session.history.undo_depth(),
@@ -24158,7 +24187,7 @@ mod shipped_shared_readout_tests {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let solid = |c: Color| Fill {
-            brush: Brush::Solid(c),
+            brush: Brush::Solid(c).into(),
             visible: true,
         };
         let red = || solid(Color::from_rgb8(220, 30, 40));
@@ -24339,7 +24368,8 @@ mod subject_tests {
                 fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(
                         200, 90, 60,
-                    )),
+                    ))
+                    .into(),
                     visible: true,
                 }]),
             },
@@ -25007,7 +25037,7 @@ mod paint_write_tests {
         let root = ids.mint();
         let mut doc = ondin_core::Document::new(root);
         let solid = |r: u8| Fill {
-            brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(r, 0, 0, 255)),
+            brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(r, 0, 0, 255)).into(),
             visible: true,
         };
         let mut ops = Vec::new();
@@ -25134,7 +25164,7 @@ mod paint_write_tests {
         app.session.adopt_document(doc, None);
 
         let fill = |g: u8| Fill {
-            brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)),
+            brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)).into(),
             visible: true,
         };
         let stroke = |width: f64| Stroke {
@@ -25906,7 +25936,7 @@ mod paint_write_tests {
         let ctx = egui::Context::default();
         let red = ondin_core::peniko::Color::from_rgb8(220, 30, 30);
         let solid = |c| Fill {
-            brush: Brush::Solid(c),
+            brush: Brush::Solid(c).into(),
             visible: true,
         };
         let staged = |a_fills: Vec<Fill>, b_fills: Vec<Fill>| {
@@ -26037,7 +26067,7 @@ mod paint_write_tests {
         let paint = |id, c| Operation::SetFills {
             id,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(c),
+                brush: Brush::Solid(c).into(),
                 visible: true,
             }]),
         };
@@ -26118,7 +26148,7 @@ mod paint_write_tests {
 
         let red = ondin_core::peniko::Color::from_rgb8(220, 30, 30);
         let one_fill = ondin_core::keyed_by_position([Fill {
-            brush: Brush::Solid(red),
+            brush: Brush::Solid(red).into(),
             visible: true,
         }]);
         let counts = |app: &OndinApp| {
@@ -26202,7 +26232,7 @@ mod paint_write_tests {
             Operation::SetFills {
                 id,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: Brush::Solid(red),
+                    brush: Brush::Solid(red).into(),
                     visible: true,
                 }]),
             },
@@ -26437,7 +26467,7 @@ mod mixed_spread_tests {
 
     fn fill(alpha: f32, visible: bool) -> Fill {
         Fill {
-            brush: Brush::Solid(Color::new([1.0, 0.0, 0.0, alpha])),
+            brush: Brush::Solid(Color::new([1.0, 0.0, 0.0, alpha])).into(),
             visible,
         }
     }

@@ -3366,7 +3366,8 @@ impl OndinApp {
         Some((
             id,
             PaintSlot::Fill(i),
-            node.paint().fills.get(i)?.brush.clone(),
+            // `croppable_fill` answers an image fill, which is never bound.
+            node.paint().fills.get(i)?.brush.literal()?.clone(),
         ))
     }
 }

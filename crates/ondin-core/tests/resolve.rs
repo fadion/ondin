@@ -1051,7 +1051,7 @@ fn stroke_expansion_follows_alignment() {
     let stroke = |align| Paint {
         fills: Vec::<ondin_core::Keyed<Fill>>::new(),
         strokes: keyed_by_position([Stroke {
-            brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK),
+            brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK).into(),
             width: 10.0,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,

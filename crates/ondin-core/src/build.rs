@@ -24,7 +24,7 @@ use crate::node::{Fill, Node, NodeKind, Stroke};
 use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::query::pivot_world;
 use crate::resolve::Resolved;
-use kurbo::{Affine, Point, Vec2};
+use kurbo::{Affine, Point, RoundedRectRadii, Vec2};
 use peniko::Color;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -2264,8 +2264,9 @@ pub fn image_ids_in(nodes: &[Node]) -> Vec<crate::ImageId> {
             let strokes = paint.strokes.iter().map(|s| &s.brush);
             fills.chain(strokes)
         })
-        .filter_map(|brush| match brush {
-            Brush::Image(b) => Some(b.image.id.clone()),
+        // A bound paint is a solid of its variable's colour, never a picture.
+        .filter_map(|brush| match brush.literal() {
+            Some(Brush::Image(b)) => Some(b.image.id.clone()),
             _ => None,
         })
         .collect();
@@ -2623,11 +2624,17 @@ fn census<K: PartialEq>(
             None => counts.push((k, 1, vec![at.node], at)),
         }
     };
+    // **Literal paints only** (§15 D1039): a bound paint's colour is its
+    // variable's, edited in the browser, and listing it here would offer a
+    // recolour that has to detach it to do anything.
     for id in subtree_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         for (i, f) in node.paint().fills.iter().enumerate() {
+            let Some(brush) = f.brush.literal() else {
+                continue;
+            };
             bump(
-                &f.brush,
+                brush,
                 PaintAt {
                     node: id,
                     target: PaintTarget::Fill,
@@ -2636,8 +2643,11 @@ fn census<K: PartialEq>(
             );
         }
         for (i, s) in node.paint().strokes.iter().enumerate() {
+            let Some(brush) = s.brush.literal() else {
+                continue;
+            };
             bump(
-                &s.brush,
+                brush,
                 PaintAt {
                     node: id,
                     target: PaintTarget::Stroke,
@@ -2661,7 +2671,10 @@ fn census<K: PartialEq>(
 /// standing in for fill 0. It is an ordinary entry in an ordinary fill list now
 /// (§15 D400), so the index means on a frame exactly what it means everywhere
 /// else.
-pub fn paint_at(doc: &Document, at: PaintAt) -> Option<Brush> {
+///
+/// **As held**: a bound paint answers its binding (§15 D1039); a caller that
+/// draws it asks [`Document::resolve_brush`].
+pub fn paint_at(doc: &Document, at: PaintAt) -> Option<crate::BrushSource> {
     let node = doc.get(at.node)?;
     match at.target {
         PaintTarget::Fill => node.paint().fills.get(at.index).map(|f| f.brush.clone()),
@@ -2686,7 +2699,14 @@ pub fn repaint(doc: &Document, ids: &[NodeId], from: &Brush, to: &Brush) -> Tran
     let mut ops = Vec::new();
     for id in subtree_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
-        let swap = |b: &Brush| if b == from { to.clone() } else { b.clone() };
+        // A bound paint is no brush's use: the census never lists one.
+        let swap = |b: &crate::BrushSource| {
+            if b.literal() == Some(from) {
+                to.clone().into()
+            } else {
+                b.clone()
+            }
+        };
         let fills: Vec<Keyed<Fill>> = node
             .paint()
             .fills
@@ -2719,9 +2739,10 @@ pub fn repaint(doc: &Document, ids: &[NodeId], from: &Brush, to: &Brush) -> Tran
     Transaction(ops)
 }
 
-/// Whether `brush` is exactly this solid colour.
-fn is_solid(brush: &Brush, key: [u8; 4]) -> bool {
-    matches!(brush, Brush::Solid(c) if c.to_rgba8().to_u8_array() == key)
+/// Whether `brush` is exactly this solid colour, **of its own** — a bound paint
+/// never is, the census not listing one (§15 D1039).
+fn is_solid(brush: &crate::BrushSource, key: [u8; 4]) -> bool {
+    matches!(brush.literal(), Some(Brush::Solid(c)) if c.to_rgba8().to_u8_array() == key)
 }
 
 /// Replace every use of `from` with `to` inside the subtrees rooted at `ids`.
@@ -2757,7 +2778,7 @@ pub fn recolor(doc: &Document, ids: &[NodeId], from: Color, to: Color) -> Transa
                 .map(|f| {
                     f.map(|f| Fill {
                         brush: if is_solid(&f.brush, key) {
-                            Brush::Solid(to)
+                            to.into()
                         } else {
                             f.brush.clone()
                         },
@@ -2775,7 +2796,7 @@ pub fn recolor(doc: &Document, ids: &[NodeId], from: Color, to: Color) -> Transa
                 .map(|s| {
                     let mut next = s.clone();
                     if is_solid(&s.brush, key) {
-                        next.brush = Brush::Solid(to);
+                        next.brush = to.into();
                     }
                     next
                 })
@@ -3047,6 +3068,208 @@ pub fn edit_fills_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Fill)) 
         }
         if fills != node.paint().fills {
             ops.push(Operation::SetFills { id, fills });
+        }
+    }
+    Transaction(ops)
+}
+
+/// What an edit of a paint **as it is drawn** leaves it (§15 D1039): `edit` is
+/// handed the brush the user sees — a bound paint's resolved solid — and its
+/// answer is written back.
+///
+/// **A bound paint keeps its binding when only its `%` moved**: the variable
+/// carries its own alpha, and the fill's `%` is a separate multiplier (D1038), so
+/// an answer that is the same colour at another alpha is a new `%` — the drawn
+/// alpha divided by the variable's. Any other answer is a colour of the user's
+/// own and **detaches** to it, which is D1038's *"any other key replaces the
+/// chip"* and *"picking Solid while bound detaches"* as one rule.
+pub fn edited_brush(
+    doc: &Document,
+    id: NodeId,
+    src: &crate::BrushSource,
+    edit: impl Fn(&Brush) -> Brush,
+) -> crate::BrushSource {
+    use crate::BrushSource;
+    match src {
+        BrushSource::Literal(b) => edit(b).into(),
+        BrushSource::Bound { var, alpha } => {
+            let Some(crate::Value::Color(c)) = doc.resolve_var(id, *var) else {
+                return src.clone();
+            };
+            let drawn = Brush::Solid(c.multiply_alpha(*alpha));
+            let next = edit(&drawn);
+            if next == drawn {
+                return src.clone();
+            }
+            let rgb = |c: Color| {
+                let [r, g, b, _] = c.to_rgba8().to_u8_array();
+                [r, g, b]
+            };
+            match next {
+                Brush::Solid(n) if rgb(n) == rgb(c) && c.components[3] > 0.0 => {
+                    BrushSource::Bound {
+                        var: *var,
+                        alpha: (n.components[3] / c.components[3]).clamp(0.0, 1.0),
+                    }
+                }
+                other => other.into(),
+            }
+        }
+    }
+}
+
+/// Every fill's (or stroke's) brush of every paint target in scope, edited **as
+/// drawn** by [`edited_brush`] — the inspector's mixed row's colour, hex and `%`
+/// writes. [`edit_fills_all`] with the paint's node in hand, which the binding
+/// needs and that function's closure is not given.
+pub fn edit_brushes_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    edit: impl Fn(&Brush) -> Brush,
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        match target {
+            PaintTarget::Fill => {
+                let fills: Vec<Keyed<Fill>> = node
+                    .paint()
+                    .fills
+                    .iter()
+                    .map(|f| {
+                        f.map(|f| Fill {
+                            brush: edited_brush(doc, id, &f.brush, &edit),
+                            ..f.clone()
+                        })
+                    })
+                    .collect();
+                if fills != node.paint().fills {
+                    ops.push(Operation::SetFills { id, fills });
+                }
+            }
+            PaintTarget::Stroke => {
+                let strokes: Vec<Keyed<Stroke>> = node
+                    .paint()
+                    .strokes
+                    .iter()
+                    .map(|s| {
+                        s.map(|s| Stroke {
+                            brush: edited_brush(doc, id, &s.brush, &edit),
+                            ..s.clone()
+                        })
+                    })
+                    .collect();
+                if strokes != node.paint().strokes {
+                    ops.push(Operation::SetStrokes { id, strokes });
+                }
+            }
+        }
+    }
+    Transaction(ops)
+}
+
+/// Bind rectangle `id`'s corners to `vars` — `None` leaving a corner as it is
+/// (§15 D1039). The bound corners' literals are written **0**, so a rectangle
+/// bound to a variable compares equal to its instance's copy bound to the same
+/// one whatever either drew before (overrides compare the binding, §5.3d); the
+/// literal is never drawn while bound.
+///
+/// Empty when `id` is not a rectangle or nothing would change.
+pub fn bind_corners_ops(doc: &Document, id: NodeId, vars: crate::CornerVars) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        return Vec::new();
+    };
+    let mut next = node.corner_vars();
+    for (k, v) in vars.iter().enumerate() {
+        if v.is_some() {
+            next[k] = *v;
+        }
+    }
+    let zero = |k: usize, lit: f64| if next[k].is_some() { 0.0 } else { lit };
+    let radii = RoundedRectRadii {
+        top_left: zero(0, corner_radii.top_left),
+        top_right: zero(1, corner_radii.top_right),
+        bottom_right: zero(2, corner_radii.bottom_right),
+        bottom_left: zero(3, corner_radii.bottom_left),
+    };
+    let mut ops = Vec::new();
+    if radii != *corner_radii {
+        ops.push(Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::CornerRadii(radii),
+        });
+    }
+    if next != node.corner_vars() {
+        ops.push(Operation::SetCornerVars { id, vars: next });
+    }
+    ops
+}
+
+/// Detach rectangle `id`'s bound corners to the radii they draw (D1038's detach):
+/// the literal becomes the resolved number and the binding goes. Empty when no
+/// corner is bound. **What any write of a radius to a bound corner has to carry
+/// beside it** — a canvas drag on the radius handle, a number typed over the
+/// chip — or the write lands on a literal nobody draws.
+pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        return Vec::new();
+    };
+    let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
+        return Vec::new();
+    };
+    vec![
+        Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::CornerRadii(drawn),
+        },
+        Operation::SetCornerVars {
+            id,
+            vars: Default::default(),
+        },
+    ]
+}
+
+/// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
+/// of the shared list, written in place so every target keeps its own item ids
+/// (§15 D980).
+pub fn edit_brush_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    index: usize,
+    edit: impl Fn(&Brush) -> Brush,
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        match target {
+            PaintTarget::Fill => {
+                let mut fills = node.paint().fills.clone();
+                let Some(f) = fills.get_mut(index) else {
+                    continue;
+                };
+                f.brush = edited_brush(doc, id, &f.brush, &edit);
+                if fills != node.paint().fills {
+                    ops.push(Operation::SetFills { id, fills });
+                }
+            }
+            PaintTarget::Stroke => {
+                let mut strokes = node.paint().strokes.clone();
+                let Some(s) = strokes.get_mut(index) else {
+                    continue;
+                };
+                s.brush = edited_brush(doc, id, &s.brush, &edit);
+                if strokes != node.paint().strokes {
+                    ops.push(Operation::SetStrokes { id, strokes });
+                }
+            }
         }
     }
     Transaction(ops)

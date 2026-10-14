@@ -45,7 +45,7 @@ fn render_kind(kind: NodeKind, effects: Vec<Effect>) -> (Vec<u8>, usize) {
         Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -515,7 +515,7 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
         ops.push(Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         });
@@ -523,7 +523,7 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
         ops.push(Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         });
@@ -643,7 +643,7 @@ fn render_view(effects: &[Effect], view: Rect) -> Vec<u8> {
         Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },

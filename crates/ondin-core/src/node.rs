@@ -216,6 +216,14 @@ pub struct Node {
     /// keeps it (`remap_subtree`): only the kit verbs write one
     /// (`crate::kit::check`).
     pub(crate) origin: Option<crate::kit::Origin>,
+    /// The **mode** this frame sets for itself and everything under it (§5.3f,
+    /// D1038 (b)) — `None` to inherit from the nearest ancestor frame that sets
+    /// one, else the document's default. Only on an `Artboard`: a group never
+    /// sets a mode (`crate::variable::check`).
+    pub(crate) mode: Option<crate::variable::ModeId>,
+    /// The variables this rectangle's corners are bound to (§15 D1039), all
+    /// `None` on every other layer.
+    pub(crate) corner_vars: crate::variable::CornerVars,
 }
 
 impl Node {
@@ -263,6 +271,22 @@ impl Node {
     /// Where this node was vendored from, when it is in the vault (§15 D1012).
     pub fn origin(&self) -> Option<&crate::kit::Origin> {
         self.origin.as_ref()
+    }
+    /// The mode this frame sets, if any (§5.3f) — not the mode in force here,
+    /// which is [`crate::Document::mode_at`].
+    pub fn mode(&self) -> Option<crate::variable::ModeId> {
+        self.mode
+    }
+    /// The variables this rectangle's corners are bound to (§15 D1039).
+    pub fn corner_vars(&self) -> crate::variable::CornerVars {
+        self.corner_vars
+    }
+    /// Whether any field of this node reads a variable — a bound fill, stroke or
+    /// corner. What a variable's edit dirties (`Document::bound_nodes`).
+    pub fn reads_variables(&self) -> bool {
+        self.paint.fills.iter().any(|f| f.brush.is_bound())
+            || self.paint.strokes.iter().any(|s| s.brush.is_bound())
+            || self.corner_vars.iter().any(Option::is_some)
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across
@@ -1129,19 +1153,23 @@ impl Paint {
     pub fn image_fill(&self) -> Option<usize> {
         self.fills
             .iter()
-            .position(|f| f.visible && matches!(f.brush, Brush::Image(_)))
+            .position(|f| f.visible && matches!(f.brush.literal(), Some(Brush::Image(_))))
     }
 }
 
+/// One fill. Its brush may be bound to a colour variable
+/// ([`BrushSource`](crate::BrushSource)), which binds the **whole solid paint**,
+/// never a gradient stop (D1038).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fill {
-    pub brush: Brush,
+    pub brush: crate::variable::BrushSource,
     pub visible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Stroke {
-    pub brush: Brush,
+    /// Bindable as a fill's is.
+    pub brush: crate::variable::BrushSource,
     pub width: f64,
     pub join: kurbo::Join,
     pub cap: kurbo::Cap,
@@ -1435,7 +1463,7 @@ impl Default for Stroke {
     /// Stroke panel adds, minus its brush.
     fn default() -> Self {
         Self {
-            brush: Brush::Solid(peniko::Color::BLACK),
+            brush: peniko::Color::BLACK.into(),
             width: 1.0,
             join: kurbo::Join::Miter,
             cap: kurbo::Cap::Butt,

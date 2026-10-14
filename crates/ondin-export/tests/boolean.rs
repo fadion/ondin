@@ -174,7 +174,8 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
         strokes: keyed_by_position([ondin_core::Stroke {
             brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                 255, 0, 0, 255,
-            )),
+            ))
+            .into(),
             width: 4.0,
             align: ondin_core::StrokeAlign::Inside,
             ..Default::default()
@@ -206,7 +207,8 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
         strokes: keyed_by_position([ondin_core::Stroke {
             brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                 255, 0, 0, 255,
-            )),
+            ))
+            .into(),
             width: 4.0,
             align: ondin_core::StrokeAlign::Center,
             ..Default::default()
@@ -276,7 +278,7 @@ fn filled(
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: b,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -392,7 +394,7 @@ fn stroked(align: ondin_core::StrokeAlign, width: f64) -> (Document, Resolved) {
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: b,
         strokes: keyed_by_position([ondin_core::Stroke {
-            brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(30, 90, 220, 255)),
+            brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(30, 90, 220, 255)).into(),
             width,
             align,
             ..Default::default()

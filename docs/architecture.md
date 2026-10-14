@@ -315,8 +315,9 @@ permission.
    published version, rewritten only by the commit that accepts an update. **A kit's own published
    state is not a fourth member**: it is the tree as it stood at the publish, which the document no
    longer holds once edited, so there is nothing to derive it from (§15 D1011 (2)). ⚠️ **Variables
-   add no member** (§5.3f, §15 D1037, ruled, not built): a bound field stores its binding and resolves
-   it at read; a kit's variables and styles carried into a consumer would be the third member's kind.
+   add no member** (§5.3f, §15 D1037; ~~ruled, not built~~ step 1's core built 2026-10-14, D1039): a
+   bound field stores its binding and resolves it at read; a kit's variables and styles carried into a
+   consumer would be the third member's kind.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -651,6 +652,11 @@ pub struct Node {
     origin: Option<kit::Origin>, // where a VAULT node was vendored from — kit, node there, version
                                // (§5.3e, §15 D1012); on every vault node and on nothing else;
                                // never carried by a copy; skipped when None
+    mode: Option<ModeId>,      // the mode a FRAME sets for itself and its contents; None inherits —
+                               // §5.3f, §15 D1039; Artboard only (`variable::check`); skipped when None
+    corner_vars: [Option<VarId>; 4], // a Rect's corners' bindings, RoundedRectRadii's order — the
+                               // bound literals written 0 and drawn from `Resolved`'s used kind
+                               // (§5.3f, §15 D1039); all None elsewhere; skipped when none is set
 }
 
 pub enum NodeKind {
@@ -679,9 +685,12 @@ pub enum MaskMode { Shape, Alpha }   // outline, or the mask's own alpha per pix
                                      // Luminance is deferred on a dependency, NOT a design choice
                                      // — §15 D288 has the measurement and the re-check trigger.
 
-pub struct Fill   { pub brush: peniko::Brush, pub visible: bool }
+pub struct Fill   { pub brush: BrushSource, pub visible: bool }
+pub enum BrushSource { Literal(Brush), Bound { var: VarId, alpha: f32 } } // a colour variable × the
+                               // fill's `%` — §5.3f, §15 D1039; NO Deref, drawn through
+                               // `Document::resolved_paint`; saved as the brush when literal
 pub struct Stroke {
-    pub brush: peniko::Brush,
+    pub brush: BrushSource,    // bindable as a fill's is
     pub width: f64,
     pub join: kurbo::Join,
     pub cap: kurbo::Cap,
@@ -1089,7 +1098,9 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   2026-10-05, when `SetVariantSet`, `SetVariant` and `SetProperties` did — §15 D982 — and sixteen and
   eighteen until 2026-10-06, when `SetSwap` did — §15 D983.) The test that pins the seventeen asserts
   its own length, and `overrides.rs` has the sibling that pins the nineteen — which `SetSwap`'s first
-  build left at eighteen, fixed the same day (§15 D983's amendment).
+  build left at eighteen, fixed the same day (§15 D983's amendment). ⚠️ **The seventeen are no longer
+  `changes_ink`'s whole `false` list, nor the nineteen `absorb`'s whole no-op list** — §5.7 has both
+  as they stand since kits and variables (§15 D1039).
 - **A field on the node, offered on a frame.** `Node::grids` sits beside `exports`: empty on every
   layer until somebody adds one, skipped by the save format, ignored by every walk. That is `clip`'s
   arrangement — a property of the layer, inert on kinds nobody offers it for — and what confines the
@@ -1750,9 +1761,10 @@ content, and content must not follow while overridden spans stay behind. What fo
 exist, there being no override record to fall out of step with the values; *reset* copies the
 source's value back; and the inspector shows a field as overridden by comparing it with its source.
 **The accepted catch**: setting a copy's value equal to the main's makes it follow again.
-⚠️ **A bound field compares its binding, not what it resolves to** (§5.3f, §15 D1037, ruled, not
-built): a main rebinding *brand* → *accent* reaches a copy still bound to *brand*, and a copy bound
-elsewhere keeps its binding as an override.
+⚠️ **A bound field compares its binding, not what it resolves to** (§5.3f, §15 D1037; ~~ruled, not
+built~~ built for paint, corners and a frame's mode, D1039): a main rebinding *brand* → *accent* reaches
+a copy still bound to *brand*, and a copy bound elsewhere keeps its binding as an override
+(`a_main_rebinding_reaches_a_copy_bound_as_it_was`).
 
 Three rules the session adds to it:
 
@@ -2184,7 +2196,8 @@ mixed set the loader admitted would leave its set on a nudge. Membership is not 
 moved out of its instance is cut loose by `settle_links`, the commit's answer rather than a refusal.
 
 **The save format went to v5** (the session's), on two counts — and has been **v6** since 2026-10-08,
-the vault's bump, a number and nothing else to what follows (§5.11, §15 D1012). **The item-id half is
+the vault's bump, and **v7** since 2026-10-14, the variables' (§15 D1039), each a number and nothing
+else to what follows (§5.11, §15 D1012). **The item-id half is
 built** (§15 D980, `a83adc8`): `CURRENT_SCHEMA_VERSION` became 5, and it is §5.11's own case — a v4 list item has no id, so
 the five keyed lists change shape and an old file needs a real step. **`migrate_4_to_5` gives each
 existing item `"id": "0:<index>"`**, `ItemId::positional`'s wire form, keeping an id an item already
@@ -2958,7 +2971,9 @@ kit collide when one is pasted into the other.
 ⚠️ **Kits are to carry the variables and styles a vendored main uses** (§5.3f, §15 D1037 — the
 session's proposal, not objected to; not built), under this section's provenance and update flow,
 read-only in D as the main is. A kit's modes map onto the consumer's through one per-kit mapping
-held at document level, by name, else the kit's first mode (§15 D1038).
+held at document level, by name, else the kit's first mode (§15 D1038). **Until then `kit::freeze`
+detaches every binding and drops every mode** (§15 D1039): the published state carries no table, so a
+published main holds, as literals, what it drew in the mode in force at each node.
 
 **Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's save dot and,
 hard against it in the same 26-tall box, *Publish N* (§15 D1025: the mockups put it on the right, and
@@ -3318,15 +3333,17 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; not built; §15 D1037, D1038)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core built; §15 D1037–D1039)
 
-> **Design ahead of code, all of it.** Ruled with the maintainer on 2026-10-11, in conversation, on a
-> design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome is
-> done and accepted, with the maintainer's rulings on D1037's open questions (2026-10-13, §15 D1038,
-> which carries the chrome's substance — `design/` is regenerated). **Nothing is built**; the build
-> order and what is open are `roadmap.md`'s *Next · Styles and variables*. **When a step lands, this
-> section is rewritten in the present tense** and the pointers to it from invariant 4, §5.3d, §5.3e,
-> §5.9, §5.11, §7 and §12 go.
+> **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
+> on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
+> is done and accepted, with the maintainer's rulings on D1037's open questions (2026-10-13, §15 D1038,
+> which carries the chrome's substance — `design/` is regenerated). **Build step 1's core half is built**
+> (2026-10-14, §15 D1039): colour and number variables with aliases and modes, bound to paint and a
+> rectangle's corners, saved, resolved by every reader and carried by a paste — *What is built*, at the
+> end of this section. **None of the chrome is**; the build order and what is open are `roadmap.md`'s
+> *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
+> present tense as each step lands.
 
 **A variable** is a named, typed value — **colour, number, string or boolean** — with **one value per
 mode**; an **alias** is a per-mode cell value naming another variable of the same type, not a fifth
@@ -3352,15 +3369,16 @@ visibility; **strings** bind text content and font family, with text styles. A f
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)`, and the value it draws is found against the mode in force at that node.
+`Literal(T) | Bound(VarId)` — ⚠️ **in three shapes, as built** (§15 D1039; *What is built*, below) — and
+the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
 variable writes no node**, so nothing propagates. And **§12's fourth property holds as written** — the
 resolved value is in no node — where §5.3d's copies bend it. ⚠️ **The cost is every reader**:
 `container::lay_out`, `scene::build`, the SVG writer, the snapshot and the inspector must each resolve,
 and one that skips it draws the fallback in silence. The proposed guard is a `Bindable<T>` reachable only
-through `resolve`, so the compiler lists the readers. **There is no resolve step today** — §5.9's
-`Resolved` holds none, and the scene build reads a node's fields as stored.
+through `resolve`, so the compiler lists the readers — built for paint as a type with no `Deref`, not as a
+generic one (§15 D1039).
 
 **Deleting a variable in use detaches** every field bound to it to the value it resolved to, as ops in
 the deleting transaction — §5.3d's rule for a deleted main. **Deleting a style detaches its users** the
@@ -3403,6 +3421,32 @@ its own card, a set mode appended to its canvas label.
 components and lists the layers a removed one detaches (D1038). **The export as CSS custom properties**
 is the session's and not ruled; §7 writes paint as presentation attributes today, so where a `var()`
 would go is part of the question.
+
+**What is built** (step 1's core, §15 D1039 in full). `ondin_core::variable` holds the table —
+`Variables { modes, vars }`, the modes in order and the first the default, the variables by id
+(`VarId`, `ModeId`: `NodeId` newtypes minted from the session's `IdSource`, as a `GuideId` is), each a
+name, a kind (`Color` or `Number`) and one `Cell` per mode, a value or an `Alias`. `Document::variables`
+reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
+`resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it.
+**`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
+a dangling binding rather than repairing it. The binding's three shapes:
+
+- **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
+  **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
+  alpha — so what draws is the variable's colour times `alpha`, D1038's rule. No `Deref`: drawing asks
+  `resolved_paint` and then reads `BrushSource::drawn`, which answers a bound paint as transparent and is
+  for use only below a resolve.
+- **Corners**: `Node::corner_vars: [Option<VarId>; 4]` beside `NodeKind::Rect`'s literal radii, not inside
+  the kind. A bound corner's literal is written 0 and **drawn from `Resolved`'s used kind** (§5.9), which
+  every geometry reader already asks. ⚠️ A reader of the document's own kind reads that 0 — the
+  inspector's radius field among them (§15 D1039's *Fix with*). Only a `Rect`'s corners bind; a `Path`'s
+  per-anchor radii do not.
+- **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
+
+The operations, the save format's v7, invalidation, the paste rule and the readers are in §5.7, §5.11,
+§5.9 and §15 D1039. **A ghost resolves in the default mode**, being in no frame yet; **the snapshot
+reports the resolved value**, not the binding; **a kit's frozen copy detaches every binding** until step
+4 carries variables.
 
 ### 5.4 Text node
 
@@ -4984,6 +5028,20 @@ pub enum Operation {
     SetProperties { id: NodeId, props: Vec<Keyed<Property>> }, // the old value, change no ink, and
                                                       // are held by `variant::check`, run first
                                                       // inside `component::check`
+    SetMode     { id: NodeId, mode: Option<ModeId> }, // a frame's mode — §5.3f, §15 D1039. Writable
+                                                      // on any node, so `reset::state_ops` can state
+                                                      // it; refused at the commit off a frame
+    SetCornerVars { id: NodeId, vars: [Option<VarId>; 4] }, // a Rect's corners' bindings alone; the
+                                                      // binding verb writes the literals 0 beside it
+    // the variables table (§5.3f, §15 D1039) — no node named; `variable::check` after the last op:
+    AddVariable { var: Variable },  RemoveVariable { id: VarId }, // each the other's inverse; a remove
+                                                      // refused while anything is bound to it
+    SetVariableName { id: VarId, name: String },
+    SetVariableCell { id: VarId, mode: ModeId, cell: Cell },
+    AddMode { mode: Mode, index: usize, cells: Vec<(VarId, Cell)> }, // with every variable's cell
+    RemoveMode { id: ModeId },                        // inverts to AddMode carrying the column; refused
+                                                      // while a frame is set to it
+    SetModeName { id: ModeId, name: String },
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -5007,6 +5065,8 @@ pub enum OpError {
     NoSuchGuide(GuideId), DuplicateGuide(GuideId), BadGuideOwner(NodeId),
     DuplicateItemId(NodeId, ItemId), BadLink(NodeId, LinkRule),   // §5.3d, §15 D980, D978 — after
                                                                   // the last op, like BadGuideOwner
+    NoSuchVariable(VarId), DuplicateVariable(VarId), NoSuchMode(ModeId), DuplicateMode(ModeId),
+    Variables(VarRule),                                // §5.3f, §15 D1039 — after the last op too
     /* ... */
 }
 ```
@@ -5031,7 +5091,11 @@ pub enum OpError {
   `SetGeometry` on a frame changes what its children are clipped to. The two structural ones
   (`InsertSubtree`, `DeleteNode`, and `Reparent` for both parents) enumerate what they touch because
   every one of those nodes is genuinely new, gone or moved. Everything else inserts the node it wrote,
-  and its parent where the parent's union bounds move.
+  and its parent where the parent's union bounds move. ⚠️ **The variables table's operations are the
+  exception, and they write no node at all** (§5.3f, §15 D1039): every one that can change what a binding
+  reads — a variable added or removed, a cell, a mode added or removed — dirties **every node that reads a
+  variable** (`Document::bound_nodes`, a scan), because a bound corner's used kind lives in `Resolved` and
+  `update` returns early on an empty set. The two renames dirty nothing.
 - Because ids ride inside ops, replaying a transaction anywhere yields the same result — the
   multiplayer-readiness property (§12). There is no id allocation inside `apply`, so no
   `RestoreSubtree` special case and no `created` back-channel: creators know the ids they minted.
@@ -5104,8 +5168,8 @@ pub enum OpError {
   without both, a file's value could not be undone back to or edited around (§15 D937).
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
-  since a transaction that moves a layer *and* renames it has a visible result. Exactly **seventeen**
-  answer `false`: `SetName`, `SetLocked`, `SetProportionsLocked`, `SetPivot`, `SetExports`,
+  since a transaction that moves a layer *and* renames it has a visible result. **Seventeen** chrome
+  operations answer `false` (seven more do since kits and variables, below): `SetName`, `SetLocked`, `SetProportionsLocked`, `SetPivot`, `SetExports`,
   `SetLayoutGrids`, the five guide ops, and — since 2026-10-04, when the list was eleven —
   `SetComponent` and `SetLink` (§5.3d, §15 D978), and — since 2026-10-05, when it was thirteen —
   `SetVariantSet`, `SetVariant` and `SetProperties` (§15 D982), and — since 2026-10-06, when it was
@@ -5119,7 +5183,17 @@ pub enum OpError {
   no-ops are **nineteen** (thirteen until the component ops joined the first arm, fifteen until the
   variant ops did, eighteen until `SetSwap` did). The two image ops answer `true` here and are absorbed there because
   `RenderOverrides` has no image table to patch — *"cannot preview this"* rather than *"nothing to
-  preview"* — which is written out at both ends. That matters beyond tidiness:
+  preview"* — which is written out at both ends. ⚠️ **Since kits and variables neither list is the
+  other's superset** (§15 D1039). `changes_ink` answers `false` for seven more — `OpenVault`,
+  `CloseVault` and `SetOrigin` (§15 D1012, D1016), which `absorb` **refuses** rather than no-ops, and
+  `AddVariable`, `RemoveVariable`, `SetVariableName` and `SetModeName` — and `absorb` has a **third**
+  no-op arm, the variables table's seven operations, three of which (`SetVariableCell`, `AddMode`,
+  `RemoveMode`) change ink, for the image pair's reason: the walk reads the table off the document and
+  no override holds one. So the seventeen above are what the two lists share by design. `overrides.rs`'
+  sibling pins every no-op — the seventeen, the image pair and the table's seven in two groups by their
+  `changes_ink` answer (fixed the day it was found, §15 D1039) — while `op.rs`'s fixture pins the
+  seventeen alone, so the vault pair, `SetOrigin` and the table's four `false` answers are checked
+  there by nothing but the wildcard-free `match`. That matters beyond tidiness:
   `EditorSession::has_gesture_preview` is `!overrides.is_empty() && …`, so **every** transaction
   `absorb` no-ops is invisible to `cancel_gesture`'s gate, and a repair list for that has to be derived
   from `absorb` rather than from this list. `[A7-L8-04]` certified the equality by hand-counting the
@@ -5611,6 +5685,7 @@ pub struct Resolved {
     failed: FxHashSet<NodeId>,               // booleans whose arithmetic was abandoned (§15 D239)
     index: rstar::RTree<BoundsEntry>,        // leaves = paintable nodes
     used: FxHashMap<NodeId, Used>,           // SPARSE: only where layout moves or resizes a node (§15 D868)
+                                             // or a Rect's corners are bound to variables (§15 D1039)
     text_memo: FxHashMap<NodeId, TextMemo>,  // layout's text measurements, across commits (§15 D936)
 }
 impl Resolved {
@@ -5666,7 +5741,13 @@ impl Resolved {
   every text node. It is moved into a `RefCell` for the length of a pass and put back.
 - **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
   own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
-  everywhere, and a document with no layout in it holds nothing here. `used_local_of` and
+  everywhere, and a document with no layout and no bound corner in it holds nothing here. ⚠️ **A bound
+  corner is the one entry layout does not make** (§5.3f, §15 D1039): `resolve::with_bound_corners` puts
+  the resolved radii into the used kind after layout, keeping layout's size, so every reader that
+  draws, measures or hit-tests from the used kind follows a binding with no line of its own — and a
+  reader of the document's kind reads the bound corner's literal, 0. ⚠️ **An edit made from the used
+  kind is not covered by that**: a radius written from it lands on the literal nobody draws unless the
+  write detaches the corner beside it (`build::detach_corners_ops`), which no door does yet (D1039). `used_local_of` and
   `used_kind_of` are the same two questions for a caller holding a `&Node` and no document — the SVG
   writer's helpers — and ⚠️ **the node must be this document's own**: the map is keyed by id, so a
   captured copy or a ghost would be answered with the original's layout. **Draw, measure, hit-test
@@ -5882,11 +5963,16 @@ impl Resolved {
   `a_shadow_moves_the_ink_box_up_the_tree_and_leaves_the_editing_box_alone` states the split directly.
 - Known cost: `update` rebuilds the whole R-tree (`bulk_load`) rather than patching entries. Fine
   at current scale, and the first thing to fix when node counts grow — parked in §14.
-- ⚠️ **Variables owe this layer a resolve step it does not have** (§5.3f, §15 D1037, ruled, not
-  built). A bound field's value depends on the variable's value in the mode in force at the node, and
-  a variable's edit or a frame's mode change targets no bound node, so `DirtySet` — node ids — has
-  nothing to name; `update` must learn which nodes read a variable, and the property test above must
-  author those operations.
+- **Variables reach this layer through the used kind alone** (§5.3f, §15 D1037; ~~ruled, not built~~
+  built 2026-10-14, D1039). A bound paint is resolved by the walk off the document on every frame and has
+  nothing here to go stale; a bound corner is a used-kind entry (above). A variable's edit targets no
+  node, so **every table operation that can change what a binding reads dirties every node that reads a
+  variable** (`Document::bound_nodes`, a scan rather than a reverse index), and a frame's `SetMode` dirties
+  the frame, whose subtree `update` already takes. **A fourth randomized run** authors those operations —
+  `ondin-core/tests/variables.rs`' `incremental_update_equals_rebuild_over_random_variable_ops`, cell
+  edits, modes added and removed, frames' modes and reparents across frames over rectangles with bound
+  corners — kept out of `tests/resolve.rs` so its three runs draw what they always did; its doc records
+  the flip that bites.
 
 ### 5.10 Queries
 
@@ -6018,7 +6104,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 
 ### 5.11 IO
 
-- Native format = JSON, currently **v6** (`io::CURRENT_SCHEMA_VERSION`; v5 until 2026-10-08, when
+- Native format = JSON, currently **v7** (`io::CURRENT_SCHEMA_VERSION`; v6 until 2026-10-14, when
+  variables arrived — §15 D1039, the v6 → v7 bullet below; v5 until 2026-10-08, when
   kits brought the vault — §15 D1012, the v5 → v6 bullet below; v4 until 2026-10-04, when list items
   gained ids — §15 D980). `schema.rs` defines a versioned DTO decoupled from in-memory types.
 - ⚠️ **The schema has a *second reader*, and it is not the on-disk format's alone** (§15 D823).
@@ -6047,7 +6134,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   **The envelope carries a second list since v6** (§5.3e, §15 D1012): `kits`, the vault mains a copied
   kit instance reaches, each a subtree in `subtrees`' form with its origins, written by
   `write_carrying` and skipped when empty. `parse` holds them to the same envelope rules, and an image
-  entry they key into is kept as one the subtrees key into is.
+  entry they key into is kept as one the subtrees key into is. **And a `vars` key since v7** (§5.3f,
+  §15 D1039): `variable::Carried`, the copied layers' variables by id, name and kind, the modes their
+  frames set, and a detached twin of each layer that reads one, taken against the source — what
+  `variable::land` rebinds a paste by, or falls back to; absent when the copy reads no variable.
 - **The library block is the first key after `schema_version`** (§5.11a). Its position is a decision
   about *reading* rather than about diffs: the dashboard lists a folder by reading each document's
   name, project and date, and `io::probe` reaches them from a 4 KB prefix without parsing the
@@ -6353,12 +6443,16 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   a whole document of the same version, and the ladder does not descend into it**: a later migration
   that reshapes a document owes the nested one too (`PublishedDto`'s doc). The loader refuses a
   published state that carries one of its own, so the nesting is one level.
-- ⚠️ **Variables and styles owe v7** (§5.3f, §15 D1037, ruled, not built): a document-level table of
-  variables and styles — with the mode list, a frame's set mode and each kit's mode mapping (§15
-  D1038) — and a bindable field becoming `Literal | Bound` — a change of an existing
-  field's shape, so a bump with a migration under the rule above, v6 being the version the v0.6.0
-  release commit (`51b4550`) carries. The
-  nested published document is owed the same step.
+- **v6 → v7** is variables and modes (§5.3f, §15 D1039), and **`migrate_6_to_7` is a number**,
+  `migrate_5_to_6`'s reason exactly: a v6 file has no variables, modes or bindings, which is what v7
+  reads absent keys as, and a v6 reader would drop `variables` and then refuse a bound fill as a
+  malformed brush — the wrong complaint. **It moves `published.document`'s number with the outer one's**,
+  the debt the bullet above names, paid. The keys: `DocumentDto::variables` (the modes in order, the
+  variables by id; above `images`, for their diff reason), `NodeDto::mode` and `NodeDto::corner_vars`,
+  each skipped when unset; a literal brush saves as it did, a bound one as `{"var": <id>, "alpha": a}`,
+  `alpha` omitted at 1. **The loader runs `variable::check` after the tree's own checks and refuses a
+  dangling binding** — a binding to nothing has no value to draw. ⚠️ **Still owed to a later step**:
+  styles and each kit's mode mapping (§15 D1038), which v7 does not hold.
 
 ### 5.11a The library block (§15 D362)
 
@@ -6782,7 +6876,14 @@ pub trait ScenePainter {
   nineteen and asserts its own list lengths; what it cannot do is prove there is no twentieth, which
   needs a value of every `Operation` variant and is `op.rs`'s fixture's job. ⚠️ **That is not
   hypothetical**: `SetSwap`'s first build added it to `op.rs`' list and not to this one, which went on
-  passing at eighteen — fixed the same day (§15 D983's amendment).
+  passing at eighteen — fixed the same day (§15 D983's amendment). ⚠️ **And again with the variables
+  table** (§15 D1039): a **third** no-op arm, `AddVariable`, `RemoveVariable`, `SetVariableName`,
+  `SetVariableCell`, `AddMode`, `RemoveMode` and `SetModeName` — a previewed cell draws the committed
+  value, the image pair's gap, and nothing drags one — which the first build left out of that fixture
+  as `SetSwap`'s had, fixed before commit: it lists the seven, four `changes_ink` false and three true,
+  and asserts there are seven. ⚠️ Its name still says *"two of them still change ink"*; five do. `SetMode` and
+  `SetCornerVars` are refused: a frame's mode and a corner's binding change what a subtree or a used kind
+  resolves to, which no per-node patch carries.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds
@@ -7710,10 +7811,13 @@ other were right, which is why both exist.
   export the document, rewrite a copy by hand into the shape being replaced, serve both over HTTP,
   draw them into canvases and difference the pixels. That is what said the `<use>` hoist above is
   identical and not merely valid — 10,800 opaque pixels, 0 channels differing (§15 D595).
-  ⚠️ **Variables are not in this writer, and the writer's paint has no place for them yet** (§5.3f,
-  §15 D1037, ruled, not built). Paint is written as presentation attributes (`fill="#…"`,
-  `stroke="…"`), a `style` attribute appearing only for an alpha mask's `mask-type`; an export as CSS
-  custom properties is the session's proposal, not ruled, and its shape is open.
+  ⚠️ **Variables reach this writer as the values they resolve to, and its paint has no place for a
+  reference yet** (§5.3f, §15 D1037; resolving built 2026-10-14, D1039). Each node's paint is taken
+  through `Document::resolved_paint` in the mode in force there and its helpers read only literal
+  brushes; a bound corner arrives as `rx` through the used kind. Paint is written as presentation
+  attributes (`fill="#…"`, `stroke="…"`), a `style` attribute appearing only for an alpha mask's
+  `mask-type`; an export as CSS custom properties is the session's proposal, not ruled, and its shape
+  is open.
 - **PNG** — `png(doc, res, vp) -> Vec<u8>` via `VelloCpuRenderer` + PNG encoder. No GPU anywhere in
   this path. It shares the walk, so it needs no rule of its own about a picture that cannot be drawn:
   the placeholder is ink and lands on the pixels, which is where a hole would do the most damage and
@@ -15563,9 +15667,9 @@ What v1 locks in so a future sync layer is possible without re-architecting:
    racing an instance's creation on two peers would need a resync on merge. **Kits
    (§5.3e, §15 D1010, ~~designed, not built~~ vendoring built, updates not — D1012) bend it no further**: a vendored library main changes only
    by the commit that accepts an update, so replay converges, and an accept racing an instance's
-   creation is the same resync. **Variables (§5.3f, §15 D1037, ruled, not built) do not bend it**: a
-   bound field stores the binding and the value it draws is resolved at read, so no resolved value is
-   in the document; a kit's vendored variables and styles are the kits' bend above, not a new one.
+   creation is the same resync. **Variables (§5.3f, §15 D1037; ~~ruled, not built~~ step 1's core built,
+   D1039) do not bend it**: a bound field stores the binding and the value it draws is resolved at read,
+   so no resolved value is in the document — a bound corner's literal is written 0, not its value; a kit's vendored variables and styles are the kits' bend above, not a new one.
 
 Explicitly *not* designed now: conflict resolution, causality/ordering metadata, presence, network
 protocol. Ops are the unit of change; everything else is future work that these four properties

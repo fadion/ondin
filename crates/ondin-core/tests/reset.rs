@@ -95,11 +95,11 @@ fn fixture() -> F {
             id: a,
             fills: keyed_by_position([
                 Fill {
-                    brush: solid(10),
+                    brush: solid(10).into(),
                     visible: true,
                 },
                 Fill {
-                    brush: solid(20),
+                    brush: solid(20).into(),
                     visible: true,
                 },
             ]),
@@ -199,7 +199,7 @@ fn a_fresh_instance_has_no_drift() {
 fn reset_fields_writes_every_override_back_and_keeps_the_placement() {
     let mut f = fixture();
     let mut mine = fills(&f.doc, f.ia);
-    mine[0].brush = solid(55);
+    mine[0].brush = solid(55).into();
     let mut st = style(&f.doc, f.it);
     st.font_size = 30.0;
     st.font_family = "Mono".into();
@@ -278,7 +278,7 @@ fn a_list_reset_is_the_mains_list_and_drops_its_own() {
     let local = Keyed::new(
         f.ids.mint_item(),
         Fill {
-            brush: solid(77),
+            brush: solid(77).into(),
             visible: true,
         },
     );

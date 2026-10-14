@@ -160,7 +160,8 @@ fn synthetic(paths: usize) -> (Document, Rect) {
                     rng.range(20.0, 240.0) as u8,
                     rng.range(20.0, 240.0) as u8,
                     rng.range(120.0, 255.0) as u8,
-                )),
+                ))
+                .into(),
                 visible: true,
             }]),
         });
@@ -168,7 +169,7 @@ fn synthetic(paths: usize) -> (Document, Rect) {
             ops.push(Operation::SetStrokes {
                 id,
                 strokes: keyed_by_position([Stroke {
-                    brush: Brush::Solid(Color::from_rgba8(30, 30, 40, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(30, 30, 40, 255)).into(),
                     width: rng.range(0.5, 4.0),
                     ..Default::default()
                 }]),

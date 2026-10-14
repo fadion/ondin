@@ -3,7 +3,7 @@
 //! The only way to mutate is `apply(Transaction)`. There is no public `&mut`
 //! access to nodes or the tree.
 
-use crate::build::{affine_is_finite, brush_is_finite, effect_is_finite};
+use crate::build::{affine_is_finite, effect_is_finite};
 use crate::effect::Effect;
 use crate::export::ExportSpec;
 use crate::guide::{Guide, GuideId};
@@ -74,6 +74,10 @@ pub struct Document {
     /// document that can carry an image nothing shows, which is a *Purge unused*
     /// command rather than a bug.
     images: FxHashMap<ImageId, ImageEntry>,
+    /// The document's variables and its one mode list (§5.3f, `crate::variable`)
+    /// — the third piece of state that is not a node, changed by the operations
+    /// that name a variable or a mode and checked after every transaction.
+    variables: crate::variable::Variables,
     /// The document's library identity — typed name, project, creation stamp
     /// (`crate::meta`).
     ///
@@ -136,6 +140,8 @@ impl Document {
             variant: Vec::new(),
             props: Vec::new(),
             origin: None,
+            mode: None,
+            corner_vars: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -147,6 +153,7 @@ impl Document {
             canvas_background: DEFAULT_CANVAS_BACKGROUND,
             guides: Vec::new(),
             images: FxHashMap::default(),
+            variables: Default::default(),
             // Empty, not minted: a document that has never been through the
             // library has no id, and `Document::new` is also what every test
             // fixture and the starter document use. Minting here would put a
@@ -338,6 +345,128 @@ impl Document {
         self.images.len()
     }
 
+    /// The document's variables and mode list (§5.3f, `crate::variable`).
+    pub fn variables(&self) -> &crate::variable::Variables {
+        &self.variables
+    }
+
+    /// The mode in force at `id` (§5.3f): the mode the nearest frame at or above
+    /// it sets, else the document's default. `None` only in a document with no
+    /// modes.
+    ///
+    /// **The node itself counts**: a frame's own fill reads in the mode it sets,
+    /// as its children do.
+    pub fn mode_at(&self, id: NodeId) -> Option<crate::variable::ModeId> {
+        let mut at = self.nodes.get(&id);
+        while let Some(n) = at {
+            if let Some(m) = n.mode {
+                return Some(m);
+            }
+            at = n.parent.and_then(|p| self.nodes.get(&p));
+        }
+        self.variables.default_mode()
+    }
+
+    /// `var`'s value as `id` reads it — in the mode in force there.
+    pub fn resolve_var(
+        &self,
+        id: NodeId,
+        var: crate::variable::VarId,
+    ) -> Option<crate::variable::Value> {
+        self.variables.resolve(var, self.mode_at(id)?)
+    }
+
+    /// The brush `brush` draws at `id`: itself when literal, a solid of its
+    /// variable's colour in the mode in force at `id` when bound (§5.3f).
+    ///
+    /// **The one door a bound paint is drawn through** — the scene walk, the SVG
+    /// writer, the snapshot and the inspector all ask it. A binding that cannot
+    /// resolve is refused at the commit (`crate::variable::check`), so the
+    /// transparent fallback is for a document that broke the rules anyway.
+    ///
+    /// Borrowed when literal, so the scene walk pays nothing per frame for the
+    /// paints that bind nothing.
+    pub fn resolve_brush<'a>(
+        &self,
+        id: NodeId,
+        brush: &'a crate::variable::BrushSource,
+    ) -> std::borrow::Cow<'a, crate::Brush> {
+        use crate::variable::{BrushSource, Value};
+        use std::borrow::Cow;
+        match brush {
+            BrushSource::Literal(b) => Cow::Borrowed(b),
+            BrushSource::Bound { var, alpha } => Cow::Owned(match self.resolve_var(id, *var) {
+                Some(Value::Color(c)) => crate::Brush::Solid(c.multiply_alpha(*alpha)),
+                _ => crate::Brush::Solid(Color::TRANSPARENT),
+            }),
+        }
+    }
+
+    /// `paint` as it draws at `id`: every bound brush replaced by
+    /// [`Self::resolve_brush`]'s literal — borrowed untouched when nothing in it
+    /// is bound, which is nearly always.
+    ///
+    /// **The scene walk's and the SVG writer's one call** (§15 D1039): taken where
+    /// a node's paint is read, so the code below it handles literal brushes only
+    /// and reads them with [`crate::BrushSource::drawn`]. `id` is the node whose
+    /// mode the paint reads in — for a ghost not yet in the document the scene
+    /// passes the ghost's own id, which `mode_at` finds no node for, so a ghost
+    /// reads in the **default** mode (`scene::paint_ghost`).
+    pub fn resolved_paint<'a>(&self, id: NodeId, paint: &'a Paint) -> std::borrow::Cow<'a, Paint> {
+        use std::borrow::Cow;
+        let bound = paint.fills.iter().any(|f| f.brush.is_bound())
+            || paint.strokes.iter().any(|s| s.brush.is_bound());
+        if !bound {
+            return Cow::Borrowed(paint);
+        }
+        let mut out = paint.clone();
+        for f in out.fills.iter_mut() {
+            if f.brush.is_bound() {
+                f.brush = self.resolve_brush(id, &f.brush).into_owned().into();
+            }
+        }
+        for s in out.strokes.iter_mut() {
+            if s.brush.is_bound() {
+                s.brush = self.resolve_brush(id, &s.brush).into_owned().into();
+            }
+        }
+        Cow::Owned(out)
+    }
+
+    /// `id`'s corner radii as drawn: each bound corner its variable's number in
+    /// the mode in force, each other corner its literal. `None` when `id` binds no
+    /// corner — the stored radii are the drawn ones.
+    pub fn resolve_corners(&self, id: NodeId, radii: RoundedRectRadii) -> Option<RoundedRectRadii> {
+        let n = self.nodes.get(&id)?;
+        if n.corner_vars.iter().all(Option::is_none) {
+            return None;
+        }
+        let read = |var: Option<crate::variable::VarId>, lit: f64| match var {
+            Some(v) => match self.resolve_var(id, v) {
+                Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                _ => 0.0,
+            },
+            None => lit,
+        };
+        let [tl, tr, br, bl] = n.corner_vars;
+        Some(RoundedRectRadii {
+            top_left: read(tl, radii.top_left),
+            top_right: read(tr, radii.top_right),
+            bottom_right: read(br, radii.bottom_right),
+            bottom_left: read(bl, radii.bottom_left),
+        })
+    }
+
+    /// Every node whose fields read a variable — what an edit to the table
+    /// dirties, since no node of it changed and every one of them may draw
+    /// differently (§5.3f premise (ii)).
+    pub(crate) fn bound_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes
+            .values()
+            .filter(|n| n.reads_variables())
+            .map(|n| n.id)
+    }
+
     pub fn root(&self) -> NodeId {
         self.root
     }
@@ -386,8 +515,8 @@ impl Document {
     /// Build a document from already-validated parts (used by IO on load).
     /// Performs no validation itself — the caller (io::schema) checks integrity.
     ///
-    /// One argument per field a file stores, which is why there are nine: a
-    /// struct of the same nine fields would be this signature with a name.
+    /// One argument per field a file stores, which is why there are ten: a
+    /// struct of the same ten fields would be this signature with a name.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         schema_version: u32,
@@ -397,6 +526,7 @@ impl Document {
         canvas_background: Color,
         guides: Vec<Guide>,
         images: FxHashMap<ImageId, ImageEntry>,
+        variables: crate::variable::Variables,
         meta: DocumentMeta,
         published: Option<crate::kit::Published>,
     ) -> Self {
@@ -408,6 +538,7 @@ impl Document {
             canvas_background,
             guides,
             images,
+            variables,
             meta,
             published: published.map(std::sync::Arc::new),
             restoring: false,
@@ -529,6 +660,14 @@ impl Document {
         crate::kit::check(&working.nodes, working.root, working.vault)
             .map_err(|(id, rule)| OpError::Vault(id, rule))?;
 
+        // The variables rules (§5.3f, §15 D1039): every binding resolves to a
+        // variable of its kind, every variable has a cell in every mode, no alias
+        // loops, a mode set only on a frame. Over the whole document, for
+        // `component::check`'s reason — removing a variable breaks a binding on a
+        // node the removal never dirtied.
+        crate::variable::check(&working.variables, working.nodes.values())
+            .map_err(OpError::Variables)?;
+
         // All ops succeeded — commit the working copy.
         *self = working;
 
@@ -597,6 +736,7 @@ impl Document {
             canvas_background: self.canvas_background,
             guides: Vec::new(),
             images: FxHashMap::default(),
+            variables: Default::default(),
             meta: DocumentMeta::default(),
             published: None,
             restoring: self.restoring,
@@ -743,7 +883,163 @@ impl Document {
                     origin: old,
                 })
             }
+            Operation::AddVariable { var } => self.op_add_variable(var, dirty),
+            Operation::RemoveVariable { id } => self.op_remove_variable(*id, dirty),
+            Operation::SetVariableName { id, name } => {
+                let v = self
+                    .variables
+                    .vars
+                    .get_mut(id)
+                    .ok_or(OpError::NoSuchVariable(*id))?;
+                let old = std::mem::replace(&mut v.name, name.clone());
+                Ok(Operation::SetVariableName { id: *id, name: old })
+            }
+            Operation::SetVariableCell { id, mode, cell } => {
+                self.op_set_variable_cell(*id, *mode, *cell, dirty)
+            }
+            Operation::AddMode { mode, index, cells } => {
+                self.op_add_mode(mode, *index, cells, dirty)
+            }
+            Operation::RemoveMode { id } => self.op_remove_mode(*id, dirty),
+            Operation::SetModeName { id, name } => {
+                let m = self
+                    .variables
+                    .modes
+                    .iter_mut()
+                    .find(|m| m.id == *id)
+                    .ok_or(OpError::NoSuchMode(*id))?;
+                let old = std::mem::replace(&mut m.name, name.clone());
+                Ok(Operation::SetModeName { id: *id, name: old })
+            }
+            // Written on any node, so `reset::state_ops` can state every node's
+            // mode; *setting* one anywhere but a frame is refused at the commit
+            // (`variable::check`), where a transaction is judged by where it ends.
+            Operation::SetMode { id, mode } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.mode, *mode);
+                dirty.0.insert(*id);
+                Ok(Operation::SetMode { id: *id, mode: old })
+            }
+            Operation::SetCornerVars { id, vars } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.corner_vars, *vars);
+                dirty.0.insert(*id);
+                Ok(Operation::SetCornerVars { id: *id, vars: old })
+            }
         }
+    }
+
+    // ── The variables table (§5.3f, §15 D1039) ────────────────────────────────
+    //
+    // **Every edit that can change what a bound field reads dirties every node
+    // that reads a variable** (`bound_nodes`): no node changed, and a bound
+    // corner's used kind lives in `Resolved`, whose `update` returns early on an
+    // empty set — premise (ii)'s gap. A scan, not a reverse index: a commit
+    // already clones the whole document, and the scan is the same order of work
+    // with nothing to keep in step. The rules the table keeps are checked after
+    // the last op (`variable::check`), so these handlers refuse only what no
+    // transaction could end well from — a missing id, a duplicate one.
+
+    fn op_add_variable(
+        &mut self,
+        var: &crate::variable::Variable,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if self.variables.vars.contains_key(&var.id) {
+            return Err(OpError::DuplicateVariable(var.id));
+        }
+        self.variables.vars.insert(var.id, var.clone());
+        dirty.0.extend(self.bound_nodes());
+        Ok(Operation::RemoveVariable { id: var.id })
+    }
+
+    fn op_remove_variable(
+        &mut self,
+        id: crate::variable::VarId,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        let var = self
+            .variables
+            .vars
+            .remove(&id)
+            .ok_or(OpError::NoSuchVariable(id))?;
+        dirty.0.extend(self.bound_nodes());
+        Ok(Operation::AddVariable { var })
+    }
+
+    fn op_set_variable_cell(
+        &mut self,
+        id: crate::variable::VarId,
+        mode: crate::variable::ModeId,
+        cell: crate::variable::Cell,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if self.variables.mode(mode).is_none() {
+            return Err(OpError::NoSuchMode(mode));
+        }
+        let v = self
+            .variables
+            .vars
+            .get_mut(&id)
+            .ok_or(OpError::NoSuchVariable(id))?;
+        let old = v
+            .cells
+            .insert(mode, cell)
+            .ok_or(OpError::NoSuchMode(mode))?;
+        dirty.0.extend(self.bound_nodes());
+        Ok(Operation::SetVariableCell {
+            id,
+            mode,
+            cell: old,
+        })
+    }
+
+    fn op_add_mode(
+        &mut self,
+        mode: &crate::variable::Mode,
+        index: usize,
+        cells: &[(crate::variable::VarId, crate::variable::Cell)],
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if self.variables.mode(mode.id).is_some() {
+            return Err(OpError::DuplicateMode(mode.id));
+        }
+        if index > self.variables.modes.len() {
+            return Err(OpError::IndexOutOfRange);
+        }
+        for (var, cell) in cells {
+            self.variables
+                .vars
+                .get_mut(var)
+                .ok_or(OpError::NoSuchVariable(*var))?
+                .cells
+                .insert(mode.id, *cell);
+        }
+        self.variables.modes.insert(index, mode.clone());
+        dirty.0.extend(self.bound_nodes());
+        Ok(Operation::RemoveMode { id: mode.id })
+    }
+
+    /// **The column travels in the inverse**, `op_remove_image`'s reason: the
+    /// mode's cells are held nowhere else.
+    fn op_remove_mode(
+        &mut self,
+        id: crate::variable::ModeId,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        let index = self
+            .variables
+            .mode_index(id)
+            .ok_or(OpError::NoSuchMode(id))?;
+        let mode = self.variables.modes.remove(index);
+        let cells = self
+            .variables
+            .vars
+            .values_mut()
+            .filter_map(|v| v.cells.remove(&id).map(|c| (v.id, c)))
+            .collect();
+        dirty.0.extend(self.bound_nodes());
+        Ok(Operation::AddMode { mode, index, cells })
     }
 
     /// Open the vault as an empty parentless `Root` (§15 D1012). Refused when one
@@ -871,6 +1167,8 @@ impl Document {
             variant: Vec::new(),
             props: Vec::new(),
             origin: None,
+            mode: None,
+            corner_vars: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -1003,9 +1301,9 @@ impl Document {
                 || !affine_is_finite(n.transform)
                 || n.pivot.is_some_and(|p| !p.is_finite())
                 || !n.effects.iter().all(|e| effect_is_finite(e))
-                || !n.paint.fills.iter().all(|f| brush_is_finite(&f.brush))
+                || !n.paint.fills.iter().all(|f| f.brush.is_finite())
                 || !n.paint.strokes.iter().all(|s| {
-                    brush_is_finite(&s.brush)
+                    s.brush.is_finite()
                         && s.width.is_finite()
                         && s.dashes.iter().all(|d| d.is_finite())
                 })
@@ -1481,7 +1779,7 @@ impl Document {
         // coordinates only, so a `NaN` gradient stop offset — or colour channel —
         // was stored here, written to the file as `null`, and killed the document
         // on the way back in. Refused where the user still has their work.
-        if !fills.iter().all(|f| brush_is_finite(&f.brush)) {
+        if !fills.iter().all(|f| f.brush.is_finite()) {
             return Err(OpError::NonFinite);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1504,9 +1802,7 @@ impl Document {
         // `stroke-dasharray="1e999 5"` was one of `[S7.2-L5-01]`'s five sinks and
         // the width is written to the same file.
         if !strokes.iter().all(|s| {
-            brush_is_finite(&s.brush)
-                && s.width.is_finite()
-                && s.dashes.iter().all(|d| d.is_finite())
+            s.brush.is_finite() && s.width.is_finite() && s.dashes.iter().all(|d| d.is_finite())
         }) {
             return Err(OpError::NonFinite);
         }
@@ -2171,6 +2467,8 @@ pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
         .copied()
         .chain(doc.guides.iter().map(|g| g.id.0))
         .chain(items)
+        // Variables and modes too (§15 D1039), minted from the same stream.
+        .chain(doc.variables.ids())
         .filter(|id| id.actor == actor)
         .map(|id| id.seq)
         .max();
@@ -2293,6 +2591,11 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // outside it. The kit verbs mint their copies here too and write the
             // origin afterwards, so this is the one place a copy can lose it.
             origin: None,
+            // A copy reads the variables its source reads, in the mode its source
+            // sets (§5.3f) — the bindings are ids into the document's table, not
+            // into the template, so nothing is remapped.
+            mode: n.mode,
+            corner_vars: n.corner_vars,
         });
     }
     Some((out, new_root?))
@@ -2514,6 +2817,8 @@ mod tests {
             variant: Vec::new(),
             props: Vec::new(),
             origin: None,
+            mode: None,
+            corner_vars: Default::default(),
         }
     }
 
@@ -2846,7 +3151,7 @@ mod tests {
                 "fill",
                 Paint {
                     fills: crate::keyed_by_position([Fill {
-                        brush: crate::Brush::Solid(bad),
+                        brush: crate::Brush::Solid(bad).into(),
                         visible: true,
                     }]),
                     ..Paint::default()
@@ -2856,7 +3161,7 @@ mod tests {
                 "stroke brush",
                 Paint {
                     strokes: crate::keyed_by_position([Stroke {
-                        brush: crate::Brush::Solid(bad),
+                        brush: crate::Brush::Solid(bad).into(),
                         ..Stroke::default()
                     }]),
                     ..Paint::default()
@@ -2907,7 +3212,8 @@ mod tests {
                                 crate::image::GradientBrush::from(peniko::Gradient::default());
                             g.opacity = 1e30;
                             g
-                        }),
+                        })
+                        .into(),
                         visible: true,
                     }]),
                     ..Paint::default()

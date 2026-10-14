@@ -78,7 +78,7 @@ fn gpu_renders_fixture_on_device() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
             visible: true,
         }]),
     }]))

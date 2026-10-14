@@ -1547,7 +1547,7 @@ mod pointer_slot_tests {
             .try_commit(Transaction(vec![Operation::SetFills {
                 id,
                 fills: ondin_core::keyed_by_position([ondin_core::Fill {
-                    brush: Brush::Solid(Color::WHITE),
+                    brush: Brush::Solid(Color::WHITE).into(),
                     visible: true,
                 }]),
             }]))
@@ -1617,7 +1617,7 @@ mod pointer_slot_tests {
         );
         assert_eq!(
             shown(&app),
-            Some(red.clone()),
+            Some(red.clone().into()),
             "the press frame has to preview, or the plane does nothing until the \
              pointer moves — which is what a frozen picker looks like"
         );
@@ -1634,7 +1634,11 @@ mod pointer_slot_tests {
             "the release completes a click, and a click commits directly — neither \
              `dragged` nor `changed` is ever set for one, so the valve cannot"
         );
-        assert_eq!(shown(&app), Some(red), "on the colour the press showed");
+        assert_eq!(
+            shown(&app),
+            Some(red.into()),
+            "on the colour the press showed"
+        );
     }
 
     /// **A cancelled gesture must not land as a click on release**, which is the one
@@ -1730,7 +1734,7 @@ mod mixed_hex_tests {
         let paint = |id, c: Color| Operation::SetFills {
             id,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(c),
+                brush: Brush::Solid(c).into(),
                 visible: true,
             }]),
         };
@@ -1757,8 +1761,11 @@ mod mixed_hex_tests {
     }
 
     fn rgba8(app: &OndinApp, id: NodeId) -> [u8; 4] {
-        match &app.session.doc.get(id).expect("node").paint().fills[0].brush {
-            Brush::Solid(c) => c.to_rgba8().to_u8_array(),
+        match app.session.doc.get(id).expect("node").paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
             other => panic!("the fixture's fill is a solid colour, got {other:?}"),
         }
     }
@@ -1907,14 +1914,17 @@ mod mixed_hex_tests {
         app.session.commit(Transaction(vec![Operation::SetFills {
             id: a,
             fills: ondin_core::keyed_by_position([Fill {
-                brush: Brush::Solid(grey),
+                brush: Brush::Solid(grey).into(),
                 visible: true,
             }]),
         }]));
         app.session.selection.set(vec![a]);
         app.picker = Some(Picker::new(a, PaintSlot::Fill(0), egui::pos2(400.0, 300.0)));
-        let before = match &app.session.doc.get(a).expect("node").paint().fills[0].brush {
-            Brush::Solid(c) => c.components,
+        let before = match app.session.doc.get(a).expect("node").paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Solid(c)) => c.components,
             other => panic!("solid, got {other:?}"),
         };
         assert_eq!(
@@ -1973,8 +1983,11 @@ mod mixed_hex_tests {
             frame(&ctx, &mut app, Vec::new());
         }
 
-        let after = match &app.session.doc.get(a).expect("node").paint().fills[0].brush {
-            Brush::Solid(c) => c.components,
+        let after = match app.session.doc.get(a).expect("node").paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Solid(c)) => c.components,
             other => panic!("solid, got {other:?}"),
         };
         assert!(
@@ -2095,7 +2108,7 @@ mod radial_centre_tests {
             Operation::SetFills {
                 id: a,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush,
+                    brush: brush.into(),
                     visible: true,
                 }]),
             },
@@ -2109,7 +2122,10 @@ mod radial_centre_tests {
 
     fn centre(app: &OndinApp, id: NodeId) -> (f64, f64) {
         crate::panels::paint::radial_centre(
-            &app.session.doc.get(id).expect("node").paint().fills[0].brush,
+            app.session.doc.get(id).expect("node").paint().fills[0]
+                .brush
+                .literal()
+                .expect("the fixture's fill is literal"),
             BOX,
         )
         .expect("the fixture's fill is a radial gradient")
@@ -2637,7 +2653,7 @@ mod grid_orphan_tests {
             .apply(&Transaction(vec![Operation::SetFills {
                 id: a,
                 fills: ondin_core::keyed_by_position([Fill {
-                    brush: Brush::Solid(red),
+                    brush: Brush::Solid(red).into(),
                     visible: true,
                 }]),
             }]))
@@ -2670,8 +2686,11 @@ mod grid_orphan_tests {
             1,
             "control: a chip the picker did *not* ring still commits"
         );
-        match &app.session.doc.get(a).unwrap().paint().fills[0].brush {
-            Brush::Solid(c) => assert_eq!(*c, green, "control: and lands"),
+        match app.session.doc.get(a).unwrap().paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Solid(c)) => assert_eq!(*c, green, "control: and lands"),
             other => panic!("control: expected a solid fill, got {other:?}"),
         }
     }

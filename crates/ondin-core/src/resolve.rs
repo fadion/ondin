@@ -120,9 +120,11 @@ fn entry(id: NodeId, r: Rect) -> BoundsEntry {
 /// (§15 D868) — CSS's *used* value against its *specified* one.
 ///
 /// **Sparse, and that is the whole contract.** A node has an entry only when
-/// container layout placed or sized it somewhere other than the document says, so
-/// a document with no layout in it holds nothing here and every read falls back to
-/// [`Node::transform`] and [`Node::kind`]. The two fields are separate `Option`s
+/// container layout placed or sized it somewhere other than the document says —
+/// or when a rectangle's corners are bound to variables, whose resolved radii are
+/// drawn from here (`with_bound_corners`, §15 D1039) — so a document with neither
+/// holds nothing here and every read falls back to [`Node::transform`] and
+/// [`Node::kind`]. The two fields are separate `Option`s
 /// because the two are separate facts: a flex item that moves along its row keeps
 /// its size, and one that grows keeps nothing but its kind.
 ///
@@ -488,7 +490,46 @@ fn place_node(
             laid.insert(l.id, l);
         }
     }
-    used_geometry(view, laid, id)
+    with_bound_corners(view.doc, id, used_geometry(view, laid, id))
+}
+
+/// `used` with a rectangle's **bound corners** resolved into its kind (§15
+/// D1039) — the variable's number in the mode in force there, against the
+/// literal the binding stands in for.
+///
+/// **The used kind is where a bound radius is drawn from**, because every
+/// geometry reader already asks it (`used_kind`, D874) and none reads the
+/// document's kind to draw: the outline, the SVG writer's `rx`, the hit test and
+/// the canvas's radius handles all follow without a line of their own. Layout's
+/// size is kept — this changes the radii and nothing else.
+fn with_bound_corners(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Used> {
+    let Some(node) = doc.get(id) else {
+        return used;
+    };
+    if node.corner_vars().iter().all(Option::is_none) {
+        return used;
+    }
+    let kind = used
+        .as_ref()
+        .and_then(|u| u.kind.as_ref())
+        .unwrap_or_else(|| node.kind());
+    let NodeKind::Rect { size, corner_radii } = kind else {
+        return used;
+    };
+    let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
+        return used;
+    };
+    let size = *size;
+    let mut u = used.unwrap_or(Used {
+        local: None,
+        kind: None,
+        frame: None,
+    });
+    u.kind = Some(NodeKind::Rect {
+        size,
+        corner_radii: drawn,
+    });
+    Some(u)
 }
 
 /// `node`'s used local transform: the entry's where layout moved it, the

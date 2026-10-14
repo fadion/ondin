@@ -11,7 +11,7 @@ use ondin_core::{
 
 fn solid(r: u8) -> Fill {
     Fill {
-        brush: Brush::Solid(Color::from_rgba8(r, 0, 0, 255)),
+        brush: Brush::Solid(Color::from_rgba8(r, 0, 0, 255)).into(),
         visible: true,
     }
 }

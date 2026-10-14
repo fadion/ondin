@@ -206,7 +206,7 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetFills {
             id: artboard,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(250, 250, 252, 255)),
+                brush: Brush::Solid(Color::from_rgba8(250, 250, 252, 255)).into(),
                 visible: true,
             }]),
         },
@@ -364,14 +364,14 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)),
+                brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetStrokes {
             id: rect,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::from_rgba8(20, 30, 60, 255)),
+                brush: Brush::Solid(Color::from_rgba8(20, 30, 60, 255)).into(),
                 width: 2.5,
                 join: Join::Round,
                 cap: Cap::Round,
@@ -396,21 +396,22 @@ fn golden_document() -> (Document, Resolved) {
                             (1.0_f32, Color::from_rgba8(0, 90, 200, 255)),
                         ])
                         .into(),
-                ),
+                )
+                .into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: polygon,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(30, 160, 110, 255)),
+                brush: Brush::Solid(Color::from_rgba8(30, 160, 110, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: star,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(220, 60, 90, 255)),
+                brush: Brush::Solid(Color::from_rgba8(220, 60, 90, 255)).into(),
                 visible: true,
             }]),
         },
@@ -421,7 +422,7 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetStrokes {
             id: line,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::from_rgba8(90, 90, 100, 255)),
+                brush: Brush::Solid(Color::from_rgba8(90, 90, 100, 255)).into(),
                 width: 3.0,
                 join: Join::Miter,
                 cap: Cap::Butt,
@@ -439,7 +440,7 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetStrokes {
             id: polygon,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::from_rgba8(10, 70, 50, 255)),
+                brush: Brush::Solid(Color::from_rgba8(10, 70, 50, 255)).into(),
                 width: 3.0,
                 join: Join::Miter,
                 cap: Cap::Butt,
@@ -455,21 +456,21 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetFills {
             id: path,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(140, 100, 220, 255)),
+                brush: Brush::Solid(Color::from_rgba8(140, 100, 220, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: nested,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(40, 40, 45, 255)),
+                brush: Brush::Solid(Color::from_rgba8(40, 40, 45, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: operand_a,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)),
+                brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)).into(),
                 visible: true,
             }]),
         },
@@ -481,7 +482,7 @@ fn golden_document() -> (Document, Resolved) {
         Operation::SetFills {
             id: boolean,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)),
+                brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)).into(),
                 visible: true,
             }]),
         },

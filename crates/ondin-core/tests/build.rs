@@ -2005,7 +2005,8 @@ fn a_boolean_wraps_its_operands_and_takes_the_bottom_ones_paint() {
     let blue = ondin_core::Fill {
         brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
             0, 0, 255, 255,
-        )),
+        ))
+        .into(),
         visible: true,
     };
     f.commit(Transaction(vec![Operation::SetFills {
@@ -2231,7 +2232,8 @@ fn flattening_a_boolean_keeps_its_outline_and_discards_the_operands() {
     let red = ondin_core::Fill {
         brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
             255, 0, 0, 255,
-        )),
+        ))
+        .into(),
         visible: true,
     };
     f.commit(Transaction(vec![Operation::SetFills {
@@ -2582,7 +2584,8 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
     let red = ondin_core::Fill {
         brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
             255, 0, 0, 255,
-        )),
+        ))
+        .into(),
         visible: true,
     };
     f.commit(Transaction(vec![
@@ -3227,7 +3230,7 @@ fn the_key_also_decides_the_paint_the_boolean_inherits() {
     let bottom = f.add(f.artboard, rect(100.0, 100.0), (0.0, 0.0));
     let top = f.add(f.artboard, rect(100.0, 100.0), (40.0, 0.0));
     let red = Fill {
-        brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)),
+        brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
         visible: true,
     };
     f.commit(Transaction(vec![Operation::SetFills {
@@ -3598,7 +3601,7 @@ fn a_copied_picture_arrives_in_a_document_that_never_had_it() {
         Operation::SetFills {
             id: shape,
             fills: keyed_by_position([Fill {
-                brush: image_brush(key.clone()),
+                brush: image_brush(key.clone()).into(),
                 visible: true,
             }]),
         },
@@ -3842,7 +3845,7 @@ fn make_it_a_picture(f: &mut Fixture, id: NodeId) {
         Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: image_brush(key),
+                brush: image_brush(key).into(),
                 visible: true,
             }]),
         },

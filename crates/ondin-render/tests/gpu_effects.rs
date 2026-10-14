@@ -49,7 +49,7 @@ fn document(effects: Vec<Effect>, opacity: f32) -> (Document, Resolved) {
         Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -285,7 +285,7 @@ fn photographs(n: usize, w: u32, h: u32) -> (Document, Resolved, ImageStore) {
         ops.push(Operation::SetFills {
             id: node,
             fills: keyed_by_position([Fill {
-                brush: image_brush(iid),
+                brush: image_brush(iid).into(),
                 visible: true,
             }]),
         });
@@ -403,7 +403,7 @@ fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
         Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         },
@@ -729,7 +729,7 @@ fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
             Operation::SetFills {
                 id,
                 fills: keyed_by_position([Fill {
-                    brush: Brush::Solid(c),
+                    brush: Brush::Solid(c).into(),
                     visible: true,
                 }]),
             },
@@ -939,7 +939,7 @@ fn nested(stacks: Vec<Vec<Effect>>) -> (Document, Resolved) {
     ops.push(Operation::SetFills {
         id: r,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::WHITE),
+            brush: Brush::Solid(Color::WHITE).into(),
             visible: true,
         }]),
     });
@@ -1008,7 +1008,7 @@ fn siblings(n: usize, size: f64) -> (Document, Resolved) {
         ops.push(Operation::SetFills {
             id: r,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         });
@@ -1081,7 +1081,7 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
         Operation::SetFills {
             id: pic,
             fills: keyed_by_position([Fill {
-                brush: image_brush(iid),
+                brush: image_brush(iid).into(),
                 visible: true,
             }]),
         },
@@ -1108,7 +1108,7 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
         ops.push(Operation::SetFills {
             id: other,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::WHITE),
+                brush: Brush::Solid(Color::WHITE).into(),
                 visible: true,
             }]),
         });
@@ -1469,7 +1469,7 @@ fn card_grid(n: usize) -> (Document, Resolved) {
     let mut layered = Vec::new();
     let white = || {
         keyed_by_position([Fill {
-            brush: Brush::Solid(Color::WHITE),
+            brush: Brush::Solid(Color::WHITE).into(),
             visible: true,
         }])
     };

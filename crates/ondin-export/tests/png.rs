@@ -47,7 +47,7 @@ fn red_square_doc() -> (Document, Resolved) {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -131,7 +131,7 @@ fn text_rasterizes_ink_pixels() {
         Operation::SetFills {
             id: ab,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)),
+                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)).into(),
                 visible: true,
             }]),
         },
@@ -239,7 +239,7 @@ fn stroked_rect_doc(align: StrokeAlign) -> (Document, Resolved) {
         Operation::SetStrokes {
             id: rect,
             strokes: keyed_by_position([ondin_core::Stroke {
-                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)),
+                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
                 width: 10.0,
                 join: ondin_core::kurbo::Join::Miter,
                 cap: ondin_core::kurbo::Cap::Butt,
@@ -342,7 +342,7 @@ fn an_aligned_stroke_does_not_clip_its_siblings() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: sibling,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(0, 200, 0, 255)),
+            brush: Brush::Solid(Color::from_rgba8(0, 200, 0, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -395,7 +395,7 @@ fn an_open_shape_ignores_alignment_rather_than_half_drawing_itself() {
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: line,
         strokes: keyed_by_position([ondin_core::Stroke {
-            brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)),
+            brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
             width: 10.0,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,
@@ -450,7 +450,7 @@ fn a_per_side_stroke_inks_only_that_side() {
         doc.apply(&Transaction(vec![Operation::SetStrokes {
             id: rect,
             strokes: keyed_by_position([Stroke {
-                brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
+                brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)).into(),
                 width: 8.0,
                 // Inside, so the whole stroke lands within the 100×100 viewport
                 // rather than half of it falling off the edge.
@@ -543,7 +543,7 @@ fn a_dotted_stroke_rasterizes_as_dots_not_a_line() {
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: rect,
         strokes: keyed_by_position([Stroke {
-            brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
+            brush: Brush::Solid(Color::from_rgba8(0, 0, 0, 255)).into(),
             width: 4.0,
             align: StrokeAlign::Inside,
             // A dot every 12 units. Butt-capped, which is the cap that cannot draw
@@ -598,7 +598,7 @@ fn decorated_doc(content: &str, style: ondin_core::TextStyle) -> (Document, Reso
         Operation::SetFills {
             id: ab,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)),
+                brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)).into(),
                 visible: true,
             }]),
         },
@@ -728,7 +728,7 @@ fn a_decoration_colour_overrides_the_text_ink() {
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: text,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)),
+            brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
             visible: true,
         }]),
     }]))
@@ -805,7 +805,7 @@ fn a_very_wide_stroke_buries_the_middle_of_the_shape() {
             Operation::SetStrokes {
                 id: shape,
                 strokes: keyed_by_position([ondin_core::Stroke {
-                    brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)),
+                    brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
                     width,
                     join: ondin_core::kurbo::Join::Round,
                     align: StrokeAlign::Center,
@@ -951,7 +951,7 @@ fn framed_doc(
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush,
+                brush: brush.into(),
                 visible: true,
             }]),
         },
@@ -1500,7 +1500,7 @@ fn two_fills_of_one_picture_carry_their_own_adjustments() {
         Operation::SetFills {
             id: second,
             fills: keyed_by_position([Fill {
-                brush,
+                brush: brush.into(),
                 visible: true,
             }]),
         },
@@ -1555,7 +1555,7 @@ fn overlapping_siblings() -> (Document, Resolved, ondin_core::NodeId) {
         Operation::SetFills {
             id: ab,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)),
+                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
                 visible: true,
             }]),
         },
@@ -1586,14 +1586,14 @@ fn overlapping_siblings() -> (Document, Resolved, ondin_core::NodeId) {
         Operation::SetFills {
             id: ellipse,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+                brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
                 visible: true,
             }]),
         },
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(30, 200, 60, 255)),
+                brush: Brush::Solid(Color::from_rgba8(30, 200, 60, 255)).into(),
                 visible: true,
             }]),
         },
@@ -1765,7 +1765,7 @@ fn an_alpha_mask_fades_what_it_masks_and_reads_only_its_alpha() {
         Operation::SetFills {
             id: mask,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 128)),
+                brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 128)).into(),
                 visible: true,
             }]),
         },
@@ -1895,7 +1895,7 @@ fn a_gradient_on_railed_type_runs_across_the_whole_node() {
         Operation::SetFills {
             id: text,
             fills: keyed_by_position([Fill {
-                brush: Brush::Gradient(gradient.into()),
+                brush: Brush::Gradient(gradient.into()).into(),
                 visible: true,
             }]),
         },
@@ -2004,7 +2004,8 @@ fn a_squashed_radial_gradient_paints_an_ellipse_rather_than_a_circle() {
                         * Affine::scale_non_uniform(1.0, 2.0)
                         * Affine::translate((0.0, -50.0)),
                     opacity: 1.0,
-                }),
+                })
+                .into(),
                 visible: true,
             }]),
         },
@@ -2042,7 +2043,7 @@ fn boolean_then_sibling(effects: Vec<ondin_core::Effect>) -> (Document, Resolved
     let fill = |id| Operation::SetFills {
         id,
         fills: keyed_by_position([Fill {
-            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
+            brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)).into(),
             visible: true,
         }]),
     };
@@ -2203,7 +2204,7 @@ fn text_whose_picture_is_missing_draws_nothing_rather_than_the_last_paint() {
         Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)),
+                brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
                 visible: true,
             }]),
         },
@@ -2235,7 +2236,7 @@ fn text_whose_picture_is_missing_draws_nothing_rather_than_the_last_paint() {
         Operation::SetFills {
             id: text,
             fills: keyed_by_position([Fill {
-                brush: image_brush(missing),
+                brush: image_brush(missing).into(),
                 visible: true,
             }]),
         },
@@ -2350,7 +2351,7 @@ fn a_gradient_with_descending_stops_draws_the_ramp_svg_says_it_means() {
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
             fills: keyed_by_position([Fill {
-                brush: ondin_core::Brush::Gradient(g.into()),
+                brush: ondin_core::Brush::Gradient(g.into()).into(),
                 visible: true,
             }]),
         }]))

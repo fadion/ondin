@@ -205,7 +205,7 @@ fn tree() -> Tree {
         ops.push(Operation::SetFills {
             id,
             fills: keyed_by_position([Fill {
-                brush: Brush::Solid(c),
+                brush: Brush::Solid(c).into(),
                 visible: true,
             }]),
         });

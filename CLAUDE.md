@@ -67,8 +67,16 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1046 index rows, 1046 body headings, next free
-D1047** (measured 2026-10-14 over the uncommitted tree on `b443418`; ⚠️ **the step-1 leftovers request
+anywhere cited either. **The live figures: 1056 index rows, 1056 body headings, next free
+D1057** (measured 2026-10-14 at `ad87be7`; ⚠️ **the open-issues request — the maintainer
+delegating step 1's open decisions — reserved D1047–D1058 at `68aff8b` and spent ten**, D1047–D1056
+(the property paste, override marks, per-corner chips, the corner preview, the mode on every tag,
+the colour cell's popup, the browser's refusals, groups and bar, a cell's live preview), committed
+as `11f2a0c`, `8da576f`, `566dfb2` and the record `ad87be7`; **D1057–D1058 found at zero sites and
+released.** Census **955**, none unresolved. ⚠️ **The split commits were each built and tested as
+their own tree** — the stage trees in separate target dirs this time — and a stage-2 tree caught a
+`FieldKey::Corner` arm the intermediate had lost. Before that, measured over the uncommitted tree
+on `b443418`; ⚠️ **the step-1 leftovers request
 reserved D1044–D1053 at `b443418` and spent three** — D1044 (B4's refusal, and the radius `DragValue`
 handing `--` to the retype buffer), D1045 (A4's *Mixed* capsule), D1046 (the badge's no-scrub cursor);
 `arch-scribe` read two defects in D1044's first cut — a refused `Enter` dropping the field's text, a

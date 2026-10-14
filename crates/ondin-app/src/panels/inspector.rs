@@ -5866,10 +5866,23 @@ impl OndinApp {
                     }
                     // `--` typed into it opens the list (B1): the field's text is the
                     // drag value's own, kept by egui under its id while it is typed.
+                    //
+                    // **And hands the text to the retype buffer** (§15 D1044): a
+                    // `DragValue` lays its own text out, so B4's dimmed tail cannot be
+                    // drawn in it, and `radius_retype`'s `TextEdit` can. From the next
+                    // frame that buffer is the field, caret at the end; `Enter` there
+                    // writes a number typed back over the `--` as this field would.
                     if rr.has_focus()
                         && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(rr.id))
                     {
                         app.bind_typing(ui.ctx(), key, &text, rr.rect);
+                        if text.starts_with("--") {
+                            app.var_retype = Some(super::binding::Retype {
+                                key,
+                                text,
+                                focus: true,
+                            });
+                        }
                     }
                     if rr.secondary_clicked()
                         && let Some(at) = rr.interact_pointer_pos()
@@ -10882,7 +10895,7 @@ impl OndinApp {
     /// D130). Typing over it works without a special case — `parse_hex` rejects
     /// "Mixed", so the write below simply does not happen until there is a colour to
     /// write.
-    fn paint_hex_field(
+    pub(super) fn paint_hex_field(
         &mut self,
         ui: &mut egui::Ui,
         id: NodeId,
@@ -10913,14 +10926,25 @@ impl OndinApp {
         } else {
             ui::HEX_CHAR_LIMIT
         };
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut text)
-                .id(edit_id)
-                .frame(egui::Frame::NONE)
-                .desired_width(62.0)
-                .char_limit(limit)
-                .font(egui::FontId::proportional(12.0)),
-        );
+        // B4's refused tail dims as it is typed (§15 D1044).
+        use ondin_core::variable::VarKind;
+        let font = egui::FontId::proportional(12.0);
+        let table = self.session.doc.variables();
+        let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
+            let at = super::binding::refused(table, VarKind::Color, buf.as_str()).map(|r| r.1);
+            super::binding::refusal_galley(ui, buf.as_str(), at, &font)
+        };
+        let out = egui::TextEdit::singleline(&mut text)
+            .id(edit_id)
+            .frame(egui::Frame::NONE)
+            .desired_width(62.0)
+            .char_limit(limit)
+            .font(font.clone())
+            .layouter(&mut layouter)
+            .show(ui);
+        let at = super::binding::refused(table, VarKind::Color, &text).map(|r| r.1);
+        super::binding::underline_refusal(ui, &out, at);
+        let resp = out.response;
         if retyped && !resp.has_focus() && editing {
             resp.request_focus();
         }
@@ -10933,9 +10957,24 @@ impl OndinApp {
         if resp.gained_focus() || resp.changed() {
             self.paint_hex = Some((id, slot, text.clone()));
         }
+        // **`Enter` on a refused `--` leaves the field as it was** (B4, §15
+        // D1044's *Fix*): a single-line `TextEdit` gives the keyboard up on
+        // `Enter`, which dropped the buffer the refusal asks to be edited and let
+        // the list close. The text goes back through the retype buffer, which
+        // refocuses it with the caret at the end; the list is asked for on this
+        // pass and the next, while the focus lands.
+        let refused_enter =
+            resp.lost_focus() && at.is_some() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if refused_enter {
+            self.var_retype = Some(super::binding::Retype {
+                key,
+                text: text.clone(),
+                focus: true,
+            });
+        }
         // `--` opens the variables list under the row (B2); the field's menu is
         // the other way in.
-        if resp.has_focus() {
+        if resp.has_focus() || retyped || refused_enter {
             self.bind_typing(ui.ctx(), key, &text, resp.rect);
         }
         if resp.secondary_clicked()
@@ -10949,7 +10988,7 @@ impl OndinApp {
         // of the field, including the one that writes nothing** — `Escape` has to
         // leave the buffer behind as well as the colour, or the next click into the
         // row reopens the abandoned text.
-        if resp.lost_focus() {
+        if resp.lost_focus() && !refused_enter {
             self.paint_hex = None;
         }
         // ⚠️ **`Escape` abandons it, and this field had to be told** (§15 D808).

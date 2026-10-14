@@ -266,6 +266,97 @@ pub(crate) fn matches<'a>(
     out
 }
 
+/// B4's refusal (§15 D1044): a field's buffer, `--` and all, that names a whole
+/// variable of `kind` and then goes on — `--space/4 * 2` — when a variable fills
+/// the whole field, a live relationship breaching §13 decision 1 (D1037). The
+/// variable, and the byte of `text` where the rest begins.
+///
+/// `None` while anything still matches the query, so a name that is the start of
+/// a longer one (`brand/50` of `brand/500`) is still being typed rather than
+/// refused; the longest whole name wins.
+pub(crate) fn refused<'a>(
+    table: &'a ondin_core::Variables,
+    kind: VarKind,
+    text: &str,
+) -> Option<(&'a Variable, usize)> {
+    let q = text.strip_prefix("--")?;
+    if !matches(table, kind, q).is_empty() {
+        return None;
+    }
+    table
+        .iter()
+        .filter(|v| v.kind == kind)
+        .filter(|v| {
+            q.get(..v.name.len())
+                .is_some_and(|head| head.to_lowercase() == v.name.to_lowercase())
+                && !q[v.name.len()..].trim().is_empty()
+        })
+        .max_by_key(|v| v.name.len())
+        .map(|v| (v, 2 + v.name.len()))
+}
+
+/// A bindable field's text laid out with B4's refused tail — from byte `at` on —
+/// dimmed to 40%: the layouter every `--`-taking `TextEdit` shares. With no
+/// refusal it is the plain line `TextEdit` would have laid out itself, in the
+/// colour it would have chosen.
+pub(crate) fn refusal_galley(
+    ui: &egui::Ui,
+    text: &str,
+    at: Option<usize>,
+    font: &egui::FontId,
+) -> std::sync::Arc<egui::Galley> {
+    let ink = ui
+        .visuals()
+        .override_text_color
+        .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color());
+    let mut job = egui::text::LayoutJob::default();
+    match at.filter(|a| text.is_char_boundary(*a)) {
+        Some(a) => {
+            job.append(&text[..a], 0.0, egui::TextFormat::simple(font.clone(), ink));
+            job.append(
+                &text[a..],
+                0.0,
+                egui::TextFormat::simple(font.clone(), color::text_a(102)),
+            );
+        }
+        None => job.append(text, 0.0, egui::TextFormat::simple(font.clone(), ink)),
+    }
+    job.wrap.max_width = f32::INFINITY;
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// B4's dotted underline under a field's refused tail, from byte `at` to the end
+/// of the text the field drew — egui underlines solid only, so it is painted.
+pub(crate) fn underline_refusal(
+    ui: &egui::Ui,
+    out: &egui::text_edit::TextEditOutput,
+    at: Option<usize>,
+) {
+    let text = out.galley.text();
+    let Some(a) = at.filter(|a| text.is_char_boundary(*a) && *a < text.len()) else {
+        return;
+    };
+    let x = |chars: usize| {
+        out.galley
+            .pos_from_cursor(egui::text::CCursor::new(chars))
+            .min
+            .x
+    };
+    let (x0, x1) = (x(text[..a].chars().count()), x(text.chars().count()));
+    let y = out.galley_pos.y + out.galley.rect.bottom() + 0.5;
+    ui.painter()
+        .with_clip_rect(out.text_clip_rect)
+        .extend(egui::Shape::dotted_line(
+            &[
+                egui::pos2(out.galley_pos.x + x0, y),
+                egui::pos2(out.galley_pos.x + x1, y),
+            ],
+            color::text_a(102),
+            3.0,
+            0.6,
+        ));
+}
+
 impl OndinApp {
     /// The nodes a field's binding writes to.
     fn field_ids(&self, key: FieldKey) -> Vec<NodeId> {
@@ -531,7 +622,35 @@ impl OndinApp {
                         }
                         ui.add_space(3.0);
                     }
-                    if list.is_empty() {
+                    // B4: a whole name with more after it is refused in one plain
+                    // sentence — no red, no shake — and `Enter` stays inert, the
+                    // list having no row to bind.
+                    let refusal = (!c.own_search)
+                        .then(|| format!("--{}", c.query))
+                        .and_then(|t| refused(table, c.key.kind(), &t).map(|(v, at)| (v, t, at)));
+                    if let Some((v, t, at)) = &refusal {
+                        let font = egui::FontId::proportional(11.5);
+                        let plain = egui::TextFormat::simple(font.clone(), theme::text::DIM);
+                        let mut job = egui::text::LayoutJob::default();
+                        job.append(
+                            "A variable fills the whole field. Remove ",
+                            0.0,
+                            plain.clone(),
+                        );
+                        job.append(
+                            t[*at..].trim(),
+                            0.0,
+                            egui::TextFormat::simple(egui::FontId::monospace(11.0), color::TEXT),
+                        );
+                        job.append(&format!(" to bind {}.", v.name), 0.0, plain);
+                        job.wrap.max_width = LIST_W - 8.0 - 16.0;
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(job);
+                        });
+                        ui.add_space(4.0);
+                    } else if list.is_empty() {
                         ui.label(
                             egui::RichText::new(if table.iter().any(|v| v.kind == c.key.kind()) {
                                 "No variable matches"
@@ -780,21 +899,29 @@ impl OndinApp {
         let FieldKey::Radius { id } = key else { return };
         let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
         let mut field = None;
+        let table = self.session.doc.variables();
+        let font = egui::FontId::proportional(12.0);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
             ui.label(theme::icon_text(
                 icon::CORNERS_OUT,
                 14.0,
                 theme::text::FAINT,
             ));
-            field = Some(
-                ui.add(
-                    egui::TextEdit::singleline(&mut rt.text)
-                        .id(edit_id)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(f32::INFINITY)
-                        .font(egui::FontId::proportional(12.0)),
-                ),
-            );
+            // B4's refused tail dims as it is typed (§15 D1044).
+            let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
+                let at = refused(table, VarKind::Number, buf.as_str()).map(|r| r.1);
+                refusal_galley(ui, buf.as_str(), at, &font)
+            };
+            let out = egui::TextEdit::singleline(&mut rt.text)
+                .id(edit_id)
+                .frame(egui::Frame::NONE)
+                .desired_width(f32::INFINITY)
+                .font(font.clone())
+                .layouter(&mut layouter)
+                .show(ui);
+            let at = refused(table, VarKind::Number, &rt.text).map(|r| r.1);
+            underline_refusal(ui, &out, at);
+            field = Some(out.response);
         });
         let Some(field) = field else { return };
         if rt.focus {
@@ -803,15 +930,33 @@ impl OndinApp {
             caret_to_end(ui.ctx(), edit_id, &rt.text);
         }
         self.bind_typing(ui.ctx(), key, &rt.text, field.rect);
+        // `Enter` on a refused `--` leaves the buffer focused and as typed (B4,
+        // §15 D1044's *Fix*) — the `TextEdit` gave the keyboard up on it.
+        if field.lost_focus()
+            && refused(self.session.doc.variables(), VarKind::Number, &rt.text).is_some()
+            && ui.input(|i| i.key_pressed(egui::Key::Enter))
+        {
+            rt.focus = true;
+            self.var_retype = Some(rt);
+            return;
+        }
         if field.lost_focus() {
             self.var_retype = None;
             if ui::defocus_commits(&field)
                 && !rt.text.starts_with("--")
                 && let Some(r) = crate::expr::eval(&rt.text).filter(|r| r.is_finite())
             {
-                // Detached first, so the radius written is the literal drawn
-                // whatever it is — 0 included, which changes no bound literal.
-                let mut ops = ondin_core::detach_corners_ops(&self.session.doc, id);
+                // **A chip typed over is detached first**, so the radius written
+                // is the literal drawn whatever it is — 0 included, which changes
+                // no bound literal. **Anything else is the plain field's write**
+                // (§15 D1044): the buffer is the unbound field's too since a `--`
+                // hands it here, and on a rect with *some* corners bound the
+                // commit's `keep_corner_bindings` must judge each corner as it
+                // would the `DragValue`'s edit, not see them all detached.
+                let mut ops = match self.field_var(key) {
+                    Some(_) => ondin_core::detach_corners_ops(&self.session.doc, id),
+                    None => Vec::new(),
+                };
                 ops.push(Operation::SetGeometry {
                     id,
                     geometry: ondin_core::GeometryPatch::CornerRadius(r.max(0.0)),
@@ -1503,6 +1648,300 @@ mod tests {
             paint_item(PaintSlot::Effect(0)).is_none(),
             "an effect's colour is not a bindable slot"
         );
+    }
+
+    /// **B4: a whole name with more after it is refused, and only then** (§15
+    /// D1044): `--radius/md * 2` refuses ` * 2`, case aside; a name still being
+    /// typed, or the whole name alone, is not; and a whole name that is the start
+    /// of a longer one is not refused while the longer one matches.
+    ///
+    /// Flip, run: dropping the `matches(..).is_empty()` guard fails *"a longer
+    /// name still matching is not refused"* — `--brand/500-` read as `brand/500`
+    /// and a refused `-`.
+    #[test]
+    fn a_whole_name_with_more_after_it_is_refused() {
+        let (_ctx, mut app, _rect, _, _) = fixture();
+        let mode = app.session.doc.variables().modes()[0].id;
+        let alt = app.session.ids.mint_var();
+        assert!(app.commit_edit(Transaction(vec![Operation::AddVariable {
+            var: Variable {
+                id: alt,
+                name: "brand/500-alt".into(),
+                kind: VarKind::Color,
+                cells: [(mode, Cell::Color(Color::BLACK))].into(),
+            },
+        }])));
+        let table = app.session.doc.variables();
+        let at = |kind, text| refused(table, kind, text).map(|(v, at)| (v.name.clone(), at));
+        assert_eq!(
+            at(VarKind::Number, "--radius/md * 2"),
+            Some(("radius/md".into(), 11))
+        );
+        assert_eq!(
+            at(VarKind::Number, "--RADIUS/md*2"),
+            Some(("radius/md".into(), 11)),
+            "case aside, as the list matches"
+        );
+        assert_eq!(at(VarKind::Number, "--radius/m"), None, "still being typed");
+        assert_eq!(
+            at(VarKind::Number, "--radius/md"),
+            None,
+            "the whole name binds"
+        );
+        assert_eq!(
+            at(VarKind::Number, "--radius/md  "),
+            None,
+            "trailing space is nothing"
+        );
+        assert_eq!(
+            at(VarKind::Number, "--nothing * 2"),
+            None,
+            "no name: B3's no match"
+        );
+        assert_eq!(
+            at(VarKind::Number, "--brand/500 x"),
+            None,
+            "a colour's name in a number field is no match"
+        );
+        assert_eq!(
+            at(VarKind::Color, "--brand/500-"),
+            None,
+            "a longer name still matching is not refused"
+        );
+        assert_eq!(
+            at(VarKind::Color, "--brand/500 * 2"),
+            Some(("brand/500".into(), 11))
+        );
+    }
+
+    /// **The `--` list says a refusal in one sentence, and `Enter` binds nothing**
+    /// (B4): *Remove `* 2` to bind radius/md*, the list open after the key.
+    #[test]
+    fn a_refused_query_says_why_and_enter_is_inert() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let k = FieldKey::Radius { id: rect };
+        let under = egui::Rect::from_min_size(egui::pos2(960.0, 200.0), egui::vec2(200.0, 28.0));
+        // Two passes: an area's first is egui's invisible sizing pass.
+        let mut shapes = vec![];
+        for _ in 0..2 {
+            shapes = ctx
+                .run_ui(Default::default(), |_| {
+                    app.bind_typing(&ctx, k, "--radius/md * 2", under);
+                    app.var_complete_ui(&ctx);
+                })
+                .shapes;
+        }
+        let said = "A variable fills the whole field. Remove * 2 to bind radius/md.";
+        assert!(text_at(&shapes, said).is_some(), "the sentence is drawn");
+        let input = egui::RawInput {
+            events: vec![key(egui::Key::Enter)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |_| {
+            app.bind_typing(&ctx, k, "--radius/md * 2", under);
+            app.var_complete_ui(&ctx);
+        });
+        assert_eq!(app.field_var(k), None, "Enter binds nothing");
+        assert!(app.var_complete.is_some(), "and the list stays");
+    }
+
+    /// **The radius buffer a `--` is handed to writes a number typed back over it,
+    /// on an unbound rect too, and `Escape` writes nothing** (§15 D1044): the
+    /// corner field's `DragValue` passes `--` text to `radius_retype` so B4's tail
+    /// can be drawn, which makes that buffer the unbound field's as well as a
+    /// chip's.
+    #[test]
+    fn the_radius_buffer_writes_a_number_and_escape_leaves_it() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let k = FieldKey::Radius { id: rect };
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.radius_retype(ui, k, rt, 160.0);
+                }
+            });
+        };
+        let radius = |app: &OndinApp| match app.session.doc.get(rect).unwrap().kind() {
+            NodeKind::Rect { corner_radii, .. } => corner_radii.top_left,
+            _ => unreachable!(),
+        };
+        app.var_retype = Some(Retype {
+            key: k,
+            text: "--radius/md * 2".into(),
+            focus: true,
+        });
+        run(&mut app, vec![]);
+        run(&mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.var_retype.is_none(), "Escape leaves the buffer");
+        assert_eq!(radius(&app), 2.0, "and writes nothing");
+        app.var_retype = Some(Retype {
+            key: k,
+            text: "12".into(),
+            focus: true,
+        });
+        run(&mut app, vec![]);
+        run(&mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(radius(&app), 12.0, "a number typed back writes");
+        assert_eq!(app.field_var(k), None);
+    }
+
+    /// **`Enter` on a refused `--` leaves either field as typed, the list still
+    /// up** (B4, §15 D1044's *Fix*): the hex field and the radius buffer, each
+    /// drawn for real, the key landing once the buffer holds the keyboard.
+    ///
+    /// Flip, run: without the hex field's `refused_enter` arm it fails *"the hex
+    /// buffer is kept"* — the `TextEdit` gave the keyboard up on `Enter` and
+    /// `lost_focus` dropped the text, the defect `arch-scribe` read. And without
+    /// `radius_retype`'s arm it fails *"the radius buffer is kept"*.
+    #[test]
+    fn enter_on_a_refusal_leaves_the_field_as_typed() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let typed = "--brand/500 * 2";
+        let hex = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Fill(0),
+        };
+        app.var_retype = Some(Retype {
+            key: hex,
+            text: typed.into(),
+            focus: true,
+        });
+        let brush = ondin_core::Brush::Solid(RED.with_alpha(0.5));
+        let hex_frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                app.paint_hex_field(ui, rect, PaintSlot::Fill(0), &brush, false);
+                app.var_complete_ui(&ctx);
+            });
+        };
+        for _ in 0..3 {
+            hex_frame(&mut app, vec![]);
+        }
+        assert!(
+            app.var_complete.is_some(),
+            "the list is up over the refusal"
+        );
+        hex_frame(&mut app, vec![key(egui::Key::Enter)]);
+        for _ in 0..3 {
+            hex_frame(&mut app, vec![]);
+        }
+        assert!(
+            matches!(&app.paint_hex, Some((_, _, t)) if t == typed),
+            "the hex buffer is kept"
+        );
+        assert!(app.var_complete.is_some(), "and the list stays up");
+        assert_eq!(fill0(&app, rect), BrushSource::from(RED.with_alpha(0.5)));
+
+        let radius = FieldKey::Radius { id: rect };
+        app.paint_hex = None;
+        app.var_complete = None;
+        app.var_retype = Some(Retype {
+            key: radius,
+            text: "--radius/md * 2".into(),
+            focus: true,
+        });
+        let radius_frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.radius_retype(ui, radius, rt, 160.0);
+                }
+                app.var_complete_ui(&ctx);
+            });
+        };
+        radius_frame(&mut app, vec![]);
+        radius_frame(&mut app, vec![]);
+        radius_frame(&mut app, vec![key(egui::Key::Enter)]);
+        for _ in 0..3 {
+            radius_frame(&mut app, vec![]);
+        }
+        assert_eq!(
+            app.var_retype.as_ref().map(|r| r.text.as_str()),
+            Some("--radius/md * 2"),
+            "the radius buffer is kept"
+        );
+        assert!(app.var_complete.is_some(), "and its list stays up");
+    }
+
+    /// **A number typed back over a `--` on a rect with *some* corners bound
+    /// keeps a corner written its own drawn value bound** (§15 D1044): the
+    /// buffer writes as the plain field does, through `keep_corner_bindings`, and
+    /// only a chip's retype detaches every corner first.
+    ///
+    /// Flip, run: detaching first whatever the field (the first cut) fails
+    /// *"the bound corner written 6 stays bound"*.
+    #[test]
+    fn a_number_typed_back_keeps_a_partly_bound_rects_binding() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let ops =
+            ondin_core::bind_corners_ops(&app.session.doc, rect, [Some(radius), None, None, None]);
+        assert!(app.commit_edit(Transaction(ops)));
+        let k = FieldKey::Radius { id: rect };
+        assert_eq!(
+            app.field_var(k),
+            None,
+            "the fixture is partly bound, no chip"
+        );
+        app.var_retype = Some(Retype {
+            key: k,
+            text: "6".into(),
+            focus: true,
+        });
+        for events in [vec![], vec![], vec![key(egui::Key::Enter)]] {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.radius_retype(ui, k, rt, 160.0);
+                }
+            });
+        }
+        assert!(
+            app.var_retype.is_none(),
+            "Enter wrote and closed the buffer"
+        );
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().corner_vars()[0],
+            Some(radius),
+            "the bound corner written 6 stays bound"
+        );
+    }
+
+    /// The field's refused tail is laid out at 40%, the rest as `TextEdit` would
+    /// have drawn it (B4).
+    #[test]
+    fn a_refused_tail_is_laid_out_dim() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let font = egui::FontId::proportional(12.0);
+            let g = refusal_galley(ui, "--radius/md * 2", Some(11), &font);
+            let sections = &g.job.sections;
+            assert_eq!(sections.len(), 2);
+            let r = &sections[1].byte_range;
+            assert_eq!((r.start.0, r.end.0), (11, 15), "the dim section is ` * 2`");
+            assert_eq!(sections[1].format.color, color::text_a(102));
+            assert_ne!(sections[0].format.color, color::text_a(102));
+            let plain = refusal_galley(ui, "--radius/md", None, &font);
+            assert_eq!(plain.job.sections.len(), 1);
+        });
     }
 
     /// Long names elide from the left by whole groups, then the leaf (A5).

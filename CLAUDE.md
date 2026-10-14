@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1056 index rows, 1056 body headings, next free
-D1057** (measured 2026-10-14 at `ad87be7`; ⚠️ **the open-issues request — the maintainer
+anywhere cited either. **The live figures: 1059 index rows, 1059 body headings, next free
+D1060** (measured 2026-10-14 at `a7b13df`; ⚠️ **the step-2 request reserved D1057–D1068 at
+`5ac22b7` and spent three** — D1057 (step 1's leftovers closed: the gradient faces' height, a
+`Path`'s radii unbindable by decision), D1058 (gaps and padding bound to number variables,
+schema v8), D1059 (boolean variables bound to visibility); **D1060–D1068 found at zero sites
+and released.** Census **958**, arrivals D1057–D1059, none unresolved. ⚠️ **`arch-scribe` found
+real defects in both batches** — a partly bound padding pair previewing where the commit did not
+land it (and the corner sibling, measured by a probe), a main's root visibility binding reaching
+every instance root, and five readers left on the literal — and **one wrong premise**, a
+"missing relayout" in the visibility preview that a flip showed was never missing; it was
+corrected in the record, not built. ⚠️ **A script writing a staging blob is refused by the edit
+guard here**: a mixed hunk was split by lifting a block out with `Edit`, `git add`, and putting it
+back. Before that, measured at `ad87be7`; ⚠️ **the open-issues request — the maintainer
 delegating step 1's open decisions — reserved D1047–D1058 at `68aff8b` and spent ten**, D1047–D1056
 (the property paste, override marks, per-corner chips, the corner preview, the mode on every tag,
 the colour cell's popup, the browser's refusals, groups and bar, a cell's live preview), committed

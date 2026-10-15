@@ -1614,12 +1614,18 @@ mod changes_ink_tests {
     /// and fixture recounted together, the fixture's assertion moved first.
     /// **Sixteen with `SetVariantSet`, `SetVariant` and `SetProperties`** (§15
     /// D982), 2026-10-05, the same way. **Seventeen with `SetSwap`** (§15 D983),
-    /// 2026-10-06, the fixture's assertion moved first again.
+    /// 2026-10-06, the fixture's assertion moved first again. **Twenty-four with
+    /// the styles' seven** (§15 D1062), 2026-10-15 — found missing by
+    /// `arch-scribe` after the commit that added them, the assertion moved first.
+    /// ⚠️ **Not the whole of `changes_ink`'s `false` arm**: the vault's two,
+    /// `SetOrigin` and the variables' four answer `false` there and are not
+    /// listed here — older gaps, not this list's subject.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
         let id = ids.mint();
         let guide = crate::guide::GuideId(ids.mint());
+        let style = ids.mint_style();
         let invisible = [
             Operation::SetName {
                 id,
@@ -1665,6 +1671,27 @@ mod changes_ink_tests {
                 owner: None,
                 position: 1.0,
             },
+            // The styles' seven (§15 D1062): the table and the bindings draw
+            // nothing; the lists `style::settle` writes beside them are the ink.
+            Operation::AddStyle {
+                style: crate::style::Style {
+                    id: style,
+                    name: "s".into(),
+                    value: crate::style::StyleValue::Fills(vec![]),
+                },
+            },
+            Operation::RemoveStyle { id: style },
+            Operation::SetStyleName {
+                id: style,
+                name: "t".into(),
+            },
+            Operation::SetStyleValue {
+                id: style,
+                value: crate::style::StyleValue::Fills(vec![]),
+            },
+            Operation::SetFillStyle { id, style: None },
+            Operation::SetStrokeStyle { id, style: None },
+            Operation::SetEffectsStyle { id, style: None },
         ];
         // ⚠️ **The fixture asserts its own length**, which is the only thing that
         // makes the count in this test's doc comment checkable by anything but a
@@ -1672,8 +1699,8 @@ mod changes_ink_tests {
         // mechanism.
         assert_eq!(
             invisible.len(),
-            17,
-            "the chrome list is seventeen operations"
+            24,
+            "the chrome list is twenty-four operations"
         );
         for op in &invisible {
             assert!(

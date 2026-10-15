@@ -2386,8 +2386,9 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 /// D983 — which the first build added to `op.rs`' list and not to this one,
 /// `arch-scribe`'s find; and twenty-six no-ops since the variables table's seven,
 /// §15 D1039, four of them `changes_ink`'s `false` and three its `true`, left
-/// out by that build too and added before its commit. The paragraphs below keep
-/// the counts of the finding they record.)
+/// out by that build too and added before its commit; thirty-three since the
+/// styles' seven, §15 D1062, all `false` — missed by their build and added with
+/// the styles' chrome, §15 D1063. The paragraphs below keep the counts of the finding they record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
 /// certified that they were.** `op::changes_ink` answers `false` for eleven
@@ -2536,10 +2537,37 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         },
         Operation::RemoveMode { id: mode },
     ];
+    // And the styles' seven (§15 D1062): a style draws through the lists its
+    // users hold, which a preview carries as `SetFills` and its kin, so the
+    // table and the bindings are absorbed as nothing — and draw nothing.
+    // Missed by the build that added them; `arch-scribe`'s find.
+    let style = ids.mint_style();
+    let styles = [
+        Operation::AddStyle {
+            style: ondin_core::style::Style {
+                id: style,
+                name: "s".into(),
+                value: ondin_core::style::StyleValue::Fills(vec![]),
+            },
+        },
+        Operation::RemoveStyle { id: style },
+        Operation::SetStyleName {
+            id: style,
+            name: "t".into(),
+        },
+        Operation::SetStyleValue {
+            id: style,
+            value: ondin_core::style::StyleValue::Fills(vec![]),
+        },
+        Operation::SetFillStyle { id, style: None },
+        Operation::SetStrokeStyle { id, style: None },
+        Operation::SetEffectsStyle { id, style: None },
+    ];
 
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
+    assert_eq!(styles.len(), 7, "and the styles' seven");
     assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(
@@ -2554,6 +2582,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         .chain(images.iter())
         .chain(table_chrome.iter())
         .chain(table_ink.iter())
+        .chain(styles.iter())
     {
         let ov = RenderOverrides::from_transaction(&f.doc, &res, &Transaction(vec![op.clone()]))
             .unwrap_or_else(|| panic!("{op:?} must be absorbed rather than refused"));
@@ -2568,7 +2597,11 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     // `false`, and not every no-op is — the image pair and two of the table's
     // six change ink. (Nor is every `false` a no-op: `absorb` refuses the
     // vault's two and `SetOrigin`, which this does not list.)
-    for op in chrome.iter().chain(table_chrome.iter()) {
+    for op in chrome
+        .iter()
+        .chain(table_chrome.iter())
+        .chain(styles.iter())
+    {
         assert!(!op.changes_ink(), "{op:?} is chrome and draws nothing");
     }
     for op in images.iter().chain(table_ink.iter()) {

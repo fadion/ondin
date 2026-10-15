@@ -808,7 +808,8 @@ impl DocumentDto {
 
         // And the style rules (§15 D1062), refused rather than repaired for the
         // same reason. A layer whose list differs from its style's loads as
-        // written — the next commit that touches either settles it.
+        // written, and the next commit that runs `style::settle` puts it back —
+        // unless that commit's own edit wrote the slot, which detaches it.
         let mut styles = Vec::with_capacity(self.styles.len());
         for s in self.styles {
             if styles.iter().any(|t: &crate::style::Style| t.id == s.id) {

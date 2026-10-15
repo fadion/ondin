@@ -241,6 +241,7 @@ fn stroked_rect_doc(align: StrokeAlign) -> (Document, Resolved) {
             strokes: keyed_by_position([ondin_core::Stroke {
                 brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
                 width: 10.0,
+                width_var: None,
                 join: ondin_core::kurbo::Join::Miter,
                 cap: ondin_core::kurbo::Cap::Butt,
                 dashes: Vec::new(),
@@ -397,6 +398,7 @@ fn an_open_shape_ignores_alignment_rather_than_half_drawing_itself() {
         strokes: keyed_by_position([ondin_core::Stroke {
             brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
             width: 10.0,
+            width_var: None,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,
             dashes: Vec::new(),

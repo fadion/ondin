@@ -601,6 +601,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
         strokes: keyed_by_position([ondin_core::Stroke {
             brush: Brush::Solid(Color::BLACK).into(),
             width: 4.0,
+            width_var: None,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,
             dashes: Vec::new(),
@@ -747,6 +748,7 @@ fn stroke(red: u8, visible: bool) -> ondin_core::Stroke {
     ondin_core::Stroke {
         brush: solid(red).into(),
         width: 2.0,
+        width_var: None,
         join: ondin_core::kurbo::Join::Miter,
         cap: ondin_core::kurbo::Cap::Butt,
         dashes: Vec::new(),

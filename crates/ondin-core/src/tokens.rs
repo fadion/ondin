@@ -73,6 +73,7 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         .iter()
         .filter_map(|f| f.brush.var())
         .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
+        .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
         .chain(n.corner_vars.iter().flatten().copied())
         .chain(n.spacing_vars.iter().flatten().copied())
         .chain(n.size_vars.iter().flatten().copied())
@@ -258,6 +259,9 @@ impl Plan {
         for s in n.paint.strokes.iter_mut() {
             if let BrushSource::Bound { var, .. } = &mut s.brush {
                 v(var);
+            }
+            if let Some(x) = &mut s.width_var {
+                v(x);
             }
         }
         n.corner_vars.iter_mut().flatten().for_each(v);
@@ -813,15 +817,11 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
             )
     });
     let strokes = n.paint.strokes.iter().all(|f| {
-        !hit(f.brush.var())
-            || brush(
-                &f.brush,
-                s.paint
-                    .strokes
-                    .iter()
-                    .find(|k| k.id == f.id)
-                    .map(|k| &k.brush),
-            )
+        let src = s.paint.strokes.iter().find(|k| k.id == f.id);
+        (!hit(f.brush.var()) || brush(&f.brush, src.map(|k| &k.brush)))
+            // And its width's binding (§15 D1073).
+            && (!hit(f.width_var)
+                || f.width_var.is_some_and(|x| alike(x, src.and_then(|k| k.width_var))))
     });
     let slots = |a: &[Option<VarId>], b: &[Option<VarId>]| {
         a.iter()
@@ -910,6 +910,11 @@ fn src_stroke(s: &Node, id: crate::ItemId) -> Option<VarId> {
     s.paint.strokes.iter().find(|k| k.id == id)?.brush.var()
 }
 
+/// [`src_stroke`] for the stroke's width binding (§15 D1073).
+fn src_stroke_width(s: &Node, id: crate::ItemId) -> Option<VarId> {
+    s.paint.strokes.iter().find(|k| k.id == id)?.width_var
+}
+
 /// The kits' variables and styles `n`'s own bindings read ([`own`]).
 fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     let mut vs = Vec::new();
@@ -918,6 +923,10 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     }
     for s in &n.paint.strokes {
         vs.extend(own(s.brush.var(), src.and_then(|x| src_stroke(x, s.id))));
+        vs.extend(own(
+            s.width_var,
+            src.and_then(|x| src_stroke_width(x, s.id)),
+        ));
     }
     let slots = |a: &[Option<VarId>], b: Option<&[Option<VarId>]>| -> Vec<VarId> {
         a.iter()
@@ -1200,6 +1209,13 @@ impl Fork {
                 && let Some(v) = to(Some(*var), at)
             {
                 *var = v;
+                wrote = true;
+            }
+            let at = src.and_then(|x| src_stroke_width(x, s.id));
+            if let Some(var) = s.value.width_var
+                && let Some(v) = to(Some(var), at)
+            {
+                s.value.width_var = Some(v);
                 wrote = true;
             }
         }

@@ -2827,6 +2827,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             .map(|p| Stroke {
                 brush: p.brush(bounds, local, style.stroke_opacity).into(),
                 width: style.stroke_width,
+                width_var: None,
                 join: style.stroke_join,
                 cap: style.stroke_cap,
                 dashes: style.dashes.clone(),

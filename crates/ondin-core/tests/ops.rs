@@ -473,6 +473,7 @@ fn set_fills_and_strokes_paintable_only() {
                 strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(Color::BLACK).into(),
                     width: 1.0,
+                    width_var: None,
                     join: ondin_core::kurbo::Join::Miter,
                     cap: ondin_core::kurbo::Cap::Butt,
                     dashes: vec![],

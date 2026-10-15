@@ -3829,6 +3829,130 @@ pub fn keep_opacity_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
+/// Bind stroke `item` of layer `id` to number variable `var` (§15 D1073): its
+/// width written **0**, D1039's canonical literal, the binding beside it in the
+/// item. Empty when nothing would change or the layer has no such stroke — and
+/// **on a stroke drawing `Custom` sides** ([`draws_own_sides`], a box's), which
+/// carries its four widths of its own and draws none of `width`
+/// (`StrokeSides::widths`): a binding there would be
+/// bound to nothing drawn. Its weight field re-broadcasts onto the sides, which
+/// is a write, not a binding.
+pub fn bind_stroke_width_ops(
+    doc: &Document,
+    id: NodeId,
+    item: crate::ItemId,
+    var: crate::VarId,
+) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut strokes = node.paint().strokes.clone();
+    let Some(s) = strokes.iter_mut().find(|s| s.id == item) else {
+        return Vec::new();
+    };
+    if (s.width == 0.0 && s.width_var == Some(var)) || draws_own_sides(node.kind(), s) {
+        return Vec::new();
+    }
+    s.width = 0.0;
+    s.width_var = Some(var);
+    vec![Operation::SetStrokes { id, strokes }]
+}
+
+/// Whether `stroke` on a layer of `kind` draws `Custom` sides — its own four
+/// widths and none of `width` (§15 D1073). Through
+/// [`crate::geometry::effective_sides`], so a `Custom` stroke on an ellipse or a
+/// path, which draws its whole outline at `width`, binds like any other
+/// (reading (b) of D1073's amendment: the bare `sides` field refused it).
+pub fn draws_own_sides(kind: &NodeKind, stroke: &Stroke) -> bool {
+    matches!(
+        crate::geometry::effective_sides(kind, stroke),
+        crate::StrokeSides::Custom { .. }
+    )
+}
+
+/// Detach stroke `item` of layer `id` to the width it draws (D1038's detach,
+/// §15 D1073). Empty when it is not bound.
+pub fn detach_stroke_width_ops(doc: &Document, id: NodeId, item: crate::ItemId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut strokes = node.paint().strokes.clone();
+    let Some(s) = strokes.iter_mut().find(|s| s.id == item) else {
+        return Vec::new();
+    };
+    let Some(var) = s.width_var else {
+        return Vec::new();
+    };
+    s.width = doc.stroke_width_drawn_in(doc.variables(), id, var);
+    s.width_var = None;
+    vec![Operation::SetStrokes { id, strokes }]
+}
+
+/// `strokes`, a stroke list about to be written to layer `id`, with **a bound
+/// width the write leaves bound kept bound and any other detached** (§15
+/// D1073) — the commit's rule ([`keep_stroke_width_bindings`]) and the
+/// preview's, so the two cannot disagree (D1058's *Fix*, for a list).
+///
+/// **Two halves, [`keep_corner_bindings`]' and not the opacity's one**: a stroke
+/// whose binding the write carries unchanged stays bound when its width is
+/// written **what it draws** or **its own literal 0**, the literal put back;
+/// any other width detaches it to that width. The literal half is the
+/// load-bearing one: every stroke-card edit — a colour, a join, a dash — and
+/// the Scale tool's `width *= s` rebuild the whole list from the stored items,
+/// so a bound item arrives with its 0. The price is corners' too: **0 typed over
+/// a bound width keeps the binding**, and the chip's retype, which detaches
+/// first, is that value's door. A stroke whose binding the write changes — a
+/// bind, a detach, a reset, a stroke new to the list — is left to say what it
+/// means, **except** a stroke drawing its own sides ([`draws_own_sides`]),
+/// which is detached at the width it drew whoever wrote it: it draws none of
+/// `width`, so a binding there is bound to nothing drawn.
+pub fn kept_stroke_widths(
+    doc: &Document,
+    id: NodeId,
+    mut strokes: Vec<crate::Keyed<Stroke>>,
+) -> Vec<crate::Keyed<Stroke>> {
+    let Some(node) = doc.get(id) else {
+        return strokes;
+    };
+    for s in strokes.iter_mut() {
+        let Some(var) = s.width_var else { continue };
+        // **A stroke drawing its own sides holds no width binding, whoever wrote
+        // it** — a paste of an ellipse's bound `Custom` stroke onto a rect states
+        // its binding, and would otherwise land bound to nothing it draws.
+        if draws_own_sides(node.kind(), s) {
+            s.width = doc.stroke_width_drawn_in(doc.variables(), id, var);
+            s.width_var = None;
+            continue;
+        }
+        let Some(old) = node.paint().strokes.iter().find(|o| o.id == s.id) else {
+            continue;
+        };
+        if old.width_var != Some(var) {
+            continue;
+        }
+        let drawn = doc.stroke_width_drawn_in(doc.variables(), id, var);
+        if s.width == old.width || (s.width - drawn).abs() < 1e-9 {
+            s.width = old.width;
+        } else {
+            s.width_var = None;
+        }
+    }
+    strokes
+}
+
+/// **A width written over a bound stroke detaches it** (D1038 (2), §15 D1073)
+/// — the commit-time half of the binding, every `SetStrokes` through
+/// [`kept_stroke_widths`], so the Stroke card, the Scale tool, *Paste
+/// properties* and MCP write their lists as they did.
+pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    for op in tx.0.iter_mut() {
+        if let Operation::SetStrokes { id, strokes } = op {
+            *strokes = kept_stroke_widths(doc, *id, std::mem::take(strokes));
+        }
+    }
+    tx
+}
+
 /// Which of `id`'s width and height **the user sets** — the axes a number
 /// variable may bind (§15 D1061, the maintainer's ruling: *only a hand-set size
 /// is bindable*). `[false; 2]` for a kind with no stored size
@@ -4710,6 +4834,9 @@ pub struct Properties {
     pub carried: Vec<crate::variable::CarriedVar>,
     pub drawn_fills: Vec<Brush>,
     pub drawn_strokes: Vec<Brush>,
+    /// Each stroke's width as it drew at the copy — a bound one's number, the
+    /// detach a paste falls back to (§15 D1073's amendment, reading (a)).
+    pub drawn_widths: Vec<f64>,
 }
 
 /// A layer's appearance, or `None` for a kind that has none to give.
@@ -4735,6 +4862,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         .map(|f| &f.brush)
         .chain(strokes.iter().map(|s| &s.brush))
         .filter_map(crate::BrushSource::var)
+        .chain(strokes.iter().filter_map(|s| s.width_var))
         .chain(node.opacity_var())
     {
         if let Some(var) = t.get(v)
@@ -4756,6 +4884,13 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         drawn_strokes: strokes
             .iter()
             .map(|s| doc.resolve_brush(id, &s.brush).into_owned())
+            .collect(),
+        drawn_widths: strokes
+            .iter()
+            .map(|s| match s.width_var {
+                Some(v) => doc.stroke_width_drawn_in(t, id, v),
+                None => s.width,
+            })
             .collect(),
         fills,
         strokes,
@@ -4819,9 +4954,24 @@ pub fn paste_properties(
         .strokes
         .iter()
         .enumerate()
-        .map(|(i, s)| Stroke {
-            brush: landed(&s.brush, props.drawn_strokes.get(i)),
-            ..s.clone()
+        .map(|(i, s)| {
+            // A bound width by the same rule (§15 D1073's amendment, reading
+            // (a)): rebound where this document has the variable, else the
+            // width it drew. Carried verbatim, a paste into another document
+            // left it dangling and the commit refused the paste.
+            let (width, width_var) = match s.width_var {
+                Some(v) => match crate::variable::rebind(t, &props.carried, v) {
+                    Some(v) => (s.width, Some(v)),
+                    None => (props.drawn_widths.get(i).copied().unwrap_or(s.width), None),
+                },
+                None => (s.width, None),
+            };
+            Stroke {
+                brush: landed(&s.brush, props.drawn_strokes.get(i)),
+                width,
+                width_var,
+                ..s.clone()
+            }
         })
         .collect();
     let mut ops = set_fills_all(doc, ids, &fills, src).0;

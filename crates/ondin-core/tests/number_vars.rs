@@ -2,7 +2,9 @@
 //! opacity (§15 D1072), read as a percentage — drawn and exported at its
 //! variable's number in the mode in force, its literal 0, detached by a write
 //! of anything it does not draw, and detached to what it drew by a delete, a
-//! paste into another document and *Paste properties*.
+//! paste into another document and *Paste properties* — and a stroke's width
+//! (§15 D1073), bound in the item, drawn and measured at its number, kept by a
+//! list write of what it draws or of its own 0.
 
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::{
@@ -279,4 +281,348 @@ fn paste_properties_carries_a_bound_opacity_by_the_paste_rule() {
     let node = f.doc.get(other).unwrap();
     assert_eq!(node.opacity_var(), None, "no variable to keep: detached");
     assert!((node.opacity() - 0.4).abs() < 1e-6, "at the 40% it drew");
+}
+
+/// The rect given one 2-wide stroke, centred; its item id.
+fn stroked(f: &mut F) -> ondin_core::ItemId {
+    let item = f.ids.mint_item();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetStrokes {
+            id: f.rect,
+            strokes: vec![ondin_core::Keyed::new(
+                item,
+                ondin_core::Stroke {
+                    width: 2.0,
+                    ..Default::default()
+                },
+            )],
+        }]))
+        .unwrap();
+    item
+}
+
+fn stroke(doc: &Document, id: NodeId) -> ondin_core::Stroke {
+    doc.get(id).unwrap().paint().strokes[0].value.clone()
+}
+
+/// The width `id`'s first stroke draws at, through the one door every reader
+/// takes.
+fn drawn_width(doc: &Document, id: NodeId) -> f64 {
+    doc.resolved_paint(id, doc.get(id).unwrap().paint()).strokes[0].width
+}
+
+/// **A bound stroke width draws, measures and hits at its variable's number**
+/// (§15 D1073): bound to `opacity/muted` — a number, 40 in Light — the stroke
+/// draws 40 wide over a literal 0, and the rect's world bounds grow by half of
+/// it on every side (a centred stroke), so the box is 40 + 40 wide; a click 15
+/// outside the rect's edge, inside that reach, hits it; Dark's 70 widens it
+/// again.
+///
+/// Flip, run: `world_bounds_of_parts` in `Resolved` handed `node.paint()` again
+/// fails *"the bounds reach the bound width"* — measured at the 0 literal, 40;
+/// `query::hit_test` handing `contains_local` the literal paint fails *"a click
+/// in the stroke's reach hits it"*, the bounds still right.
+#[test]
+fn a_bound_stroke_width_draws_and_measures_at_its_number() {
+    let mut f = fixture();
+    let item = stroked(&mut f);
+    let ops = ondin_core::bind_stroke_width_ops(&f.doc, f.rect, item, f.muted);
+    assert_eq!(ops.len(), 1, "one list write");
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(stroke(&f.doc, f.rect).width, 0.0, "the literal 0");
+    assert_eq!(stroke(&f.doc, f.rect).width_var, Some(f.muted));
+    assert_eq!(drawn_width(&f.doc, f.rect), 40.0, "Light's 40");
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let b = res.world_bounds(f.rect).unwrap();
+    assert_eq!(b.width(), 80.0, "the bounds reach the bound width");
+    let hit = ondin_core::hit_test(
+        &res,
+        &f.doc,
+        ondin_core::kurbo::Point::new(-15.0, 10.0),
+        0.0,
+    );
+    assert!(
+        hit.contains(&f.rect),
+        "a click in the stroke's reach hits it"
+    );
+    dark(&mut f);
+    assert_eq!(drawn_width(&f.doc, f.rect), 70.0, "Dark's 70");
+}
+
+/// **A list write keeps a bound width by corners' two halves** (§15 D1073):
+/// the stroke written back with its own 0 — every stroke-card edit, a colour
+/// here — stays bound, and so does one written the 40 it draws, its literal put
+/// back; a width of 5 detaches it at 5; and the stroke made `Custom` detaches it
+/// at the 40 it drew, its own four widths then drawn.
+///
+/// Flip, run: the literal half taken out of `kept_stroke_widths` (`s.width ==
+/// old.width ||` dropped) fails *"a colour edit keeps the binding"* — the
+/// list's 0 read as a write of 0.
+#[test]
+fn a_stroke_list_write_keeps_a_bound_width_by_two_halves() {
+    let mut f = fixture();
+    let item = stroked(&mut f);
+    let ops = ondin_core::bind_stroke_width_ops(&f.doc, f.rect, item, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let write = |doc: &Document, edit: &dyn Fn(&mut ondin_core::Stroke)| {
+        let mut strokes = doc.get(f.rect).unwrap().paint().strokes.clone();
+        edit(&mut strokes[0].value);
+        ondin_core::keep_stroke_width_bindings(
+            doc,
+            Transaction(vec![Operation::SetStrokes {
+                id: f.rect,
+                strokes,
+            }]),
+        )
+    };
+    let after = |doc: &Document, tx: Transaction| {
+        let mut d = doc.clone();
+        d.apply(&tx).unwrap();
+        stroke(&d, f.rect)
+    };
+    let recoloured = after(
+        &f.doc,
+        write(&f.doc, &|s| {
+            s.brush = ondin_core::peniko::Color::WHITE.into()
+        }),
+    );
+    assert_eq!(
+        (recoloured.width, recoloured.width_var),
+        (0.0, Some(f.muted)),
+        "a colour edit keeps the binding"
+    );
+    let drawn = after(&f.doc, write(&f.doc, &|s| s.width = 40.0));
+    assert_eq!(
+        (drawn.width, drawn.width_var),
+        (0.0, Some(f.muted)),
+        "a write of what it draws keeps it, the literal put back"
+    );
+    let five = after(&f.doc, write(&f.doc, &|s| s.width = 5.0));
+    assert_eq!((five.width, five.width_var), (5.0, None), "5 detaches at 5");
+    let custom = after(
+        &f.doc,
+        write(&f.doc, &|s| {
+            s.sides = ondin_core::StrokeSides::Custom {
+                top: 1.0,
+                right: 2.0,
+                bottom: 3.0,
+                left: 4.0,
+            }
+        }),
+    );
+    assert_eq!(
+        (custom.width, custom.width_var),
+        (40.0, None),
+        "made Custom, detached at what it drew"
+    );
+    assert!(
+        ondin_core::bind_stroke_width_ops(
+            &{
+                let mut d = f.doc.clone();
+                d.apply(&write(&f.doc, &|s| {
+                    s.sides = ondin_core::StrokeSides::Custom {
+                        top: 1.0,
+                        right: 1.0,
+                        bottom: 1.0,
+                        left: 1.0,
+                    }
+                }))
+                .unwrap();
+                d
+            },
+            f.rect,
+            item,
+            f.muted
+        )
+        .is_empty(),
+        "a Custom stroke takes no width binding"
+    );
+}
+
+/// Detaching keeps what it drew; deleting the variable detaches it the same
+/// way; a copy leaving for another document carries the number; the binding
+/// round-trips; a colour variable is refused; and a stroke style holding a
+/// bound width passes the style check, which refused any variable not a
+/// colour until D1073.
+#[test]
+fn a_stroke_width_binding_detaches_to_what_it_draws_and_round_trips() {
+    let mut f = fixture();
+    let item = stroked(&mut f);
+    let ops = ondin_core::bind_stroke_width_ops(&f.doc, f.rect, item, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    assert_eq!(ondin_core::io::load(&bytes).unwrap(), f.doc, "round-trips");
+
+    let mut d = f.doc.clone();
+    d.apply(&Transaction(ondin_core::detach_stroke_width_ops(
+        &d, f.rect, item,
+    )))
+    .unwrap();
+    let s = stroke(&d, f.rect);
+    assert_eq!((s.width, s.width_var), (40.0, None), "detached at 40");
+
+    let mut d = f.doc.clone();
+    let tx = Transaction(ondin_core::variable::remove_ops(&d, &[f.muted]));
+    d.apply(&tx).expect("detach, then remove");
+    let s = stroke(&d, f.rect);
+    assert_eq!(
+        (s.width, s.width_var),
+        (40.0, None),
+        "deleted, detached at 40"
+    );
+
+    let node = f.doc.get(f.rect).unwrap().clone();
+    let out = ondin_core::variable::detached(&f.doc, node);
+    assert_eq!(
+        out.paint().strokes[0].width,
+        40.0,
+        "a detached copy draws 40"
+    );
+    assert_eq!(out.paint().strokes[0].width_var, None);
+
+    let mut bad = f.doc.get(f.rect).unwrap().paint().strokes.clone();
+    bad[0].value.width_var = Some(f.brand);
+    let wrong = f.doc.apply(&Transaction(vec![Operation::SetStrokes {
+        id: f.rect,
+        strokes: bad,
+    }]));
+    assert!(wrong.is_err(), "a colour variable cannot bind a width");
+
+    let s = f.ids.mint_style();
+    let ops = ondin_core::style::create_ops(
+        &f.doc,
+        s,
+        "Border/Muted",
+        f.rect,
+        ondin_core::style::StyleSlot::Strokes,
+        &[f.rect],
+    )
+    .unwrap();
+    f.doc
+        .apply(&Transaction(ops))
+        .expect("a stroke style holding a bound width is a valid style");
+}
+
+/// **A `Custom` stroke binds where it draws its outline** (§15 D1073's
+/// amendment, reading (b)): on an ellipse a `Custom` stroke's sides are not
+/// honoured (`geometry::effective_sides` answers `All`), so it draws `width` and
+/// binds like any other; on the rect it draws its own four widths and the bind
+/// is refused.
+///
+/// Flip, run: `draws_own_sides` reading `stroke.sides` bare fails *"an
+/// ellipse's Custom stroke binds"* with an empty transaction. And
+/// `kept_stroke_widths`' own-sides check skipped fails *"a bound Custom stroke
+/// pasted onto a box lands detached"* — the stroke new to the list, its binding
+/// stated, left bound on the box (D1073's amendment's second reading) — and
+/// the two-halves test's *"made Custom, detached at what it drew"* with it.
+#[test]
+fn a_custom_stroke_binds_only_where_it_draws_its_outline() {
+    let mut f = fixture();
+    let custom = ondin_core::StrokeSides::Custom {
+        top: 1.0,
+        right: 1.0,
+        bottom: 1.0,
+        left: 1.0,
+    };
+    let (ellipse, item) = (f.ids.mint(), f.ids.mint_item());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: ellipse,
+                parent: f.frame,
+                index: 1,
+                kind: NodeKind::Ellipse {
+                    size: Size::new(10.0, 10.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetStrokes {
+                id: ellipse,
+                strokes: vec![ondin_core::Keyed::new(
+                    item,
+                    ondin_core::Stroke {
+                        sides: custom,
+                        ..Default::default()
+                    },
+                )],
+            },
+        ]))
+        .unwrap();
+    let ops = ondin_core::bind_stroke_width_ops(&f.doc, ellipse, item, f.muted);
+    assert_eq!(ops.len(), 1, "an ellipse's Custom stroke binds");
+    let rect_item = stroked(&mut f);
+    let mut strokes = f.doc.get(f.rect).unwrap().paint().strokes.clone();
+    strokes[0].value.sides = custom;
+    f.doc
+        .apply(&Transaction(vec![Operation::SetStrokes {
+            id: f.rect,
+            strokes,
+        }]))
+        .unwrap();
+    assert!(
+        ondin_core::bind_stroke_width_ops(&f.doc, f.rect, rect_item, f.muted).is_empty(),
+        "a rect's Custom stroke does not"
+    );
+
+    // The ellipse's stroke, bound, written onto the rect as a paste writes it —
+    // a stroke new to the list, its binding stated — lands detached at the 40 it
+    // drew, since on a box it draws its own sides.
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let pasted = f.doc.get(ellipse).unwrap().paint().strokes.clone();
+    assert_eq!(
+        pasted[0].width_var,
+        Some(f.muted),
+        "fixture: bound on the ellipse"
+    );
+    let kept = ondin_core::kept_stroke_widths(&f.doc, f.rect, pasted);
+    assert_eq!(
+        (kept[0].width, kept[0].width_var),
+        (40.0, None),
+        "a bound Custom stroke pasted onto a box lands detached"
+    );
+}
+
+/// **A bound stroke width follows *Paste properties*' rule** (§15 D1073's
+/// amendment, reading (a)): pasted within the document onto a second rect it
+/// lands bound to the same variable; copied while bound and pasted after the
+/// variable is gone, it lands at the 40 it drew — and the paste commits.
+///
+/// Flip, run: `paste_properties` copying `width_var` verbatim again (`..s.clone()`
+/// alone) fails *"a paste with the variable gone commits"* — the binding
+/// dangling, refused by `variable::check`.
+#[test]
+fn paste_properties_carries_a_bound_stroke_width_by_the_paste_rule() {
+    let mut f = fixture();
+    let item = stroked(&mut f);
+    let ops = ondin_core::bind_stroke_width_ops(&f.doc, f.rect, item, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let other = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: other,
+            parent: f.frame,
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    let props = ondin_core::build::properties_of(&f.doc, f.rect).unwrap();
+    let tx = ondin_core::build::paste_properties(&f.doc, &[other], &props, &mut f.ids);
+    let mut kept = f.doc.clone();
+    kept.apply(&tx).unwrap();
+    assert_eq!(stroke(&kept, other).width_var, Some(f.muted), "kept");
+
+    let tx = Transaction(ondin_core::variable::remove_ops(&f.doc, &[f.muted]));
+    f.doc.apply(&tx).unwrap();
+    let tx = ondin_core::build::paste_properties(&f.doc, &[other], &props, &mut f.ids);
+    f.doc
+        .apply(&tx)
+        .expect("a paste with the variable gone commits");
+    let s = stroke(&f.doc, other);
+    assert_eq!((s.width, s.width_var), (40.0, None), "at the 40 it drew");
 }

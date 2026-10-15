@@ -1487,8 +1487,17 @@ impl RenderOverrides {
             }
             Operation::SetStrokes { id, strokes } => {
                 let mut paint = self.current_paint(doc, *id)?;
-                paint.strokes = strokes.clone();
+                // **As the commit will keep it** (§15 D1073): a bound width the
+                // write leaves bound stays bound, any other detached — the
+                // commit's own rule, `build::kept_stroke_widths`, so the scene's
+                // resolve draws the preview where the commit lands it.
+                paint.strokes = build::kept_stroke_widths(doc, *id, strokes.clone());
                 self.set_paint(*id, paint);
+                // A stroke's reach is part of the ink the cull tests, so a
+                // widened outside stroke — or a bound width's new number — must
+                // not be culled on the committed bounds (`SetEffects`' reason
+                // below; the sweep for §15 D1073 found it missing here).
+                self.mark_moved(doc, *id);
             }
             // **Not in the invisible list above, even though the ops beside it
             // there are also "one field on one node".** Every number in an
@@ -1685,8 +1694,15 @@ impl RenderOverrides {
                     let Some(paint) = self.current_paint(doc, n) else {
                         continue;
                     };
+                    // A bound stroke width too (§15 D1073), which the same
+                    // resolve reads — and moves the ink, so the cull hears it.
+                    let widths = paint.strokes.iter().any(|s| s.width_var.is_some());
                     let reads = paint.fills.iter().any(|f| f.brush.is_bound())
-                        || paint.strokes.iter().any(|s| s.brush.is_bound());
+                        || paint.strokes.iter().any(|s| s.brush.is_bound())
+                        || widths;
+                    if widths {
+                        self.mark_moved(doc, n);
+                    }
                     if reads {
                         let drawn = doc.resolved_paint_in(&t, n, &paint).into_owned();
                         self.set_paint(n, drawn);
@@ -2255,7 +2271,10 @@ fn build_ghost(
         // empty literal (§15 D1069).
         text: shaped(&kind),
         kind,
-        paint: node.paint().clone(),
+        // Resolved here, in the default mode `paint_ghost`'s own resolve reads a
+        // ghost in, so `scene::ghost_ink` — which has no document — measures a
+        // bound stroke width's number and not its 0 (§15 D1073).
+        paint: doc.resolved_paint(node.id(), node.paint()).into_owned(),
         effects: node.effects().to_vec(),
         path,
         // As drawn, a bound opacity resolved (§15 D1072) — over the captured node,

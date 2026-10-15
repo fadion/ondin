@@ -684,6 +684,10 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         if s.brush.is_bound() {
             s.brush = doc.resolve_brush(id, &s.brush).into_owned().into();
         }
+        // A bound width its number (§15 D1073).
+        if let Some(v) = s.width_var.take() {
+            s.width = doc.stroke_width_drawn_in(doc.variables(), id, v);
+        }
     }
     if let crate::NodeKind::Rect { corner_radii, .. } = &mut node.kind
         && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
@@ -771,6 +775,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .iter()
             .filter_map(|f| f.brush.var())
             .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
+            .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
             .chain(n.corner_vars.iter().flatten().copied())
             .chain(n.spacing_vars.iter().flatten().copied())
             .chain(n.size_vars.iter().flatten().copied())
@@ -926,6 +931,15 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                         None => twin_brush(false, i).into(),
                     };
                 }
+                // A bound width the same way, its fallback the twin's (§15 D1073).
+                if let Some(v) = s.width_var {
+                    s.width_var = rebind(v);
+                    if s.width_var.is_none() {
+                        s.width = twin
+                            .and_then(|d| d.paint.strokes.get(i))
+                            .map_or(s.width, |t| t.width);
+                    }
+                }
             }
             if n.corner_vars.iter().any(Option::is_some) {
                 let drawn = twin.and_then(|d| match d.kind {
@@ -1077,7 +1091,10 @@ pub fn users(doc: &crate::Document, var: VarId) -> Vec<NodeId> {
 fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
     let hit = |v: Option<VarId>| v.is_some_and(|v| vars.contains(&v));
     n.paint.fills.iter().any(|f| hit(f.brush.var()))
-        || n.paint.strokes.iter().any(|s| hit(s.brush.var()))
+        || n.paint
+            .strokes
+            .iter()
+            .any(|s| hit(s.brush.var()) || hit(s.width_var))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
         || n.size_vars.iter().any(|v| hit(*v))
@@ -1124,19 +1141,34 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 .collect();
             ops.push(O::SetFills { id, fills });
         }
-        if n.paint.strokes.iter().any(|s| gone(&s.brush)) {
+        // And a stroke's width bound to one, detached to its number against the
+        // committed table (§15 D1073), in the same list write.
+        let width_gone = |s: &crate::Stroke| s.width_var.is_some_and(|v| vars.contains(&v));
+        if n.paint
+            .strokes
+            .iter()
+            .any(|s| gone(&s.brush) || width_gone(s))
+        {
             let strokes = n
                 .paint
                 .strokes
                 .iter()
                 .map(|s| {
-                    s.map(|s| crate::Stroke {
-                        brush: if gone(&s.brush) {
-                            doc.resolve_brush(id, &s.brush).into_owned().into()
-                        } else {
-                            s.brush.clone()
-                        },
-                        ..s.clone()
+                    s.map(|s| {
+                        let (width, width_var) = match s.width_var {
+                            Some(v) if width_gone(s) => (doc.stroke_width_drawn_in(t, id, v), None),
+                            other => (s.width, other),
+                        };
+                        crate::Stroke {
+                            brush: if gone(&s.brush) {
+                                doc.resolve_brush(id, &s.brush).into_owned().into()
+                            } else {
+                                s.brush.clone()
+                            },
+                            width,
+                            width_var,
+                            ..s.clone()
+                        }
                     })
                 })
                 .collect();
@@ -1520,6 +1552,7 @@ pub(crate) fn check<'a>(
                 .iter()
                 .filter_map(|f| f.brush.var())
                 .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
+                .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
                 .chain(n.corner_vars.iter().flatten().copied())
                 .chain(n.spacing_vars.iter().flatten().copied())
                 .chain(n.size_vars.iter().flatten().copied())
@@ -1536,7 +1569,12 @@ pub(crate) fn check<'a>(
             None => true,
         };
         let fills = n.paint.fills.iter().all(|f| colour_ok(&f.brush));
-        let strokes = n.paint.strokes.iter().all(|s| colour_ok(&s.brush));
+        // And a stroke's width binds a number (§15 D1073).
+        let strokes = n.paint.strokes.iter().all(|s| {
+            colour_ok(&s.brush)
+                && s.width_var
+                    .is_none_or(|v| t.kind_of(v) == Some(VarKind::Number))
+        });
         if !(fills && strokes) {
             return Err(VarRule::BadBinding(n.id));
         }

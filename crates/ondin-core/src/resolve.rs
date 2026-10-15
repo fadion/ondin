@@ -1454,7 +1454,7 @@ impl Resolved {
             NodeKind::Boolean { .. } => match self.boolean.get(&id) {
                 Some(path) => geometry::world_bounds_of_path(
                     path,
-                    node.paint(),
+                    &doc.resolved_paint(id, node.paint()),
                     kind_in(&self.used, node),
                     world,
                 ),
@@ -1486,9 +1486,11 @@ impl Resolved {
                 }
                 None => None,
             },
+            // The paint as drawn, a bound stroke width its number (§15 D1073) —
+            // the stroke's reach is part of the box.
             _ => geometry::world_bounds_of_parts(
                 kind_in(&self.used, node),
-                node.paint(),
+                &doc.resolved_paint(id, node.paint()),
                 world,
                 self.text.get(&id),
             ),
@@ -1704,7 +1706,13 @@ fn resolve_subtree(
             ))
         }),
         NodeKind::Group | NodeKind::Root => child_union,
-        _ => geometry::world_bounds_of_parts(kind, node.paint(), w, c.text.get(&id)),
+        // As drawn, a bound stroke width resolved (§15 D1073).
+        _ => geometry::world_bounds_of_parts(
+            kind,
+            &doc.resolved_paint(id, node.paint()),
+            w,
+            c.text.get(&id),
+        ),
     };
     if let Some(b) = bounds {
         c.world_bounds.insert(id, b);

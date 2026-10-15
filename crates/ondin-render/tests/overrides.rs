@@ -5009,3 +5009,97 @@ fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
         "a write past the binding: preview diverged from commit"
     );
 }
+
+/// **A stroke width bound to a number variable previews as the width it will
+/// draw** (§15 D1073): the bind's list write, then a cell's new number, then a
+/// list write past the binding — 3 written over a width bound to 9 — which the
+/// commit's `keep_stroke_width_bindings` detaches at 3.
+///
+/// Flip, run: the renderer's `SetStrokes` arm storing the list without
+/// `build::kept_stroke_widths` fails *"a width past the binding: preview
+/// diverged from commit"* — the preview still bound, its resolve drawing 9.
+/// And `Document::resolved_paint_in` leaving `width_var` on its output — the
+/// first cut — fails *"the bound width's cell edited"*, 9 against 4: the scene
+/// resolved the cell preview's override again against the committed table.
+#[test]
+fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCD);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var, item) = (ids.mint(), ids.mint_mode(), ids.mint_var(), ids.mint_item());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: rect,
+            strokes: vec![ondin_core::Keyed::new(
+                item,
+                ondin_core::Stroke {
+                    width: 2.0,
+                    ..Default::default()
+                },
+            )],
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "stroke/thick".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(9.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_stroke_width_ops(&doc, rect, item, var));
+    assert_eq!(tx.0.len(), 1, "the bind's list write");
+    assert_preview_matches_commit(&doc, &tx, "stroke width bound");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Number(4.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the bound width's cell edited");
+
+    let mut strokes = doc.get(rect).unwrap().paint().strokes.clone();
+    strokes[0].value.width = 3.0;
+    let write = Transaction(vec![Operation::SetStrokes { id: rect, strokes }]);
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &write).expect("representable");
+    let previewed = record(&doc, &res, &ov);
+    let mut committed = doc.clone();
+    committed
+        .apply(&ondin_core::keep_stroke_width_bindings(&doc, write))
+        .unwrap();
+    assert_eq!(
+        committed.get(rect).unwrap().paint().strokes[0].width_var,
+        None,
+        "detached"
+    );
+    let committed_res = Resolved::rebuild(&committed);
+    assert_eq!(
+        previewed,
+        record(&committed, &committed_res, &RenderOverrides::default()),
+        "a width past the binding: preview diverged from commit"
+    );
+}

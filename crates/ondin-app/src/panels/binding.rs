@@ -57,6 +57,13 @@ pub(crate) enum FieldKey {
     /// number variable read as a percentage, on one layer: a selection's field is
     /// the outermost members' shared value, which no one variable stands in for.
     Opacity { id: NodeId },
+    /// One stroke's width — the Stroke card's weight field (§15 D1073), stroke
+    /// `item` of layer `id`, bound to a number variable. A layer's own strokes
+    /// only: a selection's shared row has no one stroke to stand in for.
+    StrokeWidth {
+        id: NodeId,
+        item: ondin_core::ItemId,
+    },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -85,7 +92,8 @@ impl FieldKey {
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
             | FieldKey::Family { id }
-            | FieldKey::Opacity { id } => id,
+            | FieldKey::Opacity { id }
+            | FieldKey::StrokeWidth { id, .. } => id,
         }
     }
 
@@ -116,6 +124,8 @@ impl FieldKey {
             FieldKey::Family { .. } => icon::TEXT_AA,
             // The opacity field's own prefix.
             FieldKey::Opacity { .. } => icon::DROP_HALF,
+            // The weight field's own prefix.
+            FieldKey::StrokeWidth { .. } => icon::LINE_SEGMENT,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -147,7 +157,8 @@ impl FieldKey {
             | FieldKey::Corner { .. }
             | FieldKey::Spacing { .. }
             | FieldKey::Size { .. }
-            | FieldKey::Opacity { .. } => VarKind::Number,
+            | FieldKey::Opacity { .. }
+            | FieldKey::StrokeWidth { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
             FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
@@ -531,7 +542,8 @@ impl OndinApp {
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
             | FieldKey::Family { id }
-            | FieldKey::Opacity { id } => vec![id],
+            | FieldKey::Opacity { id }
+            | FieldKey::StrokeWidth { id, .. } => vec![id],
         }
     }
 
@@ -579,6 +591,9 @@ impl OndinApp {
                 Transaction(ondin_core::bind_text_ops(doc, id, [None, Some(var)]))
             }
             FieldKey::Opacity { id } => Transaction(ondin_core::bind_opacity_ops(doc, id, var)),
+            FieldKey::StrokeWidth { id, item } => {
+                Transaction(ondin_core::bind_stroke_width_ops(doc, id, item, var))
+            }
         }
     }
 
@@ -616,6 +631,9 @@ impl OndinApp {
                 Transaction(ondin_core::detach_text_ops(doc, id, [false, true]))
             }
             FieldKey::Opacity { id } => Transaction(ondin_core::detach_opacity_ops(doc, id)),
+            FieldKey::StrokeWidth { id, item } => {
+                Transaction(ondin_core::detach_stroke_width_ops(doc, id, item))
+            }
         }
     }
 
@@ -753,6 +771,14 @@ impl OndinApp {
             FieldKey::Content { id } => doc.get(id)?.text_vars()[0],
             FieldKey::Family { id } => doc.get(id)?.text_vars()[1],
             FieldKey::Opacity { id } => doc.get(id)?.opacity_var(),
+            FieldKey::StrokeWidth { id, item } => {
+                doc.get(id)?
+                    .paint()
+                    .strokes
+                    .iter()
+                    .find(|s| s.id == item)?
+                    .width_var
+            }
         }
     }
 
@@ -796,7 +822,8 @@ impl OndinApp {
             | FieldKey::Size { .. }
             | FieldKey::Content { .. }
             | FieldKey::Family { .. }
-            | FieldKey::Opacity { .. } => {
+            | FieldKey::Opacity { .. }
+            | FieldKey::StrokeWidth { .. } => {
                 return None;
             }
         }
@@ -1438,6 +1465,24 @@ impl OndinApp {
                         id,
                         opacity: (r.min(100.0) / 100.0) as f32,
                     }),
+                    // The one stroke's width, every side with it — the weight
+                    // field's `set_stroke_weight` — over the list as the detach
+                    // above leaves it, so the write lands unbound (§15 D1073).
+                    FieldKey::StrokeWidth { id, item } => {
+                        let mut strokes = match ops.last() {
+                            Some(Operation::SetStrokes { strokes, .. }) => strokes.clone(),
+                            _ => match doc.get(id) {
+                                Some(n) => n.paint().strokes.clone(),
+                                None => return,
+                            },
+                        };
+                        let Some(s) = strokes.iter_mut().find(|s| s.id == item) else {
+                            return;
+                        };
+                        super::inspector::set_stroke_weight(s, r.min(ui::MAX_STROKE_WIDTH));
+                        s.width_var = None;
+                        ops.push(Operation::SetStrokes { id, strokes });
+                    }
                     // The content is the text arm's above; the family and the
                     // eye are never typed.
                     FieldKey::Paint { .. }
@@ -1485,6 +1530,13 @@ impl OndinApp {
             }
             // Whether the layer shows.
             FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
+            // The width the stroke draws at.
+            FieldKey::StrokeWidth { id, item } => {
+                let paint = doc.resolved_paint(id, doc.get(id)?.paint()).into_owned();
+                Some(Cell::Number(
+                    paint.strokes.iter().find(|s| s.id == item)?.width,
+                ))
+            }
             // The percentage it draws at, the unit a bound opacity reads in.
             FieldKey::Opacity { id } => {
                 doc.get(id)?;
@@ -2990,6 +3042,101 @@ mod tests {
             (app.session.doc.drawn_opacity(rect) - 0.25).abs() < 1e-6,
             "and writes the percentage typed"
         );
+        assert_eq!(app.session.status().text, "", "asked for, so silent");
+    }
+
+    /// **A stroke's width binds through the field's verbs, a list write keeps
+    /// it or cuts it by two halves and says so, and a number typed over the chip
+    /// is the width** (§15 D1073): the rect given a 2-wide stroke, bound to
+    /// *radius/md* (6); a colour change through `commit_edit` — the list written
+    /// back with its 0 — leaves it bound and silent; a width of 9 written through
+    /// `commit_edit` detaches it and the floating status says *Detached
+    /// radius/md*, read around the pass in `commit_inner` since the pass rewrites
+    /// the list rather than appending; bound again, a chip retyped *3* lands 3
+    /// wide, unbound, silent.
+    ///
+    /// Flip, run: `commit_inner` without its `stroke_widths_cut` reading fails
+    /// *"and says so"* at `""`, the detach itself still green.
+    #[test]
+    fn a_stroke_width_binds_detaches_and_retypes() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let item = app.session.ids.mint_item();
+        app.commit_edit(Transaction(vec![Operation::SetStrokes {
+            id: rect,
+            strokes: vec![ondin_core::Keyed::new(
+                item,
+                ondin_core::Stroke {
+                    width: 2.0,
+                    ..Default::default()
+                },
+            )],
+        }]));
+        let key = FieldKey::StrokeWidth { id: rect, item };
+        let stroke = |app: &OndinApp| {
+            app.session.doc.get(rect).unwrap().paint().strokes[0]
+                .value
+                .clone()
+        };
+        app.bind_field(key, radius);
+        assert_eq!(app.field_var(key), Some(radius));
+        assert_eq!(stroke(&app).width, 0.0, "the literal 0");
+
+        app.session.info("");
+        let mut strokes = app.session.doc.get(rect).unwrap().paint().strokes.clone();
+        strokes[0].value.brush = Color::WHITE.into();
+        app.commit_edit(Transaction(vec![Operation::SetStrokes {
+            id: rect,
+            strokes,
+        }]));
+        assert_eq!(app.field_var(key), Some(radius), "a colour edit keeps it");
+        assert_eq!(app.session.status().text, "", "and says nothing");
+
+        let mut strokes = app.session.doc.get(rect).unwrap().paint().strokes.clone();
+        strokes[0].value.width = 9.0;
+        app.commit_edit(Transaction(vec![Operation::SetStrokes {
+            id: rect,
+            strokes,
+        }]));
+        assert_eq!(app.field_var(key), None, "a width written over it detaches");
+        assert_eq!(stroke(&app).width, 9.0);
+        assert_eq!(
+            app.session.status().text,
+            "Detached radius/md",
+            "and says so"
+        );
+
+        app.bind_field(key, radius);
+        app.session.info("");
+        app.var_retype = Some(Retype {
+            key,
+            text: "3".into(),
+            focus: true,
+        });
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.number_retype(ui, key, rt, 160.0);
+                }
+            });
+        };
+        run(&mut app, vec![]);
+        run(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(app.field_var(key), None, "the retype detaches");
+        assert_eq!(stroke(&app).width, 3.0, "and writes the width typed");
         assert_eq!(app.session.status().text, "", "asked for, so silent");
     }
 

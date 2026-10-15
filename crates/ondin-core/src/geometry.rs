@@ -1383,18 +1383,21 @@ pub fn transform_rect(affine: Affine, rect: Rect) -> Rect {
 /// always computed it — so a heavy stroke is grabbable across its whole width
 /// *and* keeps the same comfort margin beyond it.
 ///
-/// **`kind` is the node's *used* kind and `node` supplies everything else** —
-/// the paint the stroke reach comes from and the fill rule a path is tested
-/// under (§15 D868). They are the node's own kind until container layout resizes
-/// it, and then the click target has to be the box that is drawn.
+/// **`kind` is the node's *used* kind, `paint` its paint as drawn, and `node`
+/// supplies the rest** — the fill rule a path is tested under (§15 D868). The
+/// kind is the node's own until container layout resizes it, and then the click
+/// target has to be the box that is drawn; the paint is
+/// `Document::resolved_paint`'s, a bound stroke width its number (§15 D1073),
+/// since the stroke's reach is read from it.
 pub fn contains_local(
     node: &Node,
+    paint: &Paint,
     kind: &NodeKind,
     p: Point,
     text: Option<&TextLayout>,
     slop: f64,
 ) -> bool {
-    let tol = stroke_expansion(kind, node.paint()) + slop;
+    let tol = stroke_expansion(kind, paint) + slop;
     match kind {
         NodeKind::Rect { size, .. } | NodeKind::Artboard { size, .. } => {
             p.x >= -tol && p.y >= -tol && p.x <= size.width + tol && p.y <= size.height + tol
@@ -1764,21 +1767,43 @@ mod tests {
         let slop = 4.0;
 
         assert!(
-            contains_local(&node, node.kind(), Point::new(50.0, 25.0), None, slop),
+            contains_local(
+                &node,
+                node.paint(),
+                node.kind(),
+                Point::new(50.0, 25.0),
+                None,
+                slop
+            ),
             "the interior still hits"
         );
         assert!(
-            contains_local(&node, node.kind(), Point::new(-2.0, 25.0), None, slop),
+            contains_local(
+                &node,
+                node.paint(),
+                node.kind(),
+                Point::new(-2.0, 25.0),
+                None,
+                slop
+            ),
             "2 units outside the left edge is inside the allowance"
         );
         assert!(
-            !contains_local(&node, node.kind(), Point::new(-9.0, 25.0), None, slop),
+            !contains_local(
+                &node,
+                node.paint(),
+                node.kind(),
+                Point::new(-9.0, 25.0),
+                None,
+                slop
+            ),
             "9 units outside is not: the band is a few units, not a halo"
         );
         // And with no allowance asked for, the old exact behaviour is unchanged —
         // which is what keeps a marquee or a snapshot hit test from widening.
         assert!(!contains_local(
             &node,
+            node.paint(),
             node.kind(),
             Point::new(-2.0, 25.0),
             None,
@@ -1805,11 +1830,25 @@ mod tests {
         });
 
         assert!(
-            contains_local(&node, node.kind(), Point::new(50.0, 2.0), None, 4.0),
+            contains_local(
+                &node,
+                node.paint(),
+                node.kind(),
+                Point::new(50.0, 2.0),
+                None,
+                4.0
+            ),
             "2 units off a straight open path is on its ink"
         );
         assert!(
-            !contains_local(&node, node.kind(), Point::new(50.0, 40.0), None, 4.0),
+            !contains_local(
+                &node,
+                node.paint(),
+                node.kind(),
+                Point::new(50.0, 40.0),
+                None,
+                4.0
+            ),
             "40 units away is not"
         );
     }

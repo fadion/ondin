@@ -3641,6 +3641,7 @@ mod missing_picture_tests {
         Stroke {
             brush: brush.into(),
             width: 1.0,
+            width_var: None,
             join: ondin_core::kurbo::Join::Miter,
             cap: ondin_core::kurbo::Cap::Butt,
             dashes: Vec::new(),

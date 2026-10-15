@@ -333,11 +333,15 @@ impl Node {
         self.styles
     }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
-    /// corner, gap, padding, visibility, width, height, content, family or
-    /// opacity. What a variable's edit dirties (`Document::bound_nodes`).
+    /// stroke width, corner, gap, padding, visibility, width, height, content,
+    /// family or opacity. What a variable's edit dirties (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
-            || self.paint.strokes.iter().any(|s| s.brush.is_bound())
+            || self
+                .paint
+                .strokes
+                .iter()
+                .any(|s| s.brush.is_bound() || s.width_var.is_some())
             || self.corner_vars.iter().any(Option::is_some)
             || self.spacing_vars.iter().any(Option::is_some)
             || self.visible_var.is_some()
@@ -1258,7 +1262,14 @@ pub struct Fill {
 pub struct Stroke {
     /// Bindable as a fill's is.
     pub brush: crate::variable::BrushSource,
+    /// The literal width — 0 while [`Self::width_var`] binds it (§15 D1073);
+    /// what the stroke is drawn at is [`crate::Document::resolved_paint`]'s.
     pub width: f64,
+    /// The number variable the width is bound to (§15 D1073), **in the item**,
+    /// as the brush's binding is, so a stroke style, a reorder and a copy carry
+    /// it with the stroke. Absent when unbound; new in v8, still unreleased.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width_var: Option<crate::variable::VarId>,
     pub join: kurbo::Join,
     pub cap: kurbo::Cap,
     /// The dash pattern, as kurbo and `stroke-dasharray` take it: on, off, on…
@@ -1553,6 +1564,7 @@ impl Default for Stroke {
         Self {
             brush: peniko::Color::BLACK.into(),
             width: 1.0,
+            width_var: None,
             join: kurbo::Join::Miter,
             cap: kurbo::Cap::Butt,
             dashes: Vec::new(),

@@ -240,11 +240,15 @@ impl StyleValue {
         self.len() == 0
     }
 
-    /// The colour variables its paints are bound to, in order, repeats kept.
+    /// The variables its items are bound to — a paint's colour, a stroke's
+    /// width (§15 D1073) — in order, repeats kept.
     pub fn vars(&self) -> Vec<crate::variable::VarId> {
         match self {
             StyleValue::Fills(v) => v.iter().filter_map(|f| f.brush.var()).collect(),
-            StyleValue::Strokes(v) => v.iter().filter_map(|s| s.brush.var()).collect(),
+            StyleValue::Strokes(v) => v
+                .iter()
+                .flat_map(|s| s.brush.var().into_iter().chain(s.width_var))
+                .collect(),
             StyleValue::Effects(_) | StyleValue::Text(_) => Vec::new(),
         }
     }
@@ -501,11 +505,19 @@ pub(crate) fn check<'a>(
         if s.value.first_duplicate().is_some() {
             return Err(StyleRule::DuplicateItem(s.id));
         }
-        if s.value
-            .vars()
-            .iter()
-            .any(|v| vars.kind_of(*v) != Some(crate::variable::VarKind::Color))
-        {
+        // A paint binds a colour, a stroke's width a number (§15 D1073).
+        use crate::variable::VarKind;
+        let bad = |v: Option<crate::variable::VarId>, want: VarKind| {
+            v.is_some_and(|v| vars.kind_of(v) != Some(want))
+        };
+        let wrong = match &s.value {
+            StyleValue::Fills(v) => v.iter().any(|f| bad(f.brush.var(), VarKind::Color)),
+            StyleValue::Strokes(v) => v
+                .iter()
+                .any(|x| bad(x.brush.var(), VarKind::Color) || bad(x.width_var, VarKind::Number)),
+            StyleValue::Effects(_) | StyleValue::Text(_) => false,
+        };
+        if wrong {
             return Err(StyleRule::BadVariable(s.id));
         }
     }
@@ -819,9 +831,25 @@ pub(crate) fn detach_vars(
         StyleValue::Strokes(v) => StyleValue::Strokes(
             v.iter()
                 .map(|s| {
-                    s.map(|s| Stroke {
-                        brush: drawn(&s.brush),
-                        ..s.clone()
+                    s.map(|s| {
+                        // And a width bound to one of them, its number in `mode`
+                        // (§15 D1073).
+                        let (width, width_var) = match s.width_var {
+                            Some(v) if vars.contains(&v) => (
+                                match t.resolve_opt(v, mode) {
+                                    Some(Value::Number(x)) => x.max(0.0),
+                                    _ => 0.0,
+                                },
+                                None,
+                            ),
+                            other => (s.width, other),
+                        };
+                        Stroke {
+                            brush: drawn(&s.brush),
+                            width,
+                            width_var,
+                            ..s.clone()
+                        }
                     })
                 })
                 .collect(),

@@ -491,7 +491,11 @@ fn node_snapshot(
             .filter(|s: &&ondin_core::Keyed<Stroke>| s.visible)
             .map(|s| StrokeSummary {
                 paint: paint_summary(&doc.resolve_brush(id, &s.brush)),
-                width: s.width,
+                // And a bound width its number (§15 D1073).
+                width: match s.width_var {
+                    Some(v) => doc.stroke_width_drawn_in(doc.variables(), id, v),
+                    None => s.width,
+                },
             })
             .collect(),
         effects: node

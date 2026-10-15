@@ -68,7 +68,14 @@ pub fn hit_test(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Vec<Node
             let Some(kind) = res.used_kind(doc, *id) else {
                 return false;
             };
-            geometry::contains_local(node, kind, local_p, res.text_layout(*id), slop)
+            geometry::contains_local(
+                node,
+                &doc.resolved_paint(*id, node.paint()),
+                kind,
+                local_p,
+                res.text_layout(*id),
+                slop,
+            )
         })
         .collect();
 

@@ -149,6 +149,7 @@ fn rich_document() -> (Document, NodeId) {
                 strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(Color::from_rgba8(20, 20, 20, 255)).into(),
                     width: 2.5,
+                    width_var: None,
                     join: ondin_core::kurbo::Join::Bevel,
                     cap: ondin_core::kurbo::Cap::Square,
                     dashes: vec![4.0, 2.0],

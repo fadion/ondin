@@ -179,6 +179,7 @@ pub fn fixture() -> Fixture {
             strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::BLACK).into(),
                 width: 2.0,
+                width_var: None,
                 join: ondin_core::kurbo::Join::Round,
                 cap: ondin_core::kurbo::Cap::Round,
                 dashes: vec![],
@@ -213,6 +214,7 @@ pub fn fixture_with_stroke_align(align: StrokeAlign) -> Fixture {
             strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::BLACK).into(),
                 width: 3.0,
+                width_var: None,
                 join: ondin_core::kurbo::Join::Round,
                 cap: ondin_core::kurbo::Cap::Round,
                 dashes: vec![],

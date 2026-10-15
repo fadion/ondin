@@ -6960,8 +6960,15 @@ impl OndinApp {
                 // carrying per-side widths is flattened onto the new master value
                 // instead of being left drawing something the field does not say
                 // (the weight-is-master rule, `stroke_properties`).
+                //
+                // **A bound width is detached in the edit itself** (§15 D1073's
+                // amendment, reading (c)): the row writes one weight onto every
+                // stroke, so the binding goes with it here rather than through
+                // the commit's pass, and the floating status says nothing — the
+                // inspector's own doors' rule (D1071's amendment).
                 let tx = ondin_core::edit_strokes_all(&self.session.doc, &ids, |s| {
-                    set_stroke_weight(s, width)
+                    set_stroke_weight(s, width);
+                    s.width_var = None;
                 });
                 self.edit_valve(&rw, tx);
             }
@@ -7047,45 +7054,89 @@ impl OndinApp {
                         ..stroke.clone()
                     });
                 }
-                let mut width = stroke.width;
-                let rw = value_field(
-                    ui,
-                    // The mixed row's twin, and the second of D386's two survivors
-                    // — see the note there (§15 D637). `[S14.3-L3-07]` is why there
-                    // are two: this row and `mixed_stroke_properties`' are fifty
-                    // lines of the same code typed twice, so the stale literal had
-                    // to be fixed in both and a reader grepping `6.0` finds one.
-                    egui::vec2(
-                        ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 2.0,
-                        28.0,
-                    ),
-                    Prefix::Icon(icon::LINE_SEGMENT),
-                    &mut width,
-                    Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
-                    |d| d.custom_formatter(ui::number(2)),
-                );
-                // Whole units under the hand and any number typed is `Scrub::whole`
-                // now, not three lines here — the rule and the speed it rounds
-                // against live together in `ui::Scrub`.
-                // Scrubbable, so it goes through the valve rather than through
-                // `out`: a drag has to preview every frame, and the transaction it
-                // previews is the one the release commits.
-                //
-                // **The weight is the master, and it re-broadcasts.** It and a
-                // `Custom` set of per-side widths describe the same quantity, so
-                // when they disagree one of them has to win — and it is this one,
-                // deliberately: this is the field that says how heavy the stroke is,
-                // the per-side row is an override *of* it, and setting a weight and
-                // then customising is the order the two are used in. So editing it
-                // flattens the four sides onto the new value rather than leaving a
-                // weight the shape does not draw anywhere.
-                //
-                // A side left at 0 is flattened with the rest. "No stroke here" is a
-                // per-side statement, and the master saying "everything is 4 now" is
-                // exactly the instruction that overrides it; keeping the zeroes would
-                // make this a partial re-broadcast, which is a third rule nobody
-                // asked for.
-                self.stroke_valve(&rw, scope, index, |s| set_stroke_weight(s, width));
+                let field_w = ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 2.0;
+                // **Bound, the weight is a chip** (§15 D1073, D1038 A1) — a
+                // layer's own stroke only, keyed by its item — or the retype
+                // buffer once a key lands on it, the radius's drawing.
+                let key = match (scope, self.session.doc.get(scope.anchor(self))) {
+                    // Not on a stroke drawing `Custom` sides, which binds nothing
+                    // (`build::draws_own_sides`): the `--` door and the field menu
+                    // there would offer a bind that does not land.
+                    (PaintScope::Node(id), Some(n)) => n
+                        .paint()
+                        .strokes
+                        .get(index)
+                        .filter(|s| !ondin_core::build::draws_own_sides(n.kind(), s))
+                        .map(|s| super::binding::FieldKey::StrokeWidth { id, item: s.id }),
+                    _ => None,
+                };
+                let retyping =
+                    key.and_then(|k| self.var_retype.as_ref().filter(|r| r.key == k).cloned());
+                if let (Some(k), Some(rt)) = (key, retyping) {
+                    self.number_retype(ui, k, rt, field_w);
+                } else if let Some(k) = key
+                    && let Some(var) = self.field_var(k)
+                {
+                    let _ = self.number_chip(ui, k, var, field_w, None);
+                } else {
+                    let mut width = stroke.width;
+                    let rw = value_field(
+                        ui,
+                        // The mixed row's twin, and the second of D386's two survivors
+                        // — see the note there (§15 D637). `[S14.3-L3-07]` is why there
+                        // are two: this row and `mixed_stroke_properties`' are fifty
+                        // lines of the same code typed twice, so the stale literal had
+                        // to be fixed in both and a reader grepping `6.0` finds one.
+                        egui::vec2(field_w, 28.0),
+                        Prefix::Icon(icon::LINE_SEGMENT),
+                        &mut width,
+                        Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
+                        |d| d.custom_formatter(ui::number(2)),
+                    );
+                    // `--` typed into it opens the list, and the right-click is the
+                    // field menu — the radius field's two doors (§15 D1073).
+                    if let Some(k) = key {
+                        if rw.has_focus()
+                            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(rw.id))
+                        {
+                            self.bind_typing(ui.ctx(), k, &text, rw.rect);
+                            if text.starts_with("--") {
+                                self.var_retype = Some(super::binding::Retype {
+                                    key: k,
+                                    text,
+                                    focus: true,
+                                });
+                            }
+                        }
+                        if rw.secondary_clicked()
+                            && let Some(at) = rw.interact_pointer_pos()
+                        {
+                            self.field_menu = Some((k, at, rw.rect));
+                        }
+                    }
+                    // Whole units under the hand and any number typed is `Scrub::whole`
+                    // now, not three lines here — the rule and the speed it rounds
+                    // against live together in `ui::Scrub`.
+                    // Scrubbable, so it goes through the valve rather than through
+                    // `out`: a drag has to preview every frame, and the transaction it
+                    // previews is the one the release commits.
+                    //
+                    // **The weight is the master, and it re-broadcasts.** It and a
+                    // `Custom` set of per-side widths describe the same quantity, so
+                    // when they disagree one of them has to win — and it is this one,
+                    // deliberately: this is the field that says how heavy the stroke is,
+                    // the per-side row is an override *of* it, and setting a weight and
+                    // then customising is the order the two are used in. So editing it
+                    // flattens the four sides onto the new value rather than leaving a
+                    // weight the shape does not draw anywhere.
+                    //
+                    // A side left at 0 is flattened with the rest. "No stroke here" is a
+                    // per-side statement, and the master saying "everything is 4 now" is
+                    // exactly the instruction that overrides it; keeping the zeroes would
+                    // make this a partial re-broadcast, which is a third rule nobody
+                    // asked for.
+                    self.stroke_valve(&rw, scope, index, |s| set_stroke_weight(s, width));
+                }
                 let open = self.stroke_menu == Some(index);
                 let more = ui::field_button(
                     ui,
@@ -7167,6 +7218,7 @@ impl OndinApp {
     ) -> Option<Stroke> {
         let mut out = None;
         let mut sides = stroke.sides;
+        let drawn_width = self.drawn_stroke_width(scope, stroke);
         // ⚠️ **Its leading gap too, and a scope cannot supply that.** `paint_unit`
         // allocates exactly *one* gap, between its two closures, and these rows are
         // drawn inside the second one — so the combo sat flush against the
@@ -7208,8 +7260,9 @@ impl OndinApp {
                     StrokeSides::Left,
                     // Seeded from whatever the stroke already draws, so picking
                     // Custom changes nothing on canvas until a field is touched —
-                    // the row opens on the truth rather than on four zeroes.
-                    stroke.sides.as_custom(stroke.width),
+                    // the row opens on the truth rather than on four zeroes. A
+                    // bound weight's number, not its 0 (§15 D1073).
+                    stroke.sides.as_custom(drawn_width),
                 ] {
                     // Compared by *label*, not by value: the Custom entry carries
                     // live widths, so a value comparison would leave it unlit the
@@ -7226,8 +7279,16 @@ impl OndinApp {
             });
         });
         if sides != stroke.sides {
+            // **Made `Custom`, a bound weight detaches in the edit itself** (§15
+            // D1073's amendment, reading (c)), at the width it drew — the seed's
+            // own number — so the floating status says nothing, as the commit's
+            // pass would have detached it out loud. Only this row offers `Custom`
+            // on a box, where it draws its own sides.
+            let custom = matches!(sides, StrokeSides::Custom { .. });
             out = Some(Stroke {
                 sides,
+                width: if custom { drawn_width } else { stroke.width },
+                width_var: if custom { None } else { stroke.width_var },
                 ..stroke.clone()
             });
         }
@@ -7451,6 +7512,19 @@ impl OndinApp {
             }
         }
     }
+    /// The width `stroke` draws at: a bound one's number on a layer's own
+    /// strokes (§15 D1073), its literal otherwise — a selection's shared list is
+    /// read through `shown_over_strokes`, resolved already.
+    fn drawn_stroke_width(&self, scope: PaintScope, stroke: &Stroke) -> f64 {
+        let (PaintScope::Node(id), Some(var)) = (scope, stroke.width_var) else {
+            return stroke.width;
+        };
+        let doc = &self.session.doc;
+        match doc.get(id) {
+            Some(_) => doc.stroke_width_drawn_in(doc.variables(), id, var),
+            None => stroke.width,
+        }
+    }
     /// Put a scrubbed number on stroke `index` through the edit valve.
     ///
     /// Every draggable number on a stroke goes through here rather than through the
@@ -7534,6 +7608,9 @@ impl OndinApp {
         // Clear of the inspector, to its left, aligned with the stroke row that
         // opened it — see `OndinApp::popover_anchor`.
         let anchor = Self::popover_anchor(&ctx, head.rect, MENU_W);
+        // The width the stroke draws, a bound one's number and not its 0 — the
+        // scale a fresh pattern is sized at (§15 D1073's amendment, reading (d)).
+        let drawn_width = self.drawn_stroke_width(scope, s);
         let menu = egui::Area::new(egui::Id::new(("stroke-menu", index)))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
@@ -7563,8 +7640,12 @@ impl OndinApp {
                             current,
                             |p, i, rect, on| segment_label(p, rect, DashStyle::ALL[i].label(), on),
                         ) {
+                            let sized = Stroke {
+                                width: drawn_width,
+                                ..s.clone()
+                            };
                             out = Some(Stroke {
-                                dashes: pattern_for(DashStyle::ALL[i], s),
+                                dashes: pattern_for(DashStyle::ALL[i], &sized),
                                 ..s.clone()
                             });
                             // The list the *old* mode was being typed into is not
@@ -14669,7 +14750,7 @@ fn sides_button_state(applies: bool, open: bool, sides: StrokeSides) -> ui::Fiel
 /// overrides it; sparing the zeroes would make this a partial re-broadcast, which is
 /// a third rule nobody asked for. The named single sides carry no widths of their
 /// own, so there is nothing to re-broadcast and the variant is left alone.
-fn set_stroke_weight(stroke: &mut Stroke, width: f64) {
+pub(super) fn set_stroke_weight(stroke: &mut Stroke, width: f64) {
     let width = width.max(0.0);
     stroke.width = width;
     if let StrokeSides::Custom { .. } = stroke.sides {

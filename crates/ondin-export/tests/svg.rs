@@ -382,6 +382,70 @@ fn a_bound_opacity_exports_at_its_percentage() {
     );
 }
 
+/// **A bound stroke width exports at its variable's number** (§15 D1073): a
+/// rect stroked 2 wide, its width bound to `stroke/thick` (7), writes
+/// `stroke-width="7"`, never the 0 its literal holds — the SVG writer's paint
+/// comes through `Document::resolved_paint`, which substitutes it.
+#[test]
+fn a_bound_stroke_width_exports_at_its_number() {
+    use ondin_core::kurbo::{RoundedRectRadii, Size};
+    use ondin_core::{Cell, Document, IdSource, Mode, NodeKind, Stroke, VarKind, Variable};
+    let mut ids = IdSource::new(0xB1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, thick, item) = (ids.mint(), ids.mint_mode(), ids.mint_var(), ids.mint_item());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(40.0, 20.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetStrokes {
+            id: rect,
+            strokes: vec![ondin_core::Keyed::new(
+                item,
+                Stroke {
+                    width: 2.0,
+                    ..Default::default()
+                },
+            )],
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Mode 1".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: thick,
+                name: "stroke/thick".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(7.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    let ops = ondin_core::bind_stroke_width_ops(&doc, rect, item, thick);
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let out = svg(&doc, &res, None);
+    assert!(
+        out.contains("stroke-width=\"7\""),
+        "exported at its variable's 7:\n{out}"
+    );
+}
+
 /// SVG has no stroke alignment, so an aligned stroke has to be *built*: the
 /// stroke is drawn at double width and clipped to the side it belongs on. Both
 /// halves have to be present or the export silently loses the effect.
@@ -495,6 +559,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
                     Stroke {
                         brush: solid(0x33).into(),
                         width: 1.0,
+                        width_var: None,
                         join: ondin_core::kurbo::Join::Miter,
                         cap: ondin_core::kurbo::Cap::Butt,
                         dashes: vec![],
@@ -508,6 +573,7 @@ fn stacked_paints_export_one_element_each_in_paint_order() {
                     Stroke {
                         brush: solid(0x44).into(),
                         width: 1.0,
+                        width_var: None,
                         join: ondin_core::kurbo::Join::Miter,
                         cap: ondin_core::kurbo::Cap::Butt,
                         dashes: vec![],

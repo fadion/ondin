@@ -373,6 +373,7 @@ fn golden_document() -> (Document, Resolved) {
             strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(20, 30, 60, 255)).into(),
                 width: 2.5,
+                width_var: None,
                 join: Join::Round,
                 cap: Cap::Round,
                 dashes: vec![6.0, 3.0],
@@ -424,6 +425,7 @@ fn golden_document() -> (Document, Resolved) {
             strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(90, 90, 100, 255)).into(),
                 width: 3.0,
+                width_var: None,
                 join: Join::Miter,
                 cap: Cap::Butt,
                 dashes: vec![],
@@ -442,6 +444,7 @@ fn golden_document() -> (Document, Resolved) {
             strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(10, 70, 50, 255)).into(),
                 width: 3.0,
+                width_var: None,
                 join: Join::Miter,
                 cap: Cap::Butt,
                 dashes: vec![],

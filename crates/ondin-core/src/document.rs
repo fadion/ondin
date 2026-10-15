@@ -497,7 +497,10 @@ impl Document {
     ) -> std::borrow::Cow<'a, Paint> {
         use std::borrow::Cow;
         let bound = paint.fills.iter().any(|f| f.brush.is_bound())
-            || paint.strokes.iter().any(|s| s.brush.is_bound());
+            || paint
+                .strokes
+                .iter()
+                .any(|s| s.brush.is_bound() || s.width_var.is_some());
         if !bound {
             return Cow::Borrowed(paint);
         }
@@ -511,8 +514,35 @@ impl Document {
             if s.brush.is_bound() {
                 s.brush = self.resolve_brush_in(t, id, &s.brush).into_owned().into();
             }
+            // **And a bound width its number** (§15 D1073), floored at 0 as a
+            // width field floors a literal, a missing or non-number value 0 —
+            // and **unbound in what comes out**, as a resolved brush comes out
+            // literal: the cell preview hands this door's output to the scene as
+            // an override, and the scene resolves it again against the committed
+            // table, so a binding left on the item drew the committed number over
+            // the previewed one. Measured by
+            // `ondin-render`'s
+            // `a_stroke_width_binding_previews_as_the_width_it_will_draw`.
+            if let Some(v) = s.width_var.take() {
+                s.width = self.stroke_width_drawn_in(t, id, v);
+            }
         }
         Cow::Owned(out)
+    }
+
+    /// The width a stroke whose width is bound to `var` is drawn at, at `id` in
+    /// table `t` (§15 D1073): the variable's number in the mode in force, never
+    /// below 0; a missing or non-number value 0.
+    pub fn stroke_width_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        var: crate::variable::VarId,
+    ) -> f64 {
+        match self.resolve_var_in(t, id, var) {
+            Some(crate::variable::Value::Number(x)) => x.max(0.0),
+            _ => 0.0,
+        }
     }
 
     /// `id`'s corner radii as drawn: each bound corner its variable's number in

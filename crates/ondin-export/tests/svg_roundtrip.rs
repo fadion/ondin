@@ -178,6 +178,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
             strokes: keyed_by_position([ondin_core::Stroke {
                 brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0, 0, 0, 255)).into(),
                 width: 2.0,
+                width_var: None,
                 join: ondin_core::kurbo::Join::Miter,
                 cap: ondin_core::kurbo::Cap::Butt,
                 dashes: Vec::new(),

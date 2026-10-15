@@ -815,9 +815,10 @@ impl EditorSession {
             ));
         }
 
+        // The paint as drawn, a bound stroke width its number (§15 D1073).
         let own = geometry::world_bounds_of_parts(
             display.kind(),
-            display.paint(),
+            &self.doc.resolved_paint(id, display.paint()),
             world,
             self.preview_text_layout(id),
         );
@@ -1285,6 +1286,12 @@ impl EditorSession {
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
         // And an opacity written over a bound layer (§15 D1072), the same one half.
         let tx = ondin_core::build::keep_opacity_bindings(&self.doc, tx);
+        // And a stroke's width written over its binding (§15 D1073), by corners'
+        // two halves — rewritten in the list, not appended, so the widths the
+        // pass cuts are read here, around it, for the floating status (D1071).
+        let widths_bound = stroke_widths_bound(&tx);
+        let tx = ondin_core::build::keep_stroke_width_bindings(&self.doc, tx);
+        let widths_cut = stroke_widths_cut(&self.doc, &tx, &widths_bound);
         // And a width or a height written over a bound axis, or made computed by
         // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
         // item are among the layout writes it reads.
@@ -1299,10 +1306,14 @@ impl EditorSession {
         // in the one order the core tests pin (`propagate::owed`'s doc).
         let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
-        let detached = said_detached(
-            styles_detached(&self.doc, &tx, user),
-            variables_detached(&self.doc, &tx, asked_ops, user),
-        );
+        let mut vars_cut = variables_detached(&self.doc, &tx, asked_ops, user);
+        for name in widths_cut {
+            if !vars_cut.contains(&name) {
+                vars_cut.push(name);
+            }
+        }
+        vars_cut.sort();
+        let detached = said_detached(styles_detached(&self.doc, &tx, user), vars_cut);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation
@@ -1827,6 +1838,50 @@ fn variables_detached(doc: &Document, tx: &Transaction, from: usize, to: usize) 
             (Some(v), None) => table.get(v).map(|x| x.name.clone()),
             _ => None,
         })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every stroke `tx` writes with its width bound, as (layer, stroke, variable)
+/// — read before `build::keep_stroke_width_bindings`, which rewrites a cut
+/// binding inside the list rather than appending an op (§15 D1073).
+fn stroke_widths_bound(tx: &Transaction) -> Vec<(NodeId, ondin_core::ItemId, ondin_core::VarId)> {
+    tx.0.iter()
+        .filter_map(|op| match op {
+            Operation::SetStrokes { id, strokes } => Some((*id, strokes)),
+            _ => None,
+        })
+        .flat_map(|(id, strokes)| {
+            strokes
+                .iter()
+                .filter_map(move |s| s.width_var.map(|v| (id, s.id, v)))
+        })
+        .collect()
+}
+
+/// The variables `bound`'s strokes lost in `tx`, the pass run — each a width
+/// the edit wrote over its binding, by name, for [`said_detached`]. A stroke the
+/// edit itself unbinds — a chip's detach — never enters `bound`, so it is not
+/// said, F2's rule as [`variables_detached`] keeps it.
+fn stroke_widths_cut(
+    doc: &Document,
+    tx: &Transaction,
+    bound: &[(NodeId, ondin_core::ItemId, ondin_core::VarId)],
+) -> Vec<String> {
+    let table = doc.variables();
+    let mut names: Vec<String> = bound
+        .iter()
+        .filter(|(id, item, _)| {
+            tx.0.iter().any(|op| match op {
+                Operation::SetStrokes { id: n, strokes } if n == id => strokes
+                    .iter()
+                    .any(|s| s.id == *item && s.width_var.is_none()),
+                _ => false,
+            })
+        })
+        .filter_map(|(_, _, v)| table.get(*v).map(|x| x.name.clone()))
         .collect();
     names.sort();
     names.dedup();

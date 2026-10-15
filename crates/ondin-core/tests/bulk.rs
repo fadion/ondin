@@ -38,6 +38,7 @@ fn solid_stroke(c: Color) -> Stroke {
     Stroke {
         brush: Brush::Solid(c).into(),
         width: 1.0,
+        width_var: None,
         join: Join::Miter,
         cap: Cap::Butt,
         dashes: Vec::new(),

@@ -14,6 +14,7 @@ pub(crate) mod layers;
 mod layout;
 pub(crate) mod paint;
 mod picker;
+pub(crate) mod styles;
 mod typography;
 pub(crate) mod variables;
 pub(crate) mod variants;

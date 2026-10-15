@@ -34,6 +34,7 @@ use eframe::egui;
 use ondin_core::Brush;
 use ondin_core::build::{Axis, Edge};
 use ondin_core::kurbo::{Affine, Cap, Join, Point, Rect, RoundedRectRadii, Size, Vec2};
+use ondin_core::style::StyleSlot;
 use ondin_core::{
     Adjustment, DashStyle, Effect, EffectKind, Fill, GeometryPatch, GridAlign, GridAxis, GuideAxis,
     Keyed, LayoutGrid, NodeId, NodeKind, Operation, OrientOp, PaintShown, PaintTarget, Stroke,
@@ -6336,7 +6337,9 @@ impl OndinApp {
         } else {
             ui::HeadAction::new(icon::PLUS, "Add a fill")
         });
-        let add = self.panel(ui, "Fill", action, |app, ui| {
+        // The card wears its style when its layers have one (§15 D1063).
+        let targets = self.paint_style_targets(scope);
+        let add = self.style_card(ui, "Fill", StyleSlot::Fills, &targets, action, |app, ui| {
             if shown.is_mixed() {
                 app.mixed_paint_row(ui, PaintList::Fill);
                 return;
@@ -6488,132 +6491,144 @@ impl OndinApp {
         } else {
             ui::HeadAction::new(icon::PLUS, "Add a stroke")
         });
-        let add = self.panel(ui, "Stroke", action, |app, ui| {
-            if shown.is_mixed() {
-                // The same pair the list below draws, through the same function, so
-                // the two cannot disagree about the gap between them again — see
-                // [`paint_unit`]. `last`, because a mixed selection shows one.
-                paint_unit(
-                    ui,
-                    app,
-                    true,
-                    |app, ui| app.mixed_paint_row(ui, PaintList::Stroke),
-                    |app, ui| app.mixed_stroke_properties(ui, scope),
-                );
-                return;
-            }
-            // `inspector_fill`'s reading of an instance's list, for strokes.
-            let source = match scope {
-                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
-                PaintScope::Selection => None,
-            };
-            if strokes.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
-                ui.label(
-                    egui::RichText::new("No stroke")
-                        .size(11.0)
-                        .color(theme::text::FAINT),
-                );
-                return;
-            }
-            let anchor = scope.anchor(app);
-            let states = source
-                .as_ref()
-                .map(|s| ondin_core::reset::item_states(s, strokes));
-            let (mut remove, mut toggle, mut reset) = (None, None, None);
-            let mut edit: Option<(usize, Stroke)> = None;
-            let carrying = app.carrying(PaintList::Stroke, anchor);
-            let order = app.paint_order(ui, PaintList::Stroke, anchor, strokes.len());
-            let mut slots = paint::Slots::default();
-            for (pos, &index) in order.iter().enumerate() {
-                let s = &strokes[index];
-                let shown = app.session.doc.resolve_brush(anchor, &s.brush).into_owned();
-                // **Both rows travel together.** A colour without its weight is not
-                // a stroke, so the unit the grip carries is the unit the panel
-                // presents — which is also why the span pushed below is the pair's
-                // and not the colour row's.
-                let salt = ("stroke-row", index);
-                let last = pos + 1 == order.len();
-                let ((out, changed), rect) =
-                    carried_unit(ui, carrying == Some(index), salt, |ui| {
-                        paint_unit(
-                            ui,
-                            app,
-                            last,
-                            |app, ui| {
-                                app.paint_row(
-                                    ui,
-                                    RowCtx {
-                                        id: anchor,
-                                        slot: scope.slot(PaintList::Stroke, index),
-                                        visible: s.visible,
-                                        grip: Some((PaintList::Stroke, index)),
-                                        reorderable: strokes.len() > 1,
-                                        census: None,
-                                        mixed: None,
-                                        item: states.as_ref().map(|s| s[index]),
-                                    },
-                                    &shown,
-                                )
-                            },
-                            |app, ui| app.stroke_properties(ui, scope, index, s),
-                        )
-                    });
-                slots.push(rect.top(), rect.bottom());
-                remove = remove.or(out.remove.then_some(index));
-                toggle = toggle.or(out.toggle.then_some(index));
-                edit = edit.or(changed.map(|s| (index, s)));
-                reset = reset.or(out.reset.then_some(index));
-            }
-            // The main's strokes this instance removed, as ghost rows (§15 D981).
-            let mut restore = None;
-            for gone in source
-                .as_deref()
-                .map(|s| ondin_core::reset::removed_items(s, strokes))
-                .unwrap_or_default()
-            {
-                let lead = super::component::GhostLead::Chip;
-                let label = paint::source_label(&app.session.doc, &gone.brush);
-                if super::component::ghost_row(ui, lead, &label) {
-                    restore = Some(gone.id);
+        let targets = self.paint_style_targets(scope);
+        let add = self.style_card(
+            ui,
+            "Stroke",
+            StyleSlot::Strokes,
+            &targets,
+            action,
+            |app, ui| {
+                if shown.is_mixed() {
+                    // The same pair the list below draws, through the same function, so
+                    // the two cannot disagree about the gap between them again — see
+                    // [`paint_unit`]. `last`, because a mixed selection shows one.
+                    paint_unit(
+                        ui,
+                        app,
+                        true,
+                        |app, ui| app.mixed_paint_row(ui, PaintList::Stroke),
+                        |app, ui| app.mixed_stroke_properties(ui, scope),
+                    );
+                    return;
                 }
-            }
-            if let Some((from, to)) = app.finish_paint_drag(ui, PaintList::Stroke, anchor, slots) {
-                app.write_strokes(scope, paint::reordered(strokes, from, to));
-                // Everything keyed by list index is now naming a different stroke,
-                // because the reorder just renumbered them — so it is renumbered
-                // with them, and the options popup, the sides rows and the picker
-                // stay on the stroke the user was working on. Dropping them all
-                // instead was what this did first, and it shut a popup in the middle
-                // of the gesture that opened it.
-                let n = strokes.len();
-                app.remap_paint_indices(anchor, PaintList::Stroke, |i| {
-                    paint::reordered_index(n, from, to, i)
-                });
-            } else if let (Some(_), Some(src)) = (restore, source.as_deref()) {
-                // The whole list, as the fill card's restore (§15 D994).
-                app.write_strokes(scope, src.to_vec());
-            } else if let (Some(item), Some(src)) =
-                (reset.map(|i| strokes[i].id), source.as_deref())
-            {
-                app.write_strokes(scope, ondin_core::reset::reset_item(src, strokes, item));
-            } else if let Some(i) = toggle {
-                let mut next = strokes.to_vec();
-                next[i].visible = !next[i].visible;
-                app.write_strokes(scope, next);
-            } else if let Some(i) = remove {
-                let mut next = strokes.to_vec();
-                next.remove(i);
-                app.write_strokes(scope, next);
-                // The removed stroke's own chrome goes; everything above it comes
-                // down one, rather than the whole panel being reset because one row
-                // in it was deleted.
-                app.remap_paint_indices(anchor, PaintList::Stroke, |j| paint::removed_index(i, j));
-            } else if let Some((i, s)) = edit {
-                let mut next = strokes.to_vec();
-                next[i].value = s;
-                app.write_strokes(scope, next);
-            }
-        });
+                // `inspector_fill`'s reading of an instance's list, for strokes.
+                let source = match scope {
+                    PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
+                    PaintScope::Selection => None,
+                };
+                if strokes.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
+                    ui.label(
+                        egui::RichText::new("No stroke")
+                            .size(11.0)
+                            .color(theme::text::FAINT),
+                    );
+                    return;
+                }
+                let anchor = scope.anchor(app);
+                let states = source
+                    .as_ref()
+                    .map(|s| ondin_core::reset::item_states(s, strokes));
+                let (mut remove, mut toggle, mut reset) = (None, None, None);
+                let mut edit: Option<(usize, Stroke)> = None;
+                let carrying = app.carrying(PaintList::Stroke, anchor);
+                let order = app.paint_order(ui, PaintList::Stroke, anchor, strokes.len());
+                let mut slots = paint::Slots::default();
+                for (pos, &index) in order.iter().enumerate() {
+                    let s = &strokes[index];
+                    let shown = app.session.doc.resolve_brush(anchor, &s.brush).into_owned();
+                    // **Both rows travel together.** A colour without its weight is not
+                    // a stroke, so the unit the grip carries is the unit the panel
+                    // presents — which is also why the span pushed below is the pair's
+                    // and not the colour row's.
+                    let salt = ("stroke-row", index);
+                    let last = pos + 1 == order.len();
+                    let ((out, changed), rect) =
+                        carried_unit(ui, carrying == Some(index), salt, |ui| {
+                            paint_unit(
+                                ui,
+                                app,
+                                last,
+                                |app, ui| {
+                                    app.paint_row(
+                                        ui,
+                                        RowCtx {
+                                            id: anchor,
+                                            slot: scope.slot(PaintList::Stroke, index),
+                                            visible: s.visible,
+                                            grip: Some((PaintList::Stroke, index)),
+                                            reorderable: strokes.len() > 1,
+                                            census: None,
+                                            mixed: None,
+                                            item: states.as_ref().map(|s| s[index]),
+                                        },
+                                        &shown,
+                                    )
+                                },
+                                |app, ui| app.stroke_properties(ui, scope, index, s),
+                            )
+                        });
+                    slots.push(rect.top(), rect.bottom());
+                    remove = remove.or(out.remove.then_some(index));
+                    toggle = toggle.or(out.toggle.then_some(index));
+                    edit = edit.or(changed.map(|s| (index, s)));
+                    reset = reset.or(out.reset.then_some(index));
+                }
+                // The main's strokes this instance removed, as ghost rows (§15 D981).
+                let mut restore = None;
+                for gone in source
+                    .as_deref()
+                    .map(|s| ondin_core::reset::removed_items(s, strokes))
+                    .unwrap_or_default()
+                {
+                    let lead = super::component::GhostLead::Chip;
+                    let label = paint::source_label(&app.session.doc, &gone.brush);
+                    if super::component::ghost_row(ui, lead, &label) {
+                        restore = Some(gone.id);
+                    }
+                }
+                if let Some((from, to)) =
+                    app.finish_paint_drag(ui, PaintList::Stroke, anchor, slots)
+                {
+                    app.write_strokes(scope, paint::reordered(strokes, from, to));
+                    // Everything keyed by list index is now naming a different stroke,
+                    // because the reorder just renumbered them — so it is renumbered
+                    // with them, and the options popup, the sides rows and the picker
+                    // stay on the stroke the user was working on. Dropping them all
+                    // instead was what this did first, and it shut a popup in the middle
+                    // of the gesture that opened it.
+                    let n = strokes.len();
+                    app.remap_paint_indices(anchor, PaintList::Stroke, |i| {
+                        paint::reordered_index(n, from, to, i)
+                    });
+                } else if let (Some(_), Some(src)) = (restore, source.as_deref()) {
+                    // The whole list, as the fill card's restore (§15 D994).
+                    app.write_strokes(scope, src.to_vec());
+                } else if let (Some(item), Some(src)) =
+                    (reset.map(|i| strokes[i].id), source.as_deref())
+                {
+                    app.write_strokes(scope, ondin_core::reset::reset_item(src, strokes, item));
+                } else if let Some(i) = toggle {
+                    let mut next = strokes.to_vec();
+                    next[i].visible = !next[i].visible;
+                    app.write_strokes(scope, next);
+                } else if let Some(i) = remove {
+                    let mut next = strokes.to_vec();
+                    next.remove(i);
+                    app.write_strokes(scope, next);
+                    // The removed stroke's own chrome goes; everything above it comes
+                    // down one, rather than the whole panel being reset because one row
+                    // in it was deleted.
+                    app.remap_paint_indices(anchor, PaintList::Stroke, |j| {
+                        paint::removed_index(i, j)
+                    });
+                } else if let Some((i, s)) = edit {
+                    let mut next = strokes.to_vec();
+                    next[i].value = s;
+                    app.write_strokes(scope, next);
+                }
+            },
+        );
         if add {
             self.open_paint_panel("Stroke");
             let mut next = strokes.to_vec();
@@ -11355,65 +11370,72 @@ impl OndinApp {
         } else {
             ui::HeadAction::new(icon::PLUS, "Add an effect")
         });
-        let add = self.panel(ui, "Effects", action, |app, ui| {
-            if mixed {
-                ui.label(
-                    egui::RichText::new("These layers have different effects")
-                        .size(11.0)
-                        .color(theme::text::FAINT),
-                );
-                return;
-            }
-            // An instance that removed every effect still has its ghost rows.
-            if effects.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
-                ui.label(
-                    egui::RichText::new("No effects")
-                        .size(11.0)
-                        .color(theme::text::FAINT),
-                );
-                return;
-            }
-            let mut head = None;
-            let states = source
-                .as_ref()
-                .map(|s| ondin_core::reset::item_states(s, &effects));
-            for (index, effect) in effects.iter().enumerate() {
-                let open = app.effect_menu == Some((anchor, index));
-                let item = states.as_ref().map(|s| s[index]);
-                let (row, resp) = Self::effect_row(ui, index, effect, open, item);
-                if row.remove || row.toggle || row.open || row.reset {
-                    out = row;
-                    acted = Some(index);
+        let add = self.style_card(
+            ui,
+            "Effects",
+            StyleSlot::Effects,
+            subjects,
+            action,
+            |app, ui| {
+                if mixed {
+                    ui.label(
+                        egui::RichText::new("These layers have different effects")
+                            .size(11.0)
+                            .color(theme::text::FAINT),
+                    );
+                    return;
                 }
-                if open {
-                    head = Some(resp);
+                // An instance that removed every effect still has its ghost rows.
+                if effects.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
+                    ui.label(
+                        egui::RichText::new("No effects")
+                            .size(11.0)
+                            .color(theme::text::FAINT),
+                    );
+                    return;
                 }
-            }
-            // The main's effects this instance removed, as ghost rows (§15 D981).
-            for gone in source
-                .as_deref()
-                .map(|s| ondin_core::reset::removed_items(s, &effects))
-                .unwrap_or_default()
-            {
-                let lead = super::component::GhostLead::Glyph(effect_glyph(&gone.kind));
-                if super::component::ghost_row(ui, lead, gone.kind.label()) {
-                    restore = Some(gone.id);
+                let mut head = None;
+                let states = source
+                    .as_ref()
+                    .map(|s| ondin_core::reset::item_states(s, &effects));
+                for (index, effect) in effects.iter().enumerate() {
+                    let open = app.effect_menu == Some((anchor, index));
+                    let item = states.as_ref().map(|s| s[index]);
+                    let (row, resp) = Self::effect_row(ui, index, effect, open, item);
+                    if row.remove || row.toggle || row.open || row.reset {
+                        out = row;
+                        acted = Some(index);
+                    }
+                    if open {
+                        head = Some(resp);
+                    }
                 }
-            }
-            // **After every row**, so the popover's `Area` cannot claim a press
-            // meant for a row below the one that opened it, and because the closure
-            // is holding the `&mut self` the popover wants.
-            if let (Some(head), Some((_, index))) = (head, app.effect_menu)
-                && let Some(effect) = effects.get(index)
-            {
-                app.effect_menu_popup(ui, &head, subjects, index, effect);
-            }
-            // A faint *"Not drawn on the canvas yet"* stood here for one day
-            // (§15 D337), added after the first shadow authored in this panel was
-            // reported as drawing nothing. The GPU passes landed the next day
-            // (§15 D339), so it is gone — which is what a line of chrome tied to a
-            // gap is *for*, and why it was one `if`.
-        });
+                // The main's effects this instance removed, as ghost rows (§15 D981).
+                for gone in source
+                    .as_deref()
+                    .map(|s| ondin_core::reset::removed_items(s, &effects))
+                    .unwrap_or_default()
+                {
+                    let lead = super::component::GhostLead::Glyph(effect_glyph(&gone.kind));
+                    if super::component::ghost_row(ui, lead, gone.kind.label()) {
+                        restore = Some(gone.id);
+                    }
+                }
+                // **After every row**, so the popover's `Area` cannot claim a press
+                // meant for a row below the one that opened it, and because the closure
+                // is holding the `&mut self` the popover wants.
+                if let (Some(head), Some((_, index))) = (head, app.effect_menu)
+                    && let Some(effect) = effects.get(index)
+                {
+                    app.effect_menu_popup(ui, &head, subjects, index, effect);
+                }
+                // A faint *"Not drawn on the canvas yet"* stood here for one day
+                // (§15 D337), added after the first shadow authored in this panel was
+                // reported as drawing nothing. The GPU passes landed the next day
+                // (§15 D339), so it is gone — which is what a line of chrome tied to a
+                // gap is *for*, and why it was one `if`.
+            },
+        );
         if add {
             // The panel may be shut — a `+` on a collapsed header is a legal press
             // (`section_head`) — and a row added into a card nobody can see is a
@@ -13206,6 +13228,16 @@ impl OndinApp {
         };
         self.commit_edit(tx);
     }
+    /// The layers a Fill or Stroke card in `scope` writes — what its style is
+    /// read off and applied to (§15 D1063).
+    fn paint_style_targets(&self, scope: PaintScope) -> Vec<NodeId> {
+        match scope {
+            PaintScope::Node(id) => vec![id],
+            PaintScope::Selection => {
+                ondin_core::build::paint_targets(&self.session.doc, self.session.selection.ids())
+            }
+        }
+    }
     fn write_fill_list(&mut self, scope: PaintScope, fills: Vec<Keyed<Fill>>) {
         let anchor = self.fills_in_scope(scope);
         self.write_paint_list(
@@ -13314,6 +13346,23 @@ impl OndinApp {
         badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> ui::HeadClicks {
+        self.panel_full(ui, title, size, action, badge, false, body)
+    }
+
+    /// [`Self::panel_head`] with a `⋯` after the action icon when `more` — a
+    /// style slot's card (D1038 F8, §15 D1063), its click in
+    /// [`ui::HeadClicks::more`].
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn panel_full(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        size: Option<usize>,
+        action: Option<ui::HeadAction>,
+        badge: Option<&str>,
+        more: bool,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) -> ui::HeadClicks {
         let shown = match size {
             Some(n) => format!("{title} {n}"),
             None => title.to_string(),
@@ -13345,8 +13394,9 @@ impl OndinApp {
         let (mut clicks, card_rect) = ui
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {
-                    let clicks =
-                        ui::section_head_full(ui, &shown, open, action, badge, overrides, open);
+                    let clicks = ui::section_head_full(
+                        ui, &shown, open, action, badge, overrides, more, open,
+                    );
                     if open {
                         body(self, ui);
                     }
@@ -13361,8 +13411,11 @@ impl OndinApp {
             // (`ui::HEAD_ACTION_PAD`). Left out of this, the card would be the
             // later claimant over the whole pad and would win every press in it.
             let mut hit = card_rect;
-            if action.is_some() {
+            if action.is_some() || more {
                 hit.max.x -= ui::HEAD_ACTION_W + ui::HEAD_ACTION_PAD + ui::CARD_MARGIN_X;
+            }
+            if action.is_some() && more {
+                hit.max.x -= ui::HEAD_MORE_W;
             }
             let whole = ui.interact(
                 hit,
@@ -20490,9 +20543,10 @@ mod effects_panel_tests {
             card.app.collapsed_panels.contains("Effects"),
             "an empty stack rests shut"
         );
-        // The `+` sits in the header's right-hand corner, `CARD_MARGIN_X` in from
-        // the card's edge and `HEAD_ACTION_W` wide.
-        let x = COLUMN - ui::CARD_MARGIN_X - ui::HEAD_ACTION_W * 0.5;
+        // The `+` sits left of the `⋯` in the header's right-hand corner (§15
+        // D1063): the `⋯` `CARD_MARGIN_X` in from the card's edge, and the `+`
+        // `HEAD_MORE_W` further, `HEAD_ACTION_W` wide.
+        let x = COLUMN - ui::CARD_MARGIN_X - ui::HEAD_MORE_W - ui::HEAD_ACTION_W * 0.5;
         card.click(egui::pos2(x, 19.0));
         let now = card.committed();
         assert_eq!(now.len(), 1);
@@ -20638,9 +20692,10 @@ mod effects_multi_tests {
             self.settle();
         }
 
-        /// Press the header's `+`.
+        /// Press the header's `+` — left of the `⋯`, which keeps the corner
+        /// (§15 D1063).
         fn add(&mut self) {
-            let x = COLUMN - ui::CARD_MARGIN_X - ui::HEAD_ACTION_W * 0.5;
+            let x = COLUMN - ui::CARD_MARGIN_X - ui::HEAD_MORE_W - ui::HEAD_ACTION_W * 0.5;
             self.click(egui::pos2(x, 19.0));
         }
 

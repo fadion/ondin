@@ -535,6 +535,11 @@ pub struct EditorSession {
     /// The verb and moment of the last run commit, while the run is still open —
     /// see [`Self::commit_run`].
     run: Option<(&'static str, Instant)>,
+    /// The style the browser's *Edit* opened (§15 D1063): while set, a write of
+    /// its slot on a layer bound to it is an edit of the style itself
+    /// (`style::edit_through`, at the commit door), so the inspector's cards edit
+    /// every user at once.
+    pub style_edit: Option<ondin_core::style::StyleId>,
     /// When the document last matched what is on disk. `None` for a document
     /// that has never been read from or written to a file — the top bar's save
     /// dot reports that as red, because nothing of it exists on disk.
@@ -627,6 +632,7 @@ impl EditorSession {
             dirty: false,
             saving: None,
             run: None,
+            style_edit: None,
             saved_at,
             revision: 0,
             commits: 0,
@@ -1235,6 +1241,13 @@ impl EditorSession {
         if tx.0.is_empty() {
             return Ok(());
         }
+        // **While the browser's *Edit* is open, an edit of the style's users is an
+        // edit of the style** (§15 D1063) — first, so every pass below reads the
+        // style's edit and `style::settle` writes it back onto every user.
+        let tx = match self.style_edit {
+            Some(s) => ondin_core::style::edit_through(&self.doc, tx, s),
+            None => tx,
+        };
         // **Every placement a tool writes is where it wants the layer drawn**
         // (§15 D874), and for a layer pinned by insets that has to become new
         // insets — here, once, rather than in every tool. A no-op on any edit that
@@ -1271,7 +1284,9 @@ impl EditorSession {
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —
         // in the one order the core tests pin (`propagate::owed`'s doc).
+        let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
+        let detached = styles_detached(&self.doc, &tx, user);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation
@@ -1387,6 +1402,12 @@ impl EditorSession {
         // exemption and did not have it, which is how the same bug arrived a third
         // time from the other direction.
         self.clear_gesture_preview();
+        // **A door that detached a style says so** (D1038 (2), §15 D1063) — the
+        // canvas, *Paste properties*, MCP — before any caller's own report,
+        // which overwrites it.
+        if let Some(said) = detached {
+            self.info(said);
+        }
         Ok(())
     }
 
@@ -1505,6 +1526,7 @@ impl EditorSession {
         self.selection.clear();
         self.clear_preview();
         self.run = None;
+        self.style_edit = None;
         // A just-opened document matches its file, so it counts as saved now.
         self.saved_at = path.is_some().then(Instant::now);
         self.path = path;
@@ -1709,6 +1731,37 @@ impl EditorSession {
 /// saved means (`io::schema`). Re-exported here so the panels can keep asking
 /// the session's own module for it.
 pub use ondin_core::DEFAULT_CANVAS_BACKGROUND;
+
+/// What the floating status says when the commit detached a style the edit
+/// wrote over (D1038 (2), §15 D1063): *Detached surface/raised*, or a count.
+/// `None` when nothing was, and when the edit itself detached something — the
+/// capsule's *Detach* and the `⋯` menu's are asked for, and say nothing (F2).
+/// `user` is how many of `tx`'s operations the edit wrote before the commit's
+/// own passes.
+fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Option<String> {
+    use ondin_core::style::binds_slot;
+    let asked = tx.0[..user.min(tx.0.len())]
+        .iter()
+        .any(|op| matches!(binds_slot(op), Some((_, _, None))));
+    if asked {
+        return None;
+    }
+    let mut names: Vec<&str> = tx.0[user.min(tx.0.len())..]
+        .iter()
+        .filter_map(|op| match binds_slot(op) {
+            Some((id, slot, None)) => doc.get(id)?.styles().get(slot),
+            _ => None,
+        })
+        .filter_map(|s| doc.styles().get(s).map(|s| s.name.as_str()))
+        .collect();
+    names.sort();
+    names.dedup();
+    match names.as_slice() {
+        [] => None,
+        [one] => Some(format!("Detached {one}")),
+        many => Some(format!("Detached {} styles", many.len())),
+    }
+}
 
 /// A per-process-random actor id (§5.2, invariant 3).
 ///

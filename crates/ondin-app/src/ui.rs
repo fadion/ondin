@@ -885,6 +885,10 @@ pub struct HeadClicks {
     /// that opens a menu rather than acting at once: the Properties card's (§15
     /// D1005).
     pub action_rect: Option<egui::Rect>,
+    /// The `⋯` of a style slot's card (D1038 F8, §15 D1063).
+    pub more: bool,
+    /// The box the `⋯` paints, for its menu to hang from.
+    pub more_rect: Option<egui::Rect>,
 }
 
 /// A card's overrides, for its header (§15 D981): a dot and `count` at rest, and on
@@ -990,8 +994,15 @@ pub fn section_head_badged(
     badge: Option<&str>,
     sense: bool,
 ) -> HeadClicks {
-    section_head_full(ui, label, open, action, badge, None, sense)
+    section_head_full(ui, label, open, action, badge, None, false, sense)
 }
+
+/// The width a header's `⋯` takes from the toggle target beside it, past the
+/// action icon's own — its box and the gap to the `+` (D1038 F8).
+pub const HEAD_MORE_W: f32 = HEAD_ACTION_W + HEAD_MORE_GAP;
+/// The gap between a header's `+` and its `⋯` (F8: 10 between the two glyphs'
+/// boxes).
+const HEAD_MORE_GAP: f32 = 10.0;
 
 /// The chip a header's reset takes on hover: its height, and its padding either
 /// side of the glyph-and-word.
@@ -1007,6 +1018,12 @@ const HEAD_RESET_PAD: f32 = 6.0;
 /// moves*. Its click is registered **after** the header's own toggle target, which
 /// covers it, so the later and smaller target takes the press and a reset does
 /// not also fold the card.
+///
+/// `more` puts a `⋯` at the right-hand end, **always last** (D1038 F8, §15
+/// D1063), the action icon moving in beside it — the style slots' menu. Its click
+/// is [`HeadClicks::more`]; a card whose `+` is hidden passes `action: None` and
+/// the `⋯` keeps its corner, so nothing moves.
+#[allow(clippy::too_many_arguments)]
 pub fn section_head_full(
     ui: &mut egui::Ui,
     label: &str,
@@ -1014,6 +1031,7 @@ pub fn section_head_full(
     action: Option<HeadAction>,
     badge: Option<&str>,
     overrides: Option<HeadOverrides<'_>>,
+    more: bool,
     sense: bool,
 ) -> HeadClicks {
     let mut clicks = HeadClicks::default();
@@ -1055,16 +1073,43 @@ pub fn section_head_full(
                 }
             });
 
-            if action.is_some() || badge.is_some() {
+            if action.is_some() || badge.is_some() || more {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if more {
+                        // The `⋯` first, so it takes the corner whether or not
+                        // the `+` is drawn beside it.
+                        let pad = egui::Margin {
+                            left: (HEAD_MORE_GAP / 2.0) as i8,
+                            right: CARD_MARGIN_X as i8,
+                            top: HEAD_ACTION_PAD as i8,
+                            bottom: HEAD_ACTION_PAD as i8,
+                        };
+                        let resp = icon_button_padded(
+                            ui,
+                            icon::DOTS_THREE,
+                            egui::Vec2::splat(HEAD_ACTION_W),
+                            15.0,
+                            false,
+                            true,
+                            pad,
+                        )
+                        .on_hover_text("Styles");
+                        clicks.more = resp.clicked();
+                        clicks.more_rect = Some(resp.rect - pad);
+                        ui.add_space(-ui.spacing().item_spacing.x);
+                    }
                     if let Some(a) = action {
                         // Rightwards the pad runs all the way out to the card's
                         // edge: the icon already sits against the content margin,
                         // so that band is the card's own padding and nothing else
-                        // wants it.
+                        // wants it — or, beside a `⋯`, half the gap to it.
                         let pad = egui::Margin {
                             left: HEAD_ACTION_PAD as i8,
-                            right: CARD_MARGIN_X as i8,
+                            right: if more {
+                                (HEAD_MORE_GAP / 2.0) as i8
+                            } else {
+                                CARD_MARGIN_X as i8
+                            },
                             top: HEAD_ACTION_PAD as i8,
                             bottom: HEAD_ACTION_PAD as i8,
                         };
@@ -1101,6 +1146,13 @@ pub fn section_head_full(
             // The pad the action took on its left comes off here, so the two
             // targets meet rather than overlap ([`HEAD_ACTION_PAD`]).
             hit.max.x -= HEAD_ACTION_W + HEAD_ACTION_PAD;
+        }
+        if more {
+            hit.max.x -= if action.is_some() {
+                HEAD_MORE_W
+            } else {
+                HEAD_ACTION_W + HEAD_ACTION_PAD
+            };
         }
         let head = ui.interact(
             hit,

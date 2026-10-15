@@ -1387,6 +1387,15 @@ pub struct OndinApp {
     pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
     /// A frame's *Mode* menu, open under its row (D1038 (a); §15 D1042).
     pub(crate) mode_menu: Option<(NodeId, egui::Rect)>,
+    /// A style slot card's `⋯` menu (D1038 F4, §15 D1063).
+    pub(crate) style_menu: Option<crate::panels::styles::StyleMenu>,
+    /// *Apply style…*'s picker (F5).
+    pub(crate) style_picker: Option<crate::panels::styles::StylePicker>,
+    /// A style just created, its name being typed in the capsule (F6).
+    pub(crate) style_naming: Option<crate::panels::styles::StyleNaming>,
+    /// The style slots whose capsule is opened over its greyed rows (F3) —
+    /// per slot, not per layer, as the cards' own collapse is.
+    pub(crate) style_open: HashSet<ondin_core::style::StyleSlot>,
     /// The publish dialog, while it is open (§5.3e, 2B; §15 D1015).
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
     /// This kit's changes since its last publish, with the session revision and
@@ -2400,6 +2409,10 @@ impl OndinApp {
             var_retype: None,
             field_menu: None,
             mode_menu: None,
+            style_menu: None,
+            style_picker: None,
+            style_naming: None,
+            style_open: HashSet::new(),
             publishing: None,
             kit_changes: None,
             making_local: None,
@@ -2916,6 +2929,7 @@ impl eframe::App for OndinApp {
             self.field_menu_ui(&ctx);
             self.var_complete_ui(&ctx);
             self.mode_menu_ui(&ctx);
+            self.style_popups_ui(&ctx);
         }
         // 🚨 **The kit dialogs are outside the `!present` guard**, because two
         // of their doors are not hidden by present mode: `Ctrl+Alt+P` opens the
@@ -3759,6 +3773,9 @@ impl OndinApp {
             // everything, and the list's `Escape` restores what it previewed.
             self.var_retype = None;
             self.session.clear_gesture_preview();
+        } else if self.escape_styles() {
+            // A style card's menu, its picker, a new style's name, an edit of
+            // a style (§15 D1063) — one a press, before the picker below.
         } else if self.picker.take().is_some() {
             // The picker floats over the canvas and owns no gesture, so it is
             // the outermost thing Escape can dismiss.
@@ -7696,6 +7713,10 @@ impl OndinApp {
         self.var_retype = None;
         self.field_menu = None;
         self.mode_menu = None;
+        // And the styles' chrome names the old document's styles (§15 D1063).
+        self.style_menu = None;
+        self.style_picker = None;
+        self.style_naming = None;
         // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
         // sets it again after the open that cleared it.
         self.kit_return = None;
@@ -10483,7 +10504,7 @@ impl OndinApp {
     /// canvas. It shrinks to its content, which is what makes the canvas below
     /// the last panel clickable — and what makes the gaps *between* cards
     /// non-clickable, so aiming at a panel can never deselect by accident.
-    fn inspector_panel(&mut self, ctx: &egui::Context) {
+    pub(crate) fn inspector_panel(&mut self, ctx: &egui::Context) {
         let screen = ctx.input(|i| i.content_rect());
         let column = Self::inspector_column(screen);
 
@@ -11154,7 +11175,7 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 13] = [
+        let panels: [(&str, &str); 14] = [
             ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
@@ -11165,6 +11186,7 @@ mod tests {
             ("layout/grid.rs", include_str!("panels/layout/grid.rs")),
             ("paint.rs", include_str!("panels/paint.rs")),
             ("picker.rs", include_str!("panels/picker.rs")),
+            ("styles.rs", include_str!("panels/styles.rs")),
             ("typography.rs", include_str!("panels/typography.rs")),
             ("variables.rs", include_str!("panels/variables.rs")),
             ("variants.rs", include_str!("panels/variants.rs")),

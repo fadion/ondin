@@ -769,6 +769,9 @@ pub mod icon {
     /// The styles and variables browser's button (§5.3f, H3) — Phosphor
     /// `swatches`, its codepoint from `Phosphor.codepoints.txt`.
     pub const SWATCHES: &str = "\u{e5b8}";
+    /// A style card's *Create style from this…* (D1038 F4, §15 D1063) —
+    /// Phosphor `plus-square`, its codepoint from `Phosphor.codepoints.txt`.
+    pub const PLUS_SQUARE: &str = "\u{ed4a}";
     /// The browser's `+` menu (G5): *Colour variable* and *Number variable*.
     pub const PALETTE: &str = "\u{e6c8}";
     pub const HASH: &str = "\u{e2a2}";
@@ -1086,6 +1089,7 @@ pub mod icon {
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
         ("swatches", SWATCHES),
+        ("plus-square", PLUS_SQUARE),
         ("palette", PALETTE),
         ("hash", HASH),
         ("columns-plus-right", COLUMNS_PLUS_RIGHT),

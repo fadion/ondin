@@ -19,6 +19,7 @@ use crate::theme::{self, color, icon};
 use crate::ui;
 use eframe::egui;
 use ondin_core::peniko::Color;
+use ondin_core::style::{self as sty, Style, StyleId, StyleSlot};
 use ondin_core::variable::{self as var, Cell, Mode, ModeId, Value, VarId, VarKind, Variable};
 use ondin_core::{Document, NodeId, Operation, Transaction};
 use std::collections::{BTreeMap, HashSet};
@@ -79,6 +80,11 @@ enum Edit {
         path: String,
         text: String,
     },
+    /// A style's whole name, on the *Styles* tab (G8, §15 D1063).
+    Style {
+        style: StyleId,
+        text: String,
+    },
 }
 
 impl Edit {
@@ -88,7 +94,8 @@ impl Edit {
             Edit::Name { text, .. }
             | Edit::Cell { text, .. }
             | Edit::Mode { text, .. }
-            | Edit::Group { text, .. } => text,
+            | Edit::Group { text, .. }
+            | Edit::Style { text, .. } => text,
         }
     }
 }
@@ -104,6 +111,8 @@ enum Menu {
     Group(String),
     /// *Delete mode…*'s confirmation, with the frames it returns to *Inherit*.
     ConfirmMode(ModeId),
+    /// A style's row: *Rename*, *Edit*, *Select*, *Delete* (G8).
+    Style(StyleId),
 }
 
 /// The browser's own state while it is open.
@@ -193,6 +202,10 @@ enum Act {
     /// A colour cell's colour popup, opened beside the panel at this point
     /// (D1038 G-series, §15 D1052).
     OpenPicker(VarId, ModeId, egui::Pos2),
+    /// A style renamed, its *Edit* opened, deleted (G8, G9; §15 D1063).
+    StyleName(StyleId, String),
+    EditStyle(StyleId),
+    DeleteStyle(StyleId),
 }
 
 /// One row of the table as drawn: a group's header or a variable.
@@ -276,9 +289,34 @@ impl OndinApp {
                 .map(|v| v.id)
                 .collect()
         });
+        // And the styles' (G8, §15 D1063), for the *Styles* tab.
+        let mut style_users: BTreeMap<StyleId, Vec<NodeId>> = BTreeMap::new();
+        for s in doc.styles().iter() {
+            style_users.insert(s.id, sty::users(doc, s.id));
+        }
+        let style_picked: Option<HashSet<StyleId>> = b.in_selection.then(|| {
+            let ids = ondin_core::subtree_nodes(doc, self.session.selection.ids());
+            doc.styles()
+                .iter()
+                .filter(|s| style_users[&s.id].iter().any(|u| ids.contains(u)))
+                .map(|s| s.id)
+                .collect()
+        });
         let query = b.query.trim().to_lowercase();
         let lines = lines_of(table.iter(), &query, picked.as_ref(), &b.collapsed);
         let selection_line = b.in_selection.then(|| {
+            let (n, one, many) = match b.tab {
+                Tab::Variables => (
+                    picked.as_ref().map_or(0, HashSet::len),
+                    "variable",
+                    "variables",
+                ),
+                Tab::Styles => (
+                    style_picked.as_ref().map_or(0, HashSet::len),
+                    "style",
+                    "styles",
+                ),
+            };
             let ids = self.session.selection.ids();
             match ids {
                 [] => "Nothing selected".to_string(),
@@ -290,10 +328,10 @@ impl OndinApp {
                             .unwrap_or_default(),
                         many => format!("{} layers", many.len()),
                     };
-                    match picked.as_ref().map_or(0, HashSet::len) {
-                        0 => format!("{who} uses no variables"),
-                        1 => format!("Used by {who} · 1 variable"),
-                        n => format!("Used by {who} · {n} variables"),
+                    match n {
+                        0 => format!("{who} uses no {many}"),
+                        1 => format!("Used by {who} · 1 {one}"),
+                        n => format!("Used by {who} · {n} {many}"),
                     }
                 }
             }
@@ -334,7 +372,20 @@ impl OndinApp {
                             ui.label(egui::RichText::new(why).size(11.0).color(theme::text::MUTED));
                         }
                         match b.tab {
-                            Tab::Styles => empty(ui, "No styles yet", "Styles arrive with fill, stroke and effect styles."),
+                            Tab::Styles if doc.styles().is_empty() => empty(
+                                ui,
+                                "No styles yet",
+                                "Use ⋯ on any inspector card and choose Create style from this…",
+                            ),
+                            Tab::Styles => styles_tab(
+                                ui,
+                                doc,
+                                &style_users,
+                                style_picked.as_ref(),
+                                &query,
+                                &mut b,
+                                &mut acts,
+                            ),
                             Tab::Variables if table.iter().next().is_none() => empty(
                                 ui,
                                 "No variables yet",
@@ -459,6 +510,7 @@ impl OndinApp {
             Menu::Mode(_) => 3.0,
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
+            Menu::Style(_) => 4.0,
         };
         let size = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
         let pos = ui::menu_place(ctx, at, size);
@@ -609,6 +661,57 @@ impl OndinApp {
                                 close = true;
                             }
                         }
+                        Menu::Style(s) => {
+                            let Some(st) = doc.styles().get(*s) else {
+                                close = true;
+                                return;
+                            };
+                            if row(ui, icon::PENCIL_SIMPLE, "Rename") {
+                                acts.push(Act::StartEdit(Edit::Style {
+                                    style: st.id,
+                                    text: st.name.clone(),
+                                }));
+                                close = true;
+                            }
+                            let who = sty::users(doc, st.id);
+                            // *Edit* opens on the style's users (§15 D1063), so a
+                            // style nothing uses has nothing to open it on.
+                            let edit = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::SLIDERS_HORIZONTAL, "Edit")
+                                    .enabled(!who.is_empty()),
+                                MENU_ROW_H,
+                            );
+                            let edit = if who.is_empty() {
+                                edit.on_hover_text("Apply it to a layer to edit it")
+                            } else {
+                                edit
+                            };
+                            if edit.clicked() && !who.is_empty() {
+                                acts.push(Act::EditStyle(st.id));
+                                close = true;
+                            }
+                            let select = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
+                                    .enabled(!who.is_empty()),
+                                MENU_ROW_H,
+                            );
+                            if select.clicked() {
+                                acts.push(Act::Select(who));
+                                close = true;
+                            }
+                            ui::menu_sep(ui);
+                            let del = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new(icon::TRASH, "Delete").danger(true),
+                                MENU_ROW_H,
+                            );
+                            if del.clicked() {
+                                acts.push(Act::DeleteStyle(st.id));
+                                close = true;
+                            }
+                        }
                         Menu::ConfirmMode(m) => {
                             let Some(mode) = table.mode(*m) else {
                                 close = true;
@@ -661,6 +764,49 @@ impl OndinApp {
         let doc = &self.session.doc;
         let table = doc.variables();
         match act {
+            Act::StyleName(id, text) => {
+                let text = text.trim().to_string();
+                let Some(st) = doc.styles().get(id) else {
+                    self.var_edit_done();
+                    return;
+                };
+                let taken = doc
+                    .styles()
+                    .by_name(st.slot(), &text)
+                    .is_some_and(|o| o.id != id);
+                if text.is_empty() {
+                    self.var_refuse("A style needs a name.".into());
+                } else if taken {
+                    self.var_refuse(format!("{text} already exists."));
+                } else {
+                    let changed = st.name != text;
+                    self.var_edit_done();
+                    if changed {
+                        self.commit_edit(Transaction(vec![Operation::SetStyleName {
+                            id,
+                            name: text,
+                        }]));
+                    }
+                }
+            }
+            Act::EditStyle(id) => self.edit_style(id),
+            Act::DeleteStyle(id) => {
+                let name = doc
+                    .styles()
+                    .get(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+                let n = sty::users(doc, id).len();
+                let tx = Transaction(sty::remove_ops(doc, &[id]));
+                // No confirmation; the status says it, and one undo restores (D1038 (6)).
+                if self.commit_edit(tx) {
+                    self.session.info(match n {
+                        0 => format!("Deleted {name}"),
+                        1 => format!("Deleted {name}. 1 layer keeps its values."),
+                        n => format!("Deleted {name}. {n} layers keep their values."),
+                    });
+                }
+            }
             // The picker rides a node-less slot, so its node is the document's
             // root, which the slot never reads (`PaintSlot::VarCell`).
             Act::OpenPicker(var, mode, at) => {
@@ -1222,13 +1368,21 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
             b.focus = false;
             resp.request_focus();
         }
-        let toggle = square_button(ui, icon::SELECTION, b.in_selection)
-            .on_hover_text("In selection: only the variables the selection uses");
+        let toggle =
+            square_button(ui, icon::SELECTION, b.in_selection).on_hover_text(match b.tab {
+                Tab::Variables => "In selection: only the variables the selection uses",
+                Tab::Styles => "In selection: only the styles the selection uses",
+            });
         if toggle.clicked() {
             b.in_selection = !b.in_selection;
         }
         let add = square_button(ui, icon::PLUS, matches!(b.menu, Some((Menu::Add, _))))
-            .on_hover_text("New variable or mode");
+            .on_hover_text(match b.tab {
+                Tab::Variables => "New variable or mode",
+                // A style is made from a card's values (F4), and the `+` takes
+                // the browser to the variables it can make (§15 D1063).
+                Tab::Styles => "New variable or mode — a style is made from a card's ⋯",
+            });
         if add.clicked() {
             acts.push(Act::OpenMenu(
                 Menu::Add,
@@ -1264,6 +1418,182 @@ fn square_button(ui: &mut egui::Ui, glyph: &str, on: bool) -> egui::Response {
         ink,
     );
     resp
+}
+
+/// The *Styles* tab (G8, §15 D1063): one group per card, in the inspector's
+/// order, each row a preview, the style's whole name and its usage count; a
+/// right-click or a double-click opens *Rename*, *Edit*, *Select*, *Delete*.
+/// *In selection* keeps the styles the selection uses, a group's count reading
+/// *1 of 4*, and a group with none of them drops out (G20).
+#[allow(clippy::too_many_arguments)]
+fn styles_tab(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    users: &BTreeMap<StyleId, Vec<NodeId>>,
+    picked: Option<&HashSet<StyleId>>,
+    query: &str,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) {
+    let groups: Vec<(StyleSlot, Vec<&Style>, usize)> = StyleSlot::ALL
+        .into_iter()
+        .map(|slot| {
+            let all: Vec<&Style> = doc.styles().of_slot(slot).collect();
+            let total = all.len();
+            let mut shown: Vec<&Style> = all
+                .into_iter()
+                .filter(|s| query.is_empty() || s.name.to_lowercase().contains(query))
+                .filter(|s| picked.is_none_or(|p| p.contains(&s.id)))
+                .collect();
+            shown.sort_by(|a, b| a.name.cmp(&b.name));
+            (slot, shown, total)
+        })
+        .filter(|(_, shown, _)| !shown.is_empty())
+        .collect();
+    if groups.is_empty() {
+        empty(
+            ui,
+            "Nothing matches",
+            if b.in_selection {
+                "Turn off In selection to see them all."
+            } else {
+                "Try another name."
+            },
+        );
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            for (slot, shown, total) in groups {
+                // The collapse is the document's set, keyed apart from every
+                // variable group's path by a leading `\u{1}`.
+                let key = format!("\u{1}{}", slot.title());
+                let open = !b.collapsed.contains(&key) || !query.is_empty();
+                ui.add_space(2.0);
+                let (rect, resp) =
+                    ui.allocate_exact_size(egui::vec2(b.inner_w, GROUP_H), egui::Sense::click());
+                let p = ui.painter();
+                if resp.hovered() {
+                    p.rect_filled(rect, 4, color::text_a(16));
+                }
+                p.text(
+                    egui::pos2(rect.left() + 6.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    if open {
+                        icon::CARET_DOWN
+                    } else {
+                        icon::CARET_RIGHT
+                    },
+                    egui::FontId::new(11.0, egui::FontFamily::Name("phosphor".into())),
+                    theme::text::FAINT,
+                );
+                let name = p.layout_no_wrap(
+                    slot.title().to_string(),
+                    egui::FontId::proportional(11.5),
+                    color::TEXT,
+                );
+                let name_w = name.size().x;
+                p.galley(
+                    egui::pos2(rect.left() + 23.0, rect.center().y - name.size().y / 2.0),
+                    name,
+                    color::TEXT,
+                );
+                let count = if picked.is_some() {
+                    format!("{} of {total}", shown.len())
+                } else {
+                    total.to_string()
+                };
+                p.text(
+                    egui::pos2(rect.left() + 23.0 + name_w + 6.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    count,
+                    egui::FontId::proportional(10.5),
+                    theme::text::FAINT,
+                );
+                if resp.clicked() {
+                    acts.push(Act::Toggle(key));
+                }
+                if !open {
+                    continue;
+                }
+                for s in shown {
+                    style_row(ui, doc, s, users.get(&s.id).map_or(0, Vec::len), b, acts);
+                }
+            }
+        });
+}
+
+/// One style's row on the *Styles* tab: its preview, its whole name, its count.
+fn style_row(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    s: &Style,
+    count: usize,
+    b: &mut Browser,
+    acts: &mut Vec<Act>,
+) {
+    let id = ui.id().with(("style-row", s.id));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::click());
+    let menu_open = matches!(&b.menu, Some((Menu::Style(m), _)) if *m == s.id);
+    if menu_open {
+        ui.painter().rect_filled(rect, 4, color::text_a(23));
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, 4, color::text_a(18));
+    }
+    let sw = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + INDENT, rect.center().y - 7.0),
+        egui::vec2(14.0, 14.0),
+    );
+    crate::panels::styles::paint_preview(ui.painter(), doc, s, sw);
+    let refused = b.refused.clone();
+    if let Some(Edit::Style { style, text }) = b.edit.as_mut()
+        && *style == s.id
+    {
+        let r = egui::Rect::from_min_max(
+            egui::pos2(sw.right() + 6.0, rect.top() + 3.0),
+            egui::pos2(rect.right() - 40.0, rect.bottom() - 3.0),
+        );
+        let resp = edit_field(ui, r, text, id.with("edit"), 11.5, None, refused.as_deref());
+        ui.painter().rect_stroke(
+            r,
+            4,
+            egui::Stroke::new(1.0, color::ACCENT),
+            egui::StrokeKind::Outside,
+        );
+        if b.edit_focus {
+            b.edit_focus = false;
+            resp.request_focus();
+        }
+        ui::select_all_on_focus(ui, &resp, text);
+        if ui::defocus_commits(&resp) {
+            acts.push(Act::StyleName(s.id, text.clone()));
+        }
+        return;
+    }
+    let p = ui.painter();
+    p.text(
+        egui::pos2(sw.right() + 8.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &s.name,
+        egui::FontId::proportional(11.5),
+        theme::text::STRONG,
+    );
+    p.text(
+        egui::pos2(rect.right() - 6.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        count.to_string(),
+        egui::FontId::proportional(10.5),
+        theme::text::FAINT,
+    );
+    let menu_at = |r: &egui::Response| {
+        r.interact_pointer_pos().unwrap_or(rect.left_bottom()) + egui::vec2(6.0, 8.0)
+    };
+    if ui::double_clicked(ui, &resp) || resp.secondary_clicked() {
+        acts.push(Act::OpenMenu(Menu::Style(s.id), menu_at(&resp)));
+    }
 }
 
 fn empty(ui: &mut egui::Ui, head: &str, sub: &str) {
@@ -2331,6 +2661,91 @@ mod tests {
             Some(v.id),
             "one undo restores the binding"
         );
+    }
+
+    /// **The *Styles* tab lists a style under its card, and *Delete* detaches its
+    /// users, says so, and undoes whole** (G8, D1038 (6); §15 D1063). A rename
+    /// to a name its slot already holds is refused.
+    #[test]
+    fn the_styles_tab_lists_renames_and_deletes() {
+        let (ctx, mut app) = app();
+        let rect = app.session.ids.mint();
+        let root = app.session.doc.root();
+        let item = app.session.ids.mint_item();
+        let (s, t) = (app.session.ids.mint_style(), app.session.ids.mint_style());
+        let style = |id, name: &str| Operation::AddStyle {
+            style: Style {
+                id,
+                name: name.into(),
+                value: sty::StyleValue::Fills(vec![ondin_core::item::Keyed::new(
+                    item,
+                    Fill {
+                        brush: Color::WHITE.into(),
+                        visible: true,
+                    },
+                )]),
+            },
+        };
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            style(s, "surface/raised"),
+            style(t, "surface/base"),
+            Operation::SetFillStyle {
+                id: rect,
+                style: Some(s),
+            },
+        ])));
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().paint().fills.len(),
+            1,
+            "the commit wrote the style's fill"
+        );
+        app.toggle_var_browser();
+        app.var_browser.as_mut().unwrap().tab = Tab::Styles;
+        let mut shapes = vec![];
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        }
+        assert!(
+            last_text(&shapes, "surface/raised").is_some(),
+            "the row is drawn"
+        );
+        assert!(
+            last_text(&shapes, "Fill").is_some(),
+            "under its card's group"
+        );
+
+        app.var_act(Act::StartEdit(Edit::Style {
+            style: s,
+            text: "surface/base".into(),
+        }));
+        app.var_act(Act::StyleName(s, "surface/base".into()));
+        assert_eq!(
+            app.var_browser.as_ref().unwrap().refusal.as_deref(),
+            Some("surface/base already exists.")
+        );
+
+        app.var_act(Act::DeleteStyle(s));
+        assert!(app.session.doc.styles().get(s).is_none());
+        let n = app.session.doc.get(rect).unwrap();
+        assert_eq!(n.styles().fills, None);
+        assert_eq!(n.paint().fills.len(), 1, "the values stay");
+        assert_eq!(
+            app.session.status().text,
+            "Deleted surface/raised. 1 layer keeps its values."
+        );
+        app.session.undo();
+        assert_eq!(app.session.doc.get(rect).unwrap().styles().fills, Some(s));
     }
 
     /// **A boolean variable** (§15 D1059): the `+` menu's *Boolean variable* files

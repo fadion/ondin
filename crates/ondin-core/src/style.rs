@@ -403,7 +403,7 @@ pub fn users(doc: &Document, style: StyleId) -> Vec<NodeId> {
 /// **detached** from it, its values kept.
 ///
 /// - **Rewritten** when the transaction edited the style (`SetStyleValue`,
-///   `AddStyle`) or set the binding (an apply, a reset, a paste) — the style
+///   `AddStyle`) or set the binding (an apply, a reset) — the style
 ///   wins — and when nothing the user asked for wrote the slot: a component
 ///   follow carrying a main's item onto a copy bound to a style of its own, or a
 ///   pasted layer rebound by name to this document's style of the same name.
@@ -481,6 +481,43 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
         }
     }
     out
+}
+
+/// `tx` with every write of `style`'s slot on a layer bound to it **turned into
+/// an edit of the style** (§15 D1063) — the door the browser's *Edit* opens: the
+/// inspector's own cards edit the style's users, and this makes the first such
+/// list the style's value and drops the per-layer writes, which [`settle`] then
+/// writes back onto every user, the edited layers among them. A write on any
+/// other layer or slot passes through.
+pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transaction {
+    let Some(slot) = doc.styles().get(style).map(Style::slot) else {
+        return tx;
+    };
+    let bound = |id: NodeId| {
+        doc.get(id)
+            .is_some_and(|n| n.styles.get(slot) == Some(style))
+    };
+    let mut value: Option<StyleValue> = None;
+    let mut out = Vec::with_capacity(tx.0.len());
+    for op in tx.0 {
+        let hit = writes_slot(&op).is_some_and(|(id, s)| s == slot && bound(id));
+        if !hit {
+            out.push(op);
+            continue;
+        }
+        if value.is_none() {
+            value = Some(match op {
+                Operation::SetFills { fills, .. } => StyleValue::Fills(fills),
+                Operation::SetStrokes { strokes, .. } => StyleValue::Strokes(strokes),
+                Operation::SetEffects { effects, .. } => StyleValue::Effects(effects),
+                _ => unreachable!("`writes_slot` answered for it"),
+            });
+        }
+    }
+    if let Some(value) = value {
+        out.push(Operation::SetStyleValue { id: style, value });
+    }
+    Transaction(out)
 }
 
 /// The operations that delete `styles` (D1038 (6)): **every layer bound to one

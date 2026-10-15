@@ -1718,9 +1718,11 @@ impl RenderOverrides {
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. } => {}
             // **A style draws through the lists it is copied into** (§15 D1062):
-            // the table and a layer's binding to it draw nothing of themselves,
-            // so a preview of one carries the `SetFills` and its kin the commit
-            // would write (`style::settle`), and these pass through.
+            // the table and a layer's binding to it draw nothing of themselves.
+            // The app's two previews of a style write the lists themselves — the
+            // *Apply style…* picker's highlight carries the `SetFills` and its
+            // kin `style::settle` would write, and an edit of a style is a card's
+            // own list writes (§15 D1063) — so these pass through.
             Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }

@@ -1,0 +1,1189 @@
+//! Styles in the inspector (§5.3f, D1038 F1–F10; §15 D1063).
+//!
+//! The three style slots' cards — Fill, Stroke and Effects — wear a `⋯` in their
+//! header, always last (F8): *Apply style…*, *Create style from this…* and
+//! *Detach style* (F4). A styled card **collapses to one capsule** — caret,
+//! preview, name and a short summary, *Detach* in the summary's place on hover
+//! (F1, F2) — and opened it shows the card's rows greyed and inert, *Read-only —
+//! Detach to edit* (F3): the inspector is the one door that does not detach
+//! (D1038 (1)). Its `+` hides while any card in scope is styled, and nothing
+//! moves (F8, F10).
+//!
+//! A style's values change through the browser's *Edit* (G9), which here opens
+//! **an edit mode on the style's users** rather than a card inside the browser
+//! (§15 D1063): the browser selects them, the card opens live under an *editing*
+//! capsule, and the commit door turns its writes into an edit of the style
+//! (`style::edit_through`), which the commit writes back onto every user.
+
+use crate::app::OndinApp;
+use crate::theme::{self, color, icon};
+use crate::ui;
+use eframe::egui;
+use ondin_core::style::{self, Style, StyleId, StyleSlot, StyleValue};
+use ondin_core::{Brush, Document, NodeId, Operation, Transaction};
+
+/// The capsule's height and its corner — fully rounded, the reference shape
+/// (F1, D1038's capsule rule).
+const CAPSULE_H: f32 = 28.0;
+/// The menu's and the picker's widths (F4, F5).
+const MENU_W: f32 = 210.0;
+const PICKER_W: f32 = 256.0;
+const ROW_H: f32 = 26.0;
+/// Greyed rows' opacity under a read-only capsule (F3).
+const GREYED: f32 = 0.42;
+
+/// How a card's targets stand towards styles in one slot.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum StyleShown {
+    /// None of them is styled here.
+    Plain,
+    /// Every one is bound to this style.
+    One(StyleId),
+    /// Every one is styled, not all alike — the styles, in id order (F10).
+    Mixed(Vec<StyleId>),
+    /// Some are styled and some are not (F10's second case).
+    Partial,
+}
+
+impl StyleShown {
+    pub(crate) fn any(&self) -> bool {
+        !matches!(self, StyleShown::Plain)
+    }
+}
+
+/// Where `targets` stand in `slot`.
+pub(crate) fn shown(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> StyleShown {
+    let refs: Vec<Option<StyleId>> = targets
+        .iter()
+        .filter_map(|t| doc.get(*t))
+        .map(|n| n.styles().get(slot))
+        .collect();
+    if refs.is_empty() || refs.iter().all(Option::is_none) {
+        return StyleShown::Plain;
+    }
+    if refs.iter().any(Option::is_none) {
+        return StyleShown::Partial;
+    }
+    let mut ids: Vec<StyleId> = refs.into_iter().flatten().collect();
+    ids.sort();
+    ids.dedup();
+    match ids.as_slice() {
+        [one] => StyleShown::One(*one),
+        _ => StyleShown::Mixed(ids),
+    }
+}
+
+/// The `⋯` menu, open under a card's header.
+pub(crate) struct StyleMenu {
+    slot: StyleSlot,
+    targets: Vec<NodeId>,
+    under: egui::Rect,
+}
+
+/// *Apply style…*'s picker (F5), hung under the card's header.
+pub(crate) struct StylePicker {
+    slot: StyleSlot,
+    targets: Vec<NodeId>,
+    under: egui::Rect,
+    query: String,
+    focus: bool,
+    highlight: usize,
+}
+
+/// A style just made by *Create style from this…*, its name being typed in the
+/// capsule (F6): `Enter` keeps, `Escape` undoes.
+pub(crate) struct StyleNaming {
+    pub(crate) style: StyleId,
+    text: String,
+    focus: bool,
+    refusal: Option<String>,
+}
+
+/// What a capsule was asked this frame.
+#[derive(Default)]
+struct CapsuleOut {
+    toggled: bool,
+    detach: bool,
+}
+
+/// The values a card's targets agree on in `slot`, if they do — what *Create
+/// style from this…* makes a style of.
+fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleValue> {
+    let mut values = targets
+        .iter()
+        .filter_map(|t| doc.get(*t))
+        .map(|n| StyleValue::of(n, slot));
+    let first = values.next()?;
+    values.all(|v| v.same_look(&first)).then_some(first)
+}
+
+/// A style's short summary (F1): `1 fill`, `1 · inside`, `2 shadows`.
+fn summary(value: &StyleValue) -> String {
+    let plural = |n: usize, one: &str, many: &str| match n {
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
+    };
+    match value {
+        StyleValue::Fills(v) => plural(v.len(), "fill", "fills"),
+        StyleValue::Strokes(v) => match v.as_slice() {
+            [one] => format!(
+                "{} · {}",
+                number(one.width),
+                format!("{:?}", one.align).to_lowercase()
+            ),
+            v => plural(v.len(), "stroke", "strokes"),
+        },
+        StyleValue::Effects(v) => {
+            use ondin_core::EffectKind as K;
+            let shadows = v
+                .iter()
+                .all(|e| matches!(e.kind, K::DropShadow(_) | K::InnerShadow(_)));
+            if shadows && !v.is_empty() {
+                plural(v.len(), "shadow", "shadows")
+            } else {
+                plural(v.len(), "effect", "effects")
+            }
+        }
+    }
+}
+
+/// The colour a fill or stroke style is previewed in — its top visible paint
+/// as drawn in the document's default mode, a gradient's first stop.
+fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peniko::Color> {
+    let brushes: Vec<&ondin_core::BrushSource> = match value {
+        StyleValue::Fills(v) => v
+            .iter()
+            .rev()
+            .filter(|f| f.visible)
+            .map(|f| &f.brush)
+            .collect(),
+        StyleValue::Strokes(v) => v
+            .iter()
+            .rev()
+            .filter(|s| s.visible)
+            .map(|s| &s.brush)
+            .collect(),
+        StyleValue::Effects(_) => return None,
+    };
+    let b = brushes.first()?;
+    match doc.resolve_brush(doc.root(), b).into_owned() {
+        Brush::Solid(c) => Some(c),
+        other => crate::panels::paint::stops_of(&other)
+            .first()
+            .map(|(_, c)| *c),
+    }
+}
+
+/// A style's preview: a 14×14 swatch for a fill, a ring for a stroke, a small
+/// shadowed square for effects (F1, G8).
+pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, rect: egui::Rect) {
+    let ink = |a: u8| color::text_a(a);
+    match &style.value {
+        StyleValue::Fills(_) => {
+            let c = preview_colour(doc, &style.value);
+            ui::paint_checkerboard(p, rect, 3.5);
+            if let Some(c) = c {
+                p.rect_filled(rect, 4, ui::color_to_egui(c));
+            }
+            p.rect_stroke(
+                rect,
+                4,
+                egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
+                egui::StrokeKind::Inside,
+            );
+        }
+        StyleValue::Strokes(v) => {
+            let c = preview_colour(doc, &style.value)
+                .map(ui::color_to_egui)
+                .unwrap_or(ink(178));
+            let w = v.first().map_or(1.0, |s| s.width.clamp(1.0, 3.0)) as f32;
+            p.rect_stroke(rect, 4, egui::Stroke::new(w, c), egui::StrokeKind::Inside);
+        }
+        StyleValue::Effects(_) => {
+            let sq = egui::Rect::from_center_size(rect.center(), egui::vec2(11.0, 11.0));
+            p.rect_filled(
+                sq.translate(egui::vec2(0.0, 2.0)).expand(1.5),
+                4,
+                egui::Color32::from_black_alpha(140),
+            );
+            p.rect_filled(sq, 3, ink(178));
+        }
+    }
+}
+
+/// A capsule's frame: the fully rounded ground, `hover` lifting it (F1, F2).
+fn capsule_ground(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    sense: egui::Sense,
+) -> (egui::Rect, egui::Response) {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, CAPSULE_H), egui::Sense::hover());
+    let resp = ui.interact(rect, id, sense);
+    (rect, resp)
+}
+
+/// A styled card's capsule (F1–F3, G9's *editing*): caret, preview, name and
+/// summary; on hover, *Detach* — or while editing, *Done* — in the summary's
+/// place. The capsule's own click opens or closes the card under it.
+fn capsule(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    style: &Style,
+    open: bool,
+    editing: bool,
+) -> CapsuleOut {
+    let mut out = CapsuleOut::default();
+    let (rect, resp) = capsule_ground(
+        ui,
+        ui.id().with(("style-capsule", style.id)),
+        egui::Sense::click(),
+    );
+    let hovered = resp.hovered() || ui.rect_contains_pointer(rect);
+    let p = ui.painter();
+    p.rect_filled(
+        rect,
+        CAPSULE_H / 2.0,
+        color::text_a(if hovered { 38 } else { 26 }),
+    );
+    if editing {
+        p.rect_stroke(
+            rect,
+            CAPSULE_H / 2.0,
+            egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.65)),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let mid = rect.center().y;
+    let mut x = rect.left() + 9.0;
+    p.text(
+        egui::pos2(x + 5.5, mid),
+        egui::Align2::CENTER_CENTER,
+        if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        },
+        theme::icon_font(11.0),
+        color::text_a(115),
+    );
+    x += 11.0 + 8.0;
+    let sw = egui::Rect::from_min_size(egui::pos2(x, mid - 7.0), egui::vec2(14.0, 14.0));
+    paint_preview(p, doc, style, sw);
+    x += 14.0 + 8.0;
+
+    // The right-hand end: the summary at rest, the chip on hover.
+    let chip_label = if editing { "Done" } else { "Detach" };
+    let chip_glyph = if editing {
+        icon::CHECK
+    } else {
+        icon::LINK_BREAK
+    };
+    let font = egui::FontId::proportional(10.5);
+    let chip_w = p
+        .layout_no_wrap(chip_label.into(), font.clone(), theme::text::STRONG)
+        .size()
+        .x
+        + 11.0
+        + 5.0
+        + 16.0;
+    let chip = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - 4.0 - chip_w, mid - 10.0),
+        egui::vec2(chip_w, 20.0),
+    );
+    let tail = if editing {
+        "editing".to_string()
+    } else {
+        summary(&style.value)
+    };
+    let tail_w = p
+        .layout_no_wrap(tail.clone(), font.clone(), color::text_a(107))
+        .size()
+        .x;
+    let name_right = if hovered {
+        chip.left() - 6.0
+    } else {
+        rect.right() - 4.0 - 6.0 - tail_w - 6.0
+    };
+    let name = elided(p, &style.name, 12.0, name_right - x);
+    p.galley(
+        egui::pos2(x, mid - name.size().y / 2.0),
+        name,
+        theme::text::STRONG,
+    );
+    if hovered {
+        let target = ui.interact(
+            chip,
+            ui.id().with(("style-capsule-chip", style.id)),
+            egui::Sense::click(),
+        );
+        let p = ui.painter();
+        p.rect_filled(
+            chip,
+            10.0,
+            color::text_a(if target.hovered() { 48 } else { 36 }),
+        );
+        p.text(
+            egui::pos2(chip.left() + 8.0 + 5.5, mid),
+            egui::Align2::CENTER_CENTER,
+            chip_glyph,
+            theme::icon_font(11.0),
+            color::text_a(191),
+        );
+        p.text(
+            egui::pos2(chip.left() + 8.0 + 11.0 + 5.0, mid),
+            egui::Align2::LEFT_CENTER,
+            chip_label,
+            font,
+            theme::text::STRONG,
+        );
+        if target.clicked() {
+            out.detach = true;
+            return out;
+        }
+    } else {
+        ui.painter().text(
+            egui::pos2(rect.right() - 4.0 - 6.0, mid),
+            egui::Align2::RIGHT_CENTER,
+            tail,
+            font,
+            color::text_a(107),
+        );
+    }
+    out.toggled = resp.clicked();
+    out
+}
+
+/// F10's capsule over several layers styled differently: no caret, a split
+/// swatch, *Mixed* and the count, its tooltip naming them.
+fn mixed_capsule(ui: &mut egui::Ui, doc: &Document, styles: &[StyleId]) {
+    let (rect, resp) = capsule_ground(ui, ui.id().with("style-mixed"), egui::Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(rect, CAPSULE_H / 2.0, color::text_a(26));
+    let mid = rect.center().y;
+    let x = rect.left() + 9.0;
+    let sw = egui::Rect::from_min_size(egui::pos2(x, mid - 7.0), egui::vec2(14.0, 14.0));
+    let found: Vec<&Style> = styles.iter().filter_map(|s| doc.styles().get(*s)).collect();
+    if let [a, b, ..] = found.as_slice() {
+        let (l, r) = sw.split_left_right_at_fraction(0.5);
+        paint_preview(&p.with_clip_rect(l), doc, a, sw);
+        paint_preview(&p.with_clip_rect(r), doc, b, sw);
+    }
+    p.text(
+        egui::pos2(x + 22.0, mid),
+        egui::Align2::LEFT_CENTER,
+        "Mixed",
+        egui::FontId::proportional(12.0),
+        color::text_a(140),
+    );
+    p.text(
+        egui::pos2(rect.right() - 10.0, mid),
+        egui::Align2::RIGHT_CENTER,
+        format!("{} styles", styles.len()),
+        egui::FontId::proportional(10.5),
+        color::text_a(107),
+    );
+    let names: Vec<&str> = found.iter().map(|s| s.name.as_str()).collect();
+    resp.on_hover_text(names.join("\n"));
+}
+
+/// F3's footer under a read-only card, and G9's under one being edited.
+fn footer(ui: &mut egui::Ui, glyph: &str, text: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 5.0;
+        ui.label(theme::icon_text(glyph, 10.0, color::text_a(102)));
+        ui.label(
+            egui::RichText::new(text)
+                .size(10.0)
+                .color(color::text_a(102)),
+        );
+    });
+}
+
+impl OndinApp {
+    /// A style slot's card: [`OndinApp::panel_full`] with its `⋯`, and, while its
+    /// targets are styled, the capsule in place of the rows (F1–F3, F10) — the
+    /// rows themselves `body`. Answers whether the header's `+` was pressed,
+    /// which a styled card never offers.
+    pub(super) fn style_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        slot: StyleSlot,
+        targets: &[NodeId],
+        action: Option<ui::HeadAction>,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) -> bool {
+        let state = shown(&self.session.doc, targets, slot);
+        let editing = matches!(state, StyleShown::One(s) if self.session.style_edit == Some(s));
+        // The `+` hides while any card in scope is styled, and nothing moves:
+        // the `⋯` keeps its corner (F8, F10).
+        let action = if state.any() && !editing {
+            None
+        } else {
+            action
+        };
+        let clicks = self.panel_full(
+            ui,
+            title,
+            None,
+            action,
+            None,
+            true,
+            |app, ui| match &state {
+                StyleShown::One(s) => {
+                    let Some(style) = app.session.doc.styles().get(*s).cloned() else {
+                        return;
+                    };
+                    if app.style_naming.as_ref().is_some_and(|n| n.style == *s) {
+                        app.naming_capsule(ui, &style);
+                        return;
+                    }
+                    let open = editing || app.style_open.contains(&slot);
+                    let out = capsule(ui, &app.session.doc, &style, open, editing);
+                    if out.detach {
+                        if editing {
+                            app.session.style_edit = None;
+                        } else {
+                            app.detach_styles(slot, targets);
+                        }
+                        return;
+                    }
+                    if out.toggled && !editing && !app.style_open.remove(&slot) {
+                        app.style_open.insert(slot);
+                    }
+                    if !open {
+                        return;
+                    }
+                    ui.add_space(2.0);
+                    if editing {
+                        body(app, ui);
+                        let n = style::users(&app.session.doc, *s).len();
+                        let what = match n {
+                            1 => "Changes reach its 1 layer as you type".to_string(),
+                            n => format!("Changes reach its {n} layers as you type"),
+                        };
+                        footer(ui, icon::SLIDERS_HORIZONTAL, &what);
+                    } else {
+                        // Greyed and inert — the inspector's read-only door (D1038
+                        // (1)); a bound variable inside still draws its chip.
+                        ui.scope(|ui| {
+                            ui.disable();
+                            ui.set_opacity(GREYED);
+                            body(app, ui);
+                        });
+                        footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
+                    }
+                }
+                StyleShown::Mixed(list) => mixed_capsule(ui, &app.session.doc, list),
+                StyleShown::Plain | StyleShown::Partial => body(app, ui),
+            },
+        );
+        if clicks.more
+            && let Some(under) = clicks.more_rect
+        {
+            self.style_menu = Some(StyleMenu {
+                slot,
+                targets: targets.to_vec(),
+                under,
+            });
+        }
+        clicks.acted
+    }
+
+    /// F6's capsule: the new style's name being typed, the capsule ringed in
+    /// the accent; `Enter` keeps the name, `Escape` undoes the create.
+    fn naming_capsule(&mut self, ui: &mut egui::Ui, style: &Style) {
+        let Some(mut n) = self.style_naming.take() else {
+            return;
+        };
+        let (rect, _) = capsule_ground(ui, ui.id().with("style-naming"), egui::Sense::hover());
+        let p = ui.painter();
+        p.rect_filled(rect, CAPSULE_H / 2.0, color::text_a(26));
+        p.rect_stroke(
+            rect,
+            CAPSULE_H / 2.0,
+            egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.65)),
+            egui::StrokeKind::Inside,
+        );
+        let mid = rect.center().y;
+        let sw = egui::Rect::from_min_size(
+            egui::pos2(rect.left() + 12.0, mid - 7.0),
+            egui::vec2(14.0, 14.0),
+        );
+        paint_preview(p, &self.session.doc, style, sw);
+        let field = egui::Rect::from_min_max(
+            egui::pos2(sw.right() + 8.0, rect.top() + 4.0),
+            egui::pos2(rect.right() - 12.0, rect.bottom() - 4.0),
+        );
+        let id = ui.id().with(("style-naming-field", style.id));
+        let edit = ui.put(
+            field,
+            egui::TextEdit::singleline(&mut n.text)
+                .id(id)
+                .frame(egui::Frame::NONE)
+                .font(egui::FontId::proportional(12.0))
+                .text_color(theme::text::STRONG),
+        );
+        if n.focus {
+            edit.request_focus();
+            n.focus = false;
+        }
+        let (enter, escape) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
+        if escape {
+            // `Escape` undoes (F6): the create was the last step.
+            self.undo();
+            return;
+        }
+        if let Some(why) = &n.refusal {
+            ui.label(
+                egui::RichText::new(why)
+                    .size(10.5)
+                    .color(theme::text::MUTED),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new("↵ create   Esc cancel")
+                    .size(10.5)
+                    .color(color::text_a(115)),
+            );
+        }
+        if enter || edit.lost_focus() {
+            let text = n.text.trim().to_string();
+            let taken = self
+                .session
+                .doc
+                .styles()
+                .by_name(style.slot(), &text)
+                .is_some_and(|s| s.id != style.id);
+            if text.is_empty() || taken {
+                n.refusal = Some(if text.is_empty() {
+                    "A style needs a name.".into()
+                } else {
+                    format!("{text} already exists.")
+                });
+                n.focus = true;
+                self.style_naming = Some(n);
+                return;
+            }
+            if text != style.name {
+                self.commit_edit(Transaction(vec![Operation::SetStyleName {
+                    id: style.id,
+                    name: text,
+                }]));
+            }
+            return;
+        }
+        self.style_naming = Some(n);
+    }
+
+    /// Detach `targets`' `slot` from whatever style each is bound to, their
+    /// values kept — F2's chip and F4's *Detach style*.
+    fn detach_styles(&mut self, slot: StyleSlot, targets: &[NodeId]) {
+        let doc = &self.session.doc;
+        let ops: Vec<Operation> = targets
+            .iter()
+            .filter(|t| doc.get(**t).is_some_and(|n| n.styles().get(slot).is_some()))
+            .map(|t| style::bind_op(*t, slot, None))
+            .collect();
+        if !ops.is_empty() {
+            self.commit_edit(Transaction(ops));
+        }
+    }
+
+    /// The operations applying `s` to `targets`, and the values the commit will
+    /// write beside them — what the picker's highlight previews (F5).
+    fn apply_tx(
+        &self,
+        s: StyleId,
+        slot: StyleSlot,
+        targets: &[NodeId],
+        preview: bool,
+    ) -> Transaction {
+        let mut ops: Vec<Operation> = targets
+            .iter()
+            .map(|t| style::bind_op(*t, slot, Some(s)))
+            .collect();
+        if preview && let Some(st) = self.session.doc.styles().get(s) {
+            ops.extend(targets.iter().map(|t| st.value.write_op(*t)));
+        }
+        Transaction(ops)
+    }
+
+    /// *Create style from this…* (F4, F6): the agreed list made a style under a
+    /// free name, every target bound to it, and the capsule opened on its name.
+    fn create_style(&mut self, slot: StyleSlot, targets: &[NodeId]) {
+        let Some(&from) = targets.first() else { return };
+        let base = format!("{} style", slot.title());
+        let name = style::free_name(self.session.doc.styles(), slot, &base);
+        let id = self.session.ids.mint_style();
+        let Some(ops) = style::create_ops(&self.session.doc, id, &name, from, slot, targets) else {
+            return;
+        };
+        if self.commit_edit(Transaction(ops)) {
+            self.style_naming = Some(StyleNaming {
+                style: id,
+                text: name,
+                focus: true,
+                refusal: None,
+            });
+        }
+    }
+
+    /// The `⋯` menu and the *Apply style…* picker, drawn over everything.
+    pub(crate) fn style_popups_ui(&mut self, ctx: &egui::Context) {
+        // An edit whose style is gone, or none of whose users is selected any
+        // more, is over.
+        if let Some(s) = self.session.style_edit {
+            let doc = &self.session.doc;
+            let users = style::users(doc, s);
+            let selected = self.session.selection.ids();
+            if doc.styles().get(s).is_none() || !selected.iter().any(|n| users.contains(n)) {
+                self.session.style_edit = None;
+            }
+        }
+        if let Some(n) = &self.style_naming
+            && self.session.doc.styles().get(n.style).is_none()
+        {
+            self.style_naming = None;
+        }
+        self.style_menu_ui(ctx);
+        self.style_picker_ui(ctx);
+    }
+
+    fn style_menu_ui(&mut self, ctx: &egui::Context) {
+        let Some(menu) = self.style_menu.take() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let state = shown(doc, &menu.targets, menu.slot);
+        let n = menu.targets.len();
+        let styled = menu
+            .targets
+            .iter()
+            .filter(|t| {
+                doc.get(**t)
+                    .is_some_and(|x| x.styles().get(menu.slot).is_some())
+            })
+            .count();
+        let apply = match n {
+            1 => "Apply style…".to_string(),
+            n => format!("Apply style to {n} layers…"),
+        };
+        // Create is the agreed list's — off over several styles or a mix (F10).
+        let can_create = match &state {
+            StyleShown::Plain => agreed(doc, &menu.targets, menu.slot).is_some(),
+            StyleShown::One(_) => true,
+            StyleShown::Mixed(_) | StyleShown::Partial => false,
+        };
+        let create = match state {
+            StyleShown::One(_) => "Create style from this as a copy…",
+            _ => "Create style from this…",
+        };
+        let detach = match (n, styled) {
+            (1, _) | (_, 0) => "Detach style".to_string(),
+            (_, k) => format!("Detach style from {k} layers"),
+        };
+        let size = egui::vec2(MENU_W, 3.0 * ROW_H + 10.0);
+        let pos = ui::menu_place(
+            ctx,
+            egui::pos2(menu.under.right() - MENU_W + 8.0, menu.under.bottom() + 6.0),
+            size,
+        );
+        let mut act: Option<u8> = None;
+        let rect = egui::Area::new(egui::Id::new("style-card-menu"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(4.0).show(ui, |ui| {
+                    ui.set_width(MENU_W - 8.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    if ui::menu_row(ui, ui::MenuRow::new(icon::SWATCHES, &apply), ROW_H).clicked() {
+                        act = Some(0);
+                    }
+                    let c = ui::menu_row(
+                        ui,
+                        ui::MenuRow::new(icon::PLUS_SQUARE, create).enabled(can_create),
+                        ROW_H,
+                    );
+                    if c.clicked() && can_create {
+                        act = Some(1);
+                    }
+                    let d = ui::menu_row(
+                        ui,
+                        ui::MenuRow::new(icon::LINK_BREAK, &detach).enabled(styled > 0),
+                        ROW_H,
+                    );
+                    if d.clicked() && styled > 0 {
+                        act = Some(2);
+                    }
+                });
+            })
+            .response
+            .rect;
+        match act {
+            Some(0) => {
+                self.style_picker = Some(StylePicker {
+                    slot: menu.slot,
+                    targets: menu.targets,
+                    under: menu.under,
+                    query: String::new(),
+                    focus: true,
+                    highlight: 0,
+                });
+            }
+            Some(1) => self.create_style(menu.slot, &menu.targets),
+            Some(2) => self.detach_styles(menu.slot, &menu.targets),
+            _ => {
+                let away = ctx.input(|i| {
+                    i.pointer.any_pressed()
+                        && i.pointer
+                            .interact_pos()
+                            .is_some_and(|p| !rect.contains(p) && !menu.under.contains(p))
+                });
+                if !away {
+                    self.style_menu = Some(menu);
+                }
+            }
+        }
+    }
+
+    fn style_picker_ui(&mut self, ctx: &egui::Context) {
+        let Some(mut pk) = self.style_picker.take() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let query = pk.query.trim().to_lowercase();
+        // Grouped by the path before the last `/`, groups and rows by name (F5).
+        let mut rows: Vec<&Style> = doc
+            .styles()
+            .of_slot(pk.slot)
+            .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
+            .collect();
+        rows.sort_by(|a, b| {
+            let g = |s: &Style| s.name.rsplit_once('/').map(|(g, _)| g.to_string());
+            g(a).cmp(&g(b)).then(a.name.cmp(&b.name))
+        });
+        let counts: Vec<usize> = rows.iter().map(|s| style::users(doc, s.id).len()).collect();
+        pk.highlight = pk.highlight.min(rows.len().saturating_sub(1));
+        let (up, down, enter) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::Enter),
+            )
+        });
+        if down && pk.highlight + 1 < rows.len() {
+            pk.highlight += 1;
+        }
+        if up {
+            pk.highlight = pk.highlight.saturating_sub(1);
+        }
+        let mut pick: Option<StyleId> = enter
+            .then(|| rows.get(pk.highlight).map(|s| s.id))
+            .flatten();
+        let groups = rows
+            .iter()
+            .enumerate()
+            .filter(|(i, s)| {
+                let g = |s: &Style| s.name.rsplit_once('/').map(|(g, _)| g.to_string());
+                *i == 0 || g(s) != g(rows[i - 1])
+            })
+            .filter(|(_, s)| s.name.contains('/'))
+            .count();
+        let h = 40.0 + (rows.len().max(1) as f32) * ROW_H + groups as f32 * 22.0;
+        let pos = ui::menu_place(
+            ctx,
+            egui::pos2(menu_left(pk.under), pk.under.bottom() + 6.0),
+            egui::vec2(PICKER_W, h.min(360.0)),
+        );
+        let slot_word = pk.slot.title().to_lowercase();
+        let rect = egui::Area::new(egui::Id::new("style-picker"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(4.0).show(ui, |ui| {
+                    ui.set_width(PICKER_W - 8.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let search = ui.add(
+                        egui::TextEdit::singleline(&mut pk.query)
+                            .id(egui::Id::new("style-picker-search"))
+                            .hint_text(format!("Search {slot_word} styles"))
+                            .desired_width(PICKER_W - 16.0),
+                    );
+                    if pk.focus {
+                        search.request_focus();
+                        pk.focus = false;
+                    }
+                    ui.add_space(4.0);
+                    if rows.is_empty() {
+                        let text = if doc.styles().of_slot(pk.slot).next().is_none() {
+                            format!("No {slot_word} styles yet")
+                        } else {
+                            "Nothing matches".to_string()
+                        };
+                        ui.label(
+                            egui::RichText::new(text)
+                                .size(11.0)
+                                .color(theme::text::FAINT),
+                        );
+                        return;
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            let mut last_group: Option<Option<&str>> = None;
+                            for (i, s) in rows.iter().enumerate() {
+                                let (group, leaf) = match s.name.rsplit_once('/') {
+                                    Some((g, l)) => (Some(g), l),
+                                    None => (None, s.name.as_str()),
+                                };
+                                if last_group != Some(group) {
+                                    last_group = Some(group);
+                                    if let Some(g) = group {
+                                        let (r, _) = ui.allocate_exact_size(
+                                            egui::vec2(ui.available_width(), 22.0),
+                                            egui::Sense::hover(),
+                                        );
+                                        ui.painter().text(
+                                            egui::pos2(r.left() + 8.0, r.center().y),
+                                            egui::Align2::LEFT_CENTER,
+                                            g.to_uppercase(),
+                                            egui::FontId::proportional(9.5),
+                                            theme::text::FAINT,
+                                        );
+                                    }
+                                }
+                                let (r, resp) = ui.allocate_exact_size(
+                                    egui::vec2(ui.available_width(), ROW_H),
+                                    egui::Sense::click(),
+                                );
+                                if resp.hovered()
+                                    && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO)
+                                {
+                                    pk.highlight = i;
+                                }
+                                let p = ui.painter();
+                                if i == pk.highlight {
+                                    p.rect_filled(r, 4, color::text_a(23));
+                                }
+                                let sw = egui::Rect::from_min_size(
+                                    egui::pos2(r.left() + 8.0, r.center().y - 7.0),
+                                    egui::vec2(14.0, 14.0),
+                                );
+                                paint_preview(p, doc, s, sw);
+                                p.text(
+                                    egui::pos2(sw.right() + 8.0, r.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    leaf,
+                                    egui::FontId::proportional(11.5),
+                                    theme::text::STRONG,
+                                );
+                                p.text(
+                                    egui::pos2(r.right() - 8.0, r.center().y),
+                                    egui::Align2::RIGHT_CENTER,
+                                    counts[i].to_string(),
+                                    egui::FontId::proportional(10.5),
+                                    color::text_a(102),
+                                );
+                                if resp.clicked() {
+                                    pick = Some(s.id);
+                                }
+                            }
+                        });
+                });
+            })
+            .response
+            .rect;
+        if let Some(s) = pick {
+            self.session.clear_gesture_preview();
+            let tx = self.apply_tx(s, pk.slot, &pk.targets, false);
+            self.commit_edit(tx);
+            return;
+        }
+        let away = ctx.input(|i| {
+            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+        });
+        if away {
+            self.session.clear_gesture_preview();
+            return;
+        }
+        // The highlighted row previews on the canvas (F5).
+        match rows.get(pk.highlight) {
+            Some(s) => {
+                let tx = self.apply_tx(s.id, pk.slot, &pk.targets, true);
+                self.session.set_preview(&tx);
+            }
+            None => self.session.clear_gesture_preview(),
+        }
+        self.style_picker = Some(pk);
+    }
+
+    /// `Escape` over the styles' chrome, one thing a press: the picker, the
+    /// menu, a name being typed (undone), an edit. Whether it took the key.
+    pub(crate) fn escape_styles(&mut self) -> bool {
+        if self.style_picker.take().is_some() {
+            self.session.clear_gesture_preview();
+            return true;
+        }
+        if self.style_menu.take().is_some() {
+            return true;
+        }
+        if self.style_naming.take().is_some() {
+            self.undo();
+            return true;
+        }
+        if self.session.style_edit.take().is_some() {
+            return true;
+        }
+        false
+    }
+
+    /// The browser's *Edit* (G9, §15 D1063): select the style's users and open
+    /// their card on the style, live.
+    pub(crate) fn edit_style(&mut self, s: StyleId) {
+        let users = style::users(&self.session.doc, s);
+        if users.is_empty() {
+            return;
+        }
+        let slot = self.session.doc.styles().get(s).map(Style::slot);
+        self.session.selection.set(users);
+        self.session.style_edit = Some(s);
+        if let Some(slot) = slot {
+            self.style_open.insert(slot);
+        }
+    }
+}
+
+/// `x` to two places, its trailing zeros dropped: `1`, `1.5`, `0.25`.
+fn number(x: f64) -> String {
+    let s = format!("{x:.2}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `text` laid out on one line no wider than `width`, an ellipsis where it is
+/// cut.
+fn elided(p: &egui::Painter, text: &str, size: f32, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(size), theme::text::STRONG),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: width.max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    p.layout_job(job)
+}
+
+/// The picker's left edge: under the card, its right edge at the `⋯`'s.
+fn menu_left(under: egui::Rect) -> f32 {
+    under.right() - PICKER_W + 8.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::item::Keyed;
+    use ondin_core::kurbo::{RoundedRectRadii, Size};
+    use ondin_core::peniko::Color;
+    use ondin_core::{Fill, IdSource, NodeKind};
+
+    const RED: Color = Color::from_rgba8(200, 30, 30, 255);
+    const GREEN: Color = Color::from_rgba8(20, 200, 40, 255);
+
+    /// Two red 80×60 rects, the first selected.
+    fn app(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x5E);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (a, b) = (ids.mint(), ids.mint());
+        let mut ops = Vec::new();
+        for id in [a, b] {
+            ops.push(Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(80.0, 60.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                },
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: vec![Keyed::new(
+                    ids.mint_item(),
+                    Fill {
+                        brush: Brush::Solid(RED).into(),
+                        visible: true,
+                    },
+                )],
+            });
+        }
+        doc.apply(&Transaction(ops)).expect("build");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![a]);
+        (app, a, b)
+    }
+
+    /// One frame of the inspector and the styles' popups, its shapes returned.
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| {
+            app.inspector_panel(ctx);
+            app.style_popups_ui(ctx);
+        })
+        .shapes
+    }
+
+    fn drawn(shapes: &[egui::epaint::ClippedShape], s: &str) -> bool {
+        fn find(shape: &egui::Shape, s: &str) -> bool {
+            match shape {
+                egui::Shape::Text(t) => t.galley.text() == s,
+                egui::Shape::Vec(v) => v.iter().any(|x| find(x, s)),
+                _ => false,
+            }
+        }
+        shapes.iter().any(|c| find(&c.shape, s))
+    }
+
+    fn fill_colour(app: &OndinApp, id: NodeId) -> Brush {
+        app.session.doc.get(id).unwrap().paint().fills[0]
+            .brush
+            .literal()
+            .cloned()
+            .unwrap()
+    }
+
+    fn fill_style(app: &OndinApp, id: NodeId) -> Option<StyleId> {
+        app.session.doc.get(id).unwrap().styles().fills
+    }
+
+    /// **A styled Fill card is its capsule, and *Detach* keeps the values**
+    /// (F1, F2): after *Create style from this…*, the card draws the style's
+    /// name and its summary where the rows were, and detaching leaves the red.
+    #[test]
+    fn a_styled_card_draws_its_capsule_and_detaching_keeps_its_values() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        let s = fill_style(&app, a).expect("bound by the create");
+        assert_eq!(app.session.doc.styles().get(s).unwrap().name, "Fill style");
+        app.style_naming = None;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&ctx, &mut app, vec![]);
+        }
+        assert!(drawn(&shapes, "1 fill"), "the capsule's summary is drawn");
+        app.detach_styles(StyleSlot::Fills, &[a]);
+        assert_eq!(fill_style(&app, a), None);
+        assert_eq!(fill_colour(&app, a), Brush::Solid(RED));
+        // Asked for, so no status (F2: *no toast*).
+        assert!(!app.session.status().text.starts_with("Detached"));
+        let shapes = frame(&ctx, &mut app, vec![]);
+        assert!(!drawn(&shapes, "1 fill"), "the plain card is back");
+    }
+
+    /// **`Escape` while the new style's name is typed undoes the create** (F6).
+    #[test]
+    fn escape_on_a_new_styles_name_undoes_the_create() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        assert!(app.style_naming.is_some());
+        assert!(app.escape_styles());
+        assert!(app.session.doc.styles().is_empty(), "the create is undone");
+        assert_eq!(fill_style(&app, a), None);
+    }
+
+    /// **The browser's *Edit* makes a card's write an edit of the style, which
+    /// reaches every user** (§15 D1063). Outside the edit the same write detaches
+    /// the one layer.
+    ///
+    /// Flip, run: the commit door's `edit_through` dropped fails at *"b follows
+    /// the edit"* — `a` detached and green, `b` still the style's red.
+    #[test]
+    fn an_edit_of_a_styles_user_edits_the_style() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a, b]);
+        app.style_naming = None;
+        let s = fill_style(&app, a).unwrap();
+        app.edit_style(s);
+        assert_eq!(app.session.selection.ids().len(), 2, "its users selected");
+        let mut fills = app.session.doc.get(a).unwrap().paint().fills.clone();
+        fills[0].value.brush = Brush::Solid(GREEN).into();
+        assert!(app.commit_edit(Transaction(vec![Operation::SetFills {
+            id: a,
+            fills: fills.clone(),
+        }])));
+        assert_eq!(
+            fill_colour(&app, b),
+            Brush::Solid(GREEN),
+            "b follows the edit"
+        );
+        assert_eq!(fill_style(&app, a), Some(s), "a stays styled");
+        // The edit closed, the same write detaches.
+        app.session.style_edit = None;
+        fills[0].value.brush = Brush::Solid(RED).into();
+        app.commit_edit(Transaction(vec![Operation::SetFills { id: a, fills }]));
+        assert_eq!(fill_style(&app, a), None);
+        assert_eq!(fill_colour(&app, b), Brush::Solid(GREEN));
+        // And says so, as a door's detach does (D1038 (2)).
+        assert_eq!(app.session.status().text, "Detached Fill style");
+    }
+
+    /// **The picker's highlight previews on the canvas and `Enter` applies it**
+    /// (F5).
+    #[test]
+    fn the_pickers_highlight_previews_and_enter_applies() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        app.style_naming = None;
+        let s = fill_style(&app, a).unwrap();
+        app.style_picker = Some(StylePicker {
+            slot: StyleSlot::Fills,
+            targets: vec![b],
+            under: egui::Rect::from_min_size(egui::pos2(900.0, 100.0), egui::vec2(20.0, 20.0)),
+            query: String::new(),
+            focus: true,
+            highlight: 0,
+        });
+        frame(&ctx, &mut app, vec![]);
+        assert!(app.session.has_gesture_preview(), "the highlight previews");
+        assert_eq!(fill_style(&app, b), None, "nothing committed yet");
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![enter]);
+        assert_eq!(fill_style(&app, b), Some(s));
+        assert!(!app.session.has_gesture_preview());
+        assert!(app.style_picker.is_none());
+    }
+}

@@ -3489,9 +3489,12 @@ its own card, a set mode appended to its canvas label.
 
 **Kits carry the variables and styles a vendored main uses** (the session's, not objected to), under
 §5.3e's provenance and update flow; a kit update's summary counts variables and styles beside
-components and lists the layers a removed one detaches (D1038). **The export as CSS custom properties**
-is the session's and not ruled; §7 writes paint as presentation attributes today, so where a `var()`
-would go is part of the question.
+components and lists the layers a removed one detaches (D1038). **The export as CSS custom properties
+is not this work's**: by the maintainer's ruling of 2026-10-15 (D1037's amendment) it belongs to
+**code export** — HTML/CSS and perhaps framework code for a frame, a group or one element, a later
+feature in a separate release (`roadmap.md`'s *Later · Code export*) — and the variables' sheet with
+it, since generated layer code is what would read them through `var()`. §7 writes paint as
+presentation attributes today, so where a `var()` would go is that feature's question.
 
 **What is built** (step 1's core, §15 D1039 in full). `ondin_core::variable` holds the table —
 `Variables { modes, vars }`, the modes in order and the first the default, the variables by id
@@ -8231,8 +8234,8 @@ other were right, which is why both exist.
   through `Document::resolved_paint` in the mode in force there and its helpers read only literal
   brushes; a bound corner arrives as `rx` through the used kind. Paint is written as presentation
   attributes (`fill="#…"`, `stroke="…"`), a `style` attribute appearing only for an alpha mask's
-  `mask-type`; an export as CSS custom properties is the session's proposal, not ruled, and its shape
-  is open.
+  `mask-type`; an export as CSS custom properties belongs to code export, a later feature in a
+  separate release, by the maintainer's ruling of 2026-10-15 (§5.3f, §15 D1037's amendment).
 - **PNG** — `png(doc, res, vp) -> Vec<u8>` via `VelloCpuRenderer` + PNG encoder. No GPU anywhere in
   this path. It shares the walk, so it needs no rule of its own about a picture that cannot be drawn:
   the placeholder is ink and lands on the pixels, which is where a hole would do the most damage and

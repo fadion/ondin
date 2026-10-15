@@ -1126,9 +1126,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         // A corner's binding is the radius field's (§15 D1039).
         O::SetOpacity { .. } | O::SetClip { .. } | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
-        O::SetFills { .. } => Some("Fill"),
-        O::SetStrokes { .. } => Some("Stroke"),
-        O::SetEffects { .. } => Some("Effects"),
+        // A card's style is that card's (§15 D1062, D1038 F9): *Reset fill*
+        // restores the main's style with the main's list.
+        O::SetFills { .. } | O::SetFillStyle { .. } => Some("Fill"),
+        O::SetStrokes { .. } | O::SetStrokeStyle { .. } => Some("Stroke"),
+        O::SetEffects { .. } | O::SetEffectsStyle { .. } => Some("Effects"),
         O::SetExports { .. } => Some("Export"),
         O::SetLayoutGrids { .. } => Some("Layout grid"),
         O::SetInsets { .. } => Some("Position"),
@@ -1178,7 +1180,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetVariableCell { .. }
         | O::AddMode { .. }
         | O::RemoveMode { .. }
-        | O::SetModeName { .. } => None,
+        | O::SetModeName { .. }
+        | O::AddStyle { .. }
+        | O::RemoveStyle { .. }
+        | O::SetStyleName { .. }
+        | O::SetStyleValue { .. } => None,
     }
 }
 

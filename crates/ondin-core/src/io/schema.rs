@@ -71,6 +71,11 @@ pub(crate) struct DocumentDto {
     /// frequent, the table below it large and still.
     #[serde(default, skip_serializing_if = "VariablesDto::is_empty")]
     pub variables: VariablesDto,
+    /// The styles (§15 D1062), sorted by id on save (invariant 9), absent in a
+    /// document with none. New in v8 — the version D1058 opened, unreleased when
+    /// this joined it, as `size_vars` did.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<crate::style::Style>,
     /// The image table, sorted by id on save (invariant 9).
     ///
     /// **Last, and that is a decision about diffs rather than about serde.** An
@@ -362,6 +367,10 @@ pub(crate) struct NodeDto {
     /// (a local build of D1058's or D1059's commit would drop it in silence).
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
+    /// The styles a layer's fills, strokes and effects are bound to (§15
+    /// D1062), absent when none is. New in v8, as `size_vars` is.
+    #[serde(default, skip_serializing_if = "crate::style::StyleRefs::is_empty")]
+    pub styles: crate::style::StyleRefs,
 }
 
 fn no_size_vars(v: &crate::variable::SizeVars) -> bool {
@@ -473,6 +482,7 @@ impl NodeDto {
             spacing_vars: n.spacing_vars(),
             visible_var: n.visible_var(),
             size_vars: n.size_vars(),
+            styles: n.styles(),
         }
     }
 
@@ -588,6 +598,7 @@ impl NodeDto {
             spacing_vars: self.spacing_vars,
             visible_var: self.visible_var,
             size_vars: self.size_vars,
+            styles: self.styles,
         })
     }
 }
@@ -691,6 +702,7 @@ impl DocumentDto {
             canvas_background: doc.canvas_background(),
             guides,
             variables: VariablesDto::from_table(doc.variables()),
+            styles: doc.styles().iter().cloned().collect(),
             images,
             meta: doc.meta().clone(),
             published: doc.published().map(|p| PublishedDto {
@@ -794,6 +806,31 @@ impl DocumentDto {
         crate::variable::check(&variables, nodes.values())
             .map_err(|rule| IoError::Integrity(rule.to_string()))?;
 
+        // And the style rules (§15 D1062), refused rather than repaired for the
+        // same reason. A layer whose list differs from its style's loads as
+        // written — the next commit that touches either settles it.
+        let mut styles = Vec::with_capacity(self.styles.len());
+        for s in self.styles {
+            if styles.iter().any(|t: &crate::style::Style| t.id == s.id) {
+                return Err(IoError::Integrity(format!("duplicate style id {:?}", s.id)));
+            }
+            styles.push(s);
+        }
+        let styles = crate::style::Styles::from_list(styles);
+        let in_vault = |id: NodeId| {
+            let mut cursor = Some(id);
+            for _ in 0..=nodes.len() {
+                match cursor {
+                    Some(c) if Some(c) == vault => return true,
+                    Some(c) => cursor = nodes.get(&c).and_then(|n| n.parent()),
+                    None => return false,
+                }
+            }
+            false
+        };
+        crate::style::check(&styles, &variables, nodes.values(), in_vault)
+            .map_err(|rule| IoError::Integrity(rule.to_string()))?;
+
         // The published state is a document of its own, held to the same rules
         // by the same loader (§15 D1012) — but one level deep only: a frozen copy
         // never carries a frozen copy, and refusing one here bounds the
@@ -823,6 +860,7 @@ impl DocumentDto {
             guides,
             images,
             variables,
+            styles,
             // ⚠️ **Taken as it was written, with nothing filled in.** A loader
             // that minted a missing id would make `load` non-deterministic —
             // reading the same bytes twice would give two documents that

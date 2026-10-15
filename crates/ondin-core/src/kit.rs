@@ -418,6 +418,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         images,
         Default::default(),
         Default::default(),
+        Default::default(),
         None,
     );
     debug_assert!(
@@ -605,6 +606,7 @@ fn empty_published(doc: &Document) -> Published {
             doc.canvas_background(),
             Vec::new(),
             FxHashMap::default(),
+            Default::default(),
             Default::default(),
             Default::default(),
             None,

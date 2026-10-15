@@ -233,6 +233,10 @@ pub struct Node {
     /// The number variables this layer's width and height are bound to (§15
     /// D1061), all `None` on a kind with no stored size.
     pub(crate) size_vars: crate::variable::SizeVars,
+    /// The styles this layer's fills, strokes and effects are bound to (§5.3f,
+    /// §15 D1062) — the lists themselves hold the style's values, written there
+    /// by the commit (`crate::style::settle`).
+    pub(crate) styles: crate::style::StyleRefs,
 }
 
 impl Node {
@@ -305,6 +309,10 @@ impl Node {
     /// kind's own `size` is the literal, 0 on a bound axis.
     pub fn size_vars(&self) -> crate::variable::SizeVars {
         self.size_vars
+    }
+    /// The styles this layer's cards are bound to (§15 D1062).
+    pub fn styles(&self) -> crate::style::StyleRefs {
+        self.styles
     }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
     /// corner, gap, padding, visibility, width or height. What a variable's edit

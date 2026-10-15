@@ -73,7 +73,12 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetCornerVars { .. }
         | Operation::SetSpacingVars { .. }
         | Operation::SetVisibleVar { .. }
-        | Operation::SetSizeVars { .. } => Mode::Whole,
+        | Operation::SetSizeVars { .. }
+        // And a card's style (§15 D1062, D1038 F9): the main's own style is no
+        // override, another one or a detach is.
+        | Operation::SetFillStyle { .. }
+        | Operation::SetStrokeStyle { .. }
+        | Operation::SetEffectsStyle { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }
@@ -123,7 +128,13 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetVariableCell { .. }
         | Operation::AddMode { .. }
         | Operation::RemoveMode { .. }
-        | Operation::SetModeName { .. } => Mode::Skip,
+        | Operation::SetModeName { .. }
+        // So is the styles table: a style's edit reaches main and copy alike
+        // through the values `style::settle` writes on each.
+        | Operation::AddStyle { .. }
+        | Operation::RemoveStyle { .. }
+        | Operation::SetStyleName { .. }
+        | Operation::SetStyleValue { .. } => Mode::Skip,
     }
 }
 
@@ -347,6 +358,15 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 /// hole 16: two lists a person keeps agree whatever either says). The tests call
 /// this now, so a flip here fails there.
 pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource) {
+    // What the user's edit is, for the styles (§15 D1062): a slot one of these
+    // operations writes on a styled layer detaches it; one the passes below
+    // write is put back to its style.
+    let user = tx.0.len();
+    // A style edited or applied is written onto its users, and a styled slot
+    // the edit wrote is detached — first, so a main's rewrite or detach reaches
+    // its copies through every pass below.
+    let styled = crate::style::settle(doc, tx, user);
+    tx.0.extend(styled);
     // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
     // back, has its children and fields rewritten in place here — the one place
     // they are — so the picker, a reset and a nested variant switch need write
@@ -377,6 +397,11 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // after the passes above, so what they append to a main propagates too.
     let follows = propagate(doc, tx);
     tx.0.extend(follows);
+    // And the styles once more, after everything: a follow that carried a main's
+    // item onto a copy bound to a style of its own, a swap's or a structural
+    // pass's copy of a styled node, put back to its style (§15 D1062).
+    let restyled = crate::style::settle(doc, tx, user);
+    tx.0.extend(restyled);
 }
 
 /// The nodes `tx` takes away from the source they follow: everything under a
@@ -1047,6 +1072,7 @@ pub(crate) fn untouched(
         && c.spacing_vars == s.spacing_vars
         && c.visible_var == s.visible_var
         && c.size_vars == s.size_vars
+        && c.styles == s.styles
         // A swap is an override (§15 D983): a swapped copy is never untouched.
         && c.swap.is_none()
         && c_kids.len() == s_kids.len();

@@ -78,6 +78,11 @@ pub struct Document {
     /// — the third piece of state that is not a node, changed by the operations
     /// that name a variable or a mode and checked after every transaction.
     variables: crate::variable::Variables,
+    /// The document's styles (§5.3f, `crate::style`) — the fourth such piece,
+    /// changed by the operations that name a style and checked after every
+    /// transaction. Its values are copied onto the layers bound to it, so nothing
+    /// that draws reads it (§15 D1062).
+    styles: crate::style::Styles,
     /// The document's library identity — typed name, project, creation stamp
     /// (`crate::meta`).
     ///
@@ -145,6 +150,7 @@ impl Document {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            styles: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -157,6 +163,7 @@ impl Document {
             guides: Vec::new(),
             images: FxHashMap::default(),
             variables: Default::default(),
+            styles: Default::default(),
             // Empty, not minted: a document that has never been through the
             // library has no id, and `Document::new` is also what every test
             // fixture and the starter document use. Minting here would put a
@@ -351,6 +358,11 @@ impl Document {
     /// The document's variables and mode list (§5.3f, `crate::variable`).
     pub fn variables(&self) -> &crate::variable::Variables {
         &self.variables
+    }
+
+    /// The document's styles (§5.3f, `crate::style`).
+    pub fn styles(&self) -> &crate::style::Styles {
+        &self.styles
     }
 
     /// The mode in force at `id` (§5.3f): the mode the nearest frame at or above
@@ -707,8 +719,8 @@ impl Document {
     /// Build a document from already-validated parts (used by IO on load).
     /// Performs no validation itself — the caller (io::schema) checks integrity.
     ///
-    /// One argument per field a file stores, which is why there are ten: a
-    /// struct of the same ten fields would be this signature with a name.
+    /// One argument per field a file stores, which is why there are eleven: a
+    /// struct of the same eleven fields would be this signature with a name.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         schema_version: u32,
@@ -719,6 +731,7 @@ impl Document {
         guides: Vec<Guide>,
         images: FxHashMap<ImageId, ImageEntry>,
         variables: crate::variable::Variables,
+        styles: crate::style::Styles,
         meta: DocumentMeta,
         published: Option<crate::kit::Published>,
     ) -> Self {
@@ -731,6 +744,7 @@ impl Document {
             guides,
             images,
             variables,
+            styles,
             meta,
             published: published.map(std::sync::Arc::new),
             restoring: false,
@@ -860,6 +874,18 @@ impl Document {
         crate::variable::check(&working.variables, working.nodes.values())
             .map_err(OpError::Variables)?;
 
+        // The style rules (§15 D1062): every binding names a style of its slot,
+        // names unique within a slot, a style's paints bound to colour variables,
+        // and no vault node bound — the same whole-document reach, for the same
+        // reason.
+        crate::style::check(
+            &working.styles,
+            &working.variables,
+            working.nodes.values(),
+            |id| working.in_vault(id),
+        )
+        .map_err(OpError::Styles)?;
+
         // All ops succeeded — commit the working copy.
         *self = working;
 
@@ -929,6 +955,7 @@ impl Document {
             guides: Vec::new(),
             images: FxHashMap::default(),
             variables: Default::default(),
+            styles: Default::default(),
             meta: DocumentMeta::default(),
             published: None,
             restoring: self.restoring,
@@ -1135,6 +1162,75 @@ impl Document {
                 let old = std::mem::replace(&mut node.size_vars, *vars);
                 dirty.0.insert(*id);
                 Ok(Operation::SetSizeVars { id: *id, vars: old })
+            }
+            // ── The styles (§15 D1062) ── document-level, like the variables:
+            // a style's values are written onto its users by ops of their own
+            // (`style::settle`), so these dirty nothing.
+            Operation::AddStyle { style } => {
+                if self.styles.styles.contains_key(&style.id) {
+                    return Err(OpError::DuplicateStyle(style.id));
+                }
+                self.styles.styles.insert(style.id, style.clone());
+                Ok(Operation::RemoveStyle { id: style.id })
+            }
+            Operation::RemoveStyle { id } => {
+                let style = self
+                    .styles
+                    .styles
+                    .remove(id)
+                    .ok_or(OpError::NoSuchStyle(*id))?;
+                Ok(Operation::AddStyle { style })
+            }
+            Operation::SetStyleName { id, name } => {
+                let s = self
+                    .styles
+                    .styles
+                    .get_mut(id)
+                    .ok_or(OpError::NoSuchStyle(*id))?;
+                let old = std::mem::replace(&mut s.name, name.clone());
+                Ok(Operation::SetStyleName { id: *id, name: old })
+            }
+            Operation::SetStyleValue { id, value } => {
+                let s = self
+                    .styles
+                    .styles
+                    .get_mut(id)
+                    .ok_or(OpError::NoSuchStyle(*id))?;
+                if s.slot() != value.slot() {
+                    return Err(OpError::WrongKindForOp);
+                }
+                let old = std::mem::replace(&mut s.value, value.clone());
+                Ok(Operation::SetStyleValue {
+                    id: *id,
+                    value: old,
+                })
+            }
+            Operation::SetFillStyle { id, style } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.styles.fills, *style);
+                dirty.0.insert(*id);
+                Ok(Operation::SetFillStyle {
+                    id: *id,
+                    style: old,
+                })
+            }
+            Operation::SetStrokeStyle { id, style } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.styles.strokes, *style);
+                dirty.0.insert(*id);
+                Ok(Operation::SetStrokeStyle {
+                    id: *id,
+                    style: old,
+                })
+            }
+            Operation::SetEffectsStyle { id, style } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.styles.effects, *style);
+                dirty.0.insert(*id);
+                Ok(Operation::SetEffectsStyle {
+                    id: *id,
+                    style: old,
+                })
             }
         }
     }
@@ -1382,6 +1478,7 @@ impl Document {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            styles: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2682,6 +2779,8 @@ pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
         .chain(items)
         // Variables and modes too (§15 D1039), minted from the same stream.
         .chain(doc.variables.ids())
+        // And styles (§15 D1062).
+        .chain(doc.styles.ids())
         .filter(|id| id.actor == actor)
         .map(|id| id.seq)
         .max();
@@ -2812,6 +2911,9 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             spacing_vars: n.spacing_vars,
             visible_var: n.visible_var,
             size_vars: n.size_vars,
+            // And the styles its source's cards are bound to, the same way: ids
+            // into the document's table (§15 D1062).
+            styles: n.styles,
         });
     }
     Some((out, new_root?))
@@ -3038,6 +3140,7 @@ mod tests {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            styles: Default::default(),
         }
     }
 

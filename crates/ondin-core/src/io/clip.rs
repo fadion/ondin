@@ -92,11 +92,17 @@ struct CarriedDto {
     modes: Vec<crate::variable::Mode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     detached: Vec<NodeDto>,
+    /// The styles the layers are bound to (§15 D1062).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    styles: Vec<crate::style::CarriedStyle>,
 }
 
 impl CarriedDto {
     fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.modes.is_empty() && self.detached.is_empty()
+        self.vars.is_empty()
+            && self.modes.is_empty()
+            && self.detached.is_empty()
+            && self.styles.is_empty()
     }
 }
 
@@ -164,6 +170,7 @@ pub fn write_carrying(
             vars: vars.vars.clone(),
             modes: vars.modes.clone(),
             detached: vars.detached.iter().map(NodeDto::from_node).collect(),
+            styles: vars.styles.clone(),
         },
         from: from.map(|r| [r.x0, r.y0, r.x1, r.y1]),
     };
@@ -326,6 +333,7 @@ fn parse(json: &str) -> Result<Payload, IoError> {
             .into_iter()
             .map(NodeDto::into_node)
             .collect::<Result<_, _>>()?,
+        styles: dto.vars.styles,
     };
     Ok(Payload {
         subtrees,

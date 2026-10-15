@@ -44,6 +44,7 @@ pub mod propagate;
 pub mod query;
 pub mod reset;
 pub mod resolve;
+pub mod style;
 pub mod svg_in;
 pub mod swap;
 pub mod text;

@@ -462,6 +462,9 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.visible_var = None;
     }
     node.mode = None;
+    // And its styles, its lists already holding their values (§15 D1062) — a
+    // kit carries none until step 4, as it carries no variable.
+    node.styles = Default::default();
     node
 }
 
@@ -487,11 +490,18 @@ pub struct Carried {
     pub vars: Vec<CarriedVar>,
     pub modes: Vec<Mode>,
     pub detached: Vec<crate::Node>,
+    /// The styles the copied layers are bound to, by name and slot, for the
+    /// same rule (§15 D1062, `crate::style::rebind`). A layer's own lists
+    /// already hold its style's values, so no twin is needed to detach one.
+    pub styles: Vec<crate::style::CarriedStyle>,
 }
 
 impl Carried {
     pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.modes.is_empty() && self.detached.is_empty()
+        self.vars.is_empty()
+            && self.modes.is_empty()
+            && self.detached.is_empty()
+            && self.styles.is_empty()
     }
 }
 
@@ -531,6 +541,18 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
         if n.reads_variables() {
             out.detached.push(detached(doc, n.clone()));
         }
+        for (slot, s) in n.styles.iter() {
+            if out.styles.iter().any(|c| c.id == s) {
+                continue;
+            }
+            if let Some(style) = doc.styles().get(s) {
+                out.styles.push(crate::style::CarriedStyle {
+                    id: s,
+                    name: style.name.clone(),
+                    slot,
+                });
+            }
+        }
     }
     out
 }
@@ -566,6 +588,15 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
     nodes
         .into_iter()
         .map(|mut n| {
+            // A card's style by the same rule, by name and slot, else detached —
+            // the layer's list already holds the values it was copied with
+            // (§15 D1062). Rebound to another document's namesake, the commit
+            // writes that style's values onto it (`style::settle`).
+            let refs = n.styles;
+            for (slot, s) in refs.iter() {
+                let to = crate::style::rebind(doc.styles(), &carried.styles, slot, s);
+                n.styles.set(slot, to);
+            }
             if !n.reads_variables() && n.mode.is_none() {
                 return n;
             }
@@ -848,6 +879,20 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                     id: v.id,
                     mode: *mode,
                     cell,
+                });
+            }
+        }
+    }
+    // And a style whose paints read one detaches them too, to the colour they
+    // draw in the default mode (§15 D1062) — a style holds one value for layers
+    // in every mode. Its users are rewritten from it by the commit, the style
+    // winning over the per-layer detaches above, so they stay styled.
+    if let Some(mode) = t.default_mode() {
+        for s in doc.styles().iter() {
+            if s.value.vars().iter().any(|v| vars.contains(v)) {
+                ops.push(O::SetStyleValue {
+                    id: s.id,
+                    value: crate::style::detach_vars(&s.value, t, mode, vars),
                 });
             }
         }

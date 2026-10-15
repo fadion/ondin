@@ -474,6 +474,45 @@ pub enum Operation {
         id: NodeId,
         vars: crate::variable::SizeVars,
     },
+    /// Put a style in the document's table (§15 D1062). Its name must be free in
+    /// its slot — `crate::style::check`, after the last op. Inverts to
+    /// [`Self::RemoveStyle`], and that back to this carrying the whole style.
+    AddStyle {
+        style: crate::style::Style,
+    },
+    /// Take a style out of the table. **Refused at the commit while any layer is
+    /// bound to it**: the delete verb detaches its users first, in the same
+    /// transaction (`crate::style::remove_ops`, D1038 (6)).
+    RemoveStyle {
+        id: crate::style::StyleId,
+    },
+    /// Rename a style — a slash path, whose groups are the browser's.
+    SetStyleName {
+        id: crate::style::StyleId,
+        name: String,
+    },
+    /// A style's whole value, of the slot it already has. Its users are rewritten
+    /// by the commit, live to every one of them (`crate::style::settle`).
+    SetStyleValue {
+        id: crate::style::StyleId,
+        value: crate::style::StyleValue,
+    },
+    /// The style a layer's fills are bound to, `None` to detach. Writes the
+    /// binding alone — the commit writes the style's values beside it.
+    SetFillStyle {
+        id: NodeId,
+        style: Option<crate::style::StyleId>,
+    },
+    /// The style a layer's strokes are bound to, as [`Self::SetFillStyle`].
+    SetStrokeStyle {
+        id: NodeId,
+        style: Option<crate::style::StyleId>,
+    },
+    /// The style a layer's effects are bound to, as [`Self::SetFillStyle`].
+    SetEffectsStyle {
+        id: NodeId,
+        style: Option<crate::style::StyleId>,
+    },
 }
 
 impl Operation {
@@ -538,6 +577,9 @@ impl Operation {
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
             | Operation::SetSizeVars { id, .. }
+            | Operation::SetFillStyle { id, .. }
+            | Operation::SetStrokeStyle { id, .. }
+            | Operation::SetEffectsStyle { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -565,7 +607,12 @@ impl Operation {
             | Operation::SetVariableCell { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
-            | Operation::SetModeName { .. } => None,
+            | Operation::SetModeName { .. }
+            // And the styles table (§15 D1062): these name a style.
+            | Operation::AddStyle { .. }
+            | Operation::RemoveStyle { .. }
+            | Operation::SetStyleName { .. }
+            | Operation::SetStyleValue { .. } => None,
         }
     }
 
@@ -612,7 +659,10 @@ impl Operation {
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
-            | Operation::SetSizeVars { id, .. } => id,
+            | Operation::SetSizeVars { id, .. }
+            | Operation::SetFillStyle { id, .. }
+            | Operation::SetStrokeStyle { id, .. }
+            | Operation::SetEffectsStyle { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -764,7 +814,17 @@ impl Operation {
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
-            | Operation::SetModeName { .. } => false,
+            | Operation::SetModeName { .. }
+            // A style's table and a layer's binding to one draw nothing of
+            // themselves: what a styled layer draws is its own list, which the
+            // commit rewrites beside these by `SetFills` and its kin (§15 D1062).
+            | Operation::AddStyle { .. }
+            | Operation::RemoveStyle { .. }
+            | Operation::SetStyleName { .. }
+            | Operation::SetStyleValue { .. }
+            | Operation::SetFillStyle { .. }
+            | Operation::SetStrokeStyle { .. }
+            | Operation::SetEffectsStyle { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -886,7 +946,25 @@ impl Operation {
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::AddMode { .. }
-            | Operation::RemoveMode { .. } => false,
+            | Operation::RemoveMode { .. }
+            | Operation::AddStyle { .. }
+            | Operation::RemoveStyle { .. } => false,
+
+            Operation::SetStyleName { id, name } => {
+                doc.styles().get(*id).is_some_and(|s| s.name == *name)
+            }
+            Operation::SetStyleValue { id, value } => {
+                doc.styles().get(*id).is_some_and(|s| s.value == *value)
+            }
+            Operation::SetFillStyle { id, style } => {
+                node(id).is_some_and(|n| n.styles().fills == *style)
+            }
+            Operation::SetStrokeStyle { id, style } => {
+                node(id).is_some_and(|n| n.styles().strokes == *style)
+            }
+            Operation::SetEffectsStyle { id, style } => {
+                node(id).is_some_and(|n| n.styles().effects == *style)
+            }
 
             Operation::SetVariableName { id, name } => {
                 doc.variables().get(*id).is_some_and(|v| v.name == *name)
@@ -1406,6 +1484,14 @@ pub enum OpError {
     /// [`Self::BadLink`] is.
     #[error("{0}")]
     Variables(crate::variable::VarRule),
+    /// A style rule broken (§15 D1062) — a binding to a style that is not there,
+    /// a name used twice in a slot. Checked after the last op.
+    #[error("{0}")]
+    Styles(crate::style::StyleRule),
+    #[error("no such style: {0:?}")]
+    NoSuchStyle(crate::style::StyleId),
+    #[error("duplicate style id: {0:?}")]
+    DuplicateStyle(crate::style::StyleId),
     #[error("duplicate guide id: {0:?}")]
     DuplicateGuide(GuideId),
     #[error("no such image: {0}")]

@@ -1717,6 +1717,17 @@ impl RenderOverrides {
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. } => {}
+            // **A style draws through the lists it is copied into** (§15 D1062):
+            // the table and a layer's binding to it draw nothing of themselves,
+            // so a preview of one carries the `SetFills` and its kin the commit
+            // would write (`style::settle`), and these pass through.
+            Operation::AddStyle { .. }
+            | Operation::RemoveStyle { .. }
+            | Operation::SetStyleName { .. }
+            | Operation::SetStyleValue { .. }
+            | Operation::SetFillStyle { .. }
+            | Operation::SetStrokeStyle { .. }
+            | Operation::SetEffectsStyle { .. } => {}
             // **A corner's binding previews as the radii it will draw** (§15
             // D1050): the `--` list's highlight on a radius field, which D1039
             // refused here. The bound corners are resolved through the document —

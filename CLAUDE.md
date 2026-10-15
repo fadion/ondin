@@ -67,8 +67,23 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1065 index rows, 1065 body headings, next free
-D1066** (measured 2026-10-15 at `2033b8d`; ⚠️ **the step-4 request — kits carrying variables
+anywhere cited either. **The live figures: 1066 index rows, 1066 body headings, next free
+D1067** (measured 2026-10-15 at `fe414ff`; ⚠️ **the step-4 leftovers request reserved
+D1066–D1075 at `3f0d0b6` through the `dnumber-guard` mod and spent one** — D1066, *Make local*
+forking the kit variables and styles a main reads (the maintainer's ruling: a made-local main
+stops reading them; the fork, the *forked from* mark and the kit-frames status note accepted
+together), committed as `5f8942e`; the frozen-visibility edge (`b422aa9`) and 5A's summary with
+the browser's *v8 → v9* (`fe414ff`) went into amendments to D1064 and D1065. **D1067–D1075
+found at zero sites and released.** Census **965**, arrival D1066, none unresolved. Step 4 owes
+nothing. ⚠️ **`arch-scribe` read eight defects across three rounds** — among them the update
+path detaching what it should fork, a positional match turning a followed fill into an
+override, and the removal filter sparing any old fork — **every one reproduced by a test and
+flip-checked before the commit**; and the style half of one test found a defect older than the
+work: **every update dropping a style and a variable it read had failed for good**
+(`Incomplete`). The commits were split by lifting the other commits' hunks out with `Edit`,
+staging, and copying the scratchpad backup back, each staged tree checked and its core tests
+run from `git checkout-index` in its own target dir. Before that, measured 2026-10-15 at
+`2033b8d`; ⚠️ **the step-4 request — kits carrying variables
 and styles — reserved D1064–D1073 at `f4c78e4` through the `dnumber-guard` mod and spent two**:
 D1064, the core (a kit's variables and styles vendored into the consumer's own tables with an
 origin, `KitModes` and the per-kit mapping, one planner `tokens::plan` for insert, update and

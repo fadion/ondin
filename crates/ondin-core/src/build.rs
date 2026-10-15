@@ -4370,6 +4370,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
                 id: v,
                 name: var.name.clone(),
                 kind: var.kind,
+                origin: var.origin.clone(),
             });
         }
     }

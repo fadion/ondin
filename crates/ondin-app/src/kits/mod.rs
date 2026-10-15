@@ -165,7 +165,8 @@ impl OndinApp {
 
     /// What a paste carrying kit mains says when the kit refuses it: an update
     /// owed for a main this document holds at an older version (§15 D1036 (7)),
-    /// or a kit built on this one (D1036 (2)).
+    /// a kit built on this one (D1036 (2)), or a kit held here without a mode
+    /// the copy read (§15 D1064).
     pub(crate) fn carry_refused(&self, e: &ondin_core::kit::KitError) -> String {
         use ondin_core::kit::KitError;
         let doc = &self.session.doc;
@@ -178,7 +179,15 @@ impl OndinApp {
                 "The pasted component uses this kit's {}, so it cannot be pasted here",
                 doc.get(*own).map_or("component", |n| n.name())
             ),
-            // `adopt` answers only the two above; this is for a future one,
+            // The kit's modes held here at another version than the copy's
+            // (§15 D1064, `tokens::plan`).
+            KitError::Modes(kit) => {
+                match doc.variables().kits().get(kit).and_then(|k| k.name.clone()) {
+                    Some(name) => format!("Accept {name}'s update first, then paste again"),
+                    None => "Accept the kit's update first, then paste again".to_string(),
+                }
+            }
+            // The carry answers only the three above; this is for a future one,
             // worded rather than printed (D1024: no error prints its Debug).
             _ => "That paste could not be placed — the kit it carries is incomplete".to_string(),
         }

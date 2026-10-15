@@ -141,17 +141,91 @@ impl From<Value> for Cell {
 /// A variable: a name, a kind and one cell per mode.
 ///
 /// **The name is a path** — `brand/500` — and the slashes are the browser's
-/// groups (D1038 G); there is no group object. Names are unique in the document
-/// ([`check`]), which is what lets a paste from another document rebind by name.
+/// groups (D1038 G); there is no group object. Names are unique among the
+/// document's own variables, and among each kit's ([`check`]), which is what
+/// lets a paste from another document rebind by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Variable {
     pub id: VarId,
     pub name: String,
     pub kind: VarKind,
-    /// One cell per mode of the document, keyed by mode — **every** mode, which
+    /// One cell per mode, keyed by mode — **every** mode of the document for one
+    /// of its own, every mode of its kit for a kit's ([`KitModes`]), which
     /// [`check`] holds, so a read never meets a missing column. Ordered by id for
     /// byte-stable saves (invariant 9), not by the modes' order.
     pub cells: BTreeMap<ModeId, Cell>,
+    /// Which kit it came from, for a variable a vendored main reads (§15 D1064)
+    /// — `None` for the document's own. A kit's variable is **read-only** here, as
+    /// a vendored main is: written by an update and by nothing the user does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<VarOrigin>,
+}
+
+impl Variable {
+    /// The kit this variable came from, `None` for the document's own.
+    pub fn kit(&self) -> Option<&str> {
+        self.origin.as_ref().map(|o| o.kit.as_str())
+    }
+}
+
+/// Where a kit's variable came from (§15 D1064): the kit's `meta.id`, the
+/// variable in that kit's published state, and the version it was published at
+/// — `crate::kit::Origin` for a variable. Its own id is minted here, as a vendored
+/// node's is (§15 D1010), and [`Self::key`] is what an update and a second
+/// insert match on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VarOrigin {
+    pub kit: String,
+    pub var: VarId,
+    pub version: u32,
+}
+
+impl VarOrigin {
+    /// Which kit, which variable there — the version left out, as
+    /// `crate::kit::Origin::key` leaves it.
+    pub fn key(&self) -> (&str, VarId) {
+        (&self.kit, self.var)
+    }
+}
+
+/// One kit's modes, as a document holding its variables keeps them (§15 D1064,
+/// D1038 (b)): the kit's own list, and **the per-kit mapping** from the
+/// document's modes onto it.
+///
+/// D1038 (b) keeps **one mode list per document**: a kit's modes are not modes
+/// of the document, no frame of the document's own sets one, and they appear
+/// nowhere but as the columns its variables are read in. Which column a layer
+/// reads is the mapping's ([`Variables::kit_mode`]): the entry set by hand, else
+/// the kit mode **of the same name** as the document's mode in force, else the
+/// kit's **first** mode.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct KitModes {
+    /// The kit's name when its variables arrived — the browser's group header,
+    /// as `crate::kit::Origin::name` names a lost kit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The kit's modes, in its order — its first the fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modes: Vec<KitMode>,
+    /// The mapping's hand-set entries, a mode of the document to a mode of the
+    /// kit. A document mode with no entry maps by name, then to the first.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub map: BTreeMap<ModeId, ModeId>,
+}
+
+impl KitModes {
+    pub fn mode(&self, id: ModeId) -> Option<&KitMode> {
+        self.modes.iter().find(|m| m.id == id)
+    }
+}
+
+/// One of a kit's modes, held here under an id of this document's (`id`) and
+/// remembering the kit's own (`from`), which an update matches on.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct KitMode {
+    pub id: ModeId,
+    pub name: String,
+    pub from: ModeId,
 }
 
 /// The document's variables and its mode list.
@@ -159,6 +233,9 @@ pub struct Variable {
 pub struct Variables {
     pub(crate) modes: Vec<Mode>,
     pub(crate) vars: BTreeMap<VarId, Variable>,
+    /// The modes of each kit whose variables this document holds, by kit id
+    /// (§15 D1064).
+    pub(crate) kits: BTreeMap<String, KitModes>,
 }
 
 impl Variables {
@@ -166,28 +243,101 @@ impl Variables {
         &self.modes
     }
     /// The default mode — the first (D1038 (a)) — or `None` in a document with
-    /// no modes, which has no variables either ([`check`]).
+    /// no modes, which has no variables of its own either ([`check`]).
     pub fn default_mode(&self) -> Option<ModeId> {
         self.modes.first().map(|m| m.id)
     }
+    /// One of the **document's** modes — never a kit's.
     pub fn mode(&self, id: ModeId) -> Option<&Mode> {
         self.modes.iter().find(|m| m.id == id)
     }
     pub fn mode_index(&self, id: ModeId) -> Option<usize> {
         self.modes.iter().position(|m| m.id == id)
     }
+    /// The kits whose variables this document holds, and their modes.
+    pub fn kits(&self) -> &BTreeMap<String, KitModes> {
+        &self.kits
+    }
+    /// The kit `mode` is a mode of, with the mode — `None` for one of the
+    /// document's own, or none at all.
+    pub fn kit_mode_of(&self, mode: ModeId) -> Option<(&str, &KitMode)> {
+        self.kits
+            .iter()
+            .find_map(|(k, km)| km.mode(mode).map(|m| (k.as_str(), m)))
+    }
+    /// Whether `mode` is a mode of the document or of a kit it holds.
+    pub fn has_mode(&self, mode: ModeId) -> bool {
+        self.mode(mode).is_some() || self.kit_mode_of(mode).is_some()
+    }
     pub fn get(&self, id: VarId) -> Option<&Variable> {
         self.vars.get(&id)
     }
-    /// Every variable, in id order.
+    /// Every variable, the kits' among them, in id order.
     pub fn iter(&self) -> impl Iterator<Item = &Variable> {
         self.vars.values()
     }
-    pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.modes.is_empty()
+    /// The document's own variables, in id order — no kit's.
+    pub fn local(&self) -> impl Iterator<Item = &Variable> {
+        self.vars.values().filter(|v| v.origin.is_none())
     }
+    /// The variables of `kit`, in id order.
+    pub fn of_kit<'a>(&'a self, kit: &'a str) -> impl Iterator<Item = &'a Variable> + 'a {
+        self.vars.values().filter(move |v| v.kit() == Some(kit))
+    }
+    /// The variable whose origin is `key`, a kit's variable held here.
+    pub fn by_origin(&self, key: (&str, VarId)) -> Option<&Variable> {
+        self.vars
+            .values()
+            .find(|v| v.origin.as_ref().is_some_and(|o| o.key() == key))
+    }
+    pub fn is_empty(&self) -> bool {
+        self.vars.is_empty() && self.modes.is_empty() && self.kits.is_empty()
+    }
+    /// The document's own variable named `name` — a kit's are named in their
+    /// kit, and a paste rebinds to one of those by its origin instead.
     pub fn by_name(&self, name: &str) -> Option<&Variable> {
-        self.vars.values().find(|v| v.name == name)
+        self.local().find(|v| v.name == name)
+    }
+
+    /// The column of `kit`'s variables read when `mode` is in force (§15 D1064,
+    /// D1038 (b)): `mode` itself when it is one of the kit's (a kit main's frame
+    /// set to it), else the mapping's hand-set entry, else the kit mode named as
+    /// the document's mode is, else the kit's first. `mode` `None` is the
+    /// document's default. `None` only for a kit this table does not hold.
+    pub fn kit_mode(&self, kit: &str, mode: Option<ModeId>) -> Option<ModeId> {
+        let k = self.kits.get(kit)?;
+        let mode = mode.or_else(|| self.default_mode());
+        if let Some(m) = mode {
+            if k.mode(m).is_some() {
+                return Some(m);
+            }
+            if let Some(to) = k.map.get(&m)
+                && k.mode(*to).is_some()
+            {
+                return Some(*to);
+            }
+            if let Some(named) = self
+                .mode(m)
+                .and_then(|dm| k.modes.iter().find(|x| x.name == dm.name))
+            {
+                return Some(named.id);
+            }
+        }
+        k.modes.first().map(|x| x.id)
+    }
+
+    /// The cell `v` reads when `mode` is in force — its own column of that mode
+    /// for one of the document's own, the mapped column for a kit's.
+    fn cell_in<'a>(&self, v: &'a Variable, mode: Option<ModeId>) -> Option<&'a Cell> {
+        let col = match v.kit() {
+            None => match mode {
+                Some(m) if self.mode(m).is_some() => m,
+                // A kit's mode governs its kit's variables alone.
+                _ => self.default_mode()?,
+            },
+            Some(kit) => self.kit_mode(kit, mode)?,
+        };
+        v.cells.get(&col)
     }
 
     /// `var`'s value in `mode`, its aliases followed.
@@ -197,10 +347,20 @@ impl Variables {
     /// committed document can treat it as unreachable. The walk is bounded by the
     /// variable count all the same: a loop is refused at the commit, and a read
     /// that met one anyway must end.
+    ///
+    /// A kit's variable reads the column `mode` maps to ([`Self::kit_mode`]),
+    /// **at every step** of the walk: an alias of the document's own to a kit's
+    /// reads that kit's column for the same mode.
     pub fn resolve(&self, var: VarId, mode: ModeId) -> Option<Value> {
+        self.resolve_opt(var, Some(mode))
+    }
+
+    /// [`Self::resolve`] with `None` for the document's default mode — what a
+    /// kit's variable reads in a document with no modes of its own.
+    pub fn resolve_opt(&self, var: VarId, mode: Option<ModeId>) -> Option<Value> {
         let mut at = var;
         for _ in 0..=self.vars.len() {
-            match self.vars.get(&at)?.cells.get(&mode)? {
+            match self.cell_in(self.vars.get(&at)?, mode)? {
                 Cell::Color(c) => return Some(Value::Color(*c)),
                 Cell::Number(n) => return Some(Value::Number(*n)),
                 Cell::Boolean(b) => return Some(Value::Boolean(*b)),
@@ -216,7 +376,9 @@ impl Variables {
     /// loop the cell would close resolves to nothing, as [`Self::resolve`]'s walk
     /// is bounded; the commit refuses it.
     pub fn with_cell(&self, var: VarId, mode: ModeId, cell: Cell) -> Option<Variables> {
-        self.mode(mode)?;
+        if !self.has_mode(mode) {
+            return None;
+        }
         let mut t = self.clone();
         t.vars.get_mut(&var)?.cells.insert(mode, cell);
         Some(t)
@@ -236,7 +398,7 @@ impl Variables {
             if at == var {
                 return true;
             }
-            match self.vars.get(&at).and_then(|v| v.cells.get(&mode)) {
+            match self.vars.get(&at).and_then(|v| self.cell_in(v, Some(mode))) {
                 Some(Cell::Alias(next)) => at = *next,
                 _ => return false,
             }
@@ -250,6 +412,11 @@ impl Variables {
             .iter()
             .map(|m| m.id.0)
             .chain(self.vars.keys().map(|v| v.0))
+            .chain(
+                self.kits
+                    .values()
+                    .flat_map(|k| k.modes.iter().map(|m| m.id.0)),
+            )
     }
 }
 
@@ -431,8 +598,8 @@ pub type SizeVars = [Option<VarId>; 2];
 /// D1059), and a frame's mode is dropped.
 ///
 /// For a node leaving the document whose table it reads, into one that has none
-/// of it: a kit's frozen copy until kits carry variables (roadmap step 4, §15
-/// D1039), and a paste into another document with no variable of the name.
+/// of it: a paste into another document with no variable of the name. (A kit's
+/// frozen copy was the other until step 4: it carries its table now, §15 D1064.)
 pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
     let id = node.id;
     for f in node.paint.fills.iter_mut() {
@@ -462,8 +629,7 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.visible_var = None;
     }
     node.mode = None;
-    // And its styles, its lists already holding their values (§15 D1062) — a
-    // kit carries none until step 4, as it carries no variable.
+    // And its styles, its lists already holding their values (§15 D1062).
     node.styles = Default::default();
     node
 }
@@ -474,6 +640,10 @@ pub struct CarriedVar {
     pub id: VarId,
     pub name: String,
     pub kind: VarKind,
+    /// A kit's variable's origin (§15 D1064), which a paste rebinds by: the
+    /// target's variable of the same origin, never one of the same name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<VarOrigin>,
 }
 
 /// What a copy carries about the variables its layers read (§15 D1039) — enough
@@ -494,6 +664,10 @@ pub struct Carried {
     /// same rule (§15 D1062, `crate::style::rebind`). A layer's own lists
     /// already hold its style's values, so no twin is needed to detach one.
     pub styles: Vec<crate::style::CarriedStyle>,
+    /// The kits' variables and styles the copy reads, whole — its layers' and
+    /// the vault mains' it carries (§15 D1064, `crate::tokens::carried`) — which
+    /// a paste into a document holding none of them vendors with the mains.
+    pub tokens: crate::tokens::Tokens,
 }
 
 impl Carried {
@@ -502,6 +676,7 @@ impl Carried {
             && self.modes.is_empty()
             && self.detached.is_empty()
             && self.styles.is_empty()
+            && self.tokens.is_empty()
     }
 }
 
@@ -529,6 +704,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
                     id: v,
                     name: var.name.clone(),
                     kind: var.kind,
+                    origin: var.origin.clone(),
                 });
             }
         }
@@ -550,10 +726,13 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
                     id: s,
                     name: style.name.clone(),
                     slot,
+                    origin: style.origin.clone(),
                 });
             }
         }
     }
+    let kits = crate::kit::carried(doc, subtrees);
+    out.tokens = crate::tokens::carried(doc, subtrees.iter().chain(&kits).flatten());
     out
 }
 
@@ -561,6 +740,10 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
 /// `t` has it at the kind the copy knew, else `t`'s variable of the same name and
 /// kind, else `None` — the caller detaches. Shared by [`land`] and a property
 /// paste (`build::paste_properties`, §15 D1047), so the two cannot drift.
+///
+/// **A kit's variable rebinds by its origin, not its name** (§15 D1064): to the
+/// target's copy of the same kit's same variable, else nothing — a kit's
+/// *brand/500* is not the document's *brand/500*, the namespaces being two.
 pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId) -> Option<VarId> {
     let known = carried.iter().find(|c| c.id == v);
     if let Some(var) = t.get(v)
@@ -569,9 +752,11 @@ pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId) -> Option<VarId> 
         return Some(v);
     }
     let c = known?;
-    t.by_name(&c.name)
-        .filter(|var| var.kind == c.kind)
-        .map(|var| var.id)
+    let found = match &c.origin {
+        Some(o) => t.by_origin(o.key()),
+        None => t.by_name(&c.name),
+    };
+    found.filter(|var| var.kind == c.kind).map(|var| var.id)
 }
 
 /// `nodes` — copied layers carrying `carried` — rebound for a paste into `doc`
@@ -584,17 +769,48 @@ pub fn rebind(t: &Variables, carried: &[CarriedVar], v: VarId) -> Option<VarId> 
 /// keeps a binding beside a corner whose variable has none.
 pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -> Vec<crate::Node> {
     let t = doc.variables();
-    let rebind = |v: VarId| rebind(t, &carried.vars, v);
+    // A kit's variable the target lacks and the copy carries is **kept**, to be
+    // vendored with the mains and pointed at its copy (`crate::kit::insert_carrying`,
+    // §15 D1064) — an instance's own fields read its main's, and detaching them
+    // would make every one an override.
+    //
+    // 🚨 **Into the kit itself, the kit's own variable or nothing** (D1023's
+    // own-kit arm, `crate::tokens::plan`'s): a carried variable of `doc`'s own
+    // kit lands on the original, and one the kit has since deleted detaches
+    // here, by D1038's rule — kept for the plan, it had nothing to be pointed
+    // at and the commit refused the paste (`arch-scribe`'s reading).
+    let own = doc.meta().id.as_deref();
+    let own_var = |v: VarId| {
+        let o = carried.vars.iter().find(|c| c.id == v)?.origin.as_ref()?;
+        (Some(o.kit.as_str()) == own).then_some(o.var)
+    };
+    let rebind = |v: VarId| match own_var(v) {
+        Some(orig) => t.get(orig).filter(|x| x.origin.is_none()).map(|x| x.id),
+        None => rebind(t, &carried.vars, v).or_else(|| carried.tokens.holds_var(v).then_some(v)),
+    };
+    let own_style = |s: crate::style::StyleId| {
+        let o = carried.styles.iter().find(|c| c.id == s)?.origin.as_ref()?;
+        (Some(o.kit.as_str()) == own).then_some(o.style)
+    };
     nodes
         .into_iter()
         .map(|mut n| {
             // A card's style by the same rule, by name and slot, else detached —
             // the layer's list already holds the values it was copied with
             // (§15 D1062). Rebound to another document's namesake, the commit
-            // writes that style's values onto it (`style::settle`).
+            // writes that style's values onto it (`style::settle`). A kit's, by
+            // its origin, or kept to be vendored, as a kit's variable is.
             let refs = n.styles;
             for (slot, s) in refs.iter() {
-                let to = crate::style::rebind(doc.styles(), &carried.styles, slot, s);
+                let to = match own_style(s) {
+                    Some(orig) => doc
+                        .styles()
+                        .get(orig)
+                        .filter(|x| x.origin.is_none() && x.slot() == slot)
+                        .map(|x| x.id),
+                    None => crate::style::rebind(doc.styles(), &carried.styles, slot, s)
+                        .or_else(|| carried.tokens.holds_style(s).then_some(s)),
+                };
                 n.styles.set(slot, to);
             }
             if !n.reads_variables() && n.mode.is_none() {
@@ -698,8 +914,22 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     n.visible = twin.map_or(n.visible, |t| t.visible);
                 }
             }
-            if let Some(m) = n.mode
-                && t.mode(m).is_none()
+            // A kit's mode the copy carries is kept, as its variables are — but
+            // one of `doc`'s own kit is that mode itself, or *Inherit*.
+            let carried_kit = n.mode.and_then(|m| {
+                carried
+                    .tokens
+                    .kits
+                    .iter()
+                    .find_map(|(k, km)| km.mode(m).map(|x| (k.as_str(), x.from)))
+            });
+            if let (Some(_), Some((k, from))) = (n.mode, carried_kit)
+                && Some(k) == own
+            {
+                n.mode = t.mode(from).map(|x| x.id);
+            } else if let Some(m) = n.mode
+                && !t.has_mode(m)
+                && carried_kit.is_none()
             {
                 n.mode = carried
                     .modes
@@ -887,14 +1117,14 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
     // draw in the default mode (§15 D1062) — a style holds one value for layers
     // in every mode. Its users are rewritten from it by the commit, the style
     // winning over the per-layer detaches above, so they stay styled.
-    if let Some(mode) = t.default_mode() {
-        for s in doc.styles().iter() {
-            if s.value.vars().iter().any(|v| vars.contains(v)) {
-                ops.push(O::SetStyleValue {
-                    id: s.id,
-                    value: crate::style::detach_vars(&s.value, t, mode, vars),
-                });
-            }
+    // In a document with no modes of its own too: a kit's variable resolves in
+    // its kit's default there (§15 D1064), and the style must not dangle.
+    for s in doc.styles().iter() {
+        if s.value.vars().iter().any(|v| vars.contains(v)) {
+            ops.push(O::SetStyleValue {
+                id: s.id,
+                value: crate::style::detach_vars(&s.value, t, t.default_mode(), vars),
+            });
         }
     }
     ops.extend(vars.iter().map(|id| O::RemoveVariable { id: *id }));
@@ -916,6 +1146,18 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
         .into_iter()
         .map(|id| crate::Operation::SetMode { id, mode: None })
         .collect();
+    // And every kit mapping's entry for it (§15 D1064), which would name a mode
+    // the document no longer has.
+    for (kit, km) in doc.variables().kits() {
+        if km.map.contains_key(&mode) {
+            let mut next = km.clone();
+            next.map.remove(&mode);
+            ops.push(crate::Operation::SetKitModes {
+                kit: kit.clone(),
+                modes: Some(next),
+            });
+        }
+    }
     ops.push(crate::Operation::RemoveMode { id: mode });
     ops
 }
@@ -986,15 +1228,17 @@ pub fn rename_group_ops(
             None
         }
     };
+    // The document's own groups only: a kit's variables are read-only here
+    // (§15 D1064), and their names a namespace of their own.
     let mut ops = Vec::new();
     let moving: Vec<VarId> = t
-        .iter()
+        .local()
         .filter(|v| moved(&v.name).is_some())
         .map(|v| v.id)
         .collect();
-    for v in t.iter() {
+    for v in t.local() {
         let Some(next) = moved(&v.name) else { continue };
-        if t.iter().any(|o| o.name == next && !moving.contains(&o.id)) {
+        if t.local().any(|o| o.name == next && !moving.contains(&o.id)) {
             return Err(next);
         }
         ops.push(crate::Operation::SetVariableName {
@@ -1032,34 +1276,65 @@ pub enum VarRule {
     BadMode(NodeId),
     #[error("node {0:?} binds corners it does not have")]
     BadCorners(NodeId),
+    #[error("{0:?} names a kit whose modes the document does not hold, or a malformed kit id")]
+    NoKit(VarId),
+    #[error("kit {0:?}'s modes or mapping name a mode that is not there")]
+    BadKitModes(String),
+    #[error("node {0:?} is in the vault and bound to a variable of the document's own")]
+    InVault(NodeId),
 }
 
 /// The table's own rules, without the bindings.
+///
+/// A kit's variable (§15 D1064) has a cell in every mode **of its kit** and no
+/// other, aliases only a variable of the same kit, and is named uniquely among
+/// its kit's; the document's own are held to the document's modes and named
+/// uniquely among themselves. A kit's modes and the document's never share an
+/// id, and a mapping maps a mode of the document onto a mode of its kit.
 pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
-    if t.modes.is_empty() {
-        return if t.vars.is_empty() {
-            Ok(())
-        } else {
-            Err(VarRule::NoModes)
-        };
+    if t.modes.is_empty() && t.local().next().is_some() {
+        return Err(VarRule::NoModes);
     }
-    for (i, m) in t.modes.iter().enumerate() {
-        if t.modes[..i].iter().any(|n| n.id == m.id) {
-            return Err(VarRule::DuplicateMode(m.id));
+    let mut seen = std::collections::BTreeSet::new();
+    let every = t
+        .modes
+        .iter()
+        .map(|m| m.id)
+        .chain(t.kits.values().flat_map(|k| k.modes.iter().map(|m| m.id)));
+    for m in every {
+        if !seen.insert(m) {
+            return Err(VarRule::DuplicateMode(m));
+        }
+    }
+    for (kit, km) in &t.kits {
+        if !crate::meta::DocumentMeta::is_wellformed_id(kit)
+            || km
+                .map
+                .iter()
+                .any(|(from, to)| t.mode(*from).is_none() || km.mode(*to).is_none())
+        {
+            return Err(VarRule::BadKitModes(kit.clone()));
         }
     }
     let mut names = std::collections::BTreeSet::new();
     for v in t.vars.values() {
-        if !names.insert(v.name.as_str()) {
+        if !names.insert((v.kit(), v.name.as_str())) {
             return Err(VarRule::DuplicateName(v.name.clone()));
         }
-        for m in &t.modes {
-            if !v.cells.contains_key(&m.id) {
-                return Err(VarRule::MissingCell(v.id, m.id));
+        let columns: Vec<ModeId> = match v.kit() {
+            None => t.modes.iter().map(|m| m.id).collect(),
+            Some(kit) => match t.kits.get(kit) {
+                Some(km) => km.modes.iter().map(|m| m.id).collect(),
+                None => return Err(VarRule::NoKit(v.id)),
+            },
+        };
+        for m in &columns {
+            if !v.cells.contains_key(m) {
+                return Err(VarRule::MissingCell(v.id, *m));
             }
         }
         for (mode, cell) in &v.cells {
-            if t.mode(*mode).is_none() {
+            if !columns.contains(mode) {
                 return Err(VarRule::StrayCell(v.id, *mode));
             }
             if !cell.is_finite() {
@@ -1067,7 +1342,13 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
             }
             match cell {
                 Cell::Alias(target) => {
-                    if t.kind_of(*target) != Some(v.kind) {
+                    // A kit's variable aliases only its own kit's: its kit
+                    // published it so, and a column of a kit is no column of
+                    // anything else.
+                    let same_kit = v
+                        .kit()
+                        .is_none_or(|k| t.get(*target).and_then(Variable::kit) == Some(k));
+                    if t.kind_of(*target) != Some(v.kind) || !same_kit {
                         return Err(VarRule::BadAlias(v.id));
                     }
                     if t.would_loop(v.id, *mode, *target) {
@@ -1090,12 +1371,35 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
 ///
 /// Over the whole document for `component::check`'s reason: deleting a variable
 /// breaks a binding on a node the delete never dirtied.
+///
+/// **A vault node binds only a kit's variables and sets only a kit's mode**
+/// (§15 D1064), `crate::kit::check`'s `LinksOut` made for the table: a frozen
+/// copy reading a variable of the document's own would change with every edit of
+/// it, and be put back by the next update.
 pub(crate) fn check<'a>(
     t: &Variables,
     nodes: impl IntoIterator<Item = &'a crate::Node>,
+    in_vault: impl Fn(NodeId) -> bool,
 ) -> Result<(), VarRule> {
     check_table(t)?;
     for n in nodes {
+        if in_vault(n.id) {
+            let own = |v: VarId| t.get(v).is_some_and(|v| v.origin.is_none());
+            let reads_own = n
+                .paint
+                .fills
+                .iter()
+                .filter_map(|f| f.brush.var())
+                .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
+                .chain(n.corner_vars.iter().flatten().copied())
+                .chain(n.spacing_vars.iter().flatten().copied())
+                .chain(n.size_vars.iter().flatten().copied())
+                .chain(n.visible_var)
+                .any(own);
+            if reads_own || n.mode.is_some_and(|m| t.mode(m).is_some()) {
+                return Err(VarRule::InVault(n.id));
+            }
+        }
         let colour_ok = |b: &BrushSource| match b.var() {
             Some(v) => t.kind_of(v) == Some(VarKind::Color),
             None => true,
@@ -1141,7 +1445,7 @@ pub(crate) fn check<'a>(
             return Err(VarRule::BadBinding(n.id));
         }
         if let Some(m) = n.mode
-            && (t.mode(m).is_none() || !matches!(n.kind, crate::NodeKind::Artboard { .. }))
+            && (!t.has_mode(m) || !matches!(n.kind, crate::NodeKind::Artboard { .. }))
         {
             return Err(VarRule::BadMode(n.id));
         }
@@ -1172,6 +1476,7 @@ mod tests {
                 },
             ],
             vars: BTreeMap::new(),
+            kits: Default::default(),
         };
         t.vars.insert(
             brand,
@@ -1184,6 +1489,7 @@ mod tests {
                     (dark, Cell::Color(Color::BLACK)),
                 ]
                 .into(),
+                origin: None,
             },
         );
         t.vars.insert(
@@ -1197,6 +1503,7 @@ mod tests {
                     (dark, Cell::Color(Color::WHITE)),
                 ]
                 .into(),
+                origin: None,
             },
         );
         (t, light, dark, brand, accent)

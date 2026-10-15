@@ -788,10 +788,24 @@ impl OndinApp {
             .of_slot(pk.slot)
             .filter(|s| query.is_empty() || s.name.to_lowercase().contains(&query))
             .collect();
+        // *Kit groups last* (F5, §15 D1065): the document's own, then each kit's
+        // under its name, then its id, so two kits of one name never interleave.
+        let kit_of = |s: &Style| {
+            s.kit()
+                .map(|k| (super::binding::kit_name(doc, k), k.to_string()))
+        };
         rows.sort_by(|a, b| {
             let g = |s: &Style| s.name.rsplit_once('/').map(|(g, _)| g.to_string());
-            g(a).cmp(&g(b)).then(a.name.cmp(&b.name))
+            kit_of(a)
+                .cmp(&kit_of(b))
+                .then(g(a).cmp(&g(b)))
+                .then(a.name.cmp(&b.name))
         });
+        let kit_heads = rows
+            .iter()
+            .filter_map(|s| s.kit())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
         let counts: Vec<usize> = rows.iter().map(|s| style::users(doc, s.id).len()).collect();
         pk.highlight = pk.highlight.min(rows.len().saturating_sub(1));
         let (up, down, enter, escape) = ctx.input(|i| {
@@ -822,11 +836,11 @@ impl OndinApp {
             .enumerate()
             .filter(|(i, s)| {
                 let g = |s: &Style| s.name.rsplit_once('/').map(|(g, _)| g.to_string());
-                *i == 0 || g(s) != g(rows[i - 1])
+                *i == 0 || g(s) != g(rows[i - 1]) || s.kit() != rows[i - 1].kit()
             })
             .filter(|(_, s)| s.name.contains('/'))
             .count();
-        let h = 40.0 + (rows.len().max(1) as f32) * ROW_H + groups as f32 * 22.0;
+        let h = 40.0 + (rows.len().max(1) as f32) * ROW_H + (groups + kit_heads) as f32 * 22.0;
         let pos = ui::menu_place(
             ctx,
             egui::pos2(menu_left(pk.under), pk.under.bottom() + 6.0),
@@ -867,14 +881,25 @@ impl OndinApp {
                     egui::ScrollArea::vertical()
                         .max_height(300.0)
                         .show(ui, |ui| {
-                            let mut last_group: Option<Option<&str>> = None;
+                            let mut last_group: Option<(Option<&str>, Option<&str>)> = None;
+                            let mut last_kit: Option<&str> = None;
                             for (i, s) in rows.iter().enumerate() {
                                 let (group, leaf) = match s.name.rsplit_once('/') {
                                     Some((g, l)) => (Some(g), l),
                                     None => (None, s.name.as_str()),
                                 };
-                                if last_group != Some(group) {
-                                    last_group = Some(group);
+                                if let Some(k) = s.kit()
+                                    && last_kit != Some(k)
+                                {
+                                    last_kit = Some(k);
+                                    super::binding::kit_header(
+                                        ui,
+                                        &super::binding::kit_name(doc, k),
+                                        ui.available_width(),
+                                    );
+                                }
+                                if last_group != Some((s.kit(), group)) {
+                                    last_group = Some((s.kit(), group));
                                     if let Some(g) = group {
                                         let (r, _) = ui.allocate_exact_size(
                                             egui::vec2(ui.available_width(), 22.0),
@@ -978,7 +1003,15 @@ impl OndinApp {
     /// their card on the style, live.
     pub(crate) fn edit_style(&mut self, s: StyleId) {
         let users = style::users(&self.session.doc, s);
-        if users.is_empty() {
+        // A kit's style is edited in its kit (§15 D1065): read-only here, as its
+        // vendored mains are.
+        let kits = self
+            .session
+            .doc
+            .styles()
+            .get(s)
+            .is_some_and(|st| st.origin.is_some());
+        if users.is_empty() || kits {
             return;
         }
         let slot = self.session.doc.styles().get(s).map(Style::slot);

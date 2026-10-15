@@ -231,6 +231,7 @@ fn a_name_is_unique_within_its_slot() {
         id: f.ids.mint_style(),
         name: "surface/raised".into(),
         value: StyleValue::Fills(Vec::new()),
+        origin: None,
     };
     assert!(matches!(
         commit(&mut f, vec![Operation::AddStyle { style: twin }]),
@@ -240,6 +241,7 @@ fn a_name_is_unique_within_its_slot() {
         id: f.ids.mint_style(),
         name: "surface/raised".into(),
         value: StyleValue::Strokes(Vec::new()),
+        origin: None,
     };
     commit(&mut f, vec![Operation::AddStyle { style: stroke }])
         .expect("a stroke style may share a fill style's name");
@@ -320,6 +322,7 @@ fn an_instances_style_is_an_override() {
                     id: t,
                     name: "surface/sunken".into(),
                     value: StyleValue::Fills(vec![blue]),
+                    origin: None,
                 },
             },
             Operation::SetFillStyle {
@@ -415,6 +418,7 @@ fn a_paste_keeps_rebinds_or_detaches_a_style() {
                 id: theirs,
                 name: "surface/raised".into(),
                 value: StyleValue::Fills(vec![green]),
+                origin: None,
             },
         }]))
         .unwrap();
@@ -478,6 +482,7 @@ fn deleting_a_variable_inside_a_style_detaches_the_style() {
                     name: "brand".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(GREEN))].into(),
+                    origin: None,
                 },
             },
             Operation::SetStyleValue { id: s, value },

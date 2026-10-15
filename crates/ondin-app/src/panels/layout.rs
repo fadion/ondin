@@ -5901,6 +5901,7 @@ mod tests {
                     name: "space/4".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(8.0))].into(),
+                    origin: None,
                 },
             },
         ])));

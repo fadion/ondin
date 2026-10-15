@@ -57,7 +57,7 @@ impl OndinApp {
         let n = c.count();
         let tip = if version == 0 {
             "Never published: the count is every component".to_string()
-        } else if n == 0 && (c.renamed || c.reordered) {
+        } else if n == 0 && c.any() {
             format!("{} changed since v{version}", not_a_component(&c))
         } else if n == 0 {
             format!("Nothing to publish · no changes since v{version}")
@@ -208,11 +208,19 @@ impl OndinApp {
                         "{n} component{} changed since v{}{when}{}.",
                         plural(n),
                         mark.version,
-                        match (c.renamed, c.reordered) {
-                            (false, false) => "",
-                            (true, false) => ", and the kit's name",
-                            (false, true) => ", and their order",
-                            (true, true) => ", the kit's name and their order",
+                        // And what else travels (§15 D1064's variables and
+                        // styles beside the name and the order).
+                        if c.renamed || c.reordered || c.tokens {
+                            format!(
+                                ", and {}",
+                                joined(&[
+                                    (c.renamed, "the kit's name"),
+                                    (c.reordered, "their order"),
+                                    (c.tokens, "the variables and styles they read"),
+                                ])
+                            )
+                        } else {
+                            String::new()
                         }
                     ),
                 }
@@ -303,13 +311,13 @@ impl OndinApp {
         // What a publish of no component carried, for its toast: the zero
         // arm was written for the name alone, and said *"its new name"* over
         // a publish of the order (the record's reading of `0d540f8`).
-        let other = changes
-            .as_ref()
-            .map_or("its new name", |c| match (c.renamed, c.reordered) {
-                (true, true) => "its new name and order",
-                (false, true) => "its components' new order",
-                _ => "its new name",
-            });
+        let other = changes.as_ref().map_or("its new name".to_string(), |c| {
+            joined(&[
+                (c.renamed, "its new name"),
+                (c.reordered, "its components' new order"),
+                (c.tokens, "its variables and styles"),
+            ])
+        });
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,
             Some(note),
@@ -325,19 +333,42 @@ impl OndinApp {
         let name = self.session.document_title();
         self.session.info(match count {
             0 => format!("Published {name} v{version} · {other}"),
+            n if changes.as_ref().is_some_and(|c| c.tokens) => format!(
+                "Published {name} v{version} · {n} component{} and its variables and styles",
+                plural(n)
+            ),
             n => format!("Published {name} v{version} · {n} component{}", plural(n)),
         });
     }
 }
 
 /// What changed that is not a component — the kit's name, the order of its
-/// components (the v0.5.0 release review's `[X2-L1-04]`), or both — as the
-/// subject of *"… changed since v4"*.
-fn not_a_component(c: &Changes) -> &'static str {
-    match (c.renamed, c.reordered) {
-        (true, true) => "The kit's name and the order of its components",
-        (false, true) => "The order of the kit's components",
-        _ => "The kit's name",
+/// components (the v0.5.0 release review's `[X2-L1-04]`), the variables and
+/// styles they read (§15 D1064), or any of them together — as the subject of
+/// *"… changed since v4"*.
+fn not_a_component(c: &Changes) -> String {
+    let mut s = joined(&[
+        (c.renamed, "the kit's name"),
+        (c.reordered, "the order of its components"),
+        // A variable or a style its components read (§15 D1064) — worded as a
+        // rename until `arch-scribe` read the zero arm against `Changes::tokens`.
+        (c.tokens, "the variables and styles its components read"),
+    ]);
+    if let Some(first) = s.get(..1) {
+        let up = first.to_uppercase();
+        s.replace_range(..1, &up);
+    }
+    s
+}
+
+/// The parts that hold, as *a, b and c* — the kit's name when none does, the
+/// zero arm's old answer.
+fn joined(parts: &[(bool, &str)]) -> String {
+    let on: Vec<&str> = parts.iter().filter(|(b, _)| *b).map(|(_, s)| *s).collect();
+    match on.as_slice() {
+        [] => parts.first().map_or(String::new(), |(_, s)| s.to_string()),
+        [one] => one.to_string(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
     }
 }
 

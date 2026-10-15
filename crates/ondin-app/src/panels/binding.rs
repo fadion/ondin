@@ -356,12 +356,46 @@ pub(crate) fn matches<'a>(
         .iter()
         .filter(|v| v.kind == kind && (q.is_empty() || v.name.to_lowercase().contains(&q)))
         .collect();
+    // *Kit groups last* (D1038 B, §15 D1065): the document's own first, then each
+    // kit's by the kit's name — then its id, so two kits of one name never
+    // interleave — each by slash group.
+    let kit_name = |v: &Variable| v.kit().map(|k| (kit_label(table, k), k.to_string()));
     out.sort_by(|a, b| {
         let (ga, _) = ondin_core::variable::split_name(&a.name);
         let (gb, _) = ondin_core::variable::split_name(&b.name);
-        ga.cmp(gb).then(a.name.cmp(&b.name))
+        kit_name(a)
+            .cmp(&kit_name(b))
+            .then(ga.cmp(gb))
+            .then(a.name.cmp(&b.name))
     });
     out
+}
+
+/// What a kit is called where its variables are listed (§15 D1065): its name as
+/// it arrived, else *Kit* — the id alone names nothing a person recognises.
+pub(crate) fn kit_label(table: &ondin_core::Variables, kit: &str) -> String {
+    table
+        .kits()
+        .get(kit)
+        .and_then(|k| k.name.clone())
+        .unwrap_or_else(|| "Kit".to_string())
+}
+
+/// [`kit_label`] for a kit whose styles may have come without variables: the
+/// name its modes arrived with, else the one a vault main of it carries
+/// (`kit::Origin::name`), else *Kit* (§15 D1065).
+pub(crate) fn kit_name(doc: &ondin_core::Document, kit: &str) -> String {
+    if let Some(n) = doc.variables().kits().get(kit).and_then(|k| k.name.clone()) {
+        return n;
+    }
+    doc.vault()
+        .and_then(|v| doc.get(v))
+        .into_iter()
+        .flat_map(|v| v.children().iter())
+        .filter_map(|c| doc.get(*c).and_then(|n| n.origin()))
+        .find(|o| o.kit == kit)
+        .and_then(|o| o.name.clone())
+        .unwrap_or_else(|| "Kit".to_string())
 }
 
 /// B4's refusal (§15 D1044): a field's buffer, `--` and all, that names a whole
@@ -909,7 +943,11 @@ impl OndinApp {
                         .max_height(8.0 * (LIST_ROW_H + 1.0))
                         .show(ui, |ui| {
                             for (i, v) in list.iter().enumerate() {
-                                let value = mode.as_ref().and_then(|m| table.resolve(v.id, m.id));
+                                // What the binding would draw at the field's layer —
+                                // the door the chip and the face read through, so a
+                                // kit's variable under a frame set to one of its kit's
+                                // modes reads that column (§15 D1064, D1065).
+                                let value = doc.resolve_var(at, v.id);
                                 if list_row(ui, v, value, &c.query, i == c.highlight).clicked() {
                                     chosen = Some(v.id);
                                 }
@@ -997,6 +1035,7 @@ impl OndinApp {
                 name: name.clone(),
                 kind: key.kind(),
                 cells: modes.into_iter().map(|m| (m, value)).collect(),
+                origin: None,
             },
         });
         // The bind names the variable by id and reads only the field, so it is
@@ -1453,11 +1492,18 @@ impl OndinApp {
                     };
                     ui.label(egui::RichText::new(none).size(11.5).color(theme::text::DIM));
                 }
-                let mut group: Option<&str> = None;
+                // The document's own first, then each kit's under its name and
+                // the kit mark, its rows dimmed (E1, §15 D1065).
+                let mut group: Option<(Option<&str>, &str)> = None;
+                let mut kit: Option<&str> = None;
                 for v in &list {
                     let (g, _) = ondin_core::variable::split_name(&v.name);
-                    if group != Some(g) {
-                        group = Some(g);
+                    if v.kit().is_some() && v.kit() != kit {
+                        kit = v.kit();
+                        kit_header(ui, &kit_name(doc, v.kit().unwrap_or("")), w);
+                    }
+                    if group != Some((v.kit(), g)) {
+                        group = Some((v.kit(), g));
                         if !g.is_empty() {
                             face_header(ui, g, w);
                         }
@@ -1536,8 +1582,30 @@ fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
     );
 }
 
+/// A kit's header in a list of variables or styles (D1038 E1, F5, G8; §15
+/// D1065): the kit mark and the kit's name, above its groups.
+pub(crate) fn kit_header(ui: &mut egui::Ui, name: &str, w: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FACE_HEAD_H + 4.0), egui::Sense::hover());
+    let p = ui.painter();
+    let y = rect.center().y + 2.0;
+    let g = p.text(
+        egui::pos2(rect.left() + 3.0, y),
+        egui::Align2::LEFT_CENTER,
+        icon::PACKAGE,
+        theme::icon_font(11.0),
+        theme::text::DIM,
+    );
+    p.text(
+        egui::pos2(g.right() + 5.0, y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(10.5),
+        theme::text::DIM,
+    );
+}
+
 /// One row of the picker's *Variables* face: swatch, full name, hex, and the
-/// check on the current variable (E1).
+/// check on the current variable (E1) — a kit's dimmed.
 fn face_row(
     ui: &mut egui::Ui,
     v: &Variable,
@@ -1587,9 +1655,10 @@ fn face_row(
         egui::Align2::LEFT_CENTER,
         shown,
         font,
-        match refusal {
-            Some(_) => color::text_a(102),
-            None => color::TEXT,
+        match (refusal, v.origin.is_some()) {
+            (Some(_), _) => color::text_a(102),
+            (None, true) => color::text_a(170),
+            (None, false) => color::TEXT,
         },
     );
     p.galley(
@@ -1644,6 +1713,17 @@ fn list_row(
         ui::paint_checkerboard(p, sw, 3.0);
         p.rect_filled(sw, 0, ui::color_to_egui(c));
         x = sw.right() + 8.0;
+    }
+    // A kit's variable wears the kit mark (D1038 E1's package glyph, §15 D1065).
+    if v.origin.is_some() {
+        let g = p.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_CENTER,
+            icon::PACKAGE,
+            theme::icon_font(10.5),
+            theme::text::FAINT,
+        );
+        x = g.right() + 5.0;
     }
     let font = egui::FontId::proportional(11.5);
     let mut job = egui::text::LayoutJob::default();
@@ -1739,6 +1819,7 @@ mod tests {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::WHITE))].into(),
+                    origin: None,
                 },
             },
             Operation::AddVariable {
@@ -1747,6 +1828,7 @@ mod tests {
                     name: "radius/md".into(),
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(6.0))].into(),
+                    origin: None,
                 },
             },
         ])));
@@ -2098,6 +2180,7 @@ mod tests {
                 name: "brand/500-alt".into(),
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(Color::BLACK))].into(),
+                origin: None,
             },
         }])));
         let table = app.session.doc.variables();
@@ -2259,6 +2342,7 @@ mod tests {
                     name: "accent/400".into(),
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::BLACK))].into(),
+                    origin: None,
                 },
             },
         ])));
@@ -2641,6 +2725,7 @@ mod tests {
                 name: "state/off".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                origin: None,
             },
         }])));
         let key = FieldKey::Visible { id: rect };

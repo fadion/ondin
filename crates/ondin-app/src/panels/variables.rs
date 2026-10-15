@@ -114,6 +114,9 @@ enum Menu {
     ConfirmMode(ModeId),
     /// A style's row: *Rename*, *Edit*, *Select*, *Delete* (G8).
     Style(StyleId),
+    /// A kit's mapping for one of the document's modes (D1038 (b), §15 D1065):
+    /// the kit's modes, then *Match by name*.
+    KitMap(String, ModeId),
 }
 
 /// The browser's own state while it is open.
@@ -207,16 +210,33 @@ enum Act {
     StyleName(StyleId, String),
     EditStyle(StyleId),
     DeleteStyle(StyleId),
+    /// A kit's mapping entry for a document mode set to a kit mode, or cleared
+    /// to match by name (§15 D1065).
+    KitMap(String, ModeId, Option<ModeId>),
 }
 
-/// One row of the table as drawn: a group's header or a variable.
+/// One row of the table as drawn: a group's header or a variable, or a kit's
+/// header above its own (§15 D1065).
 enum Line<'a> {
     Group {
         path: &'a str,
         shown: usize,
         total: usize,
+        /// The kit the group is a group of, `None` for the document's own.
+        kit: Option<&'a str>,
     },
     Var(&'a Variable),
+    Kit(&'a str),
+}
+
+/// The key a group's collapse is kept under: its path for the document's own, a
+/// kit's prefixed by `\u{2}` and the kit id, so a kit's *brand* folds apart from
+/// the document's (§15 D1065, D1054's per-document set).
+fn group_key(kit: Option<&str>, path: &str) -> String {
+    match kit {
+        None => path.to_string(),
+        Some(k) => format!("\u{2}{k}\u{2}{path}"),
+    }
 }
 
 impl OndinApp {
@@ -304,7 +324,7 @@ impl OndinApp {
                 .collect()
         });
         let query = b.query.trim().to_lowercase();
-        let lines = lines_of(table.iter(), &query, picked.as_ref(), &b.collapsed);
+        let lines = all_lines(doc, &query, picked.as_ref(), &b.collapsed);
         let selection_line = b.in_selection.then(|| {
             let (n, one, many) = match b.tab {
                 Tab::Variables => (
@@ -414,18 +434,38 @@ impl OndinApp {
                                         ui.add_space(4.0);
                                         for line in &lines {
                                             match line {
-                                                Line::Group { path, shown, total } => group_row(
+                                                Line::Group {
+                                                    path,
+                                                    shown,
+                                                    total,
+                                                    kit,
+                                                } => group_row(
                                                     ui,
                                                     path,
+                                                    *kit,
                                                     *shown,
                                                     *total,
                                                     picked.is_some(),
                                                     &mut b,
                                                     &mut acts,
                                                 ),
+                                                Line::Var(v) if v.origin.is_some() => {
+                                                    kit_var_row(
+                                                        ui,
+                                                        doc,
+                                                        v,
+                                                        &modes,
+                                                        &users[&v.id],
+                                                        &b,
+                                                        &mut acts,
+                                                    )
+                                                }
                                                 Line::Var(v) => var_row(
                                                     ui, doc, v, &modes, &users[&v.id], &mut b,
                                                     &mut acts, pending,
+                                                ),
+                                                Line::Kit(k) => kit_row(
+                                                    ui, doc, k, &modes, &b, &mut acts,
                                                 ),
                                             }
                                         }
@@ -512,6 +552,7 @@ impl OndinApp {
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
             Menu::Style(_) => 4.0,
+            Menu::KitMap(kit, _) => table.kits().get(kit).map_or(0, |k| k.modes.len()) as f32 + 1.5,
         };
         let size = egui::vec2(menu_w, rows * MENU_ROW_H + 24.0);
         let pos = ui::menu_place(ctx, at, size);
@@ -667,6 +708,22 @@ impl OndinApp {
                                 close = true;
                                 return;
                             };
+                            // A kit's style is inert here (§15 D1065): its users
+                            // can be selected, and nothing else.
+                            if st.origin.is_some() {
+                                let who = sty::users(doc, st.id);
+                                let select = ui::menu_row(
+                                    ui,
+                                    ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
+                                        .enabled(!who.is_empty()),
+                                    MENU_ROW_H,
+                                );
+                                if select.clicked() {
+                                    acts.push(Act::Select(who));
+                                    close = true;
+                                }
+                                return;
+                            }
                             if row(ui, icon::PENCIL_SIMPLE, "Rename") {
                                 acts.push(Act::StartEdit(Edit::Style {
                                     style: st.id,
@@ -710,6 +767,34 @@ impl OndinApp {
                             );
                             if del.clicked() {
                                 acts.push(Act::DeleteStyle(st.id));
+                                close = true;
+                            }
+                        }
+                        Menu::KitMap(kit, mode) => {
+                            let Some(km) = table.kits().get(kit) else {
+                                close = true;
+                                return;
+                            };
+                            let read = table.kit_mode(kit, Some(*mode));
+                            for m in &km.modes {
+                                let r = ui::MenuRow::new(
+                                    if read == Some(m.id) { icon::CHECK } else { "" },
+                                    &m.name,
+                                );
+                                if ui::menu_row(ui, r, MENU_ROW_H).clicked() {
+                                    acts.push(Act::KitMap(kit.clone(), *mode, Some(m.id)));
+                                    close = true;
+                                }
+                            }
+                            ui::menu_sep(ui);
+                            let by_name = ui::menu_row(
+                                ui,
+                                ui::MenuRow::new("", "Match by name")
+                                    .enabled(km.map.contains_key(mode)),
+                                MENU_ROW_H,
+                            );
+                            if by_name.clicked() && km.map.contains_key(mode) {
+                                acts.push(Act::KitMap(kit.clone(), *mode, None));
                                 close = true;
                             }
                         }
@@ -825,7 +910,7 @@ impl OndinApp {
                 for v in table.iter() {
                     let mut at = 0;
                     while let Some(i) = v.name[at..].find('/') {
-                        all.insert(v.name[..at + i].to_string());
+                        all.insert(group_key(v.kit(), &v.name[..at + i]));
                         at += i + 1;
                     }
                 }
@@ -835,6 +920,19 @@ impl OndinApp {
                         false => b.collapsed.extend(all),
                     }
                 }
+            }
+            Act::KitMap(kit, mode, to) => {
+                let Some(mut km) = table.kits().get(&kit).cloned() else {
+                    return;
+                };
+                match to {
+                    Some(m) => km.map.insert(mode, m),
+                    None => km.map.remove(&mode),
+                };
+                self.commit_edit(Transaction(vec![Operation::SetKitModes {
+                    kit,
+                    modes: Some(km),
+                }]));
             }
             Act::Toggle(path) => {
                 if let Some(b) = self.var_browser.as_mut()
@@ -897,6 +995,7 @@ impl OndinApp {
                         name: name.clone(),
                         kind,
                         cells: modes.into_iter().map(|m| (m, cell)).collect(),
+                        origin: None,
                     },
                 });
                 if self.commit_edit(Transaction(ops))
@@ -1015,8 +1114,12 @@ impl OndinApp {
                 }
             }
             Act::Duplicate(id) => {
-                let Some(v) = table.get(id) else { return };
-                let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
+                // The document's own only: a kit's rows are inert (D1038 G), and
+                // a copy of one would carry its kit's columns (§15 D1064).
+                let Some(v) = table.get(id).filter(|v| v.origin.is_none()) else {
+                    return;
+                };
+                let taken: Vec<&str> = table.local().map(|v| v.name.as_str()).collect();
                 let stem = format!("{} copy", v.name);
                 let name = if taken.contains(&stem.as_str()) {
                     free_name(&taken, &stem, 2)
@@ -1270,6 +1373,7 @@ fn cell_text(table: &ondin_core::Variables, cell: &Cell) -> String {
 /// its variables, by name, filtered by the search and by *In selection*.
 fn lines_of<'a>(
     vars: impl Iterator<Item = &'a Variable>,
+    kit: Option<&'a str>,
     query: &str,
     picked: Option<&HashSet<VarId>>,
     collapsed: &HashSet<String>,
@@ -1296,11 +1400,39 @@ fn lines_of<'a>(
                 path,
                 shown: shown.len(),
                 total,
+                kit,
             });
         }
         // A search opens the groups it matches (D1038 G).
-        if path.is_empty() || !query.is_empty() || !collapsed.contains(path) {
+        if path.is_empty() || !query.is_empty() || !collapsed.contains(&group_key(kit, path)) {
             out.extend(shown.into_iter().map(Line::Var));
+        }
+    }
+    out
+}
+
+/// The whole table's lines: the document's own, then each kit's under its
+/// header, by the kit's name — *kit groups last* (D1038 B, §15 D1065). A kit
+/// with nothing shown has no header.
+fn all_lines<'a>(
+    doc: &'a Document,
+    query: &str,
+    picked: Option<&HashSet<VarId>>,
+    collapsed: &HashSet<String>,
+) -> Vec<Line<'a>> {
+    let table = doc.variables();
+    let mut out = lines_of(table.local(), None, query, picked, collapsed);
+    let mut kits: Vec<(String, &'a str)> = table
+        .kits()
+        .keys()
+        .map(|k| (super::binding::kit_name(doc, k), k.as_str()))
+        .collect();
+    kits.sort();
+    for (_, k) in kits {
+        let lines = lines_of(table.of_kit(k), Some(k), query, picked, collapsed);
+        if !lines.is_empty() {
+            out.push(Line::Kit(k));
+            out.extend(lines);
         }
     }
     out
@@ -1436,10 +1568,29 @@ fn styles_tab(
     b: &mut Browser,
     acts: &mut Vec<Act>,
 ) {
-    let groups: Vec<(StyleSlot, Vec<&Style>, usize)> = StyleSlot::ALL
+    // The document's own by card, then each kit's by card under the kit's
+    // header — *kit groups last* (G8, F5; §15 D1065).
+    let mut kits: Vec<(String, &str)> = doc
+        .styles()
+        .iter()
+        .filter_map(|s| s.kit())
+        .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
-        .map(|slot| {
-            let all: Vec<&Style> = doc.styles().of_slot(slot).collect();
+        .map(|k| (super::binding::kit_name(doc, k), k))
+        .collect();
+    kits.sort();
+    let owners: Vec<Option<&str>> = std::iter::once(None)
+        .chain(kits.iter().map(|(_, k)| Some(*k)))
+        .collect();
+    let groups: Vec<(Option<&str>, StyleSlot, Vec<&Style>, usize)> = owners
+        .into_iter()
+        .flat_map(|kit| StyleSlot::ALL.into_iter().map(move |slot| (kit, slot)))
+        .map(|(kit, slot)| {
+            let all: Vec<&Style> = doc
+                .styles()
+                .of_slot(slot)
+                .filter(|s| s.kit() == kit)
+                .collect();
             let total = all.len();
             let mut shown: Vec<&Style> = all
                 .into_iter()
@@ -1447,9 +1598,9 @@ fn styles_tab(
                 .filter(|s| picked.is_none_or(|p| p.contains(&s.id)))
                 .collect();
             shown.sort_by(|a, b| a.name.cmp(&b.name));
-            (slot, shown, total)
+            (kit, slot, shown, total)
         })
-        .filter(|(_, shown, _)| !shown.is_empty())
+        .filter(|(_, _, shown, _)| !shown.is_empty())
         .collect();
     if groups.is_empty() {
         empty(
@@ -1468,10 +1619,22 @@ fn styles_tab(
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
-            for (slot, shown, total) in groups {
+            let mut header: Option<&str> = None;
+            for (kit, slot, shown, total) in groups {
+                if let Some(k) = kit
+                    && header != Some(k)
+                {
+                    header = Some(k);
+                    ui.add_space(6.0);
+                    super::binding::kit_header(ui, &super::binding::kit_name(doc, k), b.inner_w);
+                }
                 // The collapse is the document's set, keyed apart from every
-                // variable group's path by a leading `\u{1}`.
-                let key = format!("\u{1}{}", slot.title());
+                // variable group's path by a leading `\u{1}` — and a kit's by its
+                // id after it.
+                let key = match kit {
+                    None => format!("\u{1}{}", slot.title()),
+                    Some(k) => format!("\u{1}{k}\u{1}{}", slot.title()),
+                };
                 let open = !b.collapsed.contains(&key) || !query.is_empty();
                 ui.add_space(2.0);
                 let (rect, resp) =
@@ -1695,10 +1858,12 @@ fn header(ui: &mut egui::Ui, modes: &[Mode], b: &mut Browser, acts: &mut Vec<Act
 }
 
 /// A group's header: its caret, its path, its count (*1 of 3* while filtered).
+/// A kit's folds and nothing else — no rename, no menu (§15 D1065).
 #[allow(clippy::too_many_arguments)]
 fn group_row(
     ui: &mut egui::Ui,
     path: &str,
+    kit: Option<&str>,
     shown: usize,
     total: usize,
     filtered: bool,
@@ -1707,11 +1872,13 @@ fn group_row(
 ) {
     ui.add_space(2.0);
     let w = b.inner_w;
-    let id = ui.id().with(("var-group", path));
+    let key = group_key(kit, path);
+    let id = ui.id().with(("var-group", &key));
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, GROUP_H), egui::Sense::click());
     let refused = b.refused.clone();
     if let Some(Edit::Group { path: p, text }) = b.edit.as_mut()
         && p == path
+        && kit.is_none()
     {
         let r = egui::Rect::from_min_size(
             rect.min + egui::vec2(20.0, 2.0),
@@ -1738,7 +1905,7 @@ fn group_row(
     if resp.hovered() {
         p.rect_filled(rect, 4, color::text_a(16));
     }
-    let open = !b.collapsed.contains(path) || !b.query.trim().is_empty();
+    let open = !b.collapsed.contains(&key) || !b.query.trim().is_empty();
     p.text(
         egui::pos2(rect.left() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -1773,16 +1940,17 @@ fn group_row(
         egui::FontId::proportional(10.5),
         theme::text::FAINT,
     );
-    if ui::double_clicked(ui, &resp) {
+    if kit.is_none() && ui::double_clicked(ui, &resp) {
         acts.push(Act::StartEdit(Edit::Group {
             path: path.to_string(),
             text: path.to_string(),
         }));
     } else if resp.clicked() && ui.input(|i| i.modifiers.alt) {
-        acts.push(Act::ToggleAll(path.to_string()));
+        acts.push(Act::ToggleAll(key));
     } else if resp.clicked() {
-        acts.push(Act::Toggle(path.to_string()));
-    } else if resp.secondary_clicked()
+        acts.push(Act::Toggle(key));
+    } else if kit.is_none()
+        && resp.secondary_clicked()
         && let Some(at) = resp.interact_pointer_pos()
     {
         acts.push(Act::OpenMenu(
@@ -2034,6 +2202,190 @@ fn var_row(
             cell_resp.on_hover_text(format!("uses {}", t.name));
         }
     }
+}
+
+/// The columns a kit's rows fill: each of the document's modes, or — in a
+/// document with none of its own — one, the kit's default (§15 D1065).
+fn kit_columns(modes: &[Mode]) -> Vec<Option<ModeId>> {
+    if modes.is_empty() {
+        vec![None]
+    } else {
+        modes.iter().map(|m| Some(m.id)).collect()
+    }
+}
+
+/// A kit's header (D1038 (b), §15 D1065): the kit mark and its name, and in each
+/// mode column **the per-kit mapping** — the kit mode that document mode reads,
+/// *Day →* under *Light*. A click on one opens its menu: the kit's modes, and
+/// *Match by name*.
+fn kit_row(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    kit: &str,
+    modes: &[Mode],
+    b: &Browser,
+    acts: &mut Vec<Act>,
+) {
+    let table = doc.variables();
+    let Some(km) = table.kits().get(kit) else {
+        return;
+    };
+    ui.add_space(6.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(b.inner_w, GROUP_H), egui::Sense::hover());
+    let p = ui.painter();
+    p.hline(
+        rect.x_range(),
+        rect.top(),
+        egui::Stroke::new(1.0, color::text_a(20)),
+    );
+    let g = p.text(
+        egui::pos2(rect.left() + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        icon::PACKAGE,
+        theme::icon_font(12.0),
+        theme::text::DIM,
+    );
+    p.text(
+        egui::pos2(g.right() + 6.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        super::binding::kit_name(doc, kit),
+        egui::FontId::proportional(11.5),
+        theme::text::STRONG,
+    );
+    let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
+    for (i, col) in kit_columns(modes).into_iter().enumerate() {
+        let x = mode_x(rect.left(), i, b.scroll_x);
+        let cell =
+            egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(MODE_W, GROUP_H));
+        if !cell.intersects(clip) {
+            continue;
+        }
+        let read = table.kit_mode(kit, col);
+        let name = read
+            .and_then(|m| km.mode(m))
+            .map_or(String::new(), |m| format!("{} →", m.name));
+        let hand = col.is_some_and(|c| km.map.contains_key(&c));
+        let resp = ui.interact(
+            cell.intersect(clip),
+            ui.id().with(("kit-map", kit, i)),
+            egui::Sense::click(),
+        );
+        let p = ui.painter().with_clip_rect(clip);
+        if resp.hovered() && col.is_some() {
+            p.rect_filled(cell.shrink2(egui::vec2(2.0, 3.0)), 4, color::text_a(16));
+        }
+        p.text(
+            egui::pos2(cell.left() + 6.0, cell.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            egui::FontId::proportional(11.0),
+            if hand {
+                theme::text::STRONG
+            } else {
+                theme::text::DIM
+            },
+        );
+        if let Some(c) = col {
+            let resp = resp.on_hover_text(if hand {
+                "Set by hand — click to change"
+            } else {
+                "Matched by name, else the kit's first mode — click to change"
+            });
+            if resp.clicked() {
+                acts.push(Act::OpenMenu(
+                    Menu::KitMap(kit.to_string(), c),
+                    cell.left_bottom() + egui::vec2(0.0, 2.0),
+                ));
+            }
+        }
+    }
+}
+
+/// A kit's variable's row — **inert** (D1038 G's *"a kit's rows are inert"*,
+/// §15 D1065): its leaf name dimmed and its usage count, which selects its
+/// users, then in each mode column the value it reads there through the mapping.
+fn kit_var_row(
+    ui: &mut egui::Ui,
+    doc: &Document,
+    v: &Variable,
+    modes: &[Mode],
+    users: &[NodeId],
+    b: &Browser,
+    acts: &mut Vec<Act>,
+) {
+    let table = doc.variables();
+    let id = ui.id().with(("kit-var-row", v.id));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::hover());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 4, color::text_a(10));
+    }
+    let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(NAME_W, ROW_H));
+    let (_, leaf) = var::split_name(&v.name);
+    let count = users.len();
+    let p = ui.painter();
+    let count_galley = p.layout_no_wrap(
+        count.to_string(),
+        egui::FontId::proportional(10.5),
+        theme::text::FAINT,
+    );
+    let count_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            name_rect.right() - 6.0 - count_galley.size().x,
+            rect.center().y - count_galley.size().y / 2.0,
+        ),
+        count_galley.size(),
+    );
+    let clip = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + INDENT, rect.top()),
+        egui::pos2(count_rect.left() - 6.0, rect.bottom()),
+    );
+    p.with_clip_rect(clip).text(
+        egui::pos2(rect.left() + INDENT, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        leaf,
+        egui::FontId::proportional(11.5),
+        theme::text::MUTED,
+    );
+    let count_resp = ui.interact(
+        count_rect.expand(3.0),
+        id.with("count"),
+        egui::Sense::click(),
+    );
+    ui.painter().text(
+        count_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        count.to_string(),
+        egui::FontId::proportional(10.5),
+        if count_resp.hovered() && count > 0 {
+            color::TEXT
+        } else {
+            theme::text::FAINT
+        },
+    );
+    if count > 0 && count_resp.on_hover_text(layers_label(count)).clicked() {
+        acts.push(Act::Select(users.to_vec()));
+    }
+    let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
+    for (i, col) in kit_columns(modes).into_iter().enumerate() {
+        let x = mode_x(rect.left(), i, b.scroll_x);
+        let cell = egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(MODE_W, ROW_H));
+        if !cell.intersects(clip) {
+            continue;
+        }
+        let Some(value) = table.resolve_opt(v.id, col) else {
+            continue;
+        };
+        draw_cell(
+            &ui.painter().with_clip_rect(clip),
+            table,
+            cell,
+            &Cell::from(value),
+        );
+    }
+    let _ = resp.on_hover_text(format!(
+        "From {} — edited in the kit, read-only here",
+        super::binding::kit_name(doc, v.kit().unwrap_or(""))
+    ));
 }
 
 /// One cell at rest: a colour's swatch and hex, a bare number, an alias's capsule
@@ -2685,6 +3037,7 @@ mod tests {
                         visible: true,
                     },
                 )]),
+                origin: None,
             },
         };
         assert!(app.commit_edit(Transaction(vec![
@@ -3173,6 +3526,182 @@ mod tests {
             cell(&app, a),
             Cell::Color(Color::from_rgba8(0x10, 0x20, 0x30, 0xff)),
             "Solid writes the colour it drew, ending the alias"
+        );
+    }
+
+    const KIT: &str = "5eed0000000000000000000000000021";
+
+    /// A document with a mode *Light* and a variable of its own, *surface*, and
+    /// a kit *Atlas*'s variable *brand* — white by *Day*, navy by *Night* — and a
+    /// kit fill style *Accent* on a rectangle (§15 D1064). Answers the ids.
+    fn with_a_kit(app: &mut OndinApp) -> (ModeId, ModeId, VarId, VarId, StyleId, NodeId) {
+        let ids = &mut app.session.ids;
+        let (light, day, night) = (ids.mint_mode(), ids.mint_mode(), ids.mint_mode());
+        let (surface, brand) = (ids.mint_var(), ids.mint_var());
+        let (accent, rect) = (ids.mint_style(), ids.mint());
+        let navy = Color::from_rgba8(10, 20, 80, 255);
+        let gold = keyed_by_position([Fill {
+            brush: Color::from_rgba8(220, 180, 40, 255).into(),
+            visible: true,
+        }]);
+        let root = app.session.doc.root();
+        let tx = Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: light,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: surface,
+                    name: "surface".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(Color::WHITE))].into(),
+                    origin: None,
+                },
+            },
+            Operation::SetKitModes {
+                kit: KIT.into(),
+                modes: Some(ondin_core::variable::KitModes {
+                    name: Some("Atlas".into()),
+                    modes: vec![
+                        ondin_core::variable::KitMode {
+                            id: day,
+                            name: "Day".into(),
+                            from: day,
+                        },
+                        ondin_core::variable::KitMode {
+                            id: night,
+                            name: "Night".into(),
+                            from: night,
+                        },
+                    ],
+                    map: Default::default(),
+                }),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: brand,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(day, Cell::Color(Color::WHITE)), (night, Cell::Color(navy))].into(),
+                    origin: Some(ondin_core::variable::VarOrigin {
+                        kit: KIT.into(),
+                        var: brand,
+                        version: 1,
+                    }),
+                },
+            },
+            Operation::AddStyle {
+                style: Style {
+                    id: accent,
+                    name: "Accent".into(),
+                    value: sty::StyleValue::Fills(gold.clone()),
+                    origin: Some(sty::StyleOrigin {
+                        kit: KIT.into(),
+                        style: accent,
+                        version: 1,
+                    }),
+                },
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: rect,
+                fills: gold,
+            },
+            Operation::SetFillStyle {
+                id: rect,
+                style: Some(accent),
+            },
+        ]);
+        assert!(app.session.commit(tx), "the fixture commits");
+        (light, night, surface, brand, accent, rect)
+    }
+
+    /// **A kit's variables list last, under the kit, inert — and the kit's header
+    /// carries the mapping** (D1038 (b), G; §15 D1065): *brand* sits after the
+    /// document's own *surface*, below an *Atlas* header whose *Light* column
+    /// reads *Day →* — no kit mode is named *Light*, so the kit's first — and a
+    /// pick from that column's menu sets the entry by hand, the column then
+    /// reading *Night →*. *Duplicate* of a kit's variable makes nothing, and the
+    /// `--` list puts the kit's after the document's own.
+    ///
+    /// Flip, run: `all_lines` listing `table.iter()` whole, with no kit header,
+    /// fails at *"the kit's header, after the document's own"* — the kit's
+    /// *brand* first by name, and editable as the document's own.
+    #[test]
+    fn a_kits_variables_list_last_under_the_kit_with_its_mapping() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        let (light, night, surface, brand, accent, rect) = with_a_kit(&mut app);
+        app.toggle_var_browser();
+
+        let doc = &app.session.doc;
+        let order: Vec<String> = all_lines(doc, "", None, &HashSet::new())
+            .iter()
+            .map(|l| match l {
+                Line::Var(v) => v.name.clone(),
+                Line::Kit(k) => format!("kit {k}"),
+                Line::Group { path, .. } => format!("group {path}"),
+            })
+            .collect();
+        assert_eq!(
+            order,
+            ["surface".to_string(), format!("kit {KIT}"), "brand".into()],
+            "the kit's header, after the document's own"
+        );
+        let listed: Vec<VarId> =
+            super::super::binding::matches(doc.variables(), VarKind::Color, "")
+                .iter()
+                .map(|v| v.id)
+                .collect();
+        assert_eq!(listed, [surface, brand], "the `--` list's kit groups last");
+
+        // Two passes: an `Area` draws nothing on the frame it first sizes itself.
+        pass(&ctx, &mut app, vec![], |a, c| a.var_browser_ui(c));
+        let shapes = pass(&ctx, &mut app, vec![], |a, c| a.var_browser_ui(c));
+        assert!(
+            last_text(&shapes, "Atlas").is_some(),
+            "the kit's name heads it"
+        );
+        click_text(&ctx, &mut app, "Day →", |a, c| a.var_browser_ui(c));
+        let b = app.var_browser.as_ref().unwrap();
+        assert!(
+            matches!(&b.menu, Some((Menu::KitMap(k, m), _)) if k == KIT && *m == light),
+            "the column's menu"
+        );
+        app.var_act(Act::KitMap(KIT.into(), light, Some(night)));
+        assert_eq!(
+            app.session.doc.variables().kits()[KIT].map.get(&light),
+            Some(&night)
+        );
+        let shapes = pass(&ctx, &mut app, vec![], |a, c| a.var_browser_ui(c));
+        assert!(last_text(&shapes, "Night →").is_some(), "set by hand");
+
+        let before = app.session.doc.variables().iter().count();
+        app.var_act(Act::Duplicate(brand));
+        assert_eq!(app.session.doc.variables().iter().count(), before, "inert");
+
+        // And a kit's style is not edited here: *Edit* opens on nothing.
+        app.edit_style(accent);
+        assert_eq!(app.session.style_edit, None);
+        assert_eq!(
+            sty::users(&app.session.doc, accent),
+            [rect],
+            "though it has a user"
         );
     }
 }

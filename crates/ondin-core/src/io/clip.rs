@@ -95,6 +95,9 @@ struct CarriedDto {
     /// The styles the layers are bound to (§15 D1062).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     styles: Vec<crate::style::CarriedStyle>,
+    /// The kits' variables and styles the copy reads (§15 D1064).
+    #[serde(default, skip_serializing_if = "crate::tokens::Tokens::is_empty")]
+    tokens: crate::tokens::Tokens,
 }
 
 impl CarriedDto {
@@ -103,6 +106,7 @@ impl CarriedDto {
             && self.modes.is_empty()
             && self.detached.is_empty()
             && self.styles.is_empty()
+            && self.tokens.is_empty()
     }
 }
 
@@ -171,6 +175,7 @@ pub fn write_carrying(
             modes: vars.modes.clone(),
             detached: vars.detached.iter().map(NodeDto::from_node).collect(),
             styles: vars.styles.clone(),
+            tokens: vars.tokens.clone(),
         },
         from: from.map(|r| [r.x0, r.y0, r.x1, r.y1]),
     };
@@ -334,6 +339,7 @@ fn parse(json: &str) -> Result<Payload, IoError> {
             .map(NodeDto::into_node)
             .collect::<Result<_, _>>()?,
         styles: dto.vars.styles,
+        tokens: dto.vars.tokens,
     };
     Ok(Payload {
         subtrees,

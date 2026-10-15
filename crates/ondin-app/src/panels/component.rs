@@ -1178,12 +1178,15 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::RemoveVariable { .. }
         | O::SetVariableName { .. }
         | O::SetVariableCell { .. }
+        | O::SetVariable { .. }
+        | O::SetKitModes { .. }
         | O::AddMode { .. }
         | O::RemoveMode { .. }
         | O::SetModeName { .. }
         | O::AddStyle { .. }
         | O::RemoveStyle { .. }
         | O::SetStyleName { .. }
+        | O::SetStyleOrigin { .. }
         | O::SetStyleValue { .. } => None,
     }
 }
@@ -2483,6 +2486,7 @@ mod tests {
             name: name.into(),
             kind: ondin_core::variable::VarKind::Number,
             cells: [(mode, ondin_core::variable::Cell::Number(n))].into(),
+            origin: None,
         };
         let mut ops = vec![
             Operation::AddMode {
@@ -2571,6 +2575,7 @@ mod tests {
                     name: "size/w".into(),
                     kind: ondin_core::variable::VarKind::Number,
                     cells: [(mode, ondin_core::variable::Cell::Number(30.0))].into(),
+                    origin: None,
                 },
             },
         ];
@@ -5083,6 +5088,7 @@ mod tests {
                     name: "state/on".into(),
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
+                    origin: None,
                 },
             },
         ])));
@@ -5152,6 +5158,7 @@ mod tests {
                 name: name.into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(true))].into(),
+                origin: None,
             },
         };
         assert!(v.app.commit_edit(Transaction(vec![

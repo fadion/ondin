@@ -1,0 +1,1004 @@
+//! Kits carrying variables and styles (§5.3e, §5.3f, §15 D1064).
+//!
+//! Kit L binds its mains to variables of its own and styles them; a consumer D
+//! vendoring a main takes what it reads into its own tables, under ids of its
+//! own and with an origin, and holds the kit's modes beside its own — read
+//! through **one per-kit mapping** (D1038 (b)): the entry set by hand, else the
+//! kit mode of the same name, else the kit's first. These tests hold the
+//! publish, the insert, the mapping, the update, the carrying paste, the file and
+//! the vault's rule.
+
+use ondin_core::kit::{self, KitError, Published};
+use ondin_core::kurbo::{RoundedRectRadii, Size};
+use ondin_core::meta::{DocumentMeta, KitMark};
+use ondin_core::peniko::Color;
+use ondin_core::style::{Style, StyleId, StyleValue};
+use ondin_core::variable::{KitModes, VarRule};
+use ondin_core::{
+    Brush, BrushSource, Cell, Document, Fill, IdSource, Mode, ModeId, NodeId, NodeKind, OpError,
+    Operation, Placement, Transaction, VarId, VarKind, Variable, io, keyed_by_position,
+};
+
+const L_ID: &str = "5eed0000000000000000000000000011";
+
+const WHITE: Color = Color::from_rgba8(255, 255, 255, 255);
+const NAVY: Color = Color::from_rgba8(10, 20, 80, 255);
+const RED: Color = Color::from_rgba8(200, 30, 30, 255);
+const GOLD: Color = Color::from_rgba8(220, 180, 40, 255);
+
+fn frame(w: f64, h: f64) -> NodeKind {
+    NodeKind::Artboard {
+        size: Size::new(w, h),
+    }
+}
+
+fn rect() -> NodeKind {
+    NodeKind::Rect {
+        size: Size::new(10.0, 10.0),
+        corner_radii: RoundedRectRadii::default(),
+    }
+}
+
+fn create(id: NodeId, parent: NodeId, index: usize, kind: NodeKind, name: &str) -> Operation {
+    Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind,
+        transform: None,
+        name: Some(name.into()),
+    }
+}
+
+fn bound(var: VarId) -> Vec<ondin_core::item::Keyed<Fill>> {
+    keyed_by_position([Fill {
+        brush: BrushSource::Bound { var, alpha: 1.0 },
+        visible: true,
+    }])
+}
+
+/// Kit L: modes *Day* and *Night*; `brand` white by day and navy by night, and
+/// `spare`, which nothing reads; a fill style *Accent* (gold); a main *Icon* —
+/// its own fill styled *Accent*, its *Dot* bound to `brand` — and a main
+/// *Badge*, a rectangle bound to `brand`.
+struct Kit {
+    doc: Document,
+    ids: IdSource,
+    icon: NodeId,
+    dot: NodeId,
+    badge: NodeId,
+    day: ModeId,
+    brand: VarId,
+    spare: VarId,
+    accent: StyleId,
+}
+
+fn kit() -> Kit {
+    let mut ids = IdSource::new(0xAE);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [icon, dot, badge] = [(); 3].map(|_| ids.mint());
+    let (day, night) = (ids.mint_mode(), ids.mint_mode());
+    let (brand, spare) = (ids.mint_var(), ids.mint_var());
+    let accent = ids.mint_style();
+    let gold = keyed_by_position([Fill {
+        brush: GOLD.into(),
+        visible: true,
+    }]);
+    doc.apply(&Transaction(vec![
+        Operation::AddMode {
+            mode: Mode {
+                id: day,
+                name: "Day".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: night,
+                name: "Night".into(),
+            },
+            index: 1,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: brand,
+                name: "brand".into(),
+                kind: VarKind::Color,
+                cells: [(day, Cell::Color(WHITE)), (night, Cell::Color(NAVY))].into(),
+                origin: None,
+            },
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: spare,
+                name: "spare".into(),
+                kind: VarKind::Number,
+                cells: [(day, Cell::Number(1.0)), (night, Cell::Number(2.0))].into(),
+                origin: None,
+            },
+        },
+        Operation::AddStyle {
+            style: Style {
+                id: accent,
+                name: "Accent".into(),
+                value: StyleValue::Fills(gold.clone()),
+                origin: None,
+            },
+        },
+        create(icon, root, 0, frame(24.0, 24.0), "Icon"),
+        create(dot, icon, 0, rect(), "Dot"),
+        Operation::SetFills {
+            id: icon,
+            fills: gold,
+        },
+        Operation::SetFillStyle {
+            id: icon,
+            style: Some(accent),
+        },
+        Operation::SetFills {
+            id: dot,
+            fills: bound(brand),
+        },
+        Operation::SetComponent {
+            id: icon,
+            component: true,
+        },
+        create(badge, root, 1, frame(40.0, 16.0), "Badge"),
+        Operation::SetFills {
+            id: badge,
+            fills: bound(brand),
+        },
+        Operation::SetComponent {
+            id: badge,
+            component: true,
+        },
+    ]))
+    .expect("the kit");
+    doc.set_meta(DocumentMeta {
+        id: Some(L_ID.into()),
+        name: Some("Atlas".into()),
+        kit: Some(KitMark {
+            version: 0,
+            ..KitMark::default()
+        }),
+        ..DocumentMeta::default()
+    });
+    assert_eq!(kit::publish(&mut doc, None, 1), Some(1));
+    Kit {
+        doc,
+        ids,
+        icon,
+        dot,
+        badge,
+        day,
+        brand,
+        spare,
+        accent,
+    }
+}
+
+fn published(k: &Kit) -> &Published {
+    k.doc.published().unwrap()
+}
+
+fn version(k: &Kit) -> u32 {
+    k.doc.meta().kit.as_ref().unwrap().version
+}
+
+/// Consumer D, with `modes` of its own (none for an empty list).
+fn consumer(modes: &[&str]) -> (Document, IdSource, Vec<ModeId>) {
+    let mut ids = IdSource::new(0xDB);
+    let mut doc = Document::new(ids.mint());
+    let made: Vec<ModeId> = modes.iter().map(|_| ids.mint_mode()).collect();
+    let ops: Vec<Operation> = modes
+        .iter()
+        .zip(&made)
+        .enumerate()
+        .map(|(i, (name, id))| Operation::AddMode {
+            mode: Mode {
+                id: *id,
+                name: (*name).into(),
+            },
+            index: i,
+            cells: vec![],
+        })
+        .collect();
+    if !ops.is_empty() {
+        doc.apply(&Transaction(ops)).unwrap();
+    }
+    (doc, ids, made)
+}
+
+fn insert_under(
+    d: &mut Document,
+    ids: &mut IdSource,
+    k: &Kit,
+    main: NodeId,
+    parent: NodeId,
+) -> NodeId {
+    let (tx, made) = kit::insert(d, ids, L_ID, version(k), published(k), main, parent).unwrap();
+    d.apply(&tx).expect("one kit insert");
+    made
+}
+
+fn insert(d: &mut Document, ids: &mut IdSource, k: &Kit, main: NodeId) -> NodeId {
+    let root = d.root();
+    insert_under(d, ids, k, main, root)
+}
+
+/// What `id`'s first fill draws.
+fn drawn(doc: &Document, id: NodeId) -> Brush {
+    let b = &doc.get(id).unwrap().paint().fills[0].brush;
+    doc.resolve_brush(id, b).into_owned()
+}
+
+fn first_child(doc: &Document, id: NodeId) -> NodeId {
+    doc.get(id).unwrap().children()[0]
+}
+
+/// Accept `k`'s current publish, through the commit's passes.
+fn accept(d: &mut Document, ids: &mut IdSource, k: &Kit) -> kit::Update {
+    let u = kit::update(d, ids, L_ID, version(k), published(k)).unwrap();
+    let mut tx = u.tx.clone();
+    ondin_core::propagate::owed(d, &mut tx, ids);
+    d.apply(&tx).expect("an accepted update commits");
+    u
+}
+
+/// **A publish carries what its mains read** and nothing else: `brand`, the
+/// kit's two modes and *Accent* travel, `spare` stays home, and the frozen mains
+/// keep their bindings — until step 4 a publish detached every one
+/// (`variable::detached`, §15 D1039).
+///
+/// Flip, run: `kit::freeze` writing empty tables in place of `frozen_tables`'
+/// fails here at *"brand travels"* — `freeze`'s own debug assertion holds only
+/// the component and vault rules — and every insert test beside it at the
+/// commit, the vault copy bound to a variable nobody holds (`BadBinding`).
+#[test]
+fn a_publish_carries_what_its_mains_read() {
+    let k = kit();
+    let p = published(&k).document();
+    assert!(p.variables().get(k.brand).is_some(), "brand travels");
+    assert!(p.variables().get(k.spare).is_none(), "spare stays home");
+    assert_eq!(p.variables().modes().len(), 2);
+    assert!(p.styles().get(k.accent).is_some(), "the style travels");
+    assert_eq!(
+        p.get(k.dot).unwrap().paint().fills[0].brush,
+        BrushSource::Bound {
+            var: k.brand,
+            alpha: 1.0
+        },
+        "the binding is kept"
+    );
+    assert_eq!(p.get(k.icon).unwrap().styles().fills, Some(k.accent));
+    // And the frozen copy is a document the loader takes.
+    let bytes = io::save(&k.doc).unwrap();
+    assert_eq!(io::load(&bytes).unwrap(), k.doc);
+}
+
+/// **An insert vendors the kit's variables and styles with the main** (§15
+/// D1064): D holds one variable and one style of L's, minted its own ids and
+/// carrying their origins, and L's modes beside its own — and the instance's dot
+/// reads `brand` through the vault copy's binding. D has no modes of its own,
+/// so the kit's first, *Day*, is read: white. One undo takes it all back.
+#[test]
+fn an_insert_vendors_the_kits_variables_and_the_instance_reads_them() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let before = d.clone();
+    let root = d.root();
+    let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 1, published(&k), k.icon, root).unwrap();
+    let undo = d.apply(&tx).unwrap().inverse;
+
+    let t = d.variables();
+    let [v] = t.iter().collect::<Vec<_>>()[..] else {
+        panic!("one variable vendored, `spare` not among them")
+    };
+    assert_ne!(v.id, k.brand, "minted an id of D's");
+    let o = v.origin.as_ref().expect("an origin");
+    assert_eq!((o.kit.as_str(), o.var, o.version), (L_ID, k.brand, 1));
+    assert_eq!(t.local().count(), 0, "none of D's own");
+    let modes: Vec<&str> = t.kits()[L_ID]
+        .modes
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(modes, ["Day", "Night"]);
+    assert_eq!(t.kits()[L_ID].name.as_deref(), Some("Atlas"));
+
+    let dot = first_child(&d, inst);
+    assert_eq!(
+        d.get(dot).unwrap().paint().fills[0].brush.var(),
+        Some(v.id),
+        "the instance's dot reads D's copy"
+    );
+    assert_eq!(drawn(&d, dot), Brush::Solid(WHITE), "the kit's first mode");
+
+    let [s] = d.styles().iter().collect::<Vec<_>>()[..] else {
+        panic!("one style vendored")
+    };
+    assert_eq!(s.kit(), Some(L_ID));
+    assert_eq!(d.get(inst).unwrap().styles().fills, Some(s.id));
+    assert_eq!(drawn(&d, inst), Brush::Solid(GOLD));
+
+    d.apply(&undo).unwrap();
+    assert_eq!(d, before, "one undo");
+}
+
+/// **The mapping** (D1038 (b)): D's *Light* has no kit mode of its name and reads
+/// the kit's first, *Day*; D's *Night* reads the kit's *Night* by name; and an
+/// entry set by hand — *Light → Night* — wins over both.
+///
+/// Flip, run: `Variables::kit_mode`'s name match taken out fails *"by name"*,
+/// the instance in the Night frame white.
+#[test]
+fn the_mapping_reads_by_name_then_the_first_and_a_hand_set_entry_wins() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Light", "Night"]);
+    let (light, night) = (modes[0], modes[1]);
+    let root = d.root();
+    let dark = ids.mint();
+    d.apply(&Transaction(vec![
+        create(dark, root, 0, frame(100.0, 100.0), "Dark"),
+        Operation::SetMode {
+            id: dark,
+            mode: Some(night),
+        },
+    ]))
+    .unwrap();
+    let plain = insert(&mut d, &mut ids, &k, k.badge);
+    let in_dark = insert_under(&mut d, &mut ids, &k, k.badge, dark);
+    assert_eq!(drawn(&d, plain), Brush::Solid(WHITE), "no Light: the first");
+    assert_eq!(drawn(&d, in_dark), Brush::Solid(NAVY), "by name");
+
+    let mut record: KitModes = d.variables().kits()[L_ID].clone();
+    let kit_night = record.modes[1].id;
+    record.map.insert(light, kit_night);
+    d.apply(&Transaction(vec![Operation::SetKitModes {
+        kit: L_ID.into(),
+        modes: Some(record),
+    }]))
+    .unwrap();
+    assert_eq!(drawn(&d, plain), Brush::Solid(NAVY), "the hand-set entry");
+    assert_eq!(
+        d.mode_at(plain),
+        Some(light),
+        "a kit's mode is no mode of D's"
+    );
+
+    // And deleting the mode an entry names takes the entry with it.
+    let ops = ondin_core::variable::remove_mode_ops(&d, light);
+    d.apply(&Transaction(ops))
+        .expect("the entry goes with its mode");
+    assert!(d.variables().kits()[L_ID].map.is_empty());
+}
+
+/// A second insert of a main reading what D already holds reuses it — one
+/// variable, one style, one kit record — as a held main is reused.
+#[test]
+fn a_second_insert_reuses_the_held_variables() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&["Light"]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    insert(&mut d, &mut ids, &k, k.badge);
+    insert(&mut d, &mut ids, &k, k.icon);
+    assert_eq!(d.variables().iter().count(), 1);
+    assert_eq!(d.styles().iter().count(), 1);
+    assert_eq!(d.variables().kits().len(), 1);
+}
+
+/// **An update rewrites what D holds of the kit** (5A): L adds a mode and
+/// recolours `brand`'s *Day*; the instance follows. Then L stops binding its
+/// mains to `brand`, which no longer travels — and D's own layer bound to it
+/// keeps the colour it drew, detached (*keep its values*), and the variable goes.
+///
+/// 🚨 **The plain instance follows its main rather than detaching**, and the
+/// first build did not: the removal detached every user, the instance among
+/// them, and the commit read that write as an override, so the instance kept red
+/// where its main turned white. Flip, run: `tokens::plan`'s removal without its
+/// follow filter fails at *"the instance follows its main"*, red.
+#[test]
+fn an_update_rewrites_the_kits_variables_and_removes_what_it_dropped() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().iter().next().unwrap().id;
+    // D's own layer, bound to the kit's variable.
+    let mine = ids.mint();
+    let root = d.root();
+    d.apply(&Transaction(vec![
+        create(mine, root, 0, rect(), "Mine"),
+        Operation::SetFills {
+            id: mine,
+            fills: bound(held),
+        },
+    ]))
+    .unwrap();
+
+    let dusk = k.ids.mint_mode();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: dusk,
+                    name: "Dusk".into(),
+                },
+                index: 2,
+                cells: vec![(k.brand, Cell::Color(NAVY)), (k.spare, Cell::Number(3.0))],
+            },
+            Operation::SetVariableCell {
+                id: k.brand,
+                mode: k.day,
+                cell: Cell::Color(RED),
+            },
+        ]))
+        .unwrap();
+    assert!(kit::changes(&k.doc).tokens, "worth a publish");
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let u = accept(&mut d, &mut ids, &k);
+    assert_eq!(u.vars_changed, vec![held]);
+    assert_eq!(drawn(&d, inst), Brush::Solid(RED), "the instance follows");
+    assert_eq!(drawn(&d, mine), Brush::Solid(RED), "and D's own layer");
+    assert_eq!(d.variables().kits()[L_ID].modes.len(), 3);
+    assert_eq!(
+        d.variables()
+            .get(held)
+            .unwrap()
+            .origin
+            .as_ref()
+            .unwrap()
+            .version,
+        2
+    );
+
+    // Now L draws its mains in literals: `brand` no longer travels.
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: k.dot,
+                fills: keyed_by_position([Fill {
+                    brush: WHITE.into(),
+                    visible: true,
+                }]),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: keyed_by_position([Fill {
+                    brush: WHITE.into(),
+                    visible: true,
+                }]),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 3), Some(3));
+    let u = accept(&mut d, &mut ids, &k);
+    assert_eq!(u.vars_removed, vec![held]);
+    assert!(d.variables().get(held).is_none(), "the variable goes");
+    assert_eq!(
+        d.get(mine).unwrap().paint().fills[0].brush,
+        BrushSource::from(RED),
+        "D's own layer keeps what it drew"
+    );
+    assert_eq!(
+        drawn(&d, inst),
+        Brush::Solid(WHITE),
+        "the instance follows its main"
+    );
+}
+
+/// **A main from a newer publish whose kit gained a mode is refused until the
+/// update** (`KitError::Modes`): D's copy of `brand` has no cell in it.
+#[test]
+fn an_insert_over_older_kit_modes_asks_for_the_update() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    let dusk = k.ids.mint_mode();
+    k.doc
+        .apply(&Transaction(vec![Operation::AddMode {
+            mode: Mode {
+                id: dusk,
+                name: "Dusk".into(),
+            },
+            index: 2,
+            cells: vec![(k.brand, Cell::Color(RED)), (k.spare, Cell::Number(3.0))],
+        }]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    let root = d.root();
+    let r = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root);
+    assert!(
+        matches!(r, Err(KitError::Modes(ref kit)) if kit == L_ID),
+        "{r:?}"
+    );
+    accept(&mut d, &mut ids, &k);
+    insert(&mut d, &mut ids, &k, k.badge);
+}
+
+/// **A carrying paste vendors the kits' variables with the mains** (§15 D1064):
+/// an instance copied out of D lands in E — which has never used the kit — an
+/// instance still, its dot bound to E's own copy of `brand`, not detached.
+///
+/// Flip, run: `variable::land` without its `holds_var` fallback fails *"bound to
+/// E's copy"*, the pasted dot a literal white.
+#[test]
+fn a_carrying_paste_vendors_the_kits_variables_too() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+
+    let subtrees = vec![d.capture_subtree(inst).unwrap()];
+    let kits = kit::carried(&d, &subtrees);
+    let vars = ondin_core::variable::carried(&d, &subtrees);
+    assert!(
+        !vars.tokens.is_empty(),
+        "the copy carries the kit's variable"
+    );
+    let text = io::clip::write_carrying(&subtrees, &kits, &[], &vars, None, "Icon").unwrap();
+    let payload = io::clip::read(&text).unwrap().unwrap();
+
+    let mut e = Document::new(ids.mint());
+    let root = e.root();
+    let placements: Vec<Placement> = payload
+        .subtrees
+        .into_iter()
+        .map(|nodes| Placement {
+            nodes: ondin_core::variable::land(&e, &payload.vars, nodes),
+            parent: root,
+            index: None,
+        })
+        .collect();
+    let (mut tx, made) = kit::insert_carrying(
+        &e,
+        &mut ids,
+        &payload.kits,
+        &payload.vars.tokens,
+        &placements,
+        Default::default(),
+    )
+    .unwrap();
+    ondin_core::propagate::owed(&e, &mut tx, &mut ids);
+    e.apply(&tx).expect("a carrying paste");
+
+    let pasted = made[0];
+    assert!(e.get(pasted).unwrap().link().is_some(), "still an instance");
+    let [v] = e.variables().iter().collect::<Vec<_>>()[..] else {
+        panic!("one variable vendored")
+    };
+    assert_eq!(v.origin.as_ref().unwrap().var, k.brand);
+    let dot = first_child(&e, pasted);
+    assert_eq!(
+        e.get(dot).unwrap().paint().fills[0].brush.var(),
+        Some(v.id),
+        "bound to E's copy"
+    );
+    assert_eq!(drawn(&e, dot), Brush::Solid(WHITE));
+    assert_eq!(e.styles().iter().count(), 1, "the style came too");
+}
+
+/// A consumer holding a kit's variables, modes, mapping and styles saves and
+/// loads byte for byte.
+#[test]
+fn a_consumer_holding_kit_variables_round_trips_through_a_file() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Light"]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    let mut record = d.variables().kits()[L_ID].clone();
+    record.map.insert(modes[0], record.modes[1].id);
+    d.apply(&Transaction(vec![Operation::SetKitModes {
+        kit: L_ID.into(),
+        modes: Some(record),
+    }]))
+    .unwrap();
+    let bytes = io::save(&d).unwrap();
+    let back = io::load(&bytes).unwrap();
+    assert_eq!(back, d);
+    assert_eq!(io::save(&back).unwrap(), bytes);
+}
+
+/// **A vault node reads only a kit's variables** (`variable::check`'s
+/// `InVault`): binding a vendored main's dot to one of D's own is refused, as a
+/// link out of the vault is (§15 D1036 (1)).
+#[test]
+fn a_vault_node_bound_to_the_documents_own_variable_is_refused() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Light"]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let vault_dot = first_child(&d, main);
+    let own = ids.mint_var();
+    let r = d.apply(&Transaction(vec![
+        Operation::AddVariable {
+            var: Variable {
+                id: own,
+                name: "own".into(),
+                kind: VarKind::Color,
+                cells: [(modes[0], Cell::Color(RED))].into(),
+                origin: None,
+            },
+        },
+        Operation::SetFills {
+            id: vault_dot,
+            fills: bound(own),
+        },
+    ]));
+    assert!(
+        matches!(r, Err(OpError::Variables(VarRule::InVault(n))) if n == vault_dot),
+        "{r:?}"
+    );
+}
+
+/// D's own variable aliasing the kit's reads the kit's column for D's mode —
+/// the mapping applied at every step of the walk.
+#[test]
+fn an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Night"]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().iter().next().unwrap().id;
+    let mine = ids.mint_var();
+    d.apply(&Transaction(vec![Operation::AddVariable {
+        var: Variable {
+            id: mine,
+            name: "surface".into(),
+            kind: VarKind::Color,
+            cells: [(modes[0], Cell::Alias(held))].into(),
+            origin: None,
+        },
+    }]))
+    .unwrap();
+    assert_eq!(
+        d.variables().resolve(mine, modes[0]),
+        Some(ondin_core::Value::Color(NAVY)),
+        "Night by name"
+    );
+    // And a kit's variable may not alias one of D's.
+    let mut v = d.variables().get(held).unwrap().clone();
+    let col = *v.cells.keys().next().unwrap();
+    v.cells.insert(col, Cell::Alias(mine));
+    let r = d.apply(&Transaction(vec![Operation::SetVariable { var: v }]));
+    assert!(
+        matches!(r, Err(OpError::Variables(VarRule::BadAlias(_)))),
+        "{r:?}"
+    );
+}
+
+/// Copy `inst` out of `from` through the clipboard's text and paste it into
+/// `to`'s root, through `land` and the carrying insert and the commit's passes.
+fn paste(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSource) -> NodeId {
+    let subtrees = vec![from.capture_subtree(inst).unwrap()];
+    let kits = kit::carried(from, &subtrees);
+    let vars = ondin_core::variable::carried(from, &subtrees);
+    let text = io::clip::write_carrying(&subtrees, &kits, &[], &vars, None, "x").unwrap();
+    let payload = io::clip::read(&text).unwrap().unwrap();
+    let root = to.root();
+    let placements: Vec<Placement> = payload
+        .subtrees
+        .into_iter()
+        .map(|nodes| Placement {
+            nodes: ondin_core::variable::land(to, &payload.vars, nodes),
+            parent: root,
+            index: None,
+        })
+        .collect();
+    let (mut tx, made) = kit::insert_carrying(
+        to,
+        ids,
+        &payload.kits,
+        &payload.vars.tokens,
+        &placements,
+        Default::default(),
+    )
+    .unwrap();
+    ondin_core::propagate::owed(to, &mut tx, ids);
+    to.apply(&tx).expect("a carrying paste");
+    made[0]
+}
+
+/// L gains a third mode, *Dusk* — `brand` red in it — and publishes.
+fn add_dusk(k: &mut Kit) -> ModeId {
+    let dusk = k.ids.mint_mode();
+    k.doc
+        .apply(&Transaction(vec![Operation::AddMode {
+            mode: Mode {
+                id: dusk,
+                name: "Dusk".into(),
+            },
+            index: 2,
+            cells: vec![(k.brand, Cell::Color(RED)), (k.spare, Cell::Number(3.0))],
+        }]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 9);
+    dusk
+}
+
+const A_ID: &str = "5eed0000000000000000000000000012";
+
+/// Kit A, built on L: a main *Card* nesting an instance of L's *Badge*, which A
+/// vendored at L's current publish. Answers A and Card.
+fn kit_a(k: &Kit) -> (Document, IdSource, NodeId) {
+    let mut ids = IdSource::new(0xAF);
+    let mut a = Document::new(ids.mint());
+    let card = ids.mint();
+    let root = a.root();
+    a.apply(&Transaction(vec![create(
+        card,
+        root,
+        0,
+        frame(80.0, 40.0),
+        "Card",
+    )]))
+    .unwrap();
+    insert_under(&mut a, &mut ids, k, k.badge, card);
+    a.apply(&Transaction(vec![Operation::SetComponent {
+        id: card,
+        component: true,
+    }]))
+    .unwrap();
+    a.set_meta(DocumentMeta {
+        id: Some(A_ID.into()),
+        name: Some("Cards".into()),
+        kit: Some(KitMark {
+            version: 0,
+            ..KitMark::default()
+        }),
+        ..DocumentMeta::default()
+    });
+    kit::publish(&mut a, None, 1);
+    (a, ids, card)
+}
+
+/// 🚨 **A kit instance pasted back into its own kit reads the kit's own
+/// variables** (D1023's own-kit arm made for the tables, `arch-scribe`'s reading
+/// of the first build): L holds no copy of its own `brand`, and the pasted Icon's
+/// dot reads the original — before the fix L gained a kit record of itself and
+/// a second `brand`, and every bound field of the paste was an override.
+///
+/// Flip, run: `tokens::plan`'s `own` taken as `None` fails at *"no copy of its
+/// own variables"*, three variables where two were.
+#[test]
+fn a_kit_instance_pasted_back_into_its_kit_reads_its_own_variables() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let pasted = paste(&d, inst, &mut k.doc, &mut k.ids);
+    assert_eq!(
+        k.doc.variables().iter().count(),
+        2,
+        "no copy of its own variables"
+    );
+    assert!(
+        k.doc.variables().kits().is_empty(),
+        "no kit record of itself"
+    );
+    assert_eq!(k.doc.styles().iter().count(), 1, "no copy of its own style");
+    let dot = first_child(&k.doc, pasted);
+    assert_eq!(
+        k.doc.get(dot).unwrap().paint().fills[0].brush.var(),
+        Some(k.brand)
+    );
+    assert_eq!(
+        k.doc.get(pasted).unwrap().link(),
+        Some(k.icon),
+        "the live main"
+    );
+}
+
+/// And a kit instance pasted back into a kit that has **deleted** the variable
+/// it reads detaches to what it drew, by D1038's rule (`arch-scribe`'s reading of
+/// the own-kit fix: kept for a plan with nothing to point it at, the commit
+/// refused the paste as a binding to nothing).
+///
+/// Flip, run: `land` keeping an own-kit binding as any carried one (`own_var`
+/// answering `None`) fails in `paste`, the commit refusing a `BadBinding`.
+#[test]
+fn a_paste_back_into_a_kit_that_deleted_the_variable_detaches() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let ops = ondin_core::variable::remove_ops(&k.doc, &[k.brand]);
+    k.doc.apply(&Transaction(ops)).unwrap();
+    let pasted = paste(&d, inst, &mut k.doc, &mut k.ids);
+    let dot = first_child(&k.doc, pasted);
+    assert_eq!(
+        k.doc.get(dot).unwrap().paint().fills[0].brush,
+        BrushSource::from(WHITE),
+        "detached to what it drew"
+    );
+}
+
+/// **A consumer holding a third kit newer than the kit carrying it** — L with
+/// *Dusk*, where A vendored L before it — inserts A's Card all the same: the
+/// held record covers what A read (`arch-scribe`'s reading: refused for good as
+/// an update owed, which no update could give).
+///
+/// Flip, run: `covers` made the old equal-sets test fails at *"inserts"*,
+/// `Err(Modes(L))`.
+#[test]
+fn a_third_kit_held_newer_than_the_kit_carrying_it_is_reused() {
+    let mut k = kit();
+    let (a, _, card) = kit_a(&k);
+    add_dusk(&mut k);
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let root = d.root();
+    let pa = a.published().unwrap();
+    let r = kit::insert(&d, &mut ids, A_ID, 1, pa, card, root);
+    let (tx, inst) = r.expect("inserts");
+    d.apply(&tx).expect("commits");
+    assert_eq!(d.variables().iter().count(), 1, "L's brand, held once");
+    assert_eq!(
+        d.variables().kits()[L_ID].modes.len(),
+        3,
+        "the newer record kept"
+    );
+    let badge = first_child(&d, inst);
+    assert_eq!(drawn(&d, badge), Brush::Solid(WHITE));
+}
+
+/// **Accept all takes a kit carrying a third kit's new mode beside that kit's
+/// own update, in either order** (`arch-scribe`'s reading: `[A, L]` refused
+/// where `[L, A]` took).
+///
+/// Flip, run: `update_all` without its retry fails at *"A first, L second"*,
+/// `Err(Modes(L))`.
+#[test]
+fn accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order() {
+    let mut k = kit();
+    let (mut a, mut aids, card) = kit_a(&k);
+    let (mut d, mut ids, _) = consumer(&[]);
+    let root = d.root();
+    let (tx, _) = kit::insert(&d, &mut ids, A_ID, 1, a.published().unwrap(), card, root).unwrap();
+    d.apply(&tx).unwrap();
+    add_dusk(&mut k);
+    // A takes L's new publish and publishes again.
+    let u = kit::update(&a, &mut aids, L_ID, version(&k), published(&k)).unwrap();
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&a, &mut tx, &mut aids);
+    a.apply(&tx).unwrap();
+    kit::publish(&mut a, None, 2);
+
+    let av = a.meta().kit.as_ref().unwrap().version;
+    let u = kit::update_all(
+        &d,
+        &mut ids,
+        &[
+            (A_ID, av, a.published().unwrap()),
+            (L_ID, version(&k), published(&k)),
+        ],
+    )
+    .expect("A first, L second");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("commits");
+    assert_eq!(d.variables().kits()[L_ID].modes.len(), 3);
+}
+
+/// **The stale-mode reset spares a copy that set the mode as its main did**
+/// (`arch-scribe`'s reading): L's Icon set to *Night*, an instance of it in D
+/// with it; then L moves Icon to *Dusk* and removes *Night*. The instance
+/// follows to *Dusk* — the reset's write had made it an override, left on
+/// *Inherit*.
+///
+/// Flip, run: the reset without its `follows` filter fails at *"follows"*,
+/// `None`.
+#[test]
+fn a_copy_on_a_removed_kit_mode_follows_its_main_to_the_new_one() {
+    let mut k = kit();
+    let night = k.doc.variables().modes()[1].id;
+    k.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: k.icon,
+            mode: Some(night),
+        }]))
+        .unwrap();
+    let dusk = add_dusk(&mut k);
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let kit_mode = |d: &Document, name: &str| {
+        d.variables().kits()[L_ID]
+            .modes
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.id)
+    };
+    assert_eq!(d.get(inst).unwrap().mode(), kit_mode(&d, "Night"));
+    // The mode's removal returns Icon to *Inherit*, and Icon is then set to
+    // *Dusk* — in that order, or the removal's write lands last.
+    let mut ops = ondin_core::variable::remove_mode_ops(&k.doc, night);
+    ops.push(Operation::SetMode {
+        id: k.icon,
+        mode: Some(dusk),
+    });
+    k.doc.apply(&Transaction(ops)).unwrap();
+    kit::publish(&mut k.doc, None, 3);
+    accept(&mut d, &mut ids, &k);
+    assert_eq!(d.get(inst).unwrap().mode(), kit_mode(&d, "Dusk"), "follows");
+}
+
+/// In a document with no modes of its own, a style of its own reading a kit's
+/// variable the kit removes is detached to what it drew — before, `remove_ops`
+/// detached styles only under a default mode, and the update was refused.
+///
+/// Flip, run: the styles' detach gated on a default mode again fails in
+/// `accept`, the commit refusing the style (`BadVariable`).
+#[test]
+fn a_documents_own_style_reading_a_removed_kit_variable_is_detached() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().iter().next().unwrap().id;
+    let mine = ids.mint_style();
+    d.apply(&Transaction(vec![Operation::AddStyle {
+        style: Style {
+            id: mine,
+            name: "Mine".into(),
+            value: StyleValue::Fills(bound(held)),
+            origin: None,
+        },
+    }]))
+    .unwrap();
+    let plain = keyed_by_position([Fill {
+        brush: WHITE.into(),
+        visible: true,
+    }]);
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: k.dot,
+                fills: plain.clone(),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: plain,
+            },
+        ]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    accept(&mut d, &mut ids, &k);
+    let StyleValue::Fills(f) = &d.styles().get(mine).unwrap().value else {
+        panic!("a fill style")
+    };
+    assert_eq!(
+        f[0].brush,
+        BrushSource::from(WHITE),
+        "the kit's default, Day"
+    );
+}
+
+/// Binding a main root's visibility on the kit's page is no change a consumer
+/// receives — an instance root keeps its own visibility, bound or not.
+///
+/// Flip, run: `reach` leaving a top's `visible_var` fails here, Icon counted
+/// changed. ⚠️ **`Changes::tokens` still reads true**: the boolean travels, a
+/// node of the frozen copy reading it — a publish no consumer draws, left as a
+/// known edge (`frozen_tables` asks what the nodes read, not what reaches an
+/// instance).
+#[test]
+fn a_main_roots_visibility_binding_is_not_a_change() {
+    let mut k = kit();
+    let shown = k.ids.mint_var();
+    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: shown,
+                    name: "shown".into(),
+                    kind: VarKind::Boolean,
+                    cells: modes.iter().map(|m| (*m, Cell::Boolean(true))).collect(),
+                    origin: None,
+                },
+            },
+            Operation::SetVisibleVar {
+                id: k.icon,
+                var: Some(shown),
+            },
+        ]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert!(!c.changed.contains(&k.icon), "{c:?}");
+}

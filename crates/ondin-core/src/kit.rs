@@ -360,14 +360,9 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         if let Some(g) = top_frame_name(doc, *t) {
             groups.push((*t, g));
         }
-        // **Detached, until kits carry variables** (roadmap step 4, §15 D1039):
-        // the frozen copy has no table, and a binding into this document's would
-        // leave every consumer refusing the main it vendors.
-        nodes.extend(
-            captured
-                .into_iter()
-                .map(|n| (n.id, crate::variable::detached(doc, n))),
-        );
+        // Bindings kept: the frozen copy carries the table they read (§15 D1064,
+        // below), as it carries the images its fills key into.
+        nodes.extend(captured.into_iter().map(|n| (n.id, n)));
     }
 
     // The vault mains the published ones reach, transitively.
@@ -385,11 +380,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         let captured = doc.capture_subtree(t)?;
         pending.extend(refs_out(&captured));
         vault_tops.push(t);
-        nodes.extend(
-            captured
-                .into_iter()
-                .map(|n| (n.id, crate::variable::detached(doc, n))),
-        );
+        nodes.extend(captured.into_iter().map(|n| (n.id, n)));
     }
     let vault = if vault_tops.is_empty() {
         None
@@ -408,6 +399,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
             .into_iter()
             .filter_map(|id| doc.image(&id).map(|e| (id, e.clone())))
             .collect();
+    let (variables, styles) = frozen_tables(doc, nodes.values());
     let frozen = Document::from_parts(
         doc.schema_version(),
         nodes,
@@ -416,8 +408,8 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         doc.canvas_background(),
         Vec::new(),
         images,
-        Default::default(),
-        Default::default(),
+        variables,
+        styles,
         Default::default(),
         None,
     );
@@ -431,6 +423,64 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         groups,
         name: doc.meta().name.clone(),
     })
+}
+
+/// The variables and styles a frozen kit carries (§15 D1064): **what its nodes
+/// read**, closed over styles and aliases (`crate::tokens::reached`) — the kit's
+/// own and the third kits' it vendored, those with their origins and their kits'
+/// modes — and the kit's whole mode list, which are the kit's modes downstream.
+/// No mapping travels: the per-kit mapping is each consumer's own (D1038 (b)).
+///
+/// A variable the mains do not read stays home, as a main the kit does not
+/// publish does: what a consumer holds of a kit is what its mains need.
+fn frozen_tables<'a>(
+    doc: &Document,
+    nodes: impl IntoIterator<Item = &'a Node>,
+) -> (crate::variable::Variables, crate::style::Styles) {
+    let nodes: Vec<&Node> = nodes.into_iter().collect();
+    let t = doc.variables();
+    let (vs, ss) = crate::tokens::reached(t, doc.styles(), nodes.iter().copied());
+    if vs.is_empty() && ss.is_empty() && nodes.iter().all(|n| n.mode.is_none()) {
+        return Default::default();
+    }
+    let vars: std::collections::BTreeMap<_, _> = vs
+        .iter()
+        .filter_map(|v| t.get(*v).map(|var| (*v, var.clone())))
+        .collect();
+    let mut kits = std::collections::BTreeMap::new();
+    let kit_modes = nodes
+        .iter()
+        .filter_map(|n| n.mode)
+        .filter_map(|m| t.kit_mode_of(m).map(|(k, _)| k.to_string()));
+    for k in vars
+        .values()
+        .filter_map(|v| v.kit().map(str::to_string))
+        .chain(kit_modes)
+    {
+        if let Some(km) = t.kits().get(&k) {
+            kits.entry(k).or_insert_with(|| crate::variable::KitModes {
+                map: Default::default(),
+                ..km.clone()
+            });
+        }
+    }
+    // The kit's own modes whenever anything of its own is read or set — a
+    // variable of its own, or a frame set to one of its modes.
+    let own = vars.values().any(|v| v.origin.is_none())
+        || nodes
+            .iter()
+            .any(|n| n.mode.is_some_and(|m| t.mode(m).is_some()));
+    let variables = crate::variable::Variables {
+        modes: if own { t.modes().to_vec() } else { Vec::new() },
+        vars,
+        kits,
+    };
+    let styles = crate::style::Styles::from_list(
+        ss.iter()
+            .filter_map(|s| doc.styles().get(*s).cloned())
+            .collect(),
+    );
+    (variables, styles)
 }
 
 /// What a publish would change (§5.3e, 2A–2C): the kit's mains and sets against
@@ -452,6 +502,9 @@ pub struct Changes {
     /// them in, so worth a publish as the name is: §15 D1015 counts what changes
     /// downstream (the v0.5.0 release review's `[X2-L1-04]`).
     pub reordered: bool,
+    /// The variables or styles the mains read changed — a value, a name, a mode
+    /// (§15 D1064): a change every consumer draws though no node of a main moved.
+    pub tokens: bool,
 }
 
 impl Changes {
@@ -460,10 +513,10 @@ impl Changes {
         self.added.len() + self.changed.len() + self.removed.len()
     }
 
-    /// Whether a publish would carry anything: a component, the kit's name, or
-    /// the order of its components.
+    /// Whether a publish would carry anything: a component, the kit's name, the
+    /// order of its components, or the variables and styles they read.
     pub fn any(&self) -> bool {
-        self.count() > 0 || self.renamed || self.reordered
+        self.count() > 0 || self.renamed || self.reordered || self.tokens
     }
 }
 
@@ -508,6 +561,16 @@ pub fn changes(doc: &Document) -> Changes {
         .filter(|t| !tops_now.contains(t))
         .collect();
     out.renamed = before.is_some_and(|b| b.name() != doc.meta().name.as_deref());
+    let tables = |p: Option<&Published>| {
+        p.map(|p| {
+            (
+                p.document().variables().clone(),
+                p.document().styles().clone(),
+            )
+        })
+        .unwrap_or_default()
+    };
+    out.tokens = tables(now.as_ref()) != tables(before);
     out
 }
 
@@ -548,6 +611,10 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
                 n.insets = Default::default();
                 n.item = Default::default();
                 n.visible = true;
+                // And its binding, now that a frozen copy keeps bindings (§15
+                // D1064; D1059's amendment, item 6): an instance root keeps
+                // its own visibility, bound or not.
+                n.visible_var = None;
             }
             if let Some(o) = &mut n.origin {
                 o.version = 0;
@@ -635,6 +702,11 @@ pub enum KitError {
     /// to the live main, which the vault may not (`VaultRule::LinksOut`), so the
     /// insert, the update or the paste is refused, naming the main here.
     Circular(NodeId),
+    /// The document holds this kit's variables at **other modes** than the
+    /// publish read (§15 D1064) — a mode the kit added or removed since: the
+    /// variables held have no cell in a mode they lack, so accepting the kit's
+    /// update comes first, as [`Self::NeedsUpdate`] says for a main.
+    Modes(String),
 }
 
 /// The main `id` sits in, or `id` itself when it is one — what a
@@ -702,6 +774,7 @@ pub fn vendor(
     };
 
     let mut copies: Vec<Vec<Node>> = Vec::new();
+    let mut templates: Vec<Node> = Vec::new();
     let mut queue = vec![first];
     let mut queued: FxHashSet<NodeId> = queue.iter().copied().collect();
     while let Some(t) = queue.pop() {
@@ -732,6 +805,7 @@ pub fn vendor(
         {
             o.name = name.map(str::to_string);
         }
+        templates.extend(template);
         copies.push(copy);
     }
 
@@ -791,6 +865,22 @@ pub fn vendor(
         }
     }
     let shown = resolve(main)?;
+    // The variables and styles the copies read, held here and the copies
+    // pointed at them (§15 D1064) — a held one reused, whatever its version.
+    let tokens = crate::tokens::plan(
+        doc,
+        ids,
+        &crate::tokens::Source {
+            vars: src.variables(),
+            styles: src.styles(),
+            kit: Some((kit, version, name)),
+        },
+        &templates,
+        None,
+    )?;
+    for copy in &mut copies {
+        copy.iter_mut().for_each(|n| tokens.apply(n));
+    }
     let mut images: Vec<(crate::ImageId, crate::ImageEntry)> = Vec::new();
     for copy in &copies {
         for id in crate::build::image_ids_in(copy) {
@@ -805,6 +895,7 @@ pub fn vendor(
     if copies.is_empty() {
         return Ok((out, shown));
     }
+    out.extend(tokens.ops);
     // Opened only when something goes in — a kit inserting its own main into
     // itself vendors nothing ([`find`]) and must not leave an empty vault.
     let vault = match doc.vault() {
@@ -1036,13 +1127,28 @@ pub fn insert_carrying(
     doc: &Document,
     ids: &mut IdSource,
     kits: &[Vec<Node>],
+    tokens: &crate::tokens::Tokens,
     placements: &[crate::build::Placement],
     offset: kurbo::Vec2,
 ) -> Result<(Transaction, Vec<NodeId>), KitError> {
     let (mut ops, map) = adopt(doc, ids, kits)?;
-    if ops.is_empty() && map.values().zip(map.keys()).all(|(a, b)| a == b) {
+    // And the kits' variables and styles the copy reads (§15 D1064), held here
+    // first: the adopted copies and the pasted layers are pointed at them.
+    let pasted = placements.iter().flat_map(|p| p.nodes.iter());
+    let plan = crate::tokens::plan_carried(doc, ids, tokens, kits.iter().flatten().chain(pasted))?;
+    for op in &mut ops {
+        if let Operation::InsertSubtree { nodes, .. } = op {
+            nodes.iter_mut().for_each(|n| plan.apply(n));
+        }
+    }
+    let identity = map.values().zip(map.keys()).all(|(a, b)| a == b)
+        && plan.vars.iter().all(|(a, b)| a == b)
+        && plan.styles.iter().all(|(a, b)| a == b)
+        && plan.modes.iter().all(|(a, b)| a == b);
+    if ops.is_empty() && plan.ops.is_empty() && identity {
         return Ok(crate::build::insert_subtrees(doc, ids, placements, offset));
     }
+    let mut ops: Vec<Operation> = plan.ops.iter().cloned().chain(ops).collect();
     let mut scratch = doc.clone();
     if scratch.apply_unchecked(&Transaction(ops.clone())).is_err() {
         return Ok(crate::build::insert_subtrees(doc, ids, placements, offset));
@@ -1052,6 +1158,7 @@ pub fn insert_carrying(
         .map(|p| {
             let mut nodes = p.nodes.clone();
             relink(&mut nodes, &map);
+            nodes.iter_mut().for_each(|n| plan.apply(n));
             crate::build::Placement {
                 nodes,
                 parent: p.parent,
@@ -1135,6 +1242,13 @@ pub struct Update {
     /// set it still publishes (§15 D982 (c), D1036 (4)). Their instances are
     /// detached by the commit, and the caller says so.
     pub removed: Vec<NodeId>,
+    /// The kits' variables the update added or rewrote, and those it removed —
+    /// their users detached, values kept (§15 D1064, 5A).
+    pub vars_changed: Vec<crate::variable::VarId>,
+    pub vars_removed: Vec<crate::variable::VarId>,
+    /// The same for the kits' styles.
+    pub styles_changed: Vec<crate::style::StyleId>,
+    pub styles_removed: Vec<crate::style::StyleId>,
 }
 
 /// Bring every main this document vendored from `kit` up to `published`, at
@@ -1174,6 +1288,34 @@ pub fn update_all(
     ids: &mut IdSource,
     kits: &[(&str, u32, &Published)],
 ) -> Result<Update, KitError> {
+    // 🚨 **A kit carrying a third kit's newer modes waits for that kit's
+    // update when both are accepted** (§15 D1064, `arch-scribe`'s reading):
+    // each kit is planned against what the ones before it leave, so `[A, B]`
+    // with A carrying B's new mode was refused as `Modes(B)` where `[B, A]`
+    // took. The refused kit's own update is moved first, and the whole built
+    // again — the failed attempts spend ids and leave gaps, nothing else.
+    let mut order: Vec<(&str, u32, &Published)> = kits.to_vec();
+    for _ in 0..kits.len() {
+        match update_in_order(doc, ids, &order) {
+            Err(KitError::Modes(k)) => match order.iter().position(|(id, _, _)| *id == k) {
+                Some(at) if at > 0 => {
+                    let moved = order.remove(at);
+                    order.insert(0, moved);
+                }
+                _ => return Err(KitError::Modes(k)),
+            },
+            other => return other,
+        }
+    }
+    update_in_order(doc, ids, &order)
+}
+
+/// [`update_all`] for `kits` in the order given.
+fn update_in_order(
+    doc: &Document,
+    ids: &mut IdSource,
+    kits: &[(&str, u32, &Published)],
+) -> Result<Update, KitError> {
     let Some(&(kit0, version0, published0)) = kits.first() else {
         return Ok(Update {
             tx: Transaction(Vec::new()),
@@ -1181,6 +1323,10 @@ pub fn update_all(
             made_local: Vec::new(),
             changed: Vec::new(),
             removed: Vec::new(),
+            vars_changed: Vec::new(),
+            vars_removed: Vec::new(),
+            styles_changed: Vec::new(),
+            styles_removed: Vec::new(),
         });
     };
     let mut b = Builder {
@@ -1193,13 +1339,39 @@ pub fn update_all(
         later: Vec::new(),
         dropped: Vec::new(),
         keep_out: Vec::new(),
+        tokens: Default::default(),
     };
     let mut updated = Vec::new();
     let mut made_local = Vec::new();
     let (mut changed, mut removed) = (Vec::new(), Vec::new());
+    let (mut vars_changed, mut vars_removed) = (Vec::new(), Vec::new());
+    let (mut styles_changed, mut styles_removed) = (Vec::new(), Vec::new());
     for (at, &(kit, version, published)) in kits.iter().enumerate() {
         (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
+        // The kit's variables and styles first (§15 D1064): every one this
+        // document holds rewritten to the publish, what it no longer has
+        // detached and removed, what it newly reads added — so each main's sync
+        // below writes bindings that already have somewhere to land.
+        let tokens = crate::tokens::plan(
+            &b.scratch,
+            ids,
+            &crate::tokens::Source {
+                vars: src.variables(),
+                styles: src.styles(),
+                kit: Some((kit, version, published.name())),
+            },
+            src.node_map().values(),
+            Some(kit),
+        )?;
+        for op in tokens.ops.iter().cloned() {
+            b.push(op)?;
+        }
+        vars_changed.extend(tokens.changed_vars.iter().copied());
+        vars_removed.extend(tokens.removed_vars.iter().copied());
+        styles_changed.extend(tokens.changed_styles.iter().copied());
+        styles_removed.extend(tokens.removed_styles.iter().copied());
+        b.tokens = tokens;
         let mut tops: Vec<NodeId> = b
             .scratch
             .vault()
@@ -1321,6 +1493,38 @@ pub fn update_all(
                 b.push(Operation::DeleteNode { id: n })?;
             }
         }
+        // A frame of the document's set to a mode the kit removed reads the
+        // mapping again (§15 D1064): an instance whose main set it, and kept it
+        // as an override. 🚨 **Not a copy that set it as its main did** — the
+        // main is rewritten by its sync and the commit's follow carries that;
+        // this write would be read as the user's and keep the copy off its main
+        // (`arch-scribe`'s reading, the removal's follow filter's shape).
+        // The main must still be there for the follow to come from — a variant
+        // this update deletes takes its copies off it, and the commit detaches
+        // them on the mode this reset is for (`arch-scribe`'s reading of the
+        // first cut, which asked the old document) — and must have set the
+        // copy's mode before the update.
+        let follows = |n: &Node| {
+            let before = doc.get(n.id).map(|x| x.mode);
+            let main = n
+                .link
+                .filter(|l| b.scratch.contains(*l))
+                .and_then(|l| doc.get(l))
+                .map(|s| s.mode);
+            !b.scratch.in_vault(n.id) && main.is_some() && main == before
+        };
+        let mut stale: Vec<NodeId> = b
+            .scratch
+            .node_map()
+            .values()
+            .filter(|n| n.mode.is_some_and(|m| !b.scratch.variables().has_mode(m)))
+            .filter(|n| !follows(n))
+            .map(|n| n.id)
+            .collect();
+        stale.sort();
+        for id in stale {
+            b.push(Operation::SetMode { id, mode: None })?;
+        }
     }
     // The references a sync could not point yet, now that every main of every
     // kit accepted is synced (§15 D1022).
@@ -1383,6 +1587,10 @@ pub fn update_all(
         made_local,
         changed,
         removed,
+        vars_changed,
+        vars_removed,
+        styles_changed,
+        styles_removed,
     })
 }
 
@@ -1537,6 +1745,9 @@ struct Builder<'a> {
     /// The vault tops being made local: nothing is moved out of them (§15
     /// D1024).
     keep_out: Vec<NodeId>,
+    /// Where the current kit's variables, modes and styles landed in the scratch
+    /// (§15 D1064) — every published node a sync writes is pointed through it.
+    tokens: crate::tokens::Plan,
 }
 
 impl Builder<'_> {
@@ -1626,6 +1837,7 @@ impl Builder<'_> {
         let src = self.published.document();
         let mut top = src.get(s).ok_or(KitError::Incomplete(s))?.clone();
         top.children.clear();
+        self.tokens.apply(&mut top);
         let template = vec![top];
         let (mut copy, root) =
             crate::document::remap_subtree(&template, ids).ok_or(KitError::Incomplete(s))?;
@@ -1779,6 +1991,7 @@ impl Builder<'_> {
         // property's bound layers may be among.
         let mut want = pn.clone();
         want.id = d;
+        self.tokens.apply(&mut want);
         // 🚨 **Only the fields this kind carries** (§15 D1024): `state_ops`
         // writes every field, and `changes_nothing` never calls paint on a kind
         // that takes none a no-op, so a group's `SetFills` was applied, refused

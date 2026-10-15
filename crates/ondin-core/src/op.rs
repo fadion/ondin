@@ -412,6 +412,20 @@ pub enum Operation {
     RemoveVariable {
         id: crate::variable::VarId,
     },
+    /// Replace a variable whole — its name, its cells and its origin — as a kit
+    /// update rewrites a kit's variable to the new publish (§15 D1064), its cells
+    /// following the kit's modes as they are now. The id must be there; its kind
+    /// may not change. Inverts to the variable it replaced.
+    SetVariable {
+        var: crate::variable::Variable,
+    },
+    /// One kit's modes and its mapping onto the document's (§15 D1064, D1038
+    /// (b)), `None` to drop them. Whole, as the record is small and an update
+    /// moves several parts of it at once; inverts to what it replaced.
+    SetKitModes {
+        kit: String,
+        modes: Option<crate::variable::KitModes>,
+    },
     /// Rename a variable — a slash path, whose groups are the browser's (D1038 G).
     SetVariableName {
         id: crate::variable::VarId,
@@ -496,6 +510,11 @@ pub enum Operation {
     SetStyleValue {
         id: crate::style::StyleId,
         value: crate::style::StyleValue,
+    },
+    /// A kit's style's origin — its version moved by an update (§15 D1064).
+    SetStyleOrigin {
+        id: crate::style::StyleId,
+        origin: Option<crate::style::StyleOrigin>,
     },
     /// The style a layer's fills are bound to, `None` to detach. Writes the
     /// binding alone — the commit writes the style's values beside it.
@@ -603,16 +622,19 @@ impl Operation {
             // variable or a mode, never a node.
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
+            | Operation::SetVariable { .. }
             | Operation::SetVariableName { .. }
             | Operation::SetVariableCell { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. }
+            | Operation::SetKitModes { .. }
             // And the styles table (§15 D1062): these name a style.
             | Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
-            | Operation::SetStyleValue { .. } => None,
+            | Operation::SetStyleValue { .. }
+            | Operation::SetStyleOrigin { .. } => None,
         }
     }
 
@@ -822,6 +844,7 @@ impl Operation {
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
             | Operation::SetStyleValue { .. }
+            | Operation::SetStyleOrigin { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. } => false,
@@ -890,6 +913,10 @@ impl Operation {
             // to it draws, and adding or removing a mode can move which one is
             // first — the default every unset frame reads in (D1038 (a)).
             | Operation::SetVariableCell { .. }
+            // A kit's variable rewritten, and a kit's modes or mapping — which
+            // column every layer bound to it reads (§15 D1064).
+            | Operation::SetVariable { .. }
+            | Operation::SetKitModes { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetMode { .. }
@@ -955,6 +982,13 @@ impl Operation {
             }
             Operation::SetStyleValue { id, value } => {
                 doc.styles().get(*id).is_some_and(|s| s.value == *value)
+            }
+            Operation::SetStyleOrigin { id, origin } => {
+                doc.styles().get(*id).is_some_and(|s| s.origin == *origin)
+            }
+            Operation::SetVariable { var } => doc.variables().get(var.id) == Some(var),
+            Operation::SetKitModes { kit, modes } => {
+                doc.variables().kits().get(kit) == modes.as_ref()
             }
             Operation::SetFillStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().fills == *style)
@@ -1617,6 +1651,9 @@ mod changes_ink_tests {
     /// 2026-10-06, the fixture's assertion moved first again. **Twenty-four with
     /// the styles' seven** (§15 D1062), 2026-10-15 — found missing by
     /// `arch-scribe` after the commit that added them, the assertion moved first.
+    /// **Twenty-five with `SetStyleOrigin`** (§15 D1064), the same day; that
+    /// entry's `SetVariable` and `SetKitModes` change ink, as `SetVariableCell`
+    /// does, and are asserted with the visible ones below.
     /// ⚠️ **Not the whole of `changes_ink`'s `false` arm**: the vault's two,
     /// `SetOrigin` and the variables' four answer `false` there and are not
     /// listed here — older gaps, not this list's subject.
@@ -1678,6 +1715,7 @@ mod changes_ink_tests {
                     id: style,
                     name: "s".into(),
                     value: crate::style::StyleValue::Fills(vec![]),
+                    origin: None,
                 },
             },
             Operation::RemoveStyle { id: style },
@@ -1692,6 +1730,11 @@ mod changes_ink_tests {
             Operation::SetFillStyle { id, style: None },
             Operation::SetStrokeStyle { id, style: None },
             Operation::SetEffectsStyle { id, style: None },
+            // A kit's style's version (§15 D1064): bookkeeping, as `SetOrigin` is.
+            Operation::SetStyleOrigin {
+                id: style,
+                origin: None,
+            },
         ];
         // ⚠️ **The fixture asserts its own length**, which is the only thing that
         // makes the count in this test's doc comment checkable by anything but a
@@ -1699,8 +1742,8 @@ mod changes_ink_tests {
         // mechanism.
         assert_eq!(
             invisible.len(),
-            24,
-            "the chrome list is twenty-four operations"
+            25,
+            "the chrome list is twenty-five operations"
         );
         for op in &invisible {
             assert!(
@@ -1737,6 +1780,21 @@ mod changes_ink_tests {
             },
             Operation::DeleteNode { id },
             Operation::Reorder { id, index: 0 },
+            // A kit's variable and a kit's modes are columns bound layers read
+            // (§15 D1064), as a cell is.
+            Operation::SetVariable {
+                var: crate::variable::Variable {
+                    id: crate::variable::VarId(id),
+                    name: "v".into(),
+                    kind: crate::variable::VarKind::Color,
+                    cells: Default::default(),
+                    origin: None,
+                },
+            },
+            Operation::SetKitModes {
+                kit: "0".repeat(32),
+                modes: None,
+            },
         ];
         for op in &visible {
             assert!(op.changes_ink(), "{op:?} changes what is drawn");

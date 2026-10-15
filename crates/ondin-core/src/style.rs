@@ -200,12 +200,29 @@ pub struct Style {
     pub id: StyleId,
     pub name: String,
     pub value: StyleValue,
+    /// Which kit it came from, for a style a vendored main is bound to (§15
+    /// D1064) — `None` for the document's own. A kit's style is read-only here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<StyleOrigin>,
 }
 
 impl Style {
     pub fn slot(&self) -> StyleSlot {
         self.value.slot()
     }
+    /// The kit this style came from, `None` for the document's own.
+    pub fn kit(&self) -> Option<&str> {
+        self.origin.as_ref().map(|o| o.kit.as_str())
+    }
+}
+
+/// Where a kit's style came from (§15 D1064) — `crate::variable::VarOrigin` for
+/// a style: the kit's `meta.id`, the style in its published state, the version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StyleOrigin {
+    pub kit: String,
+    pub style: StyleId,
+    pub version: u32,
 }
 
 /// The document's styles.
@@ -229,8 +246,19 @@ impl Styles {
     pub fn is_empty(&self) -> bool {
         self.styles.is_empty()
     }
+    /// The document's own style of `slot` named `name` — a kit's are named in
+    /// their kit, and a paste rebinds to one of those by its origin (§15 D1064).
     pub fn by_name(&self, slot: StyleSlot, name: &str) -> Option<&Style> {
-        self.of_slot(slot).find(|s| s.name == name)
+        self.of_slot(slot)
+            .find(|s| s.origin.is_none() && s.name == name)
+    }
+    /// The style whose origin is `key`, a kit's style held here.
+    pub fn by_origin(&self, key: (&str, StyleId)) -> Option<&Style> {
+        self.styles.values().find(|s| {
+            s.origin
+                .as_ref()
+                .is_some_and(|o| (o.kit.as_str(), o.style) == key)
+        })
     }
     /// Every id the table holds, for `reserve_existing_ids` — the styles' own and
     /// their items', which a style with no users holds alone.
@@ -334,8 +362,12 @@ pub enum StyleRule {
     BadVariable(StyleId),
     #[error("node {0:?} is bound to a style that is not there or of another slot")]
     BadBinding(NodeId),
-    #[error("node {0:?} in the vault is bound to a style")]
+    #[error("node {0:?} in the vault is bound to a style of the document's own")]
     InVault(NodeId),
+    #[error(
+        "{0:?} is a kit's and reads a variable of the document's own, or names a malformed kit"
+    )]
+    KitStyle(StyleId),
 }
 
 /// The style rules, over the table and every node's bindings — a post-condition
@@ -352,13 +384,24 @@ pub(crate) fn check<'a>(
     nodes: impl IntoIterator<Item = &'a crate::Node>,
     in_vault: impl Fn(NodeId) -> bool,
 ) -> Result<(), StyleRule> {
-    let mut names: FxHashSet<(StyleSlot, &str)> = FxHashSet::default();
+    let mut names: FxHashSet<(Option<&str>, StyleSlot, &str)> = FxHashSet::default();
     for s in styles.styles.values() {
         if s.name.trim().is_empty() {
             return Err(StyleRule::EmptyName);
         }
-        if !names.insert((s.slot(), s.name.as_str())) {
+        // Unique among the document's own, and among each kit's (§15 D1064).
+        if !names.insert((s.kit(), s.slot(), s.name.as_str())) {
             return Err(StyleRule::DuplicateName(s.slot(), s.name.clone()));
+        }
+        // A kit's style reads only kits' variables, as a vault node does.
+        if let Some(k) = s.kit()
+            && (!crate::meta::DocumentMeta::is_wellformed_id(k)
+                || s.value
+                    .vars()
+                    .iter()
+                    .any(|v| vars.get(*v).is_some_and(|v| v.origin.is_none())))
+        {
+            return Err(StyleRule::KitStyle(s.id));
         }
         if s.value.first_duplicate().is_some() {
             return Err(StyleRule::DuplicateItem(s.id));
@@ -373,10 +416,12 @@ pub(crate) fn check<'a>(
     }
     for n in nodes {
         for (slot, id) in n.styles.iter() {
-            if styles.get(id).is_none_or(|s| s.slot() != slot) {
+            let Some(style) = styles.get(id).filter(|s| s.slot() == slot) else {
                 return Err(StyleRule::BadBinding(n.id));
-            }
-            if in_vault(n.id) {
+            };
+            // A vault node is bound to kits' styles only (§15 D1064), as it
+            // reads kits' variables only (`variable::check`).
+            if in_vault(n.id) && style.origin.is_none() {
                 return Err(StyleRule::InVault(n.id));
             }
         }
@@ -565,6 +610,7 @@ pub fn create_ops(
             id,
             name: name.to_string(),
             value,
+            origin: None,
         },
     }];
     ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));
@@ -586,18 +632,19 @@ pub fn free_name(styles: &Styles, slot: StyleSlot, base: &str) -> String {
 /// `value` with every paint bound to one of `vars` **detached to the colour it
 /// draws in `mode`** — what deleting a variable does to the styles that use it
 /// (`variable::remove_ops`), in the document's default mode: a style is read by
-/// layers in many modes and holds one value.
+/// layers in many modes and holds one value. `None` in a document with no modes,
+/// where a kit's variable reads its kit's default (§15 D1064).
 pub(crate) fn detach_vars(
     value: &StyleValue,
     t: &crate::variable::Variables,
-    mode: crate::variable::ModeId,
+    mode: Option<crate::variable::ModeId>,
     vars: &[crate::variable::VarId],
 ) -> StyleValue {
     use crate::variable::{BrushSource, Value};
     let drawn = |b: &BrushSource| -> BrushSource {
         match b {
             BrushSource::Bound { var, alpha } if vars.contains(var) => {
-                let c = match t.resolve(*var, mode) {
+                let c = match t.resolve_opt(*var, mode) {
                     Some(Value::Color(c)) => c.multiply_alpha(*alpha),
                     _ => peniko::Color::TRANSPARENT,
                 };
@@ -638,12 +685,16 @@ pub struct CarriedStyle {
     pub id: StyleId,
     pub name: String,
     pub slot: StyleSlot,
+    /// A kit's style's origin (§15 D1064), which a paste rebinds by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<StyleOrigin>,
 }
 
 /// The variables' paste rule made for a style (§15 D1062, D1038's rule for a
 /// variable): `s` itself where `styles` has it at the slot, else `styles`' style
 /// of the **same name and slot**, else `None` — the layer keeps the values it
-/// was copied with, detached.
+/// was copied with, detached. A kit's style rebinds by its origin instead, as a
+/// kit's variable does (§15 D1064).
 pub fn rebind(
     styles: &Styles,
     carried: &[CarriedStyle],
@@ -654,5 +705,11 @@ pub fn rebind(
         return Some(s);
     }
     let c = carried.iter().find(|c| c.id == s && c.slot == slot)?;
-    styles.by_name(slot, &c.name).map(|st| st.id)
+    match &c.origin {
+        Some(o) => styles
+            .by_origin((&o.kit, o.style))
+            .filter(|st| st.slot() == slot)
+            .map(|st| st.id),
+        None => styles.by_name(slot, &c.name).map(|st| st.id),
+    }
 }

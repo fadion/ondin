@@ -126,15 +126,18 @@ fn mode(op: &Operation) -> Mode {
         | Operation::RemoveVariable { .. }
         | Operation::SetVariableName { .. }
         | Operation::SetVariableCell { .. }
+        | Operation::SetVariable { .. }
         | Operation::AddMode { .. }
         | Operation::RemoveMode { .. }
         | Operation::SetModeName { .. }
+        | Operation::SetKitModes { .. }
         // So is the styles table: a style's edit reaches main and copy alike
         // through the values `style::settle` writes on each.
         | Operation::AddStyle { .. }
         | Operation::RemoveStyle { .. }
         | Operation::SetStyleName { .. }
-        | Operation::SetStyleValue { .. } => Mode::Skip,
+        | Operation::SetStyleValue { .. }
+        | Operation::SetStyleOrigin { .. } => Mode::Skip,
     }
 }
 

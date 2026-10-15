@@ -2502,11 +2502,12 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     ];
 
     // And the variables table's (§15 D1039): no override carries the table, so
-    // these six are no-ops here — four of them draw nothing, and a mode coming
+    // these eight are no-ops here — four of them draw nothing, and a mode coming
     // or going changes what every bound layer draws. **Seven until
     // `SetVariableCell` left the list** (§15 D1056): a cell's edit now previews
     // on what reads it, so it is no longer absorbed as nothing
-    // (`a_variable_cell_previews_on_what_reads_it`).
+    // (`a_variable_cell_previews_on_what_reads_it`). **Eight with §15 D1064's
+    // `SetVariable` and `SetKitModes`**, both ink, as a mode's coming is.
     let (var, mode) = (ids.mint_var(), ids.mint_mode());
     let table_chrome = [
         Operation::AddVariable {
@@ -2515,6 +2516,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 name: "v".into(),
                 kind: ondin_core::VarKind::Number,
                 cells: Default::default(),
+                origin: None,
             },
         },
         Operation::RemoveVariable { id: var },
@@ -2537,6 +2539,21 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             cells: vec![],
         },
         Operation::RemoveMode { id: mode },
+        // A kit's variable rewritten and a kit's modes (§15 D1064): columns
+        // every bound layer reads, so ink, and absorbed as committed.
+        Operation::SetVariable {
+            var: ondin_core::Variable {
+                id: var,
+                name: "v".into(),
+                kind: ondin_core::VarKind::Number,
+                cells: Default::default(),
+                origin: None,
+            },
+        },
+        Operation::SetKitModes {
+            kit: "0".repeat(32),
+            modes: None,
+        },
     ];
     // And the styles' seven (§15 D1062): a style draws through the lists its
     // users hold, which a preview carries as `SetFills` and its kin, so the
@@ -2549,6 +2566,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 id: style,
                 name: "s".into(),
                 value: ondin_core::style::StyleValue::Fills(vec![]),
+                origin: None,
             },
         },
         Operation::RemoveStyle { id: style },
@@ -2563,18 +2581,23 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         Operation::SetFillStyle { id, style: None },
         Operation::SetStrokeStyle { id, style: None },
         Operation::SetEffectsStyle { id, style: None },
+        // A kit's style's version (§15 D1064).
+        Operation::SetStyleOrigin {
+            id: style,
+            origin: None,
+        },
     ];
 
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
-    assert_eq!(styles.len(), 7, "and the styles' seven");
+    assert_eq!(styles.len(), 8, "and the styles' eight");
     assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(
         table_chrome.len() + table_ink.len(),
-        6,
-        "and the table's six"
+        8,
+        "and the table's eight"
     );
 
     let res = Resolved::rebuild(&f.doc);
@@ -2595,8 +2618,8 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     }
 
     // The half the design got wrong: every chrome no-op is `changes_ink`'s
-    // `false`, and not every no-op is — the image pair and two of the table's
-    // six change ink. (Nor is every `false` a no-op: `absorb` refuses the
+    // `false`, and not every no-op is — the image pair and four of the table's
+    // eight change ink. (Nor is every `false` a no-op: `absorb` refuses the
     // vault's two and `SetOrigin`, which this does not list.)
     for op in chrome
         .iter()
@@ -4105,6 +4128,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
                 name: "radius/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4225,6 +4249,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
                 name: "space/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(16.0))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4325,6 +4350,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
                 name: "state/open".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4421,6 +4447,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
                 name: "state/open".into(),
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4482,6 +4509,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
                 name: "radius/lg".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4526,6 +4554,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             name: name.into(),
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(x))].into(),
+            origin: None,
         },
     };
     doc.apply(&Transaction(vec![
@@ -4686,6 +4715,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
                 name: "size/w".into(),
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(90.0))].into(),
+                origin: None,
             },
         },
     ]))
@@ -4753,6 +4783,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             name: name.into(),
             kind,
             cells: [(mode, cell)].into(),
+            origin: None,
         },
     };
     doc.apply(&Transaction(vec![

@@ -1904,7 +1904,11 @@ impl OndinApp {
         );
         let (mut ops, scratch, shown) = match built {
             Ok(b) => b,
-            Err(ondin_core::kit::KitError::NeedsUpdate(_)) => {
+            // A main, or a kit's modes, held at an older version — a held kit
+            // lacking a mode the publish read (§15 D1064).
+            Err(
+                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+            ) => {
                 self.session.fail(
                     "This kit has an update to accept before that component can be swapped in"
                         .to_string(),

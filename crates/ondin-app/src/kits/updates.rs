@@ -393,13 +393,17 @@ impl OndinApp {
             // kit, it failed for good. When more updates wait, all of them are
             // accepted together — the third kit's among them — as *Accept all*
             // does; otherwise the third kit is not in the library to update from.
-            Err(ondin_core::kit::KitError::NeedsUpdate(_))
-                if only.is_some() && self.kits_waiting(false).len() > waiting.len() =>
-            {
+            // A third kit's modes held at another version than this publish
+            // read are the same owed update (§15 D1064).
+            Err(
+                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+            ) if only.is_some() && self.kits_waiting(false).len() > waiting.len() => {
                 self.accept_kit_updates(None);
                 return;
             }
-            Err(ondin_core::kit::KitError::NeedsUpdate(_)) => {
+            Err(
+                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_),
+            ) => {
                 self.session.fail(
                     "This update needs a newer version of another kit it uses, which is not \
                      in your library"
@@ -479,6 +483,24 @@ impl OndinApp {
                 "{toast} · {n} instance{} of {name} detached — the kit removed it",
                 plural(*n)
             );
+        }
+        // And the kits' variables and styles (5A's counts, §15 D1065): what came
+        // new or changed, and what the kit removed — its users keeping the values.
+        let tokens = |vars: usize, styles: usize| match (vars, styles) {
+            (0, 0) => None,
+            (v, 0) => Some(format!("{v} variable{}", plural(v))),
+            (0, s) => Some(format!("{s} style{}", plural(s))),
+            (v, s) => Some(format!(
+                "{v} variable{} and {s} style{}",
+                plural(v),
+                plural(s)
+            )),
+        };
+        if let Some(t) = tokens(update.vars_changed.len(), update.styles_changed.len()) {
+            toast = format!("{toast} · {t} updated");
+        }
+        if let Some(t) = tokens(update.vars_removed.len(), update.styles_removed.len()) {
+            toast = format!("{toast} · {t} the kit removed detached, values kept");
         }
         if let Some(first) = update.made_local.first().and_then(|m| doc.get(*m)) {
             toast = match update.made_local.len() {

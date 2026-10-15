@@ -687,7 +687,14 @@ fn try_paste_across(
             index: None,
         })
         .collect();
-    kit::insert_carrying(to, ids, &payload.kits, &placements, Default::default())
+    kit::insert_carrying(
+        to,
+        ids,
+        &payload.kits,
+        &Default::default(),
+        &placements,
+        Default::default(),
+    )
 }
 
 /// **A kit instance pasted into a document that has never used the kit lands an

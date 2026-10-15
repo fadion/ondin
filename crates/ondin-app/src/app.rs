@@ -6239,7 +6239,14 @@ impl OndinApp {
         }
         // Down and right, so the copy is obviously a copy rather than sitting
         // invisibly on top of what it came from.
-        self.insert_all(placements, "Pasted", offset, &clip.images, &clip.kits);
+        self.insert_all(
+            placements,
+            "Pasted",
+            offset,
+            &clip.images,
+            &clip.kits,
+            &clip.vars.tokens,
+        );
         true
     }
 
@@ -6314,12 +6321,19 @@ impl OndinApp {
         // clipboard, the copy settles as an instance of `m` inside `m` and the commit
         // refused the whole paste as `ComponentCycle`; a main whose original is gone
         // stays a main, `NestedMain` inside a main or an instance.
-        if !self.paste_is_held(&placements, &clip.images, &clip.kits) {
+        if !self.paste_is_held(&placements, &clip.images, &clip.kits, &clip.vars.tokens) {
             return self.paste_clipboard_at(PASTE_OFFSET);
         }
         // Offset like every other paste: a copy landing exactly on top of something
         // is invisible, and this door decided the *slot*, not the position.
-        self.insert_all(placements, "Pasted", PASTE_OFFSET, &clip.images, &clip.kits);
+        self.insert_all(
+            placements,
+            "Pasted",
+            PASTE_OFFSET,
+            &clip.images,
+            &clip.kits,
+            &clip.vars.tokens,
+        );
         true
     }
 
@@ -6340,6 +6354,7 @@ impl OndinApp {
         placements: &[build::Placement],
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
         kits: &[Vec<Node>],
+        tokens: &ondin_core::tokens::Tokens,
     ) -> bool {
         let doc = &self.session.doc;
         let under_a_component = placements.iter().any(|p| {
@@ -6356,6 +6371,7 @@ impl OndinApp {
             doc,
             &mut self.session.ids,
             kits,
+            tokens,
             placements,
             PASTE_OFFSET,
         ) else {
@@ -6483,7 +6499,14 @@ impl OndinApp {
         }
         // No pictures to carry: a duplicate is made from the document it lands in,
         // so every id it references is already in that document's table.
-        self.insert_all(placements, "Duplicated", step, &[], &[]);
+        self.insert_all(
+            placements,
+            "Duplicated",
+            step,
+            &[],
+            &[],
+            &Default::default(),
+        );
 
         // Remember where this copy landed, so moving it and pressing again
         // repeats that move.
@@ -6549,6 +6572,7 @@ impl OndinApp {
         offset: Vec2,
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
         kits: &[Vec<Node>],
+        tokens: &ondin_core::tokens::Tokens,
     ) {
         if placements.is_empty() {
             return;
@@ -6560,6 +6584,7 @@ impl OndinApp {
             &self.session.doc,
             &mut self.session.ids,
             kits,
+            tokens,
             &placements,
             offset,
         ) {

@@ -43,6 +43,7 @@ fn var(id: VarId, name: &str, kind: VarKind, cells: [(ModeId, Cell); 2]) -> Vari
         name: name.into(),
         kind,
         cells: cells.into(),
+        origin: None,
     }
 }
 
@@ -449,6 +450,7 @@ fn a_paste_keeps_rebinds_or_detaches() {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(RED))].into(),
+                    origin: None,
                 },
             },
         ]))
@@ -548,6 +550,7 @@ fn a_property_paste_keeps_rebinds_or_detaches() {
                     name: "brand/500".into(),
                     kind: VarKind::Color,
                     cells: [(m, Cell::Color(RED))].into(),
+                    origin: None,
                 },
             },
         ]))
@@ -774,6 +777,7 @@ fn deleting_a_mode_and_renaming_a_group() {
                 name: "md".into(),
                 kind: VarKind::Number,
                 cells: [(f.light, Cell::Number(1.0))].into(),
+                origin: None,
             },
         }]))
         .unwrap();

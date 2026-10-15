@@ -1710,13 +1710,18 @@ impl RenderOverrides {
             // reads it off the document, so a previewed rename, a new mode, or a
             // variable added draws as committed — `AddImage`'s gap, for the same
             // reason, and none of them is dragged. Absorbed rather than refused so
-            // a transaction carrying one still previews the rest.
+            // a transaction carrying one still previews the rest. So are a kit's
+            // variable rewritten whole and a kit's modes (§15 D1064): written by a
+            // kit update and a mapping's pick, both committed at once, neither
+            // dragged.
             Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
-            | Operation::SetModeName { .. } => {}
+            | Operation::SetModeName { .. }
+            | Operation::SetVariable { .. }
+            | Operation::SetKitModes { .. } => {}
             // **A style draws through the lists it is copied into** (§15 D1062):
             // the table and a layer's binding to it draw nothing of themselves.
             // The app's two previews of a style write the lists themselves — the
@@ -1726,6 +1731,7 @@ impl RenderOverrides {
             Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
+            | Operation::SetStyleOrigin { .. }
             | Operation::SetStyleValue { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }

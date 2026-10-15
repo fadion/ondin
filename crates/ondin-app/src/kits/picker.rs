@@ -830,7 +830,10 @@ impl OndinApp {
                 root,
             )
             .map_err(|e| match e {
-                ondin_core::kit::KitError::NeedsUpdate(_) => {
+                // A main, or the kit's modes, held at an older version (§15
+                // D1064): either way an update is owed first. A kit held newer,
+                // covering the modes this kit read, is reused, not refused.
+                ondin_core::kit::KitError::NeedsUpdate(_) | ondin_core::kit::KitError::Modes(_) => {
                     "This kit has an update to accept before that component can be placed"
                         .to_string()
                 }

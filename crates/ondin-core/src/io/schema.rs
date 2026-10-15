@@ -121,11 +121,15 @@ pub(crate) struct VariablesDto {
     pub modes: Vec<crate::variable::Mode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vars: Vec<crate::variable::Variable>,
+    /// The kits' modes and mappings, by kit id (§15 D1064) — a `BTreeMap`, so in
+    /// order. New in v8, unreleased when it joined, as `styles` did.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub kits: std::collections::BTreeMap<String, crate::variable::KitModes>,
 }
 
 impl VariablesDto {
     fn is_empty(&self) -> bool {
-        self.modes.is_empty() && self.vars.is_empty()
+        self.modes.is_empty() && self.vars.is_empty() && self.kits.is_empty()
     }
 
     fn from_table(t: &crate::variable::Variables) -> Self {
@@ -133,6 +137,7 @@ impl VariablesDto {
         Self {
             modes: t.modes().to_vec(),
             vars: t.iter().cloned().collect(),
+            kits: t.kits().clone(),
         }
     }
 
@@ -149,6 +154,7 @@ impl VariablesDto {
         Ok(crate::variable::Variables {
             modes: self.modes,
             vars,
+            kits: self.kits,
         })
     }
 }
@@ -803,7 +809,18 @@ impl DocumentDto {
         // dangling component link is: a binding to nothing has no value to draw,
         // and dropping it would hand the layer a literal nobody chose.
         let variables = self.variables.into_table()?;
-        crate::variable::check(&variables, nodes.values())
+        let in_vault = |id: NodeId| {
+            let mut cursor = Some(id);
+            for _ in 0..=nodes.len() {
+                match cursor {
+                    Some(c) if Some(c) == vault => return true,
+                    Some(c) => cursor = nodes.get(&c).and_then(|n| n.parent()),
+                    None => return false,
+                }
+            }
+            false
+        };
+        crate::variable::check(&variables, nodes.values(), in_vault)
             .map_err(|rule| IoError::Integrity(rule.to_string()))?;
 
         // And the style rules (§15 D1062), refused rather than repaired for the
@@ -818,17 +835,6 @@ impl DocumentDto {
             styles.push(s);
         }
         let styles = crate::style::Styles::from_list(styles);
-        let in_vault = |id: NodeId| {
-            let mut cursor = Some(id);
-            for _ in 0..=nodes.len() {
-                match cursor {
-                    Some(c) if Some(c) == vault => return true,
-                    Some(c) => cursor = nodes.get(&c).and_then(|n| n.parent()),
-                    None => return false,
-                }
-            }
-            false
-        };
         crate::style::check(&styles, &variables, nodes.values(), in_vault)
             .map_err(|rule| IoError::Integrity(rule.to_string()))?;
 

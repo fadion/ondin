@@ -7062,6 +7062,7 @@ mod bound_eye_tests {
                     name: "state/on".into(),
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
+                    origin: None,
                 },
             },
         ])));

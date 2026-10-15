@@ -371,15 +371,41 @@ impl Document {
     ///
     /// **The node itself counts**: a frame's own fill reads in the mode it sets,
     /// as its children do.
+    ///
+    /// **One of the document's modes**: a frame set to a kit's mode — a kit
+    /// main's, copied onto its instances (§15 D1064) — governs that kit's
+    /// variables alone, and is passed over here. [`Self::resolve_var_in`] reads
+    /// it for those.
     pub fn mode_at(&self, id: NodeId) -> Option<crate::variable::ModeId> {
+        self.mode_for_in(&self.variables, id, None)
+    }
+
+    /// The mode `id` reads a variable of `kit` in — `None` for one of the
+    /// document's own: the nearest frame's at or above it that is a mode of the
+    /// document or of that kit, else `None`, the default (§15 D1064). For the
+    /// document's own, a default is filled in.
+    fn mode_for_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        kit: Option<&str>,
+    ) -> Option<crate::variable::ModeId> {
         let mut at = self.nodes.get(&id);
         while let Some(n) = at {
             if let Some(m) = n.mode {
-                return Some(m);
+                let ours = t.mode(m).is_some();
+                let kits =
+                    kit.is_some_and(|k| t.kits().get(k).is_some_and(|km| km.mode(m).is_some()));
+                if ours || kits {
+                    return Some(m);
+                }
             }
             at = n.parent.and_then(|p| self.nodes.get(&p));
         }
-        self.variables.default_mode()
+        if kit.is_some() {
+            return None;
+        }
+        t.default_mode()
     }
 
     /// `var`'s value as `id` reads it — in the mode in force there.
@@ -401,7 +427,11 @@ impl Document {
         id: NodeId,
         var: crate::variable::VarId,
     ) -> Option<crate::variable::Value> {
-        t.resolve(var, self.mode_at(id)?)
+        match t.get(var)?.kit() {
+            // A kit's variable, through the mapping (§15 D1064, D1038 (b)).
+            Some(kit) => t.resolve_opt(var, self.mode_for_in(t, id, Some(kit))),
+            None => t.resolve(var, self.mode_for_in(t, id, None)?),
+        }
     }
 
     /// The brush `brush` draws at `id`: itself when literal, a solid of its
@@ -871,13 +901,15 @@ impl Document {
         // loops, a mode set only on a frame. Over the whole document, for
         // `component::check`'s reason — removing a variable breaks a binding on a
         // node the removal never dirtied.
-        crate::variable::check(&working.variables, working.nodes.values())
-            .map_err(OpError::Variables)?;
+        crate::variable::check(&working.variables, working.nodes.values(), |id| {
+            working.in_vault(id)
+        })
+        .map_err(OpError::Variables)?;
 
         // The style rules (§15 D1062): every binding names a style of its slot,
         // names unique within a slot, a style's paints bound to colour variables,
-        // and no vault node bound — the same whole-document reach, for the same
-        // reason.
+        // and no vault node bound to one of the document's own (§15 D1064) — the
+        // same whole-document reach, for the same reason.
         crate::style::check(
             &working.styles,
             &working.variables,
@@ -1104,6 +1136,30 @@ impl Document {
             }
             Operation::AddVariable { var } => self.op_add_variable(var, dirty),
             Operation::RemoveVariable { id } => self.op_remove_variable(*id, dirty),
+            Operation::SetVariable { var } => {
+                let v = self
+                    .variables
+                    .vars
+                    .get_mut(&var.id)
+                    .ok_or(OpError::NoSuchVariable(var.id))?;
+                if v.kind != var.kind {
+                    return Err(OpError::WrongKindForOp);
+                }
+                let old = std::mem::replace(v, var.clone());
+                dirty.0.extend(self.bound_nodes());
+                Ok(Operation::SetVariable { var: old })
+            }
+            Operation::SetKitModes { kit, modes } => {
+                let old = match modes {
+                    Some(m) => self.variables.kits.insert(kit.clone(), m.clone()),
+                    None => self.variables.kits.remove(kit),
+                };
+                dirty.0.extend(self.bound_nodes());
+                Ok(Operation::SetKitModes {
+                    kit: kit.clone(),
+                    modes: old,
+                })
+            }
             Operation::SetVariableName { id, name } => {
                 let v = self
                     .variables
@@ -1205,6 +1261,18 @@ impl Document {
                     value: old,
                 })
             }
+            Operation::SetStyleOrigin { id, origin } => {
+                let s = self
+                    .styles
+                    .styles
+                    .get_mut(id)
+                    .ok_or(OpError::NoSuchStyle(*id))?;
+                let old = std::mem::replace(&mut s.origin, origin.clone());
+                Ok(Operation::SetStyleOrigin {
+                    id: *id,
+                    origin: old,
+                })
+            }
             Operation::SetFillStyle { id, style } => {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
                 let old = std::mem::replace(&mut node.styles.fills, *style);
@@ -1280,7 +1348,7 @@ impl Document {
         cell: crate::variable::Cell,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        if self.variables.mode(mode).is_none() {
+        if !self.variables.has_mode(mode) {
             return Err(OpError::NoSuchMode(mode));
         }
         let v = self

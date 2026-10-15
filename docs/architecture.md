@@ -320,8 +320,8 @@ permission.
    consumer are the third member's kind (built 2026-10-15, §15 D1064): copies of the kit's at a
    published version, each with its origin, rewritten only by the commit that accepts an update.
    ⚠️ **Styles make it the first of four** (§5.3f, §15
-   D1062): a styled layer's fills, strokes or effects are a copy of its style's list, written by the
-   commit (`style::settle`) — the second member's shape, for a style.
+   D1062): a styled layer's fills, strokes or effects — or, since D1067, its type — are a copy of
+   its style's list, written by the commit (`style::settle`) — the second member's shape, for a style.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -3401,7 +3401,10 @@ Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a lay
 > removals, the carrying paste) and its chrome (§15 D1065: kit groups last, the browser's kit header
 > with the mapping, inert rows, the toast's counts), and *Make local*'s fork of what the main reads (§15
 > D1066, the maintainer's ruling) — *Kits' variables and styles, as built*, below — and 5A's extended
-> summary and the browser's *v8 → v9* line (D1065's second amendment). The
+> summary and the browser's *v8 → v9* line (D1065's second amendment). **Of step 6, text styles are
+> built** (2026-10-15, under the maintainer's delegation) — the core (§15 D1067: a fourth slot holding
+> the character defaults less colour and language, spans the text's own marks over it) and the Type
+> card as a style card (§15 D1068) — and string variables are not. The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3464,10 +3467,14 @@ a whole**: editing any field of a styled card detaches it, with no partial overr
 (D1038) — ⚠️ as built, *Edit* opens the users' own card on the style rather than a card in the browser
 (§15 D1063); a fully or a partly styled card is read-only alike. Every other door — a canvas gesture on a styled or bound value, *Paste properties*, MCP —
 detaches, the floating status saying what was detached; refusing would leave the canvas's handles
-dead. A style's values may be variables. Text styles come last, text storing its character attributes
-per span (§5.4). 🚨 **A style is not resolved at read** (§15 D1062): a styled layer's own list holds a
-copy of its style's values, which the commit writes — the variables' rule above is theirs alone, and a
-reader of a layer's fills, strokes or effects never asks the style table.
+dead. A style's values may be variables. **A text style binds the character defaults, not the spans**
+(§15 D1067, D1037's (e)): text stores its character attributes per span (§5.4), and a span stays the
+text's own mark over the style — so styling a selection keeps the style, and only a write of the
+defaults detaches. It holds the defaults **less their colour and language** — the colour is the Fill
+card's, a language the words' — and neither the paragraph nor the block scope. 🚨 **A style is not
+resolved at read** (§15 D1062): a styled layer's own list holds a copy of its style's values, which the
+commit writes — the variables' rule above is theirs alone, and a reader of a layer's fills, strokes,
+effects or type never asks the style table.
 
 **The chrome** (the maintainer's rulings, §15 D1037; the accepted design, §15 D1038 in full). **A fully
 rounded capsule means a reference** — a bound field's chip, a collapsed styled card, an alias — and
@@ -3701,8 +3708,15 @@ opaque than its variable.
 variables — each `Style` a name and a `StyleValue`: `Fills`, `Strokes` or `Effects`, **the card's whole
 list** of `Keyed` items, so a stroke style carries each stroke's width, join, cap, dashes and alignment.
 Names are slash paths, **unique within a slot, not across slots**. A layer's bindings are
-`Node::styles: StyleRefs { fills, strokes, effects }`. The binding ops are per slot — `SetFillStyle`,
-`SetStrokeStyle`, `SetEffectsStyle` — and write the binding alone.
+`Node::styles: StyleRefs { fills, strokes, effects, text }`. The binding ops are per slot — `SetFillStyle`,
+`SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle` — and write the binding alone.
+**A text style** (step 6, §15 D1067 in full) is `StyleValue::Text(Box<TextStyle>)`, the type part
+(`style::type_part`: the defaults with `color` and `locale` cleared); the commit writes it as
+`SetTextStyle { spans: None }` over the layer's own colour and language, compares type parts, and so
+re-states the spans against the new defaults — ⚠️ a span the new defaults equal is dropped (§15 D163),
+`Ctrl+Z` alone bringing it back. `SetTextSpans` and `SetText` are not the slot's writes; a
+`SetTextStyle` is, but detaches only when it moves the type part. `style::check` refuses a text style on
+a layer that is not text.
 🚨 **`style::settle` is the whole of "styled or not, as a whole"**: run by `propagate::owed` first and
 last, it finds every bound slot not holding its style's look (values compared, item ids not) and
 **rewrites** it from the style when the transaction edited the style or set that binding, or when no
@@ -3738,8 +3752,16 @@ slot on a user into one `SetStyleValue`, which `settle` writes back onto every u
 users cannot be edited, and the edit ends with *Done*, `Escape`, the style's removal, or a selection
 holding any layer that is not its user. A detach a door made — `settle`'s, not the user's own ops' — says
 *Detached X* on the floating status (`session::styles_detached`, D1038 (2)). ⚠️ **No preview runs
-`settle`**: the picker's and an edit's previews write the lists themselves. Not built: ~~the kit groups
-(step 4),~~ the text and layout cards' styles.
+`settle`**: the picker's and an edit's previews write the lists themselves. **The Type card is a style
+card** (§15 D1068): *Ag* its preview, `Family · size` its summary, and its rows **live under the capsule
+over a live session's non-empty selection**, where they write spans and keep the style; *Apply* over a
+live session re-opens the editor; *Edit* on a text style selects its first user only. 🚨 **The card is
+wider than its slot, so it leaves live the rows its style does not hold** (D1068's amendment): a
+`tail` drawn after whatever the card's state draws, under a collapsed capsule too, holds the alignment
+row and the popup's opener — the popup closing when its opener is not drawn — and the popup locks its
+Character tab's held sections where the card is read-only — its Colour and Language rows live, as a
+text style holds neither — and Paragraph and Box live. Not built: ~~the kit groups (step 4),~~ ~~the text
+and~~ the layout card's style, and a Type card over several layers.
 
 **Kits' variables and styles, as built** (step 4, §15 D1064 and D1065 in full). A vendored kit's
 variables and styles sit **in the consumer's own tables**, each minted the consumer's id and carrying
@@ -5392,7 +5414,8 @@ pub enum Operation {
     SetStyleValue { id: StyleId, value: StyleValue }, // the whole list, of the style's own slot
     SetFillStyle { id: NodeId, style: Option<StyleId> }, // a layer's binding alone, one op per slot;
     SetStrokeStyle { id: NodeId, style: Option<StyleId> }, // the commit writes the values beside it
-    SetEffectsStyle { id: NodeId, style: Option<StyleId> }, // (`style::settle`). All seven change no ink
+    SetEffectsStyle { id: NodeId, style: Option<StyleId> }, // (`style::settle`); and a text layer's type
+    SetTypeStyle { id: NodeId, style: Option<StyleId> },   // (§15 D1067). All eight change no ink
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },

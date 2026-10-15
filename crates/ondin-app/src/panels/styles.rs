@@ -476,7 +476,18 @@ impl OndinApp {
                     }
                 }
                 StyleShown::Mixed(list) => mixed_capsule(ui, &app.session.doc, list),
-                StyleShown::Plain | StyleShown::Partial => body(app, ui),
+                // Some styled and some not (F10): the rows greyed and inert, as a
+                // styled card's are — the inspector is the one door that does
+                // not detach (D1038 (1)); the `⋯` detaches or applies to them all.
+                StyleShown::Partial => {
+                    ui.scope(|ui| {
+                        ui.disable();
+                        ui.set_opacity(GREYED);
+                        body(app, ui);
+                    });
+                    footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
+                }
+                StyleShown::Plain => body(app, ui),
             },
         );
         if clicks.more
@@ -645,7 +656,13 @@ impl OndinApp {
             let doc = &self.session.doc;
             let users = style::users(doc, s);
             let selected = self.session.selection.ids();
-            if doc.styles().get(s).is_none() || !selected.iter().any(|n| users.contains(n)) {
+            // Every selected layer a user: one that is not would read the card
+            // as *Partial* while the door still turned its writes into the
+            // style's (`arch-scribe`'s read of the first cut).
+            if doc.styles().get(s).is_none()
+                || selected.is_empty()
+                || !selected.iter().all(|n| users.contains(n))
+            {
                 self.session.style_edit = None;
             }
         }
@@ -683,9 +700,13 @@ impl OndinApp {
             StyleShown::One(_) => true,
             StyleShown::Mixed(_) | StyleShown::Partial => false,
         };
-        let create = match state {
-            StyleShown::One(_) => "Create style from this as a copy…",
-            _ => "Create style from this…",
+        // Every row names how many layers it acts on (F10) — *Create* too, which
+        // binds them all.
+        let create = match (&state, n) {
+            (StyleShown::One(_), 1) => "Create style from this as a copy…".to_string(),
+            (StyleShown::One(_), n) => format!("Create style from these {n} as a copy…"),
+            (_, 1) => "Create style from this…".to_string(),
+            (_, n) => format!("Create style from these {n} layers…"),
         };
         let detach = match (n, styled) {
             (1, _) | (_, 0) => "Detach style".to_string(),
@@ -710,7 +731,7 @@ impl OndinApp {
                     }
                     let c = ui::menu_row(
                         ui,
-                        ui::MenuRow::new(icon::PLUS_SQUARE, create).enabled(can_create),
+                        ui::MenuRow::new(icon::PLUS_SQUARE, &create).enabled(can_create),
                         ROW_H,
                     );
                     if c.clicked() && can_create {
@@ -1153,8 +1174,22 @@ mod tests {
             "b follows the edit"
         );
         assert_eq!(fill_style(&app, a), Some(s), "a stays styled");
-        // The edit closed, the same write detaches.
-        app.session.style_edit = None;
+        // A selection holding a layer that does not use the style ends the edit.
+        let c = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![Operation::CreateNode {
+            id: c,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Ellipse {
+                size: Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: None,
+        }])));
+        app.session.selection.set(vec![a, b, c]);
+        frame(&ctx, &mut app, vec![]);
+        assert_eq!(app.session.style_edit, None, "a non-user selected ends it");
         fills[0].value.brush = Brush::Solid(RED).into();
         app.commit_edit(Transaction(vec![Operation::SetFills { id: a, fills }]));
         assert_eq!(fill_style(&app, a), None);

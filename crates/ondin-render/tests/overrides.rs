@@ -2387,8 +2387,9 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 /// `arch-scribe`'s find; and twenty-six no-ops since the variables table's seven,
 /// §15 D1039, four of them `changes_ink`'s `false` and three its `true`, left
 /// out by that build too and added before its commit; thirty-three since the
-/// styles' seven, §15 D1062, all `false` — missed by their build and added with
-/// the styles' chrome, §15 D1063. The paragraphs below keep the counts of the finding they record.)
+/// styles' seven, §15 D1062, all `false` — missed by their build and added by
+/// the commit after it. The paragraphs below keep the counts of the finding they
+/// record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
 /// certified that they were.** `op::changes_ink` answers `false` for eleven

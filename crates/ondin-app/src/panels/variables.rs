@@ -9,8 +9,9 @@
 //! Build step 1 draws the *Variables* tab: a fixed name column and one column per
 //! mode — 340 wide with one mode, 96 more per mode to three, the mode columns
 //! scrolling sideways past that — variables grouped by the slash path in their
-//! names, each with its usage count and its cells, edited in place. The *Styles*
-//! tab is the empty state until styles are built (roadmap step 3).
+//! names, each with its usage count and its cells, edited in place. Build step 3
+//! draws the *Styles* tab (§15 D1063): one group per card, each style's preview,
+//! name and count, and its *Rename*, *Edit*, *Select* and *Delete*.
 
 use crate::app::OndinApp;
 use crate::panels::PaintSlot;

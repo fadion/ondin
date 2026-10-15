@@ -1703,38 +1703,9 @@ impl OndinApp {
                     let chip = cache
                         .chips
                         .entry((roots.to_vec(), p.id))
-                        .or_insert_with(|| {
-                            let cps: Vec<NodeId> = roots
-                                .iter()
-                                .flat_map(|r| variant::counterparts(doc, *r, p))
-                                .collect();
-                            let mut vars = Vec::new();
-                            for c in &cps {
-                                let v = doc.get(*c)?.visible_var()?;
-                                if !vars.contains(&v) {
-                                    vars.push(v);
-                                }
-                            }
-                            let table = doc.variables();
-                            let name = |v| table.get(v).map(|x| x.name.clone()).unwrap_or_default();
-                            Some(match vars.as_slice() {
-                                [] => return None,
-                                [var] if mixed => format!("{} · {}", name(*var), ui::MIXED_WORD),
-                                [var] => {
-                                    let at = cps[0];
-                                    let mode = doc.mode_at(at).and_then(|m| table.mode(m));
-                                    super::binding::chip_tip(
-                                        &name(*var),
-                                        doc.resolve_var(at, *var),
-                                        mode,
-                                    )
-                                }
-                                many => {
-                                    many.iter().map(|v| name(*v)).collect::<Vec<_>>().join("\n")
-                                }
-                            })
-                        });
-                    let chip = chip.clone();
+                        .or_insert_with(|| bound_chip(doc, roots, p, mixed, |n| n.visible_var()))
+                        .clone()
+                        .map(|(_, tip)| tip);
                     let (resp, reset_hit) = toggle_row(
                         ui,
                         &p.name,
@@ -1766,15 +1737,34 @@ impl OndinApp {
                     };
                     if resp.clicked() {
                         let next = if mixed { true } else { !on };
-                        out.push(Transaction(variant::set_property(
+                        // Each bound layer the click changes detached in the edit
+                        // itself, the detach the tooltip promises — asked for, so
+                        // the floating status says nothing (§15 D1071's
+                        // amendment, F2).
+                        let mut ops: Vec<_> = roots
+                            .iter()
+                            .flat_map(|r| variant::counterparts(doc, *r, p))
+                            .filter(|c| {
+                                doc.get(*c).is_some_and(|n| n.visible_var().is_some())
+                                    && doc.shown(*c) != next
+                            })
+                            .flat_map(|c| ondin_core::build::detach_visible_ops(doc, c))
+                            .collect();
+                        ops.extend(variant::set_property(
                             doc,
                             roots,
                             p,
                             &PropValue::Boolean(next),
-                        )));
+                        ));
+                        out.push(Transaction(ops));
                     }
                 }
                 PropKind::Text => {
+                    let text_chip = cache
+                        .chips
+                        .entry((roots.to_vec(), p.id))
+                        .or_insert_with(|| bound_chip(doc, roots, p, mixed, |n| n.text_vars()[0]))
+                        .clone();
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         // 🚨 **The ↺ is the user's last act, and wins** (the
@@ -1794,29 +1784,96 @@ impl OndinApp {
                         };
                         let w = ui.available_width();
                         let id = ui.id().with(("prop-text", first, p.name.as_str()));
+                        // **Every layer it views bound, the row is the chip**
+                        // (D1038 (d), §15 D1070's amendment) — the property a view
+                        // over the field (D982), so it shows what the Type card's
+                        // Content row shows: `Backspace` or the × detaches each
+                        // to the string it draws, and a key typed starts the
+                        // text that replaces it, held under `retype` until the
+                        // field commits it (which detaches, `keep_text_bindings`)
+                        // or `Escape` gives the chip back.
+                        let retype_id = id.with("retype");
+                        let retype = ui.data(|d| d.get_temp::<String>(retype_id));
+                        if let (Some((label, tip)), None) = (&text_chip, &retype) {
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(w, ui::CONTROL_H),
+                                egui::Sense::hover(),
+                            );
+                            let tip = match &mark {
+                                Some(m) => format!("{tip}\n{}", m.tip),
+                                None => tip.clone(),
+                            };
+                            let got =
+                                super::binding::chip(ui, rect, id.with("chip"), label, &tip, true);
+                            if reset_clicked {
+                                return;
+                            }
+                            if got.detach {
+                                let ops: Vec<_> = roots
+                                    .iter()
+                                    .flat_map(|r| variant::counterparts(doc, *r, p))
+                                    .flat_map(|c| {
+                                        ondin_core::build::detach_text_ops(doc, c, [true, false])
+                                    })
+                                    .collect();
+                                out.push(Transaction(ops));
+                            } else if let Some(t) = got.typed {
+                                ui.data_mut(|d| d.insert_temp(retype_id, t));
+                            }
+                            return;
+                        }
                         // Content, not a name: as typed, empty allowed (§15
                         // D1003 (10)); over a mixed selection *Mixed* is the
                         // hint and the field starts empty.
                         let rules = Rules {
                             hint: "",
                             name: false,
-                            mixed,
+                            mixed: mixed && retype.is_none(),
                         };
-                        if let (_, Some(t)) = committed_field(
+                        let seed = retype.clone().unwrap_or(text);
+                        let (resp, committed) = committed_field(
                             ui,
                             id,
-                            &text,
+                            &seed,
                             egui::vec2(w, ui::CONTROL_H),
                             12.0,
                             rules,
-                        ) && !reset_clicked
+                        );
+                        if retype.is_some() {
+                            if !resp.has_focus() && !resp.lost_focus() {
+                                resp.request_focus();
+                                super::binding::caret_to_end(ui.ctx(), resp.id, &seed);
+                            } else if resp.lost_focus() {
+                                ui.data_mut(|d| d.remove::<String>(retype_id));
+                            }
+                        }
+                        if let Some(t) = committed
+                            && !reset_clicked
                         {
-                            out.push(Transaction(variant::set_property(
-                                doc,
-                                roots,
-                                p,
-                                &PropValue::Text(t),
-                            )));
+                            // **Detached first, as the Content chip's retype is**
+                            // (§15 D1071's amendment): a bound copy this text
+                            // changes is detached in the edit itself, so the
+                            // detach is the one asked for and the floating status
+                            // says nothing (F2) — left to `keep_text_bindings`, the
+                            // same key said *Detached copy/cta* here and nothing
+                            // on the Type card.
+                            let mut ops: Vec<_> = roots
+                                .iter()
+                                .flat_map(|r| variant::counterparts(doc, *r, p))
+                                .filter(|c| {
+                                    doc.get(*c).is_some_and(|n| n.text_vars()[0].is_some())
+                                        && !matches!(
+                                            doc.resolved_kind(*c).as_deref(),
+                                            Some(ondin_core::NodeKind::Text { content, .. })
+                                                if *content == t
+                                        )
+                                })
+                                .flat_map(|c| {
+                                    ondin_core::build::detach_text_ops(doc, c, [true, false])
+                                })
+                                .collect();
+                            ops.extend(variant::set_property(doc, roots, p, &PropValue::Text(t)));
+                            out.push(Transaction(ops));
                         }
                     });
                 }
@@ -2658,6 +2715,48 @@ fn plural(n: usize, what: &str) -> String {
         1 => format!("1 {what}"),
         n => format!("{n} {what}s"),
     }
+}
+
+/// A property row's chip over `roots` (§15 D1060; D1070's amendment for a Text
+/// property), D1038 A4's rule as the fields keep it (§15 D1045): **every layer
+/// the property views bound**, by `var_of`, or none — a binding on some and not
+/// others draws D130's plain row. One variable, its name and the chip's tooltip
+/// — *name · value · Mode*, or *name · Mixed* where modes give the layers
+/// different values; several, *Mixed* with their names listed.
+fn bound_chip(
+    doc: &ondin_core::Document,
+    roots: &[NodeId],
+    p: &Property,
+    mixed: bool,
+    var_of: impl Fn(&ondin_core::Node) -> Option<ondin_core::VarId>,
+) -> Option<(String, String)> {
+    let cps: Vec<NodeId> = roots
+        .iter()
+        .flat_map(|r| variant::counterparts(doc, *r, p))
+        .collect();
+    let mut vars = Vec::new();
+    for c in &cps {
+        let v = var_of(doc.get(*c)?)?;
+        if !vars.contains(&v) {
+            vars.push(v);
+        }
+    }
+    let table = doc.variables();
+    let name = |v| table.get(v).map(|x| x.name.clone()).unwrap_or_default();
+    Some(match vars.as_slice() {
+        [] => return None,
+        [var] if mixed => (name(*var), format!("{} · {}", name(*var), ui::MIXED_WORD)),
+        [var] => {
+            let at = cps[0];
+            let mode = doc.mode_at(at).and_then(|m| table.mode(m));
+            let tip = super::binding::chip_tip(&name(*var), doc.resolve_var(at, *var), mode);
+            (name(*var), tip)
+        }
+        many => (
+            ui::MIXED_WORD.to_owned(),
+            many.iter().map(|v| name(*v)).collect::<Vec<_>>().join("\n"),
+        ),
+    })
 }
 
 #[cfg(test)]

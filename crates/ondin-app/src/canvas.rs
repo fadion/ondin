@@ -27428,3 +27428,130 @@ mod string_binding_session_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bound_resize_tests {
+    //! **A resize handle dragged over a bound W detaches it, and says so**
+    //! (D1038 (2), §15 D1061, D1071) — the canvas half the roadmap named as
+    //! untested: a real drag through `canvas_ui`, the commit's
+    //! `keep_size_bindings` cutting the binding, and the floating status naming
+    //! the variable it cut.
+    //!
+    //! Plain backticks throughout, per §15 D319 — a `#[cfg(test)]` module.
+
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Cell, Document, IdSource, Mode, Operation, Transaction, VarKind, Variable};
+
+    const RECT: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+    const PPP: f32 = 1.0;
+
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let time = ctx.input(|i| i.time) + 0.1;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(RECT),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| app.canvas_ui(ui),
+        );
+    }
+
+    fn button(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// A 100 × 60 rect at the origin, selected, its W bound to `size/w` (100)
+    /// and its H plain, the camera on its centre.
+    ///
+    /// Flip, run: `variables_detached` read from propagate's mark to the end in
+    /// place of between the binding passes' start and that mark — the copies'
+    /// follows, not the edit's own cuts — fails *"and said so"* at `""`; the
+    /// detach itself stays green, the commit pass unchanged.
+    #[test]
+    fn dragging_a_bound_width_detaches_it_and_says_so() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x2E8A);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (id, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 60.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "size/w".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(100.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .expect("a rect and a number variable");
+        let bind = ondin_core::build::bind_size_ops(&doc, id, [Some(var), None]);
+        doc.apply(&Transaction(bind)).expect("W bound");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        app.session.camera.center = Point::new(50.0, 30.0);
+        app.session.camera.zoom = 1.0;
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(app.session.doc.get(id).unwrap().size_vars()[0], Some(var));
+
+        // The right edge's handle, dragged 40 out in eight steps.
+        let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
+        let (from, to) = (Point::new(100.0, 30.0), Point::new(140.0, 30.0));
+        let start = at(&app, from);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&ctx, &mut app, vec![button(start, true)]);
+        for step in 1..=8 {
+            let p = at(&app, from + (to - from) * (step as f64 / 8.0));
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let end = at(&app, to);
+        frame(&ctx, &mut app, vec![button(end, false)]);
+        frame(&ctx, &mut app, Vec::new());
+
+        let doc = &app.session.doc;
+        let w = match doc.get(id).unwrap().kind() {
+            NodeKind::Rect { size, .. } => size.width,
+            _ => unreachable!("a rect"),
+        };
+        assert!((w - 140.0).abs() < 1e-6, "resized to 140, got {w}");
+        assert_eq!(doc.get(id).unwrap().size_vars()[0], None, "W detached");
+        assert_eq!(app.session.status().text, "Detached size/w", "and said so");
+    }
+}

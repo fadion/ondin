@@ -194,6 +194,10 @@ pub(crate) fn count(f: impl FnOnce(&mut Reads)) {
     });
 }
 
+/// A property row's chip as [`PropCache::chips`] holds it: the label and the
+/// tooltip, `None` where no chip is drawn.
+pub(super) type PropChip = Option<(String, String)>;
+
 /// The Component card's **property readings**, as of the session revision they
 /// were read at — the twin of `OndinApp::drift_cache`, and for the same reason:
 /// the card is drawn every frame it is up and each reading is a walk of an
@@ -221,10 +225,11 @@ pub(crate) struct PropCache {
     /// of roots and property: built only for a row that is overridden.
     pub(super) marks:
         std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), (String, Vec<Operation>)>,
-    /// A boolean property row's chip — its tooltip, or `None` unless every layer
-    /// it views is bound — per set of roots and property
-    /// (§15 D1060): a walk of every root, as the states are.
-    pub(super) chips: std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), Option<String>>,
+    /// A boolean or text property row's chip — its label (the variable's name,
+    /// or *Mixed* over several) and its tooltip, or `None` unless every layer it
+    /// views is bound — per set of roots and property (§15 D1060, D1070's
+    /// amendment): a walk of every root, as the states are.
+    pub(super) chips: std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), PropChip>,
 }
 
 impl PropCache {
@@ -5115,11 +5120,120 @@ mod tests {
         let out = settled(&mut v.app, &ctx, v.i);
         let found = capsules(&out);
         assert_eq!(found.len(), 1, "bound: the capsule");
+        v.app.session.info("");
         click(&mut v.app, &ctx, found[0].center());
         settle(&mut v.app, &ctx);
         let doc = &v.app.session.doc;
         assert!(!doc.shown(c), "the switch's click hid the layer");
         assert_eq!(doc.get(c).unwrap().visible_var(), None, "and detached it");
+        // Asked for — the tooltip says so — so said nothing (§15 D1071's
+        // amendment): left to `keep_visible_bindings`, *Detached state/on*.
+        assert_eq!(
+            v.app.session.status().text,
+            "",
+            "an asked-for detach is silent"
+        );
+    }
+
+    /// **A Text property over a bound content shows the chip** (D1038 (d), §15
+    /// D1070's amendment): *Label text*'s counterpart on the instance bound to a
+    /// string variable, the row draws the chip — the variable's name — where the
+    /// field was; unbound, no name. `Backspace` on the focused chip detaches the
+    /// copy to the string it draws, and a key typed starts the text that
+    /// replaces it, committed on `Enter` as an override that detaches.
+    ///
+    /// Flip, run: `bound_chip`'s Text getter answering `None` fails *"bound: the
+    /// chip"* with no name drawn; the chip's typed key dropped instead of held
+    /// under `retype` fails *"the typed text"* at `""`, the bound literal.
+    #[test]
+    fn a_text_property_over_a_bound_content_shows_the_chip() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let named = |out: &egui::FullOutput| {
+            texts(out)
+                .into_iter()
+                .find(|(t, _)| t == "copy/cta")
+                .map(|(_, r)| r)
+        };
+        let out = settled(&mut v.app, &ctx, v.i);
+        assert!(named(&out).is_none(), "unbound: no chip");
+
+        let (mode, var) = (v.app.session.ids.mint_mode(), v.app.session.ids.mint_var());
+        assert!(v.app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "copy/cta".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ])));
+        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, [Some(var), None]);
+        assert!(v.app.commit_edit(Transaction(ops)));
+        assert_eq!(
+            v.app.session.doc.get(v.ilabel).unwrap().text_vars()[0],
+            Some(var)
+        );
+
+        let out = settled(&mut v.app, &ctx, v.i);
+        let chip = named(&out).expect("bound: the chip");
+        let key = |k| egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        click(&mut v.app, &ctx, chip.center());
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Backspace)]);
+        settle(&mut v.app, &ctx);
+        let doc = &v.app.session.doc;
+        assert_eq!(doc.get(v.ilabel).unwrap().text_vars()[0], None, "detached");
+        assert_eq!(
+            content(&v.app, v.ilabel),
+            "Sign in",
+            "to the string it drew"
+        );
+
+        // Bound again, a key typed replaces the text.
+        let ops = ondin_core::build::bind_text_ops(&v.app.session.doc, v.ilabel, [Some(var), None]);
+        assert!(v.app.commit_edit(Transaction(ops)));
+        let out = settled(&mut v.app, &ctx, v.i);
+        let chip = named(&out).expect("bound again: the chip");
+        v.app.session.info("");
+        click(&mut v.app, &ctx, chip.center());
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("N".into())]);
+        settle(&mut v.app, &ctx);
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("o".into())]);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Enter)]);
+        settle(&mut v.app, &ctx);
+        let doc = &v.app.session.doc;
+        assert_eq!(content(&v.app, v.ilabel), "No", "the typed text");
+        assert_eq!(
+            doc.get(v.ilabel).unwrap().text_vars()[0],
+            None,
+            "and detached"
+        );
+        // Detached in the edit itself, as the Content chip's retype is, so the
+        // status says nothing (§15 D1071's amendment).
+        assert_eq!(
+            v.app.session.status().text,
+            "",
+            "an asked-for detach is silent"
+        );
     }
 
     /// **Over several layers, A4's rule** (§15 D1060, D1045): *Interesante*

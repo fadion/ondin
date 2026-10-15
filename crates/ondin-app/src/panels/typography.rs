@@ -712,6 +712,7 @@ struct TypeMarks {
     letter_spacing: Option<OverrideMark>,
     align: Option<OverrideMark>,
     valign: Option<OverrideMark>,
+    content: Option<OverrideMark>,
 }
 
 /// A `Length` as a mark's tooltip names it: *120%*, *4*.
@@ -819,6 +820,72 @@ impl OndinApp {
         })
     }
 
+    /// The *Content* row's override mark on text `id` (§15 D1070's amendment) —
+    /// [`Self::family_mark`]'s rule for the other half of `TextVars`: **the
+    /// binding with the literal**, so a copy bound apart from its main, or bound
+    /// on one side only, differs by its binding alone (a bound literal is empty on
+    /// both sides). The reset is the main's `SetText` — its spans with it — and
+    /// its content binding beside the copy's own family binding, which
+    /// `keep_text_bindings` leaves as stated.
+    fn content_mark(&self, id: NodeId) -> Option<OverrideMark> {
+        let doc = &self.session.doc;
+        let computed: Vec<Operation>;
+        let resets = match self.field_overrides.iter().find(|(n, _)| *n == id) {
+            Some((_, r)) => r.as_slice(),
+            None => {
+                computed = ondin_core::reset::overrides(doc, id)
+                    .into_iter()
+                    .map(|o| o.reset)
+                    .collect();
+                computed.as_slice()
+            }
+        };
+        let node = doc.get(id)?;
+        let ondin_core::NodeKind::Text { content, .. } = node.kind() else {
+            return None;
+        };
+        let theirs_text = resets
+            .iter()
+            .find(|op| matches!(op, Operation::SetText { .. }))
+            .cloned();
+        let theirs_var = resets.iter().find_map(|op| match op {
+            Operation::SetTextVars { vars, .. } => Some(vars[0]),
+            _ => None,
+        });
+        let own_var = node.text_vars()[0];
+        let var = theirs_var.unwrap_or(own_var);
+        let text_differs = matches!(
+            &theirs_text,
+            Some(Operation::SetText { content: c, .. }) if c != content
+        );
+        if !text_differs && var == own_var {
+            return None;
+        }
+        let shown = match (var, &theirs_text) {
+            (Some(v), _) => doc
+                .variables()
+                .get(v)
+                .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+            (None, Some(Operation::SetText { content: c, .. })) => c.clone(),
+            (None, _) => content.clone(),
+        };
+        let shown: String = match shown.chars().count() > 32 {
+            true => shown.chars().take(31).chain(['…']).collect(),
+            false => shown,
+        };
+        let mut tx = Vec::new();
+        if let Some(op) = theirs_text {
+            tx.push(op);
+        }
+        let mut vars = node.text_vars();
+        vars[0] = var;
+        tx.push(Operation::SetTextVars { id, vars });
+        Some(OverrideMark {
+            tip: format!("Reset to main · {}", shown.replace(['\r', '\n'], " ")),
+            tx: Transaction(tx),
+        })
+    }
+
     /// One paragraph style field's override mark on text `id` (§15 D981), the
     /// paragraph twin of [`Self::style_mark`]: the node's own paragraph, never a
     /// span's.
@@ -918,9 +985,39 @@ impl OndinApp {
 
     /// The Type card's override marks for text `id` (§15 D981): the five style
     /// fields, the paragraph's alignment and the box's vertical alignment.
+    ///
+    /// **On a text-styled layer the five style fields carry no mark** (§15
+    /// D1068's amendment): their values are the style's, so a copy whose differs
+    /// from its main's is on another style, or on one where its main has none —
+    /// which the card's own mark says and resets (F9). A field's ↺ wrote the
+    /// main's value into the copy's whole `SetTextStyle`, and the commit's
+    /// `style::settle` read that as a door writing over the style and detached
+    /// it — the inspector detaching against D1038 (1). Reachable while the rows
+    /// are live over a session's selection, which is when they are drawn.
     fn type_marks(&self, id: NodeId) -> TypeMarks {
+        let styled = self
+            .session
+            .doc
+            .get(id)
+            .is_some_and(|n| n.styles().get(StyleSlot::Text).is_some());
+        if styled {
+            return TypeMarks {
+                family: None,
+                variant: None,
+                size: None,
+                line_height: None,
+                letter_spacing: None,
+                ..self.unstyled_marks(id)
+            };
+        }
+        self.unstyled_marks(id)
+    }
+
+    /// [`Self::type_marks`] whatever the layer's text style.
+    fn unstyled_marks(&self, id: NodeId) -> TypeMarks {
         TypeMarks {
             family: self.family_mark(id),
+            content: self.content_mark(id),
             // The face: weight, italic and the axes they drive
             // (`AXES_DRIVEN_ELSEWHERE`), as one. Not the whole `variations`
             // (`[X9.2-L1-03]`): `opsz` and the listed axes are Optical size's and
@@ -1055,7 +1152,7 @@ impl OndinApp {
             // (§15 D1067, D1069), so they stay live on a styled layer, the popup's
             // opener with them.
             |app, ui| {
-                app.type_content_row(ui, &subject);
+                app.type_content_row(ui, &subject, &marks.content);
                 menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
             },
         );
@@ -1077,12 +1174,23 @@ impl OndinApp {
     /// **Read-only over a text of several lines, and while the canvas edits this
     /// layer**: a one-line field cannot hold a line break, and a live session is
     /// the text's truth until it ends (§9.3). The field menu still binds there.
-    fn type_content_row(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+    ///
+    /// **An instance's content is marked as the other fields are** (§15 D1070's
+    /// amendment): `mark` is [`Self::content_mark`]'s, on the chip as the number
+    /// fields carry it and, unbound, on the badge — the glyph at full ink with
+    /// the dot after it, ↺ in its place while the pointer is on the row, its
+    /// click the reset.
+    fn type_content_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        subject: &TypeSubject,
+        mark: &Option<OverrideMark>,
+    ) {
         let id = subject.id;
         let key = super::binding::FieldKey::Content { id };
         let w = ui.available_width();
         let live = self.text.as_ref().is_some_and(|s| s.id == id);
-        if !live && self.spacing_bound_ui(ui, key, w, &None) {
+        if !live && self.spacing_bound_ui(ui, key, w, mark) {
             return;
         }
         let Some(ondin_core::NodeKind::Text {
@@ -1110,8 +1218,32 @@ impl OndinApp {
             false => shown.replace(['\r', '\n'], " "),
         };
         let mut field = None;
+        let mut reset_hit = false;
         let row = field_row(ui, egui::vec2(w, ROW_H), |ui| {
-            ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+            let over = ui.rect_contains_pointer(ui.max_rect());
+            match mark {
+                None => {
+                    ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+                }
+                Some(m) => {
+                    let glyph = if over {
+                        icon::ARROW_COUNTER_CLOCKWISE
+                    } else {
+                        key.badge()
+                    };
+                    let badge = ui.add(
+                        egui::Label::new(theme::icon_text(glyph, 14.0, theme::text::STRONG))
+                            .sense(egui::Sense::click()),
+                    );
+                    if !over {
+                        crate::ui::override_dot(
+                            ui.painter(),
+                            badge.rect.right_top() + egui::vec2(1.5, 3.0),
+                        );
+                    }
+                    reset_hit = badge.on_hover_text(&m.tip).clicked();
+                }
+            }
             let out = ui.add_enabled(
                 !read_only,
                 egui::TextEdit::singleline(&mut text)
@@ -1124,6 +1256,13 @@ impl OndinApp {
             ui.max_rect()
         });
         let Some(field) = field else { return };
+        // The ↺ is the user's last act and wins over the field's own typing
+        // (`[X6-L1-02]`'s rule on the Properties card's Text row).
+        if reset_hit {
+            ui.data_mut(|d| d.remove::<String>(edit_id));
+            self.reset_marked(true, mark);
+            return;
+        }
         // A disabled field reports no hover, so the reason hangs off a sense of
         // its own beside it (`inspector::menu_action`'s lesson).
         let hover = ui.interact(row, edit_id.with("hover"), egui::Sense::click());
@@ -10347,6 +10486,213 @@ mod skip_ink_tests {
                 spans: None,
             }]),
             "the main's size into the copy's own style, nothing else moved"
+        );
+    }
+
+    /// **The Content row marks a copy's content, binding and all** (§15 D1070's
+    /// amendment): the text made a main and an instance placed, the copy's
+    /// content bound to a string variable the main's is not. The literal is no
+    /// guide — a bound literal is empty, and the reset's `SetText` is the main's
+    /// — so the mark is the binding's: *Reset to main ·* the main's own string,
+    /// and its reset leaves the copy unbound, drawing that string, unmarked.
+    ///
+    /// Flip, run: `content_mark` reading the copy's own binding in place of the
+    /// main's (`let var = own_var`) still marks it — the emptied literal differs
+    /// — but names the copy's variable and resets to it: fails the tip, *"Reset
+    /// to main · copy/cta"* against the main's string. (Predicted at *"the main's
+    /// string"*, the reset keeping the binding; the tip is read first.)
+    #[test]
+    fn the_content_row_marks_a_copys_bound_content() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
+        let group = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Group,
+                transform: None,
+                name: Some("Label".into()),
+            },
+            Operation::Reparent {
+                id: text,
+                new_parent: group,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: group,
+                component: true,
+            },
+        ])));
+        let inst = {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(group).unwrap(),
+                    parent: root,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let copy = app.session.doc.get(inst).unwrap().children()[0];
+        let drawn =
+            |app: &OndinApp, id| match app.session.doc.resolved_kind(id).map(|k| k.into_owned()) {
+                Some(ondin_core::NodeKind::Text { content, .. }) => content,
+                _ => unreachable!("a text"),
+            };
+        let main_string = drawn(&app, text);
+        assert!(!main_string.is_empty(), "the fixture's text has content");
+        app.session.selection.set_one(copy);
+        app.gather_card_overrides();
+        assert!(app.type_marks(copy).content.is_none(), "unbound: no mark");
+
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "copy/cta".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ])));
+        let ops = ondin_core::build::bind_text_ops(&app.session.doc, copy, [Some(var), None]);
+        assert!(app.session.commit(Transaction(ops)));
+        app.gather_card_overrides();
+        let mark = app.type_marks(copy).content.expect("bound apart: marked");
+        assert_eq!(mark.tip, format!("Reset to main · {main_string}"));
+        assert!(app.session.commit(mark.tx));
+        assert_eq!(drawn(&app, copy), main_string, "the main's string");
+        assert_eq!(
+            app.session.doc.get(copy).unwrap().text_vars()[0],
+            None,
+            "unbound"
+        );
+        app.gather_card_overrides();
+        assert!(app.type_marks(copy).content.is_none(), "and unmarked");
+    }
+
+    /// **A text-styled copy's style fields carry no mark** (§15 D1068's
+    /// amendment): the copy's size made 30 and that type made a text style the
+    /// copy is bound to, the main unstyled at 20. The size differs, and is the
+    /// style's: its ↺ wrote the main's 20 into the copy's `SetTextStyle`, which
+    /// the commit read as a door writing over the style and detached it. The
+    /// alignment, which no text style holds, keeps its mark.
+    ///
+    /// Flip, run: `type_marks` without its `styled` arm fails *"the size is the
+    /// style's"*. The defect itself is asserted last, on the mark the field
+    /// built before (`unstyled_marks`): its reset committed leaves the copy with
+    /// no text style.
+    #[test]
+    fn a_text_styled_copys_style_fields_carry_no_mark() {
+        let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
+        let group = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Group,
+                transform: None,
+                name: Some("Label".into()),
+            },
+            Operation::Reparent {
+                id: text,
+                new_parent: group,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: group,
+                component: true,
+            },
+        ])));
+        let inst = {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(group).unwrap(),
+                    parent: root,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let copy = app.session.doc.get(inst).unwrap().children()[0];
+        let (style, paragraph) = match app.session.doc.get(copy).unwrap().kind() {
+            ondin_core::NodeKind::Text {
+                style, paragraph, ..
+            } => ((**style).clone(), paragraph.clone()),
+            _ => unreachable!("a text"),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetTextStyle {
+                id: copy,
+                style: TextStyle {
+                    font_size: 30.0,
+                    ..style
+                },
+                spans: None,
+            },
+            Operation::SetParagraphStyle {
+                id: copy,
+                paragraph: ParagraphStyle {
+                    align: TextAlign::Center,
+                    ..paragraph
+                },
+                spans: None,
+            },
+        ])));
+        let s = app.session.ids.mint_style();
+        let ops = ondin_core::style::create_ops(
+            &app.session.doc,
+            s,
+            "Heading/H2",
+            copy,
+            StyleSlot::Text,
+            &[copy],
+        )
+        .unwrap();
+        assert!(app.session.commit(Transaction(ops)));
+        assert_eq!(app.session.doc.get(copy).unwrap().styles().text, Some(s));
+        app.session.selection.set_one(copy);
+        app.gather_card_overrides();
+        let marks = app.type_marks(copy);
+        assert!(marks.size.is_none(), "the size is the style's");
+        assert!(
+            marks.align.is_some(),
+            "the alignment is still the copy's own"
+        );
+
+        // What the old ↺ did: the field's reset, built whatever the style.
+        let old = app.unstyled_marks(copy).size.expect("the size differs");
+        assert!(app.session.commit(old.tx));
+        assert_eq!(
+            app.session.doc.get(copy).unwrap().styles().text,
+            None,
+            "the old reset detached the style — D1038 (1)'s defect"
         );
     }
 

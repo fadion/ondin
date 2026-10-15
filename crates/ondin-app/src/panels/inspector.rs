@@ -2302,10 +2302,15 @@ impl OndinApp {
                             .on_hover_text("Toggle visibility"),
                     };
                     if resp.clicked() {
-                        self.commit_edit(Transaction(vec![Operation::SetVisible {
+                        // Bound, detached in the edit itself — the detach the
+                        // tooltip promises, asked for, so the floating status
+                        // says nothing (§15 D1071's amendment, F2).
+                        let mut ops = ondin_core::build::detach_visible_ops(&self.session.doc, id);
+                        ops.push(Operation::SetVisible {
                             id,
                             visible: !visible0,
-                        }]));
+                        });
+                        self.commit_edit(Transaction(ops));
                     }
                     if resp.secondary_clicked()
                         && let Some(at) = resp.interact_pointer_pos()

@@ -1267,6 +1267,9 @@ impl EditorSession {
         // And a resized flex item keeps the size it was dragged to (§15 D875), and
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        // Where the binding passes below start appending their detaches, so the
+        // floating status can name the variables they cut (§15 D1071).
+        let asked_ops = tx.0.len();
         // And a radius written over a bound corner detaches it (§15 D1041, D1038
         // (2)) — before `propagate`, so a copy bound as its main was follows the
         // detach as well as the radius.
@@ -1290,7 +1293,10 @@ impl EditorSession {
         // in the one order the core tests pin (`propagate::owed`'s doc).
         let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
-        let detached = styles_detached(&self.doc, &tx, user);
+        let detached = said_detached(
+            styles_detached(&self.doc, &tx, user),
+            variables_detached(&self.doc, &tx, asked_ops, user),
+        );
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation
@@ -1406,9 +1412,9 @@ impl EditorSession {
         // exemption and did not have it, which is how the same bug arrived a third
         // time from the other direction.
         self.clear_gesture_preview();
-        // **A door that detached a style says so** (D1038 (2), §15 D1063) — the
-        // canvas, *Paste properties*, MCP — before any caller's own report,
-        // which overwrites it.
+        // **A door that detached a style or a variable says so** (D1038 (2), §15
+        // D1063, D1071) — the canvas, *Paste properties*, MCP — before any
+        // caller's own report, which overwrites it.
         if let Some(said) = detached {
             self.info(said);
         }
@@ -1736,34 +1742,103 @@ impl EditorSession {
 /// the session's own module for it.
 pub use ondin_core::DEFAULT_CANVAS_BACKGROUND;
 
-/// What the floating status says when the commit detached a style the edit
-/// wrote over (D1038 (2), §15 D1063): *Detached surface/raised*, or a count.
-/// `None` when nothing was, and when the edit itself detached something — the
-/// capsule's *Detach* and the `⋯` menu's are asked for, and say nothing (F2).
+/// The styles the commit detached where the edit wrote over them (D1038 (2),
+/// §15 D1063), by name, for [`said_detached`]. Empty when none was, and when
+/// the edit itself detached something — the capsule's *Detach* and the `⋯`
+/// menu's are asked for, and say nothing (F2).
 /// `user` is how many of `tx`'s operations the edit wrote before the commit's
 /// own passes.
-fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Option<String> {
+fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Vec<String> {
     use ondin_core::style::binds_slot;
     let asked = tx.0[..user.min(tx.0.len())]
         .iter()
         .any(|op| matches!(binds_slot(op), Some((_, _, None))));
     if asked {
-        return None;
+        return Vec::new();
     }
-    let mut names: Vec<&str> = tx.0[user.min(tx.0.len())..]
+    let mut names: Vec<String> = tx.0[user.min(tx.0.len())..]
         .iter()
         .filter_map(|op| match binds_slot(op) {
             Some((id, slot, None)) => doc.get(id)?.styles().get(slot),
             _ => None,
         })
-        .filter_map(|s| doc.styles().get(s).map(|s| s.name.as_str()))
+        .filter_map(|s| doc.styles().get(s).map(|s| s.name.clone()))
         .collect();
     names.sort();
     names.dedup();
-    match names.as_slice() {
-        [] => None,
-        [one] => Some(format!("Detached {one}")),
-        many => Some(format!("Detached {} styles", many.len())),
+    names
+}
+
+/// The variables the commit's binding passes cut where the edit wrote over a
+/// bound field (D1038 (2), §15 D1071) — a gap, a padding, a radius, a
+/// visibility, a size, a text's content or family — read off the `Set*Vars`
+/// the passes append between `from` and `to` (`build::keep_corner_bindings`
+/// and its four siblings each push rather than rewrite), against the bindings
+/// the document holds. Empty when the edit itself set a binding of those kinds
+/// — a chip's detach, a reset, a bind — which says what it means, as
+/// [`styles_detached`]' asked-for detach does.
+fn variables_detached(doc: &Document, tx: &Transaction, from: usize, to: usize) -> Vec<String> {
+    use ondin_core::VarId;
+    // Each slot's binding before the op and after it.
+    type Slots = Vec<(Option<VarId>, Option<VarId>)>;
+    // A binding op's node and the slots it writes, `None` for an op of
+    // another kind.
+    let slots = |op: &Operation| -> Option<(NodeId, Slots)> {
+        let node = |id: &NodeId| doc.get(*id);
+        Some(match op {
+            Operation::SetCornerVars { id, vars } => {
+                let had = node(id)?.corner_vars();
+                (*id, had.iter().copied().zip(vars.iter().copied()).collect())
+            }
+            Operation::SetSpacingVars { id, vars } => {
+                let had = node(id)?.spacing_vars();
+                (*id, had.iter().copied().zip(vars.iter().copied()).collect())
+            }
+            Operation::SetVisibleVar { id, var } => (*id, vec![(node(id)?.visible_var(), *var)]),
+            Operation::SetSizeVars { id, vars } => {
+                let had = node(id)?.size_vars();
+                (*id, had.iter().copied().zip(vars.iter().copied()).collect())
+            }
+            Operation::SetTextVars { id, vars } => {
+                let had = node(id)?.text_vars();
+                (*id, had.iter().copied().zip(vars.iter().copied()).collect())
+            }
+            _ => return None,
+        })
+    };
+    let (from, to) = (from.min(tx.0.len()), to.min(tx.0.len()));
+    if tx.0[..from].iter().any(|op| slots(op).is_some()) {
+        return Vec::new();
+    }
+    let table = doc.variables();
+    let mut names: Vec<String> = tx.0[from..to.max(from)]
+        .iter()
+        .filter_map(slots)
+        .flat_map(|(_, s)| s)
+        .filter_map(|(had, now)| match (had, now) {
+            (Some(v), None) => table.get(v).map(|x| x.name.clone()),
+            _ => None,
+        })
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// What the floating status says when the commit detached something the edit
+/// wrote over (D1038 (2)): *Detached surface/raised*, *Detached space/gap*, or
+/// a count — *3 styles*, *2 variables*, *3 styles and variables* — `None` when
+/// nothing was (§15 D1063, D1071).
+fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<String> {
+    match (styles.as_slice(), vars.as_slice()) {
+        ([], []) => None,
+        ([one], []) | ([], [one]) => Some(format!("Detached {one}")),
+        (many, []) => Some(format!("Detached {} styles", many.len())),
+        ([], many) => Some(format!("Detached {} variables", many.len())),
+        (s, v) => Some(format!(
+            "Detached {} styles and variables",
+            s.len() + v.len()
+        )),
     }
 }
 
@@ -1927,6 +2002,75 @@ mod tests {
             name: None,
         }])));
         id
+    }
+
+    /// **A door's edit over a bound field names what it cut; an asked-for
+    /// detach says nothing** (D1038 (2), §15 D1071). A rect's W and H bound to
+    /// `size/w` and `size/h`: a size written over W alone says *Detached
+    /// size/w*; over both, *Detached 2 variables*; and the chip's own detach —
+    /// `detach_size_ops`, a `SetSizeVars` among the edit's own operations —
+    /// leaves the status as it was (F2's rule for a style's capsule).
+    ///
+    /// ⚠️ **Flip, run, and it does not bite**: `variables_detached` without its
+    /// asked-for test stays green, because every binding pass leaves a node
+    /// whose binding the edit sets to the edit (`keep_size_bindings`'
+    /// `sets_vars`), so the chip's detach appends nothing to read. The test
+    /// decides only an edit that sets one layer's binding and writes over
+    /// another's — a reset across several layers — which nothing here drives.
+    #[test]
+    fn a_detach_the_commit_makes_is_said_and_one_asked_for_is_not() {
+        use ondin_core::{Cell, Mode, VarKind, Variable};
+        let mut s = EditorSession::new();
+        let id = add_rect(&mut s);
+        let (mode, w, h) = (s.ids.mint_mode(), s.ids.mint_var(), s.ids.mint_var());
+        let var = |id, name: &str| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(10.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        };
+        assert!(s.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            var(w, "size/w"),
+            var(h, "size/h"),
+        ])));
+        let bind = |s: &mut EditorSession| {
+            let ops = ondin_core::build::bind_size_ops(&s.doc, id, [Some(w), Some(h)]);
+            assert!(s.commit(Transaction(ops)));
+            s.info("");
+        };
+        let resize = |s: &mut EditorSession, size: Size| {
+            assert!(s.commit(Transaction(vec![Operation::SetGeometry {
+                id,
+                geometry: ondin_core::GeometryPatch::Size(size),
+            }])));
+        };
+        bind(&mut s);
+        resize(&mut s, Size::new(30.0, 10.0));
+        assert_eq!(s.doc.get(id).unwrap().size_vars(), [None, Some(h)]);
+        assert_eq!(s.status().text, "Detached size/w", "W alone");
+
+        bind(&mut s);
+        resize(&mut s, Size::new(40.0, 40.0));
+        assert_eq!(s.doc.get(id).unwrap().size_vars(), [None, None]);
+        assert_eq!(s.status().text, "Detached 2 variables", "both");
+
+        bind(&mut s);
+        let ops = ondin_core::build::detach_size_ops(&s.doc, id, [true, false]);
+        assert!(s.commit(Transaction(ops)));
+        assert_eq!(s.doc.get(id).unwrap().size_vars(), [None, Some(h)]);
+        assert_eq!(s.status().text, "", "the chip's detach says nothing");
     }
 
     #[test]

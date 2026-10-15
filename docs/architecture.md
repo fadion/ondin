@@ -2736,7 +2736,8 @@ asked of `Galley::elided` through `component::fitted_label`, the tooltip never a
 D1006), and a boolean's row `variants::toggle_row` —
 its name in the label column and the switch where the fields begin, not the features' toggle-list row;
 over layers all bound to boolean variables the switch sits in a variable's capsule (§15 D1060,
-§5.3f). **The drift summary counts
+§5.3f), and a text's field over contents all bound to string variables is the chip (§15 D1070's
+amendment). **The drift summary counts
 properties apart**, a property's field units subtracted from the overrides (`PropDrift`, *2 properties ·
 1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
@@ -3371,7 +3372,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 and 6 built; §15 D1037–D1070)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 and 6 built; §15 D1037–D1071)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3593,6 +3594,17 @@ a dangling binding rather than repairing it. The binding's seven shapes:
   the content's binding with its literal (§15 D1069's amendment).
 - **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
 
+**What the five passes cut is said** (§15 D1071, D1038 (2)): each **appends** its `Set*Vars`, so
+`session::variables_detached` reads the binding ops between `asked_ops` — noted after `keep_flex_sizes`,
+before the first pass — and `propagate::owed`'s mark, and names every variable a slot loses, *Detached
+size/w* or *Detached N variables*, beside the styles `styles_detached` names (`said_detached`). An edit
+whose own ops set a binding of those kinds says nothing, as a style's asked-for detach does — and the
+inspector's doors detach in the edit itself (the identity card's eye, the Properties card's Boolean
+switch and Text commit), so they say nothing; the layers panel's eye and the hide chord are left to the
+pass, and say it (D1071's amendment). 🚨 **The
+run ends before the follows**, which are the cut's consequences in the copies, not the edit's cuts. A
+paint's binding is its `BrushSource`, decided at the write and no pass's, so its detach says nothing.
+
 The operations, the save format's v7 and v8, invalidation, the paste rule and the readers are in §5.7, §5.11,
 §5.9 and §15 D1039. **A ghost resolves in the default mode**, being in no frame yet — its paint, and since §15 D1059 (3) its
 visibility (`renderer::ghost_shown`); **the snapshot
@@ -3709,9 +3721,13 @@ retype buffer and whose write re-bases the spans through the one minimal edit; r
 several lines and while the canvas edits the layer, the field menu still binding. The family row is
 the chip while bound — except over a live session's selection, whose write is a run's — and its
 right-click opens the field menu on a layer with no text style. On an instance the family's mark is
-the binding's and the literal's joined and its ↺ writes both (`family_mark`). The canvas session opens
-on the drawn string. ⚠️ **Not built**: the Properties card's Text row draws no chip for a bound
-content (D1038 (d)), and the Content row no override mark.
+the binding's and the literal's joined and its ↺ writes both (`family_mark`); **the content's the
+same way** (`content_mark`, §15 D1070's amendment), its ↺ the main's `SetText` and content binding
+beside the copy's own family binding — on the chip while bound, on the badge, glyph bright with the
+dot, while not. The canvas session opens on the drawn string. **The Properties card's Text row is the
+chip** while every content it views is bound (D1038 (d), `variants::bound_chip`, the Boolean row's
+rule): × or `Backspace` detaches each to its drawn string, and a key typed starts the field that
+replaces it, committed through `variant::set_property`.
 
 **A frame's mode** (§15 D1042 in full) is `OndinApp::frame_mode_row`, in the identity card under the
 name row, drawn on an `Artboard` only and only in a document that has a mode: set, the mode's name
@@ -3799,7 +3815,9 @@ wider than its slot, so it leaves live the rows its style does not hold** (D1068
 `tail` drawn after whatever the card's state draws, under a collapsed capsule too, holds the alignment
 row and the popup's opener — the popup closing when its opener is not drawn — and the popup locks its
 Character tab's held sections where the card is read-only — its Colour and Language rows live, as a
-text style holds neither — and Paragraph and Box live. Not built: ~~the kit groups (step 4),~~ ~~the text
+text style holds neither — and Paragraph and Box live. On an instance a text-styled layer's five
+held fields carry no mark of their own (`type_marks`, D1068's second amendment): their values are the
+style's, and *Reset Type* their reset, as the paint cards' (F9). Not built: ~~the kit groups (step 4),~~ ~~the text
 and~~ the layout card's style, and a Type card over several layers.
 
 **Kits' variables and styles, as built** (step 4, §15 D1064 and D1065 in full). A vendored kit's

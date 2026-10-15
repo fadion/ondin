@@ -317,7 +317,9 @@ permission.
    longer holds once edited, so there is nothing to derive it from (§15 D1011 (2)). ⚠️ **Variables
    add no member** (§5.3f, §15 D1037; ~~ruled, not built~~ step 1's core built 2026-10-14, D1039): a
    bound field stores its binding and resolves it at read; a kit's variables and styles carried into a
-   consumer would be the third member's kind.
+   consumer would be the third member's kind. ⚠️ **Styles make it the first of four** (§5.3f, §15
+   D1062): a styled layer's fills, strokes or effects are a copy of its style's list, written by the
+   commit (`style::settle`) — the second member's shape, for a style.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -1765,7 +1767,9 @@ source's value back; and the inspector shows a field as overridden by comparing 
 ⚠️ **A bound field compares its binding, not what it resolves to** (§5.3f, §15 D1037; ~~ruled, not
 built~~ built for paint, corners and a frame's mode, D1039): a main rebinding *brand* → *accent* reaches
 a copy still bound to *brand*, and a copy bound elsewhere keeps its binding as an override
-(`a_main_rebinding_reaches_a_copy_bound_as_it_was`).
+(`a_main_rebinding_reaches_a_copy_bound_as_it_was`). **So does a card's style** (§15 D1062, D1038
+F9): a copy on the main's own style is no override, one on another style or detached is, and the reset
+writes the main's binding beside its list (`an_instances_style_is_an_override`).
 
 Three rules the session adds to it:
 
@@ -3338,7 +3342,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built; §15 D1037–D1061)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built, step 3's core; §15 D1037–D1062)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3359,7 +3363,9 @@ and the dashboard's 1B §15 D1017).
 > step 1 owes nothing. **Of step 2, a container's gaps and padding bind** (2026-10-14, §15 D1058), **and
 > a layer's visibility binds to a boolean variable** (2026-10-14, §15 D1059), **its chrome on the
 Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a layer's hand-set width
-> and height bind** (2026-10-14, §15 D1061, the maintainer's ruling), so step 2 owes nothing. The
+> and height bind** (2026-10-14, §15 D1061, the maintainer's ruling), so step 2 owes nothing. **Of
+> step 3, styles for fills, strokes and effects have their core** (§15 D1062, `910c19a`) — the table,
+> the bindings, the commit's pass, v8 — *Styles, as built*, below; their chrome is not. The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3419,7 +3425,9 @@ a whole**: editing any field of a styled card detaches it, with no partial overr
 (D1038). Every other door — a canvas gesture on a styled or bound value, *Paste properties*, MCP —
 detaches, the floating status saying what was detached; refusing would leave the canvas's handles
 dead. A style's values may be variables. Text styles come last, text storing its character attributes
-per span (§5.4).
+per span (§5.4). 🚨 **A style is not resolved at read** (§15 D1062): a styled layer's own list holds a
+copy of its style's values, which the commit writes — the variables' rule above is theirs alone, and a
+reader of a layer's fills, strokes or effects never asks the style table.
 
 **The chrome** (the maintainer's rulings, §15 D1037; the accepted design, §15 D1038 in full). **A fully
 rounded capsule means a reference** — a bound field's chip, a collapsed styled card, an alias — and
@@ -3643,6 +3651,29 @@ whose targets disagree, and the *All* row, which has no *Variables* tab — and 
 keeping a binding for its own colour and clamping a `%` above the variable's alpha. **Both kept** (§15
 D1043's amendment): such a write changes nothing drawn, and a `%` of at most 100% cannot draw more
 opaque than its variable.
+
+**Styles, as built** (step 3's core, §15 D1062 in full). `ondin_core::style` holds the table —
+`Styles`, by `StyleId` (a `NodeId` newtype from the session's `IdSource`), on `Document` beside the
+variables — each `Style` a name and a `StyleValue`: `Fills`, `Strokes` or `Effects`, **the card's whole
+list** of `Keyed` items, so a stroke style carries each stroke's width, join, cap, dashes and alignment.
+Names are slash paths, **unique within a slot, not across slots**. A layer's bindings are
+`Node::styles: StyleRefs { fills, strokes, effects }`. The binding ops are per slot — `SetFillStyle`,
+`SetStrokeStyle`, `SetEffectsStyle` — and write the binding alone.
+🚨 **`style::settle` is the whole of "styled or not, as a whole"**: run by `propagate::owed` first and
+last, it finds every bound slot not holding its style's look (values compared, item ids not) and
+**rewrites** it from the style when the transaction edited the style or set that binding, or when no
+op of the user's edit or the doors' rewrites wrote the slot (a component follow, a paste rebound by
+name); it **detaches** the layer, values kept, when one did — so the canvas, *Paste properties* and MCP
+detach with no door knowing. Both runs are load-bearing: the first lets a main's rewrite or detach reach
+its copies, the second puts back a copy on another style that a follow drifted. **`style::check`** (a
+post-condition of `apply` and of the loader) holds names unique per slot, no item id twice in a style,
+paints bound to colour variables only, every binding to a style of its slot, and **no vault node
+bound** — a kit's frozen copy clears its styles, keeping the values, until step 4. A bare
+`RemoveStyle` of a style in use is refused; `style::remove_ops` detaches the users first. **Deleting a
+variable a style's paint reads** detaches the style to its colour **in the default mode**, and the
+users are rewritten from it, staying styled — a user in another mode changes colour. A paste rebinds a
+style by id, else by name and slot, else detaches. The chrome — the browser's *Styles* tab, the styled
+card, the header `⋯` — is not built, and ⚠️ **no preview runs `settle`** yet.
 
 ### 5.4 Text node
 
@@ -5246,6 +5277,14 @@ pub enum Operation {
     RemoveMode { id: ModeId },                        // inverts to AddMode carrying the column; refused
                                                       // while a frame is set to it
     SetModeName { id: ModeId, name: String },
+    // the styles table (§5.3f, §15 D1062) — no node named; `style::check` after the last op:
+    AddStyle { style: Style },  RemoveStyle { id: StyleId }, // each the other's inverse; a remove
+                                                      // refused while any layer is bound to it
+    SetStyleName { id: StyleId, name: String },
+    SetStyleValue { id: StyleId, value: StyleValue }, // the whole list, of the style's own slot
+    SetFillStyle { id: NodeId, style: Option<StyleId> }, // a layer's binding alone, one op per slot;
+    SetStrokeStyle { id: NodeId, style: Option<StyleId> }, // the commit writes the values beside it
+    SetEffectsStyle { id: NodeId, style: Option<StyleId> }, // (`style::settle`). All seven change no ink
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -6670,7 +6709,7 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   each skipped when unset; a literal brush saves as it did, a bound one as `{"var": <id>, "alpha": a}`,
   `alpha` omitted at 1. **The loader runs `variable::check` after the tree's own checks and refuses a
   dangling binding** — a binding to nothing has no value to draw. ⚠️ **Still owed to a later step**:
-  styles and each kit's mode mapping (§15 D1038), which v7 does not hold.
+  ~~styles and~~ each kit's mode mapping (§15 D1038), which v7 does not hold — styles are in v8 (below).
 - **v7 → v8** is a container's gap and padding bindings (§5.3f, §15 D1058), and **`migrate_7_to_8` is a
   number**, the published document's moving with it, `migrate_6_to_7`'s rule. The key is
   `NodeDto::spacing_vars`, skipped when nothing is bound. ⚠️ **What the bump saves is silent, not a wrong
@@ -6678,7 +6717,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   out at the 0 its literal holds. **Step 2's boolean bindings landed in the same unreleased v8** (§15
   D1059), no second bump, v8 never having shipped: `NodeDto::visible_var`, skipped when unset, and a
   boolean cell saved as `{"boolean": true}`. **So did W and H's** (§15 D1061): `NodeDto::size_vars`,
-  skipped when neither axis is bound.
+  skipped when neither axis is bound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
+  images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
+  the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
+  style's loads as written, and the next commit that runs `style::settle` puts it back.
 
 ### 5.11a The library block (§15 D362)
 
@@ -15934,6 +15976,8 @@ What v1 locks in so a future sync layer is possible without re-architecting:
    creation is the same resync. **Variables (§5.3f, §15 D1037; ~~ruled, not built~~ step 1's core built,
    D1039) do not bend it**: a bound field stores the binding and the value it draws is resolved at read,
    so no resolved value is in the document — a bound corner's literal is written 0, not its value; a kit's vendored variables and styles are the kits' bend above, not a new one.
+   **Styles (§5.3f, §15 D1062) bend it as components do**: a styled layer's list is a copy of its
+   style's, written at the commit, so a style edit racing a bind on two peers is the same resync.
 
 Explicitly *not* designed now: conflict resolution, causality/ordering metadata, presence, network
 protocol. Ops are the unit of change; everything else is future work that these four properties

@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1066 index rows, 1066 body headings, next free
-D1067** (measured 2026-10-15 at `fe414ff`; ⚠️ **the step-4 leftovers request reserved
+anywhere cited either. **The live figures: 1068 index rows, 1068 body headings, next free
+D1069** (measured 2026-10-15 at `188c776`; ⚠️ **the step-5/step-6 request reserved D1067–D1076 at
+`26e0590` through the `dnumber-guard` mod and spent two** — D1067, text styles' core (a fourth
+slot holding the character defaults less colour and language; spans the text's own marks over it,
+so D1037's (e) is answered), and D1068, their chrome (the Type card a style card, live over a
+session's selection, the rows no text style holds left live); step 5, the CSS export, went into
+amendments to D1037 and D1038 (the maintainer ruled it a later *code export*). **D1069–D1076
+found at zero sites and released.** Census **967**, arrivals D1067–D1068, none unresolved.
+⚠️ **`arch-scribe` read five defects in the chrome across two rounds** — a read-only Type card
+locking alignment and the popup's Paragraph and Box tabs, the popup live beside it, an *Edit*
+through a user clearing that user's spans alone, *Edit*'s footer over a selection, and the lock
+covering Language (and Colour, found while fixing it) — each fixed before the commit, three
+flip-checked. Before that, measured 2026-10-15 at `fe414ff`; ⚠️ **the step-4 leftovers request reserved
 D1066–D1075 at `3f0d0b6` through the `dnumber-guard` mod and spent one** — D1066, *Make local*
 forking the kit variables and styles a main reads (the maintainer's ruling: a made-local main
 stops reading them; the fork, the *forked from* mark and the kit-frames status note accepted

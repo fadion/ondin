@@ -979,10 +979,11 @@ fn a_documents_own_style_reading_a_removed_kit_variable_is_detached() {
 /// receives — an instance root keeps its own visibility, bound or not.
 ///
 /// Flip, run: `reach` leaving a top's `visible_var` fails here, Icon counted
-/// changed. ⚠️ **`Changes::tokens` still reads true**: the boolean travels, a
-/// node of the frozen copy reading it — a publish no consumer draws, left as a
-/// known edge (`frozen_tables` asks what the nodes read, not what reaches an
-/// instance).
+/// changed. And nor is the boolean a change of the tables (D1064's amendment):
+/// `freeze` detaches a top's own visibility to what it shows, so the variable
+/// does not travel and a cell edit of it enables no publish. Flip, run: the
+/// `top_visibility_frozen` call in `freeze`'s published-tops loop removed fails
+/// at *"no table change"*, `tokens` true — the edge D1064 left.
 #[test]
 fn a_main_roots_visibility_binding_is_not_a_change() {
     let mut k = kit();
@@ -1008,6 +1009,21 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
         .unwrap();
     let c = kit::changes(&k.doc);
     assert!(!c.changed.contains(&k.icon), "{c:?}");
+    assert!(!c.tokens, "no table change: {c:?}");
+    // Hidden by its variable, the frozen main is hidden by its literal.
+    k.doc
+        .apply(&Transaction(vec![Operation::SetVariableCell {
+            id: shown,
+            mode: modes[0],
+            cell: Cell::Boolean(false),
+        }]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert!(!c.any(), "a cell no consumer reads: {c:?}");
+    let frozen = kit::freeze(&k.doc).unwrap();
+    let icon = frozen.document().get(k.icon).unwrap();
+    assert_eq!((icon.visible_var(), icon.visible()), (None, false));
+    assert!(frozen.document().variables().get(shown).is_none());
 }
 
 /// *Make local* `inst`'s main through the commit's passes, so its instances

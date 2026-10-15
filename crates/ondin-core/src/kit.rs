@@ -361,7 +361,13 @@ pub fn freeze(doc: &Document) -> Option<Published> {
             groups.push((*t, g));
         }
         // Bindings kept: the frozen copy carries the table they read (§15 D1064,
-        // below), as it carries the images its fills key into.
+        // below), as it carries the images its fills key into — **all but the
+        // top's own visibility**, frozen to what it shows (D1064's amendment): an
+        // instance root keeps its own visibility, so nothing downstream reads
+        // that binding, and keeping it put its variable in the frozen table,
+        // where a cell edit counted as a change ([`Changes::tokens`]) with no
+        // component changed.
+        top_visibility_frozen(doc, &mut captured);
         nodes.extend(captured.into_iter().map(|n| (n.id, n)));
     }
 
@@ -377,7 +383,8 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         if !seen.insert(t) {
             continue;
         }
-        let captured = doc.capture_subtree(t)?;
+        let mut captured = doc.capture_subtree(t)?;
+        top_visibility_frozen(doc, &mut captured);
         pending.extend(refs_out(&captured));
         vault_tops.push(t);
         nodes.extend(captured.into_iter().map(|n| (n.id, n)));
@@ -423,6 +430,22 @@ pub fn freeze(doc: &Document) -> Option<Published> {
         groups,
         name: doc.meta().name.clone(),
     })
+}
+
+/// A frozen top's visibility binding, and every main root's in it, detached to
+/// what it shows (§15 D1064's amendment, the edge its first fix left): a
+/// published main's or set's own visibility is its place on the kit's page,
+/// and a variant's its place in its set — an instance root keeps its own
+/// (`propagate::is_placement`), a variant switch or a swap the slot's
+/// (§15 D983) — so no instance downstream receives it ([`reach`] blanks it)
+/// and the variable it reads must not travel for it.
+fn top_visibility_frozen(doc: &Document, captured: &mut [Node]) {
+    for (i, n) in captured.iter_mut().enumerate() {
+        if (i == 0 || n.component) && n.visible_var.is_some() {
+            n.visible = doc.shown(n.id);
+            n.visible_var = None;
+        }
+    }
 }
 
 /// The variables and styles a frozen kit carries (§15 D1064): **what its nodes
@@ -614,6 +637,11 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
                 // And its binding, now that a frozen copy keeps bindings (§15
                 // D1064; D1059's amendment, item 6): an instance root keeps
                 // its own visibility, bound or not.
+                n.visible_var = None;
+            } else if n.component {
+                // A variant's visibility is its place in its set, as a top's on
+                // the page (`top_visibility_frozen`).
+                n.visible = true;
                 n.visible_var = None;
             }
             if let Some(o) = &mut n.origin {

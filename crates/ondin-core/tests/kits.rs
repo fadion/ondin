@@ -2491,3 +2491,55 @@ fn an_accepted_copy_is_the_publish_order() {
     assert_eq!(shape(&d, vault_nested), want, "the order is the publish's");
     assert_eq!(shape(&d, page_nested), want, "and the page's");
 }
+
+/// **A variant's own visibility, bound or not, is no change downstream** (§15
+/// D1064's amendment): it is its place in its set, which a variant switch and
+/// a swap keep the slot's own of (§15 D983), as a top's on the page is — so
+/// the frozen copy carries the literal it shows and not the boolean, and
+/// neither hiding it nor editing that boolean counts toward a publish.
+///
+/// Flip, run: `top_visibility_frozen` taking the first node only (its
+/// `i == 0 || n.component` narrowed to `i == 0`) fails at *"the boolean stays
+/// home"*; `reach`'s `n.component` arm dropped fails at *"no component
+/// changed"*.
+#[test]
+fn a_variants_own_visibility_binding_is_not_a_change() {
+    let mut k = kit();
+    let mut ids = IdSource::new(0xAD);
+    let (mode, var) = (ids.mint_mode(), ids.mint_var());
+    k.doc
+        .apply(&Transaction(vec![
+            ondin_core::Operation::AddMode {
+                mode: ondin_core::Mode {
+                    id: mode,
+                    name: "Day".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            ondin_core::Operation::AddVariable {
+                var: ondin_core::Variable {
+                    id: var,
+                    name: "shown".into(),
+                    kind: ondin_core::VarKind::Boolean,
+                    cells: [(mode, ondin_core::Cell::Boolean(false))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            ondin_core::Operation::SetVisibleVar {
+                id: k.small,
+                var: Some(var),
+            },
+        ]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert!(c.changed.is_empty(), "no component changed: {c:?}");
+    let frozen = kit::freeze(&k.doc).unwrap();
+    assert!(
+        frozen.document().variables().get(var).is_none(),
+        "the boolean stays home"
+    );
+    let small = frozen.document().get(k.small).unwrap();
+    assert_eq!((small.visible_var(), small.visible()), (None, false));
+}

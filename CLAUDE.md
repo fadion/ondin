@@ -67,8 +67,20 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1068 index rows, 1068 body headings, next free
-D1069** (measured 2026-10-15 at `188c776`; ⚠️ **the step-5/step-6 request reserved D1067–D1076 at
+anywhere cited either. **The live figures: 1070 index rows, 1070 body headings, next free
+D1071** (measured 2026-10-15 over the uncommitted tree on `7a349aa`; ⚠️ **the string-variables
+request reserved D1069–D1078 at `7a349aa` through the `dnumber-guard` mod and spent two** —
+D1069, string variables' core (a text's content and family bound, literals empty while bound,
+`resolved_kind` substituting, `keep_text_bindings`), and D1070, their chrome (the Type card's
+*Content* row, the family row's chip, the browser's *String variable*) — the maintainer's
+acceptance of four recommendations with no design pass. **D1071–D1078 found at zero sites and
+released.** Census **969**, arrivals D1069–D1070, none unresolved. ⚠️ **An `Explore` reader
+sweep found four readers of the stored literal** (`Resolved`'s used kind for a text neither laid
+nor pinned, the canvas session, the font walks, the Alt-drag ghost) **and `arch-scribe` read four
+defects in the first cut** (an emptied text kept bound, a Text property reset drawing nothing, a
+copy's family binding outliving its main's text style, a mode change leaving the layout memo
+stale) — each reproduced by a test and flip-checked before the record closed. Before that,
+measured 2026-10-15 at `188c776`; ⚠️ **the step-5/step-6 request reserved D1067–D1076 at
 `26e0590` through the `dnumber-guard` mod and spent two** — D1067, text styles' core (a fourth
 slot holding the character defaults less colour and language; spans the text's own marks over it,
 so D1037's (e) is answered), and D1068, their chrome (the Type card a style card, live over a

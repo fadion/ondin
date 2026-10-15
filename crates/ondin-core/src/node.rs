@@ -236,6 +236,9 @@ pub struct Node {
     /// The string variables this text's content and family are bound to (§15
     /// D1069), both `None` on every other kind.
     pub(crate) text_vars: crate::variable::TextVars,
+    /// The number variable this layer's opacity is bound to (§15 D1072), read
+    /// as a percentage; `opacity` its literal, 0 while bound and never drawn.
+    pub(crate) opacity_var: Option<crate::variable::VarId>,
     /// The styles this layer's fills, strokes and effects are bound to (§5.3f,
     /// §15 D1062) — the lists themselves hold the style's values, written there
     /// by the commit (`crate::style::settle`).
@@ -319,13 +322,19 @@ impl Node {
     pub fn text_vars(&self) -> crate::variable::TextVars {
         self.text_vars
     }
+    /// The variable this layer's opacity is bound to (§15 D1072). The opacity it
+    /// is drawn at is [`crate::Document::drawn_opacity`]'s; [`Self::opacity`] is
+    /// the literal, 0 while bound.
+    pub fn opacity_var(&self) -> Option<crate::variable::VarId> {
+        self.opacity_var
+    }
     /// The styles this layer's cards are bound to (§15 D1062).
     pub fn styles(&self) -> crate::style::StyleRefs {
         self.styles
     }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
-    /// corner, gap, padding, visibility, width, height, content or family. What a
-    /// variable's edit dirties (`Document::bound_nodes`).
+    /// corner, gap, padding, visibility, width, height, content, family or
+    /// opacity. What a variable's edit dirties (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self.paint.strokes.iter().any(|s| s.brush.is_bound())
@@ -334,6 +343,7 @@ impl Node {
             || self.visible_var.is_some()
             || self.size_vars.iter().any(Option::is_some)
             || self.text_vars.iter().any(Option::is_some)
+            || self.opacity_var.is_some()
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across
@@ -399,6 +409,8 @@ impl Node {
     pub fn proportions_locked(&self) -> bool {
         self.proportions_locked
     }
+    /// The literal opacity — 0 while [`Self::opacity_var`] binds it (§15 D1072);
+    /// what the layer is drawn at is [`crate::Document::drawn_opacity`].
     pub fn opacity(&self) -> f32 {
         self.opacity
     }

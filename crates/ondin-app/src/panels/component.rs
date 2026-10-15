@@ -1141,7 +1141,11 @@ fn card_of(op: &Operation) -> Option<&'static str> {
             | G::BoolOp(_) => None,
         },
         // A corner's binding is the radius field's (§15 D1039).
-        O::SetOpacity { .. } | O::SetClip { .. } | O::SetCornerVars { .. } => Some("Appearance"),
+        // An opacity's binding is the opacity field's (§15 D1072).
+        O::SetOpacity { .. }
+        | O::SetOpacityVar { .. }
+        | O::SetClip { .. }
+        | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
         // A card's style is that card's (§15 D1062, D1038 F9): *Reset fill*
         // restores the main's style with the main's list.

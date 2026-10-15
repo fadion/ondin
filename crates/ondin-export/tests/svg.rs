@@ -322,6 +322,66 @@ fn group_opacity_is_carried_by_the_group_not_each_child() {
     );
 }
 
+/// **A bound opacity exports at its variable's percentage** (§15 D1072), never
+/// the 0 its literal holds: the fixture's group bound to `opacity/muted` (40)
+/// is written `opacity="0.4"` on its `<g>`.
+///
+/// Flip, run: `emit_node` reading `node.opacity()` again fails *"exported at
+/// its variable's 40%"* — the group written at the literal 0.
+#[test]
+fn a_bound_opacity_exports_at_its_percentage() {
+    use ondin_core::{Cell, Mode, NodeKind, VarKind, Variable};
+
+    let mut f = common::fixture();
+    let group = {
+        let mut found = None;
+        let mut stack = vec![f.doc.root()];
+        while let Some(id) = stack.pop() {
+            let node = f.doc.get(id).unwrap();
+            if matches!(node.kind(), NodeKind::Group) {
+                found = Some(id);
+                break;
+            }
+            stack.extend(node.children().iter().copied());
+        }
+        found.expect("fixture has a group")
+    };
+    let mut ids = ondin_core::IdSource::new(0xB0);
+    let (mode, muted) = (ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: muted,
+                    name: "opacity/muted".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(40.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .unwrap();
+    let ops = ondin_core::bind_opacity_ops(&f.doc, group, muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(group).unwrap().opacity(), 0.0, "the literal 0");
+    let res = Resolved::rebuild(&f.doc);
+    let out = svg(&f.doc, &res, None);
+    let g_line = out.lines().find(|l| l.contains("opacity=\"0.4\""));
+    assert!(
+        g_line.is_some_and(|l| l.trim_start().starts_with("<g")),
+        "exported at its variable's 40%:\n{out}"
+    );
+}
+
 /// SVG has no stroke alignment, so an aligned stroke has to be *built*: the
 /// stroke is drawn at double width and clipped to the side it belongs on. Both
 /// halves have to be present or the export silently loses the effect.

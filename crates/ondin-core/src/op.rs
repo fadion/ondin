@@ -495,6 +495,13 @@ pub enum Operation {
         id: NodeId,
         vars: crate::variable::TextVars,
     },
+    /// The number variable a layer's opacity is bound to (§15 D1072). Writes
+    /// the binding alone — the verb that binds writes the literal 0 beside it
+    /// (`build::bind_opacity_ops`).
+    SetOpacityVar {
+        id: NodeId,
+        var: Option<crate::variable::VarId>,
+    },
     /// Put a style in the document's table (§15 D1062). Its name must be free in
     /// its slot — `crate::style::check`, after the last op. Inverts to
     /// [`Self::RemoveStyle`], and that back to this carrying the whole style.
@@ -611,6 +618,7 @@ impl Operation {
             | Operation::SetVisibleVar { id, .. }
             | Operation::SetSizeVars { id, .. }
             | Operation::SetTextVars { id, .. }
+            | Operation::SetOpacityVar { id, .. }
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
@@ -699,6 +707,7 @@ impl Operation {
             | Operation::SetVisibleVar { id, .. }
             | Operation::SetSizeVars { id, .. }
             | Operation::SetTextVars { id, .. }
+            | Operation::SetOpacityVar { id, .. }
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
@@ -943,7 +952,8 @@ impl Operation {
             | Operation::SetSpacingVars { .. }
             | Operation::SetVisibleVar { .. }
             | Operation::SetSizeVars { .. }
-            | Operation::SetTextVars { .. } => true,
+            | Operation::SetTextVars { .. }
+            | Operation::SetOpacityVar { .. } => true,
         }
     }
 
@@ -1045,6 +1055,9 @@ impl Operation {
             }
             Operation::SetSizeVars { id, vars } => node(id).is_some_and(|n| n.size_vars() == *vars),
             Operation::SetTextVars { id, vars } => node(id).is_some_and(|n| n.text_vars() == *vars),
+            Operation::SetOpacityVar { id, var } => {
+                node(id).is_some_and(|n| n.opacity_var() == *var)
+            }
 
             // **The index is read the way `apply` writes it** — the child is
             // removed from its parent's list and re-inserted at `index`, so the

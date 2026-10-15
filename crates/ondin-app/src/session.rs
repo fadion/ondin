@@ -347,6 +347,8 @@ pub struct DisplayNode<'a> {
     drawn: Option<ondin_core::container::Display>,
     /// Whether the layer is shown, a bound visibility resolved (§15 D1059).
     shown: bool,
+    /// The opacity it draws at, a bound one resolved (§15 D1072).
+    opacity: f32,
 }
 
 impl<'a> DisplayNode<'a> {
@@ -390,10 +392,10 @@ impl<'a> DisplayNode<'a> {
             .and_then(|o| o.paint.as_ref())
             .unwrap_or_else(|| self.node.paint())
     }
+    /// The opacity the layer draws at — a live preview's, else a bound one
+    /// resolved (§15 D1072), never the 0 a binding's literal holds.
     pub fn opacity(&self) -> f32 {
-        self.over
-            .and_then(|o| o.opacity)
-            .unwrap_or_else(|| self.node.opacity())
+        self.over.and_then(|o| o.opacity).unwrap_or(self.opacity)
     }
     /// Whether the layer is shown — a bound visibility resolved (§15 D1059),
     /// the eye's state, a live preview's included.
@@ -708,6 +710,7 @@ impl EditorSession {
                 _ => None,
             },
             shown: self.doc.shown(id),
+            opacity: self.doc.drawn_opacity(id),
         })
     }
 
@@ -731,6 +734,7 @@ impl EditorSession {
             // What shows, not the literal (§15 D1059): a binding is not a
             // preview, so the committed answer resolves it too.
             shown: self.doc.shown(id),
+            opacity: self.doc.drawn_opacity(id),
         })
     }
 
@@ -1279,6 +1283,8 @@ impl EditorSession {
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
         // And a visibility written over a bound layer (§15 D1059).
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
+        // And an opacity written over a bound layer (§15 D1072), the same one half.
+        let tx = ondin_core::build::keep_opacity_bindings(&self.doc, tx);
         // And a width or a height written over a bound axis, or made computed by
         // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
         // item are among the layout writes it reads.
@@ -1771,9 +1777,10 @@ fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Vec<String>
 
 /// The variables the commit's binding passes cut where the edit wrote over a
 /// bound field (D1038 (2), §15 D1071) — a gap, a padding, a radius, a
-/// visibility, a size, a text's content or family — read off the `Set*Vars`
-/// the passes append between `from` and `to` (`build::keep_corner_bindings`
-/// and its four siblings each push rather than rewrite), against the bindings
+/// visibility, a size, a text's content or family, an opacity (§15 D1072) —
+/// read off the `Set*Vars` the passes append between `from` and `to`
+/// (`build::keep_corner_bindings` and its siblings each push rather than
+/// rewrite), against the bindings
 /// the document holds. Empty when the edit itself set a binding of those kinds
 /// — a chip's detach, a reset, a bind — which says what it means, as
 /// [`styles_detached`]' asked-for detach does.
@@ -1795,6 +1802,7 @@ fn variables_detached(doc: &Document, tx: &Transaction, from: usize, to: usize) 
                 (*id, had.iter().copied().zip(vars.iter().copied()).collect())
             }
             Operation::SetVisibleVar { id, var } => (*id, vec![(node(id)?.visible_var(), *var)]),
+            Operation::SetOpacityVar { id, var } => (*id, vec![(node(id)?.opacity_var(), *var)]),
             Operation::SetSizeVars { id, vars } => {
                 let had = node(id)?.size_vars();
                 (*id, had.iter().copied().zip(vars.iter().copied()).collect())

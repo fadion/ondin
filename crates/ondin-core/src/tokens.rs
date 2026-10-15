@@ -78,6 +78,7 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         .chain(n.size_vars.iter().flatten().copied())
         .chain(n.text_vars.iter().flatten().copied())
         .chain(n.visible_var)
+        .chain(n.opacity_var)
 }
 
 /// The variables and styles `nodes` read in `vars` and `styles`, **closed**: a
@@ -264,6 +265,9 @@ impl Plan {
         n.size_vars.iter_mut().flatten().for_each(v);
         n.text_vars.iter_mut().flatten().for_each(v);
         if let Some(x) = &mut n.visible_var {
+            v(x);
+        }
+        if let Some(x) = &mut n.opacity_var {
             v(x);
         }
         if let Some(m) = n.mode
@@ -831,6 +835,7 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
         && slots(&n.size_vars, &s.size_vars)
         && slots(&n.text_vars, &s.text_vars)
         && (!hit(n.visible_var) || n.visible_var.is_some_and(|x| alike(x, s.visible_var)))
+        && (!hit(n.opacity_var) || n.opacity_var.is_some_and(|x| alike(x, s.opacity_var)))
 }
 
 /// [`plan`] for a clipboard's [`Tokens`] — a carrying paste (`crate::kit::adopt`).
@@ -925,6 +930,7 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     vs.extend(slots(&n.size_vars, src.map(|s| &s.size_vars[..])));
     vs.extend(slots(&n.text_vars, src.map(|s| &s.text_vars[..])));
     vs.extend(own(n.visible_var, src.and_then(|s| s.visible_var)));
+    vs.extend(own(n.opacity_var, src.and_then(|s| s.opacity_var)));
     let ss = n
         .styles
         .iter()
@@ -1229,6 +1235,9 @@ impl Fork {
         }
         if let Some(v) = to(n.visible_var, src.and_then(|s| s.visible_var)) {
             ops.push(Operation::SetVisibleVar { id, var: Some(v) });
+        }
+        if let Some(v) = to(n.opacity_var, src.and_then(|s| s.opacity_var)) {
+            ops.push(Operation::SetOpacityVar { id, var: Some(v) });
         }
         for (slot, s) in n.styles.iter() {
             if own(Some(s), src.and_then(|x| x.styles.get(slot))).is_some()

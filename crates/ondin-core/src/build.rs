@@ -1747,11 +1747,11 @@ fn replace_with_path(
     // **This *is* the same layer**, so everything about it that is not its geometry
     // comes across — where `flatten_union` below makes a genuinely new layer out of
     // several and inherits only paint, the way `boolean` does.
-    if node.opacity() != 1.0 {
-        ops.push(Operation::SetOpacity {
-            id: new,
-            opacity: node.opacity(),
-        });
+    // What it draws, a bound opacity resolved — the path is unbound (§15 D1072),
+    // as its visibility below.
+    let opacity = doc.drawn_opacity(id);
+    if opacity != 1.0 {
+        ops.push(Operation::SetOpacity { id: new, opacity });
     }
     // What it shows, a bound visibility resolved — the path is unbound (§15 D1059).
     if !doc.shown(id) {
@@ -3743,6 +3743,92 @@ pub fn keep_visible_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
+/// Bind layer `id`'s opacity to number variable `var` (§15 D1072), read as a
+/// percentage. The literal is written **0**, D1039's canonical literal — so a
+/// main and its copy bound to one variable compare equal whatever either drew
+/// before, and a reader that skips [`Document::drawn_opacity`] draws the layer
+/// invisible rather than nearly right. Empty when nothing would change.
+pub fn bind_opacity_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut ops = Vec::new();
+    if node.opacity() != 0.0 {
+        ops.push(Operation::SetOpacity { id, opacity: 0.0 });
+    }
+    if node.opacity_var() != Some(var) {
+        ops.push(Operation::SetOpacityVar { id, var: Some(var) });
+    }
+    ops
+}
+
+/// Detach layer `id`'s opacity to what it draws (D1038's detach, §15 D1072).
+/// Empty when it is not bound.
+pub fn detach_opacity_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    if node.opacity_var().is_none() {
+        return Vec::new();
+    }
+    vec![
+        Operation::SetOpacity {
+            id,
+            opacity: doc.drawn_opacity(id),
+        },
+        Operation::SetOpacityVar { id, var: None },
+    ]
+}
+
+/// **An opacity written over a bound layer detaches it** (D1038 (2), §15
+/// D1072) — the commit-time half of the binding, so the Appearance field and the
+/// several-layer row ([`set_opacity_all`]), the number keys, *Paste properties*
+/// and MCP write `SetOpacity` as they did.
+///
+/// 🚨 **One half, [`keep_visible_bindings`]' rule, not [`keep_corner_bindings`]'
+/// two.** A write of what the layer draws stays bound — its literal put back —
+/// but a write of its own literal is **not** excused: the literal is the 0
+/// [`bind_opacity_ops`] writes, and 0% typed or keyed over a bound layer means
+/// *make it invisible*, so the literal half would have kept every such layer
+/// bound and drawn as before, the edit doing nothing. No writer builds an
+/// opacity from the stored literal the way the Scale tool builds radii — the
+/// one that copied it, `replace_with_path`, carries the drawn value.
+///
+/// A transaction that sets a layer's binding itself — a bind, a detach, a reset
+/// — is left to say what it means.
+pub fn keep_opacity_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_var: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetOpacityVar { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut detached: Vec<NodeId> = Vec::new();
+    for op in tx.0.iter_mut() {
+        let Operation::SetOpacity { id, opacity } = op else {
+            continue;
+        };
+        if sets_var.contains(id) {
+            continue;
+        }
+        let Some(node) = doc.get(*id) else { continue };
+        if node.opacity_var().is_none() {
+            continue;
+        }
+        if (*opacity - doc.drawn_opacity(*id)).abs() < OPACITY_AGREEMENT {
+            *opacity = node.opacity();
+        } else if !detached.contains(id) {
+            detached.push(*id);
+        }
+    }
+    detached.sort();
+    for id in detached {
+        tx.0.push(Operation::SetOpacityVar { id, var: None });
+    }
+    tx
+}
+
 /// Which of `id`'s width and height **the user sets** — the axes a number
 /// variable may bind (§15 D1061, the maintainer's ruling: *only a hand-set size
 /// is bindable*). `[false; 2]` for a kind with no stored size
@@ -4610,7 +4696,12 @@ pub struct Properties {
     /// *onto* one kept the first.
     pub fills: Vec<Fill>,
     pub strokes: Vec<Stroke>,
+    /// The opacity the layer **draws** — a bound one resolved, the detach a
+    /// paste falls back to (§15 D1072).
     pub opacity: f32,
+    /// The variable it is bound to, landed by the paste's rule as a paint's is,
+    /// its name and kind in `carried`.
+    pub opacity_var: Option<crate::VarId>,
     /// **What a bound paint needs to land in another document** (§15 D1047):
     /// the name and kind of every variable the fills and strokes bind, and each
     /// paint as it drew in the copying document — the detach a paste falls back
@@ -4644,6 +4735,7 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
         .map(|f| &f.brush)
         .chain(strokes.iter().map(|s| &s.brush))
         .filter_map(crate::BrushSource::var)
+        .chain(node.opacity_var())
     {
         if let Some(var) = t.get(v)
             && !carried.iter().any(|c| c.id == v)
@@ -4667,7 +4759,8 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
             .collect(),
         fills,
         strokes,
-        opacity: node.opacity(),
+        opacity: doc.drawn_opacity(id),
+        opacity_var: node.opacity_var(),
         carried,
     })
 }
@@ -4733,7 +4826,20 @@ pub fn paste_properties(
         .collect();
     let mut ops = set_fills_all(doc, ids, &fills, src).0;
     ops.extend(set_strokes_all(doc, ids, &strokes, src).0);
-    ops.extend(set_opacity_all(doc, ids, props.opacity).0);
+    // A bound opacity by the same rule (§15 D1072): rebound where this document
+    // has the variable, on the outermost members `set_opacity_all` writes, else
+    // the opacity it drew.
+    match props
+        .opacity_var
+        .and_then(|v| crate::variable::rebind(t, &props.carried, v))
+    {
+        Some(var) => {
+            for id in outermost(doc, ids) {
+                ops.extend(bind_opacity_ops(doc, id, var));
+            }
+        }
+        None => ops.extend(set_opacity_all(doc, ids, props.opacity).0),
+    }
     Transaction(ops)
 }
 
@@ -4747,7 +4853,10 @@ pub fn set_opacity_all(doc: &Document, ids: &[NodeId], opacity: f32) -> Transact
     Transaction(
         outermost(doc, ids)
             .into_iter()
-            .filter(|id| doc.get(*id).is_some_and(|n| n.opacity() != opacity))
+            // Against what each draws (§15 D1072): a bound layer holds 0, so the
+            // literal would drop a 0% typed over one and write any other value
+            // its binding already draws.
+            .filter(|id| doc.get(*id).is_some() && doc.drawn_opacity(*id) != opacity)
             .map(|id| Operation::SetOpacity { id, opacity })
             .collect(),
     )

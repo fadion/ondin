@@ -834,7 +834,11 @@ fn paint_node<P: ScenePainter>(
         .or_else(|| res.used_local(doc, id))
         .unwrap_or_else(|| node.transform());
     let world = parent_world * local;
-    let opacity = over.and_then(|o| o.opacity).unwrap_or(node.opacity());
+    // A bound opacity drawn as its variable's percentage (§15 D1072), never the
+    // 0 its literal holds.
+    let opacity = over
+        .and_then(|o| o.opacity)
+        .unwrap_or_else(|| doc.drawn_opacity(id));
 
     let painted = Painted {
         kind: over

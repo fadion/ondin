@@ -1462,6 +1462,24 @@ impl RenderOverrides {
                     self.entry(*id).visible = Some(shown);
                 }
             }
+            // **An opacity's binding previews as what it will draw** (§15
+            // D1072), the bound variable's percentage in the mode in force;
+            // unbound, the literal the ops before this one left, else the
+            // document's — `SetVisibleVar`'s rule above.
+            Operation::SetOpacityVar { id, var } => {
+                let literal = match self.ghost(*id) {
+                    Some(g) => g.opacity,
+                    None => self
+                        .get(*id)
+                        .and_then(|o| o.opacity)
+                        .or_else(|| doc.get(*id).map(|n| n.opacity()))?,
+                };
+                let drawn = doc.opacity_drawn_in(doc.variables(), *id, literal, *var);
+                match self.ghost_mut(*id) {
+                    Some(g) => g.opacity = drawn,
+                    None => self.entry(*id).opacity = Some(drawn),
+                }
+            }
             Operation::SetFills { id, fills } => {
                 let mut paint = self.current_paint(doc, *id)?;
                 paint.fills = fills.clone();
@@ -1712,6 +1730,14 @@ impl RenderOverrides {
                     // A bound visibility the same way (§15 D1059).
                     if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
                         self.entry(n).visible = Some(doc.shown_in(&t, n));
+                    }
+                    // And a bound opacity (§15 D1072).
+                    if let Some(node) = doc.get(n)
+                        && node.opacity_var().is_some()
+                    {
+                        let drawn =
+                            doc.opacity_drawn_in(&t, n, node.opacity(), node.opacity_var());
+                        self.entry(n).opacity = Some(drawn);
                     }
                     // A bound gap or padding the same way, against the table with
                     // the cell changed, over the layout pending or committed
@@ -2232,7 +2258,16 @@ fn build_ghost(
         paint: node.paint().clone(),
         effects: node.effects().to_vec(),
         path,
-        opacity: node.opacity(),
+        // As drawn, a bound opacity resolved (§15 D1072) — over the captured node,
+        // whose id is in no document, so `drawn_opacity` would answer its
+        // missing-node 1 for every ghost; read in the default mode, as
+        // `ghost_shown` reads a visibility.
+        opacity: doc.opacity_drawn_in(
+            doc.variables(),
+            node.id(),
+            node.opacity(),
+            node.opacity_var(),
+        ),
         visible: ghost_shown(doc, node),
         clip: node.clip(),
         mask: node.mask(),

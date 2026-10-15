@@ -1524,7 +1524,8 @@ fn emit_node(
     // about *what sort* of node this is (`is_container`, `wrap`) stay on
     // `node.kind()`, since a used kind is always the same variant.
     let transform = outer * res.used_local_of(node);
-    let opacity = node.opacity();
+    // As drawn, a bound opacity resolved (§15 D1072).
+    let opacity = doc.drawn_opacity(node.id());
 
     let is_container = matches!(
         node.kind(),

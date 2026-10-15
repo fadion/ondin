@@ -703,6 +703,11 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.visible = doc.shown(id);
         node.visible_var = None;
     }
+    // A bound opacity its percentage (§15 D1072).
+    if node.opacity_var.is_some() {
+        node.opacity = doc.drawn_opacity(id);
+        node.opacity_var = None;
+    }
     node.mode = None;
     // And its styles, its lists already holding their values (§15 D1062).
     node.styles = Default::default();
@@ -770,7 +775,8 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .chain(n.spacing_vars.iter().flatten().copied())
             .chain(n.size_vars.iter().flatten().copied())
             .chain(n.text_vars.iter().flatten().copied())
-            .chain(n.visible_var);
+            .chain(n.visible_var)
+            .chain(n.opacity_var);
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
                 continue;
@@ -1017,6 +1023,13 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     n.visible = twin.map_or(n.visible, |t| t.visible);
                 }
             }
+            // And an opacity's, its fallback the twin's percentage (§15 D1072).
+            if let Some(v) = n.opacity_var {
+                n.opacity_var = rebind(v);
+                if n.opacity_var.is_none() {
+                    n.opacity = twin.map_or(n.opacity, |t| t.opacity);
+                }
+            }
             // A kit's mode the copy carries is kept, as its variables are — but
             // one of `doc`'s own kit is that mode itself, or *Inherit*.
             let carried_kit = n.mode.and_then(|m| {
@@ -1070,6 +1083,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.size_vars.iter().any(|v| hit(*v))
         || n.text_vars.iter().any(|v| hit(*v))
         || hit(n.visible_var)
+        || hit(n.opacity_var)
 }
 
 /// The operations that delete `vars` (D1038): **every field bound to one detaches
@@ -1203,6 +1217,13 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 visible: doc.shown_in(t, id),
             });
             ops.push(O::SetVisibleVar { id, var: None });
+        }
+        if n.opacity_var.is_some_and(|v| vars.contains(&v)) {
+            ops.push(O::SetOpacity {
+                id,
+                opacity: doc.opacity_drawn_in(t, id, n.opacity, n.opacity_var),
+            });
+            ops.push(O::SetOpacityVar { id, var: None });
         }
     }
     for v in t.iter().filter(|v| !vars.contains(&v.id)) {
@@ -1504,6 +1525,7 @@ pub(crate) fn check<'a>(
                 .chain(n.size_vars.iter().flatten().copied())
                 .chain(n.text_vars.iter().flatten().copied())
                 .chain(n.visible_var)
+                .chain(n.opacity_var)
                 .any(own);
             if reads_own || n.mode.is_some_and(|m| t.mode(m).is_some()) {
                 return Err(VarRule::InVault(n.id));
@@ -1550,6 +1572,12 @@ pub(crate) fn check<'a>(
         }
         if n.visible_var
             .is_some_and(|v| t.kind_of(v) != Some(VarKind::Boolean))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
+        // An opacity binds a number, on any layer (§15 D1072).
+        if n.opacity_var
+            .is_some_and(|v| t.kind_of(v) != Some(VarKind::Number))
         {
             return Err(VarRule::BadBinding(n.id));
         }

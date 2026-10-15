@@ -461,7 +461,8 @@ fn node_snapshot(
         visible: doc.shown(id),
         locked: node.locked(),
         proportions_locked: node.proportions_locked(),
-        opacity: node.opacity(),
+        // And a bound opacity (§15 D1072).
+        opacity: doc.drawn_opacity(id),
         clip: node.clip(),
         mask: node.mask(),
         mask_mode: node.mask_mode().label().to_string(),

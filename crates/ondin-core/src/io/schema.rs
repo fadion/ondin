@@ -378,6 +378,11 @@ pub(crate) struct NodeDto {
     /// unreleased when this joined it.
     #[serde(default, skip_serializing_if = "no_text_vars")]
     pub text_vars: crate::variable::TextVars,
+    /// The number variable a layer's opacity is bound to (§15 D1072), absent
+    /// when unbound. New in v8, as `size_vars` is — v8 still unreleased (v0.5.0
+    /// wrote v5) when this joined it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity_var: Option<crate::variable::VarId>,
     /// The styles a layer's fills, strokes and effects are bound to (§15
     /// D1062), and a text layer's type (§15 D1067), absent when none is. New in
     /// v8, as `size_vars` is.
@@ -499,6 +504,7 @@ impl NodeDto {
             visible_var: n.visible_var(),
             size_vars: n.size_vars(),
             text_vars: n.text_vars(),
+            opacity_var: n.opacity_var(),
             styles: n.styles(),
         }
     }
@@ -616,6 +622,7 @@ impl NodeDto {
             visible_var: self.visible_var,
             size_vars: self.size_vars,
             text_vars: self.text_vars,
+            opacity_var: self.opacity_var,
             styles: self.styles,
         })
     }

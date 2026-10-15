@@ -611,6 +611,77 @@ fn a_dropped_subtree_previews_as_the_artwork_it_will_become() {
     assert_preview_matches_commit(&f.doc, &tx, "dropping a copy of a group");
 }
 
+/// **A dropped copy previews at the opacity it will draw** (§15 D1072's
+/// reading (b)): the group at 50% plain, then bound to `opacity/muted` (30), its
+/// copy dropped beside it. The ghost's captured ids are in no document, so a
+/// ghost asking `Document::drawn_opacity` of its own id drew every copy at 100%.
+///
+/// Flip, run: `build_ghost` reading `doc.drawn_opacity(node.id())` again fails
+/// *"a copy of a 50% group"* — the ghost at 1 against the commit's 0.5.
+#[test]
+fn a_dropped_copy_previews_at_its_opacity_bound_or_not() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut f = fixture();
+    let mut ids = IdSource::new(0xC1FF);
+    let drop = |doc: &Document, ids: &mut IdSource| {
+        let template = doc.capture_subtree(f.group).expect("capture the group");
+        let (nodes, new_root) = ondin_core::remap_subtree(&template, ids).expect("remap");
+        let base = nodes
+            .iter()
+            .find(|n| n.id() == new_root)
+            .map(|n| n.transform())
+            .unwrap();
+        let index = doc.get(f.artboard).unwrap().children().len();
+        Transaction(vec![
+            Operation::InsertSubtree {
+                nodes,
+                parent: f.artboard,
+                index,
+            },
+            Operation::SetTransform {
+                id: new_root,
+                transform: Affine::translate((200.0, 0.0)) * base,
+            },
+        ])
+    };
+    f.doc
+        .apply(&Transaction(vec![Operation::SetOpacity {
+            id: f.group,
+            opacity: 0.5,
+        }]))
+        .unwrap();
+    let tx = drop(&f.doc, &mut ids);
+    assert_preview_matches_commit(&f.doc, &tx, "a copy of a 50% group");
+
+    let (mode, var) = (ids.mint_mode(), ids.mint_var());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "opacity/muted".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(30.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .unwrap();
+    let bind = ondin_core::bind_opacity_ops(&f.doc, f.group, var);
+    f.doc.apply(&Transaction(bind)).unwrap();
+    let tx = drop(&f.doc, &mut ids);
+    assert_preview_matches_commit(&f.doc, &tx, "a copy of a bound group");
+}
+
 /// A copied *frame* is the case the old ghost could not express at all, and the
 /// one that made Alt-drag move the original instead of the copy (§15, D40): a
 /// frame is a container, and it clips.
@@ -4848,4 +4919,93 @@ fn a_variable_cell_previews_on_what_reads_it() {
         "brand recoloured",
     );
     assert_preview_matches_commit(&doc, &cell(radius, Cell::Number(12.0)), "radius changed");
+}
+
+/// **An opacity bound to a number variable previews as the percentage it will
+/// draw** (§15 D1072): the `--` list's highlight on the opacity field —
+/// `bind_opacity_ops`, its literal 0 then the binding — drawn as an override and
+/// as committed, the committed scene walk reading `Document::drawn_opacity`;
+/// then the bound layer under a cell's new number, D1056's preview; then a write
+/// past the binding, the commit's `keep_opacity_bindings` detaching it.
+///
+/// Flip, run: the scene walk's `doc.drawn_opacity(id)` read as `node.opacity()`
+/// fails *"opacity bound: preview diverged from commit"* — the commit drawn at
+/// the literal 0, the preview at 40%.
+#[test]
+fn an_opacity_binding_previews_as_the_percentage_it_will_draw() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCC);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "opacity/muted".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(40.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_opacity_ops(&doc, rect, var));
+    assert_eq!(tx.0.len(), 2, "the literal 0 and the binding");
+    assert_preview_matches_commit(&doc, &tx, "opacity bound");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Number(75.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the bound opacity's cell edited");
+
+    // A write of 20% past the binding: the preview draws the 20% the commit
+    // detaches to.
+    let write = Transaction(vec![Operation::SetOpacity {
+        id: rect,
+        opacity: 0.2,
+    }]);
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &write).expect("representable");
+    let previewed = record(&doc, &res, &ov);
+    let mut committed = doc.clone();
+    committed
+        .apply(&ondin_core::keep_opacity_bindings(&doc, write))
+        .unwrap();
+    assert_eq!(committed.get(rect).unwrap().opacity_var(), None, "detached");
+    let committed_res = Resolved::rebuild(&committed);
+    assert_eq!(
+        previewed,
+        record(&committed, &committed_res, &RenderOverrides::default()),
+        "a write past the binding: preview diverged from commit"
+    );
 }

@@ -2123,22 +2123,10 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let fw = (ui.available_width() - 28.0 - ui::CARD_COL_GAP * 2.0) / 2.0;
-                let mut pct = opacity0 * 100.0;
-                let ro = value_field(
-                    ui,
-                    egui::vec2(fw, 28.0),
-                    Prefix::Icon(icon::DROP_HALF),
-                    &mut pct,
-                    Scrub::whole(0.5).range(0.0..=100.0),
-                    |d| d.suffix("%").max_decimals(0),
-                );
-                app.edit_valve(
-                    &ro,
-                    Transaction(vec![Operation::SetOpacity {
-                        id,
-                        opacity: (pct / 100.0).clamp(0.0, 1.0),
-                    }]),
-                );
+                // The layer's own opacity field, chip and all (§15 D1072's
+                // reading (a)) — this card is one layer too. No mark, as the
+                // card has drawn none.
+                app.opacity_field(ui, id, opacity0, fw, &None);
 
                 let enabled = radius0.is_some();
                 ui.add_enabled_ui(enabled, |ui| {
@@ -3489,12 +3477,26 @@ impl OndinApp {
                 );
                 app.reset_marked(hit, &opacity_mark);
                 if interacting(&ro) {
-                    let tx = ondin_core::set_opacity_all(
-                        &app.session.doc,
-                        &ids,
-                        (pct / 100.0).clamp(0.0, 1.0) as f32,
-                    );
-                    app.edit_valve(&ro, tx);
+                    let doc = &app.session.doc;
+                    let to = (pct / 100.0).clamp(0.0, 1.0) as f32;
+                    let set = ondin_core::set_opacity_all(doc, &ids, to);
+                    // **Each bound layer the write changes detached in the edit
+                    // itself** (§15 D1072's reading (c), D1071's amendment): the
+                    // inspector's own doors say nothing of a detach they make,
+                    // so the floating status stays quiet, as the single field's
+                    // chip does. `set_opacity_all` writes only the layers that
+                    // change, so those are the ones detached.
+                    let mut ops: Vec<Operation> = set
+                        .0
+                        .iter()
+                        .filter_map(|op| match op {
+                            Operation::SetOpacity { id, .. } => Some(*id),
+                            _ => None,
+                        })
+                        .flat_map(|id| ondin_core::detach_opacity_ops(doc, id))
+                        .collect();
+                    ops.extend(set.0);
+                    app.edit_valve(&ro, Transaction(ops));
                 }
                 if !has_rect {
                     return;
@@ -5792,17 +5794,37 @@ impl OndinApp {
             _ => None,
         };
         AppearanceMarks {
-            opacity: self.sub_mark(
-                s,
-                |op| match op {
-                    Operation::SetOpacity { opacity, .. } => Some(*opacity),
-                    _ => None,
-                },
-                |n| Some(n.opacity()),
-                |v| *v,
-                |c, v| *c = v,
-                |id, opacity| Operation::SetOpacity { id, opacity },
-                |v| format!("{}%", mark_num(f64::from(*v) * 100.0)),
+            // **The binding with the literal** (§15 D1072), the radius's rule
+            // below: a bound literal is 0 on both sides, so a copy bound apart
+            // from its main differs by its binding alone; its mark comes first,
+            // naming the main's variable, and its ↺ writes the main's
+            // `SetOpacityVar` beside the literal, which `keep_opacity_bindings`
+            // leaves as stated.
+            opacity: Mark::and(
+                self.sub_mark(
+                    s,
+                    |op| match op {
+                        Operation::SetOpacityVar { var, .. } => Some(*var),
+                        _ => None,
+                    },
+                    |n| Some(n.opacity_var()),
+                    |v| *v,
+                    |c, v| *c = v,
+                    |id, var| Operation::SetOpacityVar { id, var },
+                    |v| say_vars(std::slice::from_ref(v)),
+                ),
+                self.sub_mark(
+                    s,
+                    |op| match op {
+                        Operation::SetOpacity { opacity, .. } => Some(*opacity),
+                        _ => None,
+                    },
+                    |n| Some(n.opacity()),
+                    |v| *v,
+                    |c, v| *c = v,
+                    |id, opacity| Operation::SetOpacity { id, opacity },
+                    |v| format!("{}%", mark_num(f64::from(*v) * 100.0)),
+                ),
             ),
             // **A corner's binding is the radius field's too** (D1038 A6, §15
             // D1048, D1041's *Fix*): a copy bound to another variable than its
@@ -5893,6 +5915,69 @@ impl OndinApp {
             ),
         }
     }
+    /// One layer's opacity field, `fw` wide, for both Appearance cards — the
+    /// shape's and the point-editing one (§15 D1072's reading (a)).
+    ///
+    /// **Bound, it is a chip** (D1038 A1), the radius's own drawing — or the
+    /// buffer replacing it once a key has landed on it (A3), a number typed there
+    /// a percentage. **Unbound, it is the field**, with the radius's two doors:
+    /// `--` typed opens the list, and the right-click is the field menu.
+    fn opacity_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        opacity0: f32,
+        fw: f32,
+        mark: &Option<Mark>,
+    ) {
+        let key = super::binding::FieldKey::Opacity { id };
+        let retyping = self.var_retype.as_ref().filter(|r| r.key == key).cloned();
+        if let Some(var) = self.field_var(key).filter(|_| retyping.is_none()) {
+            let hit = self.number_chip(ui, key, var, fw, mark.as_ref());
+            self.reset_marked(hit, mark);
+            return;
+        }
+        if let Some(rt) = retyping {
+            self.number_retype(ui, key, rt, fw);
+            return;
+        }
+        let mut pct = opacity0 * 100.0;
+        let (ro, _, hit) = ui::value_field_unit_marked(
+            ui,
+            egui::vec2(fw, 28.0),
+            Prefix::Icon(icon::DROP_HALF),
+            None,
+            mark.as_ref().map(Mark::field),
+            &mut pct,
+            Scrub::whole(0.5).range(0.0..=100.0),
+            |d| d.suffix("%").max_decimals(0),
+        );
+        self.reset_marked(hit, mark);
+        self.edit_valve(
+            &ro,
+            Transaction(vec![Operation::SetOpacity {
+                id,
+                opacity: (pct / 100.0).clamp(0.0, 1.0),
+            }]),
+        );
+        if ro.has_focus()
+            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(ro.id))
+        {
+            self.bind_typing(ui.ctx(), key, &text, ro.rect);
+            if text.starts_with("--") {
+                self.var_retype = Some(super::binding::Retype {
+                    key,
+                    text,
+                    focus: true,
+                });
+            }
+        }
+        if ro.secondary_clicked()
+            && let Some(at) = ro.interact_pointer_pos()
+        {
+            self.field_menu = Some((key, at, ro.rect));
+        }
+    }
     /// Opacity, corner radius, and the vertex counts — the design's Appearance
     /// panel.
     ///
@@ -5928,25 +6013,7 @@ impl OndinApp {
                 let fields = if corners0.is_some() { 2.0 } else { 1.0 };
                 let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP * (fields - 1.0))
                     / fields;
-                let mut pct = opacity0 * 100.0;
-                let (ro, _, hit) = ui::value_field_unit_marked(
-                    ui,
-                    egui::vec2(fw, 28.0),
-                    Prefix::Icon(icon::DROP_HALF),
-                    None,
-                    marks.opacity.as_ref().map(Mark::field),
-                    &mut pct,
-                    Scrub::whole(0.5).range(0.0..=100.0),
-                    |d| d.suffix("%").max_decimals(0),
-                );
-                app.reset_marked(hit, &marks.opacity);
-                app.edit_valve(
-                    &ro,
-                    Transaction(vec![Operation::SetOpacity {
-                        id,
-                        opacity: (pct / 100.0).clamp(0.0, 1.0),
-                    }]),
-                );
+                app.opacity_field(ui, id, opacity0, fw, &marks.opacity);
                 let Some(corners) = corners0 else { return };
                 // **Bound, the field is a chip** (§15 D1041, D1038 A1) — or the
                 // buffer replacing it once a key has landed on it (A3).

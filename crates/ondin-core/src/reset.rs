@@ -87,6 +87,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         visible_var,
         size_vars,
         text_vars,
+        opacity_var,
         styles,
     } = node;
     let id = *id;
@@ -180,6 +181,13 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetTextVars {
             id,
             vars: *text_vars,
+        },
+        // And an opacity's (§15 D1072), stated so the commit's
+        // `keep_opacity_bindings` leaves it as written beside the `SetOpacity`
+        // above.
+        O::SetOpacityVar {
+            id,
+            var: *opacity_var,
         },
         // And the cards' styles (§15 D1062, D1038 F9): a copy on another style, or
         // detached from its main's, is an override, and *Reset fill* puts the

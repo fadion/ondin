@@ -151,6 +151,7 @@ impl Document {
             visible_var: None,
             size_vars: Default::default(),
             text_vars: Default::default(),
+            opacity_var: None,
             styles: Default::default(),
         };
         let mut nodes = FxHashMap::default();
@@ -635,6 +636,39 @@ impl Document {
                 _ => n.visible,
             },
             None => n.visible,
+        }
+    }
+
+    /// The opacity `id` is drawn at: **its bound variable's number in the mode in
+    /// force there, read as a percentage** — the Appearance field's own unit, so
+    /// a variable *opacity/disabled* of 40 draws 0.4 — clamped to 0–100, a missing
+    /// or non-number value 0 (§15 D1072); unbound, its literal. 1 for a node not
+    /// in the document, which draws nothing anyway.
+    ///
+    /// **What every reader that draws or exports asks**, never `Node::opacity`,
+    /// which is the literal a binding stands in for — 0 while bound, so a reader
+    /// that skips this draws the layer invisible (D1039's 0, chosen to be seen).
+    pub fn drawn_opacity(&self, id: NodeId) -> f32 {
+        match self.nodes.get(&id) {
+            Some(n) => self.opacity_drawn_in(&self.variables, id, n.opacity, n.opacity_var),
+            None => 1.0,
+        }
+    }
+
+    /// `literal` with the binding `var` read from table `t`, in the mode in force
+    /// at `id` — [`Self::drawn_opacity`] with the binding named, so a preview can
+    /// resolve one it has not committed, as [`Self::size_drawn_in`]'s is.
+    pub fn opacity_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        literal: f32,
+        var: Option<crate::variable::VarId>,
+    ) -> f32 {
+        let Some(v) = var else { return literal };
+        match self.resolve_var_in(t, id, v) {
+            Some(crate::variable::Value::Number(x)) => (x.clamp(0.0, 100.0) / 100.0) as f32,
+            _ => 0.0,
         }
     }
 
@@ -1272,6 +1306,12 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetTextVars { id: *id, vars: old })
             }
+            Operation::SetOpacityVar { id, var } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.opacity_var, *var);
+                dirty.0.insert(*id);
+                Ok(Operation::SetOpacityVar { id: *id, var: old })
+            }
             // ── The styles (§15 D1062) ── document-level, like the variables:
             // a style's values are written onto its users by ops of their own
             // (`style::settle`), so these dirty nothing.
@@ -1609,6 +1649,7 @@ impl Document {
             visible_var: None,
             size_vars: Default::default(),
             text_vars: Default::default(),
+            opacity_var: None,
             styles: Default::default(),
         };
         self.nodes.insert(id, node);
@@ -3043,6 +3084,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             visible_var: n.visible_var,
             size_vars: n.size_vars,
             text_vars: n.text_vars,
+            opacity_var: n.opacity_var,
             // And the styles its source's cards are bound to, the same way: ids
             // into the document's table (§15 D1062).
             styles: n.styles,
@@ -3273,6 +3315,7 @@ mod tests {
             visible_var: None,
             size_vars: Default::default(),
             text_vars: Default::default(),
+            opacity_var: None,
             styles: Default::default(),
         }
     }

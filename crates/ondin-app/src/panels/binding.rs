@@ -53,6 +53,10 @@ pub(crate) enum FieldKey {
     /// string variable. Not typed: the row is a picker, so the binding is the
     /// field menu's, as the eye's is.
     Family { id: NodeId },
+    /// A layer's opacity — the Appearance card's field (§15 D1072), bound to a
+    /// number variable read as a percentage, on one layer: a selection's field is
+    /// the outermost members' shared value, which no one variable stands in for.
+    Opacity { id: NodeId },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -80,7 +84,8 @@ impl FieldKey {
             | FieldKey::Visible { id }
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
-            | FieldKey::Family { id } => id,
+            | FieldKey::Family { id }
+            | FieldKey::Opacity { id } => id,
         }
     }
 
@@ -109,6 +114,8 @@ impl FieldKey {
             FieldKey::Content { .. } => icon::TEXT_T,
             // The family row's own glyph, so the chip sits where the combo's did.
             FieldKey::Family { .. } => icon::TEXT_AA,
+            // The opacity field's own prefix.
+            FieldKey::Opacity { .. } => icon::DROP_HALF,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -139,7 +146,8 @@ impl FieldKey {
             FieldKey::Radius { .. }
             | FieldKey::Corner { .. }
             | FieldKey::Spacing { .. }
-            | FieldKey::Size { .. } => VarKind::Number,
+            | FieldKey::Size { .. }
+            | FieldKey::Opacity { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
             FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
@@ -522,7 +530,8 @@ impl OndinApp {
             | FieldKey::Visible { id }
             | FieldKey::Size { id, .. }
             | FieldKey::Content { id }
-            | FieldKey::Family { id } => vec![id],
+            | FieldKey::Family { id }
+            | FieldKey::Opacity { id } => vec![id],
         }
     }
 
@@ -569,6 +578,7 @@ impl OndinApp {
             FieldKey::Family { id } => {
                 Transaction(ondin_core::bind_text_ops(doc, id, [None, Some(var)]))
             }
+            FieldKey::Opacity { id } => Transaction(ondin_core::bind_opacity_ops(doc, id, var)),
         }
     }
 
@@ -605,6 +615,7 @@ impl OndinApp {
             FieldKey::Family { id } => {
                 Transaction(ondin_core::detach_text_ops(doc, id, [false, true]))
             }
+            FieldKey::Opacity { id } => Transaction(ondin_core::detach_opacity_ops(doc, id)),
         }
     }
 
@@ -741,6 +752,7 @@ impl OndinApp {
             FieldKey::Size { id, axis } => doc.get(id)?.size_vars()[axis],
             FieldKey::Content { id } => doc.get(id)?.text_vars()[0],
             FieldKey::Family { id } => doc.get(id)?.text_vars()[1],
+            FieldKey::Opacity { id } => doc.get(id)?.opacity_var(),
         }
     }
 
@@ -783,7 +795,8 @@ impl OndinApp {
             | FieldKey::Visible { .. }
             | FieldKey::Size { .. }
             | FieldKey::Content { .. }
-            | FieldKey::Family { .. } => {
+            | FieldKey::Family { .. }
+            | FieldKey::Opacity { .. } => {
                 return None;
             }
         }
@@ -1420,6 +1433,11 @@ impl OndinApp {
                             geometry: ondin_core::GeometryPatch::Size(s),
                         });
                     }
+                    // A percentage, as the field takes it (§15 D1072).
+                    FieldKey::Opacity { id } => ops.push(Operation::SetOpacity {
+                        id,
+                        opacity: (r.min(100.0) / 100.0) as f32,
+                    }),
                     // The content is the text arm's above; the family and the
                     // eye are never typed.
                     FieldKey::Paint { .. }
@@ -1467,6 +1485,11 @@ impl OndinApp {
             }
             // Whether the layer shows.
             FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
+            // The percentage it draws at, the unit a bound opacity reads in.
+            FieldKey::Opacity { id } => {
+                doc.get(id)?;
+                Some(Cell::Number(f64::from(doc.drawn_opacity(id)) * 100.0))
+            }
             // The axis as drawn.
             FieldKey::Size { id, axis } => {
                 let s = self.session.resolved.used_kind(doc, id)?.box_size()?;
@@ -2894,6 +2917,80 @@ mod tests {
             Size::new(14.0, 20.0),
             "and writes the width typed"
         );
+    }
+
+    /// **Opacity binds through the field's verbs, a write through the commit
+    /// door detaches it and says so, and a number typed over the chip is a
+    /// percentage** (§15 D1072): bound to *radius/md* (6) the rect draws at 6%,
+    /// its literal 0; 50% written through `commit_edit` lands unbound at 50% and
+    /// the floating status says *Detached radius/md* (D1071); bound again, a chip
+    /// retyped *25* lands at 25% and unbound, saying nothing — the retype detaches
+    /// in the edit itself.
+    ///
+    /// Flip, run: `commit_inner` without its `keep_opacity_bindings` line fails
+    /// *"a write through the commit detaches it"* — the binding kept over a
+    /// literal of 0.5 it never draws.
+    #[test]
+    fn opacity_binds_a_write_detaches_it_and_a_retype_is_a_percentage() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let key = FieldKey::Opacity { id: rect };
+        app.bind_field(key, radius);
+        assert_eq!(app.field_var(key), Some(radius));
+        assert_eq!(app.session.doc.get(rect).unwrap().opacity(), 0.0);
+        assert!((app.session.doc.drawn_opacity(rect) - 0.06).abs() < 1e-6);
+        app.session.info("");
+        app.commit_edit(Transaction(vec![Operation::SetOpacity {
+            id: rect,
+            opacity: 0.5,
+        }]));
+        assert_eq!(
+            app.field_var(key),
+            None,
+            "a write through the commit detaches it"
+        );
+        assert_eq!(app.session.doc.drawn_opacity(rect), 0.5);
+        assert_eq!(
+            app.session.status().text,
+            "Detached radius/md",
+            "and says so"
+        );
+
+        app.bind_field(key, radius);
+        app.session.info("");
+        app.var_retype = Some(Retype {
+            key,
+            text: "25".into(),
+            focus: true,
+        });
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.number_retype(ui, key, rt, 160.0);
+                }
+            });
+        };
+        run(&mut app, vec![]);
+        run(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(app.field_var(key), None, "the retype detaches");
+        assert!(
+            (app.session.doc.drawn_opacity(rect) - 0.25).abs() < 1e-6,
+            "and writes the percentage typed"
+        );
+        assert_eq!(app.session.status().text, "", "asked for, so silent");
     }
 
     /// **An axis something else sizes takes no binding** (§15 D1061, the

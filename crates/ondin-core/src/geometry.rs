@@ -1569,6 +1569,7 @@ mod tests {
             visible_var: None,
             size_vars: Default::default(),
             text_vars: Default::default(),
+            opacity_var: None,
             styles: Default::default(),
         }
     }

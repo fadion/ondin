@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1063 index rows, 1063 body headings, next free
-D1064** (measured 2026-10-15 at `e289aae`; ⚠️ **the styles (step 3) request reserved
+anywhere cited either. **The live figures: 1065 index rows, 1065 body headings, next free
+D1066** (measured 2026-10-15 at `2033b8d`; ⚠️ **the step-4 request — kits carrying variables
+and styles — reserved D1064–D1073 at `f4c78e4` through the `dnumber-guard` mod and spent two**:
+D1064, the core (a kit's variables and styles vendored into the consumer's own tables with an
+origin, `KitModes` and the per-kit mapping, one planner `tokens::plan` for insert, update and
+carrying paste), and D1065, its chrome (kit groups last under a kit header, the browser's
+mapping row, kit rows inert). **D1066–D1073 found at zero sites and released.** Census **964**,
+arrivals D1064–D1065, none unresolved. ⚠️ **`arch-scribe` read twelve defects across two
+rounds** — among them a paste back into the kit minting copies of its own variables, a newer
+third kit refused for good, *Accept all* depending on kit order, and a stale-mode reset making a
+plain instance an override (the session's own first test run had found the same shape in the
+removal) — **all fixed before the commit, seven reproduced by a test and flip-checked**, the
+chrome five untested. Before that, measured 2026-10-15 at `e289aae`; ⚠️ **the styles (step 3) request reserved
 D1062–D1071 at `3003a90` through the `dnumber-guard` mod and spent two** — D1062, styles' core
 (linked copies settled at the commit, `style::settle` run before and after the component passes),
 and D1063, their chrome (the cards' `⋯` and capsule, the *Styles* tab, *Edit* as an edit mode on the

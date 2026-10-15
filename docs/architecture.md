@@ -2981,8 +2981,9 @@ kit collide when one is pasted into the other.
 
 **Kits carry the variables and styles a vendored main uses** (§5.3f, §15 D1037 — the session's
 proposal, not objected to; built 2026-10-15, §15 D1064), under this section's provenance and update
-flow, read-only in D as the main is. **`kit::freeze` keeps every binding** and freezes beside the mains
-the table they read, closed over styles and aliases, with the kit's own mode list (`frozen_tables`);
+flow, read-only in D as the main is. **`kit::freeze` keeps every binding** — but a top's own
+visibility, frozen to what it shows, no instance root reading it (§15 D1064's third amendment) — and
+freezes beside the mains the table they read, closed over styles and aliases, with the kit's own mode list (`frozen_tables`);
 a change to it alone is worth a publish (`Changes::tokens`). D holds what it vendors **in its own
 tables**, each variable and style minted D's id and carrying its origin (`VarOrigin`, `StyleOrigin`),
 and each kit's modes beside them as a `KitModes` — never modes of D — with one per-kit mapping from D's
@@ -3051,13 +3052,18 @@ here, overrides stay, undoable), from *Make all local*, and for a component the 
 instance is promoted** (§15 D1011 (3)): promoting one would make its overrides the main's values and
 re-base every other instance's against it; revealing the copy leaves every instance and override as it
 was. The revealed main goes at the top-right of D's content bounds, several stacked downwards; the
-selection does not move.
+selection does not move. **It stops reading the kit's variables and styles** (§15 D1066, the
+maintainer's ruling): D gains its own copies of those it reads — every mode's value kept, so nothing
+drawn changes — and the floating status says how many.
 
 **An update is a diff plus an ordinary commit** (5A–5D). D notices a newer publish of a kit it vendors
 from; a pill beside *Saved*, *2 kit updates*, appears on open and, while D is open, ~~the moment a kit
 publishes~~ at the next look at the used kits' files — every 45 seconds, and the moment the window
-regains the focus (§15 D1020, the maintainer's ruling of 30 to 60 seconds) — with no toast. Its popover lists per kit *v8 → v9*, a component count and the publish note,
-*Changes 23 instances. Your overrides stay.*, and *Later* / *Accept all*. Accepting rewrites the vendored
+regains the focus (§15 D1020, the maintainer's ruling of 30 to 60 seconds) — with no toast. Its popover lists per kit *v8 → v9*, ~~a component count~~ what the update
+changes — *2 components · 4 variables · 1 style*, then *Changed*, *Added* and *Removed* rows, old → new
+swatches and values, and how many layers a removal detaches (G21, §15 D1065's second amendment) — and
+the publish note, *N layers using X keep its values.* where a removal detaches any, *Changes 23
+instances. Your overrides stay.*, and *Later* / *Accept all*. Accepting rewrites the vendored
 mains in **one transaction**, undoable as one step (*Undo accept kit updates*), and the main-edit passes
 carry it to D's instances — overrides surviving by value comparison, instance-side structure by §5.3d's
 free-structure rules; a component the kit removed is made local, as above, and the toast says so —
@@ -3318,7 +3324,15 @@ and the dashboard's 1B §15 D1017).
   copies the revealed main back into the vault, origins kept, and points the nesting copy there, so the
   revealed one is the user's own fork and the vault never links out (§15 D1036 (1)). 4E's dialog says so,
   and counts only the instances that will follow the revealed main — not a page instance's nested copy,
-  which reaches it through a vault main that stays (`OndinApp::make_local_reach`). An update makes the kit's removed mains local the same way, and **whole**: every
+  which reaches it through a vault main that stays (`OndinApp::make_local_reach`). 🚨 **And the kits'
+  variables and styles it reads are forked** (`tokens::fork`, §15 D1066): the revealed nodes' **own**
+  bindings — not one equal to its link source's, which a nested kit instance keeps; a fill or stroke
+  matched to the source's by item id — are pointed at
+  the document's own copies, every mode given the cell the mapping read there, a fork already marked with the same kit variable or style
+  (`Variable::forked`, `Style::forked`) reused; `kit::make_local_report` says what it forked for the
+  status line. An update makes the kit's removed mains local the same way — a top the publish no
+  longer holds at all forked **before** the kit's tables are rewritten, or the removal of a variable
+  only it read would leave it a literal (`kit::update_in_order`) — and **whole**: every
   top is classified before any is synced, and no sync moves a layer out of one being made local
   (`Builder::keep_out`, §15 D1024).
 - **The notice**: a pill after the save dot when the library says a kit published past the version D
@@ -3327,7 +3341,11 @@ and the dashboard's 1B §15 D1017).
   than their version** (`Update::changed`) — *"no component you use changed"* at zero — a layer deleted
   after every sync, or a reference pointed after them, counted to the main it lies in — and names each
   variant the kit removed whose instances detach (`Update::removed`, §5.3d's *deleting a main*); a
-  waiting kit that cannot be read applies nothing and says so (§15 D1036 (4), (5)). ~~⚠️ It appears when the library next rescans, not the
+  waiting kit that cannot be read applies nothing and says so (§15 D1036 (4), (5)). **The popover's
+  summary** (`kits::summary`, §15 D1065's second amendment) is read off a dry run of `update_all`'s
+  operations, never off a scratch it was applied to, cached by the session's revision and the waiting
+  versions; a new value is read through the update's own kit-mode records, an old through the
+  document's; a removal's detach count estimates the plan's follow filter. ~~⚠️ It appears when the library next rescans, not the
   moment a kit publishes (§15 D1016, unruled).~~ **A publish while D is open is noticed by a look**
   (`watch_kits`, §15 D1020): while the vault holds anything, every 45 seconds and on the frame the
   window regains the focus, each used kit's file is `stat`ed against what the library scan read of it —
@@ -3353,7 +3371,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 built; §15 D1037–D1065)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 built; §15 D1037–D1066)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3381,8 +3399,9 @@ Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a lay
 > nothing. **Step 4, kits carrying both, is built** — the core (§15 D1064: the consumer's own tables
 > with origins, `KitModes` and the mapping, the frozen table, `tokens::plan`, the update's rewrite and
 > removals, the carrying paste) and its chrome (§15 D1065: kit groups last, the browser's kit header
-> with the mapping, inert rows, the toast's counts) — *Kits' variables and styles, as built*, below;
-> 5A's extended summary and the *v8 → v9* line are not. The
+> with the mapping, inert rows, the toast's counts), and *Make local*'s fork of what the main reads (§15
+> D1066, the maintainer's ruling) — *Kits' variables and styles, as built*, below — and 5A's extended
+> summary and the browser's *v8 → v9* line (D1065's second amendment). The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3546,7 +3565,7 @@ The operations, the save format's v7 and v8, invalidation, the paste rule and th
 visibility (`renderer::ghost_shown`); **the snapshot
 reports the resolved value**, not the binding; ~~**a kit's frozen copy detaches every binding** until step
 4 carries variables~~ **a kit's frozen copy keeps its bindings and carries their table** since step 4
-(§15 D1064).
+(§15 D1064) — all but a top's own visibility, frozen to what it shows (D1064's third amendment).
 
 **The browser** (§15 D1040 in full) is `panels/variables.rs`: `Shift+S` or the rail's swatches button
 directly above the hexagon opens it, and **opening either it or the insert picker closes the other**, the
@@ -3735,19 +3754,31 @@ planner, `tokens::plan`**, lands what a set of nodes reads for `kit::vendor`, `k
 `sync`: the kit's whole holding rewritten by `SetVariable`, `SetKitModes`, `SetStyleName`/`Value`/
 `Origin`, hand-set entries kept while their target survives, what the publish dropped removed and its
 users detached — 🚨 **but not a live copy bound as its main is**, which the commit's follow carries,
-or it would read as an override — and frames on a removed kit mode reset) and the carrying paste
+or it would read as an override (`tokens::reads_as_its_source`: fills and strokes matched by item id,
+a vault main's binding to the document's fork of the variable counted alike, `tokens::alike`, and
+of a style the same way) — and no style the same removal drops rewritten for the variables it
+read — and frames on a removed kit mode reset) and the carrying paste
 (`Carried::tokens`, kits' bindings matched by **origin, never by name**, and kept by `land` to be
 pointed at the vendored copy). A held kit's record is reused when it covers the source's modes — a new
 variable filling its extra columns from the source's default — and `KitError::Modes` when it lacks
 one; the kit's own document maps to its own variables, never copies. *Accept all* retries with a kit
-named by `Modes` moved ahead. Saved in v8
-(`VariablesDto::kits`, the optional origins). **The chrome**: the `--` list, the swatch popup's
+named by `Modes` moved ahead. **A publish freezes a top's and a variant's own visibility** to what it
+shows, so a main root's binding there carries no variable and its cell edit is no change (D1064's
+third and fourth amendments). ***Make local* forks** what the revealed main's own bindings read (§15
+D1066): the document's own copies, named `Kit/name`, marked `forked` with the kit variable or style
+they came from so a second *Make local* reuses them, each document mode given the cell `kit_mode` read
+there — a document with no modes taking the first forked kit's by name, every other held kit's
+default pinned to its first mode — the main's own bindings
+rebound and the follow carrying them to its instances; a nested kit instance keeps the kit's. Saved in
+v8 (`VariablesDto::kits`, the optional origins and fork marks). **The chrome**: the `--` list, the swatch popup's
 *Variables* face, the browser and *Apply style…* list kits' last, each kit under its mark and name; the
 browser's kit header carries the mapping per mode column — *Day →* under *Light*, a click opening the
 kit's modes and *Match by name* — its groups folding under `\u{2}kit\u{2}path`, its rows inert (the
 count selects users; no rename, cells, menu or *Duplicate*); a kit's style offers *Select* alone and
-cannot be edited; the update toast counts variables and styles updated and removed. Not built: 5A's
-extended summary and the *v8 → v9* line; a kit variable no held main reads cannot be bound.
+cannot be edited; the update toast counts variables and styles updated and removed; the update
+popover's summary names them, old → new, and a removal's detach count, and a kit's header reads *· v8 →
+v9* while an update waits, a click opening the popover, its rows still the held values. Not built: a
+kit variable no held main reads cannot be bound.
 
 ### 5.4 Text node
 
@@ -6798,7 +6829,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
   variables and styles** (§15 D1064): `VariablesDto::kits`, each kit's modes and mapping by kit id,
   skipped when empty, and a variable's and a style's `origin`, skipped when `None` — the published
-  document's table saved the same way, its bindings now kept.
+  document's table saved the same way, its bindings now kept. **And *Make local*'s fork marks** (§15
+  D1066): a variable's and a style's `forked`, skipped when `None`.
 
 ### 5.11a The library block (§15 D362)
 

@@ -695,7 +695,9 @@ pub enum BrushSource { Literal(Brush), Bound { var: VarId, alpha: f32 } } // a c
                                // `Document::resolved_paint`; saved as the brush when literal
 pub struct Stroke {
     pub brush: BrushSource,    // bindable as a fill's is
-    pub width: f64,
+    pub width: f64,            // the literal; 0 while `width_var` binds it — §5.3f, §15 D1073
+    pub width_var: Option<VarId>, // a number variable, IN the item, so a style, a reorder and a
+                               // copy carry it; drawn through `Document::resolved_paint`
     pub join: kurbo::Join,
     pub cap: kurbo::Cap,
     pub dashes: Vec<f64>,      // on, off, on… empty is solid; the ONLY dash state stored (below)
@@ -3437,8 +3439,10 @@ which an instance already keeps as its own (§5.3d's `reset::placement_is_own`; 
 §15 D983 (3)). **W and H bind only where the user sets them** (the maintainer's ruling, §15 D1061) —
 never a hugging frame's, a text box's, or a size a flex or grid layout deals out or stretches.
 **Layer opacity binds as a percentage** (§15 D1072, the session's under the maintainer's delegation):
-the variable's number in the Appearance field's own unit, 0–100, so *40* draws 0.4. Stroke width
-and an effect's numbers bind nothing yet (`roadmap.md`).
+the variable's number in the Appearance field's own unit, 0–100, so *40* draws 0.4. **A stroke's
+width binds in the item** (§15 D1073, the session's under the delegation), one stroke of one layer at
+a time, and not where the stroke draws per-side widths of its own. An effect's numbers bind nothing
+yet (`roadmap.md`).
 **Colours** bind a **whole solid paint**,
 never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
 stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
@@ -3448,8 +3452,8 @@ plain family, never a variable** (the maintainer's ruling, §15 D1069). A field 
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)` — ⚠️ **in eight shapes, as built** (§15 D1039, D1058, D1059, D1061,
-D1069, D1072; *What is built*, below) — and
+`Literal(T) | Bound(VarId)` — ⚠️ **in nine shapes, as built** (§15 D1039, D1058, D1059, D1061,
+D1069, D1072, D1073; *What is built*, below) — and
 the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
@@ -3521,9 +3525,9 @@ name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`, and since §15 
 reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
 `resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it
 (with `resolved_display`, D1058, `shown`, D1059, `resolved_kind`, D1061, which applies
-`text_drawn_in` since D1069, and `drawn_opacity`, D1072).
+`text_drawn_in` since D1069, `drawn_opacity`, D1072, and `stroke_width_drawn_in`, D1073).
 **`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
-a dangling binding rather than repairing it. The binding's eight shapes:
+a dangling binding rather than repairing it. The binding's nine shapes:
 
 - **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
   **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
@@ -3581,6 +3585,40 @@ a dangling binding rather than repairing it. The binding's eight shapes:
   H's is on one layer's Transform card; the several-layer row writes the outermost members' shared
   value and takes no binding, detaching a bound layer it writes in the edit itself, so it says nothing
   (§15 D1071's amendment's rule).
+- **A stroke's width** (§15 D1073): `Stroke::width_var: Option<VarId>` beside `width`, **in the item**
+  as `BrushSource` is the paint's, so a stroke style, a reorder, a copy and the keyed list ops carry it;
+  a number variable only. Binding writes the literal **0**, D1039's. 🚨 **`Document::resolved_paint_in`
+  substitutes the number** (`stroke_width_drawn_in`: floored at 0, a missing or non-number value 0)
+  **and clears `width_var` in its output**, as a resolved brush comes out literal — a preview's override
+  holding a resolved paint is resolved again by the scene against the committed table, and a binding
+  left on it drew the committed number over the previewed one. So every reader that takes the paint
+  through that seam reads the number: the scene walk and the SVG writer as before, and now `Resolved`'s
+  bounds, `query::hit_test` (§5.10's `contains_local`), the session's preview bounds, the snapshot and the
+  ghost (resolved at capture, in the default mode). **A stroke list written over a bound width is judged
+  at the commit** (`build::keep_stroke_width_bindings`, after `keep_opacity_bindings`, over every
+  `SetStrokes`) by **corners' two halves**, not the opacity's one (`build::kept_stroke_widths`, which
+  the preview's `SetStrokes` arm runs too): a stroke whose binding the write carries unchanged stays
+  bound written what it draws **or its own literal 0**, the literal put back, and detaches to any other
+  width; a stroke whose binding the write changes — a bind, a detach, a reset, a stroke new to the list
+  — is left as written. 🚨 **The literal half is the load-bearing one**: every Stroke card edit and the
+  Scale tool's `width *= s` rebuild the whole list from the stored items, so a bound stroke arrives with
+  its 0. ⚠️ **The price is corners'**: 0 typed over a bound width keeps it, the chip's retype that
+  value's door. **A stroke drawing `Custom` sides takes no binding** — it draws its own four widths
+  (`StrokeSides::widths`) — but only on a box: `build::draws_own_sides` asks `geometry::effective_sides`,
+  so a `Custom` stroke on an ellipse or a path, drawn whole at `width`, binds like any other. Where it
+  is drawn, `bind_stroke_width_ops` refuses it, `kept_stroke_widths` detaches a bound one at the width
+  it drew **whoever wrote it** — checked before the exemption for a binding the write states, so a
+  bound `Custom` stroke pasted from an ellipse onto a rect lands detached — the sides seeded from that
+  width, and the weight field offers no `--` door or field menu. The
+  chip is on one layer's own strokes (`FieldKey::StrokeWidth { id, item }`, the Stroke card's weight
+  field under `PaintScope::Node`); the selection's shared weight row stays a plain field. The
+  inspector's doors detach in the edit, so they say nothing (D1071's amendment's rule): the shared row
+  clears every binding it writes — a member already drawing the typed width included — and the sides
+  row's *Custom* writes the drawn width unbound. *Paste properties* lands a bound width by D1047's rule
+  (`Properties::drawn_widths`, the width variables carried). The dash popup sizes a fresh pattern from
+  the drawn width (§15 D1073's amendment). **The pass rewrites the
+  list in place rather than appending**, so `commit_inner` reads the widths bound before it and the
+  widths cut after it and merges the names into the floating status (below).
 - **Width and height** (§15 D1061): `Node::size_vars: [Option<VarId>; 2]` beside the stored `size`
   of the five kinds that have one (`NodeKind::box_size` — `Artboard`, `Rect`, `Ellipse`, `Polygon`,
   `Star`; a text box's W and H do not bind, by decision). A bound axis's literal is written 0, and 🚨
@@ -3622,6 +3660,11 @@ switch and Text commit), so they say nothing; the layers panel's eye and the hid
 pass, and say it (D1071's amendment). 🚨 **The
 run ends before the follows**, which are the cut's consequences in the copies, not the edit's cuts. A
 paint's binding is its `BrushSource`, decided at the write and no pass's, so its detach says nothing.
+**The seventh pass, the stroke width's, appends nothing** (§15 D1073): it rewrites the `SetStrokes`
+lists in place, so no `Set*Vars` op is there to read. `commit_inner` notes every stroke the edit writes
+with its width bound (`stroke_widths_bound`) before `keep_stroke_width_bindings` and names those the
+pass left unbound (`stroke_widths_cut`) after it, merged with `variables_detached`' names; a stroke the
+edit itself unbinds — the chip's detach — never enters the first reading, so it says nothing.
 
 The operations, the save format's v7 and v8, invalidation, the paste rule and the readers are in §5.7, §5.11,
 §5.9 and §15 D1039. **A ghost resolves in the default mode**, being in no frame yet — its paint, and since §15 D1059 (3) its
@@ -3798,7 +3841,9 @@ name); it **detaches** the layer, values kept, when one did — so the canvas, *
 detach with no door knowing. Both runs are load-bearing: the first lets a main's rewrite or detach reach
 its copies, the second puts back a copy on another style that a follow drifted. **`style::check`** (a
 post-condition of `apply` and of the loader) holds names unique per slot, no item id twice in a style,
-paints bound to colour variables only, every binding to a style of its slot, and **no vault node
+paints bound to colour variables only and a stroke's width to number variables only (§15 D1073 — a
+check per kind, where it had refused any variable not a colour), every binding to a style of its slot,
+and **no vault node
 bound to a style of the document's own** — a vault node's styles are kits' (§15 D1064), and a kit's
 style reads only kits' variables. A bare
 `RemoveStyle` of a style in use is refused; `style::remove_ops` detaches the users first. **Deleting a
@@ -5421,7 +5466,8 @@ pub enum Operation {
                                                       // a paint-shaped op — and `absorb` refuses it
                                                       // (§6.2).
     SetFills    { id: NodeId, fills: Vec<Keyed<Fill>> },     // each item with its id — §5.3d, D980
-    SetStrokes  { id: NodeId, strokes: Vec<Keyed<Stroke>> },
+    SetStrokes  { id: NodeId, strokes: Vec<Keyed<Stroke>> }, // a bound width's binding rides in the
+                                                      // item, so no op of its own — §15 D1073
     SetEffects  { id: NodeId, effects: Vec<Keyed<Effect>> },  // the whole stack — §5.3a, §15 D333. For
                                                        // SetStrokes' reason: a reorder, a removal, a
                                                        // visibility toggle and a tuned number are one
@@ -6468,9 +6514,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   half-width for strokes, glyph-box test for text), topmost-first, respecting visible/locked.
   The exact tests live in `geometry.rs`, not in callers. Both flags are read **through the ancestors**
   (`is_effectively_interactable`), so a layer inside a hidden or locked group is unpickable. The test
-  is at the node's **used** kind (§15 D868): `geometry::contains_local(node, kind, p, text, slop)`
-  takes the kind apart from the node, which still supplies the paint and the fill rule, so the click
-  target is the box that is drawn.
+  is at the node's **used** kind (§15 D868): `geometry::contains_local(node, paint, kind, p, text, slop)`
+  takes the kind apart from the node, which still supplies the fill rule, so the click target is the
+  box that is drawn — and the paint apart too, `hit_test` handing it `Document::resolved_paint`'s, so a
+  bound stroke width's reach is its number and not its literal 0 (§15 D1073).
 - **`is_effectively_locked` is the lock half of that, and it is `pub` because the whole app needs it**
   (§15 D321). **A locked group locks its contents** — that is what a lock on a container means, not a
   convenience laid over it — and until 2026-08-23 the only ancestor-aware reading of the lock in the
@@ -6941,7 +6988,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   boolean cell saved as `{"boolean": true}`. **So did W and H's** (§15 D1061): `NodeDto::size_vars`,
   skipped when neither axis is bound. **And a text's content and family** (§15 D1069):
   `NodeDto::text_vars`, skipped when neither is bound, and a string cell saved as `{"string": "…"}`.
-  **And a layer's opacity** (§15 D1072): `NodeDto::opacity_var`, skipped when unbound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
+  **And a layer's opacity** (§15 D1072): `NodeDto::opacity_var`, skipped when unbound. **And a
+  stroke's width** (§15 D1073): `Stroke::width_var`, saved **in the stroke item** rather than on
+  `NodeDto` — the stroke serialises as itself — and skipped when unbound, so an unbound stroke saves as
+  it did. **And styles** (§15 D1062): `DocumentDto::styles`, above the
   images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
   the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
   style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
@@ -7426,7 +7476,20 @@ pub trait ScenePainter {
   🚨 **The ghost reads `opacity_drawn_in` over the captured node's own literal and binding**, in the
   default mode as `ghost_shown` reads a visibility — never `drawn_opacity`, which answers 1 for an id
   the document does not hold, and previewed every Alt-drag and paste copy at 100% until D1072's
-  amendment.
+  amendment. **A bound stroke width is drawn at its number** (§15 D1073): `SetStrokes`' arm writes the
+  list through `build::kept_stroke_widths`, the commit's own judgement, so a write the commit detaches
+  previews unbound and one it keeps previews bound, the scene's resolve drawing either; and
+  `SetVariableCell`'s arm counts a bound width as reading the table, re-resolves it with the paint and
+  marks the node moved. 🚨 **`Document::resolved_paint_in`'s output has `width_var` cleared** — the scene
+  resolves an override's paint again against the committed table, and a binding left on it drew the
+  committed number over the previewed one (`a_stroke_width_binding_previews_as_the_width_it_will_draw`).
+  The ghost's paint is resolved at capture (`build_ghost`), `scene::ghost_ink` having no document to ask.
+  ~~⚠️ **`SetStrokes`' arm marks nothing moved**, where `SetEffects`' does, so a previewed write that
+  widens an outside stroke may be culled on its committed bounds — read, not run; older than D1073,
+  and reachable more often now that a bind can preview a wider number (*Revisit if* it is seen at a
+  viewport edge).~~ **`SetStrokes`' arm marks the node moved**, as `SetEffects`' does — a stroke's
+  reach is ink the cull tests, so a widened outside stroke or a bound width's new number is not culled
+  on the committed bounds (§15 D1073's amendment; no test culls at a viewport edge).
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds

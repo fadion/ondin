@@ -1468,8 +1468,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1068** — **Styles and variables, build step 6's first half — text styles' chrome: the Type card a style card, its `⋯`, capsule and read-only state F1–F8's unchanged — and, the session's own, its rows left live under the capsule over a live session's non-empty selection, whose writes are spans and keep the style.** The session's, under the maintainer's delegation. `style_card_live`; preview *Ag* in the chrome's face, summary `Family · size`; *Apply* over a live session re-opens the editor on the committed defaults; *Edit* on a text style selects its first user alone, the Type card drawing for one text layer. ⚠️ **The card is wider than the slot**: read-only, it locks both alignments and the popup's Paragraph and Box tabs, which the style does not hold — against D1037's *a card is styled or not, as a whole*. ⚠️ Three readings not run: the typography popup stays live beside a read-only card; *Edit* over a live selection writes spans on one layer under *Changes reach its N layers*; an edit through a user clears that user's spans of the edited attribute and no other user's. No multi-selection Type card, so a text style is applied one layer at a time. Amended the same day: the card's rows the style does not hold — the alignment row and the popup's opener — drawn live in a `tail` under any state, the popup's Character tab locked where the card is, the live footer winning over *Edit*'s, and the span clearing fixed in D1067; ~~the lock is wider than the style by the Language row~~ (fixed the same day, the Colour and Language rows left live), and ~~live rows' instance reset chips can detach~~ (fixed 2026-10-16, second amendment: on a text-styled layer `type_marks` marks none of the five style fields, the card's *Reset Type* their reset; the old ↺ measured detaching the copy's style). *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-15. The live rows **Keep**; the card wider than the slot ~~***Fix***, its route the maintainer's~~ fixed by leaving those rows live, the session's call; ~~the popup ***Fix***; the two edit-mode readings ***Fix***, untested~~ all three fixed; ~~the Language row and~~ the reset chips ~~***Fix***~~ **Resolved**, the Language row fixed. ~~Three~~ ~~Four~~ Five tests, ~~two~~ ~~three~~ four flips. D1063 amended; `architecture.md` §5.3f; `roadmap.md` step 6. **Amended 2026-10-16**)*
 - **D1069** — **Styles and variables, build step 6's second half — string variables' core: a text's content and family bind to string variables, a sidecar beside literals written empty while bound and substituted by `Document::resolved_kind`; binding the content clears the spans, and an edit of the text detaches what it edits.** The maintainer's ruling of 2026-10-15, agreeing the session's four recommendations with no design pass: a *Content* row (D1070); the spans cleared, an edit detaching as a resize detaches a bound size (D1061); the family a chip, a text style holding a plain family, not a variable; build from that. `VarKind::String`, `Cell`/`Value::String` — no longer `Copy`; `TextVars` on `Node::text_vars`; `SetTextVars`; v8, no bump. `bind_text_ops` refuses a family under a text style. `Document::text_drawn_in`; 🚨 `with_bound_size` fires on `text_vars` too — a reader sweep found the scene, export and snapshot shaping the empty literal, flipped. 🚨 `keep_text_bindings` after `keep_size_bindings`: a `SetText` of the drawn string ~~or `""`~~ with no spans stays bound (one half, amended); spans written over a bound content become a `SetText` of the drawn string, detaching; a family drawn or `""` stays; `SetTypeStyle(Some)` detaches the family; `keep_insets`' preflight applies it. `set_property` re-binds a copy set back to a bound source's string. ⚠️ Four readings, all fixed the same day (amendment), each tested and flipped: emptying a bound text kept it bound — the content's pass one half now, `""` detaching; a Text property's reset and drift omitted `SetTextVars` (D1059 (4)'s shape), a detached copy's reset drawing nothing — the content slot taken, the family left the copy's; a copy's own family binding survived its main's text style — `settle` clears it; `SetMode` left a laid bound text's `text_memo` stale — `update` drops every bound text's entries. *(Ruled 2026-10-15; built by the session, uncommitted when recorded. **Keep**; readings (1)–(4) ~~***Fix***~~ **Resolved**. ~~Six~~ Ten tests, ~~two~~ six flips as reported. D1038, D1039, D1040 amended; `architecture.md` §5.3f, §5.4a, §5.7, §5.9, §5.11, §6.2; `roadmap.md` step 6 struck, its readings opened)*
 - **D1070** — **Styles and variables, build step 6's second half — string variables' chrome: a *Content* row on the Type card, live under a text style, the chip when bound and a one-line field when not; the family row's chip and field menu; the browser's *String variable*, its cells quoted; a bound family's fonts loaded.** The row and the chip the maintainer's ruling (D1069), the rest the session's. *String variable* (`TEXT_T`), *string n* holding "Text"; a cell quoted, typed bare and untrimmed — a literal beginning `--` untypeable. `FieldKey::Content` typed, `FieldKey::Family` not, both `String`; the retype's refusal by the key's kind. `type_content_row` in `style_card_live`'s tail; its write re-bases spans through one minimal edit; read-only over several lines or a live session. `family_mark` resets literal and binding together (D1048, D1061). `begin_edit_text`/`restyle_session` on `resolved_kind`, flipped. `bound_families`, `bound_fonts_at`. ~~⚠️ Open: the Properties card's Text row draws no chip (D1038 (d), D1060's for Boolean); the Content row no override mark.~~ Both built (amendment, 2026-10-16): `variants::bound_chip`, A4's rule, now the Boolean and the Text rows' one decision, `PropCache::chips` a label and a tooltip; the Text row's chip `binding::chip`, × or `Backspace` detaching every counterpart to its drawn string, a typed key held under `retype` and committed through `set_property`; `content_mark`, `family_mark`'s rule for the content — the binding with the literal, reset the main's `SetText` and content binding beside the copy's own family binding — on the chip bound and on the badge unbound. *(Built on the maintainer's ruling, uncommitted when recorded. **Keep**; the two open items **Resolved**. ~~One test, one flip~~ Three tests, four flips as reported; the rest untested and not looked at. D1038, D1040 amended; `architecture.md` §5.3d, §5.3f, §5.4a; `roadmap.md` step 6, and its owed chrome struck. **Amended 2026-10-16**)*
-- **D1071** — **A variable's detach says so on the floating status: the variables the commit's five binding passes cut where an edit wrote over a bound field are named — *Detached size/w*, or a count — beside the styles D1063 names, unless the edit's own ops set a binding of those kinds.** D1038 (2)'s *"the floating status says what was detached"*, which D1058, D1059, D1061 and D1063 recorded as unbuilt for variables. 🚨 Each pass **appends** its `Set*Vars`, so `commit_inner` notes `asked_ops` after `keep_flex_sizes`, before `keep_corner_bindings`, and `session::variables_detached` reads the binding ops from there to `user`, `propagate::owed`'s mark, each slot `Some` → `None` against the document's binding — the run ending **before the follows**, the cut's consequences in the copies rather than the edit's cuts (the canvas test's flip reads past it). `styles_detached` returns names; `said_detached` words both: *Detached ‹name›*, *N styles*, *N variables*, *N styles and variables*. ⚠️ The asked-for guard is transaction-wide and its flip does not bite — every pass already leaves to the edit a node whose binding it sets — so it decides only an edit binding one layer and writing over another's. ⚠️ Not covered: a paint's binding written over (a `BrushSource`, no pass's); no canvas handle writes a gap or padding, and the Scale tool keeps a bound corner. ~~⚠️ Read, not run: the inspector's detaches through a pass — among them the bound eye's click, the Boolean property's switch, a key typed over the Text property's chip — now say *Detached ‹name›*, where the chips' × and the Content and number chips' retypes, which detach first, say nothing.~~ Fixed the same day (amendment): the identity card's eye and the Properties card's Boolean switch and Text commit detach in the edit itself (`detach_visible_ops`, `detach_text_ops` ahead of the write), so F2 keeps them silent; the layers panel's eye and the hide chord left to the pass, doors outside the inspector. *(Built 2026-10-16 on D1038 (2)'s ruling, uncommitted when recorded. **Keep**, the appended run read between the two marks above all; the guard **Keep**; the inspector's spoken detaches ~~unruled, ***Revisit*** with a ruling~~ fixed, **Keep**. Two tests, the canvas drag the first to drive a handle over a bound field; two flips, one not biting; the two property tests' silent-status assertions flipped since, each failing at *Detached state/on* or *Detached copy/cta* with its door's detach taken out; the identity eye untested. D1058, D1059, D1061, D1063 amended; `architecture.md` §5.3f; `roadmap.md` (2)'s canvas half edited down; the passes six since D1072)*
+- **D1071** — **A variable's detach says so on the floating status: the variables the commit's five binding passes cut where an edit wrote over a bound field are named — *Detached size/w*, or a count — beside the styles D1063 names, unless the edit's own ops set a binding of those kinds.** D1038 (2)'s *"the floating status says what was detached"*, which D1058, D1059, D1061 and D1063 recorded as unbuilt for variables. 🚨 Each pass **appends** its `Set*Vars`, so `commit_inner` notes `asked_ops` after `keep_flex_sizes`, before `keep_corner_bindings`, and `session::variables_detached` reads the binding ops from there to `user`, `propagate::owed`'s mark, each slot `Some` → `None` against the document's binding — the run ending **before the follows**, the cut's consequences in the copies rather than the edit's cuts (the canvas test's flip reads past it). `styles_detached` returns names; `said_detached` words both: *Detached ‹name›*, *N styles*, *N variables*, *N styles and variables*. ⚠️ The asked-for guard is transaction-wide and its flip does not bite — every pass already leaves to the edit a node whose binding it sets — so it decides only an edit binding one layer and writing over another's. ⚠️ Not covered: a paint's binding written over (a `BrushSource`, no pass's); no canvas handle writes a gap or padding, and the Scale tool keeps a bound corner. ~~⚠️ Read, not run: the inspector's detaches through a pass — among them the bound eye's click, the Boolean property's switch, a key typed over the Text property's chip — now say *Detached ‹name›*, where the chips' × and the Content and number chips' retypes, which detach first, say nothing.~~ Fixed the same day (amendment): the identity card's eye and the Properties card's Boolean switch and Text commit detach in the edit itself (`detach_visible_ops`, `detach_text_ops` ahead of the write), so F2 keeps them silent; the layers panel's eye and the hide chord left to the pass, doors outside the inspector. *(Built 2026-10-16 on D1038 (2)'s ruling, uncommitted when recorded. **Keep**, the appended run read between the two marks above all; the guard **Keep**; the inspector's spoken detaches ~~unruled, ***Revisit*** with a ruling~~ fixed, **Keep**. Two tests, the canvas drag the first to drive a handle over a bound field; two flips, one not biting; the two property tests' silent-status assertions flipped since, each failing at *Detached state/on* or *Detached copy/cta* with its door's detach taken out; the identity eye untested. D1058, D1059, D1061, D1063 amended; `architecture.md` §5.3f; `roadmap.md` (2)'s canvas half edited down; the passes six since D1072, seven since D1073, whose pass rewrites in place and is read around itself)*
 - **D1072** — **Styles and variables, the first of D1038 (7)'s remaining numbers: a layer's opacity binds to a number variable read as a percentage, a sidecar beside a literal written 0 while bound and resolved by `Document::drawn_opacity` at every reader that draws; a write over it detaches by one half, visibility's.** The session's four calls under the maintainer's delegation, D1038 silent on each: (1) the variable's number is the Appearance field's **percent**, 0–100, clamped, a missing or non-number value 0 — a fraction rejected, the field, the chip's tooltip and *Extract*'s `field_value` disagreeing under it; (2) the literal **0**, D1039's, chosen to be seen; (3) `keep_opacity_bindings` after `keep_visible_bindings`: a write of what it draws stays bound, its literal put back, and **a write of the literal 0 is not excused** — 0% means *make it invisible* — affordable since no writer builds an opacity from the literal (`replace_with_path` carries the drawn value); `set_opacity_all` filters on the drawn value (on the literal it dropped 0% and wrote a no-op 40%); (4) the chip on one layer only (`FieldKey::Opacity`, `inspector_appearance`), as W and H, the several-layer row a plain field. `Node::opacity_var`, `SetOpacityVar` (`Whole`, no placement, so it reaches instances; `kit.rs` untouched); v8, no bump. Readers: the scene walk, the SVG writer, the snapshot, the ghost, `DisplayNode::opacity`. *Paste properties* by D1047's rule; detach, delete, carry and the kit planner as the visibility's. Preview: a `SetOpacityVar` arm and the cell arm. Marks `Mark::and(binding, literal)`. ~~⚠️ Four readings: the point-editing card draws a plain field over a bound layer; 🚨 the ghost asks `drawn_opacity` of a captured id in no document, so **every Alt-drag and paste ghost previews at 100%**; the multi row's and point card's detaches are said, against D1071's silent inspector; `keep_opacity_bindings`' doc names a Scale tool writer that does not exist.~~ All four fixed the same day (amendment): 🚨 `build_ghost` reads `opacity_drawn_in` over the captured node's literal and binding in the default mode — a plain 50% copy had previewed at 100%; one `opacity_field` helper draws the chip on both single-layer cards; the several-layer row puts `detach_opacity_ops` ahead of each `SetOpacity` it writes, silent by D1071's rule; the doc corrected. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the single-layer chip **Intentional**; the ghost ~~***Fix with*** `opacity_drawn_in` over the captured node~~, the doc ~~***Fix***~~, the other two ~~*Revisit if* they mislead~~ **Resolved**. ~~Nine tests, six flips~~ Ten tests, seven flips as reported; the chip's drawing, the mark, the kit arms, the snapshot and the several-layer row's detach untested. D1058, D1071 amended; `architecture.md` §5.3f, §5's operation listing, §5.11, §6.2; `roadmap.md` the open list's numbers narrowed, its readings struck. **Amended 2026-10-16**)*
+- **D1073** — **Styles and variables, the second of D1038 (7)'s remaining numbers: a stroke's width binds to a number variable in the stroke item, `Stroke::width_var`, substituted by `Document::resolved_paint_in` — whose output comes out unbound — and a stroke list written over it is judged by corners' two halves.** The session's calls under the maintainer's delegation, D1038 silent: (1) **in the item**, as `BrushSource` is, so a stroke style, a reorder, a copy and the keyed list ops carry it — no op of its own; literal 0; v8, no bump, saved in the stroke; (2) 🚨 the seam clears `width_var` on its output — the first cut kept it, and the cell preview drew the committed 9 over the previewed 4, the scene resolving an override's paint again; `Resolved`'s bounds, `contains_local` (a new `paint` parameter), the preview bounds, the snapshot and the ghost (resolved at capture) take the seam; (3) `kept_stroke_widths`, run by `keep_stroke_width_bindings` after `keep_opacity_bindings` **and by the preview's `SetStrokes` arm**: written what it draws **or its literal 0** stays bound — the literal half load-bearing, every Stroke card edit and the Scale tool rebuilding the list from stored items — the price corners', 0 typed keeping the binding; (4) a `Custom`-sided stroke takes no binding, made `Custom` it detaches to what it drew; (5) the chip on one layer's own strokes (`FieldKey::StrokeWidth`), the shared row plain; (6) the pass rewrites in place, so `commit_inner` reads `stroke_widths_bound` before it and `stroke_widths_cut` after and merges the names. `style::check` per kind now. ~~⚠️ Six readings: 🚨 *Paste properties* copies `width_var` verbatim, so a paste into another document is refused at the commit; `Custom` draws only on a box, but the bind refuses it on an ellipse or a path too, and the `--` door is offered where the bind refuses; the several-layer weight row and the sides row's *Custom* detach through the pass and say so, against D1071's amendment; the dash popup seeds a pattern from the literal;~~ the styles browser's swatch draws the 0~~; `contains_local`'s doc stale~~. Five of the six fixed the same day (amendment): 🚨 `Properties::drawn_widths` and the carried width variables, `paste_properties` landing `width_var` by D1047's rule; `build::draws_own_sides` through `effective_sides`, asked by the bind, the pass and the chip's key; the several-layer row and the sides row's *Custom* detaching in the edit, silent — the row clearing a member that already draws the typed width; the dash seed at `drawn_stroke_width`; the doc rewritten — and the `SetStrokes` preview arm now `mark_moved`, as `SetEffects`'. ~~⚠️ An ellipse's bound `Custom` stroke pasted onto a rect lands bound and draws its own sides, read, not run.~~ Fixed the same day: `kept_stroke_widths` detaches a stroke that `draws_own_sides` before its exemption for a binding the write states, whoever wrote it. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the chip **Intentional**; the paste ~~***Fix***~~, `Custom` ~~***Fix with*** `effective_sides`~~, the spoken doors ~~***Fix***~~, the dash seed ~~***Fix with*** the drawn width~~ and the doc ~~***Fix***~~ **Resolved**, and the preview's `mark_moved`; the pasted `Custom` ~~*Revisit if*~~ **Resolved**; the swatch and the several-layer row's clearing *Revisit if* they mislead. ~~Six tests, six flips~~ ~~Eight tests, eight flips~~ Eight tests, nine flips as reported; the chip's drawing, the `Custom` seed, the kit arms, `detach_vars`' arm, the snapshot, the two inspector doors, the dash seed and the cull untested. D1058, D1062, D1071 amended; `architecture.md` §5, §5.3f, §5.10, §5.11, §6.2; `roadmap.md` the open list's numbers narrowed, the readings opened, then narrowed to the swatch. **Amended 2026-10-16**)*
 
 ---
 
@@ -26173,8 +26174,8 @@ holding no production `SetDisplay`. ~~And **the floating status says nothing of 
 corner — D1038 (2)'s *"the floating status says what was detached"* is unbuilt for both.~~ Built for
 both, and every binding pass, in D1071. **Not in this
 entry**: boolean variables bound to visibility, the rest of step 2 (D1059); W and H, step 2's last
-(D1061); and the other numbers D1038's (7) lists — ~~W, H,~~ ~~layer opacity,~~ (D1072) stroke width, an
-effect's X, Y, blur and spread — bound by nothing and given no step by the record. Insets, grid tracks, flex grow and font size are not on that list.
+(D1061); and the other numbers D1038's (7) lists — ~~W, H,~~ ~~layer opacity,~~ (D1072) ~~stroke width,~~
+(D1073) an effect's X, Y, blur and spread — bound by nothing and given no step by the record. Insets, grid tracks, flex grow and font size are not on that list.
 
 **Tests**, as the caller reports them. Core, `tests/variables.rs`:
 `a_bound_gap_and_padding_lay_out_at_the_variables_number` — flip, run: `UsedView` and `CommittedView`
@@ -26726,6 +26727,171 @@ node.opacity(), node.opacity_var())`, the default mode, as `ghost_shown` resolve
 listing, §5.11 and §6.2; `roadmap.md`
 *Next · Styles and variables*' open list narrowed)*
 
+**D1073 — Styles and variables, the second of D1038 (7)'s remaining numbers: a stroke's width binds to
+a number variable in the stroke item itself, substituted by `Document::resolved_paint_in`, whose output
+comes out unbound, and a stroke list written over it is judged by corners' two halves, not the
+opacity's one. *Built 2026-10-16 by the session under the maintainer's delegation; uncommitted when
+recorded.*** D1072 left stroke width with an effect's X, Y, blur and spread *"bound by nothing"*. D1038
+is silent on where the binding lives, which half a write is judged by, a stroke with sides of its own,
+and where the chip goes; the answers are the session's, under the delegation.
+
+**(1) In the item.** `Stroke::width_var: Option<VarId>` beside `width`, as `BrushSource` is the paint's
+binding — not a node sidecar like `Node::opacity_var` or `corner_vars`, because a stroke list is keyed
+items (D980) that a reorder moves, a stroke style holds whole (D1062) and a copy, *Paste properties* and
+the keyed list ops carry: a sidecar indexed beside the list would have to be rewritten by every one of
+them, and an item carries its binding for nothing. The cost is that **the binding has no op of its
+own** — it is written by `SetStrokes` like any other stroke field. Literal **0** while bound, D1039's.
+A number variable only (`variable::check`, `BadBinding` otherwise). **Schema: v8, no bump** — the field
+is saved in the stroke, `skip_serializing_if` unbound, so an unbound stroke saves as it did; v8 is
+unreleased. Every walk the visibility and the opacity took takes it: `Node::reads_variables`;
+`variable::detached`, the carried walk, `land` (rebound by name, else the detached twin's width),
+`reads`, `remove_ops` (detached to its number in the same list write) and the vault check; `tokens.rs`'
+`node_vars`, remap, per-stroke `alike`, `own_reads` with a new `src_stroke_width`, and the plan's
+rebind; `StyleValue::vars`, and `style::detach_vars` detaching a bound width in the default mode. ⚠️
+**`style::check` is per kind now** — a paint a colour, a width a number — where it had refused any
+variable a style read that was not a colour (as the caller reports the old check); with the widths
+among `StyleValue::vars` it would have refused every stroke style holding a bound width.
+
+**(2) One seam, and its output unbound.** `resolved_paint_in` substitutes each bound width
+(`stroke_width_drawn_in`: the number in the mode in force, floored at 0, a missing or non-number value
+0) **and clears `width_var` on what it returns**, as a resolved brush comes out literal. 🚨 **The first
+cut kept the binding on the output, and the render test found it**: D1056's cell preview hands the
+resolved paint to the scene as an override, the scene resolves an override's paint again against the
+committed table, and a binding still on it drew the committed 9 over the previewed 4. *Do not* "keep the
+binding for the reader's information" — a resolved paint is a literal one. The readers that read a
+stroke's width without the seam now take it: `Resolved`'s bounds (`recompute_bounds`' two arms and
+`resolve_subtree`), `geometry::contains_local` — which gains a `paint` parameter, `query::hit_test`
+handing it the resolved paint — `session::preview_world_bounds`, the snapshot's `width`, and the
+renderer's ghost, its paint resolved at capture in `build_ghost` because `scene::ghost_ink` has no
+document, in the default mode `paint_ghost` reads it in.
+
+**(3) Two halves, corners' rule.** `build::kept_stroke_widths`: a stroke whose binding the write
+carries unchanged stays bound when written **what it draws or its own literal 0**, the literal put back;
+any other width detaches it to that width; a stroke whose binding the write changes — a bind, a detach,
+a reset, a stroke new to the list — is left as written. 🚨 **The literal half is load-bearing, and is
+the opposite of D1072's call for the same reason turned round**: the opacity could drop it because no
+writer builds an opacity from the literal, and here nearly every writer does — every Stroke card edit (a
+colour, a join, a dash) and the Scale tool's `width *= s` rebuild the whole list from the stored items,
+so a bound stroke arrives carrying its 0, and without the literal half each of them would detach a
+binding nobody touched. ⚠️ **The price is corners'** (D1041): 0 typed over a bound width keeps the
+binding, the chip's retype — which detaches first — that value's door. `keep_stroke_width_bindings`
+runs it over every `SetStrokes` at the commit, after `keep_opacity_bindings`; **the renderer's
+`SetStrokes` preview arm runs the same function**, so a write the commit detaches previews where it
+lands (D1058's *Fix*, for a list).
+
+**(4) `Custom` sides take no binding.** A stroke with `StrokeSides::Custom` draws its own four widths
+and none of `width` (`StrokeSides::widths`), so a binding there would be bound to nothing drawn:
+`bind_stroke_width_ops` refuses it (empty), `kept_stroke_widths` detaches a bound stroke made `Custom`
+to the width it drew, and the sides row's `Custom` seed (`as_custom`) reads the drawn width
+(`drawn_stroke_width`) rather than the 0, so the choice changes nothing on the canvas.
+
+**(5) One layer's own strokes for the chip**, as W, H and the opacity: `FieldKey::StrokeWidth { id,
+item }`, badged `LINE_SEGMENT`, a `Number` field — bind and detach the two verbs, `field_var` and
+`field_value` the drawn width, and the retype writing the item through `inspector::set_stroke_weight`
+(now `pub(super)`, every side with it), unbound, after the chip's own detach. `stroke_properties` draws
+the chip, the retype buffer, or the plain weight field with the `--` door and the field menu when the
+scope is `PaintScope::Node`. **The selection's shared weight row stays a plain field**, as the opacity's
+several-layer row does — no one variable stands in for every member's stroke; it already reads
+`shown_over_strokes` through the resolved paint.
+
+**(6) What the pass cuts is said.** It rewrites the lists in place rather than appending a `Set*Vars`, so
+D1071's `variables_detached` cannot see it: `commit_inner` reads `stroke_widths_bound` — every stroke the
+edit writes with its width bound — before the pass, and `stroke_widths_cut` — those the pass left
+unbound — after it, and merges the names. An asked-for detach (the chip's) writes the stroke unbound
+and so never enters the first reading. ⚠️ **The two readings have no asked-for guard of their own**:
+`variables_detached`' guard does not count a `SetStrokes`, so an edit that binds another field and writes
+over a bound width still says the width, and a stroke chip's detach does not silence another pass's cut.
+
+~~⚠️ **Read, not run** (the record's reading of the build): (a) 🚨 ***Paste properties* carries a width's
+binding verbatim.** `build::properties_of` puts only the paints' and the opacity's variables in
+`carried`, and `drawn_strokes` holds brushes; `paste_properties` lands each stroke's brush by D1047's
+rule and copies the rest with `..s.clone()`. Within one document that is right. **Into another, the
+width names a variable the target does not hold, and `variable::check` refuses the paste's commit** —
+D1047's own pre-fix shape — and its detach would have nothing to fall back to but the literal 0. (b)
+**`Custom` is drawn only on a box**: `geometry::effective_sides` answers `All` off a `Rect` or a frame,
+so a `Custom` stroke on an ellipse or a path — reachable by *Paste properties* or a stroke style
+from a rect — draws `width`, yet `bind_stroke_width_ops` refuses it and `kept_stroke_widths` would
+detach one; and the weight field still offers the `--` door and the field menu over a stroke whose bind
+is refused, so picking a variable there does nothing. (c) **Two inspector doors detach through the
+pass and say so** — the several-layer weight row (`edit_strokes_all` of `set_stroke_weight`) and the sides
+row's *Custom* — where D1071's amendment made the inspector's doors detach in the edit and stay silent,
+and D1072's amendment (c) fixed the same thing for the opacity's several-layer row. (d) **The dash
+popup seeds a new pattern from the literal**: `inspector::pattern_for` takes `s.width.max(1.0)` of the
+stored stroke, so a bound stroke switched to dashed or dotted with nothing to inherit gets a pattern at a
+width of 1 rather than the width it draws.~~ (e) The styles browser's stroke swatch (`panels/styles.rs`)
+draws a bound width's 0, clamped to 1 — read, not run, and still open. ~~(f) `geometry::contains_local`'s
+doc still says *"`node` supplies everything else — the paint the stroke reach comes from"*, false since
+the `paint` parameter.~~ (a)–(d) and (f) fixed the same day, below.
+
+**Amended 2026-10-16, the same session: five of the record's six readings fixed, and the preview's
+cull.** (a) 🚨 **A bound width follows *Paste properties*' rule**: `Properties::drawn_widths` holds each
+stroke's width as it drew at the copy, `properties_of` puts the strokes' width variables in `carried`,
+and `paste_properties` lands each `width_var` by D1047's rule — `variable::rebind`, else the drawn
+width, unbound. *Do not* fold the width back into `..s.clone()`: that is the dangling binding the commit
+refused. (b) **`build::draws_own_sides(kind, stroke)`** asks `geometry::effective_sides`, so `Custom`
+sides refuse a binding only where they are drawn — a rect or a frame — and an ellipse's or a path's
+`Custom` stroke, drawing its whole outline at `width`, binds like any other; `bind_stroke_width_ops`
+and `kept_stroke_widths` both ask it, and `stroke_properties` builds the chip's key only where it is
+false, so the `--` door and the field menu are not offered where the bind is refused. (c) **The two
+inspector doors detach in the edit**: the several-layer weight row's `edit_strokes_all` closure clears
+`width_var` beside `set_stroke_weight`, and the sides row's change to `Custom` writes `width:
+drawn_width, width_var: None`, so the pass has nothing to cut and the floating status says nothing —
+D1071's amendment's rule. ⚠️ **The several-layer row clears every member's binding it writes**, a
+member already drawing the typed width included — where D1072's opacity row leaves such a layer
+unwritten and bound; nothing is drawn differently, but the binding goes. (d) **The dash popup sizes a
+fresh pattern from the drawn width**: `stroke_menu_popup` reads `drawn_stroke_width(scope, s)` and
+hands `pattern_for` a copy at that width, the stroke written keeping its 0 and its binding. (f)
+`contains_local`'s doc now says `kind` is the used kind, `paint` the paint as drawn, and `node` the
+rest. **And the pre-existing gap the sweep noted**: the renderer's `SetStrokes` preview arm now calls
+`mark_moved`, as `SetEffects`' does, so a widened outside stroke — or a bound width's new number — is
+not culled on the committed bounds. ~~⚠️ **What none of the fixes reaches**: a bound stroke pasted with
+its sides from another kind — an ellipse's bound `Custom` stroke, bindable since (b), pasted onto a
+rect — lands bound,
+`kept_stroke_widths` leaving a binding the write sets, and draws its own four widths there; read, not
+run.~~ Fixed the same day: 🚨 **`kept_stroke_widths` detaches a stroke that `draws_own_sides`, at the
+width it drew, *before* its exemption for a binding the write states — whoever wrote it** — so the
+pasted stroke lands detached; the old `Custom` arm, which ran only for a binding the write carried
+unchanged, is folded into this one. *Do not* move the check back below the exemption: a write that
+states its own binding is exactly the paste's. It reads the committed kind, and the cut is said on the
+floating status, *Paste properties* being a door outside the inspector. Tests: `tests/number_vars.rs::paste_properties_carries_a_bound_stroke_width_by_the_paste_rule` —
+pasted within the document it lands bound; copied while bound and pasted after the variable is removed,
+it lands at the 40 it drew, the same `rebind` miss a paste into another document meets; flip, run:
+`..s.clone()` alone fails *"a paste with the variable gone commits"* with `Variables(BadBinding)`.
+`a_custom_stroke_binds_only_where_it_draws_its_outline` — an ellipse's `Custom` stroke binds, a rect's
+is refused; flip, run: `draws_own_sides` on the bare `stroke.sides` fails *"an ellipse's Custom stroke
+binds"*; extended for the paste — flip, run: the check skipped fails *"a bound Custom stroke pasted onto
+a box lands detached"*, and the two-halves test's *"made Custom, detached at what it drew"* with it. ⚠️ **(c), (d) and the `mark_moved` are untested**: no harness drives the several-layer row,
+the sides row or the dash popup, and no test culls at a viewport edge.
+
+**Tests**, as the caller reports them, each flip in the test's doc. Core, `tests/number_vars.rs`:
+`a_bound_stroke_width_draws_and_measures_at_its_number` — flip, run: `Resolved`'s bounds on the literal
+fails *"the bounds reach the bound width"*; the hit test on the literal fails *"a click in the stroke's
+reach hits it"*; `a_stroke_list_write_keeps_a_bound_width_by_two_halves` — flip, run: the literal half
+dropped fails *"a colour edit keeps the binding"*;
+`a_stroke_width_binding_detaches_to_what_it_draws_and_round_trips` (detach, delete, `detached`, the
+round trip, a colour variable refused, a stroke style with a bound width passing `style::check`),
+unflipped. Export, `tests/svg.rs::a_bound_stroke_width_exports_at_its_number`, unflipped. Render,
+`tests/overrides.rs::a_stroke_width_binding_previews_as_the_width_it_will_draw` — flips, run: the
+`SetStrokes` arm without `kept_stroke_widths`, and `resolved_paint_in` keeping `width_var` (the first
+cut, which this test found). App, `panels::binding::tests::a_stroke_width_binds_detaches_and_retypes` —
+flip, run: no `stroke_widths_cut` reading fails *"and says so"*. **Untested**: the chip's drawing in
+the Stroke card, the `Custom` seed, the kit planner's width arms, `style::detach_vars`' width arm, and
+the snapshot. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**
+— the binding in the item, the unbound output of the seam and the two halves above all; the
+single-layer chip **Intentional**; the two readings without a guard **Keep**; (a) ~~***Fix*** — carry the
+widths' variables and each stroke's drawn width in `Properties`, and land `width_var` as the brush is
+landed~~ fixed so, **Resolved**; (b) ~~***Fix with*** `effective_sides(kind, s)` in the bind's refusal
+and the pass, and no `--` door where the bind refuses~~ fixed so, `draws_own_sides`, **Resolved**; (c)
+~~***Fix*** by D1071's amendment's rule, as D1072's (c)~~ fixed, **Resolved** — the several-layer row
+clearing a binding it need not *Revisit if* it misleads; (d) ~~***Fix with*** the drawn width~~ fixed
+so, **Resolved**; (e) *Revisit if* it misleads; (f) ~~***Fix*** the doc~~ fixed, **Resolved**; the
+`SetStrokes` arm's `mark_moved` **Resolved**; a bound `Custom` stroke pasted onto a box ~~*Revisit if* it
+is met~~ fixed, **Resolved**. ~~Six tests, six flips~~ ~~Eight tests, eight flips~~ Eight tests, nine
+flips as reported. **Amended 2026-10-16**. D1058,
+D1062 and D1071 amended; `architecture.md` §5's `Stroke` and operation listing, §5.3f, §5.10, §5.11
+and §6.2; `roadmap.md` *Next · Styles and variables*' open list narrowed and the readings opened, then
+narrowed to (e))*
+
 **D1062 — Styles and variables, build step 3's core: a style is one slot's whole list — fills, strokes
 or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own
 list, written by a commit-time pass that rewrites the copy when the style or the binding changed and
@@ -26816,7 +26982,8 @@ layers; `free_name`; `users`.
 
 **`style::check`**, a post-condition of `Document::apply` and a check of the loader, over the whole
 document for `variable::check`'s reason: names non-empty and unique per slot; no item id twice in one
-style; a style's paints bound to colour variables only; every binding naming a style of its slot; **and
+style; a style's paints bound to colour variables only (and since D1073 a stroke style's widths to
+number variables, the check made per kind); every binding naming a style of its slot; **and
 no vault node bound** — a kit carries no styles until step 4, so `variable::detached` now clears a
 node's styles too and `kit::freeze` drops them, values kept. ⚠️ **Since D1064** (2026-10-15) a vault
 node may be bound to a **kit's** style and to no style of the document's own (`StyleRule::InVault`'s
@@ -27503,7 +27670,10 @@ recorded the same of a gap, a padding and a corner, D1059 of a visibility, D1061
 resize handle dragged over a bound W cut the binding and said nothing.
 
 **Where the names come from.** Each of the five passes (six since D1072's `keep_opacity_bindings`,
-which appends its `SetOpacityVar` the same way, between the visibility's and the size's) — `keep_corner_bindings`,
+which appends its `SetOpacityVar` the same way, between the visibility's and the size's; and a seventh
+since D1073, `keep_stroke_width_bindings`, which appends nothing — it rewrites the `SetStrokes` lists in
+place — and is read around itself, `stroke_widths_bound` before it and `stroke_widths_cut` after, its
+names merged with these) — `keep_corner_bindings`,
 `keep_spacing_bindings`, `keep_visible_bindings`, `keep_size_bindings`, `keep_text_bindings` —
 **appends** its `Set*Vars` to the transaction rather than rewriting an op into one (each a `tx.0.push`
 at its end, `keep_size_bindings`' after its `extra` patches; `keep_text_bindings` rewrites a span write

@@ -1658,8 +1658,12 @@ accepted (D1038):
 - **Whether a preset follows a paste's rule** across documents — D1037's premise (iv) named it beside
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
-- **The rest of D1038's bindable numbers** — stroke width, an effect's X, Y, blur and spread — bound by
-  nothing and given no step (§15 D1058; layer opacity built, §15 D1072).
+- **The rest of D1038's bindable numbers** — an effect's X, Y, blur and spread — bound by nothing and
+  given no step (§15 D1058; layer opacity built, §15 D1072; stroke width, §15 D1073).
+- **D1073's last readings** (read, not run): the styles browser's stroke swatch (`panels/styles.rs`)
+  draws a bound width's 0, clamped to 1; and the several-layer weight row clears every member's binding
+  it writes, a member already drawing the typed width included, where D1072's opacity row leaves such a
+  layer bound — each *Revisit if* it misleads (§15 D1073's amendment).
 - **D1038 (2)'s canvas half** — a gesture on a bound value detaching, *the floating status saying what
   was detached*: no canvas handle writes a gap or a padding yet (§15 D1058); a resize handle on a bound
   W or H detaches and says so (§15 D1061, D1071); a paint's binding is no pass's, so a door's write over
@@ -1722,7 +1726,11 @@ status and a bound W's drag tested in §15 D1071, the inspector's spoken detache
 those struck the same day, fixed in D1071's amendment, the inspector's three doors detaching first;
 layer opacity struck from the remaining numbers the same day, bound as a percentage in §15 D1072 under
 the maintainer's delegation, its four readings opened in the list above; those struck the same day,
-fixed in D1072's amendment.*
+fixed in D1072's amendment; stroke width struck from the remaining numbers the same day, bound in the
+stroke item in §15 D1073 under the maintainer's delegation, its six readings opened in the list above;
+five of those struck the same day, fixed in D1073's amendment, the swatch left, and two readings of
+the fixes opened beside it; the pasted `Custom` stroke struck the same day, fixed in the same
+amendment, the several-layer row's clearing left.*
 
 ## Next · The polishing pass over the accepted calls
 

@@ -1735,7 +1735,8 @@ impl RenderOverrides {
             | Operation::SetStyleValue { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
-            | Operation::SetEffectsStyle { .. } => {}
+            | Operation::SetEffectsStyle { .. }
+            | Operation::SetTypeStyle { .. } => {}
             // **A corner's binding previews as the radii it will draw** (§15
             // D1050): the `--` list's highlight on a radius field, which D1039
             // refused here. The bound corners are resolved through the document —

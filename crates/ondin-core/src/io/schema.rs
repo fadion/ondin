@@ -374,7 +374,8 @@ pub(crate) struct NodeDto {
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
     /// The styles a layer's fills, strokes and effects are bound to (§15
-    /// D1062), absent when none is. New in v8, as `size_vars` is.
+    /// D1062), and a text layer's type (§15 D1067), absent when none is. New in
+    /// v8, as `size_vars` is.
     #[serde(default, skip_serializing_if = "crate::style::StyleRefs::is_empty")]
     pub styles: crate::style::StyleRefs,
 }

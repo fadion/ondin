@@ -89,6 +89,7 @@ use eframe::egui;
 use ondin_core::Brush;
 use ondin_core::kurbo::Size;
 use ondin_core::peniko::Color;
+use ondin_core::style::StyleSlot;
 use ondin_core::{
     AXES_DRIVEN_ELSEWHERE, AxisSetting, BlockStyle, BoxTrim, CharAttr, CharAttrKind, CharSpans,
     Decoration, FaceFeature, FeatureSetting, FontAxis, FontVariant, GeometryPatch, JustifyLast,
@@ -958,22 +959,44 @@ impl OndinApp {
         // `&mut Self` and nothing else.
         let mut menu_button: Option<egui::Rect> = None;
         let marks = self.type_marks(subject.id);
-        self.panel(ui, "Type", None, |app, ui| {
-            app.type_family_row(ui, &subject, marks.family.as_ref());
-            let half = egui::vec2((ui.available_width() - GAP) / 2.0, ROW_H);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
-                app.type_variant_field(ui, &subject, half, marks.variant.as_ref());
-                let (_, hit) = app.type_size_field(ui, &subject, half, marks.size.as_ref());
-                app.reset_marked(hit, &marks.size);
-            });
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = GAP;
-                app.type_line_height_field(ui, &subject, half, marks.line_height.as_ref());
-                app.type_letter_spacing_field(ui, &subject, half, marks.letter_spacing.as_ref());
-            });
-            menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
-        });
+        // A style slot since step 6 (§15 D1068): the `⋯`, and the capsule over a
+        // styled layer — whose rows stay live over a session's selection, since
+        // what they write there is spans, which keep the style (§15 D1067).
+        let targets = [subject.id];
+        let live = subject.partial;
+        self.style_card_live(
+            ui,
+            "Type",
+            StyleSlot::Text,
+            &targets,
+            None,
+            live,
+            |app, ui| {
+                app.type_family_row(ui, &subject, marks.family.as_ref());
+                let half = egui::vec2((ui.available_width() - GAP) / 2.0, ROW_H);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = GAP;
+                    app.type_variant_field(ui, &subject, half, marks.variant.as_ref());
+                    let (_, hit) = app.type_size_field(ui, &subject, half, marks.size.as_ref());
+                    app.reset_marked(hit, &marks.size);
+                });
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = GAP;
+                    app.type_line_height_field(ui, &subject, half, marks.line_height.as_ref());
+                    app.type_letter_spacing_field(
+                        ui,
+                        &subject,
+                        half,
+                        marks.letter_spacing.as_ref(),
+                    );
+                });
+            },
+            // The paragraph and the box — no text style holds them (§15 D1067), so
+            // they stay live on a styled layer, the popup's opener with them.
+            |app, ui| {
+                menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
+            },
+        );
         self.type_menu_popup(ui, &subject, menu_button);
     }
 
@@ -1684,6 +1707,18 @@ impl OndinApp {
         };
         let ctx = ui.ctx().clone();
         let mut close = false;
+        // **The Character tab is the text style's** (§15 D1067, D1068): on a styled
+        // layer, outside a selection and outside the style's own *Edit*, it is as
+        // read-only as the card's rows — its writes set the node's defaults, which
+        // would detach the style from inside the inspector (D1038 (1)). Paragraph
+        // and Box stay live: no text style holds them.
+        let char_locked = !subject.partial
+            && self
+                .session
+                .doc
+                .get(subject.id)
+                .and_then(|n| n.styles().text)
+                .is_some_and(|s| self.session.style_edit != Some(s));
         // Clear of the inspector, to its left, aligned with the row that opened it
         // — see `OndinApp::popover_anchor` for why it is not under the button.
         let anchor = OndinApp::popover_anchor(&ctx, head, MENU_W);
@@ -1785,7 +1820,18 @@ impl OndinApp {
                                 ui.set_width(MENU_INNER);
                                 ui.spacing_mut().item_spacing.y = SECTION_GAP;
                                 match tab {
-                                    TypeTab::Character => self.type_character_tab(ui, subject),
+                                    TypeTab::Character => {
+                                        if char_locked {
+                                            ui.label(
+                                                egui::RichText::new(
+                                                    "The text style holds the greyed rows. Detach to edit",
+                                                )
+                                                .size(10.0)
+                                                .color(theme::text::MUTED),
+                                            );
+                                        }
+                                        self.type_character_tab(ui, subject, char_locked);
+                                    }
                                     TypeTab::Paragraph => self.type_paragraph_tab(ui, subject),
                                     TypeTab::Block => self.type_block_tab(ui, subject),
                                 }
@@ -1854,19 +1900,41 @@ impl OndinApp {
     /// switch for a feature the face does not have is a control that shapes to
     /// nothing. The generated sections come last, after the ones that are always
     /// there, so choosing a different family does not move the top of the tab.
-    fn type_character_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+    ///
+    /// `locked` greys the sections **a text style holds** (§15 D1068's amendment)
+    /// and leaves Colour and Language live: `style::type_part` clears both, so
+    /// their writes keep the style (§15 D1067) and locking them would make the
+    /// card wider than its slot again (`arch-scribe`'s read of the Language row).
+    fn type_character_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, locked: bool) {
+        let held = |app: &mut Self, ui: &mut egui::Ui, f: &dyn Fn(&mut Self, &mut egui::Ui)| {
+            if locked {
+                ui.scope(|ui| {
+                    ui.disable();
+                    ui.set_opacity(0.42);
+                    f(app, ui);
+                });
+            } else {
+                f(app, ui);
+            }
+        };
         self.color_section(ui, subject);
-        self.case_section(ui, subject);
-        self.decoration_section(ui, subject);
-        self.spacing_section(ui, subject);
+        held(self, ui, &|app, ui| {
+            app.case_section(ui, subject);
+            app.decoration_section(ui, subject);
+            app.spacing_section(ui, subject);
+        });
 
         let family = attr!(subject, Family, Family);
         let axes = text::family_axes(&family);
         let coords = attr!(subject, Variations, Variations);
-        self.optical_size_section(ui, subject, &axes, &coords);
+        held(self, ui, &|app, ui| {
+            app.optical_size_section(ui, subject, &axes, &coords);
+        });
         self.language_section(ui, subject);
-        self.axes_section(ui, subject, &axes, &coords);
-        self.features_section(ui, subject, &text::family_features(&family));
+        held(self, ui, &|app, ui| {
+            app.axes_section(ui, subject, &axes, &coords);
+            app.features_section(ui, subject, &text::family_features(&family));
+        });
     }
 
     /// The text's own colour, over whatever range a character control acts on

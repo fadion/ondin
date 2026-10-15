@@ -2,9 +2,16 @@
 //!
 //! A **style** is one slot's whole set of values — an isolated CSS class, not the
 //! cascade. Build step 3's slots are a layer's **fills**, its **strokes** and its
-//! **effects**, each the whole list its inspector card edits; text and a
-//! container's layout are later steps. A node holds at most one style per slot
-//! ([`StyleRefs`]), and styles do not stack.
+//! **effects**, each the whole list its inspector card edits; step 6 adds a text
+//! layer's **type** (§15 D1067); a container's layout has no step. A node holds at
+//! most one style per slot ([`StyleRefs`]), and styles do not stack.
+//!
+//! **A text style is the node's character defaults, not its spans** (§15 D1067,
+//! D1037's open (e)). It holds a [`TextStyle`] less its colour and its language
+//! ([`type_part`]): the colour is the Fill card's and its style's, and a language
+//! belongs to the words. Spans stay the text's own marks over it — a bold word in
+//! a *Body* paragraph stays bold when *Body* changes — so styling a selection
+//! writes spans and never detaches, and only a write of the defaults does.
 //!
 //! ⚠️ **Linked copies, not a read-time resolve** (§15 D1062). A styled layer
 //! keeps the style's values **in its own list**, written there by the commit
@@ -37,6 +44,7 @@ use crate::id::NodeId;
 use crate::item::{ItemId, Keyed, same_values};
 use crate::node::{Fill, Stroke};
 use crate::op::{Operation, Transaction};
+use crate::typography::TextStyle;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
@@ -84,10 +92,18 @@ pub enum StyleSlot {
     Fills,
     Strokes,
     Effects,
+    /// A text layer's type — its character defaults (§15 D1067). Last, as the
+    /// Type card sits below the paint cards' slots in the browser's tab.
+    Text,
 }
 
 impl StyleSlot {
-    pub const ALL: [StyleSlot; 3] = [StyleSlot::Fills, StyleSlot::Strokes, StyleSlot::Effects];
+    pub const ALL: [StyleSlot; 4] = [
+        StyleSlot::Fills,
+        StyleSlot::Strokes,
+        StyleSlot::Effects,
+        StyleSlot::Text,
+    ];
 
     /// The card's title, as the inspector writes it.
     pub fn title(self) -> &'static str {
@@ -95,7 +111,30 @@ impl StyleSlot {
             StyleSlot::Fills => "Fill",
             StyleSlot::Strokes => "Stroke",
             StyleSlot::Effects => "Effects",
+            StyleSlot::Text => "Type",
         }
+    }
+}
+
+/// `style` as a text style holds it (§15 D1067): its colour and its language
+/// cleared. A run's colour is the Fill card's business and the fill style's, and
+/// a language tag describes the words rather than the type, so neither travels
+/// with *Body* onto a layer, and neither detaches it when changed.
+pub fn type_part(style: &TextStyle) -> TextStyle {
+    TextStyle {
+        color: None,
+        locale: None,
+        ..style.clone()
+    }
+}
+
+/// `typed`'s type over `own`'s colour and language — what a styled text layer's
+/// character defaults become when the commit writes its style onto it.
+fn typed_over(own: &TextStyle, typed: &TextStyle) -> TextStyle {
+    TextStyle {
+        color: own.color,
+        locale: own.locale.clone(),
+        ..typed.clone()
     }
 }
 
@@ -108,6 +147,9 @@ pub enum StyleValue {
     Fills(Vec<Keyed<Fill>>),
     Strokes(Vec<Keyed<Stroke>>),
     Effects(Vec<Keyed<Effect>>),
+    /// A text style: character defaults, colour and language cleared
+    /// ([`type_part`], §15 D1067). Boxed: a `TextStyle` is several times a list.
+    Text(Box<TextStyle>),
 }
 
 impl StyleValue {
@@ -116,32 +158,47 @@ impl StyleValue {
             StyleValue::Fills(_) => StyleSlot::Fills,
             StyleValue::Strokes(_) => StyleSlot::Strokes,
             StyleValue::Effects(_) => StyleSlot::Effects,
+            StyleValue::Text(_) => StyleSlot::Text,
         }
     }
 
-    /// `node`'s own list for `slot`, as a style's value.
+    /// `node`'s own list for `slot`, as a style's value. A layer that is not text
+    /// answers the default type for [`StyleSlot::Text`] — [`check`] refuses
+    /// binding one, so the answer is only ever compared, never written.
     pub fn of(node: &crate::Node, slot: StyleSlot) -> StyleValue {
         match slot {
             StyleSlot::Fills => StyleValue::Fills(node.paint.fills.clone()),
             StyleSlot::Strokes => StyleValue::Strokes(node.paint.strokes.clone()),
             StyleSlot::Effects => StyleValue::Effects(node.effects.clone()),
+            StyleSlot::Text => StyleValue::Text(Box::new(match &node.kind {
+                crate::NodeKind::Text { style, .. } => type_part(style),
+                _ => type_part(&TextStyle::default()),
+            })),
         }
     }
 
     /// Whether the two **look** the same — equal values in the same order, the
     /// items' ids not asked ([`same_values`]). A layer holding its style's look
-    /// under other ids is still the style's.
+    /// under other ids is still the style's. Two text styles are compared on
+    /// their [`type_part`]s, so a colour a hand-written file left in one is not
+    /// a difference.
     pub fn same_look(&self, other: &StyleValue) -> bool {
         match (self, other) {
             (StyleValue::Fills(a), StyleValue::Fills(b)) => same_values(a, b),
             (StyleValue::Strokes(a), StyleValue::Strokes(b)) => same_values(a, b),
             (StyleValue::Effects(a), StyleValue::Effects(b)) => same_values(a, b),
+            (StyleValue::Text(a), StyleValue::Text(b)) => type_part(a) == type_part(b),
             _ => false,
         }
     }
 
-    /// The operation writing this value onto `id`'s slot.
-    pub fn write_op(&self, id: NodeId) -> Operation {
+    /// The operation writing this value onto `node`'s slot. A text style keeps
+    /// the node's own colour and language ([`type_part`]) and re-states its spans
+    /// against the new defaults (`spans: None`, `Operation::SetTextStyle`) — so a
+    /// span the new defaults now equal is dropped as redundant, the price of the
+    /// spans' one invariant (§15 D1067).
+    pub fn write_op(&self, node: &crate::Node) -> Operation {
+        let id = node.id;
         match self {
             StyleValue::Fills(fills) => Operation::SetFills {
                 id,
@@ -155,15 +212,27 @@ impl StyleValue {
                 id,
                 effects: effects.clone(),
             },
+            StyleValue::Text(typed) => {
+                let own = match &node.kind {
+                    crate::NodeKind::Text { style, .. } => style.as_ref().clone(),
+                    _ => TextStyle::default(),
+                };
+                Operation::SetTextStyle {
+                    id,
+                    style: typed_over(&own, typed),
+                    spans: None,
+                }
+            }
         }
     }
 
-    /// How many items it holds — the summary's count.
+    /// How many items it holds — the summary's count; a text style is one.
     pub fn len(&self) -> usize {
         match self {
             StyleValue::Fills(v) => v.len(),
             StyleValue::Strokes(v) => v.len(),
             StyleValue::Effects(v) => v.len(),
+            StyleValue::Text(_) => 1,
         }
     }
 
@@ -176,7 +245,7 @@ impl StyleValue {
         match self {
             StyleValue::Fills(v) => v.iter().filter_map(|f| f.brush.var()).collect(),
             StyleValue::Strokes(v) => v.iter().filter_map(|s| s.brush.var()).collect(),
-            StyleValue::Effects(_) => Vec::new(),
+            StyleValue::Effects(_) | StyleValue::Text(_) => Vec::new(),
         }
     }
 
@@ -185,6 +254,7 @@ impl StyleValue {
             StyleValue::Fills(v) => crate::item::first_duplicate(v),
             StyleValue::Strokes(v) => crate::item::first_duplicate(v),
             StyleValue::Effects(v) => crate::item::first_duplicate(v),
+            StyleValue::Text(_) => None,
         }
     }
 }
@@ -273,6 +343,7 @@ impl Styles {
                 StyleValue::Fills(v) => v.iter().map(|k| k.id.0).collect(),
                 StyleValue::Strokes(v) => v.iter().map(|k| k.id.0).collect(),
                 StyleValue::Effects(v) => v.iter().map(|k| k.id.0).collect(),
+                StyleValue::Text(_) => Vec::new(),
             };
             std::iter::once(s.id.0).chain(items)
         })
@@ -295,6 +366,9 @@ pub struct StyleRefs {
     pub strokes: Option<StyleId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effects: Option<StyleId>,
+    /// A text layer's type (§15 D1067) — `None` on every other kind of layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<StyleId>,
 }
 
 impl StyleRefs {
@@ -303,6 +377,7 @@ impl StyleRefs {
             StyleSlot::Fills => self.fills,
             StyleSlot::Strokes => self.strokes,
             StyleSlot::Effects => self.effects,
+            StyleSlot::Text => self.text,
         }
     }
     pub fn set(&mut self, slot: StyleSlot, style: Option<StyleId>) {
@@ -310,10 +385,13 @@ impl StyleRefs {
             StyleSlot::Fills => self.fills = style,
             StyleSlot::Strokes => self.strokes = style,
             StyleSlot::Effects => self.effects = style,
+            StyleSlot::Text => self.text = style,
         }
     }
     pub fn is_empty(&self) -> bool {
-        self.fills.is_none() && self.strokes.is_none() && self.effects.is_none()
+        StyleSlot::ALL
+            .into_iter()
+            .all(|slot| self.get(slot).is_none())
     }
     /// Each bound slot with its style.
     pub fn iter(&self) -> impl Iterator<Item = (StyleSlot, StyleId)> + '_ {
@@ -330,16 +408,25 @@ pub fn bind_op(id: NodeId, slot: StyleSlot, style: Option<StyleId>) -> Operation
         StyleSlot::Fills => Operation::SetFillStyle { id, style },
         StyleSlot::Strokes => Operation::SetStrokeStyle { id, style },
         StyleSlot::Effects => Operation::SetEffectsStyle { id, style },
+        StyleSlot::Text => Operation::SetTypeStyle { id, style },
     }
 }
 
 /// The slot an operation **writes the values of**, with its node — `SetFills`,
-/// `SetStrokes`, `SetEffects` — or `None`.
+/// `SetStrokes`, `SetEffects`, and `SetTextStyle` for the type — or `None`.
+///
+/// ⚠️ **`SetTextStyle` writes more than the slot** — the defaults' colour and
+/// language too, which a text style does not hold ([`type_part`]). That is safe
+/// because nothing acts on a write alone: [`settle`] detaches only a layer whose
+/// look has left its style's, so a colour-only write leaves the binding alone.
+/// The spans' ops (`SetTextSpans`, `SetText`) are not the slot's at all: styling a
+/// selection keeps the style (§15 D1067).
 pub fn writes_slot(op: &Operation) -> Option<(NodeId, StyleSlot)> {
     match op {
         Operation::SetFills { id, .. } => Some((*id, StyleSlot::Fills)),
         Operation::SetStrokes { id, .. } => Some((*id, StyleSlot::Strokes)),
         Operation::SetEffects { id, .. } => Some((*id, StyleSlot::Effects)),
+        Operation::SetTextStyle { id, .. } => Some((*id, StyleSlot::Text)),
         _ => None,
     }
 }
@@ -350,6 +437,7 @@ pub fn binds_slot(op: &Operation) -> Option<(NodeId, StyleSlot, Option<StyleId>)
         Operation::SetFillStyle { id, style } => Some((*id, StyleSlot::Fills, *style)),
         Operation::SetStrokeStyle { id, style } => Some((*id, StyleSlot::Strokes, *style)),
         Operation::SetEffectsStyle { id, style } => Some((*id, StyleSlot::Effects, *style)),
+        Operation::SetTypeStyle { id, style } => Some((*id, StyleSlot::Text, *style)),
         _ => None,
     }
 }
@@ -365,7 +453,9 @@ pub enum StyleRule {
     DuplicateItem(StyleId),
     #[error("{0:?} is bound to a variable that is not there or not a colour")]
     BadVariable(StyleId),
-    #[error("node {0:?} is bound to a style that is not there or of another slot")]
+    #[error(
+        "node {0:?} is bound to a style that is not there or of another slot, or to a text style without being text"
+    )]
     BadBinding(NodeId),
     #[error("node {0:?} in the vault is bound to a style of the document's own")]
     InVault(NodeId),
@@ -424,6 +514,10 @@ pub(crate) fn check<'a>(
             let Some(style) = styles.get(id).filter(|s| s.slot() == slot) else {
                 return Err(StyleRule::BadBinding(n.id));
             };
+            // Only text has type to style (§15 D1067).
+            if slot == StyleSlot::Text && !matches!(n.kind, crate::NodeKind::Text { .. }) {
+                return Err(StyleRule::BadBinding(n.id));
+            }
             // A vault node is bound to kits' styles only (§15 D1064), as it
             // reads kits' variables only (`variable::check`).
             if in_vault(n.id) && style.origin.is_none() {
@@ -518,6 +612,9 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
             let Some(style) = after.styles().get(s) else {
                 continue; // `check` refuses it
             };
+            if slot == StyleSlot::Text && !matches!(n.kind, crate::NodeKind::Text { .. }) {
+                continue; // `check` refuses it, and says why where `SetTextStyle` would not
+            }
             let cur = StyleValue::of(n, slot);
             if cur.same_look(&style.value) {
                 continue;
@@ -526,7 +623,7 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
             if !wins && written.contains(&(n.id, slot)) {
                 out.push(bind_op(n.id, slot, None));
             } else {
-                out.push(style.value.write_op(n.id));
+                out.push(style.value.write_op(n));
             }
         }
     }
@@ -539,6 +636,11 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
 /// list the style's value and drops the per-layer writes, which [`settle`] then
 /// writes back onto every user, the edited layers among them. A write on any
 /// other layer or slot passes through.
+///
+/// A text style's write **also passes through** (§15 D1067): `SetTextStyle`
+/// carries the layer's colour and language beside the type, which the style does
+/// not hold, so dropping it would drop a colour picked in the same edit. Kept, it
+/// lands the layer on the style's new look, and [`settle`] has nothing to do there.
 pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transaction {
     let Some(slot) = doc.styles().get(style).map(Style::slot) else {
         return tx;
@@ -547,11 +649,37 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
         doc.get(id)
             .is_some_and(|n| n.styles.get(slot) == Some(style))
     };
+    // A text style's users whose defaults this edit writes. The Type card's write
+    // of the defaults carries a `SetTextSpans` clearing the attribute's spans over
+    // the whole layer (§15 D164) — right for a plain layer, wrong here: the style's
+    // other users keep their spans when it changes, so the edited one must too,
+    // or *Body*'s size edit flattens a 30px word on the layer it was typed on and
+    // nowhere else (`arch-scribe`'s read of D1068's first cut).
+    let restyled: FxHashSet<NodeId> = if slot == StyleSlot::Text {
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetTextStyle { id, .. } if bound(*id) => Some(*id),
+                _ => None,
+            })
+            .collect()
+    } else {
+        FxHashSet::default()
+    };
     let mut value: Option<StyleValue> = None;
     let mut out = Vec::with_capacity(tx.0.len());
     for op in tx.0 {
+        if matches!(&op, Operation::SetTextSpans { id, .. } if restyled.contains(id)) {
+            continue;
+        }
         let hit = writes_slot(&op).is_some_and(|(id, s)| s == slot && bound(id));
         if !hit {
+            out.push(op);
+            continue;
+        }
+        if let Operation::SetTextStyle { style: s, .. } = &op {
+            if value.is_none() {
+                value = Some(StyleValue::Text(Box::new(type_part(s))));
+            }
             out.push(op);
             continue;
         }
@@ -680,7 +808,7 @@ pub(crate) fn detach_vars(
                 })
                 .collect(),
         ),
-        StyleValue::Effects(_) => value.clone(),
+        StyleValue::Effects(_) | StyleValue::Text(_) => value.clone(),
     }
 }
 

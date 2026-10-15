@@ -1,6 +1,7 @@
 //! Styles in the inspector (§5.3f, D1038 F1–F10; §15 D1063).
 //!
-//! The three style slots' cards — Fill, Stroke and Effects — wear a `⋯` in their
+//! The four style slots' cards — Fill, Stroke, Effects and, since step 6, Type
+//! (§15 D1068) — wear a `⋯` in their
 //! header, always last (F8): *Apply style…*, *Create style from this…* and
 //! *Detach style* (F4). A styled card **collapses to one capsule** — caret,
 //! preview, name and a short summary, *Detach* in the summary's place on hover
@@ -144,6 +145,8 @@ fn summary(value: &StyleValue) -> String {
                 plural(v.len(), "effect", "effects")
             }
         }
+        // `Inter · 16` — the family and the size, what a type style is read by.
+        StyleValue::Text(t) => format!("{} · {}", t.font_family, number(t.font_size)),
     }
 }
 
@@ -163,7 +166,7 @@ fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peni
             .filter(|s| s.visible)
             .map(|s| &s.brush)
             .collect(),
-        StyleValue::Effects(_) => return None,
+        StyleValue::Effects(_) | StyleValue::Text(_) => return None,
     };
     let b = brushes.first()?;
     match doc.resolve_brush(doc.root(), b).into_owned() {
@@ -175,7 +178,8 @@ fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peni
 }
 
 /// A style's preview: a 14×14 swatch for a fill, a ring for a stroke, a small
-/// shadowed square for effects (F1, G8).
+/// shadowed square for effects (F1, G8), and *Ag* for a text style (§15 D1068)
+/// — in the chrome's face, since a document's families are not the UI's fonts.
 pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, rect: egui::Rect) {
     let ink = |a: u8| color::text_a(a);
     match &style.value {
@@ -207,6 +211,15 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
                 egui::Color32::from_black_alpha(140),
             );
             p.rect_filled(sq, 3, ink(178));
+        }
+        StyleValue::Text(_) => {
+            p.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Ag",
+                egui::FontId::proportional(11.0),
+                ink(204),
+            );
         }
     }
 }
@@ -414,6 +427,31 @@ impl OndinApp {
         action: Option<ui::HeadAction>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> bool {
+        self.style_card_live(ui, title, slot, targets, action, false, body, |_, _| {})
+    }
+
+    /// [`Self::style_card`] whose rows stay **live** under a styled capsule when
+    /// `live` — the Type card over a live session's selection (§15 D1068): its
+    /// writes there are spans, the text's own marks over the style, which keep
+    /// the style (§15 D1067), so the inspector still detaches nothing.
+    ///
+    /// `tail` is the card's rows **the style does not hold**, drawn live under
+    /// whatever `body` is in — the Type card's alignment row and its popup's
+    /// opener, since a text style holds the character defaults and not the
+    /// paragraph or the box (§15 D1067). Without it a styled card locked fields
+    /// its style never writes (`arch-scribe`'s read of the first cut).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn style_card_live(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        slot: StyleSlot,
+        targets: &[NodeId],
+        action: Option<ui::HeadAction>,
+        live: bool,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+        tail: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) -> bool {
         let state = shown(&self.session.doc, targets, slot);
         let editing = matches!(state, StyleShown::One(s) if self.session.style_edit == Some(s));
         // The `+` hides while any card in scope is styled, and nothing moves:
@@ -423,73 +461,10 @@ impl OndinApp {
         } else {
             action
         };
-        let clicks = self.panel_full(
-            ui,
-            title,
-            None,
-            action,
-            None,
-            true,
-            |app, ui| match &state {
-                StyleShown::One(s) => {
-                    let Some(style) = app.session.doc.styles().get(*s).cloned() else {
-                        return;
-                    };
-                    if app.style_naming.as_ref().is_some_and(|n| n.style == *s) {
-                        app.naming_capsule(ui, &style);
-                        return;
-                    }
-                    let open = editing || app.style_open.contains(&slot);
-                    let out = capsule(ui, &app.session.doc, &style, open, editing);
-                    if out.detach {
-                        if editing {
-                            app.session.style_edit = None;
-                        } else {
-                            app.detach_styles(slot, targets);
-                        }
-                        return;
-                    }
-                    if out.toggled && !editing && !app.style_open.remove(&slot) {
-                        app.style_open.insert(slot);
-                    }
-                    if !open {
-                        return;
-                    }
-                    ui.add_space(2.0);
-                    if editing {
-                        body(app, ui);
-                        let n = style::users(&app.session.doc, *s).len();
-                        let what = match n {
-                            1 => "Changes reach its 1 layer as you type".to_string(),
-                            n => format!("Changes reach its {n} layers as you type"),
-                        };
-                        footer(ui, icon::SLIDERS_HORIZONTAL, &what);
-                    } else {
-                        // Greyed and inert — the inspector's read-only door (D1038
-                        // (1)); a bound variable inside still draws its chip.
-                        ui.scope(|ui| {
-                            ui.disable();
-                            ui.set_opacity(GREYED);
-                            body(app, ui);
-                        });
-                        footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
-                    }
-                }
-                StyleShown::Mixed(list) => mixed_capsule(ui, &app.session.doc, list),
-                // Some styled and some not (F10): the rows greyed and inert, as a
-                // styled card's are — the inspector is the one door that does
-                // not detach (D1038 (1)); the `⋯` detaches or applies to them all.
-                StyleShown::Partial => {
-                    ui.scope(|ui| {
-                        ui.disable();
-                        ui.set_opacity(GREYED);
-                        body(app, ui);
-                    });
-                    footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
-                }
-                StyleShown::Plain => body(app, ui),
-            },
-        );
+        let clicks = self.panel_full(ui, title, None, action, None, true, |app, ui| {
+            app.style_rows(ui, &state, slot, targets, editing, live, body);
+            tail(app, ui);
+        });
         if clicks.more
             && let Some(under) = clicks.more_rect
         {
@@ -500,6 +475,88 @@ impl OndinApp {
             });
         }
         clicks.acted
+    }
+
+    /// The rows a style card draws for `state`: the capsule and its greyed,
+    /// editing or live rows, F10's mixed capsule, or `body` plain.
+    #[allow(clippy::too_many_arguments)]
+    fn style_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        state: &StyleShown,
+        slot: StyleSlot,
+        targets: &[NodeId],
+        editing: bool,
+        live: bool,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) {
+        let app = self;
+        match state {
+            StyleShown::One(s) => {
+                let Some(style) = app.session.doc.styles().get(*s).cloned() else {
+                    return;
+                };
+                if app.style_naming.as_ref().is_some_and(|n| n.style == *s) {
+                    app.naming_capsule(ui, &style);
+                    return;
+                }
+                let open = editing || live || app.style_open.contains(&slot);
+                let out = capsule(ui, &app.session.doc, &style, open, editing);
+                if out.detach {
+                    if editing {
+                        app.session.style_edit = None;
+                    } else {
+                        app.detach_styles(slot, targets);
+                    }
+                    return;
+                }
+                if out.toggled && !editing && !app.style_open.remove(&slot) {
+                    app.style_open.insert(slot);
+                }
+                if !open {
+                    return;
+                }
+                ui.add_space(2.0);
+                if editing && !live {
+                    body(app, ui);
+                    let n = style::users(&app.session.doc, *s).len();
+                    let what = match n {
+                        1 => "Changes reach its 1 layer as you type".to_string(),
+                        n => format!("Changes reach its {n} layers as you type"),
+                    };
+                    footer(ui, icon::SLIDERS_HORIZONTAL, &what);
+                } else if live {
+                    // Over a selection — under an *Edit* too: what the rows
+                    // write there is the one layer's spans, which `edit_through`
+                    // passes by, so the edit's footer would promise a reach
+                    // they do not have (`arch-scribe`'s read).
+                    body(app, ui);
+                    footer(ui, icon::TEXT_AA, "Styles the selection — the style stays");
+                } else {
+                    // Greyed and inert — the inspector's read-only door (D1038
+                    // (1)); a bound variable inside still draws its chip.
+                    ui.scope(|ui| {
+                        ui.disable();
+                        ui.set_opacity(GREYED);
+                        body(app, ui);
+                    });
+                    footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
+                }
+            }
+            StyleShown::Mixed(list) => mixed_capsule(ui, &app.session.doc, list),
+            // Some styled and some not (F10): the rows greyed and inert, as a
+            // styled card's are — the inspector is the one door that does
+            // not detach (D1038 (1)); the `⋯` detaches or applies to them all.
+            StyleShown::Partial => {
+                ui.scope(|ui| {
+                    ui.disable();
+                    ui.set_opacity(GREYED);
+                    body(app, ui);
+                });
+                footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
+            }
+            StyleShown::Plain => body(app, ui),
+        }
     }
 
     /// F6's capsule: the new style's name being typed, the capsule ringed in
@@ -620,8 +677,14 @@ impl OndinApp {
             .iter()
             .map(|t| style::bind_op(*t, slot, Some(s)))
             .collect();
-        if preview && let Some(st) = self.session.doc.styles().get(s) {
-            ops.extend(targets.iter().map(|t| st.value.write_op(*t)));
+        let doc = &self.session.doc;
+        if preview && let Some(st) = doc.styles().get(s) {
+            ops.extend(
+                targets
+                    .iter()
+                    .filter_map(|t| doc.get(*t))
+                    .map(|n| st.value.write_op(n)),
+            );
         }
         Transaction(ops)
     }
@@ -959,6 +1022,18 @@ impl OndinApp {
             self.session.clear_gesture_preview();
             let tx = self.apply_tx(s, pk.slot, &pk.targets, false);
             self.commit_edit(tx);
+            // A text style applied over a live session writes its node's defaults
+            // in the commit (`style::settle`), which the editor's layout cannot
+            // see: re-open it on them, the editor's spans kept (§15 D1068).
+            if pk.slot == StyleSlot::Text
+                && self
+                    .text
+                    .as_ref()
+                    .is_some_and(|t| pk.targets.contains(&t.id))
+            {
+                self.text_session_restyled();
+                self.preview_session();
+            }
             return;
         }
         let away = ctx.input(|i| {
@@ -1015,6 +1090,13 @@ impl OndinApp {
             return;
         }
         let slot = self.session.doc.styles().get(s).map(Style::slot);
+        // The Type card draws for one text layer only, so a text style's edit
+        // selects its first user: the door turns that layer's writes into the
+        // style's, and the commit writes them onto every user (§15 D1068).
+        let users = match slot {
+            Some(StyleSlot::Text) => users.into_iter().take(1).collect(),
+            _ => users,
+        };
         self.session.selection.set(users);
         self.session.style_edit = Some(s);
         if let Some(slot) = slot {
@@ -1293,5 +1375,213 @@ mod tests {
         assert_eq!(fill_style(&app, b), Some(s));
         assert!(!app.session.has_gesture_preview());
         assert!(app.style_picker.is_none());
+    }
+
+    /// Two text layers, `a` at 40px and `b` at 12px, `a` selected.
+    fn text_app(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x5F);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (a, b) = (ids.mint(), ids.mint());
+        let ops = [(a, 40.0, "Heading"), (b, 12.0, "Some body text")]
+            .into_iter()
+            .map(|(id, size, content)| Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: content.into(),
+                    style: Box::new(ondin_core::TextStyle {
+                        font_size: size,
+                        ..Default::default()
+                    }),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: ondin_core::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: None,
+                name: None,
+            })
+            .collect();
+        doc.apply(&Transaction(ops)).expect("build");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![a]);
+        (app, a, b)
+    }
+
+    /// `frame` on a screen tall enough for the Type card's footer: a `Label`
+    /// below the visible area paints nothing, and a text layer's cards run long.
+    fn tall_frame(ctx: &egui::Context, app: &mut OndinApp) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 2400.0),
+            )),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| {
+            app.inspector_panel(ctx);
+            app.style_popups_ui(ctx);
+        })
+        .shapes
+    }
+
+    fn font_size(app: &OndinApp, id: NodeId) -> f64 {
+        match app.session.doc.get(id).unwrap().kind() {
+            NodeKind::Text { style, .. } => style.font_size,
+            _ => panic!("text"),
+        }
+    }
+
+    /// **A styled Type card is read-only, and live over a session's selection**
+    /// (§15 D1068): what its rows write there is spans, which keep the style
+    /// (§15 D1067), so the one door that does not detach still does not.
+    ///
+    /// Flip, run: `style_card_live` called with `live: false` fails at *"live over
+    /// a selection"* — the selection's card is the read-only one.
+    #[test]
+    fn a_styled_type_card_is_read_only_and_live_over_a_selection() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = text_app(&ctx);
+        app.create_style(StyleSlot::Text, &[a]);
+        app.style_naming = None;
+        assert!(app.session.doc.get(a).unwrap().styles().text.is_some());
+        // Three passes, as the fill capsule's test: the first lays out no text.
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&ctx, &mut app, vec![]);
+        }
+        assert!(drawn(&shapes, "Type style"), "the capsule names the style");
+        assert!(drawn(&shapes, "Inter · 40"), "its summary");
+        app.style_open.insert(StyleSlot::Text);
+        let shapes = tall_frame(&ctx, &mut app);
+        assert!(drawn(&shapes, "Read-only — Detach to edit"));
+
+        app.begin_edit_text(Some(a), None);
+        app.text
+            .as_mut()
+            .expect("a live session")
+            .editor
+            .select_all();
+        let shapes = tall_frame(&ctx, &mut app);
+        assert!(
+            drawn(&shapes, "Styles the selection — the style stays"),
+            "live over a selection"
+        );
+        assert!(!drawn(&shapes, "Read-only — Detach to edit"));
+    }
+
+    /// **A styled Type card leaves live what its style does not hold** (§15
+    /// D1068's amendment): the alignment row and the popup's opener sit in the
+    /// card's tail, drawn under a collapsed capsule too, so the popup stays open
+    /// for its Paragraph and Box tabs — and its Character tab, the style's, is
+    /// read-only.
+    ///
+    /// Flip, run: the alignment row moved back into the card's `body` fails at
+    /// *"the popup outlives the collapse"* — a collapsed capsule draws no opener,
+    /// and `type_menu_popup` closes a popup with none.
+    #[test]
+    fn a_styled_type_card_leaves_its_paragraph_live_and_locks_the_character_tab() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = text_app(&ctx);
+        app.create_style(StyleSlot::Text, &[a]);
+        app.style_naming = None;
+        app.type_menu = Some(crate::app::TypeTab::Paragraph);
+        for _ in 0..3 {
+            tall_frame(&ctx, &mut app);
+        }
+        assert!(
+            app.type_menu.is_some(),
+            "the popup outlives the collapse: the opener is in the tail"
+        );
+        app.type_menu = Some(crate::app::TypeTab::Character);
+        let shapes = tall_frame(&ctx, &mut app);
+        let note = "The text style holds the greyed rows. Detach to edit";
+        assert!(drawn(&shapes, note), "the Character tab is the style's");
+
+        app.begin_edit_text(Some(a), None);
+        app.text
+            .as_mut()
+            .expect("a live session")
+            .editor
+            .select_all();
+        let shapes = tall_frame(&ctx, &mut app);
+        assert!(!drawn(&shapes, note), "and live over a selection");
+    }
+
+    /// **A text style applied over a live session re-opens its editor** on the
+    /// defaults the commit wrote (`style::settle`), as a Type reset does
+    /// (`a_type_reset_restyles_a_live_text_session`): the editor's own layout
+    /// is what the next keystroke draws, and the document cannot see it.
+    ///
+    /// Flip, run: the picker's `text_session_restyled` dropped fails at *"the
+    /// editor lays out at 40"* — the document is 40 and the editor still 12.
+    #[test]
+    fn applying_a_text_style_over_a_live_session_restyles_its_editor() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = text_app(&ctx);
+        app.create_style(StyleSlot::Text, &[a]);
+        app.style_naming = None;
+        app.session.selection.set(vec![b]);
+        app.begin_edit_text(Some(b), None);
+        let height = |app: &OndinApp| app.text.as_ref().unwrap().editor.text_layout().size.height;
+        let before = height(&app);
+        app.style_picker = Some(StylePicker {
+            slot: StyleSlot::Text,
+            targets: vec![b],
+            under: egui::Rect::from_min_size(egui::pos2(900.0, 100.0), egui::vec2(20.0, 20.0)),
+            query: String::new(),
+            focus: true,
+            highlight: 0,
+        });
+        frame(&ctx, &mut app, vec![]);
+        let enter = egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![enter]);
+        assert_eq!(font_size(&app, b), 40.0, "the document took the style");
+        assert!(
+            height(&app) > before * 2.0,
+            "the editor lays out at 40: {} against {before}",
+            height(&app)
+        );
+    }
+
+    /// **A text style's *Edit* selects one user** — the Type card draws for one
+    /// text layer — and an edit through it reaches the other (§15 D1068).
+    #[test]
+    fn a_text_styles_edit_selects_one_user_and_reaches_the_other() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = text_app(&ctx);
+        app.create_style(StyleSlot::Text, &[a, b]);
+        app.style_naming = None;
+        let s = app.session.doc.get(a).unwrap().styles().text.unwrap();
+        assert_eq!(font_size(&app, b), 40.0, "the fixture: b took the style");
+        app.edit_style(s);
+        assert_eq!(app.session.selection.ids().len(), 1, "one user selected");
+        let first = app.session.selection.ids()[0];
+        let st = match app.session.doc.get(first).unwrap().kind() {
+            NodeKind::Text { style, .. } => style.with(ondin_core::CharAttr::Size(20.0)),
+            _ => unreachable!(),
+        };
+        app.commit_edit(Transaction(vec![Operation::SetTextStyle {
+            id: first,
+            style: st,
+            spans: None,
+        }]));
+        assert_eq!(font_size(&app, a), 20.0);
+        assert_eq!(font_size(&app, b), 20.0);
+        assert_eq!(app.session.doc.get(b).unwrap().styles().text, Some(s));
     }
 }

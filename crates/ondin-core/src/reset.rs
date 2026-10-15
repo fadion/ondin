@@ -189,6 +189,11 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
             id,
             style: styles.effects,
         },
+        // The Type card's (§15 D1067), stated as the paint cards' are.
+        O::SetTypeStyle {
+            id,
+            style: styles.text,
+        },
     ];
     ops.extend(kind_ops(id, kind));
     ops

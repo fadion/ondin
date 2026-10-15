@@ -1300,6 +1300,15 @@ impl Document {
                     style: old,
                 })
             }
+            Operation::SetTypeStyle { id, style } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.styles.text, *style);
+                dirty.0.insert(*id);
+                Ok(Operation::SetTypeStyle {
+                    id: *id,
+                    style: old,
+                })
+            }
         }
     }
 

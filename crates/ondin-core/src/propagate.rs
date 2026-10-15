@@ -78,7 +78,8 @@ fn mode(op: &Operation) -> Mode {
         // override, another one or a detach is.
         | Operation::SetFillStyle { .. }
         | Operation::SetStrokeStyle { .. }
-        | Operation::SetEffectsStyle { .. } => Mode::Whole,
+        | Operation::SetEffectsStyle { .. }
+        | Operation::SetTypeStyle { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }

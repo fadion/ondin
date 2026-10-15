@@ -532,6 +532,13 @@ pub enum Operation {
         id: NodeId,
         style: Option<crate::style::StyleId>,
     },
+    /// The text style a text layer's type is bound to, as [`Self::SetFillStyle`]
+    /// (§15 D1067). Not [`Self::SetTextStyle`], which writes the character
+    /// defaults themselves — the values the commit writes beside this one.
+    SetTypeStyle {
+        id: NodeId,
+        style: Option<crate::style::StyleId>,
+    },
 }
 
 impl Operation {
@@ -599,6 +606,7 @@ impl Operation {
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
+            | Operation::SetTypeStyle { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -684,7 +692,8 @@ impl Operation {
             | Operation::SetSizeVars { id, .. }
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
-            | Operation::SetEffectsStyle { id, .. } => id,
+            | Operation::SetEffectsStyle { id, .. }
+            | Operation::SetTypeStyle { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -847,7 +856,8 @@ impl Operation {
             | Operation::SetStyleOrigin { .. }
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
-            | Operation::SetEffectsStyle { .. } => false,
+            | Operation::SetEffectsStyle { .. }
+            | Operation::SetTypeStyle { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -998,6 +1008,9 @@ impl Operation {
             }
             Operation::SetEffectsStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().effects == *style)
+            }
+            Operation::SetTypeStyle { id, style } => {
+                node(id).is_some_and(|n| n.styles().text == *style)
             }
 
             Operation::SetVariableName { id, name } => {
@@ -1653,7 +1666,9 @@ mod changes_ink_tests {
     /// `arch-scribe` after the commit that added them, the assertion moved first.
     /// **Twenty-five with `SetStyleOrigin`** (§15 D1064), the same day; that
     /// entry's `SetVariable` and `SetKitModes` change ink, as `SetVariableCell`
-    /// does, and are asserted with the visible ones below.
+    /// does, and are asserted with the visible ones below. **Twenty-six with
+    /// `SetTypeStyle`** (§15 D1067), the same day, the assertion moved after the
+    /// gates' run found it red.
     /// ⚠️ **Not the whole of `changes_ink`'s `false` arm**: the vault's two,
     /// `SetOrigin` and the variables' four answer `false` there and are not
     /// listed here — older gaps, not this list's subject.
@@ -1731,6 +1746,7 @@ mod changes_ink_tests {
             Operation::SetFillStyle { id, style: None },
             Operation::SetStrokeStyle { id, style: None },
             Operation::SetEffectsStyle { id, style: None },
+            Operation::SetTypeStyle { id, style: None },
             // A kit's style's version (§15 D1064): bookkeeping, as `SetOrigin` is.
             Operation::SetStyleOrigin {
                 id: style,
@@ -1743,8 +1759,8 @@ mod changes_ink_tests {
         // mechanism.
         assert_eq!(
             invisible.len(),
-            25,
-            "the chrome list is twenty-five operations"
+            26,
+            "the chrome list is twenty-six operations"
         );
         for op in &invisible {
             assert!(

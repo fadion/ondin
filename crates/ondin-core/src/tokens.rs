@@ -307,7 +307,8 @@ impl Plan {
                     })
                     .collect(),
             ),
-            StyleValue::Effects(_) => value.clone(),
+            // A text style reads no variable (§15 D1067).
+            StyleValue::Effects(_) | StyleValue::Text(_) => value.clone(),
         }
     }
 }

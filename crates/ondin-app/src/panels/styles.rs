@@ -626,6 +626,8 @@ impl OndinApp {
             return;
         };
         if self.commit_edit(Transaction(ops)) {
+            // Open, or the name is typed in a card nobody can see.
+            self.open_paint_panel(slot.title());
             self.style_naming = Some(StyleNaming {
                 style: id,
                 text: name,
@@ -771,13 +773,20 @@ impl OndinApp {
         });
         let counts: Vec<usize> = rows.iter().map(|s| style::users(doc, s.id).len()).collect();
         pk.highlight = pk.highlight.min(rows.len().saturating_sub(1));
-        let (up, down, enter) = ctx.input(|i| {
+        let (up, down, enter, escape) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::ArrowUp),
                 i.key_pressed(egui::Key::ArrowDown),
                 i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
             )
         });
+        // The search holds the keyboard, so the app's `Escape` ladder never hears
+        // the key while it does — the picker answers it here, in one press.
+        if escape {
+            self.session.clear_gesture_preview();
+            return;
+        }
         if down && pk.highlight + 1 < rows.len() {
             pk.highlight += 1;
         }
@@ -1152,6 +1161,37 @@ mod tests {
         assert_eq!(fill_colour(&app, b), Brush::Solid(GREEN));
         // And says so, as a door's detach does (D1038 (2)).
         assert_eq!(app.session.status().text, "Detached Fill style");
+    }
+
+    /// **`Escape` closes the picker in one press, its preview with it**, though
+    /// its search holds the keyboard the app's ladder would otherwise answer.
+    #[test]
+    fn escape_closes_the_picker_and_its_preview() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        app.style_naming = None;
+        app.style_picker = Some(StylePicker {
+            slot: StyleSlot::Fills,
+            targets: vec![b],
+            under: egui::Rect::from_min_size(egui::pos2(900.0, 100.0), egui::vec2(20.0, 20.0)),
+            query: String::new(),
+            focus: true,
+            highlight: 0,
+        });
+        frame(&ctx, &mut app, vec![]);
+        assert!(app.session.has_gesture_preview());
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![escape]);
+        assert!(app.style_picker.is_none(), "one press closes it");
+        assert!(!app.session.has_gesture_preview(), "and its preview");
+        assert_eq!(fill_style(&app, b), None, "nothing applied");
     }
 
     /// **The picker's highlight previews on the canvas and `Enter` applies it**

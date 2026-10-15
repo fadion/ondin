@@ -67,8 +67,17 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1061 index rows, 1061 body headings, next free
-D1062** (measured 2026-10-14 at `376d130`; ⚠️ **the W-and-H request reserved D1061–D1070 at
+anywhere cited either. **The live figures: 1063 index rows, 1063 body headings, next free
+D1064** (measured 2026-10-15 at `e289aae`; ⚠️ **the styles (step 3) request reserved
+D1062–D1071 at `3003a90` through the `dnumber-guard` mod and spent two** — D1062, styles' core
+(linked copies settled at the commit, `style::settle` run before and after the component passes),
+and D1063, their chrome (the cards' `⋯` and capsule, the *Styles* tab, *Edit* as an edit mode on the
+style's users through a commit door, not G9's card in the browser); step 3 closed. **D1064–D1071
+found at zero sites and released.** Census **962**, arrivals D1062–D1063, none unresolved.
+⚠️ **`arch-scribe` found real defects in both batches** — two no-op fixtures missing the seven new
+ops, three overclaiming comments, and in the chrome a partly styled card left live (detaching through
+the inspector) and an edit staying open over a selection with a non-user — each fixed and the last
+flip-checked before the record was committed. Before that, measured 2026-10-14 at `376d130`; ⚠️ **the W-and-H request reserved D1061–D1070 at
 `6db3079` and spent one** — D1061, a layer's width and height bound to number variables (the
 maintainer's ruling: literal 0, any resize detaches, only a hand-set size binds), step 2 closed;
 **D1062–D1070 found at zero sites and released.** Census **960**, arrival D1061, none unresolved.

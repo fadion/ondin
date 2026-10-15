@@ -204,6 +204,11 @@ pub struct Style {
     /// D1064) — `None` for the document's own. A kit's style is read-only here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<StyleOrigin>,
+    /// The kit style this one of the document's own was forked from by *Make
+    /// local* (§15 D1066), as `crate::variable::Variable::forked` marks a
+    /// variable — `None` for every other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked: Option<StyleOrigin>,
 }
 
 impl Style {
@@ -611,6 +616,7 @@ pub fn create_ops(
             name: name.to_string(),
             value,
             origin: None,
+            forked: None,
         },
     }];
     ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));

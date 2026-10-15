@@ -2517,6 +2517,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 kind: ondin_core::VarKind::Number,
                 cells: Default::default(),
                 origin: None,
+                forked: None,
             },
         },
         Operation::RemoveVariable { id: var },
@@ -2548,6 +2549,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 kind: ondin_core::VarKind::Number,
                 cells: Default::default(),
                 origin: None,
+                forked: None,
             },
         },
         Operation::SetKitModes {
@@ -2567,6 +2569,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
                 name: "s".into(),
                 value: ondin_core::style::StyleValue::Fills(vec![]),
                 origin: None,
+                forked: None,
             },
         },
         Operation::RemoveStyle { id: style },
@@ -4129,6 +4132,7 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4250,6 +4254,7 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(16.0))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4351,6 +4356,7 @@ fn a_visibility_binding_previews_as_what_it_will_show() {
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4448,6 +4454,7 @@ fn hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved() {
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4510,6 +4517,7 @@ fn a_bound_rect_resized_previews_its_bound_corners() {
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(14.0))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4555,6 +4563,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
             kind: VarKind::Number,
             cells: [(mode, Cell::Number(x))].into(),
             origin: None,
+            forked: None,
         },
     };
     doc.apply(&Transaction(vec![
@@ -4716,6 +4725,7 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
                 kind: VarKind::Number,
                 cells: [(mode, Cell::Number(90.0))].into(),
                 origin: None,
+                forked: None,
             },
         },
     ]))
@@ -4784,6 +4794,7 @@ fn a_variable_cell_previews_on_what_reads_it() {
             kind,
             cells: [(mode, cell)].into(),
             origin: None,
+            forked: None,
         },
     };
     doc.apply(&Transaction(vec![

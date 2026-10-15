@@ -2487,6 +2487,7 @@ mod tests {
             kind: ondin_core::variable::VarKind::Number,
             cells: [(mode, ondin_core::variable::Cell::Number(n))].into(),
             origin: None,
+            forked: None,
         };
         let mut ops = vec![
             Operation::AddMode {
@@ -2576,6 +2577,7 @@ mod tests {
                     kind: ondin_core::variable::VarKind::Number,
                     cells: [(mode, ondin_core::variable::Cell::Number(30.0))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
         ];
@@ -5089,6 +5091,7 @@ mod tests {
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
         ])));
@@ -5159,6 +5162,7 @@ mod tests {
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(true))].into(),
                 origin: None,
+                forked: None,
             },
         };
         assert!(v.app.commit_edit(Transaction(vec![

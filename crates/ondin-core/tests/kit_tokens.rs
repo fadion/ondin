@@ -109,6 +109,7 @@ fn kit() -> Kit {
                 kind: VarKind::Color,
                 cells: [(day, Cell::Color(WHITE)), (night, Cell::Color(NAVY))].into(),
                 origin: None,
+                forked: None,
             },
         },
         Operation::AddVariable {
@@ -118,6 +119,7 @@ fn kit() -> Kit {
                 kind: VarKind::Number,
                 cells: [(day, Cell::Number(1.0)), (night, Cell::Number(2.0))].into(),
                 origin: None,
+                forked: None,
             },
         },
         Operation::AddStyle {
@@ -126,6 +128,7 @@ fn kit() -> Kit {
                 name: "Accent".into(),
                 value: StyleValue::Fills(gold.clone()),
                 origin: None,
+                forked: None,
             },
         },
         create(icon, root, 0, frame(24.0, 24.0), "Icon"),
@@ -618,6 +621,7 @@ fn a_vault_node_bound_to_the_documents_own_variable_is_refused() {
                 kind: VarKind::Color,
                 cells: [(modes[0], Cell::Color(RED))].into(),
                 origin: None,
+                forked: None,
             },
         },
         Operation::SetFills {
@@ -647,6 +651,7 @@ fn an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping() {
             kind: VarKind::Color,
             cells: [(modes[0], Cell::Alias(held))].into(),
             origin: None,
+            forked: None,
         },
     }]))
     .unwrap();
@@ -938,6 +943,7 @@ fn a_documents_own_style_reading_a_removed_kit_variable_is_detached() {
             name: "Mine".into(),
             value: StyleValue::Fills(bound(held)),
             origin: None,
+            forked: None,
         },
     }]))
     .unwrap();
@@ -991,6 +997,7 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
                     kind: VarKind::Boolean,
                     cells: modes.iter().map(|m| (*m, Cell::Boolean(true))).collect(),
                     origin: None,
+                    forked: None,
                 },
             },
             Operation::SetVisibleVar {
@@ -1001,4 +1008,550 @@ fn a_main_roots_visibility_binding_is_not_a_change() {
         .unwrap();
     let c = kit::changes(&k.doc);
     assert!(!c.changed.contains(&k.icon), "{c:?}");
+}
+
+/// *Make local* `inst`'s main through the commit's passes, so its instances
+/// follow — and what it forked.
+fn make_local(d: &mut Document, ids: &mut IdSource, inst: NodeId) -> (NodeId, kit::MadeLocal) {
+    let main = d.get(inst).unwrap().link().unwrap();
+    let mut made = kit::make_local_report(d, ids, &[main]);
+    let mut tx = std::mem::take(&mut made.tx);
+    ondin_core::propagate::owed(d, &mut tx, ids);
+    // The undo in `tx`'s place: what a test hands back is what takes it back.
+    made.tx = d.apply(&tx).expect("make local commits").inverse;
+    (main, made)
+}
+
+/// **A main made local forks the kit's variables and styles it reads** (§15
+/// D1066, the maintainer's ruling): D gains its own *Atlas/brand* and
+/// *Atlas/Accent*, marked with the kit's identity they were forked from, every
+/// mode of D given the cell the per-kit mapping read there — *Light*, with no
+/// kit mode of its name, the kit's first (*Day*, white); *Night* the kit's
+/// *Night* — and the revealed main and, by the follow, its instance bound to
+/// them. Nothing drawn changes, and one undo takes it all back.
+///
+/// Flip, run: `make_local_report` without its fork (its `fork.ops` and
+/// rebinds dropped) fails at *"one variable of D's own"*, 0.
+#[test]
+fn make_local_forks_the_kits_variables_and_styles() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Light", "Night"]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let before = d.clone();
+    let (main, made) = make_local(&mut d, &mut ids, inst);
+
+    let t = d.variables();
+    let [fork] = t.local().collect::<Vec<_>>()[..] else {
+        panic!("one variable of D's own, got {}", t.local().count())
+    };
+    assert_eq!(fork.name, "Atlas/brand");
+    assert_eq!(
+        fork.forked.as_ref().map(|o| (o.kit.as_str(), o.var)),
+        Some((L_ID, k.brand))
+    );
+    assert_eq!(
+        fork.cells.iter().map(|(m, c)| (*m, *c)).collect::<Vec<_>>(),
+        [
+            (modes[0], Cell::Color(WHITE)),
+            (modes[1], Cell::Color(NAVY))
+        ]
+    );
+    let [style] = d
+        .styles()
+        .iter()
+        .filter(|s| s.origin.is_none())
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("one style of D's own")
+    };
+    assert_eq!(style.name, "Atlas/Accent");
+    assert_eq!(made.forked, (1, 1));
+
+    let main_dot = first_child(&d, main);
+    let dot = first_child(&d, inst);
+    for (n, what) in [(main_dot, "the main's dot"), (dot, "the instance's dot")] {
+        assert_eq!(
+            d.get(n).unwrap().paint().fills[0].brush.var(),
+            Some(fork.id),
+            "{what} reads the fork"
+        );
+    }
+    assert_eq!(d.get(main).unwrap().styles().fills, Some(style.id));
+    assert_eq!(d.get(inst).unwrap().styles().fills, Some(style.id));
+    assert_eq!(drawn(&d, dot), Brush::Solid(WHITE), "nothing drawn changes");
+    assert_eq!(drawn(&d, inst), Brush::Solid(GOLD));
+
+    d.apply(&made.tx).unwrap();
+    assert_eq!(d, before, "one undo");
+}
+
+/// A document with **no modes of its own** takes the forked kit's, by name — it
+/// can hold no variable of its own otherwise (`NoModes`) — and with no hand-set
+/// entry each maps to the kit mode of its name, so the kit's own variables
+/// read as before too.
+#[test]
+fn make_local_in_a_document_without_modes_takes_the_kits() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    make_local(&mut d, &mut ids, inst);
+    let t = d.variables();
+    let names: Vec<&str> = t.modes().iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, ["Day", "Night"]);
+    let fork = t.local().next().expect("a fork");
+    let cells: Vec<Cell> = t.modes().iter().map(|m| fork.cells[&m.id]).collect();
+    assert_eq!(cells, [Cell::Color(WHITE), Cell::Color(NAVY)]);
+    assert_eq!(drawn(&d, first_child(&d, inst)), Brush::Solid(WHITE));
+}
+
+/// **Taking a kit's modes leaves every other kit reading what it read**: D has
+/// no modes and holds kit B, whose modes run *Night, Day* — so B's *Chip*
+/// reads B's first, *Night*, navy. Making L's *Icon* local gives D L's *Day,
+/// Night*; by name, B would now read its *Day*. The default is pinned to B's
+/// first instead.
+///
+/// Flip, run: the pinning loop in `tokens::fork` dropped fails at *"B still
+/// reads its first mode"*, white.
+#[test]
+fn adopting_a_kits_modes_leaves_another_kit_reading_its_first() {
+    const B_ID: &str = "5eed0000000000000000000000000022";
+    let mut bi = IdSource::new(0xB4);
+    let broot = bi.mint();
+    let mut b = Document::new(broot);
+    let (night, day) = (bi.mint_mode(), bi.mint_mode());
+    let ink = bi.mint_var();
+    let chip = bi.mint();
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    b.apply(&Transaction(vec![
+        mode(night, "Night", 0),
+        mode(day, "Day", 1),
+        Operation::AddVariable {
+            var: Variable {
+                id: ink,
+                name: "ink".into(),
+                kind: VarKind::Color,
+                cells: [(night, Cell::Color(NAVY)), (day, Cell::Color(WHITE))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+        create(chip, broot, 0, frame(10.0, 10.0), "Chip"),
+        Operation::SetFills {
+            id: chip,
+            fills: bound(ink),
+        },
+        Operation::SetComponent {
+            id: chip,
+            component: true,
+        },
+    ]))
+    .unwrap();
+    b.set_meta(DocumentMeta {
+        id: Some(B_ID.into()),
+        name: Some("Basalt".into()),
+        kit: Some(KitMark::default()),
+        ..DocumentMeta::default()
+    });
+    kit::publish(&mut b, None, 1);
+
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    let root = d.root();
+    let (tx, b_inst) =
+        kit::insert(&d, &mut ids, B_ID, 1, b.published().unwrap(), chip, root).unwrap();
+    d.apply(&tx).unwrap();
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    assert_eq!(drawn(&d, b_inst), Brush::Solid(NAVY), "fixture: B's first");
+    make_local(&mut d, &mut ids, inst);
+    assert_eq!(d.variables().modes().len(), 2, "fixture: D took L's modes");
+    assert_eq!(
+        drawn(&d, b_inst),
+        Brush::Solid(NAVY),
+        "B still reads its first mode"
+    );
+}
+
+/// **A kit instance nested in the revealed main keeps the kit's bindings**: its
+/// *Dot* reads `brand` because its vault main's does, and the commit's follow
+/// carries that main — still the kit's — so a fork written over it would read
+/// as an override of the kit's *Icon*. *Badge*'s own fill is forked.
+///
+/// Flip, run: `tokens::own` answering its binding whatever the source holds
+/// fails at *"the nested Dot keeps the kit's brand"*.
+#[test]
+fn make_local_leaves_a_nested_kit_instance_the_kits() {
+    let mut k = kit();
+    let (tx, _) = ondin_core::insert_subtrees(
+        &k.doc,
+        &mut k.ids,
+        &[Placement {
+            nodes: k.doc.capture_subtree(k.icon).unwrap(),
+            parent: k.badge,
+            index: None,
+        }],
+        Default::default(),
+    );
+    k.doc.apply(&tx).unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let badge = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().by_origin((L_ID, k.brand)).unwrap().id;
+    let (main, _) = make_local(&mut d, &mut ids, badge);
+    let fork = d.variables().local().next().expect("a fork").id;
+    assert_eq!(
+        d.get(main).unwrap().paint().fills[0].brush.var(),
+        Some(fork),
+        "Badge's own fill is forked"
+    );
+    let nested = first_child(&d, main);
+    let nested_dot = first_child(&d, nested);
+    assert!(d.get(nested).unwrap().link().is_some_and(|l| d.in_vault(l)));
+    assert_eq!(
+        d.get(nested_dot).unwrap().paint().fills[0].brush.var(),
+        Some(held),
+        "the nested Dot keeps the kit's brand"
+    );
+}
+
+/// **A drifted copy's fills are matched to its source's by item id** (D980):
+/// the nested *Dot* in *Badge* has a fill of its own put **in front** of the
+/// one it follows, both bound to `brand`. Made local, the own one is forked and
+/// the followed one keeps the kit's.
+///
+/// Flip, run: `own_reads` and `rebind_ops` matching a fill to the source's at
+/// the same index again (in place of `src_fill`) fails at *"the Dot's own fill
+/// is forked"* — position 0 met the source's `brand` and was taken as
+/// followed.
+#[test]
+fn make_local_matches_a_drifted_copys_fills_by_item() {
+    let mut k = kit();
+    let (tx, _) = ondin_core::insert_subtrees(
+        &k.doc,
+        &mut k.ids,
+        &[Placement {
+            nodes: k.doc.capture_subtree(k.icon).unwrap(),
+            parent: k.badge,
+            index: None,
+        }],
+        Default::default(),
+    );
+    k.doc.apply(&tx).unwrap();
+    let nested_dot = first_child(&k.doc, first_child(&k.doc, k.badge));
+    let mut fills = k.doc.get(nested_dot).unwrap().paint().fills.clone();
+    fills.insert(
+        0,
+        ondin_core::Keyed::new(
+            k.ids.mint_item(),
+            Fill {
+                brush: BrushSource::Bound {
+                    var: k.brand,
+                    alpha: 0.5,
+                },
+                visible: true,
+            },
+        ),
+    );
+    k.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: nested_dot,
+            fills,
+        }]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let badge = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().by_origin((L_ID, k.brand)).unwrap().id;
+    let (main, _) = make_local(&mut d, &mut ids, badge);
+    let fork = d.variables().local().next().expect("a fork").id;
+    let dot = first_child(&d, first_child(&d, main));
+    let vars: Vec<_> = d
+        .get(dot)
+        .unwrap()
+        .paint()
+        .fills
+        .iter()
+        .map(|f| f.brush.var())
+        .collect();
+    assert_eq!(vars[0], Some(fork), "the Dot's own fill is forked");
+    assert_eq!(vars[1], Some(held), "the followed fill keeps the kit's");
+}
+
+/// **A main the kit removes is made local with its variables forked**, even
+/// one only it read — which the new publish therefore no longer carries, so
+/// the update removes it: the fork is taken before the kit's tables are
+/// rewritten, or the main kept only a literal (`arch-scribe`'s reading 3 of
+/// D1066's first cut).
+///
+/// Flip, run: `update_in_order`'s up-front fork of the removed tops dropped
+/// fails at *"tag forked"* — nothing was: by `make_local`'s turn the main held
+/// the literal the removal detached it to. And `reads_as_its_source`'s `alike`
+/// without its fork arm fails at *"the instance follows onto the fork"*,
+/// `None`: the instance was cut to a literal.
+///
+/// *Badge* is styled too, by *Tagged*, which reads `tag` and goes with it: the
+/// style is forked and the instance stays styled by the fork (reading (e)).
+/// Flip, run: the style filter's fork arm in `tokens::plan` dropped fails at
+/// *"the instance follows onto the style's fork"*, `None`. And the variables'
+/// removal no longer skipping a `SetStyleValue` on a style the same update
+/// removes fails in `accept` (`Incomplete`) — every update dropping a style
+/// and a variable it read had failed so, fork or none.
+#[test]
+fn a_main_the_kit_removes_forks_a_variable_only_it_read() {
+    let mut k = kit();
+    let tag = k.ids.mint_var();
+    let tagged = k.ids.mint_style();
+    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: tag,
+                    name: "tag".into(),
+                    kind: VarKind::Color,
+                    cells: [(modes[0], Cell::Color(RED)), (modes[1], Cell::Color(GOLD))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::AddStyle {
+                style: Style {
+                    id: tagged,
+                    name: "Tagged".into(),
+                    value: StyleValue::Fills(bound(tag)),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: bound(tag),
+            },
+            Operation::SetFillStyle {
+                id: k.badge,
+                style: Some(tagged),
+            },
+        ]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    let (mut d, mut ids, dm) = consumer(&["Day", "Night"]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.get(inst).unwrap().link().unwrap();
+    k.doc
+        .apply(&Transaction(vec![Operation::DeleteNode { id: k.badge }]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 3);
+    let u = accept(&mut d, &mut ids, &k);
+    assert_eq!(u.made_local, [held]);
+    let fork = d
+        .variables()
+        .local()
+        .find(|v| v.name == "Atlas/tag")
+        .expect("tag forked");
+    assert_eq!(
+        d.get(held).unwrap().paint().fills[0].brush.var(),
+        Some(fork.id),
+        "Badge reads a fork, not a literal"
+    );
+    assert_eq!(fork.cells[&dm[1]], Cell::Color(GOLD), "every mode kept");
+    // And the page's instance follows its main onto the fork — never cut to a
+    // literal the commit reads as an override (`arch-scribe`'s reading (a)).
+    assert_eq!(
+        d.get(inst).unwrap().paint().fills[0].brush.var(),
+        Some(fork.id),
+        "the instance follows onto the fork"
+    );
+    // And its style the same way (reading (e)): forked, and the instance still
+    // styled by it — never unbound from the style its main reads.
+    let style = d
+        .styles()
+        .iter()
+        .find(|s| s.name == "Atlas/Tagged")
+        .expect("the style forked")
+        .id;
+    assert_eq!(d.get(held).unwrap().styles().fills, Some(style));
+    assert_eq!(
+        d.get(inst).unwrap().styles().fills,
+        Some(style),
+        "the instance follows onto the style's fork"
+    );
+    assert!(
+        !ondin_core::reset::drift(&d, inst).any(),
+        "no override on the instance"
+    );
+    assert!(
+        d.variables().by_origin((L_ID, tag)).is_none(),
+        "the kit's is gone"
+    );
+}
+
+/// **A removal detaches a drifted copy's own fill, matched by item id** (D980,
+/// `arch-scribe`'s reading (b) of D1066's fixes): *Badge* has two fills bound
+/// to `tag`, and the page's copy has replaced the first with one of its own,
+/// bound alike — so by position every bound fill lines up with its main's.
+/// When the kit drops `tag`, the update commits and the own fill is detached.
+/// ⚠️ The followed fill is detached with it — an override where its main went
+/// white: the detach is one `SetFills` for the node, and the follow takes no
+/// item of a list the transaction wrote (`reads_as_its_source`'s doc).
+///
+/// Flip, run: `reads_as_its_source` matching fills by position again fails in
+/// `accept` — the node was spared whole, its own fill left bound to a variable
+/// the update removes (`BadBinding`).
+#[test]
+fn a_removal_matches_a_drifted_copys_fills_by_item() {
+    let mut k = kit();
+    let tag = k.ids.mint_var();
+    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: tag,
+                    name: "tag".into(),
+                    kind: VarKind::Color,
+                    cells: modes.iter().map(|m| (*m, Cell::Color(RED))).collect(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: keyed_by_position([0.5, 1.0].map(|alpha| Fill {
+                    brush: BrushSource::Bound { var: tag, alpha },
+                    visible: true,
+                })),
+            },
+        ]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().by_origin((L_ID, tag)).unwrap().id;
+    // The copy's first fill replaced by one of its own, as its main's — so
+    // every bound fill lines up with its main's by position, not by item.
+    let mut fills = d.get(inst).unwrap().paint().fills.clone();
+    fills[0] = ondin_core::Keyed::new(
+        ids.mint_item(),
+        Fill {
+            brush: BrushSource::Bound {
+                var: held,
+                alpha: 0.5,
+            },
+            visible: true,
+        },
+    );
+    d.apply(&Transaction(vec![Operation::SetFills { id: inst, fills }]))
+        .unwrap();
+    k.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: k.badge,
+            fills: keyed_by_position([Fill {
+                brush: WHITE.into(),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 3);
+    accept(&mut d, &mut ids, &k);
+    let f = &d.get(inst).unwrap().paint().fills;
+    assert!(f[0].brush.var().is_none(), "the own fill detached");
+    assert!(
+        f[1].brush.var().is_none(),
+        "the known edge: the followed fill detached with it"
+    );
+}
+
+/// **Only this update's fork counts as alike** (`arch-scribe`'s reading (d) of
+/// D1066's fixes): *Badge* was made local before, so it reads *Atlas/brand*,
+/// and a page instance of it has been bound back to the kit's `brand` by hand.
+/// When the kit drops `brand`, that copy is detached, values kept — its main is
+/// outside the vault and no edit of this update's, so nothing would follow it.
+///
+/// Flip, run: `reads_as_its_source`'s fork arm counted on any source (its
+/// `vault` ignored) fails in `accept` — the copy spared and left bound to the
+/// removed `brand` (`BadBinding`).
+#[test]
+fn an_earlier_fork_does_not_spare_a_copy_from_a_removal() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    insert(&mut d, &mut ids, &k, k.icon);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let (main, _) = make_local(&mut d, &mut ids, inst);
+    let held = d.variables().by_origin((L_ID, k.brand)).unwrap().id;
+    d.apply(&Transaction(vec![Operation::SetFills {
+        id: inst,
+        fills: d
+            .get(inst)
+            .unwrap()
+            .paint()
+            .fills
+            .iter()
+            .map(|f| {
+                f.map(|f| Fill {
+                    brush: BrushSource::Bound {
+                        var: held,
+                        alpha: 1.0,
+                    },
+                    ..f.clone()
+                })
+            })
+            .collect(),
+    }]))
+    .unwrap();
+    let plain = keyed_by_position([Fill {
+        brush: WHITE.into(),
+        visible: true,
+    }]);
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: k.dot,
+                fills: plain.clone(),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: plain,
+            },
+            Operation::RemoveVariable { id: k.brand },
+        ]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 2);
+    accept(&mut d, &mut ids, &k);
+    assert!(d.variables().by_origin((L_ID, k.brand)).is_none());
+    assert!(
+        d.get(inst).unwrap().paint().fills[0].brush.var().is_none(),
+        "the copy detached, values kept"
+    );
+    assert!(
+        d.get(main).unwrap().paint().fills[0].brush.var().is_some(),
+        "its main keeps its fork"
+    );
+}
+
+/// **A second *Make local* of the same kit binds to the first one's fork**
+/// rather than forking `brand` twice — the mark the maintainer ruled for.
+///
+/// Flip, run: `fork`'s `forked_var` answering `None` fails at *"still one
+/// fork"*, 2 — *Atlas/brand 2* beside it.
+#[test]
+fn a_second_make_local_reuses_the_fork() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let icon = insert(&mut d, &mut ids, &k, k.icon);
+    let badge = insert(&mut d, &mut ids, &k, k.badge);
+    make_local(&mut d, &mut ids, icon);
+    let (badge_main, made) = make_local(&mut d, &mut ids, badge);
+    let forks: Vec<_> = d.variables().local().collect();
+    assert_eq!(forks.len(), 1, "still one fork");
+    assert_eq!(made.forked, (0, 0));
+    assert_eq!(
+        d.get(badge_main).unwrap().paint().fills[0].brush.var(),
+        Some(forks[0].id)
+    );
 }

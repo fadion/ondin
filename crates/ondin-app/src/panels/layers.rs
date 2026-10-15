@@ -7063,6 +7063,7 @@ mod bound_eye_tests {
                     kind: VarKind::Boolean,
                     cells: [(mode, Cell::Boolean(true))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
         ])));

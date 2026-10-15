@@ -1349,6 +1349,39 @@ fn update_in_order(
     for (at, &(kit, version, published)) in kits.iter().enumerate() {
         (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
+        // 🚨 **A main the kit removed forks what it reads before the kit's
+        // tables are rewritten** (§15 D1066, `arch-scribe`'s reading 3): a
+        // variable only that main read is one the new publish no longer
+        // carries, so the plan below removes it and detaches its users — the
+        // main among them — and `make_local` at the end found only one mode's
+        // literals, the outcome D1066 rules out. A top whose kit node the
+        // publish no longer holds at all is made local for certain; the moved
+        // ones classified below fork there, by `make_local`, as before.
+        let gone: Vec<Node> = b
+            .scratch
+            .vault()
+            .and_then(|v| b.scratch.get(v))
+            .map(|v| v.children.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                b.scratch
+                    .get(*t)
+                    .and_then(|n| n.origin.as_ref())
+                    .is_some_and(|o| o.kit == kit && src.get(o.node).is_none())
+            })
+            .flat_map(|t| b.scratch.capture_subtree(t).unwrap_or_default())
+            .collect();
+        if !gone.is_empty() {
+            let fork = crate::tokens::fork(&b.scratch, ids, &gone);
+            let mut ops = fork.ops.clone();
+            for n in &gone {
+                ops.extend(fork.rebind_ops(n, n.link.and_then(|l| b.scratch.get(l))));
+            }
+            for op in ops {
+                b.push(op)?;
+            }
+        }
         // The kit's variables and styles first (§15 D1064): every one this
         // document holds rewritten to the publish, what it no longer has
         // detached and removed, what it newly reads added — so each main's sync
@@ -1616,10 +1649,33 @@ fn update_in_order(
 /// into the vault, origins kept, and those references are pointed at the copy:
 /// the kit's components keep the kit's version, and the revealed one is the
 /// user's own fork.
+///
+/// 🚨 **And the variables and styles it reads are forked with it** (§15
+/// D1066, the maintainer's ruling): a main that no longer follows its kit
+/// would otherwise go on reading the kit's variables — rewritten by every
+/// update while another of the kit's mains is held, orphaned once none is.
+/// The document gains its own copies (`crate::tokens::fork`), every mode's
+/// value kept, and the revealed nodes' own bindings point at them; a nested
+/// kit instance's bindings stay the kit's.
 pub fn make_local(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> Transaction {
+    make_local_report(doc, ids, mains).tx
+}
+
+/// What [`make_local`] did beyond its transaction — for the app's status line.
+#[derive(Debug, Default)]
+pub struct MadeLocal {
+    pub tx: Transaction,
+    /// The kits' variables and styles forked fresh, not reused (§15 D1066).
+    pub forked: (usize, usize),
+    /// Revealed frames set to a kit's own mode, which the forks do not read.
+    pub kit_frames: Vec<NodeId>,
+}
+
+/// [`make_local`], with what it forked.
+pub fn make_local_report(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> MadeLocal {
     let mut ops = Vec::new();
     let Some(vault) = doc.vault() else {
-        return Transaction(ops);
+        return MadeLocal::default();
     };
     let root = doc.root();
     let mains: Vec<NodeId> = mains
@@ -1697,6 +1753,16 @@ pub fn make_local(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> Trans
             });
         }
     }
+    // The forks, and the revealed nodes' own bindings pointed at them.
+    let shown: Vec<Node> = mains
+        .iter()
+        .flat_map(|m| doc.capture_subtree(*m).unwrap_or_default())
+        .collect();
+    let fork = crate::tokens::fork(doc, ids, &shown);
+    ops.extend(fork.ops.iter().cloned());
+    for n in &shown {
+        ops.extend(fork.rebind_ops(n, n.link.and_then(|l| doc.get(l))));
+    }
     let end = doc.get(root).map_or(0, |r| r.children.len());
     for (i, m) in mains.iter().enumerate() {
         for n in doc.capture_subtree(*m).unwrap_or_default() {
@@ -1711,7 +1777,11 @@ pub fn make_local(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> Trans
             index: end + i,
         });
     }
-    Transaction(ops)
+    MadeLocal {
+        tx: Transaction(ops),
+        forked: fork.made,
+        kit_frames: fork.kit_frames,
+    }
 }
 
 /// [`update`]'s state: the scratch document every op is applied to as it is

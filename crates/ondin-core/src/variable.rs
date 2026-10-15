@@ -159,6 +159,12 @@ pub struct Variable {
     /// a vendored main is: written by an update and by nothing the user does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<VarOrigin>,
+    /// The kit variable this one of the document's own was **forked from** by
+    /// *Make local* (§15 D1066) — `None` for every other. A mark, never a link:
+    /// nothing updates a fork; a second *Make local* of the same kit binds to it
+    /// rather than forking the kit's variable twice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked: Option<VarOrigin>,
 }
 
 impl Variable {
@@ -1490,6 +1496,7 @@ mod tests {
                 ]
                 .into(),
                 origin: None,
+                forked: None,
             },
         );
         t.vars.insert(
@@ -1504,6 +1511,7 @@ mod tests {
                 ]
                 .into(),
                 origin: None,
+                forked: None,
             },
         );
         (t, light, dark, brand, accent)

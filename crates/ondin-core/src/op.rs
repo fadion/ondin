@@ -1716,6 +1716,7 @@ mod changes_ink_tests {
                     name: "s".into(),
                     value: crate::style::StyleValue::Fills(vec![]),
                     origin: None,
+                    forked: None,
                 },
             },
             Operation::RemoveStyle { id: style },
@@ -1789,6 +1790,7 @@ mod changes_ink_tests {
                     kind: crate::variable::VarKind::Color,
                     cells: Default::default(),
                     origin: None,
+                    forked: None,
                 },
             },
             Operation::SetKitModes {

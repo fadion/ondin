@@ -256,7 +256,8 @@ impl OndinApp {
         self.finish_text_first();
         let doc = &self.session.doc;
         let content = self.session.preview_world_bounds(doc.root());
-        let mut tx = ondin_core::kit::make_local(doc, &mut self.session.ids, tops);
+        let made = ondin_core::kit::make_local_report(doc, &mut self.session.ids, tops);
+        let mut tx = made.tx;
         if tx.0.is_empty() {
             return;
         }
@@ -270,14 +271,48 @@ impl OndinApp {
             .iter()
             .filter_map(|t| doc.get(*t).map(|n| n.name().to_string()))
             .collect();
-        self.session.info(match names.as_slice() {
+        let mut text = match names.as_slice() {
             [one] => format!("{one} is now a local main, at the top right of the canvas"),
             many => format!(
                 "{} components are now local mains, at the top right of the canvas",
                 many.len()
             ),
-        });
+        };
+        text.push_str(&forked_note(made.forked, made.kit_frames.len()));
+        self.session.info(text);
     }
+}
+
+/// The status line's tail for what *Make local* forked (§15 D1066): the kits'
+/// variables and styles copied as the document's own, and the frames set to a
+/// kit's mode, which those copies do not read — empty when neither.
+pub(crate) fn forked_note((vars, styles): (usize, usize), kit_frames: usize) -> String {
+    let count = |n: usize, one: &str| match n {
+        0 => None,
+        1 => Some(format!("1 {one}")),
+        n => Some(format!("{n} {one}s")),
+    };
+    let copied: Vec<String> = [count(vars, "variable"), count(styles, "style")]
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut out = String::new();
+    if !copied.is_empty() {
+        out.push_str(&format!(
+            "; {} copied from the kit as this document's own",
+            copied.join(" and ")
+        ));
+    }
+    if kit_frames > 0 {
+        out.push_str(&format!(
+            "; {} set to a kit's mode may draw differently",
+            match kit_frames {
+                1 => "1 frame".to_string(),
+                n => format!("{n} frames"),
+            }
+        ));
+    }
+    out
 }
 
 /// The card's source line under the main's name (4A, 4B): the kit glyph, *Atlas

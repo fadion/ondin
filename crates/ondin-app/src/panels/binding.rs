@@ -1036,6 +1036,7 @@ impl OndinApp {
                 kind: key.kind(),
                 cells: modes.into_iter().map(|m| (m, value)).collect(),
                 origin: None,
+                forked: None,
             },
         });
         // The bind names the variable by id and reads only the field, so it is
@@ -1820,6 +1821,7 @@ mod tests {
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::WHITE))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
             Operation::AddVariable {
@@ -1829,6 +1831,7 @@ mod tests {
                     kind: VarKind::Number,
                     cells: [(mode, Cell::Number(6.0))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
         ])));
@@ -2181,6 +2184,7 @@ mod tests {
                 kind: VarKind::Color,
                 cells: [(mode, Cell::Color(Color::BLACK))].into(),
                 origin: None,
+                forked: None,
             },
         }])));
         let table = app.session.doc.variables();
@@ -2343,6 +2347,7 @@ mod tests {
                     kind: VarKind::Color,
                     cells: [(mode, Cell::Color(Color::BLACK))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
         ])));
@@ -2726,6 +2731,7 @@ mod tests {
                 kind: VarKind::Boolean,
                 cells: [(mode, Cell::Boolean(false))].into(),
                 origin: None,
+                forked: None,
             },
         }])));
         let key = FieldKey::Visible { id: rect };

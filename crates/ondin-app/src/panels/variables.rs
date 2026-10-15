@@ -996,6 +996,7 @@ impl OndinApp {
                         kind,
                         cells: modes.into_iter().map(|m| (m, cell)).collect(),
                         origin: None,
+                        forked: None,
                     },
                 });
                 if self.commit_edit(Transaction(ops))
@@ -3038,6 +3039,7 @@ mod tests {
                     },
                 )]),
                 origin: None,
+                forked: None,
             },
         };
         assert!(app.commit_edit(Transaction(vec![
@@ -3561,6 +3563,7 @@ mod tests {
                     kind: VarKind::Color,
                     cells: [(light, Cell::Color(Color::WHITE))].into(),
                     origin: None,
+                    forked: None,
                 },
             },
             Operation::SetKitModes {
@@ -3593,6 +3596,7 @@ mod tests {
                         var: brand,
                         version: 1,
                     }),
+                    forked: None,
                 },
             },
             Operation::AddStyle {
@@ -3605,6 +3609,7 @@ mod tests {
                         style: accent,
                         version: 1,
                     }),
+                    forked: None,
                 },
             },
             Operation::CreateNode {

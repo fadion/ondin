@@ -1658,8 +1658,8 @@ accepted (D1038):
 - **Whether a preset follows a paste's rule** across documents — D1037's premise (iv) named it beside
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
-- **The rest of D1038's bindable numbers** — layer opacity, stroke width, an effect's X, Y, blur and
-  spread — bound by nothing and given no step (§15 D1058).
+- **The rest of D1038's bindable numbers** — stroke width, an effect's X, Y, blur and spread — bound by
+  nothing and given no step (§15 D1058; layer opacity built, §15 D1072).
 - **D1038 (2)'s canvas half** — a gesture on a bound value detaching, *the floating status saying what
   was detached*: no canvas handle writes a gap or a padding yet (§15 D1058); a resize handle on a bound
   W or H detaches and says so (§15 D1061, D1071); a paint's binding is no pass's, so a door's write over
@@ -1719,7 +1719,10 @@ above; the four readings struck the same day, fixed in D1069's amendment, the ch
 amendment, and the text styles' reset chips with it, fixed in D1068's second, the Type card over several
 layers left; and (2)'s canvas half edited down the same day, a variable's detach said on the floating
 status and a bound W's drag tested in §15 D1071, the inspector's spoken detaches opened in its place;
-those struck the same day, fixed in D1071's amendment, the inspector's three doors detaching first.*
+those struck the same day, fixed in D1071's amendment, the inspector's three doors detaching first;
+layer opacity struck from the remaining numbers the same day, bound as a percentage in §15 D1072 under
+the maintainer's delegation, its four readings opened in the list above; those struck the same day,
+fixed in D1072's amendment.*
 
 ## Next · The polishing pass over the accepted calls
 

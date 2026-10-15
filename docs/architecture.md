@@ -3436,6 +3436,9 @@ Y, blur and spread, and the layout gaps and padding — **not X, Y or rotation**
 which an instance already keeps as its own (§5.3d's `reset::placement_is_own`; a swapped slot's,
 §15 D983 (3)). **W and H bind only where the user sets them** (the maintainer's ruling, §15 D1061) —
 never a hugging frame's, a text box's, or a size a flex or grid layout deals out or stretches.
+**Layer opacity binds as a percentage** (§15 D1072, the session's under the maintainer's delegation):
+the variable's number in the Appearance field's own unit, 0–100, so *40* draws 0.4. Stroke width
+and an effect's numbers bind nothing yet (`roadmap.md`).
 **Colours** bind a **whole solid paint**,
 never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
 stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
@@ -3445,8 +3448,8 @@ plain family, never a variable** (the maintainer's ruling, §15 D1069). A field 
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)` — ⚠️ **in seven shapes, as built** (§15 D1039, D1058, D1059, D1061,
-D1069; *What is built*, below) — and
+`Literal(T) | Bound(VarId)` — ⚠️ **in eight shapes, as built** (§15 D1039, D1058, D1059, D1061,
+D1069, D1072; *What is built*, below) — and
 the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
@@ -3517,10 +3520,10 @@ presentation attributes today, so where a `var()` would go is that feature's que
 name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`, and since §15 D1069 `String`) and one `Cell` per mode, a value or an `Alias`. `Document::variables`
 reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
 `resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it
-(with `resolved_display`, D1058, `shown`, D1059, and `resolved_kind`, D1061, which applies
-`text_drawn_in` since D1069).
+(with `resolved_display`, D1058, `shown`, D1059, `resolved_kind`, D1061, which applies
+`text_drawn_in` since D1069, and `drawn_opacity`, D1072).
 **`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
-a dangling binding rather than repairing it. The binding's seven shapes:
+a dangling binding rather than repairing it. The binding's eight shapes:
 
 - **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
   **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
@@ -3563,6 +3566,21 @@ a dangling binding rather than repairing it. The binding's seven shapes:
   after `keep_spacing_bindings`) by **one half only**: written what it shows, it stays bound; anything
   else detaches. The literal half is left out on purpose — it would excuse the `true` the eye and *Bring
   back into flow* write to show a hidden bound layer, keeping it bound and hidden.
+- **Opacity** (§15 D1072): `Node::opacity_var: Option<VarId>` beside `opacity`, which stays the
+  literal; a number variable only, on any layer, **read as a percentage** — clamped to 0–100, a
+  missing or non-number value 0. Binding writes the literal **0**, D1039's, chosen to be seen: 🚨
+  **`Document::drawn_opacity` is what every reader that draws or exports asks** — the scene walk, the
+  SVG writer, the snapshot, the app's `DisplayNode` — and one that reads `Node::opacity` draws a bound
+  layer invisible. **An opacity written over a bound layer detaches it at the commit**
+  (`build::keep_opacity_bindings`, after `keep_visible_bindings`) by the visibility's **one half**:
+  written what it draws, it stays bound, the literal put back; anything else detaches. ⚠️ The literal
+  half is left out because 0% typed or keyed over a bound layer means *make it invisible*; no writer
+  builds an opacity from the literal (`replace_with_path` carries the drawn value), and
+  `set_opacity_all` compares the drawn value, not the literal. The chip is on one layer's Appearance
+  card only (`FieldKey::Opacity`, `OndinApp::opacity_field`, the point-editing card's too), as W and
+  H's is on one layer's Transform card; the several-layer row writes the outermost members' shared
+  value and takes no binding, detaching a bound layer it writes in the edit itself, so it says nothing
+  (§15 D1071's amendment's rule).
 - **Width and height** (§15 D1061): `Node::size_vars: [Option<VarId>; 2]` beside the stored `size`
   of the five kinds that have one (`NodeKind::box_size` — `Artboard`, `Rect`, `Ellipse`, `Polygon`,
   `Star`; a text box's W and H do not bind, by decision). A bound axis's literal is written 0, and 🚨
@@ -3594,7 +3612,7 @@ a dangling binding rather than repairing it. The binding's seven shapes:
   the content's binding with its literal (§15 D1069's amendment).
 - **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
 
-**What the five passes cut is said** (§15 D1071, D1038 (2)): each **appends** its `Set*Vars`, so
+**What the six passes cut is said** (§15 D1071, D1072, D1038 (2)): each **appends** its `Set*Vars`, so
 `session::variables_detached` reads the binding ops between `asked_ops` — noted after `keep_flex_sizes`,
 before the first pass — and `propagate::owed`'s mark, and names every variable a slot loses, *Detached
 size/w* or *Detached N variables*, beside the styles `styles_detached` names (`said_detached`). An edit
@@ -5462,6 +5480,9 @@ pub enum Operation {
     SetTextVars { id: NodeId, vars: [Option<VarId>; 2] }, // a text's content and family bindings
                                                       // alone; the verb writes the literals
                                                       // empty beside it — §15 D1069
+    SetOpacityVar { id: NodeId, var: Option<VarId> }, // a layer's opacity binding alone, a number
+                                                      // read as a percentage; the verb writes the
+                                                      // literal 0 beside it — §15 D1072
     // the variables table (§5.3f, §15 D1039) — no node named; `variable::check` after the last op:
     AddVariable { var: Variable },  RemoveVariable { id: VarId }, // each the other's inverse; a remove
                                                       // refused while anything is bound to it
@@ -6919,7 +6940,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   D1059), no second bump, v8 never having shipped: `NodeDto::visible_var`, skipped when unset, and a
   boolean cell saved as `{"boolean": true}`. **So did W and H's** (§15 D1061): `NodeDto::size_vars`,
   skipped when neither axis is bound. **And a text's content and family** (§15 D1069):
-  `NodeDto::text_vars`, skipped when neither is bound, and a string cell saved as `{"string": "…"}`. **And styles** (§15 D1062): `DocumentDto::styles`, above the
+  `NodeDto::text_vars`, skipped when neither is bound, and a string cell saved as `{"string": "…"}`.
+  **And a layer's opacity** (§15 D1072): `NodeDto::opacity_var`, skipped when unbound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
   images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
   the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
   style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
@@ -7397,7 +7419,14 @@ pub trait ScenePainter {
   a test found it. **A bound content or family is drawn resolved** (§15 D1069): `patch_text` previews
   a bound family written empty as its variable, so a size scrub on a family-bound text keeps its
   family — the family only, an emptied content previewing empty as the commit detaches it;
-  `SetTextVars` and a string `SetVariableCell` preview; and the ghost shapes `ghost_kind`.
+  `SetTextVars` and a string `SetVariableCell` preview; and the ghost shapes `ghost_kind`. **A bound
+  opacity is drawn at its percentage** (§15 D1072): `SetOpacity`'s arm draws the value written, where
+  the commit lands it whether it keeps the binding or not; `SetOpacityVar`'s resolves the binding it
+  sets over the literal the ops before it left; `SetVariableCell`'s re-resolves bound opacities.
+  🚨 **The ghost reads `opacity_drawn_in` over the captured node's own literal and binding**, in the
+  default mode as `ghost_shown` reads a visibility — never `drawn_opacity`, which answers 1 for an id
+  the document does not hold, and previewed every Alt-drag and paste copy at 100% until D1072's
+  amendment.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds

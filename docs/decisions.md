@@ -1461,6 +1461,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1061** — **Styles and variables, build step 2's last item: a layer's width and height bind to number variables — a sidecar of two beside the stored size, its literal 0 as a corner's, answered resolved by every layout view and drawn from the used kind — and only a hand-set size binds.** The maintainer's ruling, 2026-10-14: *"go with your recommendation for W and H"* — literal 0 beside the binding, any resize detaches, not a hugging frame's, a text box's or a grown or stretched item's size. `SizeVars` on `Node::size_vars`, the five kinds `NodeKind::box_size` answers, Text unbindable by decision; `SetSizeVars`; `NodeDto::size_vars` in the unreleased v8, no bump. 🚨 `DocView::kind` answers `Document::resolved_kind`; `resolve::with_bound_size` gives an unlaid, unpinned bound layer a `Used` entry (D1039's sparse contract widened again). `size_axes_authored`: `%`/`fit-content`, pinned both ends, flex main with grow or basis, flex cross stretched, grid stretched with size `auto` — shrink, min and max not counted. 🚨 `keep_size_bindings` after `keep_visible_bindings`: D1041's two halves over a `Size` patch (`kept_size_vars`, shared with the preview), **and a layout half** detaching an axis an edit makes computed, to the size drawn before; `keep_insets` reads sizes after that pass. `is_slot_field` holds `SetSizeVars` (D983 (3)). Preview: `current_kind`, `apply_laid` — a bound rect previewed 0 wide beside a resize, found by a test and fixed — the cell arm and `ghost_kind`. `FieldKey::Size`, the single card only; the multi card's union W and H take none. `baked_ops` left: an extra, harmless op. ⚠️ No canvas resize of a bound layer tested; no status message on a detach; no bound-size mark in the layers panel. *(Built 2026-10-14, uncommitted when recorded. **Keep**; Text and the multi card **Intentional**. Nine tests and the random incremental test's size ops, flips as reported; a `current_kind` flip does not bite in the first render test, two defences. D1038, D1039, D1058 amended; `architecture.md` §5.3f, §5.9, §5.11, §6.2; `roadmap.md` step 2 struck)*
 - **D1062** — **Styles and variables, build step 3's core: a style is one slot's whole list — fills, strokes or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own list, written by a commit-time pass that rewrites the copy when the style or the binding changed and detaches the layer when the edit wrote the slot.** The session's, under the maintainer's autonomy grant; the record had not said how a style is stored. `Style { id, name, value: StyleValue }`, `StyleValue` one of `Fills`/`Strokes`/`Effects` over `Vec<Keyed<_>>` — a stroke style carries width, join, cap, dashes and alignment; `Styles` on `Document`; `StyleId` from the one `IdSource`, swept with its items' ids; names slash paths unique per slot, not across; `Node::styles: StyleRefs`. 🚨 **Linked copies, D978's argument**: every reader of a layer's lists reads the list it always read; variables inside a style stay bound and resolve at read; the cost is D978's — invariant 4 gains a member, §12's fourth property bent again. 🚨 `style::settle` runs **twice** in `propagate::owed`, first and last, `user` the length at entry: a bound slot off its style's look (values compared, ids not) is **rewritten** when the style was edited or the binding set, or when no user op wrote it, else **detached**, values kept — D1038 (1) with no door knowing; flips for each run and the detach arm reported, the first run's not biting in the apply test. Ops `AddStyle`, `RemoveStyle` (refused while bound; `remove_ops` detaches first), `SetStyleName`, `SetStyleValue` (same slot), `SetFillStyle`/`SetStrokeStyle`/`SetEffectsStyle` — `changes_ink` false, `absorb` no-ops, bindings `Whole` (F9), stated by `state_ops`. `style::check`: names, item ids, colour variables only, bindings of their slot, no vault node bound (`variable::detached` clears styles). A deleted variable inside a style detaches it to the **default mode's** colour and its users are rewritten — a user in another mode changes colour. Paste rebinds by id, else name and slot, else detaches; *Paste properties* detaches. v8, no bump. ⚠️ No preview runs `settle` — the chrome's two previews write the lists themselves (amendment); ~~neither no-op fixture lists the seven ops~~ both do since `aa56200`. *(Built under the maintainer's autonomy grant, `910c19a`; recorded 2026-10-15; the chrome D1063. **Keep**; the default-mode detach **Keep**, *revisit if* it misleads; the fixtures ~~*Fix*~~ fixed. Ten tests, three flips as reported. D1037 amended; `architecture.md` invariant 4, §5.3d, §5.3f, §5.7, §5.11, §12; `roadmap.md` step 3's core marked built)*
 - **D1063** — **Styles and variables, build step 3's chrome: a `⋯` on the Fill, Stroke and Effects cards, a styled card collapsed to its capsule, *Apply style…*'s picker, *Create* named in the capsule and the browser's *Styles* tab — and G9's *Edit* built not as a card inside the browser but as an edit mode on the style's users, whose own inspector card writes the style through a commit door.** The session's, under the maintainer's autonomy grant. `section_head_full`'s `more`, the `+` moved in by `HEAD_MORE_W`; the menu's three rows, *Detach* counting the styled targets, *Create* off over Mixed, Partial or disagreeing lists — ⚠️ and naming no count, against F10. `style_card` over `shown`: One a 28-high capsule (preview, name, summary, *Detach* on hover, no status), opened greyed and inert, open state per slot (`style_open`); Mixed a caretless capsule; 🚨 **Partial the plain, live rows** — values where the lists agree, and a write detaching the styled layers — so the inspector is read-only on a fully styled card only. The picker's preview carries the style's `write_op`s beside the binds `absorb` no-ops. *Create* names in the capsule, `Escape` undoing it through `undo` and the `escape_styles` rung. The tab: groups by card, *Rename*/*Edit*/*Select*/*Delete*, the mockup's *"or use +"* dropped. 🚨 **G9**: *Edit* selects the users and sets `style_edit`; `style::edit_through`, first in `commit_inner`, turns their slot's writes into one `SetStyleValue` and `settle` writes it back — the cards' 66 scope and 227 slot sites left alone; a style with no users uneditable; ⚠️ two edges read, not run (an unselected user unpreviewed; a Partial card's write editing the style). `styles_detached`: a commit's own detach says *Detached X*, unless the user's ops detach — that rule's case untested. *(Built under the maintainer's autonomy grant, `d63716e`; recorded 2026-10-15. G9's edit mode **Keep**, *revisit if* a style without users needs editing; ~~the Partial rows **Intentional**~~ greyed, and *Create*'s count ~~*Fix*~~ named, in the same-day amendment, with an edit ending on any non-user selected and the picker's one-press `Escape`. Six tests, three flips. D1038 and D1062 amended; `architecture.md` §5.3f; `roadmap.md` step 3 struck)*
+- **D1064** — **Styles and variables, build step 4's core: a kit carries the variables and styles its mains read, frozen with them, bindings kept; a consumer holds them in its own tables under its own ids, each marked with its origin, beside the kit's modes and a per-kit mapping from the document's modes — and one planner, `tokens::plan`, lands them for an insert, an update and a carrying paste.** The session's, under the maintainer's autonomy grant. `Variable::origin`/`Style::origin` (`VarOrigin`, `StyleOrigin`), `Variables::kits: KitModes { name, modes: Vec<KitMode { id, name, from }>, map }` — never modes of the document. The mapping stored as hand-set entries document mode → kit mode, else the kit mode **of the same name**, else the kit's **first**: D1038 (b) read in the direction a read needs, said as such. A frame set to a kit's mode governs that kit's variables only; `mode_at` passes over it; `mode_for_in` and `kit_mode` at every alias step. 🚨 `kit::freeze` **keeps bindings** and freezes `frozen_tables` — D1039's detaching stopgap gone; `Changes::tokens`. Rules: a vault node binds only kits' variables and styles and sets no document mode; a kit's variable aliases only its kit's; a kit's style reads only kits' variables; names unique per kit; mode ids unique across document and kits. Held copies reused by origin key whatever their version; a held kit of another mode set is `KitError::Modes`. An update rewrites the kit's whole holding (`SetVariable`, `SetKitModes`, `SetStyleName`/`Value`/`Origin`) and removes what the publish dropped, users detached — 🚨 **except a copy bound as its main is**, left to the commit's follow (found by the first run of the tests, flipped). Carrying paste: `Carried::tokens`, kits' rebound by **origin, never name**. v8, no bump. Six defects read by the record, **all fixed the same day** (amendment): the kit's own document maps to its own variables (an own-kit arm); a held kit **covering** the source's modes is reused, a new variable filling its extra modes from the source's default; *Accept all* retried with a kit named by `Modes` moved first; the publish chrome names a tables change; `reach` blanks `visible_var` — ⚠️ `Changes::tokens` still true there, left; the stale-mode reset spares a following copy. And `remove_ops` detaches a style with no default mode. Three readings of the fixes fixed too (second amendment): `land` lands an own-kit binding on the original or detaches it; `follows` asks the scratch for the main (untested); the publish chrome's *N components* arms name the tables (untested). ⚠️ Known edge kept: a variable from a carrier's older third-kit copy round-trips through two updates, values kept. *(Built under the maintainer's autonomy grant, uncommitted when recorded. **Keep** the model, the mapping's reading and the follow filter; the nine readings **Resolved**, the `tokens` edge open. Seventeen tests, eleven flips as reported. D1037, D1038, D1039, D1043, D1059, D1062 amended; `architecture.md` invariant 4, §5.3e, §5.3f, §5.11; `roadmap.md` step 4 struck to what is left)*
+- **D1065** — **Styles and variables, build step 4's chrome: kits' variables and styles listed last under a kit header — in the `--` list, the swatch popup's *Variables* face, the browser and *Apply style…* — the browser's kit header carrying the mapping per mode column, a kit's rows and styles inert, and the update toast counting variables and styles.** The session's, under the maintainer's autonomy grant; D1038 E1, F5, G8, (b) drawn. `matches` sorts by kit name, then group; the face's `kit_header` (mark and name) and dimmed rows; `list_row`'s kit mark. `all_lines`: the document's own, then each kit by name under `Line::Kit`, its groups folding under `\u{2}kit\u{2}path`. `kit_row`: *Day →* under *Light*, bright when set by hand, a click opening *Kit modes* / *Match by name* (`Menu::KitMap`, `Act::KitMap`). `kit_var_row` inert — count selects users, no rename, cells, menu or *Duplicate*; a kit style's menu *Select* alone; `edit_style` refuses one. The toast's *N variables and M styles updated* and *… the kit removed detached, values kept*; `KitError::Modes` worded at the four refusal sites. ⚠️ Not built: 5A's extended summary and the browser's *v8 → v9* line. Two readings fixed the same day, untested: the `--` list's swatch reads through `resolve_var`, and two kits of one name break the tie by id. *(Built under the maintainer's autonomy grant, uncommitted when recorded. **Keep**; the two readings **Resolved**. One test, one flip as reported. D1038, D1043, D1063 amended; `architecture.md` §5.3f; `roadmap.md` step 4)*
 
 ---
 
@@ -24501,7 +24503,10 @@ points in this entry's inspector bullets are refined there rather than reversed:
 only in the browser — *"an edit to any field of a styled card detaches it"* still holding for every
 other door; and *Mixed* is two cases, a capsule only when every layer is bound. **Amended
 2026-10-15** (D1062): a style is stored as a linked copy on its users, so the §12 bullet's *"the one
-bend is kits'"* is true of variables only)*
+bend is kits'"* is true of variables only. **Amended again 2026-10-15** (D1064, D1065): *kits carry the
+variables and styles a vendored main uses* is built, build order (4) — in the consumer's own tables,
+each with its origin; *the session's, not ruled* still describes the proposal, and a variables-only kit
+is not a thing, the sentence taken at its word)*
 
 **D1038 — Styles and variables: the accepted chrome — a fully rounded capsule means a reference and
 nothing else in the inspector is round, a styled card is read-only there and edited in the browser
@@ -24542,6 +24547,11 @@ about 40 px hides, as every frame label does.
 through **one per-kit mapping held at document level**, shown and edited in the kit's header row in
 the browser (*Day → Light, Night → Dark*): matched **by name** by default, a kit mode with no match
 mapping to the **kit's first mode**. **A frame carries exactly one mode** — which is what H2 breaks.
+⚠️ **Built 2026-10-15 (D1064, D1065) on the session's reading of the direction**: the entries run
+document mode → kit mode, and a *document* mode with no kit mode of its name reads the kit's first —
+the column a read needs — where these words and the example are written from the kit's side; the
+header shows *Day →* under the *Light* column. A frame set to a kit main's own mode governs that kit's
+variables only, which H2's per-kit row is not.
 
 (c) **`Shift+S` opens the browser** — *Styles* — beside `Shift+I` for the insert picker; agreed and
 unbound (`shortcuts.md` §14). Free in the editor's map: `S` alone is the Star tool, read with no
@@ -24691,7 +24701,11 @@ under the maintainer's delegation (D1040's amendment).
 old → new swatches and values, and lists the layers a removed variable or style detaches (*keep its
 values*); *Accept all* is one undo step and the floating status gives the count. While an update waits
 the kit's line in the browser reads *v8 → v9*, a click opening the summary, and its rows keep showing
-v8's values.
+v8's values. ⚠️ **Built in part, 2026-10-15** (D1064, D1065): the toast counts the variables and styles
+updated and those removed, their users detached with values kept, and *Accept all* stays one undo; the
+summary's old → new swatches and values, its list of layers a removal detaches, and the browser's
+*v8 → v9* line are not built (`roadmap.md`). The kit groups of B, E1, F5 and G8, the inert rows and the
+header's mapping are built (D1065).
 
 *(Designed by Claude Design and accepted by the maintainer with the rulings of 2026-10-13, every one
 the session's recommendation; (b) and (d) overrule the mockup's H2 and G5, and the field menu's
@@ -24871,10 +24885,12 @@ and it **moves `published.document`'s number with the outer one's**, §5.11's de
 (i). `DocumentDto::variables` (modes in order, variables by id, absent when empty, above the images for
 their diff reason), `NodeDto::mode` and `NodeDto::corner_vars`, each skipped when unset;
 `the_table_and_its_bindings_round_trip_through_a_save` asserts the second save's bytes equal the first's.
-**Kits: `kit::freeze` detaches every binding and drops every mode** (`variable::detached`) — the frozen
+~~**Kits: `kit::freeze` detaches every binding and drops every mode** (`variable::detached`) — the frozen
 copy has no table, and a binding into this document's would leave every consumer refusing the main it
 vendors — so a published main draws, as literals, what it drew in the mode in force at each node, until
-step 4 carries variables.
+step 4 carries variables.~~ **Gone since D1064** (2026-10-15): `freeze` keeps every binding and freezes
+the table its nodes read with them (`kit::frozen_tables`), and a consumer vendors that table into its
+own; `variable::detached` stays for a paste into a document with no namesake.
 
 **The paste, D1038's ruling on premise (iv), per field.** The copy carries
 `variable::Carried` — the copied layers' variables by id, name and kind, the modes their frames set,
@@ -24930,7 +24946,8 @@ segment built, the second edge fixed on a row one variable binds, as above. **Am
 disagreeing selection row and the *All* row ruled **Keep**, D1043's amendment. **Amended a sixth
 time 2026-10-14** (D1050): `absorb` previews `SetCornerVars`, struck from the refusal above. **Amended a seventh time
 2026-10-14** (D1056): a previewed cell reaches every bound node, premise (vi) built, the table's no-ops
-six)*
+six. **Amended an eighth time 2026-10-15** (D1064): the freeze's detach struck — a publish keeps its
+bindings and carries its table)*
 
 **D1040 — Styles and variables, build step 1's browser: a floating panel above the hexagon that swaps
 in place with the insert picker, a fixed name column and a column per mode, variables grouped by the
@@ -25370,8 +25387,8 @@ stretches. `picker.rs`' `a_click_on_the_picker_writes_a_text_layers_colour` expe
 at the old width, and moved 152 → 165, its doc saying why — the same point lies further left on a wider
 plane. It locates the plane by a measured coordinate, so the next change to `WIDTH` moves it again.
 
-**Not built.** E1's kit group — a package glyph and dimmed rows — the table holding no kit variables
-until step 4. **No hover preview** of a row on the canvas, where the `--` list previews its highlight
+**Not built.** ~~E1's kit group — a package glyph and dimmed rows — the table holding no kit variables
+until step 4.~~ (Built in step 4, D1065: each kit under its mark and name, its rows dimmed.) **No hover preview** of a row on the canvas, where the `--` list previews its highlight
 (D1041): the face commits on a click only — the session's call. ~~And a colour cell in the browser opening
 this popup to make an alias (D1038's route; D1040's `--name` stands in).~~ (A colour cell opens it since
 D1052, the face making the cell an alias.)
@@ -26281,7 +26298,10 @@ the session's too — the mockup draws no boolean cell. ⚠️ Neither the capsu
    `spacing_vars` and `visible_var`. ⚠️ Untested — `untouched` is `pub(crate)`.
 6. **What was checked and does not matter**: `kit.rs`' `reach` blanks a captured main root's `visible`
    to `true` and not its binding — but the copy it compares is `freeze`'s, which runs
-   `variable::detached` on every node, so no binding survives to compare.
+   `variable::detached` on every node, so no binding survives to compare. ⚠️ **It matters since D1064**
+   (2026-10-15): `freeze` keeps bindings now, so a reached top's `visible_var` is compared and a main
+   root's visibility bound on the kit's page counted as a change — D1064's reading 5, **fixed** the
+   same day (`reach` blanks `visible_var`; ⚠️ `Changes::tokens` still reads true, left).
 7. **Comments made false**: `app.rs`' `hide_switch` doc still says *"`toggle_hidden` reads
    `n.visible()`"* — it reads `doc.shown`; `resolve::DocView`'s doc still says *"every answer a
    **specified** value, read straight off the node"* — `display` has answered resolved since D1058 and
@@ -26630,7 +26650,10 @@ layers; `free_name`; `users`.
 document for `variable::check`'s reason: names non-empty and unique per slot; no item id twice in one
 style; a style's paints bound to colour variables only; every binding naming a style of its slot; **and
 no vault node bound** — a kit carries no styles until step 4, so `variable::detached` now clears a
-node's styles too and `kit::freeze` drops them, values kept. **A layer's values are not compared with
+node's styles too and `kit::freeze` drops them, values kept. ⚠️ **Since D1064** (2026-10-15) a vault
+node may be bound to a **kit's** style and to no style of the document's own (`StyleRule::InVault`'s
+meaning narrowed), and `freeze` keeps its styles, carrying them in the frozen table;
+`variable::detached` still clears them, for a paste. **A layer's values are not compared with
 its style's** — `settle` keeps them equal, and a refusal over drift would turn a slip in a pass into an
 edit the user cannot make.
 
@@ -26737,7 +26760,8 @@ values). Empty: *No fill styles yet*, or *Nothing matches*. 🚨 **The highlight
 and the preview has to carry the values**: `absorb` no-ops a binding (D1062), so `apply_tx(…, true)`
 writes the style's `write_op` for each target beside the binds — what `settle` would write — into
 `set_preview`; a pick, a click away or `Escape` clears it. *Do not* drop the `write_op`s as redundant
-with the binds: without them the preview draws nothing. No kit group (step 4).
+with the binds: without them the preview draws nothing. ~~No kit group (step 4).~~ Kits' styles listed
+last under their headers since D1065.
 
 **Create (F6).** *Create style from this…* commits `style::create_ops` under a free name — *Fill style*,
 *Fill style 2*, … (`free_name`) — binding every target, and opens the name in the capsule: an accent
@@ -26791,7 +26815,8 @@ nothing (F2), and a delete's detaches are its own ops, its status its own. ⚠�
 one case no test drives**: a main detached by the chip, its copies' detaches following through
 `propagate` — without it the status would announce the follows. Variables' detaches still say nothing.
 
-**Not built.** The kit groups in the picker and the tab (step 4); the text and layout cards' `⋯` and a
+**Not built.** ~~The kit groups in the picker and the tab (step 4);~~ (built in step 4, D1065, a kit
+style inert there and `edit_style` refusing one;) the text and layout cards' `⋯` and a
 layout style's capsule, F7 (text styles are step 6, layout styles have no step); a swatch popup for a
 style, which the mockup does not draw. F9's override marks are D1062's — `card_of` files each binding
 under its card.
@@ -26819,6 +26844,312 @@ press — its search holds the keyboard, so the ladder never heard the key — a
 collapsed card, or the name is typed where nobody can see it; a test, flipped. **Kept**: the `+` stays
 live while a card is being edited — adding an item there is an edit of the style, which the door turns
 into one.
+
+**D1064 — Styles and variables, build step 4's core: a kit carries the variables and styles its mains
+read, frozen with them at a publish and bindings kept, and a consumer holds them in its own tables under
+ids of its own, each marked with where it came from, beside the kit's modes and a per-kit mapping from
+the document's modes — one planner landing them for an insert, an update and a carrying paste. *The
+session's, under the maintainer's autonomy grant for this build; uncommitted when recorded.*** D1037's
+*"Kits carry the variables and styles a vendored main uses, under D1010's provenance and D1016's update
+flow"* was the session's proposal, not objected to, and D1038 (b) ruled the modes: one list per
+document, a kit's mapped onto it per kit, by name, else the kit's first. **How any of it is stored,
+frozen, vendored, updated or pasted is the session's**, and so is the direction the mapping is read in.
+
+**The model.** A kit's variables live **in the consumer's own table**, beside its own, each minted a
+consumer id (`IdSource::mint_var`) and carrying `Variable::origin: Option<VarOrigin { kit, var,
+version }>` — the kit's `meta.id`, the variable's id in the kit's published state, the version —
+exactly what a vendored node's `Origin` is (D1010); a style likewise `Style::origin:
+Option<StyleOrigin { kit, style, version }>`. `VarOrigin::key` drops the version, as `Origin::key` does,
+and is what a second insert and an update match on (`Variables::by_origin`, `Styles::by_origin`). **A
+kit's modes are not modes of the document**: `Variables::kits` holds a `KitModes { name, modes:
+Vec<KitMode { id, name, from }>, map }` per kit id — the kit's modes in its order under ids of the
+consumer's (`id`) remembering the kit's own (`from`), the kit's name for the browser's header, and the
+mapping. `Variables::mode` answers the document's modes only; a kit's variable has a cell in every mode
+**of its kit** and no other (`check_table`). That is D1038 (b)'s *one mode list per document* kept
+literally — a kit's modes appear nowhere but as the columns its variables are read in. `local`,
+`of_kit` and `by_name` (the document's own only) are the table's new readers.
+
+**The mapping, and the reading of D1038 (b) it rests on.** Stored as **hand-set entries, a document
+mode → a kit mode**; `Variables::kit_mode(kit, mode)` answers, in order, the mode itself when it is one
+of the kit's (a frame set to it, below), the entry set by hand, **the kit mode of the same name** as the
+document's mode in force, else **the kit's first**. ⚠️ **D1038's words were *"matched by name by
+default, a kit mode with no match mapping to the kit's first mode"*** — which, read literally, maps
+from the kit's side. A read needs the other direction — given the document's mode in force, which kit
+column — so the session read *"a kit mode with no match"* as *a document mode with no kit mode of its
+name*, and that is what is built. D1038's own example, *Day → Light, Night → Dark*, is written kit-side
+too; the browser shows the mapping per document-mode column instead, *Day →* under *Light* (D1065). *Do
+not* read either as the maintainer's ruling on the direction; it is the session's reading of one. No
+mapping travels in a publish: each consumer's is its own.
+
+**Resolution.** `Document::mode_at` **passes over a kit's mode** and answers one of the document's, so
+every reader of the document's mode — the *Mode* row, the inspector's footers, D1051's tag — is as it was.
+`Document::resolve_var_in` reads a kit's variable through `mode_for_in(t, id, Some(kit))` — the nearest
+frame at or above the node that sets a mode **of the document or of that kit**, else `None` — and
+`Variables::resolve_opt`, whose walk applies `kit_mode` **at every alias step**, so a document variable
+aliasing a kit's reads the kit's column for the same mode. **A frame may be set to a kit's mode** — a
+kit main's, copied to its instances in the vault and out of it — and it governs **that kit's
+variables only**: `cell_in` reads a document variable under a kit mode in the document's default. The
+rule (`check`'s `BadMode`) admits a kit mode on any frame through `has_mode`.
+
+🚨 **A publish keeps its bindings.** `kit::freeze` copies the published nodes whole and asks
+`frozen_tables`: what the frozen nodes read, **closed** over styles and aliases (`tokens::reached`) —
+the kit's own variables and styles, and the third kits' it holds, those with their origins and their
+`KitModes` (the mapping cleared) — plus **the kit's whole own mode list** whenever anything of its own
+is read or set, those being the kit's modes downstream. A variable the mains do not read stays home, as
+an unpublished main does. **This deletes D1039's stopgap**: until now `freeze` ran `variable::detached`
+on every node, so a published main drew, as literals, what it drew in the mode in force at each node;
+`detached` stays, for a paste into a document with no namesake. `Changes::tokens` compares the two
+frozen tables, so a recoloured variable is worth a publish though no node moved (⚠️ the chrome does not
+say so, below).
+
+**Rules** (`variable::check`, `style::check`): **a vault node binds only kits' variables and styles
+and sets no document mode** (`VarRule::InVault`; `StyleRule::InVault` now meaning *a style of the
+document's own*) — a frozen copy reading the consumer's own would change with every edit of it and be
+put back by the next update, `LinksOut`'s argument for the table; **a kit's variable aliases only its
+own kit's** (`BadAlias`); **a kit's style reads only kits' variables** (`StyleRule::KitStyle`); names
+unique among the document's own and among each kit's; **mode ids unique across the document and every
+kit** (`DuplicateMode`); a mapping maps a document mode onto a mode of its kit (`BadKitModes`); a kit's
+variable whose kit has no record is `NoKit`. `variable::remove_mode_ops` drops a deleted mode's mapping
+entries; `rename_group_ops` and *Duplicate* touch the document's own only.
+
+**Vendoring — `tokens::plan`, one function for every door.** Given a source (a kit's published tables,
+whose own variables have no origin and are that kit's, or a clipboard's `Tokens`), the nodes being
+landed and an optional `sync` kit, it returns the ops that bring the consumer's tables to hold what
+those nodes read and the maps (`vars`, `modes`, `styles`) that `Plan::apply` points a copy through.
+Each kit read gets a `KitModes`, matched to the source's by the kit's own mode ids; **a variable or style
+lands on the consumer's copy of the same origin key whatever version it holds** — bringing it up to date
+is an update's, as `kit::vendor` reuses a held main — and is minted otherwise. **A held kit that lacks
+a mode the source has is `KitError::Modes(kit)`**: the held variables have no cell in it. (~~*whose
+mode set differs*~~ until the amendment below: a held record that **covers** the source's modes is
+reused.) `kit::vendor` calls it over its templates; `kit::insert_carrying` over the carried mains and the
+pasted layers.
+
+**An update** (`kit::update_all`, before any main is synced, the result kept on `Builder::tokens` so every
+published node a sync writes is pointed through it) runs the plan with `sync`: every variable and style
+of that kit the publish has — not only those the mains read, a consumer's own layer may be bound to any
+— is rewritten (`Operation::SetVariable`, whole, cells following the kit's modes as they are now;
+`SetStyleName`, `SetStyleValue`, `SetStyleOrigin`); the kit's modes taken as published (`SetKitModes`: a
+mode added minted an id, one gone dropped, renames and order taken) **with the hand-set entries kept
+whose target survives**; and what the publish no longer has **removed, its users detached keeping their
+values** (`variable::remove_ops`, `style::remove_ops`, 5A's *keep its values*). 🚨 **Except a live copy
+whose bindings to the removed ones equal its main's** (`tokens::reads_as_its_source`, and the slot test
+for styles): its detach is left out and the commit's follow carries the main's rewrite to it. **The first
+run of `kit_tokens.rs` found the defect this prevents**: detaching every user wrote the plain instance,
+the commit read that write as the hand's override, and the instance kept the old colour where its main
+changed. *Do not* widen the filter to the vault — a vault main is rewritten by its own sync. After the
+syncs, **a frame set to a mode the kit removed is reset** (`SetMode { mode: None }`). `kit::Update` gains
+`vars_changed`/`vars_removed` and `styles_changed`/`styles_removed`, a version-only rewrite counted as no
+change.
+
+**The carrying paste.** `variable::Carried::tokens` (`tokens::Tokens`, on the clipboard's wire beside
+the vault mains) holds the kits' variables and styles the copy and the vault mains it carries read —
+whole, with their kits' modes, the mapping cleared; the document's own stay out, D1038's name rule
+governing those. `variable::rebind` and `style::rebind` match **a kit's by origin, never by name** — a
+kit's *brand/500* is not the document's — and `land` **keeps** a kit binding the target lacks when the
+copy carries it, for `insert_carrying`'s plan to point at the vendored copy; without that keep, a pasted
+instance's own fields detach and every one reads as an override. A kit mode the copy's frames set is
+kept the same way.
+
+**Operations.** `SetVariable { var }` (the id there, the kind unchanged, inverting to the variable
+replaced), `SetKitModes { kit, modes: Option<KitModes> }` (whole, `None` drops), `SetStyleOrigin { id,
+origin }`. The first two dirty every bound node and change ink, as `SetVariableCell` does; the third is
+bookkeeping, `changes_ink` false. All three `Skip` in `propagate::mode`, and `RenderOverrides::absorb`
+takes them as no-ops — written by an update and by a mapping's pick, both committed at once. The two
+no-op fixtures move, the caller's account: `op.rs`' `only_the_chrome_operations_change_no_ink` at
+twenty-five, `overrides.rs`' table and styles groups at eight each.
+
+**Schema: v8, no bump** — `VariablesDto::kits`, a `BTreeMap` by kit id, skipped when empty, and the
+optional origins on a variable and a style, skipped when `None`; v8 is unreleased (nothing since
+`fb90943` is pushed), D1061's precedent.
+
+**Not built.** **5A's extended summary** — old → new swatches and values, and the list of layers a
+removed variable detaches — the toast carrying only counts (D1065); and the browser's *v8 → v9* line
+while an update waits. **A kit variable no held main reads cannot be bound, and a variables-only kit is
+not a thing**: a consumer holds what its vendored mains read, which is D1037's own *"the variables and
+styles a vendored main uses"* taken at its word. The CSS export is untouched (step 5).
+
+⚠️ **Six defects, read in the code by the record and then each reproduced by a test and fixed the same
+day** (the amendment below; the readings kept here as they were written, struck):
+
+1. ~~**A paste back into the kit's own document duplicates its own variables.** `tokens::plan` never asks
+   whether `doc` is the kit: a consumer's instance of kit L's main, pasted into L, lands linked to the
+   live main (`find`'s own-kit arm, D1023 for a vendored main), but its bindings name L's own variables
+   by origin, `by_origin` finds no copy (L's own carry none), and the plan mints a `KitModes` for L and
+   kit copies of L's variables in L itself — the instance then bound to those where its main is bound to
+   the originals, an override on every bound field.~~ **Fixed.**
+2. ~~**A consumer holding a *newer* third kit than the kit read is refused for good.** Kit A vendored B
+   at modes *Day/Night*; the consumer holds B since it added *Dusk*. `plan` (insert or `sync = A`) meets
+   B held at another mode set and answers `KitError::Modes(B)` — every insert and update of A refused
+   until A re-vendors B and republishes, and worded as an update owed where there is none to accept.~~
+   **Fixed.**
+3. ~~***Accept all* depends on the order of the kits.** `update_all` plans each kit against the scratch
+   the ones before it leave; A's publish carrying B's new modes is refused if A comes before B and passes
+   if B comes first.~~ **Fixed.**
+4. ~~**The publish chrome reads a tokens-only publish as a rename** — the button's tooltip *Nothing to
+   publish* over an enabled button, the dialog *The kit's name changed*, the toast *· its new name*.~~
+   **Fixed.**
+5. ~~**`kit::reach` blanks a reached top's `visible` and not its `visible_var`** — moot only while
+   `freeze` detached (D1059's amendment, item 6); a kit main root's visibility bound on the kit's page
+   counted as a component change.~~ **Fixed**, with an edge left.
+6. ~~**The stale-mode reset writes a following copy** — `SetMode { mode: None }` on a plain instance
+   that inherited the removed mode from its main, read as the hand's override where the publish moved the
+   main to another mode.~~ **Fixed.**
+
+And one question rather than a defect: **a main made local keeps its bindings to its kit's variables**,
+read-only in the document, and whether anything updates them once no vault main of the kit remains is
+not read here.
+
+**Tests**, `crates/ondin-core/tests/kit_tokens.rs`, ten: `a_publish_carries_what_its_mains_read`,
+`an_insert_vendors_the_kits_variables_and_the_instance_reads_them`,
+`the_mapping_reads_by_name_then_the_first_and_a_hand_set_entry_wins`,
+`a_second_insert_reuses_the_held_variables`,
+`an_update_rewrites_the_kits_variables_and_removes_what_it_dropped`,
+`an_insert_over_older_kit_modes_asks_for_the_update`, `a_carrying_paste_vendors_the_kits_variables_too`,
+`a_consumer_holding_kit_variables_round_trips_through_a_file`,
+`a_vault_node_bound_to_the_documents_own_variable_is_refused` and
+`an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping`. **Flips**, run by the session and
+reported: `freeze` writing empty tables fails at *"brand travels"* (and every insert test at the
+commit, `BadBinding`); `kit_mode`'s name match removed fails at *"by name"*; `land` without its
+`holds_var` keep fails at *"bound to E's copy"*; the removal's follow filter removed fails at *"the
+instance follows its main"*. (Sixteen since the amendment below, seventeen since the second.) *(Built by the session under the maintainer's autonomy grant, uncommitted
+when recorded. **Keep** — the consumer's own table, the mapping's reading (*revisit if* the maintainer
+reads D1038 (b) the other way), the kept bindings and the follow filter above all. ~~The six readings
+***Fix***, each owed a test that fails first.~~ The six readings **Resolved** the same day, below; the
+visibility edge left open (`roadmap.md`); the three readings of the fixes **Resolved** in the second
+amendment, the round-trip edge **Keep**. The not-built items and the made-local question are
+`roadmap.md`'s. D1037, D1038, D1039, D1043, D1059 and D1062 amended; `architecture.md` invariant 4, §5.3e,
+§5.3f and §5.11; `roadmap.md` *Next · Styles and variables* step 4 struck to what is left. **Amended
+2026-10-15**, the six fixed; **again**, the three readings of the fixes)*
+
+**Amended 2026-10-15, the same session: the six readings fixed, five of them by a test in
+`kit_tokens.rs` that its flip turns red, the publish chrome by none** — sixteen tests there now, green,
+each flip run on its own; the caller's account.
+
+1. **The kit's own document holds its own variables, never copies** — `tokens::plan`'s own-kit arm
+   (`own = doc.meta().id`), D1023's rule made for the tables: a kit's own modes map to its own (`from`),
+   its own variables and styles to the originals, and no `KitModes` is minted for it.
+   `a_kit_instance_pasted_back_into_its_kit_reads_its_own_variables`; the arm's `own` forced to `None`
+   fails at *"no copy of its own variables"*, three variables against two.
+2. **A held record that covers the source's modes is reused** (`covers`): a consumer holding a third kit
+   at a mode more than the kit carrying it read takes the carried variables into the record it has, a
+   variable new to it filling the record's extra columns **from the source's first mode's cell** — that
+   kit's default. `KitError::Modes` is left for a held record lacking a mode the source has, which is an
+   update owed. `a_third_kit_held_newer_than_the_kit_carrying_it_is_reused`; the old equal-sets test put
+   back fails at *"inserts"*, `Err(Modes(L))`. ⚠️ **The cost**: such a variable reads its default's value
+   in the extra mode until the third kit's own update rewrites it.
+3. ***Accept all* is retried in a working order** — `update_all` runs `update_in_order`, and on
+   `KitError::Modes(k)` for a kit in the list moves `k` ahead and builds the whole again, at most once per
+   kit; a failed attempt spends ids and leaves gaps, nothing else. A `Modes` naming a kit not in the
+   list, or the first, is returned. `accept_all_takes_a_kit_carrying_a_newer_third_kit_in_either_order`;
+   no retry fails at *"A first, L second"*.
+4. **The publish chrome names a tokens change** (`kits/publish.rs`): `not_a_component` and the toast join
+   *the variables and styles its components read* / *its variables and styles* with the name and the
+   order (`joined`), and the tooltip's zero arm asks `c.any()`. **No test** — chrome strings.
+5. **`reach` blanks a reached top's `visible_var`** beside its `visible`.
+   `a_main_roots_visibility_binding_is_not_a_change`; the line removed counts *Icon* changed. ⚠️ **An
+   edge left, recorded in the test's doc: `Changes::tokens` still reads true for that publish**, the
+   boolean variable now being one a frozen node reads, so the publish stays enabled for a table change
+   though no component changed. *Not* fixed.
+6. **The stale-mode reset spares a live copy whose mode equalled its main's before the update**
+   (`follows`), the commit's follow carrying the main's new one.
+   `a_copy_on_a_removed_kit_mode_follows_its_main_to_the_new_one`; the filter removed fails at
+   *"follows"*, the copy left `None`. The fixture orders the mode's removal before its own `SetMode`.
+
+**And the edge the record noted beside them**: `variable::remove_ops` detaches a style's paints
+**whatever the default mode** — `style::detach_vars` takes an `Option<ModeId>` and reads through
+`resolve_opt` — so a document with no modes of its own whose style reads a kit variable an update removes
+no longer dangles. `a_documents_own_style_reading_a_removed_kit_variable_is_detached`; the detach gated
+on a default mode again fails at the commit, `Styles(BadVariable)`.
+
+⚠️ **Read in the fixes by the record** — (a)–(c) **fixed the same day** (the second amendment, below),
+(d) a known edge: ~~(a) **The own-kit arm leaves unmapped a variable, style or mode the kit has since
+deleted**, while `variable::land` has already **kept** the carried binding and mode for the plan to point
+— so a paste back into the kit of an instance bound to a variable the kit deleted is refused at the
+commit whole (`BadBinding`, `BadMode`), where D1038's rule detaches it. (b) **`follows` reads the main
+in `doc`, not in the scratch**: a copy of a variant the update deletes, sitting on a kit mode the same
+update removes, is spared the reset, and the commit detaches it still set to a mode that is not there —
+`BadMode` refusing the whole update. (c) The publish dialog's *N components changed* suffix and the *N
+components* toast name the kit's name and the order and never the tables.~~ (d) **Kept as a known
+edge**, values kept each time: under (2), a variable taken
+from a carrier's older copy of a third kit and since dropped by that kit is removed by the third kit's
+next update, its users detached — the carrier's vault mains among them, which the filter does not spare —
+and vendored again by the carrier's next; the values are kept each time, so nothing changes on the
+canvas.
+
+**Amended again 2026-10-15, the same session: the readings of the fixes, (a)–(c), fixed** — the
+caller's account. (a) **`variable::land` lands a carried binding whose origin kit is the target's own**
+(`own_var`, `own_style`) **on the kit's original** while it is still a local variable, or a local style
+of that slot, and otherwise answers `None`, so D1038's rule detaches it; a carried mode of the target's
+own kit becomes that mode (`from`) while the kit still has it, else *Inherit*.
+`a_paste_back_into_a_kit_that_deleted_the_variable_detaches` — the kit deletes *brand* through
+`remove_ops`, then the paste, the dot detached to white; `own_var` forced to `None` fails in the paste
+at the commit, `Variables(BadBinding)`. Seventeen tests in `kit_tokens.rs`. (b) **The stale-mode reset's
+`follows` requires the main still in the scratch** (`b.scratch.contains(l)`), reading its old mode from
+`doc`. ⚠️ **No test**: the fixture — a variant the update deletes, its copy on a mode the update
+removes — was not built, so the case stays reasoned. (c) **The publish dialog's *N components changed*
+suffix and the toast name the variables and styles too**, through `joined`. **No test** — chrome
+strings. (d) stays as written above, a known edge. *(**Resolved**, (a) tested and flipped, (b) and (c)
+untested; (d) **Keep**, *revisit if* the round trip ever shows on the canvas.)*
+
+**D1065 — Styles and variables, build step 4's chrome: a kit's variables and styles are listed last,
+each kit under a header carrying the kit mark and its name — in the `--` list, the swatch popup's
+*Variables* face, the browser's two tabs and *Apply style…* — the browser's kit header carries the
+mapping in each mode column, a kit's rows are inert, and the update toast counts what changed. *The
+session's, under the maintainer's autonomy grant for this build; uncommitted when recorded.*** D1038
+drew the kit groups (E1, F5, G8 — *"kit groups last"*, *"a kit's rows are inert"*, the kit mark) and
+(b)'s header row; D1043 and D1063 left them to this step. Over D1064's core.
+
+**The lists.** `binding::matches` — the `--` list's and the face's one filter — sorts the document's
+own first, then each kit's **by the kit's name** (`kit_label`: the name its modes arrived with, else
+*Kit*), each by slash group; `list_row` puts the kit mark (`icon::PACKAGE`) before a kit variable's name.
+The swatch popup's *Variables* face draws `kit_header` — the mark and `kit_name` (the modes' name, else a
+vault main's `Origin::name`, else *Kit*) — where the kit changes, and dims a kit's rows. **The browser**:
+`all_lines` lists `Variables::local`, then each kit by name under `Line::Kit`, a kit with nothing shown
+having no header; a kit's groups fold under `group_key`'s `\u{2}kit\u{2}path`, so a kit's *brand*
+folds apart from the document's in D1054's per-document set. `kit_row` draws the header: the mark, the
+name, and **in each mode column the mapping** — the kit mode that column reads, *Day →* under *Light*
+(D1064's direction), bright when set by hand and dim when matched, its tooltip saying which; a click
+opens `Menu::KitMap` — the kit's modes, then *Match by name* — committing `SetKitModes` through
+`Act::KitMap`. In a document with no modes of its own a kit fills one column, its default
+(`kit_columns`). **A kit's row is inert** (`kit_var_row`): its leaf dimmed, its usage count selecting
+the users, each column the value it reads through the mapping, its tooltip *From X — edited in the kit,
+read-only here*; no rename, no cell edit, no menu, and *Duplicate* guarded in `Act::Duplicate`. **The
+Styles tab** lists the document's own by card, then each kit's by card under its header; **a kit
+style's menu offers *Select* alone**, and **`edit_style` refuses a kit's style**. *Apply style…*'s
+picker sorts kits' styles last under their headers.
+
+**The update toast** (`kits/updates.rs`) adds *· N variables and M styles updated* and *· N variables
+and M styles the kit removed detached, values kept*, from `kit::Update`'s four lists. ⚠️ **5A's
+extended summary is not built** — the old → new swatches and values and the list of layers a removed
+variable detaches — and neither is the browser's *v8 → v9* line while an update waits. **`KitError::Modes`
+is worded at the four refusal sites** — the carrying paste (`carry_refused`, *Accept X's update first*),
+the picker's insert, a swap to a kit main never used (`swap_to_kit`, D1019) and the update itself —
+none printing its `Debug`
+(D1024).
+
+⚠️ **Read in the code by the record, not reproduced.** (1) **The `--` list's swatch reads the mapped
+document mode**, `table.resolve_opt(v.id, doc.mode_at(at))` (`binding.rs`'s list), where the chip's
+tooltip and the face ask `doc.resolve_var(at, v)` — so under a frame set to a kit's mode a kit
+variable's swatch shows another column than the binding would draw. (2) **Two kits of one name
+interleave**: `matches`, `all_lines` and the picker sort by the kit's *name*, and the face draws a header
+wherever the kit id changes, so two kits both named (or both unnamed, *Kit*) repeat headers over mixed
+rows; the id belongs after the name in the key. ~~And D1064's reading 2 is worded here: the four sites
+say *accept the update* where the held kit may be the newer.~~ (Since D1064's amendment a held kit
+covering the source's modes is reused, so `Modes` means one held older and *accept the update* is true.)
+
+**Test**, `panels::variables::tests::a_kits_variables_list_last_under_the_kit_with_its_mapping`: *brand*
+after the document's *surface* under an *Atlas* header whose *Light* column reads *Day →*, a pick setting
+*Night →*, *Duplicate* making nothing, the `--` list ordering the kit's last. **Flip**, run by the session
+and reported: `all_lines` listing `table.iter()` whole fails at *"the kit's header, after the document's
+own"*. *(Built by the session under the maintainer's autonomy grant, uncommitted when recorded. **Keep**;
+the two readings ~~***Fix***~~ **Resolved** the same day, below. D1038, D1043 and D1063 amended;
+`architecture.md` §5.3f; `roadmap.md` step 4. **Amended 2026-10-15**)*
+
+**Amended 2026-10-15, the same session: both readings fixed**, the caller's account, neither with a
+test. (1) The `--` list's value reads `doc.resolve_var(at, v.id)`, the chip's door, so a frame set to a
+kit's mode shows the column the binding draws. (2) `matches` and the style picker break a tie on the kit's
+name by its id; the browser's two lists already sorted `(name, id)` pairs. ⚠️ **Untested, both** — a
+regression of either is a swatch's colour or a header's order, and nothing asserts them.
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

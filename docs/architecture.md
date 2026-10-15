@@ -3342,7 +3342,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built, step 3's core; §15 D1037–D1062)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–3 built; §15 D1037–D1063)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3365,7 +3365,9 @@ and the dashboard's 1B §15 D1017).
 Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a layer's hand-set width
 > and height bind** (2026-10-14, §15 D1061, the maintainer's ruling), so step 2 owes nothing. **Of
 > step 3, styles for fills, strokes and effects have their core** (§15 D1062, `910c19a`) — the table,
-> the bindings, the commit's pass, v8 — *Styles, as built*, below; their chrome is not. The
+> the bindings, the commit's pass, v8 — **and their chrome** (§15 D1063, `d63716e`) — the cards' `⋯`
+> and capsule, *Apply style…*, the *Styles* tab and *Edit* — *Styles, as built*, below; so step 3 owes
+> nothing. The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3422,7 +3424,8 @@ alignment, gaps, padding — never an item's grow or `align-self` (D1038). **A c
 a whole**: editing any field of a styled card detaches it, with no partial override and no inheritance
 (the maintainer's ruling). ⚠️ **The inspector is the one door that does not**: there a styled card is
 **read-only**, and a style's values change only through the browser's *Edit*, live to every user
-(D1038). Every other door — a canvas gesture on a styled or bound value, *Paste properties*, MCP —
+(D1038) — ⚠️ as built, *Edit* opens the users' own card on the style rather than a card in the browser
+(§15 D1063); a fully or a partly styled card is read-only alike. Every other door — a canvas gesture on a styled or bound value, *Paste properties*, MCP —
 detaches, the floating status saying what was detached; refusing would leave the canvas's handles
 dead. A style's values may be variables. Text styles come last, text storing its character attributes
 per span (§5.4). 🚨 **A style is not resolved at read** (§15 D1062): a styled layer's own list holds a
@@ -3672,8 +3675,29 @@ bound** — a kit's frozen copy clears its styles, keeping the values, until ste
 `RemoveStyle` of a style in use is refused; `style::remove_ops` detaches the users first. **Deleting a
 variable a style's paint reads** detaches the style to its colour **in the default mode**, and the
 users are rewritten from it, staying styled — a user in another mode changes colour. A paste rebinds a
-style by id, else by name and slot, else detaches. The chrome — the browser's *Styles* tab, the styled
-card, the header `⋯` — is not built, and ⚠️ **no preview runs `settle`** yet.
+style by id, else by name and slot, else detaches.
+
+**The chrome** (§15 D1063 in full). The Fill, Stroke and Effects cards' headers carry a `⋯`, always
+last, the `+` moved in beside it (`ui::HEAD_MORE_W`): *Apply style…*, *Create style from this…* (*…as
+a copy…* when styled; off over *Mixed*, a partly styled card or lists that disagree) and *Detach style*,
+each counting the layers it acts on where there are several (F10).
+`OndinApp::style_card` reads `styles::shown`: a card whose targets share one style is a 28-high capsule
+— preview, name, summary, *Detach* on hover, saying nothing — opened greyed and inert under *Read-only
+— Detach to edit*, open per slot (`style_open`), not per layer; styled differently, a caretless *Mixed*
+capsule; partly styled, the rows greyed and inert as a styled card's are. The `+` hides while any target is styled, except under
+an edit. *Apply style…* is a 256-wide picker of the slot's styles, grouped by path, the highlight
+previewed — 🚨 its preview carries the style's `write_op`s beside the binds, which `absorb` no-ops.
+*Create* names the new style in the capsule, `Escape` undoing it (`escape_styles`, a rung of `escape`).
+The browser's *Styles* tab groups by card, each row a preview, the whole name and a count, its menu
+*Rename*, *Edit*, *Select N layers* and *Delete*. 🚨 ***Edit* is an edit mode, not a card in the
+browser**: it selects the style's users and sets `EditorSession::style_edit`, their card opens live
+under an *editing* capsule, and **`style::edit_through`, first in `commit_inner`**, turns a write of the
+slot on a user into one `SetStyleValue`, which `settle` writes back onto every user. So a style with no
+users cannot be edited, and the edit ends with *Done*, `Escape`, the style's removal, or a selection
+holding any layer that is not its user. A detach a door made — `settle`'s, not the user's own ops' — says
+*Detached X* on the floating status (`session::styles_detached`, D1038 (2)). ⚠️ **No preview runs
+`settle`**: the picker's and an edit's previews write the lists themselves. Not built: the kit groups
+(step 4), the text and layout cards' styles.
 
 ### 5.4 Text node
 

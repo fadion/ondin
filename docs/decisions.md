@@ -1459,7 +1459,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1059** — **Styles and variables, build step 2's second half: a layer's visibility binds to a boolean variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws, picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule.** D1038 (d). `VarKind::Boolean`, `Cell::Boolean`, `Value::Boolean`; `Node::visible_var` beside the literal `visible`; `SetVisibleVar`; schema field in the unreleased v8. `bind_visible_ops` writes the literal `true`, canonical. 🚨 `shown`/`shown_in` read by every drawing, picking, layout and export reader — a hidden bound item leaves its flow. 🚨 `keep_visible_bindings` after `keep_spacing_bindings`: written what it shows stays bound, else detaches — **no literal half**, which would keep a layer the eye shows bound and hidden. `absorb`'s `SetVisibleVar` arm and D1056's cell arm patch a bound visibility; ~~⚠️ no visibility arm marks a node moved, so the eye's `--` preview over an in-flow item does not re-lay its layout (*Fix*)~~ — corrected: `flex_relayout` lays from every overridden node, not from `moved`, so the preview already re-lays an in-flow item's siblings (measured, test added). `FieldKey::Visible`, `typed()` false; the bound eye a 22×18 capsule, the browser's boolean box — the session's chrome. 🚨 Read, not reproduced, and **fixed in `79ae5eb`**: `is_placement` omitted `SetVisibleVar`, so a main root's binding followed to every instance root (tested, flip run); the layer menu's *Show*/*Hide* label read the literal; a ghost read the literal (now `ghost_shown`, the default mode); a Boolean property's reset and drift ignored the binding; `propagate::untouched` compared no binding — the last four untested. ⚠️ Owed: ~~the Properties card's chip, the layers panel's bound mark~~ (D1060), a detach's status message. *(Built 2026-10-14, `bf347f9`. **Keep**, the one-half pass and `shown` above all; the five read defects and the stale comments **Resolved** in `79ae5eb`; the relayout *Fix* **withdrawn**, a wrong premise. Eight tests and the random incremental test's visibility ops, six flips run as reported. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `79ae5eb`; **again**, the card's chip and the panel's bound eye built in D1060)*
 - **D1060** — **Styles and variables, build step 2's owed chrome: a Boolean property row over layers all bound sets its switch in a variable's capsule, A4's rule, a bound layer's eye rests in the capsule in the layers panel, and a worded row badge ends before a resting eye.** D1038 (d)'s *"the property is a view over the field (D982), so it shows the chip"*; D1038 draws neither shape, both borrowed from D1059's bound eye. `toggle_row(…, bound)`: a 38×22 capsule (`BOUND_SWITCH_PAD` 6×3), `text_a(28)`/44; drawn when every counterpart over every root is bound, to one variable or several (A4, D1045), partly bound the plain row; cached in `PropCache::chips`. Tooltip `chip_tip`, *name · Mixed* where modes part the values, or the names listed; the verb *Click to toggle and detach*, or on a *Mixed* row *Click to show all; the hidden ones detach*. The click detaches through `set_property` and `keep_visible_bindings`, no door of its own. The first cut's one-variable rule and its overstated tooltip read and fixed before commit. `layers_row`: `show_eye` also while bound, `BOUND_EYE` 22×18, no tooltip. A worded badge (*W × H*, *N variants*) drew under a resting eye — measured *40 × 40* over the eye-slash — and now ends at `eye_x − 15`. *(Built 2026-10-14, uncommitted when recorded. **Keep**; the chrome the session's, not looked at. Four tests, four flips run as reported; no test reads the tooltips. D1059 amended; `architecture.md` §5.3d, §5.3f, §9.2; `roadmap.md` step 2's owed chrome struck)*
 - **D1061** — **Styles and variables, build step 2's last item: a layer's width and height bind to number variables — a sidecar of two beside the stored size, its literal 0 as a corner's, answered resolved by every layout view and drawn from the used kind — and only a hand-set size binds.** The maintainer's ruling, 2026-10-14: *"go with your recommendation for W and H"* — literal 0 beside the binding, any resize detaches, not a hugging frame's, a text box's or a grown or stretched item's size. `SizeVars` on `Node::size_vars`, the five kinds `NodeKind::box_size` answers, Text unbindable by decision; `SetSizeVars`; `NodeDto::size_vars` in the unreleased v8, no bump. 🚨 `DocView::kind` answers `Document::resolved_kind`; `resolve::with_bound_size` gives an unlaid, unpinned bound layer a `Used` entry (D1039's sparse contract widened again). `size_axes_authored`: `%`/`fit-content`, pinned both ends, flex main with grow or basis, flex cross stretched, grid stretched with size `auto` — shrink, min and max not counted. 🚨 `keep_size_bindings` after `keep_visible_bindings`: D1041's two halves over a `Size` patch (`kept_size_vars`, shared with the preview), **and a layout half** detaching an axis an edit makes computed, to the size drawn before; `keep_insets` reads sizes after that pass. `is_slot_field` holds `SetSizeVars` (D983 (3)). Preview: `current_kind`, `apply_laid` — a bound rect previewed 0 wide beside a resize, found by a test and fixed — the cell arm and `ghost_kind`. `FieldKey::Size`, the single card only; the multi card's union W and H take none. `baked_ops` left: an extra, harmless op. ⚠️ No canvas resize of a bound layer tested; no status message on a detach; no bound-size mark in the layers panel. *(Built 2026-10-14, uncommitted when recorded. **Keep**; Text and the multi card **Intentional**. Nine tests and the random incremental test's size ops, flips as reported; a `current_kind` flip does not bite in the first render test, two defences. D1038, D1039, D1058 amended; `architecture.md` §5.3f, §5.9, §5.11, §6.2; `roadmap.md` step 2 struck)*
-- **D1062** — **Styles and variables, build step 3's core: a style is one slot's whole list — fills, strokes or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own list, written by a commit-time pass that rewrites the copy when the style or the binding changed and detaches the layer when the edit wrote the slot.** The session's, under the maintainer's autonomy grant; the record had not said how a style is stored. `Style { id, name, value: StyleValue }`, `StyleValue` one of `Fills`/`Strokes`/`Effects` over `Vec<Keyed<_>>` — a stroke style carries width, join, cap, dashes and alignment; `Styles` on `Document`; `StyleId` from the one `IdSource`, swept with its items' ids; names slash paths unique per slot, not across; `Node::styles: StyleRefs`. 🚨 **Linked copies, D978's argument**: every reader of a layer's lists reads the list it always read; variables inside a style stay bound and resolve at read; the cost is D978's — invariant 4 gains a member, §12's fourth property bent again. 🚨 `style::settle` runs **twice** in `propagate::owed`, first and last, `user` the length at entry: a bound slot off its style's look (values compared, ids not) is **rewritten** when the style was edited or the binding set, or when no user op wrote it, else **detached**, values kept — D1038 (1) with no door knowing; flips for each run and the detach arm reported, the first run's not biting in the apply test. Ops `AddStyle`, `RemoveStyle` (refused while bound; `remove_ops` detaches first), `SetStyleName`, `SetStyleValue` (same slot), `SetFillStyle`/`SetStrokeStyle`/`SetEffectsStyle` — `changes_ink` false, `absorb` no-ops, bindings `Whole` (F9), stated by `state_ops`. `style::check`: names, item ids, colour variables only, bindings of their slot, no vault node bound (`variable::detached` clears styles). A deleted variable inside a style detaches it to the **default mode's** colour and its users are rewritten — a user in another mode changes colour. Paste rebinds by id, else name and slot, else detaches; *Paste properties* detaches. v8, no bump. ⚠️ No preview runs `settle`; neither no-op fixture lists the seven ops. *(Built under the maintainer's autonomy grant, `910c19a`; recorded 2026-10-15; the chrome to come. **Keep**; the default-mode detach **Keep**, *revisit if* it misleads; the fixtures *Fix*. Ten tests, three flips as reported. D1037 amended; `architecture.md` invariant 4, §5.3d, §5.3f, §5.7, §5.11, §12; `roadmap.md` step 3's core marked built)*
+- **D1062** — **Styles and variables, build step 3's core: a style is one slot's whole list — fills, strokes or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own list, written by a commit-time pass that rewrites the copy when the style or the binding changed and detaches the layer when the edit wrote the slot.** The session's, under the maintainer's autonomy grant; the record had not said how a style is stored. `Style { id, name, value: StyleValue }`, `StyleValue` one of `Fills`/`Strokes`/`Effects` over `Vec<Keyed<_>>` — a stroke style carries width, join, cap, dashes and alignment; `Styles` on `Document`; `StyleId` from the one `IdSource`, swept with its items' ids; names slash paths unique per slot, not across; `Node::styles: StyleRefs`. 🚨 **Linked copies, D978's argument**: every reader of a layer's lists reads the list it always read; variables inside a style stay bound and resolve at read; the cost is D978's — invariant 4 gains a member, §12's fourth property bent again. 🚨 `style::settle` runs **twice** in `propagate::owed`, first and last, `user` the length at entry: a bound slot off its style's look (values compared, ids not) is **rewritten** when the style was edited or the binding set, or when no user op wrote it, else **detached**, values kept — D1038 (1) with no door knowing; flips for each run and the detach arm reported, the first run's not biting in the apply test. Ops `AddStyle`, `RemoveStyle` (refused while bound; `remove_ops` detaches first), `SetStyleName`, `SetStyleValue` (same slot), `SetFillStyle`/`SetStrokeStyle`/`SetEffectsStyle` — `changes_ink` false, `absorb` no-ops, bindings `Whole` (F9), stated by `state_ops`. `style::check`: names, item ids, colour variables only, bindings of their slot, no vault node bound (`variable::detached` clears styles). A deleted variable inside a style detaches it to the **default mode's** colour and its users are rewritten — a user in another mode changes colour. Paste rebinds by id, else name and slot, else detaches; *Paste properties* detaches. v8, no bump. ⚠️ No preview runs `settle` — the chrome's two previews write the lists themselves (amendment); ~~neither no-op fixture lists the seven ops~~ both do since `aa56200`. *(Built under the maintainer's autonomy grant, `910c19a`; recorded 2026-10-15; the chrome D1063. **Keep**; the default-mode detach **Keep**, *revisit if* it misleads; the fixtures ~~*Fix*~~ fixed. Ten tests, three flips as reported. D1037 amended; `architecture.md` invariant 4, §5.3d, §5.3f, §5.7, §5.11, §12; `roadmap.md` step 3's core marked built)*
+- **D1063** — **Styles and variables, build step 3's chrome: a `⋯` on the Fill, Stroke and Effects cards, a styled card collapsed to its capsule, *Apply style…*'s picker, *Create* named in the capsule and the browser's *Styles* tab — and G9's *Edit* built not as a card inside the browser but as an edit mode on the style's users, whose own inspector card writes the style through a commit door.** The session's, under the maintainer's autonomy grant. `section_head_full`'s `more`, the `+` moved in by `HEAD_MORE_W`; the menu's three rows, *Detach* counting the styled targets, *Create* off over Mixed, Partial or disagreeing lists — ⚠️ and naming no count, against F10. `style_card` over `shown`: One a 28-high capsule (preview, name, summary, *Detach* on hover, no status), opened greyed and inert, open state per slot (`style_open`); Mixed a caretless capsule; 🚨 **Partial the plain, live rows** — values where the lists agree, and a write detaching the styled layers — so the inspector is read-only on a fully styled card only. The picker's preview carries the style's `write_op`s beside the binds `absorb` no-ops. *Create* names in the capsule, `Escape` undoing it through `undo` and the `escape_styles` rung. The tab: groups by card, *Rename*/*Edit*/*Select*/*Delete*, the mockup's *"or use +"* dropped. 🚨 **G9**: *Edit* selects the users and sets `style_edit`; `style::edit_through`, first in `commit_inner`, turns their slot's writes into one `SetStyleValue` and `settle` writes it back — the cards' 66 scope and 227 slot sites left alone; a style with no users uneditable; ⚠️ two edges read, not run (an unselected user unpreviewed; a Partial card's write editing the style). `styles_detached`: a commit's own detach says *Detached X*, unless the user's ops detach — that rule's case untested. *(Built under the maintainer's autonomy grant, `d63716e`; recorded 2026-10-15. G9's edit mode **Keep**, *revisit if* a style without users needs editing; ~~the Partial rows **Intentional**~~ greyed, and *Create*'s count ~~*Fix*~~ named, in the same-day amendment, with an edit ending on any non-user selected and the picker's one-press `Escape`. Six tests, three flips. D1038 and D1062 amended; `architecture.md` §5.3f; `roadmap.md` step 3 struck)*
 
 ---
 
@@ -24572,7 +24573,9 @@ restores all.
 
 **The mockup's additions, each accepted.** (1) **A styled card is read-only in the inspector**:
 expanded, it shows its values greyed and inert, *Read-only — Detach to edit*; a style's values change
-only through the browser's *Edit* (the Styles tab, the style's card inline, live to every user).
+only through the browser's *Edit* (the Styles tab, the style's card inline, live to every user) — ⚠️
+**built otherwise** (D1063): *Edit* opens the users' own inspector card on the style. (A partly
+styled card's rows were live and detached for a day; greyed in D1063's amendment.)
 D1037's *"an edit to any field of a styled card detaches it"* **still holds for every other door** —
 the canvas, *Paste properties*, MCP. (2) **A canvas gesture on a bound or styled value detaches** —
 dragging a gap handle on a layout-styled container, resizing a bound W — the record's rule, since
@@ -26540,7 +26543,8 @@ variables* step 2 struck — it owes nothing — and its open list edited)*
 or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own
 list, written by a commit-time pass that rewrites the copy when the style or the binding changed and
 detaches the layer when the edit wrote the slot. *The model and the linked copy the session's, under
-the maintainer's autonomy grant for this build; committed as `910c19a`; the chrome not yet built.***
+the maintainer's autonomy grant for this build; committed as `910c19a`; ~~the chrome not yet built~~
+the chrome built as D1063, `d63716e`.***
 D1037 ruled what a style is — one slot's isolated set of values, at most one per slot per node, no
 stacking, a card styled or not as a whole — and D1038 its doors: read-only in the inspector and edited
 only in the browser, live to every user; detached by every other door's edit ((1)); deleted with its
@@ -26669,9 +26673,152 @@ variables table (D1039); `op.rs`' fixture lists none of the variables' four eith
 autonomy grant, committed as `910c19a`; recorded 2026-10-15. **Keep** — the linked copy and the two
 runs of `settle` above all; *revisit if* real-time collaboration is built, D978's verdict. The
 default-mode detach **Keep**, *revisit if* a styled layer in another mode changing colour on a variable's
-delete misleads. The two fixtures: *Fix with* the seven ops listed and their counts moved. D1037
+delete misleads. The two fixtures: ~~*Fix with* the seven ops listed and their counts moved~~ fixed in
+`aa56200`, the amendment below. D1037
 amended; `architecture.md` invariant 4, §5.3d, §5.3f, §5.7, §5.11 and §12; `roadmap.md` *Next · Styles
 and variables* step 3's core marked built)*
+
+**Amended 2026-10-15: the *Fix* done, and the preview answered without `settle`.** Both no-op fixtures
+list the seven ops (`aa56200`, test only): `overrides.rs`' at thirty-three no-ops, all seven
+`changes_ink`'s `false`, and `op.rs`' at twenty-four, each assertion moved first. ⚠️ **`op.rs`' list is
+still not the whole `false` arm** — the variables' four, the vault's two and `SetOrigin` are left out,
+older gaps its own doc names — so *"lists none of the variables' four either"* above stands. Three
+comments the record's reading of `910c19a` found false were corrected, the caller's account: `io/schema.rs`'
+*"the next commit that touches either"* in `aa56200`, and `style.rs`' *"a paste"* and `renderer.rs`'
+preview sentence in `d63716e`. And *"a previewed apply or style edit draws nothing"* is answered by the
+chrome rather than by a preview running the pass (D1063): *Apply style…*'s highlight carries the style's
+`SetFills` or kin for each target beside the binds `absorb` no-ops, and an edit of a style previews as
+the card's own writes on its selected users. ⚠️ **No preview runs `settle` still**; the two that draw a
+style write its lists themselves.
+
+**D1063 — Styles and variables, build step 3's chrome: a `⋯` on the Fill, Stroke and Effects cards, a
+styled card collapsed to its capsule, *Apply style…*'s picker, *Create* named in the capsule and the
+browser's *Styles* tab — and G9's *Edit* built not as a card inside the browser but as an edit mode on
+the style's users, whose own inspector card writes the style through a commit door. *Built by the
+session under the maintainer's autonomy grant for this build; committed as `d63716e`.*** D1038 drew the
+chrome (F1–F10, G8, G9, G18, G20) over D1062's core, and most of it is built as drawn. Where it is not,
+this entry says so; the largest is G9.
+
+**The header (F8, F4).** `ui::section_head_full` gains a `more` flag and `HeadClicks::more`/`more_rect`;
+the `⋯` takes the header's right-hand corner and the `+` moves in beside it, `HEAD_MORE_W` — the action
+box and a 10 gap — further in. So the `+` moved on all three cards, and the Effects card's tests now
+find it there (`the_header_plus_adds_a_shadow_and_brings_up_its_numbers`). The menu
+(`styles::style_menu_ui`) has three rows, glyphs swatches, plus-square (`theme::PLUS_SQUARE`, new) and
+link-break: *Apply style…* (*Apply style to N layers…*), *Create style from this…* (*…as a copy…* on a
+styled card) and *Detach style* (*Detach style from N layers*, N the **styled** targets, not all of
+them; off when none is). *Create* is off over a *Mixed* or a partly styled card and over a plain one
+whose lists disagree (`agreed`, compared by look). ⚠️ **F10's *"every `⋯` row names how many layers it
+acts on"* is not met by *Create***, which names no count however many layers it binds — read from the
+code, not said in the brief.
+
+**The capsule (F1–F3).** `OndinApp::style_card` wraps `panel_full` around each card's own rows and asks
+`styles::shown`: `Plain`, `One(style)`, `Mixed(styles)` or `Partial`. **One** draws a 28-high capsule —
+caret, a 14 preview (a swatch over the checkerboard for fills, a ring for strokes, a shadowed square for
+effects), the name elided, and the summary: `1 fill`, `1 · inside` for one stroke's width and alignment,
+`2 shadows` or `n effects`. Hover puts a *Detach* chip in the summary's place; its click writes each
+styled target's binding `None`, values kept, and says nothing (F2). The capsule's own click opens the
+card: its rows inside `ui.disable()` at opacity .42, a bound variable still drawing its chip, and the
+footer *Read-only — Detach to edit*. ⚠️ **Open is per slot, `OndinApp::style_open`, not per layer**:
+opening one styled Fill card opens every styled Fill card until it is closed. **Mixed** (F10) is a
+capsule with no caret, the first two styles' previews split in one swatch, *Mixed* and *N styles*, its
+tooltip naming them. 🚨 **Partial is the card's plain body** — `Plain | Partial => body` — and that
+departs from D1038 twice, unsaid by the record until now: where the lists differ it shows the grey
+*Mixed* row F10 drew (`mixed_paint_row`, D130's), but **where they agree it shows the values**, and
+either way **the rows are live**, so a write over a partly styled card detaches its styled layers
+through `settle` — the inspector acting as a detaching door, which (1) says it is not. **The inspector
+is read-only on a fully styled card only.** And the `+` hides while any target is styled (F8, F10) —
+**except while that card is being edited**, below, where it adds an item to the style.
+
+**Apply (F5).** A 256-wide picker hung under the header, its right edge at the `⋯`'s: a search
+(*Search fill styles*), the slot's styles grouped by the path before the last `/` — a 9.5 uppercase
+header over each group that has one — each row a preview, the leaf and the usage count; ↑/↓ or the
+pointer move the highlight, `Enter` or a click applies (one `bind_op` per target, the commit writing the
+values). Empty: *No fill styles yet*, or *Nothing matches*. 🚨 **The highlight previews on the canvas,
+and the preview has to carry the values**: `absorb` no-ops a binding (D1062), so `apply_tx(…, true)`
+writes the style's `write_op` for each target beside the binds — what `settle` would write — into
+`set_preview`; a pick, a click away or `Escape` clears it. *Do not* drop the `write_op`s as redundant
+with the binds: without them the preview draws nothing. No kit group (step 4).
+
+**Create (F6).** *Create style from this…* commits `style::create_ops` under a free name — *Fill style*,
+*Fill style 2*, … (`free_name`) — binding every target, and opens the name in the capsule: an accent
+ring, the preview and a field. `Enter`, or the field losing focus, keeps it, refusing an empty or a
+taken name in the slot (*A style needs a name.*, *X already exists.*); `Escape` **undoes the create**,
+through `OndinApp::undo` — from the field, and from the ladder's rung `escape_styles` (after the field
+menu and the `--` list, before the colour picker), which also closes the picker, the menu, and an edit,
+one a press. ⚠️ **The undo is of the last step, not of the create by id**: it is right because nothing
+commits while the name field holds the keyboard.
+
+**The *Styles* tab (G8, G18, G20).** Groups *Fill*, *Stroke* and *Effects* in the inspector's order,
+their collapse kept in the browser's per-document set under `\u{1}Fill` and the like — a key no variable
+group's path is — each row a preview, the whole name and its count. A right-click or double-click opens
+*Rename* (in place, refused in B4's manner: *A style needs a name.*, *X already exists.*), *Edit*,
+*Select N layers* and *Delete* — no confirmation, `style::remove_ops`, one undo, the status *Deleted X.
+N layers keep their values.* (D1038 (6)). *In selection* is shared with the *Variables* tab, its line
+*Used by X · N styles*, a group's count *1 of 4*. The empty state reads *No styles yet* / *Use ⋯ on any
+inspector card and choose Create style from this…* — **the mockup's *"…, or use +."* dropped**, the
+session's call: the `+` on this tab still makes variables, its tooltip saying a style is made from a
+card's `⋯`.
+
+🚨 **G9's *Edit* is not a card inside the browser.** D1038 drew *"the style's card inline"* on the
+*Styles* tab. Built, *Edit* (`OndinApp::edit_style`) **selects the style's users** and sets
+`EditorSession::style_edit`; their card, now `One(style)` and editing, opens live under an *editing*
+capsule — accent ring, *editing* in the summary's place, a *Done* chip on hover — with the footer
+*Changes reach its N layers as you type*. The writes become the style's at the commit door:
+**`style::edit_through`, the first thing `commit_inner` does**, turns every write of the slot on a layer
+bound to that style into one `SetStyleValue` — the first such list — and drops the per-layer writes;
+any other write passes. `settle` then writes the style back onto every user, the edited ones among
+them, the style having been edited in the transaction. **The reason, the session's**: the cards are
+built on `PaintScope` — one layer or the selection — over 66 scope sites, 227 slot sites and the
+Effects popover, the caller's counts, and a third scope meaning *a style* would rebuild them; this
+route hands every card control, the colour picker and the live preview to the style unchanged, a
+Selection-scope preview already drawing on every selected target. **The costs**: **a style with no
+users cannot be edited** — *Edit* is off, its tooltip *Apply it to a layer to edit it* — and *Edit*
+changes the selection. The edit ends on *Done*, `Escape`, the style going, a document adopted, or a
+selection holding none of its users (`style_popups_ui`). ⚠️ **Two edges of that last rule, read from
+the code and not run**: a user dropped from the selection while another stays is still written by the
+commit but **not previewed**, the preview drawing on the selection; and a selection of users and
+non-users keeps the edit open while the card reads `Partial`, so a write there **edits the style** for
+the users — the door reads `style_edit`, not the card — rather than detaching them as a partly styled
+card otherwise does. **Flip**, run by the session: the door replaced by `tx` fails
+`an_edit_of_a_styles_user_edits_the_style` at *"b follows the edit"*.
+
+**The floating status (D1038 (2)).** `session::styles_detached`, read after `propagate::owed` against the
+document before the apply: a style binding written `None` among **the commit's own ops** — past the
+user's, where `settle` puts a door's detach — sets *Detached surface/raised*, or *Detached N styles*,
+after the gesture preview clears and before a caller's own report, which overwrites it. **Unless the
+user's ops hold a detach themselves**: the capsule's chip and the menu's row are asked for and say
+nothing (F2), and a delete's detaches are its own ops, its status its own. ⚠️ **That rule exists for
+one case no test drives**: a main detached by the chip, its copies' detaches following through
+`propagate` — without it the status would announce the follows. Variables' detaches still say nothing.
+
+**Not built.** The kit groups in the picker and the tab (step 4); the text and layout cards' `⋯` and a
+layout style's capsule, F7 (text styles are step 6, layout styles have no step); a swatch popup for a
+style, which the mockup does not draw. F9's override marks are D1062's — `card_of` files each binding
+under its card.
+
+**Tests**, `panels::styles::tests`: `a_styled_card_draws_its_capsule_and_detaching_keeps_its_values`,
+`escape_on_a_new_styles_name_undoes_the_create`, `an_edit_of_a_styles_user_edits_the_style` (flipped,
+above) and `the_pickers_highlight_previews_and_enter_applies`; and
+`panels::variables::tests::the_styles_tab_lists_renames_and_deletes`. *(Built under the maintainer's
+autonomy grant, `d63716e`; recorded 2026-10-15. G9's edit mode **Keep**, *revisit if* a style without
+users needs editing or the selection change misleads. ~~The partly styled card's live rows
+**Intentional**~~ greyed since the amendment below. ~~*Create*'s missing count *Fix*~~ fixed, below.
+D1038 (1) and D1062 amended; `architecture.md` §5.3f; `roadmap.md` step 3 struck)*
+
+**Amended 2026-10-15, the same session, from `arch-scribe`'s reading of `d63716e`.** Four changes and
+one call kept. (1) **A partly styled card is read-only too**: `Partial` draws its rows greyed and inert
+under *Read-only — Detach to edit*, as a styled card's are, so the inspector detaches nothing (D1038
+(1)) and F10's grey fields hold; the `⋯` still applies or detaches over them all. (2) ***Create* names
+its count** over several layers — *Create style from these 3 layers…*, *…from these 3 as a copy…* —
+F10's *every row names how many layers it acts on*. (3) **An edit ends once the selection holds any
+layer that is not the style's user**, not only when it holds none — the `Partial` edge above, where the
+door would have edited the style through a card reading partly styled; a test selects a non-user beside
+the users, and the old `any` rule fails it at *"a non-user selected ends it"*. The unselected-user
+preview edge stands. (4) From the session's own review, `0151dc3`: `Escape` closes the picker in one
+press — its search holds the keyboard, so the ladder never heard the key — and *Create* opens a
+collapsed card, or the name is typed where nobody can see it; a test, flipped. **Kept**: the `+` stays
+live while a card is being edited — adding an item there is an edit of the style, which the door turns
+into one.
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

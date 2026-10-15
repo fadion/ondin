@@ -3371,7 +3371,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 built; §15 D1037–D1066)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 and 6 built; §15 D1037–D1070)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3404,7 +3404,11 @@ Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a lay
 > summary and the browser's *v8 → v9* line (D1065's second amendment). **Of step 6, text styles are
 > built** (2026-10-15, under the maintainer's delegation) — the core (§15 D1067: a fourth slot holding
 > the character defaults less colour and language, spans the text's own marks over it) and the Type
-> card as a style card (§15 D1068) — and string variables are not. The
+> card as a style card (§15 D1068) — **and so are string variables** (2026-10-15, the maintainer's
+> ruling): the core (§15 D1069: a text's content and family bound, the literals empty while bound,
+> the spans cleared, an edit detaching) and the chrome (§15 D1070: the Type card's *Content* row, the
+> family's chip, *String variable* in the browser), D1069's four readings fixed in its amendment — so
+> step 6 owes only D1070's Text property chip and the Content row's override mark. The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3434,11 +3438,14 @@ never a hugging frame's, a text box's, or a size a flex or grid layout deals out
 **Colours** bind a **whole solid paint**,
 never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
 stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
-visibility; **strings** bind text content and font family, with text styles. A field that is also a
+visibility; **strings** bind text content and font family, with text styles — **binding the content
+clears its spans**, a variable's string changing length with the mode, and **a text style holds a
+plain family, never a variable** (the maintainer's ruling, §15 D1069). A field that is also a
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)` — ⚠️ **in six shapes, as built** (§15 D1039, D1058, D1059, D1061; *What is built*, below) — and
+`Literal(T) | Bound(VarId)` — ⚠️ **in seven shapes, as built** (§15 D1039, D1058, D1059, D1061,
+D1069; *What is built*, below) — and
 the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
@@ -3506,12 +3513,13 @@ presentation attributes today, so where a `var()` would go is that feature's que
 **What is built** (step 1's core, §15 D1039 in full). `ondin_core::variable` holds the table —
 `Variables { modes, vars }`, the modes in order and the first the default, the variables by id
 (`VarId`, `ModeId`: `NodeId` newtypes minted from the session's `IdSource`, as a `GuideId` is), each a
-name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`) and one `Cell` per mode, a value or an `Alias`. `Document::variables`
+name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`, and since §15 D1069 `String`) and one `Cell` per mode, a value or an `Alias`. `Document::variables`
 reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
 `resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it
-(with `resolved_display`, D1058, `shown`, D1059, and `resolved_kind`, D1061).
+(with `resolved_display`, D1058, `shown`, D1059, and `resolved_kind`, D1061, which applies
+`text_drawn_in` since D1069).
 **`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
-a dangling binding rather than repairing it. The binding's six shapes:
+a dangling binding rather than repairing it. The binding's seven shapes:
 
 - **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
   **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
@@ -3568,6 +3576,21 @@ a dangling binding rather than repairing it. The binding's six shapes:
   (a keyword, a second pin, growth, a basis, a stretch, a reparent into a layout) to the size drawn
   before it. `keep_insets` reads sizes from the document that pass leaves. On one layer's Transform
   card only; the multi card's W and H are the union box's and take no binding.
+- **A text's content and family** (§15 D1069): `Node::text_vars: [Option<VarId>; 2]`, content then
+  family, string variables only, on a `Text` only. Binding writes both literals **empty** — the content
+  with **no spans and no paragraph spans**, which could not index a string whose length is the mode's,
+  the family with the runs' own families cleared — and **no family binds under a text style**, which
+  holds a plain family. `Document::resolved_kind` substitutes the strings (`text_drawn_in`), and
+  `resolve::with_bound_size` gives a bound text nothing lays out or pins its used kind, so nothing
+  shapes the empty literal. **`build::keep_text_bindings`**, after `keep_size_bindings`: a `SetText` of
+  the drawn string with no spans stays bound — **one half**, as the visibility's, since `""` is what a
+  text emptied on purpose writes — anything else detaches to what it wrote, and
+  spans written over a bound content become a `SetText` of the drawn string, detaching; a family
+  written drawn or `""` stays bound, another detaches, and **applying a text style detaches it**. A run
+  given a family is a span, the default staying bound under it; the family takes both halves. A copy's
+  family binding under its main's text style is cleared by `style::settle`, which propagation reaches
+  after this pass. `keep_insets` reads the document both passes leave. A Text property's reset takes
+  the content's binding with its literal (§15 D1069's amendment).
 - **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
 
 The operations, the save format's v7 and v8, invalidation, the paste rule and the readers are in §5.7, §5.11,
@@ -3604,12 +3627,17 @@ is B4's manner** (§15 D1053): one plain sentence above the table, and the refus
 its field until it is changed. **A boolean variable** (§15 D1059) is the `+` menu's *Boolean variable*,
 `true` in every mode; its cell is a 12-pt box, checked when true, then *True* or *False* — a click on the
 box writes the other value, a click on the word types (`true`/`false`, `yes`/`no`, `on`/`off`, `1`/`0`),
-the box the session's chrome. ⚠️ **Not yet D1038's**: the `+` menu leaves out *String* until step 6.
+the box the session's chrome. ~~⚠️ **Not yet D1038's**: the `+` menu leaves out *String* until step 6.~~
+**A string variable** (§15 D1070) is the `+` menu's *String variable*, *string n* holding "Text" in
+every mode — empty would draw nothing where it binds a content; its cell is drawn quoted, line breaks
+as spaces, and typed bare and untrimmed. `--name` still types an alias, so a literal string beginning
+`--` cannot be typed.
 
 **Binding a field** (§15 D1041 in full) is `panels/binding.rs`, for the two fields step 1 binds: a solid
 paint row's colour and a rectangle's corner radius, all four corners or one (`FieldKey`'s `Paint`,
 `Radius` and `Corner`) — and since step 2 a container's gaps and padding (`Spacing`, below), a
-layer's visibility (`Visible`, below) and a layer's hand-set W and H (`Size`, below). **Bound, the
+layer's visibility (`Visible`, below) and a layer's hand-set W and H (`Size`, below), and since step 6
+a text's content and family (`Content`, `Family`, below). **Bound, the
 field is a chip** — a
 20-pt capsule at the value area's width, no hue unless focused, the name elided by whole groups from the
 left, its tooltip *name · value · Mode*, a hover × detaching. Focused, **it consumes `Backspace` and
@@ -3673,6 +3701,17 @@ layer's eye already rested, with no tooltip; a worded row badge ends before a re
 on an axis `build::bindable_size_axes` calls hand-set; the retype writes the typed axis, the other at
 its literal. On an instance the binding's mark joins the literal's, and the ↺ writes the main's
 `SetSizeVars` beside its size.
+**A text's content and family bind on the Type card** (§15 D1070): `FieldKey::Content`, typed, badged
+`TEXT_T`, and `FieldKey::Family`, never typed, bound by the field menu, badged `TEXT_AA`. **The
+*Content* row** (`OndinApp::type_content_row`) is drawn in the card's live tail, beside the alignment
+row, so a text style leaves it live: bound, the chip; unbound, a one-line field whose `--` hands to the
+retype buffer and whose write re-bases the spans through the one minimal edit; read-only over a text of
+several lines and while the canvas edits the layer, the field menu still binding. The family row is
+the chip while bound — except over a live session's selection, whose write is a run's — and its
+right-click opens the field menu on a layer with no text style. On an instance the family's mark is
+the binding's and the literal's joined and its ↺ writes both (`family_mark`). The canvas session opens
+on the drawn string. ⚠️ **Not built**: the Properties card's Text row draws no chip for a bound
+content (D1038 (d)), and the Content row no override mark.
 
 **A frame's mode** (§15 D1042 in full) is `OndinApp::frame_mode_row`, in the identity card under the
 name row, drawn on an `Artboard` only and only in a document that has a mode: set, the mode's name
@@ -4333,7 +4372,11 @@ Architectural consequences:
   `TextStyle::font_family` anywhere, so reading the defaults alone left exactly those runs in the
   fallback face until something else touched the node — a hole the coarse flag had covered by
   accident, and the narrowing is what made it reachable. Both callers read the one walk, so the gate
-  and `ensure_document_fonts` cannot disagree about which families a document has.
+  and `ensure_document_fonts` cannot disagree about which families a document has. **A family bound
+  to a string variable** (§15 D1070) adds every value of its variable, across every mode and kit mode
+  (`app::bound_families`), and the document's fonts are loaded once per revision while the table holds
+  a string variable (`OndinApp::bound_fonts_at`) — a bind, a typed cell or a new mode can name a family
+  nothing has loaded.
 - **Font *acquisition* never happens on the UI thread; registration and rasterization do.** The
   sentence used to say "nothing font-shaped happens on the UI thread except registration", which read
   as covering more than it meant. Registration has to be there: the `fontique` collection is
@@ -5398,6 +5441,9 @@ pub enum Operation {
     SetSizeVars { id: NodeId, vars: [Option<VarId>; 2] }, // a layer's width and height bindings
                                                       // alone; the verb writes the literals 0
                                                       // beside it — §15 D1061
+    SetTextVars { id: NodeId, vars: [Option<VarId>; 2] }, // a text's content and family bindings
+                                                      // alone; the verb writes the literals
+                                                      // empty beside it — §15 D1069
     // the variables table (§5.3f, §15 D1039) — no node named; `variable::check` after the last op:
     AddVariable { var: Variable },  RemoveVariable { id: VarId }, // each the other's inverse; a remove
                                                       // refused while anything is bound to it
@@ -6116,13 +6162,18 @@ impl Resolved {
   must not: `rebuild` holds only what its own pass asked for. What it owes is that every entry is what
   measuring would answer now, and its whole argument is D590's — a text node's measurement depends on
   its own node alone, so `update` drops every dirty id's entries before the pass; fonts arriving dirty
-  every text node. It is moved into a `RefCell` for the length of a pass and put back.
+  every text node. It is moved into a `RefCell` for the length of a pass and put back. ⚠️ **That
+  argument is false of a bound text** (§15 D1069's reading (4)): its content and family read the
+  variables table and the mode in force, and `SetMode` dirties only its frame — so a laid text bound
+  below it kept the old string's entries. **Fixed**: `update` drops every bound text's entries on each
+  pass (`memo.retain` over `text_vars`), so the argument holds of what the memo keeps.
 - **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
   own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
   everywhere, and a document with no layout and no bound corner or size in it holds nothing here.
   ⚠️ **Layout does not make two kinds of entry.** A bound width or height (§15 D1061): a bound layer
   nothing lays out or pins gets one from `resolve::with_bound_size`, its kind at the variables'
-  numbers, before the corners are resolved over it. And ~~**a bound
+  numbers, before the corners are resolved over it — and so does a bound text's content or family
+  (§15 D1069), its kind at the variables' strings. And ~~**a bound
   corner is the one entry layout does not make**~~ a bound corner (§5.3f, §15 D1039): `resolve::with_bound_corners` puts
   the resolved radii into the used kind after layout, keeping layout's size, so every reader that
   draws, measures or hit-tests from the used kind follows a binding with no line of its own — and a
@@ -6849,7 +6900,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   out at the 0 its literal holds. **Step 2's boolean bindings landed in the same unreleased v8** (§15
   D1059), no second bump, v8 never having shipped: `NodeDto::visible_var`, skipped when unset, and a
   boolean cell saved as `{"boolean": true}`. **So did W and H's** (§15 D1061): `NodeDto::size_vars`,
-  skipped when neither axis is bound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
+  skipped when neither axis is bound. **And a text's content and family** (§15 D1069):
+  `NodeDto::text_vars`, skipped when neither is bound, and a string cell saved as `{"string": "…"}`. **And styles** (§15 D1062): `DocumentDto::styles`, above the
   images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
   the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
   style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
@@ -7324,7 +7376,10 @@ pub trait ScenePainter {
   bindings it sets, and `SetVariableCell`'s arm resolves bound sizes against the changed table.
   `apply_laid`, the insets relayout's base, a released item and a ghost (`ghost_kind`, in the default
   mode) read the resolved kind — `apply_laid` drew a bound rect 0 wide beside a resized neighbour until
-  a test found it.
+  a test found it. **A bound content or family is drawn resolved** (§15 D1069): `patch_text` previews
+  a bound family written empty as its variable, so a size scrub on a family-bound text keeps its
+  family — the family only, an emptied content previewing empty as the commit detaches it;
+  `SetTextVars` and a string `SetVariableCell` preview; and the ghost shapes `ghost_kind`.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds

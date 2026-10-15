@@ -1358,6 +1358,13 @@ pub struct OndinApp {
     /// The library's kits' published states and tile pictures, loaded off the
     /// frame for the picker (`kits::index`).
     pub(crate) kit_shelf: crate::kits::index::KitShelf,
+    /// The update popover's summary (5A, G21), kept for the document revision
+    /// and the waiting kits' versions it was read at — a dry run of the update,
+    /// too dear for every frame. `None` inside when the dry run failed.
+    pub(crate) kit_summary: Option<(
+        crate::kits::summary::Key,
+        Option<crate::kits::summary::Summary>,
+    )>,
     /// When the kits this document uses were last looked at on disk, for the
     /// update pill (`kits::updates`, §15 D1020).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
@@ -2399,6 +2406,7 @@ impl OndinApp {
             kit_picker: None,
             kit_placing: None,
             kit_shelf: Default::default(),
+            kit_summary: None,
             kit_watch: Default::default(),
             kit_users: None,
             kit_button: egui::Rect::NOTHING,

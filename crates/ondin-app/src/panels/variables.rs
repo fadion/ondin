@@ -213,6 +213,8 @@ enum Act {
     /// A kit's mapping entry for a document mode set to a kit mode, or cleared
     /// to match by name (§15 D1065).
     KitMap(String, ModeId, Option<ModeId>),
+    /// A kit header's *v8 → v9* clicked (G22): the update summary opened.
+    KitUpdates,
 }
 
 /// One row of the table as drawn: a group's header or a variable, or a kit's
@@ -282,6 +284,12 @@ impl OndinApp {
             b.root = Some(root);
         }
         let pending = self.var_cell_preview;
+        // The kits with an update waiting, for their headers' *v8 → v9* (G22).
+        let waiting: Vec<(String, u32, u32)> = self
+            .kits_waiting(false)
+            .into_iter()
+            .map(|w| (w.kit.id, w.held, w.kit.version))
+            .collect();
         let doc = &self.session.doc;
         let table = doc.variables();
         let modes: Vec<Mode> = table.modes().to_vec();
@@ -465,7 +473,16 @@ impl OndinApp {
                                                     &mut acts, pending,
                                                 ),
                                                 Line::Kit(k) => kit_row(
-                                                    ui, doc, k, &modes, &b, &mut acts,
+                                                    ui,
+                                                    doc,
+                                                    k,
+                                                    &modes,
+                                                    waiting
+                                                        .iter()
+                                                        .find(|w| w.0 == *k)
+                                                        .map(|w| (w.1, w.2)),
+                                                    &b,
+                                                    &mut acts,
                                                 ),
                                             }
                                         }
@@ -954,6 +971,7 @@ impl OndinApp {
                     b.menu = Some((menu, at));
                 }
             }
+            Act::KitUpdates => self.open_kit_updates(),
             Act::Select(ids) => {
                 if !ids.is_empty() {
                     self.session.selection.set(ids);
@@ -1243,7 +1261,7 @@ fn value_text(v: Value) -> String {
     }
 }
 
-fn number_text(x: f64) -> String {
+pub(crate) fn number_text(x: f64) -> String {
     let r = (x * 100.0).round() / 100.0;
     if r.fract() == 0.0 {
         format!("{r:.0}")
@@ -2219,11 +2237,17 @@ fn kit_columns(modes: &[Mode]) -> Vec<Option<ModeId>> {
 /// mode column **the per-kit mapping** — the kit mode that document mode reads,
 /// *Day →* under *Light*. A click on one opens its menu: the kit's modes, and
 /// *Match by name*.
+///
+/// While an update of the kit waits (`waiting`, held and published versions)
+/// the name reads on *· v8 → v9* (G22, D1038's *Kit updates*), a click opening
+/// the update summary; its rows keep showing what the document holds — the
+/// summary is the one place that says what v9 changes.
 fn kit_row(
     ui: &mut egui::Ui,
     doc: &Document,
     kit: &str,
     modes: &[Mode],
+    waiting: Option<(u32, u32)>,
     b: &Browser,
     acts: &mut Vec<Act>,
 ) {
@@ -2246,13 +2270,47 @@ fn kit_row(
         theme::icon_font(12.0),
         theme::text::DIM,
     );
-    p.text(
+    let named = p.text(
         egui::pos2(g.right() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         super::binding::kit_name(doc, kit),
         egui::FontId::proportional(11.5),
         theme::text::STRONG,
     );
+    if let Some((held, next)) = waiting {
+        let at = egui::pos2(named.right() + 5.0, rect.center().y);
+        let galley = ui.ctx().fonts_mut(|f| {
+            f.layout_no_wrap(
+                format!("· v{held} → v{next}"),
+                egui::FontId::proportional(10.5),
+                theme::text::DIM,
+            )
+        });
+        let hit = egui::Rect::from_min_size(
+            at - egui::vec2(2.0, galley.size().y / 2.0 + 2.0),
+            galley.size() + egui::vec2(4.0, 4.0),
+        )
+        .intersect(egui::Rect::from_x_y_ranges(
+            rect.left()..=rect.left() + NAME_W,
+            rect.y_range(),
+        ));
+        let resp = ui
+            .interact(hit, ui.id().with(("kit-update", kit)), egui::Sense::click())
+            .on_hover_text(format!("v{next} is waiting — click for what it changes"));
+        let p = ui.painter().with_clip_rect(hit);
+        p.galley(
+            egui::pos2(at.x, at.y - galley.size().y / 2.0),
+            galley,
+            if resp.hovered() {
+                theme::text::STRONG
+            } else {
+                theme::text::DIM
+            },
+        );
+        if resp.clicked() {
+            acts.push(Act::KitUpdates);
+        }
+    }
     let clip = egui::Rect::from_x_y_ranges(rect.left() + NAME_W..=rect.right(), rect.y_range());
     for (i, col) in kit_columns(modes).into_iter().enumerate() {
         let x = mode_x(rect.left(), i, b.scroll_x);
@@ -2562,7 +2620,7 @@ fn edit_field(
 }
 
 /// A 12×12 colour chip, the checkerboard under a translucent one (G1).
-fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
+pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
     let painter = p.with_clip_rect(rect.intersect(p.clip_rect()));
     ui::paint_checkerboard(&painter, rect, 3.0);
     painter.rect_filled(rect, 0, ui::color_to_egui(c));

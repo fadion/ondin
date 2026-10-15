@@ -267,6 +267,12 @@ impl OndinApp {
         let ready = waiting
             .iter()
             .all(|w| !matches!(self.kit_shelf.load(&w.kit.id), Some(Load::Pending)));
+        // What accepting would change (G21) — once every publish is loaded.
+        let summary = if ready {
+            self.update_summary(&waiting)
+        } else {
+            None
+        };
         self.dropdown(&ctx, "kit-updates", anchor, POP_W, &resp, |app, ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
@@ -280,10 +286,27 @@ impl OndinApp {
             );
             ui.add_space(4.0);
             for w in &waiting {
-                waiting_row(ui, w);
+                let part = summary
+                    .as_ref()
+                    .and_then(|s| s.kits.iter().find(|k| k.kit == w.kit.id));
+                waiting_row(ui, w, part);
             }
             let instances: usize = waiting.iter().map(|w| w.instances).sum();
             ui.add_space(4.0);
+            // The layers the kits' removals detach keep their values (G21).
+            if let Some((n, one)) = summary.as_ref().map(|s| s.detaching())
+                && n > 0
+            {
+                let layers = format!("{n} layer{}", if n == 1 { "" } else { "s" });
+                ui.label(
+                    egui::RichText::new(match one {
+                        Some(name) => format!("{layers} using {name} keep its values."),
+                        None => format!("{layers} using what the kits removed keep their values."),
+                    })
+                    .size(11.0)
+                    .color(theme::text::DIM),
+                );
+            }
             ui.label(
                 egui::RichText::new(format!(
                     "Changes {instances} instance{}. Your overrides stay.",
@@ -315,6 +338,57 @@ impl OndinApp {
                 }
             });
         });
+    }
+
+    /// Open the update popover from elsewhere than its pill — a kit header's
+    /// *v8 → v9* in the browser (G22) — asking the shelf for the publishes its
+    /// summary and *Accept all* read, as the pill's click does.
+    pub(crate) fn open_kit_updates(&mut self) {
+        if self.open_menu == TopMenu::KitUpdates {
+            return;
+        }
+        for w in &self.kits_waiting(false) {
+            self.kit_shelf.ask(&w.kit);
+        }
+        self.toggle_menu(TopMenu::KitUpdates);
+    }
+
+    /// What accepting the `waiting` kits would change (G21), from a dry run of
+    /// `kit::update_all` over the shelf's publishes — kept until the document
+    /// or a waiting version moves. `None` while a publish is not loaded, or
+    /// when the dry run fails (the accept then says why).
+    fn update_summary(&mut self, waiting: &[Waiting]) -> Option<super::summary::Summary> {
+        let key: super::summary::Key = (
+            self.session.revision(),
+            waiting
+                .iter()
+                .map(|w| (w.kit.id.clone(), w.kit.version))
+                .collect(),
+        );
+        if let Some((k, s)) = &self.kit_summary
+            && *k == key
+        {
+            return s.clone();
+        }
+        let mut loaded = Vec::new();
+        for w in waiting {
+            loaded.push((
+                w.kit.id.clone(),
+                w.kit.version,
+                self.kit_shelf.current(&w.kit)?,
+            ));
+        }
+        let args: Vec<(&str, u32, &ondin_core::kit::Published)> = loaded
+            .iter()
+            .map(|(k, v, p)| (k.as_str(), *v, p.as_ref()))
+            .collect();
+        // The dry run mints from the session's ids: ids are never reused, so
+        // the ones it spends are only skipped.
+        let s = ondin_core::kit::update_all(&self.session.doc, &mut self.session.ids, &args)
+            .ok()
+            .map(|u| super::summary::summary(&self.session.doc, &u));
+        self.kit_summary = Some((key, s.clone()));
+        s
     }
 
     /// *Later* (5C): remember the versions waiting now, so the pill shrinks and
@@ -564,8 +638,10 @@ pub(crate) fn stack_local(
 }
 
 /// One kit in the popover: its name and *v8 → v9*, how many components, and
-/// its publish note (5A).
-fn waiting_row(ui: &mut egui::Ui, w: &Waiting) {
+/// its publish note (5A) — and, once the dry run has read it, what the update
+/// changes (G21): the headline's counts and the *Changed*, *Added* and
+/// *Removed* rows (`kits::summary`).
+fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::KitSummary>) {
     ui.horizontal(|ui| {
         ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::MUTED));
         ui.label(
@@ -581,15 +657,16 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting) {
             );
         });
     });
-    ui.label(
-        egui::RichText::new(format!(
+    let line = match part.map(super::summary::headline) {
+        Some(h) if !h.is_empty() => h,
+        Some(_) => "No component you use changes".to_string(),
+        None => format!(
             "{} component{}",
             w.mains,
             if w.mains == 1 { "" } else { "s" }
-        ))
-        .size(11.0)
-        .color(theme::text::DIM),
-    );
+        ),
+    };
+    ui.label(egui::RichText::new(line).size(11.0).color(theme::text::DIM));
     if let Some(note) = &w.kit.note {
         ui.label(
             egui::RichText::new(format!("“{note}”"))
@@ -597,6 +674,9 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting) {
                 .italics()
                 .color(theme::text::MUTED),
         );
+    }
+    if let Some(k) = part {
+        super::summary::draw(ui, k);
     }
 }
 
@@ -1769,5 +1849,22 @@ mod tests {
             "nothing left"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// *Make local*'s status tail (§15 D1066): the forks counted, and a frame
+    /// set to a kit's mode named — empty when it forked nothing.
+    #[test]
+    fn make_locals_status_says_what_it_forked() {
+        use crate::kits::card::forked_note;
+        assert_eq!(forked_note((0, 0), 0), "");
+        assert_eq!(
+            forked_note((2, 1), 0),
+            "; 2 variables and 1 style copied from the kit as this document's own"
+        );
+        assert_eq!(
+            forked_note((1, 0), 3),
+            "; 1 variable copied from the kit as this document's own; 3 frames set to a \
+             kit's mode may draw differently"
+        );
     }
 }

@@ -13,6 +13,7 @@ pub(crate) mod card;
 pub(crate) mod index;
 pub(crate) mod picker;
 pub(crate) mod publish;
+pub(crate) mod summary;
 pub(crate) mod updates;
 pub(crate) mod used;
 pub(crate) mod users;

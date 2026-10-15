@@ -86,6 +86,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         spacing_vars,
         visible_var,
         size_vars,
+        text_vars,
         styles,
     } = node;
     let id = *id;
@@ -172,6 +173,13 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetSizeVars {
             id,
             vars: *size_vars,
+        },
+        // And a content's or a family's (§15 D1069), stated so the commit's
+        // `keep_text_bindings` leaves it as written beside the text `kind_ops`
+        // writes below.
+        O::SetTextVars {
+            id,
+            vars: *text_vars,
         },
         // And the cards' styles (§15 D1062, D1038 F9): a copy on another style, or
         // detached from its main's, is an override, and *Reset fill* puts the

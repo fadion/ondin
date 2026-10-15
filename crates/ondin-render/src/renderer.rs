@@ -1210,6 +1210,18 @@ impl RenderOverrides {
             return None;
         }
         patch(&mut kind);
+        // **A bound family written its empty literal draws its variable** (§15
+        // D1069), as the commit will leave it — `build::keep_text_bindings`
+        // keeps a family the op writes empty. Every row of the Type card writes
+        // the whole style with the family as stored, so without this a scrub of
+        // a family-bound text's size previewed it in no family at all. Not the
+        // content: an empty one written is a text emptied, and detaches.
+        if let (Some(n), NodeKind::Text { style, .. }) = (doc.get(id), &kind) {
+            let family = n.text_vars()[1].filter(|_| style.font_family.is_empty());
+            if family.is_some() {
+                kind = doc.text_drawn_in(doc.variables(), id, &kind, [None, family]);
+            }
+        }
         self.set_kind(doc, res, id, kind);
         self.moved.insert(id);
         Some(())
@@ -1646,7 +1658,7 @@ impl RenderOverrides {
             // `SetVariableCell` after it finds literals and moves nothing — the
             // popup writes one. A cell or mode not in the table refuses.
             Operation::SetVariableCell { id: var, mode, cell } => {
-                let t = doc.variables().with_cell(*var, *mode, *cell)?;
+                let t = doc.variables().with_cell(*var, *mode, cell.clone())?;
                 let bound: Vec<NodeId> = doc.bound_nodes().collect();
                 for n in bound {
                     if self.ghost(n).is_some() {
@@ -1684,6 +1696,16 @@ impl RenderOverrides {
                         && let Some(base) = self.current_kind(doc, n)
                     {
                         let drawn = doc.size_drawn_in(&t, n, &base, node.size_vars());
+                        self.set_kind(doc, res, n, drawn);
+                        self.mark_moved(doc, n);
+                    }
+                    // A bound content or family the same way (§15 D1069) — a
+                    // string cell typed in the browser re-sets the text live.
+                    if let Some(node) = doc.get(n)
+                        && node.text_vars().iter().any(Option::is_some)
+                        && let Some(base) = self.current_kind(doc, n)
+                    {
+                        let drawn = doc.text_drawn_in(&t, n, &base, node.text_vars());
                         self.set_kind(doc, res, n, drawn);
                         self.mark_moved(doc, n);
                     }
@@ -1778,6 +1800,20 @@ impl RenderOverrides {
                 let base = self.current_kind(doc, *id)?;
                 base.box_size()?;
                 let drawn = doc.size_drawn_in(doc.variables(), *id, &base, *vars);
+                self.set_kind(doc, res, *id, drawn);
+                self.moved.insert(*id);
+            }
+            // **A content's or a family's binding previews as the string it
+            // will draw** (§15 D1069) — the `--` list's highlight on the Content
+            // or the family row, as `SetSizeVars` above. The bind verb's
+            // `SetText` and `SetTextStyle` come first and leave the fields
+            // empty; a field `vars` leaves unbound keeps what they left.
+            Operation::SetTextVars { id, vars } => {
+                let base = self.current_kind(doc, *id)?;
+                if !matches!(base, NodeKind::Text { .. }) {
+                    return None;
+                }
+                let drawn = doc.text_drawn_in(doc.variables(), *id, &base, *vars);
                 self.set_kind(doc, res, *id, drawn);
                 self.moved.insert(*id);
             }
@@ -2117,9 +2153,11 @@ fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode
 /// A captured node's kind at its drawn size: a bound width or height resolved
 /// through `doc` in the default mode, [`ghost_shown`]'s reading (§15 D1061). The
 /// literal is 0 there, and an Alt-drag copy of a bound layer previewed with no
-/// size.
+/// size. And a bound content or family the same way (§15 D1069), whose literal
+/// is empty.
 fn ghost_kind(doc: &Document, n: &ondin_core::Node) -> NodeKind {
-    doc.size_drawn_in(doc.variables(), n.id(), n.kind(), n.size_vars())
+    let sized = doc.size_drawn_in(doc.variables(), n.id(), n.kind(), n.size_vars());
+    doc.text_drawn_in(doc.variables(), n.id(), &sized, n.text_vars())
 }
 
 /// Whether a captured node shows: its binding resolved through `doc` — in the
@@ -2180,16 +2218,19 @@ fn build_ghost(
         }
         _ => None,
     };
+    let kind = ghost_kind(doc, node);
     Some(GhostNode {
         id: node.id(),
         transform: node.transform(),
-        kind: ghost_kind(doc, node),
-        paint: node.paint().clone(),
-        effects: node.effects().to_vec(),
         // A captured subtree carries its own text, but not the *shaped* layout —
         // `Resolved` holds those and has never seen this node. Shape it once
         // here rather than per frame: a ghost's text is fixed for the gesture.
-        text: shaped(node.kind()),
+        // Shaped from the kind it draws, a bound content's string and not its
+        // empty literal (§15 D1069).
+        text: shaped(&kind),
+        kind,
+        paint: node.paint().clone(),
+        effects: node.effects().to_vec(),
         path,
         opacity: node.opacity(),
         visible: ghost_shown(doc, node),

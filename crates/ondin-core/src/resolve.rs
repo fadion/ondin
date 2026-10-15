@@ -515,13 +515,17 @@ fn place_node(
 /// places from it; what is left is a bound layer neither laid nor pinned, whose
 /// `Used` would otherwise be absent and read as the stored kind. Corners follow
 /// ([`with_bound_corners`] keeps the size of the kind it is handed).
+///
+/// **And a bound text's content and family** (§15 D1069), for the same reason:
+/// `Document::resolved_kind` substitutes them, and a text neither laid nor
+/// pinned would otherwise be shaped from its empty literal.
 fn with_bound_size(doc: &Document, id: NodeId, used: Option<Used>) -> Option<Used> {
     let Some(node) = doc.get(id) else {
         return used;
     };
-    if node.size_vars().iter().all(Option::is_none)
-        || used.as_ref().is_some_and(|u| u.kind.is_some())
-    {
+    let bound = node.size_vars().iter().any(Option::is_some)
+        || node.text_vars().iter().any(Option::is_some);
+    if !bound || used.as_ref().is_some_and(|u| u.kind.is_some()) {
         return used;
     }
     let kind = doc.resolved_kind(id)?.into_owned();
@@ -883,6 +887,15 @@ impl Resolved {
         for id in &dirty.0 {
             memo.remove(id);
         }
+        // 🚨 **Except a bound text's** (§15 D1069): its content and family are
+        // its string variables' in the mode in force, and a frame's `SetMode`, or
+        // a reparent of an ancestor into another mode, changes them without
+        // dirtying it. Few texts are bound, so their entries go on every update
+        // rather than tracing which edit reached which.
+        memo.retain(|id, _| {
+            doc.get(*id)
+                .is_none_or(|n| n.text_vars().iter().all(Option::is_none))
+        });
         let memo = std::cell::RefCell::new(memo);
         for id in &ordered {
             let fresh = {

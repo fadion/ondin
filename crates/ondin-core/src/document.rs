@@ -150,6 +150,7 @@ impl Document {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            text_vars: Default::default(),
             styles: Default::default(),
         };
         let mut nodes = FxHashMap::default();
@@ -678,17 +679,63 @@ impl Document {
     /// with, and what `Resolved`'s used kind starts from**, so a bound size is
     /// laid out and drawn at its variable's number and never at the 0 its
     /// literal holds (§15 D1061).
+    ///
+    /// **And a bound text's content and family** (§15 D1069,
+    /// [`Self::text_drawn_in`]), so a text reads its string variable wherever it
+    /// is shaped, drawn or exported, and never the empty literal.
     pub fn resolved_kind(&self, id: NodeId) -> Option<std::borrow::Cow<'_, NodeKind>> {
         let n = self.nodes.get(&id)?;
-        if n.size_vars.iter().all(Option::is_none) {
+        let sized = n.size_vars.iter().any(Option::is_some);
+        let texted = n.text_vars.iter().any(Option::is_some);
+        if !sized && !texted {
             return Some(std::borrow::Cow::Borrowed(&n.kind));
         }
-        Some(std::borrow::Cow::Owned(self.size_drawn_in(
-            &self.variables,
-            id,
-            &n.kind,
-            n.size_vars,
-        )))
+        let mut kind = match sized {
+            true => self.size_drawn_in(&self.variables, id, &n.kind, n.size_vars),
+            false => n.kind.clone(),
+        };
+        if texted {
+            kind = self.text_drawn_in(&self.variables, id, &kind, n.text_vars);
+        }
+        Some(std::borrow::Cow::Owned(kind))
+    }
+
+    /// `kind` with the content and family `vars` binds read from table `t`, in
+    /// the mode in force at `id` (§15 D1069) — each its variable's string, the
+    /// other field as it is; `kind` unchanged when nothing is bound or it is no
+    /// `Text`. `vars` is named rather than read off the node so a preview can
+    /// resolve a binding it has not committed, as [`Self::size_drawn_in`]'s is.
+    ///
+    /// The bound content's spans are not touched: the binding verb cleared them
+    /// and `crate::build::keep_text_bindings` detaches any edit that writes
+    /// some, so there are none to index the string.
+    pub fn text_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        kind: &NodeKind,
+        vars: crate::variable::TextVars,
+    ) -> NodeKind {
+        let mut out = kind.clone();
+        if vars.iter().all(Option::is_none) {
+            return out;
+        }
+        let NodeKind::Text { content, style, .. } = &mut out else {
+            return out;
+        };
+        let read = |v: Option<crate::variable::VarId>| {
+            v.and_then(|v| match self.resolve_var_in(t, id, v) {
+                Some(crate::variable::Value::String(s)) => Some(s),
+                _ => None,
+            })
+        };
+        if let Some(s) = read(vars[0]) {
+            *content = s;
+        }
+        if let Some(s) = read(vars[1]) {
+            style.font_family = s;
+        }
+        out
     }
 
     /// Every node whose fields read a variable — what an edit to the table
@@ -1170,7 +1217,7 @@ impl Document {
                 Ok(Operation::SetVariableName { id: *id, name: old })
             }
             Operation::SetVariableCell { id, mode, cell } => {
-                self.op_set_variable_cell(*id, *mode, *cell, dirty)
+                self.op_set_variable_cell(*id, *mode, cell.clone(), dirty)
             }
             Operation::AddMode { mode, index, cells } => {
                 self.op_add_mode(mode, *index, cells, dirty)
@@ -1218,6 +1265,12 @@ impl Document {
                 let old = std::mem::replace(&mut node.size_vars, *vars);
                 dirty.0.insert(*id);
                 Ok(Operation::SetSizeVars { id: *id, vars: old })
+            }
+            Operation::SetTextVars { id, vars } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.text_vars, *vars);
+                dirty.0.insert(*id);
+                Ok(Operation::SetTextVars { id: *id, vars: old })
             }
             // ── The styles (§15 D1062) ── document-level, like the variables:
             // a style's values are written onto its users by ops of their own
@@ -1396,7 +1449,7 @@ impl Document {
                 .get_mut(var)
                 .ok_or(OpError::NoSuchVariable(*var))?
                 .cells
-                .insert(mode.id, *cell);
+                .insert(mode.id, cell.clone());
         }
         self.variables.modes.insert(index, mode.clone());
         dirty.0.extend(self.bound_nodes());
@@ -1555,6 +1608,7 @@ impl Document {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            text_vars: Default::default(),
             styles: Default::default(),
         };
         self.nodes.insert(id, node);
@@ -2988,6 +3042,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             spacing_vars: n.spacing_vars,
             visible_var: n.visible_var,
             size_vars: n.size_vars,
+            text_vars: n.text_vars,
             // And the styles its source's cards are bound to, the same way: ids
             // into the document's table (§15 D1062).
             styles: n.styles,
@@ -3217,6 +3272,7 @@ mod tests {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            text_vars: Default::default(),
             styles: Default::default(),
         }
     }

@@ -76,24 +76,29 @@ pub struct Mode {
     pub name: String,
 }
 
-/// What a variable holds. Build step 1's two, and step 2's boolean, bound to a
-/// layer's visibility (D1038 (d), §15 D1059); string arrives with the fields it
-/// binds to (roadmap step 6).
+/// What a variable holds. Build step 1's two, step 2's boolean, bound to a
+/// layer's visibility (D1038 (d), §15 D1059), and step 6's string, bound to a
+/// text's content and its family (§15 D1069).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VarKind {
     Color,
     Number,
     Boolean,
+    String,
 }
 
 /// One variable's value in one mode.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// Not `Copy` since the string kind (§15 D1069): a cell is cloned where it was
+/// copied.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Cell {
     Color(Color),
     Number(f64),
     Boolean(bool),
+    String(String),
     /// Another variable of the same kind, read in the same mode (§5.3f).
     Alias(VarId),
 }
@@ -106,6 +111,7 @@ impl Cell {
             Cell::Color(_) => Some(VarKind::Color),
             Cell::Number(_) => Some(VarKind::Number),
             Cell::Boolean(_) => Some(VarKind::Boolean),
+            Cell::String(_) => Some(VarKind::String),
             Cell::Alias(_) => None,
         }
     }
@@ -114,17 +120,28 @@ impl Cell {
         match self {
             Cell::Color(c) => c.components.iter().all(|x| x.is_finite()),
             Cell::Number(n) => n.is_finite(),
-            Cell::Boolean(_) | Cell::Alias(_) => true,
+            Cell::Boolean(_) | Cell::String(_) | Cell::Alias(_) => true,
         }
     }
 }
 
 /// A resolved value: what a cell comes to once its aliases are followed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Color(Color),
     Number(f64),
     Boolean(bool),
+    String(String),
+}
+
+impl Value {
+    /// The string, `None` for any other kind.
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 impl From<Value> for Cell {
@@ -134,6 +151,7 @@ impl From<Value> for Cell {
             Value::Color(c) => Cell::Color(c),
             Value::Number(n) => Cell::Number(n),
             Value::Boolean(b) => Cell::Boolean(b),
+            Value::String(s) => Cell::String(s),
         }
     }
 }
@@ -370,10 +388,38 @@ impl Variables {
                 Cell::Color(c) => return Some(Value::Color(*c)),
                 Cell::Number(n) => return Some(Value::Number(*n)),
                 Cell::Boolean(b) => return Some(Value::Boolean(*b)),
+                Cell::String(s) => return Some(Value::String(s.clone())),
                 Cell::Alias(next) => at = *next,
             }
         }
         None
+    }
+
+    /// Every value `var` takes — in each of the document's modes and each of
+    /// its kits', and in the default — its aliases followed, each once. What a
+    /// bound family asks the font service to load (§15 D1069): a frame set to
+    /// another mode draws another family, and it must be there before it is
+    /// switched to.
+    pub fn every_value(&self, var: VarId) -> Vec<Value> {
+        let modes = self
+            .modes
+            .iter()
+            .map(|m| Some(m.id))
+            .chain(
+                self.kits
+                    .values()
+                    .flat_map(|k| k.modes.iter().map(|m| Some(m.id))),
+            )
+            .chain(std::iter::once(None));
+        let mut out: Vec<Value> = Vec::new();
+        for m in modes {
+            if let Some(v) = self.resolve_opt(var, m)
+                && !out.contains(&v)
+            {
+                out.push(v);
+            }
+        }
+        out
     }
 
     /// This table with `var`'s cell in `mode` set to `cell` — what a previewed
@@ -597,11 +643,32 @@ pub type SpacingVars = [Option<VarId>; 6];
 /// is detached (`crate::build::keep_size_bindings`).
 pub type SizeVars = [Option<VarId>; 2];
 
+/// A text layer's content and family bindings, in that order (§15 D1069) —
+/// string variables, D1038 (d)'s two fields.
+///
+/// **On the node beside the kind, as [`SizeVars`] sits beside the size**: a
+/// bound field's literal is written empty by the verb that binds it
+/// (`crate::build::bind_text_ops`) — the content with **no spans and no
+/// paragraph spans**, since a byte range cannot index a string whose length
+/// changes with the mode, and the family with no family spans over it — so a
+/// main and a copy bound alike compare equal, and is never drawn: every reader
+/// that shapes, draws or exports the text reads the kind through
+/// [`crate::Document::resolved_kind`]. Only a `Text` binds.
+///
+/// **The content binding is the text, whole**: an edit of the text — on the
+/// canvas, through a component's text property, or a range styled — detaches it
+/// to what was written (`crate::build::keep_text_bindings`). **The family
+/// binding is the node's default**, as a text style's family is (§15 D1067): a
+/// run given a family of its own keeps it, and applying a text style, which
+/// holds a plain family, detaches it.
+pub type TextVars = [Option<VarId>; 2];
+
 /// `node` — a node of `doc`, or a copy of one still carrying its id — with every
 /// binding **detached to the value it draws** in `doc` (D1038's detach): a bound
 /// paint becomes a solid of its variable's colour times its `%`, a bound corner,
 /// gap or padding its number (§15 D1058), a bound visibility what it shows (§15
-/// D1059), and a frame's mode is dropped.
+/// D1059), a bound content or family its string (§15 D1069), and a frame's mode
+/// is dropped.
 ///
 /// For a node leaving the document whose table it reads, into one that has none
 /// of it: a paste into another document with no variable of the name. (A kit's
@@ -630,6 +697,8 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
     node.spacing_vars = Default::default();
     node.kind = doc.size_drawn_in(doc.variables(), id, &node.kind, node.size_vars);
     node.size_vars = Default::default();
+    node.kind = doc.text_drawn_in(doc.variables(), id, &node.kind, node.text_vars);
+    node.text_vars = Default::default();
     if node.visible_var.is_some() {
         node.visible = doc.shown(id);
         node.visible_var = None;
@@ -700,6 +769,7 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .chain(n.corner_vars.iter().flatten().copied())
             .chain(n.spacing_vars.iter().flatten().copied())
             .chain(n.size_vars.iter().flatten().copied())
+            .chain(n.text_vars.iter().flatten().copied())
             .chain(n.visible_var);
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
@@ -912,6 +982,33 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
                 n.size_vars = vars;
             }
+            // A content's or a family's binding the same way, its fallback the
+            // twin's drawn string (§15 D1069).
+            if n.text_vars.iter().any(Option::is_some) {
+                let fallback = twin.and_then(|t| match &t.kind {
+                    crate::NodeKind::Text { content, style, .. } => {
+                        Some((content.clone(), style.font_family.clone()))
+                    }
+                    _ => None,
+                });
+                let mut vars = n.text_vars;
+                if let crate::NodeKind::Text { content, style, .. } = &mut n.kind {
+                    for (k, var) in vars.iter_mut().enumerate() {
+                        if let Some(v) = *var {
+                            *var = rebind(v);
+                            if var.is_none()
+                                && let Some((c, f)) = &fallback
+                            {
+                                match k {
+                                    0 => *content = c.clone(),
+                                    _ => style.font_family = f.clone(),
+                                }
+                            }
+                        }
+                    }
+                }
+                n.text_vars = vars;
+            }
             // A visibility's binding the same way, its fallback whether the twin
             // was shown (§15 D1059).
             if let Some(v) = n.visible_var {
@@ -971,6 +1068,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
         || n.size_vars.iter().any(|v| hit(*v))
+        || n.text_vars.iter().any(|v| hit(*v))
         || hit(n.visible_var)
 }
 
@@ -1095,6 +1193,10 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             });
             ops.push(O::SetSizeVars { id, vars: kept });
         }
+        if n.text_vars.iter().flatten().any(|v| vars.contains(v)) {
+            let which = n.text_vars.map(|v| v.is_some_and(|v| vars.contains(&v)));
+            ops.extend(crate::build::detach_text_ops_in(doc, t, id, which));
+        }
         if n.visible_var.is_some_and(|v| vars.contains(&v)) {
             ops.push(O::SetVisible {
                 id,
@@ -1190,7 +1292,7 @@ pub fn copy_mode_ops(
     t.mode(from)?;
     let cells = t
         .iter()
-        .filter_map(|v| v.cells.get(&from).map(|c| (v.id, *c)))
+        .filter_map(|v| v.cells.get(&from).map(|c| (v.id, c.clone())))
         .collect();
     Some(crate::Operation::AddMode {
         mode: Mode {
@@ -1400,6 +1502,7 @@ pub(crate) fn check<'a>(
                 .chain(n.corner_vars.iter().flatten().copied())
                 .chain(n.spacing_vars.iter().flatten().copied())
                 .chain(n.size_vars.iter().flatten().copied())
+                .chain(n.text_vars.iter().flatten().copied())
                 .chain(n.visible_var)
                 .any(own);
             if reads_own || n.mode.is_some_and(|m| t.mode(m).is_some()) {
@@ -1447,6 +1550,16 @@ pub(crate) fn check<'a>(
         }
         if n.visible_var
             .is_some_and(|v| t.kind_of(v) != Some(VarKind::Boolean))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
+        // A content or a family binds a string, and only on a text (§15 D1069).
+        if n.text_vars.iter().any(Option::is_some)
+            && (!matches!(n.kind, crate::NodeKind::Text { .. })
+                || n.text_vars
+                    .iter()
+                    .flatten()
+                    .any(|v| t.kind_of(*v) != Some(VarKind::String)))
         {
             return Err(VarRule::BadBinding(n.id));
         }

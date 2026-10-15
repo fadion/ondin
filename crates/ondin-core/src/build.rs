@@ -4078,6 +4078,288 @@ pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     tx
 }
 
+/// Bind text `id`'s content and family to `vars` — `None` leaving a field as it
+/// is (§15 D1069), [`bind_size_ops`]' shape: a bound field's literal is written
+/// **empty**, so a main and its copy bound to one variable compare equal, and the
+/// literal is never drawn while bound.
+///
+/// **Binding the content clears the text's spans and paragraph spans** — a
+/// byte range cannot index a string whose length changes with the mode — and
+/// binding the family clears the runs given a family of their own, so the text
+/// draws its variable whole. A family is **not bound under a text style**, which
+/// holds a plain family (§15 D1067): the Type card's family row is the style's
+/// there. Empty for a layer that is no text, or when nothing would change.
+pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let NodeKind::Text {
+        content,
+        style,
+        spans,
+        para_spans,
+        ..
+    } = node.kind()
+    else {
+        return Vec::new();
+    };
+    let mut next = node.text_vars();
+    if vars[0].is_some() {
+        next[0] = vars[0];
+    }
+    if vars[1].is_some() && node.styles().text.is_none() {
+        next[1] = vars[1];
+    }
+    if next == node.text_vars() {
+        return Vec::new();
+    }
+    let mut ops = Vec::new();
+    let mut style2 = (**style).clone();
+    if next[1].is_some() {
+        style2.font_family.clear();
+    }
+    let mut spans2 = spans.clone();
+    if next[0].is_some() {
+        spans2 = Default::default();
+    } else if next[1].is_some() {
+        spans2.clear(
+            0..content.len(),
+            crate::typography::CharAttrKind::Family,
+            &style2,
+        );
+    }
+    if style2 != **style || spans2 != *spans {
+        ops.push(Operation::SetTextStyle {
+            id,
+            style: style2,
+            spans: Some(spans2.clone()),
+        });
+    }
+    if next[0].is_some() && (!content.is_empty() || !spans2.is_empty() || !para_spans.is_empty()) {
+        ops.push(Operation::SetText {
+            id,
+            content: String::new(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        });
+    }
+    ops.push(Operation::SetTextVars { id, vars: next });
+    ops
+}
+
+/// Detach the fields of text `id` that `which` names to the strings they are
+/// drawn with (D1038's detach, §15 D1069): each literal becomes its variable's
+/// string and the binding goes, the other field as it is. Empty when neither is
+/// bound.
+pub fn detach_text_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Operation> {
+    detach_text_ops_in(doc, doc.variables(), id, which)
+}
+
+/// [`detach_text_ops`] against table `t` — the one a variable's delete detaches
+/// against (`crate::variable::remove_ops`), the committed document's own.
+pub fn detach_text_ops_in(
+    doc: &Document,
+    t: &crate::Variables,
+    id: NodeId,
+    which: [bool; 2],
+) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut vars = node.text_vars();
+    if !(0..2).any(|k| which[k] && vars[k].is_some()) {
+        return Vec::new();
+    }
+    let NodeKind::Text {
+        style,
+        spans,
+        para_spans,
+        ..
+    } = node.kind()
+    else {
+        return Vec::new();
+    };
+    let NodeKind::Text {
+        content: drawn,
+        style: drawn_style,
+        ..
+    } = doc.text_drawn_in(t, id, node.kind(), vars)
+    else {
+        return Vec::new();
+    };
+    let mut ops = Vec::new();
+    if which[1] && vars[1].is_some() {
+        let mut s = (**style).clone();
+        s.font_family = drawn_style.font_family;
+        ops.push(Operation::SetTextStyle {
+            id,
+            style: s,
+            spans: Some(spans.clone()),
+        });
+        vars[1] = None;
+    }
+    if which[0] && vars[0].is_some() {
+        ops.push(Operation::SetText {
+            id,
+            content: drawn,
+            spans: spans.clone(),
+            para_spans: para_spans.clone(),
+        });
+        vars[0] = None;
+    }
+    ops.push(Operation::SetTextVars { id, vars });
+    ops
+}
+
+/// **An edit of a bound text detaches what it edits** (D1038 (2), §15 D1069) —
+/// the commit-time half of the binding, so the canvas text session, a
+/// component's text property, the Type card, *Paste properties* and MCP write
+/// the text ops as they did.
+///
+/// - **The content.** A `SetText` writing the drawn string, **with no spans and
+///   no paragraph spans**, stays bound, its literal put back empty — a text
+///   session opened and closed without an edit writes exactly that. 🚨 **One
+///   half, not the corners' two**, D1059's reason for the visibility: the
+///   empty literal is what a text emptied on purpose writes — a session that
+///   deletes every character, a Text property typed empty — and excusing it
+///   brought the variable's string back on release. No writer builds a
+///   `SetText` from the stored literal without stating the binding beside it
+///   (the bind verb, a reset). Anything else detaches to what it wrote: typing changes the string,
+///   and styling a range writes spans that index the string drawn now, so a
+///   `SetTextSpans` or a `SetParagraphSpans` that leaves any is rewritten into a
+///   `SetText` of the drawn string carrying them. A content's binding is the
+///   text whole, as a resize detaches a bound size.
+/// - **The family.** A `SetTextStyle` whose family is the drawn one or the
+///   empty literal stays bound — every row of the Type card but the family
+///   writes the whole style with the family as stored — and any other detaches.
+///   A run given a family of its own is a span, and the default stays bound
+///   under it, as a text style's family does (§15 D1067). **Applying a text
+///   style detaches it**: the style holds a plain family, which
+///   `crate::style::settle` then writes.
+///
+/// The family takes [`keep_corner_bindings`]' two halves, for its reason: a
+/// writer building from the stored kind writes the literal, one building from
+/// what the card shows writes the drawn value — and no edit means *no family*
+/// by an empty one. A transaction that sets a text's
+/// bindings itself — a bind, a detach, a reset — is left to say what it means.
+pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_var: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetTextVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut vars: FxHashMap<NodeId, crate::TextVars> = FxHashMap::default();
+    let bound = |id: NodeId| -> Option<(&Node, String, String)> {
+        if sets_var.contains(&id) {
+            return None;
+        }
+        let node = doc.get(id)?;
+        if node.text_vars().iter().all(Option::is_none) {
+            return None;
+        }
+        match doc.resolved_kind(id)?.into_owned() {
+            NodeKind::Text { content, style, .. } => Some((node, content, style.font_family)),
+            _ => None,
+        }
+    };
+    for op in tx.0.iter_mut() {
+        match op {
+            Operation::SetText {
+                id,
+                content,
+                spans,
+                para_spans,
+            } => {
+                let Some((node, drawn, _)) = bound(*id) else {
+                    continue;
+                };
+                if node.text_vars()[0].is_none() {
+                    continue;
+                }
+                let plain = spans.is_empty() && para_spans.is_empty();
+                if plain && *content == drawn {
+                    content.clear();
+                } else {
+                    vars.entry(*id).or_insert(node.text_vars())[0] = None;
+                }
+            }
+            Operation::SetTextSpans { id, spans } if !spans.is_empty() => {
+                let id = *id;
+                let Some((node, drawn, _)) = bound(id) else {
+                    continue;
+                };
+                if node.text_vars()[0].is_none() {
+                    continue;
+                }
+                let NodeKind::Text { para_spans, .. } = node.kind() else {
+                    continue;
+                };
+                let spans = std::mem::take(spans);
+                *op = Operation::SetText {
+                    id,
+                    content: drawn,
+                    spans,
+                    para_spans: para_spans.clone(),
+                };
+                vars.entry(id).or_insert(node.text_vars())[0] = None;
+            }
+            Operation::SetParagraphSpans { id, spans } if !spans.is_empty() => {
+                let id = *id;
+                let Some((node, drawn, _)) = bound(id) else {
+                    continue;
+                };
+                if node.text_vars()[0].is_none() {
+                    continue;
+                }
+                let NodeKind::Text { spans: chars, .. } = node.kind() else {
+                    continue;
+                };
+                let para_spans = std::mem::take(spans);
+                *op = Operation::SetText {
+                    id,
+                    content: drawn,
+                    spans: chars.clone(),
+                    para_spans,
+                };
+                vars.entry(id).or_insert(node.text_vars())[0] = None;
+            }
+            Operation::SetTextStyle { id, style, .. } => {
+                let Some((node, _, family)) = bound(*id) else {
+                    continue;
+                };
+                if node.text_vars()[1].is_none() {
+                    continue;
+                }
+                if style.font_family.is_empty() || style.font_family == family {
+                    style.font_family.clear();
+                } else {
+                    vars.entry(*id).or_insert(node.text_vars())[1] = None;
+                }
+            }
+            Operation::SetTypeStyle { id, style: Some(_) } => {
+                let Some((node, _, _)) = bound(*id) else {
+                    continue;
+                };
+                if node.text_vars()[1].is_some() {
+                    vars.entry(*id).or_insert(node.text_vars())[1] = None;
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut ids: Vec<NodeId> = vars.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let v = vars[&id];
+        if doc.get(id).is_some_and(|n| n.text_vars() != v) {
+            tx.0.push(Operation::SetTextVars { id, vars: v });
+        }
+    }
+    tx
+}
+
 /// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
 /// of the shared list, written in place so every target keeps its own item ids
 /// (§15 D980).
@@ -6217,9 +6499,12 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     // `keep_size_bindings` runs later, and before it a bound axis written its
     // drawn number or its literal reads 0 off the kind, and one written past
     // its variable still reads the variable — so sizes below are read as
-    // `resolved_kind` of a document that has had that pass.
+    // `resolved_kind` of a document that has had that pass. **And its text
+    // bindings** (§15 D1069): typing into a bound text leaves it bound until
+    // `keep_text_bindings` detaches it, and a text's size is its string's.
     let mut after = doc.clone();
-    if after.apply(&keep_size_bindings(doc, tx.clone())).is_err() {
+    let kept = keep_text_bindings(doc, keep_size_bindings(doc, tx.clone()));
+    if after.apply(&kept).is_err() {
         return tx;
     }
     let mut ids: Vec<(NodeId, (Option<Affine>, bool))> = placed.into_iter().collect();

@@ -12399,7 +12399,9 @@ impl OndinApp {
                 }
                 return match self.session.doc.variables().resolve(var, mode)? {
                     ondin_core::Value::Color(c) => Some(Brush::Solid(c)),
-                    ondin_core::Value::Number(_) | ondin_core::Value::Boolean(_) => None,
+                    ondin_core::Value::Number(_)
+                    | ondin_core::Value::Boolean(_)
+                    | ondin_core::Value::String(_) => None,
                 };
             }
             // The shared colour where the selected guides agree, and the first

@@ -74,6 +74,7 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetSpacingVars { .. }
         | Operation::SetVisibleVar { .. }
         | Operation::SetSizeVars { .. }
+        | Operation::SetTextVars { .. }
         // And a card's style (§15 D1062, D1038 F9): the main's own style is no
         // override, another one or a detach is.
         | Operation::SetFillStyle { .. }
@@ -1076,6 +1077,7 @@ pub(crate) fn untouched(
         && c.spacing_vars == s.spacing_vars
         && c.visible_var == s.visible_var
         && c.size_vars == s.size_vars
+        && c.text_vars == s.text_vars
         && c.styles == s.styles
         // A swap is an override (§15 D983): a swapped copy is never untouched.
         && c.swap.is_none()

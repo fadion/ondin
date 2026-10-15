@@ -233,6 +233,9 @@ pub struct Node {
     /// The number variables this layer's width and height are bound to (§15
     /// D1061), all `None` on a kind with no stored size.
     pub(crate) size_vars: crate::variable::SizeVars,
+    /// The string variables this text's content and family are bound to (§15
+    /// D1069), both `None` on every other kind.
+    pub(crate) text_vars: crate::variable::TextVars,
     /// The styles this layer's fills, strokes and effects are bound to (§5.3f,
     /// §15 D1062) — the lists themselves hold the style's values, written there
     /// by the commit (`crate::style::settle`).
@@ -310,13 +313,19 @@ impl Node {
     pub fn size_vars(&self) -> crate::variable::SizeVars {
         self.size_vars
     }
+    /// The variables this text's content and family are bound to (§15 D1069).
+    /// What it is drawn with is [`crate::Document::resolved_kind`]'s; the kind's
+    /// own content and family are the literals, empty where bound.
+    pub fn text_vars(&self) -> crate::variable::TextVars {
+        self.text_vars
+    }
     /// The styles this layer's cards are bound to (§15 D1062).
     pub fn styles(&self) -> crate::style::StyleRefs {
         self.styles
     }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
-    /// corner, gap, padding, visibility, width or height. What a variable's edit
-    /// dirties (`Document::bound_nodes`).
+    /// corner, gap, padding, visibility, width, height, content or family. What a
+    /// variable's edit dirties (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self.paint.strokes.iter().any(|s| s.brush.is_bound())
@@ -324,6 +333,7 @@ impl Node {
             || self.spacing_vars.iter().any(Option::is_some)
             || self.visible_var.is_some()
             || self.size_vars.iter().any(Option::is_some)
+            || self.text_vars.iter().any(Option::is_some)
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across

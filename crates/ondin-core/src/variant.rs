@@ -1764,8 +1764,10 @@ pub fn field_value(doc: &Document, id: NodeId, kind: PropKind) -> Option<PropVal
         // Shown, a bound visibility resolved: the property is a view over the
         // field as drawn (D1038 (d), §15 D1059).
         PropKind::Boolean => Some(PropValue::Boolean(doc.shown(n.id))),
-        PropKind::Text => match &n.kind {
-            NodeKind::Text { content, .. } => Some(PropValue::Text(content.clone())),
+        // As drawn too: a bound content's string, not its empty literal (§15
+        // D1069).
+        PropKind::Text => match doc.resolved_kind(n.id)?.into_owned() {
+            NodeKind::Text { content, .. } => Some(PropValue::Text(content)),
             _ => None,
         },
         PropKind::Swap => crate::component::main_of(doc, id).map(PropValue::Swap),
@@ -1815,13 +1817,30 @@ pub fn set_property(
                     }
                 }
                 PropValue::Text(t) => {
-                    let Some(NodeKind::Text { content, .. }) = doc.get(c).map(|n| &n.kind) else {
+                    // Against what it draws (§15 D1069): a bound copy already
+                    // drawing `t` keeps its binding, and any other text written
+                    // here detaches it at the commit (`keep_text_bindings`).
+                    let Some(NodeKind::Text { content, .. }) =
+                        doc.resolved_kind(c).map(|k| k.into_owned())
+                    else {
                         continue;
                     };
-                    if content == t {
+                    if content == *t {
                         continue;
                     }
                     let src = crate::reset::source_of(doc, c).and_then(|s| doc.get(s));
+                    // Set back to a **bound** source's string, the copy takes its
+                    // binding again — what a reset would leave, so it reads as no
+                    // override, as the unbound case below takes the spans.
+                    if let Some(s) = src
+                        && let Some(var) = s.text_vars[0]
+                        && let Some(NodeKind::Text { content: drawn, .. }) =
+                            doc.resolved_kind(s.id).map(|k| k.into_owned())
+                        && drawn == *t
+                    {
+                        ops.extend(crate::build::bind_text_ops(doc, c, [Some(var), None]));
+                        continue;
+                    }
                     let op = match src.map(|s| &s.kind) {
                         Some(NodeKind::Text {
                             content: sc,
@@ -1851,19 +1870,35 @@ pub fn set_property(
 
 /// The ops that put a counterpart's property-driven field back to its source's.
 fn property_reset_ops(doc: &Document, c: NodeId, kind: PropKind) -> Vec<Operation> {
+    let own = doc.get(c).map(|n| n.text_vars()).unwrap_or_default();
     crate::reset::overrides(doc, c)
         .into_iter()
         .map(|o| o.reset)
-        .filter(|op| match kind {
+        .filter_map(|op| match kind {
             // The visibility and its binding (§15 D1059): a copy bound apart
             // from its source shows apart with both literals `true`.
             PropKind::Boolean => matches!(
                 op,
                 Operation::SetVisible { .. } | Operation::SetVisibleVar { .. }
-            ),
-            PropKind::Text => matches!(op, Operation::SetText { .. }),
-            PropKind::Swap => matches!(op, Operation::SetSwap { .. }),
-            PropKind::Nested => false,
+            )
+            .then_some(op),
+            // The content and **its** binding (§15 D1069), for the visibility's
+            // reason: a copy detached from a bound source reset by its `SetText`
+            // alone took the source's empty literal and drew nothing. The family's
+            // binding rides in the same op and is the Type card's, so it stays
+            // the copy's own.
+            PropKind::Text => match op {
+                Operation::SetText { .. } => Some(op),
+                Operation::SetTextVars { id, vars } if vars[0] != own[0] => {
+                    Some(Operation::SetTextVars {
+                        id,
+                        vars: [vars[0], own[1]],
+                    })
+                }
+                _ => None,
+            },
+            PropKind::Swap => matches!(op, Operation::SetSwap { .. }).then_some(op),
+            PropKind::Nested => None,
         })
         .collect()
 }

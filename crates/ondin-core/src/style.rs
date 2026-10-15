@@ -615,6 +615,17 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
             if slot == StyleSlot::Text && !matches!(n.kind, crate::NodeKind::Text { .. }) {
                 continue; // `check` refuses it, and says why where `SetTextStyle` would not
             }
+            // 🚨 **A text style's family is plain, and a bound family under it
+            // goes** (§15 D1069). `build::keep_text_bindings` detaches it where
+            // the user applies the style, but a copy receives its main's
+            // `SetTypeStyle` from propagation, after that pass — and kept bound,
+            // it drew its variable over the family written here.
+            if slot == StyleSlot::Text && n.text_vars[1].is_some() {
+                out.push(Operation::SetTextVars {
+                    id: n.id,
+                    vars: [n.text_vars[0], None],
+                });
+            }
             let cur = StyleValue::of(n, slot);
             if cur.same_look(&style.value) {
                 continue;
@@ -737,7 +748,14 @@ pub fn create_ops(
     slot: StyleSlot,
     nodes: &[NodeId],
 ) -> Option<Vec<Operation>> {
-    let value = StyleValue::of(doc.get(from)?, slot);
+    // A bound family is read as drawn (§15 D1069): a text style holds a plain
+    // family, and `from`'s literal is empty. Binding `from` then detaches its
+    // family (`build::keep_text_bindings`), the style's being the same string.
+    let mut source = doc.get(from)?.clone();
+    if slot == StyleSlot::Text && source.text_vars[1].is_some() {
+        source.kind = doc.text_drawn_in(doc.variables(), from, &source.kind, source.text_vars);
+    }
+    let value = StyleValue::of(&source, slot);
     let mut ops = vec![Operation::AddStyle {
         style: Style {
             id,

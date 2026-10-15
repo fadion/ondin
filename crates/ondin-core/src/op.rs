@@ -488,6 +488,13 @@ pub enum Operation {
         id: NodeId,
         vars: crate::variable::SizeVars,
     },
+    /// The string variables a text's content and family are bound to (§15
+    /// D1069). Writes the bindings alone — the verb that binds writes the bound
+    /// field's literal empty beside it (`build::bind_text_ops`).
+    SetTextVars {
+        id: NodeId,
+        vars: crate::variable::TextVars,
+    },
     /// Put a style in the document's table (§15 D1062). Its name must be free in
     /// its slot — `crate::style::check`, after the last op. Inverts to
     /// [`Self::RemoveStyle`], and that back to this carrying the whole style.
@@ -603,6 +610,7 @@ impl Operation {
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
             | Operation::SetSizeVars { id, .. }
+            | Operation::SetTextVars { id, .. }
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
@@ -690,6 +698,7 @@ impl Operation {
             | Operation::SetSpacingVars { id, .. }
             | Operation::SetVisibleVar { id, .. }
             | Operation::SetSizeVars { id, .. }
+            | Operation::SetTextVars { id, .. }
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
@@ -933,7 +942,8 @@ impl Operation {
             | Operation::SetCornerVars { .. }
             | Operation::SetSpacingVars { .. }
             | Operation::SetVisibleVar { .. }
-            | Operation::SetSizeVars { .. } => true,
+            | Operation::SetSizeVars { .. }
+            | Operation::SetTextVars { .. } => true,
         }
     }
 
@@ -1034,6 +1044,7 @@ impl Operation {
                 node(id).is_some_and(|n| n.visible_var() == *var)
             }
             Operation::SetSizeVars { id, vars } => node(id).is_some_and(|n| n.size_vars() == *vars),
+            Operation::SetTextVars { id, vars } => node(id).is_some_and(|n| n.text_vars() == *vars),
 
             // **The index is read the way `apply` writes it** — the child is
             // removed from its parent's list and re-inserted at `index`, so the

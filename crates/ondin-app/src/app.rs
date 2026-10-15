@@ -1352,6 +1352,10 @@ pub struct OndinApp {
     pub(crate) open_menu: TopMenu,
     /// The floating insert picker, while it is open (§5.3e, 3A; §15 D1014).
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
+    /// The revision the bound families were last loaded at (§15 D1069) — a
+    /// bind, a string cell typed, a variable added or a paste can each name a
+    /// family nothing has asked the font service for.
+    bound_fonts_at: Option<u64>,
     /// A picker placement waiting one painted frame (§15 D1030) — here rather
     /// than on the picker, so closing it in the wait keeps the click.
     pub(crate) kit_placing: Option<crate::kits::picker::Placing>,
@@ -2404,6 +2408,7 @@ impl OndinApp {
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
             kit_picker: None,
+            bound_fonts_at: None,
             kit_placing: None,
             kit_shelf: Default::default(),
             kit_summary: None,
@@ -2641,6 +2646,23 @@ impl eframe::App for OndinApp {
         // shaped-text cache** (§5.4a): a longer family list is a repaint, and
         // re-shaping the document when the web catalog landed was work for a
         // change that added no fonts at all.
+        // **A bound family is asked for when the document changes** (§15 D1069):
+        // its literal names nothing, so the open-time walk is not enough — a
+        // bind, a typed string cell or a new mode's column can each name a
+        // family. Gated on the table holding a string at all, so a document
+        // with none pays one table scan per commit and no tree walk.
+        if self.bound_fonts_at != Some(self.session.revision()) {
+            self.bound_fonts_at = Some(self.session.revision());
+            let strings = self
+                .session
+                .doc
+                .variables()
+                .iter()
+                .any(|v| v.kind == ondin_core::VarKind::String);
+            if strings {
+                self.ensure_document_fonts();
+            }
+        }
         let fonts = self.fonts.poll();
         if fonts.fonts_registered {
             // 🚨 **The document's cache goes only when the document names the
@@ -8637,9 +8659,28 @@ impl OndinApp {
                     }
                 }
             }
+            bound_families(&self.session.doc, node, &mut families);
             stack.extend(node.children().iter().copied());
         }
         families
+    }
+}
+
+/// The families a text's bound family can draw (§15 D1069) — its string
+/// variable's value in every mode, lowercased, into `families`. Its literal is
+/// empty and names none; a frame switched to another mode draws another, and
+/// the font has to be loading before then.
+pub(crate) fn bound_families(
+    doc: &ondin_core::Document,
+    node: &ondin_core::Node,
+    families: &mut std::collections::HashSet<String>,
+) {
+    if let Some(var) = node.text_vars()[1] {
+        for v in doc.variables().every_value(var) {
+            if let Some(s) = v.as_str() {
+                families.insert(s.to_lowercase());
+            }
+        }
     }
 }
 

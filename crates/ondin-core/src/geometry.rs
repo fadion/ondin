@@ -1568,6 +1568,7 @@ mod tests {
             spacing_vars: Default::default(),
             visible_var: None,
             size_vars: Default::default(),
+            text_vars: Default::default(),
             styles: Default::default(),
         }
     }

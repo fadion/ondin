@@ -1066,7 +1066,10 @@ fn make_local_forks_the_kits_variables_and_styles() {
         Some((L_ID, k.brand))
     );
     assert_eq!(
-        fork.cells.iter().map(|(m, c)| (*m, *c)).collect::<Vec<_>>(),
+        fork.cells
+            .iter()
+            .map(|(m, c)| (*m, c.clone()))
+            .collect::<Vec<_>>(),
         [
             (modes[0], Cell::Color(WHITE)),
             (modes[1], Cell::Color(NAVY))
@@ -1115,7 +1118,11 @@ fn make_local_in_a_document_without_modes_takes_the_kits() {
     let names: Vec<&str> = t.modes().iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, ["Day", "Night"]);
     let fork = t.local().next().expect("a fork");
-    let cells: Vec<Cell> = t.modes().iter().map(|m| fork.cells[&m.id]).collect();
+    let cells: Vec<Cell> = t
+        .modes()
+        .iter()
+        .map(|m| fork.cells[&m.id].clone())
+        .collect();
     assert_eq!(cells, [Cell::Color(WHITE), Cell::Color(NAVY)]);
     assert_eq!(drawn(&d, first_child(&d, inst)), Brush::Solid(WHITE));
 }

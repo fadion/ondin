@@ -46,6 +46,13 @@ pub(crate) enum FieldKey {
     /// (§15 D1061), on one layer: a selection's W and H are its union box's, which
     /// no variable stands in for.
     Size { id: NodeId, axis: usize },
+    /// A text's content — the Type card's *Content* row (§15 D1069), bound to a
+    /// string variable. Typed: `--` opens the list over it.
+    Content { id: NodeId },
+    /// A text's family — the Type card's family row (§15 D1069), bound to a
+    /// string variable. Not typed: the row is a picker, so the binding is the
+    /// field menu's, as the eye's is.
+    Family { id: NodeId },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -71,15 +78,17 @@ impl FieldKey {
             | FieldKey::Corner { id, .. }
             | FieldKey::Spacing { id, .. }
             | FieldKey::Visible { id }
-            | FieldKey::Size { id, .. } => id,
+            | FieldKey::Size { id, .. }
+            | FieldKey::Content { id }
+            | FieldKey::Family { id } => id,
         }
     }
 
     /// Whether the field is one the keyboard types into — the `--` list's door
     /// and `Backspace`'s, which the field menu names as its accelerators. The eye
-    /// is clicked, never typed (§15 D1059).
+    /// is clicked, never typed (§15 D1059), and the family picked (§15 D1069).
     pub(crate) fn typed(self) -> bool {
-        !matches!(self, FieldKey::Visible { .. })
+        !matches!(self, FieldKey::Visible { .. } | FieldKey::Family { .. })
     }
 
     /// The glyph a number field's badge carries: the corners icon for all four,
@@ -97,6 +106,9 @@ impl FieldKey {
             FieldKey::Visible { .. } => icon::EYE,
             FieldKey::Size { axis: 0, .. } => "W",
             FieldKey::Size { .. } => "H",
+            FieldKey::Content { .. } => icon::TEXT_T,
+            // The family row's own glyph, so the chip sits where the combo's did.
+            FieldKey::Family { .. } => icon::TEXT_AA,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -129,6 +141,7 @@ impl FieldKey {
             | FieldKey::Spacing { .. }
             | FieldKey::Size { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
+            FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
     }
 }
@@ -322,6 +335,7 @@ pub(crate) fn chip_tip(name: &str, value: Option<Value>, mode: Option<&Mode>) ->
         Some(Value::Color(c)) => ui::hex_of(c),
         Some(Value::Number(x)) => trim_number(x),
         Some(Value::Boolean(b)) => bool_word(b).into(),
+        Some(Value::String(s)) => super::variables::string_text(&s),
         None => "—".into(),
     };
     match mode {
@@ -506,7 +520,9 @@ impl OndinApp {
             | FieldKey::Radius { id }
             | FieldKey::Corner { id, .. }
             | FieldKey::Visible { id }
-            | FieldKey::Size { id, .. } => vec![id],
+            | FieldKey::Size { id, .. }
+            | FieldKey::Content { id }
+            | FieldKey::Family { id } => vec![id],
         }
     }
 
@@ -547,6 +563,12 @@ impl OndinApp {
                 vars[axis] = Some(var);
                 Transaction(ondin_core::bind_size_ops(doc, id, vars))
             }
+            FieldKey::Content { id } => {
+                Transaction(ondin_core::bind_text_ops(doc, id, [Some(var), None]))
+            }
+            FieldKey::Family { id } => {
+                Transaction(ondin_core::bind_text_ops(doc, id, [None, Some(var)]))
+            }
         }
     }
 
@@ -576,6 +598,12 @@ impl OndinApp {
                 let mut which = [false; 2];
                 which[axis] = true;
                 Transaction(ondin_core::detach_size_ops(doc, id, which))
+            }
+            FieldKey::Content { id } => {
+                Transaction(ondin_core::detach_text_ops(doc, id, [true, false]))
+            }
+            FieldKey::Family { id } => {
+                Transaction(ondin_core::detach_text_ops(doc, id, [false, true]))
             }
         }
     }
@@ -711,6 +739,8 @@ impl OndinApp {
             }
             FieldKey::Visible { id } => doc.get(id)?.visible_var(),
             FieldKey::Size { id, axis } => doc.get(id)?.size_vars()[axis],
+            FieldKey::Content { id } => doc.get(id)?.text_vars()[0],
+            FieldKey::Family { id } => doc.get(id)?.text_vars()[1],
         }
     }
 
@@ -751,7 +781,9 @@ impl OndinApp {
             FieldKey::Radius { .. }
             | FieldKey::Corner { .. }
             | FieldKey::Visible { .. }
-            | FieldKey::Size { .. } => {
+            | FieldKey::Size { .. }
+            | FieldKey::Content { .. }
+            | FieldKey::Family { .. } => {
                 return None;
             }
         }
@@ -933,6 +965,9 @@ impl OndinApp {
                                     VarKind::Boolean => {
                                         "No boolean variables yet — Shift+S to add one"
                                     }
+                                    VarKind::String => {
+                                        "No string variables yet — Shift+S to add one"
+                                    }
                                 }
                             })
                             .size(11.5)
@@ -1022,6 +1057,7 @@ impl OndinApp {
             VarKind::Color => "colour",
             VarKind::Number => "number",
             VarKind::Boolean => "boolean",
+            VarKind::String => "string",
         };
         let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
         let name = (1..)
@@ -1034,7 +1070,7 @@ impl OndinApp {
                 id,
                 name: name.clone(),
                 kind: key.kind(),
-                cells: modes.into_iter().map(|m| (m, value)).collect(),
+                cells: modes.into_iter().map(|m| (m, value.clone())).collect(),
                 origin: None,
                 forked: None,
             },
@@ -1251,7 +1287,7 @@ impl OndinApp {
             }
             // B4's refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
-                let at = refused(table, VarKind::Number, buf.as_str()).map(|r| r.1);
+                let at = refused(table, key.kind(), buf.as_str()).map(|r| r.1);
                 refusal_galley(ui, buf.as_str(), at, &font)
             };
             let out = egui::TextEdit::singleline(&mut rt.text)
@@ -1261,7 +1297,7 @@ impl OndinApp {
                 .font(font.clone())
                 .layouter(&mut layouter)
                 .show(ui);
-            let at = refused(table, VarKind::Number, &rt.text).map(|r| r.1);
+            let at = refused(table, key.kind(), &rt.text).map(|r| r.1);
             underline_refusal(ui, &out, at);
             field = Some(out.response);
         });
@@ -1275,11 +1311,32 @@ impl OndinApp {
         // `Enter` on a refused `--` leaves the buffer focused and as typed (B4,
         // §15 D1044's *Fix*) — the `TextEdit` gave the keyboard up on it.
         if field.lost_focus()
-            && refused(self.session.doc.variables(), VarKind::Number, &rt.text).is_some()
+            && refused(self.session.doc.variables(), key.kind(), &rt.text).is_some()
             && ui.input(|i| i.key_pressed(egui::Key::Enter))
         {
             rt.focus = true;
             self.var_retype = Some(rt);
+            return;
+        }
+        // **A content chip typed over is the text typed** (§15 D1069), detached
+        // first as a number's is, its spans gone with the string they indexed.
+        if field.lost_focus()
+            && let FieldKey::Content { id } = key
+        {
+            self.var_retype = None;
+            if ui::defocus_commits(&field) && !rt.text.starts_with("--") {
+                let mut ops = match self.field_var(key) {
+                    Some(_) => self.detach_tx(key).0,
+                    None => Vec::new(),
+                };
+                ops.push(Operation::SetText {
+                    id,
+                    content: rt.text.clone(),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                });
+                self.commit_edit(Transaction(ops));
+            }
             return;
         }
         if field.lost_focus() {
@@ -1363,7 +1420,12 @@ impl OndinApp {
                             geometry: ondin_core::GeometryPatch::Size(s),
                         });
                     }
-                    FieldKey::Paint { .. } | FieldKey::Visible { .. } => return,
+                    // The content is the text arm's above; the family and the
+                    // eye are never typed.
+                    FieldKey::Paint { .. }
+                    | FieldKey::Visible { .. }
+                    | FieldKey::Content { .. }
+                    | FieldKey::Family { .. } => return,
                 }
                 self.commit_edit(Transaction(ops));
             }
@@ -1419,6 +1481,18 @@ impl OndinApp {
                 })),
                 _ => None,
             },
+            // The string as drawn (§15 D1069).
+            FieldKey::Content { id } | FieldKey::Family { id } => {
+                match doc.resolved_kind(id)?.into_owned() {
+                    ondin_core::NodeKind::Text { content, style, .. } => {
+                        Some(Cell::String(match key {
+                            FieldKey::Content { .. } => content,
+                            _ => style.font_family,
+                        }))
+                    }
+                    _ => None,
+                }
+            }
         }
     }
 }
@@ -1751,6 +1825,7 @@ fn list_row(
         Some(Value::Color(c)) => ui::hex_of(c),
         Some(Value::Number(n)) => trim_number(n),
         Some(Value::Boolean(b)) => bool_word(b).into(),
+        Some(Value::String(s)) => super::variables::string_text(&s),
         None => String::new(),
     };
     p.text(

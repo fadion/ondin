@@ -519,6 +519,7 @@ fn families_of(doc: &ondin_core::Document) -> std::collections::HashSet<String> 
                 }
             }
         }
+        crate::app::bound_families(doc, node, &mut families);
         stack.extend(node.children().iter().copied());
     }
     families

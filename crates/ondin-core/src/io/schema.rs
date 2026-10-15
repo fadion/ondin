@@ -373,6 +373,11 @@ pub(crate) struct NodeDto {
     /// (a local build of D1058's or D1059's commit would drop it in silence).
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
+    /// The string variables a text's content and family are bound to (§15
+    /// D1069), absent when neither is. New in v8, as `size_vars` is — still
+    /// unreleased when this joined it.
+    #[serde(default, skip_serializing_if = "no_text_vars")]
+    pub text_vars: crate::variable::TextVars,
     /// The styles a layer's fills, strokes and effects are bound to (§15
     /// D1062), and a text layer's type (§15 D1067), absent when none is. New in
     /// v8, as `size_vars` is.
@@ -381,6 +386,10 @@ pub(crate) struct NodeDto {
 }
 
 fn no_size_vars(v: &crate::variable::SizeVars) -> bool {
+    v.iter().all(Option::is_none)
+}
+
+fn no_text_vars(v: &crate::variable::TextVars) -> bool {
     v.iter().all(Option::is_none)
 }
 
@@ -489,6 +498,7 @@ impl NodeDto {
             spacing_vars: n.spacing_vars(),
             visible_var: n.visible_var(),
             size_vars: n.size_vars(),
+            text_vars: n.text_vars(),
             styles: n.styles(),
         }
     }
@@ -605,6 +615,7 @@ impl NodeDto {
             spacing_vars: self.spacing_vars,
             visible_var: self.visible_var,
             size_vars: self.size_vars,
+            text_vars: self.text_vars,
             styles: self.styles,
         })
     }

@@ -143,7 +143,16 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
                         o.reset,
                         Operation::SetVisible { .. } | Operation::SetVisibleVar { .. }
                     ),
-                    PropKind::Text => matches!(o.reset, Operation::SetText { .. }),
+                    // And the content's binding (§15 D1069), as the visibility's
+                    // above: a copy bound apart from its main differs by it
+                    // alone. Not the family's, which rides in the same op.
+                    PropKind::Text => match &o.reset {
+                        Operation::SetText { .. } => true,
+                        Operation::SetTextVars { vars, .. } => {
+                            doc.get(*c).is_some_and(|n| n.text_vars()[0] != vars[0])
+                        }
+                        _ => false,
+                    },
                     PropKind::Swap => matches!(o.reset, Operation::SetSwap { .. }),
                     PropKind::Nested => false,
                 })
@@ -1111,6 +1120,9 @@ fn card_of(op: &Operation) -> Option<&'static str> {
     match op {
         // A width's or a height's binding is the W or H field's (§15 D1061).
         O::SetTransform { .. } | O::SetPivot { .. } | O::SetSizeVars { .. } => Some("Transform"),
+        // A content's or a family's binding is the Type card's Content or family
+        // row (§15 D1069).
+        O::SetTextVars { .. } => Some("Type"),
         O::SetGeometry { geometry, .. } => match geometry {
             G::Size(_) | G::LineEnd(_) => Some("Transform"),
             G::CornerRadius(_) | G::CornerRadii(_) | G::Sides(_) | G::InnerRatio(_) => {

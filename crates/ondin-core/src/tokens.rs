@@ -76,6 +76,7 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         .chain(n.corner_vars.iter().flatten().copied())
         .chain(n.spacing_vars.iter().flatten().copied())
         .chain(n.size_vars.iter().flatten().copied())
+        .chain(n.text_vars.iter().flatten().copied())
         .chain(n.visible_var)
 }
 
@@ -261,6 +262,7 @@ impl Plan {
         n.corner_vars.iter_mut().flatten().for_each(v);
         n.spacing_vars.iter_mut().flatten().for_each(v);
         n.size_vars.iter_mut().flatten().for_each(v);
+        n.text_vars.iter_mut().flatten().for_each(v);
         if let Some(x) = &mut n.visible_var {
             v(x);
         }
@@ -528,7 +530,7 @@ pub(crate) fn plan<'a>(
         }
         let remap = |c: &Cell| match c {
             Cell::Alias(a) => Cell::Alias(*plan.vars.get(a).unwrap_or(a)),
-            c => *c,
+            c => c.clone(),
         };
         let mut cells: BTreeMap<ModeId, Cell> = var
             .cells
@@ -545,7 +547,7 @@ pub(crate) fn plan<'a>(
         });
         if let (Some(r), Some(first)) = (records.get(&o.kit), first) {
             for m in &r.modes {
-                cells.entry(m.id).or_insert(first);
+                cells.entry(m.id).or_insert_with(|| first.clone());
             }
         }
         let next = Variable {
@@ -827,6 +829,7 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
         && slots(&n.corner_vars, &s.corner_vars)
         && slots(&n.spacing_vars, &s.spacing_vars)
         && slots(&n.size_vars, &s.size_vars)
+        && slots(&n.text_vars, &s.text_vars)
         && (!hit(n.visible_var) || n.visible_var.is_some_and(|x| alike(x, s.visible_var)))
 }
 
@@ -920,6 +923,7 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
     vs.extend(slots(&n.corner_vars, src.map(|s| &s.corner_vars[..])));
     vs.extend(slots(&n.spacing_vars, src.map(|s| &s.spacing_vars[..])));
     vs.extend(slots(&n.size_vars, src.map(|s| &s.size_vars[..])));
+    vs.extend(slots(&n.text_vars, src.map(|s| &s.text_vars[..])));
     vs.extend(own(n.visible_var, src.and_then(|s| s.visible_var)));
     let ss = n
         .styles
@@ -1092,7 +1096,7 @@ pub(crate) fn fork(doc: &Document, ids: &mut IdSource, nodes: &[Node]) -> Fork {
                 let col = modes.kit_mode(kit, Some(m.id))?;
                 let cell = match var.cells.get(&col)? {
                     Cell::Alias(a) => Cell::Alias(*out.vars.get(a).unwrap_or(a)),
-                    c => *c,
+                    c => c.clone(),
                 };
                 Some((m.id, cell))
             })
@@ -1219,6 +1223,9 @@ impl Fork {
         }
         if let Some(vars) = slots(n.size_vars, src.map(|s| s.size_vars), to) {
             ops.push(Operation::SetSizeVars { id, vars });
+        }
+        if let Some(vars) = slots(n.text_vars, src.map(|s| s.text_vars), to) {
+            ops.push(Operation::SetTextVars { id, vars });
         }
         if let Some(v) = to(n.visible_var, src.and_then(|s| s.visible_var)) {
             ops.push(Operation::SetVisibleVar { id, var: Some(v) });

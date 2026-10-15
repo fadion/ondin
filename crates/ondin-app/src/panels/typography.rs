@@ -754,6 +754,71 @@ impl OndinApp {
         )
     }
 
+    /// The family's override mark on text `id` (§15 D981) — **the binding with
+    /// the literal** (§15 D1069), W's and H's rule (D1061): a bound family's
+    /// literal is empty on both sides, so a copy bound apart from its main, or
+    /// bound on one side only, differs by its binding alone, and the reset writes
+    /// the main's binding beside its literal, which `keep_text_bindings` leaves
+    /// as stated. Through [`Self::style_mark`] alone, a copy detached from a
+    /// bound main was marked *Reset to main ·* nothing, and the ↺ set it in no
+    /// family at all.
+    fn family_mark(&self, id: NodeId) -> Option<OverrideMark> {
+        let doc = &self.session.doc;
+        let computed: Vec<Operation>;
+        let resets = match self.field_overrides.iter().find(|(n, _)| *n == id) {
+            Some((_, r)) => r.as_slice(),
+            None => {
+                computed = ondin_core::reset::overrides(doc, id)
+                    .into_iter()
+                    .map(|o| o.reset)
+                    .collect();
+                computed.as_slice()
+            }
+        };
+        let node = doc.get(id)?;
+        let ondin_core::NodeKind::Text { style, .. } = node.kind() else {
+            return None;
+        };
+        let theirs_family = resets.iter().find_map(|op| match op {
+            Operation::SetTextStyle { style, .. } => Some(style.font_family.clone()),
+            _ => None,
+        });
+        let theirs_var = resets.iter().find_map(|op| match op {
+            Operation::SetTextVars { vars, .. } => Some(vars[1]),
+            _ => None,
+        });
+        if theirs_family.is_none() && theirs_var.is_none() {
+            return None;
+        }
+        let family = theirs_family.unwrap_or_else(|| style.font_family.clone());
+        let var = theirs_var.unwrap_or(node.text_vars()[1]);
+        if family == style.font_family && var == node.text_vars()[1] {
+            return None;
+        }
+        let shown = match var {
+            Some(v) => doc
+                .variables()
+                .get(v)
+                .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+            None => family.clone(),
+        };
+        let mut next = (**style).clone();
+        next.font_family = family;
+        let mut vars = node.text_vars();
+        vars[1] = var;
+        Some(OverrideMark {
+            tip: format!("Reset to main · {shown}"),
+            tx: Transaction(vec![
+                Operation::SetTextStyle {
+                    id,
+                    style: next,
+                    spans: None,
+                },
+                Operation::SetTextVars { id, vars },
+            ]),
+        })
+    }
+
     /// One paragraph style field's override mark on text `id` (§15 D981), the
     /// paragraph twin of [`Self::style_mark`]: the node's own paragraph, never a
     /// span's.
@@ -855,12 +920,7 @@ impl OndinApp {
     /// fields, the paragraph's alignment and the box's vertical alignment.
     fn type_marks(&self, id: NodeId) -> TypeMarks {
         TypeMarks {
-            family: self.style_mark(
-                id,
-                |s| s.font_family.clone(),
-                |s, v| s.font_family = v,
-                |v| v.clone(),
-            ),
+            family: self.family_mark(id),
             // The face: weight, italic and the axes they drive
             // (`AXES_DRIVEN_ELSEWHERE`), as one. Not the whole `variations`
             // (`[X9.2-L1-03]`): `opsz` and the listed axes are Optical size's and
@@ -991,13 +1051,140 @@ impl OndinApp {
                     );
                 });
             },
-            // The paragraph and the box — no text style holds them (§15 D1067), so
-            // they stay live on a styled layer, the popup's opener with them.
+            // The content, the paragraph and the box — no text style holds them
+            // (§15 D1067, D1069), so they stay live on a styled layer, the popup's
+            // opener with them.
             |app, ui| {
+                app.type_content_row(ui, &subject);
                 menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
             },
         );
         self.type_menu_popup(ui, &subject, menu_button);
+    }
+
+    /// The *Content* row (§15 D1070, on D1069's ruling): the text itself, one line, and the door to
+    /// binding it to a string variable — the session's chrome, D1038 drawing no
+    /// content field and the maintainer accepting this one without a design.
+    ///
+    /// **Bound, it is the chip**, the number fields' own drawing
+    /// (`spacing_bound_ui`): `Backspace` detaches, a key typed starts the text
+    /// that replaces it, the right-click is the field menu. **Unbound, it is a
+    /// field**: `--` typed opens the list, `Enter` or a click away writes the
+    /// text, `Escape` abandons. The write is the one edit the typing made — the
+    /// common head and tail kept — so the spans over the rest are re-based as a
+    /// canvas edit re-bases them, not dropped.
+    ///
+    /// **Read-only over a text of several lines, and while the canvas edits this
+    /// layer**: a one-line field cannot hold a line break, and a live session is
+    /// the text's truth until it ends (§9.3). The field menu still binds there.
+    fn type_content_row(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+        let id = subject.id;
+        let key = super::binding::FieldKey::Content { id };
+        let w = ui.available_width();
+        let live = self.text.as_ref().is_some_and(|s| s.id == id);
+        if !live && self.spacing_bound_ui(ui, key, w, &None) {
+            return;
+        }
+        let Some(ondin_core::NodeKind::Text {
+            content,
+            style,
+            spans,
+            para_spans,
+            paragraph,
+            ..
+        }) = self.session.doc.get(id).map(|n| n.kind().clone())
+        else {
+            return;
+        };
+        let shown = match self.session.doc.resolved_kind(id).map(|k| k.into_owned()) {
+            Some(ondin_core::NodeKind::Text { content, .. }) => content,
+            _ => content.clone(),
+        };
+        let read_only = live || self.field_var(key).is_some() || shown.contains('\n');
+        let edit_id = egui::Id::new(("type-content", id));
+        let focused = ui.memory(|m| m.has_focus(edit_id));
+        let mut text = match focused {
+            true => ui
+                .data(|d| d.get_temp::<String>(edit_id))
+                .unwrap_or_else(|| shown.clone()),
+            false => shown.replace(['\r', '\n'], " "),
+        };
+        let mut field = None;
+        let row = field_row(ui, egui::vec2(w, ROW_H), |ui| {
+            ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+            let out = ui.add_enabled(
+                !read_only,
+                egui::TextEdit::singleline(&mut text)
+                    .id(edit_id)
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY)
+                    .font(egui::FontId::proportional(12.0)),
+            );
+            field = Some(out);
+            ui.max_rect()
+        });
+        let Some(field) = field else { return };
+        // A disabled field reports no hover, so the reason hangs off a sense of
+        // its own beside it (`inspector::menu_action`'s lesson).
+        let hover = ui.interact(row, edit_id.with("hover"), egui::Sense::click());
+        if read_only {
+            let why = if live {
+                "Being edited on the canvas"
+            } else {
+                "Text of several lines — edit it on the canvas"
+            };
+            let _ = hover.clone().on_hover_text(why);
+        }
+        if (hover.secondary_clicked() || field.secondary_clicked())
+            && let Some(at) = ui.input(|i| i.pointer.interact_pos())
+        {
+            self.field_menu = Some((key, at, row));
+        }
+        if field.has_focus() {
+            ui.data_mut(|d| d.insert_temp(edit_id, text.clone()));
+            // `--` hands the text to the retype buffer, which draws the list's
+            // refused tail and binds (`spacing_doors`' door for a number field).
+            self.bind_typing(ui.ctx(), key, &text, field.rect);
+            if text.starts_with("--") {
+                self.var_retype = Some(super::binding::Retype {
+                    key,
+                    text,
+                    focus: true,
+                });
+            }
+            return;
+        }
+        if ui::defocus_commits(&field) && text != shown && !text.starts_with("--") {
+            let (old, new) = (content.as_bytes(), text.as_bytes());
+            let mut head = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+            while !content.is_char_boundary(head) || !text.is_char_boundary(head) {
+                head -= 1;
+            }
+            let room = old.len().min(new.len()) - head;
+            let mut tail = old
+                .iter()
+                .rev()
+                .zip(new.iter().rev())
+                .take(room)
+                .take_while(|(a, b)| a == b)
+                .count();
+            while !content.is_char_boundary(old.len() - tail)
+                || !text.is_char_boundary(new.len() - tail)
+            {
+                tail -= 1;
+            }
+            let removed = old.len() - head - tail;
+            let inserted = new.len() - head - tail;
+            self.commit_edit(Transaction(vec![Operation::SetText {
+                id,
+                content: text,
+                spans: spans.edited(head, removed, inserted, &style),
+                para_spans: para_spans.edited(head, removed, inserted, &paragraph),
+            }]));
+        }
+        if field.lost_focus() {
+            ui.data_mut(|d| d.remove::<String>(edit_id));
+        }
     }
 
     // --- main panel -------------------------------------------------------
@@ -1022,6 +1209,22 @@ impl OndinApp {
         subject: &TypeSubject,
         mark: Option<&OverrideMark>,
     ) {
+        // **Bound to a string variable, the row is the chip** (§15 D1069) — the
+        // number fields' drawing, its badge the row's glyph — unless a session's
+        // selection is what the row edits, where it writes runs over the bound
+        // default, as it does under a text style (§15 D1067).
+        let key = super::binding::FieldKey::Family { id: subject.id };
+        if !subject.partial
+            && let Some(var) = self.field_var(key)
+        {
+            let w = ui.available_width();
+            if self.number_chip(ui, key, var, w, mark)
+                && let Some(m) = mark
+            {
+                self.commit_reset(m.tx.clone());
+            }
+            return;
+        }
         let shown = attr!(subject, Family, Family);
         let mixed = subject.mixed(CharAttrKind::Family);
         let current = shown.clone();
@@ -1055,6 +1258,7 @@ impl OndinApp {
         };
         let mut chosen: Option<String> = None;
         let mut reset = false;
+        let mut menu_at: Option<(egui::Pos2, egui::Rect)> = None;
         let width = ui.available_width();
         // **A combo paints exactly `interact_size.y`, so the row states it** — and
         // in a `scope`, or the height would leak into the fields below. Left to the
@@ -1124,6 +1328,15 @@ impl OndinApp {
             if mark.is_some() {
                 super::component::combo_dot(ui.painter(), combo.rect);
             }
+            // The door to a binding (§15 D1069): the field menu, as the eye's is —
+            // a picker takes no `--`. Not over a session's selection, whose family
+            // is a run's, nor under a text style, whose family is the style's.
+            if combo.secondary_clicked()
+                && !subject.partial
+                && let Some(at) = combo.interact_pointer_pos()
+            {
+                menu_at = Some((at, combo.rect));
+            }
             // **The sentence hangs off the combo's own head response**, which is the
             // one place it fires: a tooltip on the wrapping `ui.scope` is silently
             // dead, the scope's response being a placeholder over the rect rather
@@ -1137,6 +1350,15 @@ impl OndinApp {
                 );
             }
         });
+        if let Some((at, rect)) = menu_at
+            && self
+                .session
+                .doc
+                .get(subject.id)
+                .is_some_and(|n| n.styles().text.is_none())
+        {
+            self.field_menu = Some((key, at, rect));
+        }
         if reset && let Some(m) = mark {
             self.commit_reset(m.tx.clone());
             return;

@@ -1343,6 +1343,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                                 VarKind::Color => Cell::Color(RED),
                                 VarKind::Number => Cell::Number(rng.below(20) as f64),
                                 VarKind::Boolean => Cell::Boolean(rng.below(2) == 0),
+                                VarKind::String => Cell::String(format!("s{}", rng.below(20))),
                             };
                             (v.id, cell)
                         })

@@ -118,6 +118,7 @@ fn read<'a>(
             Cell::Color(c) => return Some(Value::Color(*c)),
             Cell::Number(n) => return Some(Value::Number(*n)),
             Cell::Boolean(b) => return Some(Value::Boolean(*b)),
+            Cell::String(s) => return Some(Value::String(s.clone())),
             Cell::Alias(next) => at = lookup(*next)?,
         }
     }
@@ -337,6 +338,7 @@ fn value_text(v: &Value) -> Option<String> {
         Value::Color(_) => None,
         Value::Number(n) => Some(crate::panels::variables::number_text(*n)),
         Value::Boolean(b) => Some(if *b { "true" } else { "false" }.to_string()),
+        Value::String(s) => Some(crate::panels::variables::string_text(s)),
     }
 }
 
@@ -367,9 +369,10 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
         }
     };
     fn token(t: &Token) -> Row<'_> {
-        let lead = match (t.kind, t.old.or(t.new)) {
-            (TokenKind::Var(_), Some(Value::Color(c))) => Lead::Chip(c),
+        let lead = match (t.kind, t.old.as_ref().or(t.new.as_ref())) {
+            (TokenKind::Var(_), Some(Value::Color(c))) => Lead::Chip(*c),
             (TokenKind::Var(VarKind::Number), _) => Lead::Glyph(icon::HASH),
+            (TokenKind::Var(VarKind::String), _) => Lead::Glyph(icon::TEXT_T),
             (TokenKind::Var(_), _) => Lead::Glyph(icon::HASH),
             (TokenKind::Style(_), _) => Lead::Glyph(icon::SWATCHES),
         };
@@ -380,16 +383,16 @@ pub(crate) fn draw(ui: &mut egui::Ui, k: &KitSummary) {
                 if t.detach == 1 { "" } else { "s" }
             ))
         } else {
-            match (t.kind, t.old, t.new) {
+            match (t.kind, &t.old, &t.new) {
                 (TokenKind::Style(_), ..) => Tail::Text("style".into()),
-                (_, Some(Value::Color(a)), Some(Value::Color(b))) => Tail::Chips(a, b),
+                (_, Some(Value::Color(a)), Some(Value::Color(b))) => Tail::Chips(*a, *b),
                 (_, Some(a), Some(b)) => Tail::Text(format!(
                     "{} → {}",
-                    value_text(&a).unwrap_or_default(),
-                    value_text(&b).unwrap_or_default()
+                    value_text(a).unwrap_or_default(),
+                    value_text(b).unwrap_or_default()
                 )),
                 (_, None, Some(v)) | (_, Some(v), None) => {
-                    value_text(&v).map_or(Tail::None, Tail::Text)
+                    value_text(v).map_or(Tail::None, Tail::Text)
                 }
                 _ => Tail::None,
             }
@@ -685,7 +688,7 @@ mod tests {
         };
         assert_eq!(changed.name, "brand");
         assert_eq!(
-            (changed.old, changed.new),
+            (changed.old.clone(), changed.new.clone()),
             (Some(Value::Color(WHITE)), Some(Value::Color(DUSK))),
             "read in the kit's new first mode, Dusk"
         );
@@ -693,7 +696,7 @@ mod tests {
             panic!("gap added: {:?}", k.added)
         };
         assert_eq!(
-            (added.name.as_str(), added.new),
+            (added.name.as_str(), added.new.clone()),
             ("gap", Some(Value::Number(4.0)))
         );
         let [removed] = &k.removed[..] else {

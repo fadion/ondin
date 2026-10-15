@@ -7755,9 +7755,13 @@ impl OndinApp {
                 .info("This layer is locked — unlock it to edit the text");
             return;
         }
-        let Some(kind) = self.session.doc.get(id).map(|n| n.kind()) else {
+        // **The text as drawn** (§15 D1069): a bound content's string and family,
+        // never the empty literals they stand in for — the user edits what they
+        // see, and `keep_text_bindings` keeps the binding if they change nothing.
+        let Some(kind) = self.session.doc.resolved_kind(id) else {
             return;
         };
+        let kind = &*kind;
         let Some(parts) = TextParts::of(kind) else {
             return;
         };
@@ -8359,9 +8363,12 @@ impl OndinApp {
         let Some(id) = self.text.as_ref().map(|s| s.id) else {
             return;
         };
-        let Some(kind) = self.session.doc.get(id).map(|n| n.kind()) else {
+        // As drawn, a bound content's and family's strings, as `begin_edit_text`
+        // opened the session on (§15 D1069).
+        let Some(kind) = self.session.doc.resolved_kind(id) else {
             return;
         };
+        let kind = &*kind;
         let Some(parts) = TextParts::of(kind) else {
             return;
         };
@@ -27311,6 +27318,113 @@ mod flex_canvas_tests {
             app.session.resolved.world_bounds(a).unwrap().x0,
             0.0,
             "a where it was"
+        );
+    }
+}
+
+#[cfg(test)]
+mod string_binding_session_tests {
+    //! A text whose content is bound to a string variable, edited on the canvas
+    //! (§15 D1069): the session opens on the string drawn, closing it unedited
+    //! keeps the binding, and typing detaches it — the commit's
+    //! `keep_text_bindings`, reached through the app's own door.
+
+    use super::*;
+    use ondin_core::{Cell, Mode, VarKind, Variable};
+
+    /// A text holding *Hello*, its content bound to `copy/cta` (*Sign in*).
+    fn app_with_bound_text(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (text, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+        let parts = crate::fonts::FontService::default_text_parts();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: text,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "Hello".into(),
+                    style: Box::new(parts.style),
+                    spans: parts.spans,
+                    para_spans: parts.para_spans,
+                    paragraph: parts.paragraph,
+                    block: parts.block,
+                    sizing: parts.sizing,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: Some(Affine::translate((400.0, 400.0))),
+                name: None,
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "copy/cta".into(),
+                    kind: VarKind::String,
+                    cells: [(mode, Cell::String("Sign in".into()))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(text);
+        app.canvas_px = (800, 600);
+        let key = crate::panels::binding::FieldKey::Content { id: text };
+        app.bind_field(key, var);
+        assert_eq!(app.field_var(key), Some(var), "bound through the app");
+        (app, text)
+    }
+
+    /// **The session opens on the string drawn and leaves the binding alone if
+    /// nothing is typed** — and typing detaches it to what was typed.
+    ///
+    /// Flip, run: `begin_edit_text` reading the stored kind (`doc.get(id)`), as
+    /// it did, fails *"the editor holds the bound string"* — it opened on the
+    /// empty literal, so the user saw *Sign in* and edited nothing.
+    #[test]
+    fn a_session_on_a_bound_text_edits_what_it_draws() {
+        let ctx = egui::Context::default();
+        let (mut app, text) = app_with_bound_text(&ctx);
+        app.begin_edit_text(Some(text), None);
+        assert_eq!(
+            app.text.as_ref().map(|s| s.editor.content().to_string()),
+            Some("Sign in".to_string()),
+            "the editor holds the bound string"
+        );
+        app.finish_text_edit();
+        assert!(
+            app.session.doc.get(text).unwrap().text_vars()[0].is_some(),
+            "closed unedited, still bound"
+        );
+
+        app.begin_edit_text(Some(text), None);
+        if let Some(s) = app.text.as_mut() {
+            s.editor.select_all();
+            s.editor.insert("Log in");
+        }
+        app.finish_text_edit();
+        let n = app.session.doc.get(text).unwrap();
+        let NodeKind::Text { content, .. } = n.kind() else {
+            unreachable!()
+        };
+        assert_eq!(
+            (content.as_str(), n.text_vars()[0]),
+            ("Log in", None),
+            "typing detaches the content to what was typed"
         );
     }
 }

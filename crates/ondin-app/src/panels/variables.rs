@@ -105,7 +105,7 @@ impl Edit {
 #[derive(Clone, Debug, PartialEq)]
 enum Menu {
     /// The `+` button's: *Colour variable*, *Number variable*, *Boolean variable*
-    /// (§15 D1059), *New mode* (G5).
+    /// (§15 D1059), *String variable* (§15 D1069), *New mode* (G5).
     Add,
     Var(VarId),
     Mode(ModeId),
@@ -595,9 +595,15 @@ impl OndinApp {
                                 close = true;
                             }
                             // Step 2's: a boolean binds a layer's visibility
-                            // (D1038 (d), §15 D1059). *String* waits for step 6.
+                            // (D1038 (d), §15 D1059).
                             if row(ui, icon::CHECK, "Boolean variable") {
                                 acts.push(Act::NewVar(VarKind::Boolean));
+                                close = true;
+                            }
+                            // And step 6's: a string binds a text's content and
+                            // its family (D1038 (d), §15 D1069).
+                            if row(ui, icon::TEXT_T, "String variable") {
+                                acts.push(Act::NewVar(VarKind::String));
                                 close = true;
                             }
                             ui::menu_sep(ui);
@@ -1003,6 +1009,10 @@ impl OndinApp {
                     VarKind::Color => ("colour", Cell::Color(Color::WHITE)),
                     VarKind::Number => ("number", Cell::Number(0.0)),
                     VarKind::Boolean => ("boolean", Cell::Boolean(true)),
+                    // A word to start from rather than nothing (§15 D1069): an
+                    // empty string bound to a text's content draws no text at
+                    // all, which reads as a fault.
+                    VarKind::String => ("string", Cell::String("Text".into())),
                 };
                 let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
                 let name = free_name(&taken, stem, 1);
@@ -1012,7 +1022,7 @@ impl OndinApp {
                         id,
                         name: name.clone(),
                         kind,
-                        cells: modes.into_iter().map(|m| (m, cell)).collect(),
+                        cells: modes.into_iter().map(|m| (m, cell.clone())).collect(),
                         origin: None,
                         forked: None,
                     },
@@ -1252,13 +1262,21 @@ fn layers_label(n: usize) -> String {
     }
 }
 
-/// A variable's value as a sentence names it: `16`, `#8BA5E0`.
+/// A variable's value as a sentence names it: `16`, `#8BA5E0`, `“Sign in”`.
 fn value_text(v: Value) -> String {
     match v {
         Value::Color(c) => format!("#{}", ui::hex_of(c)),
         Value::Number(x) => number_text(x),
         Value::Boolean(b) => super::binding::bool_word(b).into(),
+        Value::String(s) => string_text(&s),
     }
+}
+
+/// A string as a row shows it: **quoted**, D1038 G's *"a quoted string"* —
+/// what tells it from a number or a word like *true* with no type column —
+/// on one line, a line break a space.
+pub(crate) fn string_text(s: &str) -> String {
+    format!("\u{201C}{}\u{201D}", s.replace(['\r', '\n'], " "))
 }
 
 pub(crate) fn number_text(x: f64) -> String {
@@ -1293,13 +1311,15 @@ fn name_refusal(
 }
 
 /// A typed cell: `--name` aliases another variable of the kind, a colour takes
-/// a hex (its alpha too, eight digits), a number takes an expression.
+/// a hex (its alpha too, eight digits), a number takes an expression, and a
+/// string takes the text as typed, spaces and all (§15 D1069).
 fn parse_cell(
     table: &ondin_core::Variables,
     v: &Variable,
     mode: ModeId,
     text: &str,
 ) -> Result<Cell, String> {
+    let typed = text;
     let text = text.trim();
     if let Some(name) = text.strip_prefix("--") {
         let name = name.trim();
@@ -1332,6 +1352,7 @@ fn parse_cell(
         VarKind::Boolean => parse_bool(text)
             .map(Cell::Boolean)
             .ok_or_else(|| "True or false, or --name.".to_string()),
+        VarKind::String => Ok(Cell::String(typed.to_string())),
     }
 }
 
@@ -1350,6 +1371,7 @@ fn kind_word(k: VarKind) -> &'static str {
         VarKind::Color => "colour",
         VarKind::Number => "number",
         VarKind::Boolean => "boolean",
+        VarKind::String => "string",
     }
 }
 
@@ -1381,6 +1403,8 @@ fn cell_text(table: &ondin_core::Variables, cell: &Cell) -> String {
         }
         Cell::Number(x) => number_text(*x),
         Cell::Boolean(b) => super::binding::bool_word(*b).into(),
+        // Typing starts from the string bare; at rest it is drawn quoted.
+        Cell::String(s) => s.clone(),
         Cell::Alias(t) => format!(
             "--{}",
             table.get(*t).map(|v| v.name.as_str()).unwrap_or_default()
@@ -2172,7 +2196,7 @@ fn var_row(
         // does not hold yet (§15 D1052's preview fork).
         let shown = match pending {
             Some((pv, pm, colour)) if pv == v.id && pm == m.id => Cell::Color(colour),
-            _ => *c,
+            _ => c.clone(),
         };
         draw_cell(&p, table, cell, &shown);
         // **A colour cell opens the colour popup; a double-click types into it**
@@ -2472,6 +2496,17 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::pos2(cell.left() + 6.0, y + 0.5),
                 egui::Align2::LEFT_CENTER,
                 number_text(*x),
+                font,
+                theme::text::STRONG,
+            );
+        }
+        // A string (§15 D1069): quoted, cut at the cell's edge by the painter's
+        // clip — the whole string is one click away, in the field.
+        Cell::String(s) => {
+            p.text(
+                egui::pos2(cell.left() + 6.0, y + 0.5),
+                egui::Align2::LEFT_CENTER,
+                string_text(s),
                 font,
                 theme::text::STRONG,
             );
@@ -2907,7 +2942,7 @@ mod tests {
         let v = the_only_var(&app);
         assert_eq!(v.name, "colour 1");
         assert_eq!(
-            v.cells.values().copied().collect::<Vec<_>>(),
+            v.cells.values().cloned().collect::<Vec<_>>(),
             vec![Cell::Color(Color::WHITE)]
         );
         let b = app.var_browser.as_ref().unwrap();
@@ -3186,7 +3221,8 @@ mod tests {
             super::super::binding::bool_word(false).into(),
             None,
         ));
-        let cell = |app: &OndinApp| app.session.doc.variables().get(v.id).unwrap().cells[&mode];
+        let cell =
+            |app: &OndinApp| app.session.doc.variables().get(v.id).unwrap().cells[&mode].clone();
         assert_eq!(cell(&app), Cell::Boolean(false), "the box's word lands");
         app.var_act(Act::Cell(v.id, mode, "yes".into(), None));
         assert_eq!(cell(&app), Cell::Boolean(true));
@@ -3559,7 +3595,8 @@ mod tests {
             "itself is refused"
         );
         click_text(&ctx, &mut app, "colour 2", popup);
-        let cell = |app: &OndinApp, v| app.session.doc.variables().get(v).unwrap().cells[&mode];
+        let cell =
+            |app: &OndinApp, v| app.session.doc.variables().get(v).unwrap().cells[&mode].clone();
         assert_eq!(cell(&app, a), Cell::Alias(b), "a row makes the alias");
 
         app.var_act(Act::OpenPicker(b, mode, egui::pos2(500.0, 200.0)));

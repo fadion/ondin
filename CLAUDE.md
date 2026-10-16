@@ -67,8 +67,17 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1079 index rows, 1079 body headings, next free
-D1080** (measured 2026-10-16 over the uncommitted tree on `3c2a954`; ⚠️ **the canvas-fill measurement
+anywhere cited either. **The live figures: 1080 index rows, 1080 body headings, next free
+D1081** (measured 2026-10-16 over the uncommitted tree on `1e445d4`; ⚠️ **the pre-QA gaps request
+reserved D1080–D1089 at `1e445d4` and spent one** — D1080, *Paste properties* saying what its bindings
+landed as, *Replace image…* through the drop's wording, and the image-editing card made read-only under a
+styled Fill card; the seven kit-carrying tests went into amendments to D1066 and D1072–D1074 (no defect).
+**D1081–D1089 found at zero sites and released.** Census **979**, arrival D1080, none unresolved.
+⚠️ **`arch-scribe` read a real defect while checking a premise of the brief** — the image card is an
+`Area`, so it escaped the styled card's lock and every control in it detached the style — reproduced by
+a test and fixed before the commit; ⚠️ **that test's first cut did not bite** (located on a 2400-tall
+screen, clicked on an 800-tall one). Before that, measured 2026-10-16 over the uncommitted tree on
+`3c2a954`; ⚠️ **the canvas-fill measurement
 request reserved D1079–D1088 at `3c2a954` and spent one** — D1079, the one canvas door onto a paint (a
 picture dropped or pasted onto a shape) saying what it detached, its *Replaced with* no longer
 overwriting a style's *Detached*. **D1080–D1088 found at zero sites and released.** Census **978**,

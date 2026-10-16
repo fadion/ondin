@@ -68,7 +68,13 @@ entry it stops being true again. Not the file's own header prose, which has gone
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
 anywhere cited either. **The live figures: 1078 index rows, 1078 body headings, next free
-D1079** (measured 2026-10-16 at `5eb191f`; ⚠️ **the spacing-handles request reserved D1078–D1087
+D1079** (measured 2026-10-16 at `48c4575`; ⚠️ **the spacing-handles "left alone" request reserved
+D1079–D1088 at `cea486d` and spent none** — a gap band yielding to a pinned child, masks left out of
+the children bands yield to, and seven new canvas tests went into D1078's second amendment;
+**D1079–D1088 found at zero sites and released**. Census **977**, no arrivals, none unresolved.
+⚠️ **`arch-scribe` read the mask defect from the code; the test found its other half** — a padding
+band yields to any child, so a container-wide mask hid every band. Before that, measured at
+`5eb191f`; ⚠️ **the spacing-handles request reserved D1078–D1087
 at `3056e89` and spent one** — D1078, spacing handles on the canvas, built from `design/Spacing
 Handles.dc.html` as a reference the session ruled over (the maintainer: *"You have priority over its
 decisions"*). **D1079–D1087 found at zero sites and released.** Census **977**, arrival D1078, none

@@ -347,17 +347,22 @@ pub(crate) fn shown(bands: Vec<Band>, scale: Vec2) -> Vec<Band> {
 
 /// The band at local point `p`, by [`BandKind::priority`]: none within `edge`
 /// of the box's outline (the resize handles' and sides' own pick radius, P4),
-/// and **no padding band over a child** — a pinned child may sit on the padding,
-/// and a click there is the child's. A gap band picks over its neighbours'
-/// edges: a gap thinner than `min` is a strip centred on its seam (P4), which
-/// reaches into the items either side by design, or a gap of 0 could never be
-/// dragged open. `min` is the strip's thickness and `edge` the resize radius,
-/// each per axis in that axis's local units.
+/// and **no band under a pinned child** — a layer pinned by its insets may sit
+/// on the padding or across a gap, and a click there is the layer's.
+/// `children` is every child's box with whether it is pinned (out of flow).
+///
+/// **A padding band yields to any child on it; a gap band only to a pinned
+/// one.** A gap thinner than `min` is a strip centred on its seam (P4), which
+/// reaches into the in-flow items either side by design, or a gap of 0 could
+/// never be dragged open. It yielded to no child at all until §15 D1078's
+/// second amendment, so a pinned layer over a gap lost its click to the band.
+/// `min` is the strip's thickness and `edge` the resize radius, each per axis
+/// in that axis's local units.
 pub(crate) fn hit(
     bands: &[Band],
     p: Point,
     bx: Rect,
-    children: &[Rect],
+    children: &[(Rect, bool)],
     min: Vec2,
     edge: Vec2,
 ) -> Option<usize> {
@@ -370,12 +375,17 @@ pub(crate) fn hit(
     if !inside.contains(p) {
         return None;
     }
-    let on_child = children.iter().any(|c| c.contains(p));
+    let on_child = children.iter().any(|(c, _)| c.contains(p));
+    let on_pinned = children.iter().any(|(c, pinned)| *pinned && c.contains(p));
     let mut order: Vec<usize> = (0..bands.len()).collect();
     order.sort_by_key(|i| bands[*i].kind.priority());
     order.into_iter().find(|i| {
         let b = &bands[*i];
-        if on_child && matches!(b.kind, BandKind::Padding(_)) {
+        let yields = match b.kind {
+            BandKind::Padding(_) => on_child,
+            _ => on_pinned,
+        };
+        if yields {
             return false;
         }
         // A padding band's strip reaches past the resize radius by `min` at
@@ -481,7 +491,8 @@ pub(crate) struct Subject {
     pub bx: Rect,
     /// The display as drawn — a bound slot its variable's number.
     pub drawn: Display,
-    pub children: Vec<Rect>,
+    /// Every shown child's box, with whether it is pinned (out of flow).
+    pub children: Vec<(Rect, bool)>,
     pub bands: Vec<Band>,
     /// Screen points per local unit along x and y.
     pub scale: Vec2,
@@ -523,8 +534,19 @@ impl OndinApp {
             else {
                 continue;
             };
-            children.push(r);
-            if ondin_core::build::is_flex_item(doc, *c) {
+            // **A mask is no child a band yields to**: it draws nothing of its
+            // own, it clips, and it usually spans the whole container — counted,
+            // every padding band and (as out of flow) every gap band yielded to
+            // it and the handles vanished (`arch-scribe`'s read of the second
+            // amendment, and the padding half found by its test).
+            if doc.get(*c).is_some_and(|n| n.mask()) {
+                continue;
+            }
+            let in_flow = ondin_core::build::is_flex_item(doc, *c);
+            // **Pinned means pinned by insets**, not merely out of flow.
+            let pinned = doc.get(*c).is_some_and(|n| n.insets().is_authored());
+            children.push((r, pinned));
+            if in_flow {
                 items.push(r);
             }
         }
@@ -1274,6 +1296,342 @@ mod canvas_tests {
         );
     }
 
+    /// The display the row is laid out under, changed by `f` and committed.
+    fn restyle(app: &mut OndinApp, row: NodeId, f: impl FnOnce(&mut Display)) {
+        let mut d = app.session.doc.get(row).unwrap().display().unwrap().clone();
+        f(&mut d);
+        assert!(app.session.commit(Transaction(vec![Operation::SetDisplay {
+            id: row,
+            display: Some(d),
+        }])));
+    }
+
+    fn texts(out: &egui::FullOutput) -> Vec<String> {
+        out.shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn hatches(out: &egui::FullOutput) -> usize {
+        out.shapes
+            .iter()
+            .filter(|s| {
+                matches!(&s.shape, egui::Shape::LineSegment { stroke, .. }
+                    if stroke.color == crate::theme::color::SPACING_HATCH)
+            })
+            .count()
+    }
+
+    /// **Derived space: the hatch and the label** (G2, D1): under
+    /// `space-between` at gap 8 the first gap lays out 120 wide — (360 − 120 −
+    /// 16) / 2 + 8 — so hovering it hatches the stored part, and dragging it
+    /// shows *Gap 8 · laid 120*; at the start, where the gap lays out as it
+    /// stores, there is no hatch.
+    ///
+    /// Flip, run: `spacing_hatch` returning at once fails *"hatched where it
+    /// lays out wider"*.
+    #[test]
+    fn derived_space_is_hatched_and_labelled() {
+        use ondin_core::container::JustifyContent;
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let hover = |app: &mut OndinApp, w: Point| {
+            let p = app.to_screen(w, RECT, 1.0);
+            frame(
+                &ctx,
+                app,
+                vec![egui::Event::PointerMoved(p)],
+                Default::default(),
+            );
+            frame(&ctx, app, Vec::new(), Default::default())
+        };
+        assert_eq!(
+            hatches(&hover(&mut app, Point::new(65.0, 35.0))),
+            0,
+            "no derived space"
+        );
+        restyle(&mut app, row, |d| {
+            if let Display::Flex(f) = d {
+                f.justify_content = JustifyContent::SpaceBetween;
+                f.column_gap = 8.0;
+            }
+        });
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        assert!(
+            hatches(&hover(&mut app, Point::new(120.0, 35.0))) > 0,
+            "hatched where it lays out wider"
+        );
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(120.0, 35.0),
+            Point::new(120.0, 45.0),
+            none,
+            true,
+        );
+        let out = frame(&ctx, &mut app, Vec::new(), none);
+        assert!(
+            texts(&out).iter().any(|t| t == "Gap 8 · laid 120"),
+            "the label: {:?}",
+            texts(&out)
+        );
+    }
+
+    /// **A grid's column gap drags end to end** (G1): a grid of two 100-wide
+    /// columns at gap 10 inside padding 20 — the gap band x 120–130 — dragged
+    /// 8 to the right is a gap of 18, the row gap untouched.
+    ///
+    /// Flip, run: `bands`' grid arm switched off fails here at 10 (and
+    /// `a_grids_bands_are_between_its_tracks` on *"a column gap"*).
+    #[test]
+    fn a_grids_column_gap_drags() {
+        use ondin_core::container::{Grid, Track, TrackBreadth as B, TrackSize as S};
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let px = |v| Track::Size(S::Breadth(B::Px(v)));
+        restyle(&mut app, row, |d| {
+            *d = Display::Grid(Grid {
+                columns: vec![px(100.0), px(100.0)],
+                rows: vec![px(50.0), px(50.0)],
+                column_gap: 10.0,
+                row_gap: 6.0,
+                padding: [20.0; 4],
+                ..Default::default()
+            });
+        });
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(125.0, 40.0),
+            Point::new(133.0, 40.0),
+            none,
+            false,
+        );
+        assert_eq!(&spacing(&app, row)[..2], &[18.0, 6.0]);
+    }
+
+    /// **A layout-styled container's drag detaches the style and says so**
+    /// (B3, §15 D1075): the row made the user of a layout style, its gap
+    /// dragged to 18 — the style cut, the gap written, the floating status
+    /// naming the style.
+    #[test]
+    fn a_layout_styled_containers_drag_detaches_the_style() {
+        use ondin_core::style::{self, StyleSlot};
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let s = app.session.ids.mint_style();
+        let ops = style::create_ops(
+            &app.session.doc,
+            s,
+            "Stack/Row",
+            row,
+            StyleSlot::Layout,
+            &[row],
+        )
+        .expect("the row has a layout");
+        assert!(app.session.commit(Transaction(ops)));
+        let styled = |app: &OndinApp| app.session.doc.get(row).unwrap().styles().layout;
+        assert_eq!(styled(&app), Some(s), "the fixture: styled");
+        app.session.info("");
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(65.0, 35.0),
+            Point::new(73.0, 35.0),
+            none,
+            false,
+        );
+        assert_eq!(styled(&app), None, "the drag cut the style");
+        assert_eq!(spacing(&app, row)[0], 18.0);
+        assert_eq!(app.session.status().text, "Detached Stack/Row");
+    }
+
+    /// **An instance's drag is an override** (B4): the row made a main and an
+    /// instance placed over it, the instance selected and its gap dragged to
+    /// 18 — the copy at 18 and still linked, the main at 10.
+    #[test]
+    fn an_instances_drag_is_an_override() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: row,
+                    component: true,
+                }]))
+        );
+        let doc = &app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(row).unwrap(),
+                parent: doc.root(),
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(app.session.commit(tx));
+        let inst = made[0];
+        assert_eq!(
+            app.session.doc.get(inst).unwrap().link(),
+            Some(row),
+            "an instance"
+        );
+        app.session.selection.set_one(inst);
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(65.0, 35.0),
+            Point::new(73.0, 35.0),
+            none,
+            false,
+        );
+        assert_eq!(spacing(&app, inst)[0], 18.0, "the copy took the drag");
+        assert_eq!(spacing(&app, row)[0], 10.0, "the main did not");
+        assert_eq!(
+            app.session.doc.get(inst).unwrap().link(),
+            Some(row),
+            "still linked"
+        );
+    }
+
+    /// **A mask across the container does not hide its bands**: a mask draws
+    /// nothing of its own, so a 400 × 200 mask over the whole row leaves the
+    /// first gap and the top padding picking.
+    ///
+    /// Flip, run: the mask kept in the children list fails *"and the padding"* —
+    /// a padding band yields to any child. (The second amendment's first cut also
+    /// read *pinned* as *"not a flex item"*, which made a mask stop the gap too;
+    /// pinned is authored insets now, so the gap assertion alone no longer sees
+    /// the mask.)
+    #[test]
+    fn a_mask_across_the_container_does_not_hide_its_bands() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let mask = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: mask,
+                parent: row,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(400.0, 200.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetMask {
+                id: mask,
+                mask: true
+            },
+        ])));
+        app.session.selection.set_one(row);
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let picks = |app: &OndinApp, w: Point| {
+            app.spacing_at(app.to_screen(w, RECT, 1.0), RECT, 1.0)
+                .map(|(s, i)| s.bands[i].kind)
+        };
+        assert_eq!(
+            picks(&app, Point::new(65.0, 35.0)),
+            Some(super::BandKind::ColumnGap),
+            "the gap under a mask still picks"
+        );
+        assert_eq!(
+            picks(&app, Point::new(200.0, 14.0)),
+            Some(super::BandKind::Padding(super::Side::Top)),
+            "and the padding"
+        );
+    }
+
+    /// **A hugging container grows with the drag** (D1): the row's width fit to
+    /// its content, a gap dragged +8 mid-drag lays the row 16 wider — both gaps
+    /// move. The size badge reads this same preview box; its drawing is not
+    /// asserted here.
+    #[test]
+    fn a_hugging_container_grows_with_the_drag() {
+        use ondin_core::container::Dimension;
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let mut item = *app.session.doc.get(row).unwrap().item();
+        item.width = Dimension::FitContent;
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetLayoutItem {
+                    id: row,
+                    item
+                }]))
+        );
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let width = |app: &OndinApp| app.session.preview_local_box(row).unwrap().width();
+        assert_eq!(
+            width(&app),
+            180.0,
+            "the fixture hugs: 20 + 40 + 10 + 60 + 10 + 20 + 20"
+        );
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(65.0, 35.0),
+            Point::new(73.0, 35.0),
+            none,
+            true,
+        );
+        assert_eq!(width(&app), 196.0, "the preview grows by both gaps");
+    }
+
+    /// **A rotated container's bands pick where they are drawn** (8): the row
+    /// turned a quarter about its origin, the first gap's middle at world
+    /// (−35, 65) picks the gap with the vertical arrows, and a drag 8 down —
+    /// along the row's own x — is a gap of 18.
+    ///
+    /// Flip, run: `spacing_at` testing the world point unmapped by the row's
+    /// inverse transform fails on *"the gap, turned"*. B3, B4 and the hugging
+    /// row's tests are not flipped: each rests on a pass with its own tests
+    /// (`style::settle`, the override marks, the flex engine's fit-content).
+    #[test]
+    fn a_rotated_containers_bands_pick_where_drawn() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: row,
+                    transform: Affine::rotate(std::f64::consts::FRAC_PI_2),
+                }]))
+        );
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let at = app.to_screen(Point::new(-35.0, 65.0), RECT, 1.0);
+        let (s, i) = app.spacing_at(at, RECT, 1.0).expect("the gap, turned");
+        assert_eq!(s.bands[i].kind, super::BandKind::ColumnGap);
+        assert_eq!(
+            app.spacing_cursor(row, s.bands[i].kind),
+            egui::CursorIcon::ResizeVertical
+        );
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(-35.0, 65.0),
+            Point::new(-35.0, 73.0),
+            none,
+            false,
+        );
+        assert_eq!(spacing(&app, row)[0], 18.0);
+    }
+
     /// **The cursor says resize only over a band** (7, H1): across a gap the
     /// horizontal arrows, across the top padding the vertical, over an item the
     /// plain arrow, and with two layers selected nothing over the same gap.
@@ -1449,7 +1807,13 @@ mod tests {
 
     /// **Picking** (P3, P4): a corner is the top padding's, a zero gap picks
     /// across a strip centred on its seam, nothing picks within the resize
-    /// radius of the edge, and a thin padding is still reachable past it.
+    /// radius of the edge, and a thin padding is still reachable past it. A
+    /// pinned child takes its own click over a padding band and over a gap band
+    /// alike (§15 D1078's second amendment); an in-flow neighbour does not stop
+    /// a gap's strip.
+    ///
+    /// Flip, run: a gap band yielding to no child (its old rule) fails *"a
+    /// pinned child over a gap is the child's"*.
     #[test]
     fn picking_follows_the_priority_and_spares_the_resize_edge() {
         let bx = Rect::new(0.0, 0.0, 300.0, 100.0);
@@ -1460,7 +1824,8 @@ mod tests {
         let b = bands(&row(0.0, 20.0), bx, &items, None);
         let edge = Vec2::new(9.0, 9.0);
         let min = Vec2::new(8.0, 8.0);
-        let at = |x, y| hit(&b, Point::new(x, y), bx, &items, min, edge).map(|i| b[i].kind);
+        let in_flow: Vec<(Rect, bool)> = items.iter().map(|r| (*r, false)).collect();
+        let at = |x, y| hit(&b, Point::new(x, y), bx, &in_flow, min, edge).map(|i| b[i].kind);
         assert_eq!(
             at(15.0, 15.0),
             Some(BandKind::Padding(Side::Top)),
@@ -1473,12 +1838,20 @@ mod tests {
         );
         assert_eq!(at(70.0, 50.0), None, "an item is not a band");
         assert_eq!(at(150.0, 4.0), None, "the resize edge wins");
-        // A pinned child sitting on the top padding takes its own click.
-        let pinned = [items[0], items[1], Rect::new(150.0, 10.0, 170.0, 18.0)];
+        // A pinned child sitting on the top padding, and one across the zero
+        // gap's strip, each take their own click.
+        let mut pinned = in_flow.clone();
+        pinned.push((Rect::new(150.0, 10.0, 170.0, 18.0), true));
+        pinned.push((Rect::new(78.0, 40.0, 84.0, 60.0), true));
         assert_eq!(
             hit(&b, Point::new(160.0, 14.0), bx, &pinned, min, edge),
             None,
             "a child on the padding is the child's"
+        );
+        assert_eq!(
+            hit(&b, Point::new(81.0, 50.0), bx, &pinned, min, edge),
+            None,
+            "a pinned child over a gap is the child's"
         );
         // Padding 4: thinner than the resize radius, still grabbed past it.
         let thin = bands(&row(10.0, 4.0), bx, &[], None);

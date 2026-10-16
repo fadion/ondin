@@ -1673,7 +1673,9 @@ edge, quadratic in the track count.
 rulings over it). A flex or grid container's gaps and padding are drawn as bands and dragged to write
 them, under a tool that selects — the container under the pointer, unselected or not, else the single
 selected one (§15 D1089: `spacing_subject`'s pointer, `spacing_hover` the topmost layer there in no group
-or instance and not locked; one of several selected is never the subject, and a drag selects nothing) —
+or instance and not locked; one of several selected is never the subject, and a drag selects nothing;
+**unselected, a container shows and picks its gaps only**, its padding being where a marquee over its
+children starts, so the padding waits for the selection — §15 D1093, the maintainer's) —
 **one `SetDisplay` through the commit door, the Container card's own write**,
 so `keep_spacing_bindings` (§15 D1058), the style pass (§15 D1075) and the override marks judge it as
 they judge a typed value — **but for a bound slot the drag moves off its variable's number, whose
@@ -1687,7 +1689,7 @@ laid. ⚠️ **A gap band names its axis, not its role**: `column_gap` is the ho
 `row_gap` the vertical in every direction, the engine's reading, so a column's between-items gap is
 the row gap. **Nothing is drawn at rest**: with the pointer inside the subject container every band
 is drawn in `GRID_GAP`'s tint — a grid's gaps excepted, its track lines drawing them already, which for
-a hovered unselected grid they do not, so only its padding and the band under the pointer show — the
+a hovered unselected grid they do not, so only the gap under the pointer shows — the
 band under the pointer in `SPACING_STRONG` with a pill; a band under 6 screen px is dropped, but
 not the kind a drag is writing while it runs. The whole
 band picks, at least 8 screen px across, so a zero gap is a strip on its seam; nothing picks within
@@ -14433,6 +14435,9 @@ the context-menu door both call. The menu door asked `pick_leaf` alone until 202
 had **no way at all** of reaching an occupied frame, a right-click on the tag opening the
 empty-canvas menu instead (§15 D469). `begin_select_drag` is the third door and still adds
 `selected_frame_at` on top, which is the sentence above and is a widening the other two do not have.
+The edge is `FRAME_EDGE_PICK_PX`, 8 points either side of the border — twice every other pick's
+slop, the edge being an occupied frame's one target besides its tag (§15 D1093) — so a press-drag
+in that strip moves the frame where a marquee would otherwise start.
 ⚠️ **A frame's *edge* is the last link of that chain since §15 D816, and reaching only one of the
 three doors with it was a defect in its own right** (§15 D839): `begin_select_drag` builds its own
 chain, so the same pixel selected the frame on a click and started a **marquee** on a press —

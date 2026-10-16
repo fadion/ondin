@@ -243,7 +243,8 @@ two doors call one function now, `canvas::pick_at_pointer`, which is C1 made lit
 assumed. ~~**The *"or on its edge"* half is still answered by only one door**: `begin_select_drag` adds
 `selected_frame_at` and neither of the other two has it — open work in `roadmap.md`.~~ **The edge
 clause is answered as of 2026-09-19** (§15 D816): `canvas::frame_edge_at` is the **last** link of
-`pick_at_pointer`, an occupied frame whose border passes within `pick_slop()`. 🚨 **Widening the
+`pick_at_pointer`, an occupied frame whose border passes within ~~`pick_slop()`~~ `FRAME_EDGE_PICK_PX`
+— 8 points either side, twice every other pick's slop, since §15 D1093. 🚨 **Widening the
 chain with `selected_frame_at` was the obvious repair and was declined** — that function answers a
 frame's whole **box**, so it would have made an already-selected frame's *interior* a target, which
 is the half of this rule that has never been true and which `pick_leaf` skips on purpose (§15 D22).

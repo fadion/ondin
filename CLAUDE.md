@@ -67,8 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1092 index rows, 1092 body headings, next free
-D1093** (measured 2026-10-16 at `4b4b5d5`; ⚠️ **the second polish list reserved D1090–D1099 at
+anywhere cited either. **The live figures: 1093 index rows, 1093 body headings, next free
+D1094** (measured 2026-10-16 at `7cd4511`; ⚠️ **the marquee-and-frame-edge request reserved
+D1093–D1102 at `10d89e0` and spent one** — D1093, an unselected container's padding left to the
+marquee and an occupied frame's edge picked 8 points either side; **D1094–D1102 found at zero sites
+and released.** Census **992**, arrival D1093, none unresolved. ⚠️ **`arch-scribe` read a first-cut
+clause that guarded nothing** (sparing the dragged container brought its padding back mid-drag),
+removed before the commit. Before that, measured 2026-10-16 at `4b4b5d5`; ⚠️ **the second polish list reserved D1090–D1099 at
 `b6f5a91` through the `dnumber-guard` mod and spent three** — D1090 (a band drag to 0 over a bound
 slot cutting the binding itself; the pass's literal half had read the 0 as unchanged and the slot
 sprang back), D1091 (the header's `+`/`⋯` gap laid out — it had never been, the pads overlapping),

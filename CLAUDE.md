@@ -67,8 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1076 index rows, 1076 body headings, next free
-D1077** (measured 2026-10-16 at `77846f6`; ⚠️ **the "continue the roadmap" request reserved
+anywhere cited either. **The live figures: 1077 index rows, 1077 body headings, next free
+D1078** (measured 2026-10-16 at `47b7238`; ⚠️ **the "continue the styles and variables work" request
+reserved D1077–D1086 at `a293655` through the `dnumber-guard` mod and spent one** — D1077, the Type
+card over several text layers (writes fanned out per layer, *Edit* on a text style selecting every
+user); D1073's swatch and D1074's retype cap went into their third amendments. **D1078–D1086 found at
+zero sites and released.** Census **976**, arrival D1077, none unresolved. ⚠️ **`arch-scribe` read two
+defects in the first cut** — *Create* offered over layers bound to different family variables (both
+store `""`), which rewrote the second's family, and a unit click converting the first layer's value
+onto every layer — **and one wrong premise of the session's**: a subject already reads a bound family
+as drawn, so a field added for it was redundant (measured by a probe, removed). Each defect was
+reproduced by a test and flip-checked before the commit. Before that, measured 2026-10-16 at
+`77846f6`; ⚠️ **the "continue the roadmap" request reserved
 D1071–D1082 at `7a349aa` through the `dnumber-guard` mod and spent six** — D1071 (a variable's
 detach said on the floating status), D1072 (opacity bound, read as a percentage), D1073 (a
 stroke's width bound, in the item), D1074 (an effect's X, Y, blur and spread bound, in the item),

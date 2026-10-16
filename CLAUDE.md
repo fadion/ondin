@@ -67,8 +67,27 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1094 index rows, 1094 body headings, next free
-D1095** (measured 2026-10-16 at `281d4fc`; ⚠️ **the drag-rate request reserved D1094–D1103 at
+anywhere cited either. **The live figures: 1097 index rows, 1097 body headings, next free
+D1098** (measured 2026-10-16 over the uncommitted tree on `6c871cb`; ⚠️ **the invariant-10 request
+reserved D1097–D1106 at `6c871cb` and spent one** — D1097, the maintainer widening invariant 10 to
+document-level actions (mark a kit, publish, stop sharing, file a document) on §8.3's one queue, and
+the agent publishing on request with no dialog; **D1098–D1106 found at zero sites and released.**
+Census **996**, arrival D1097, none unresolved. ⚠️ **`arch-scribe` found the brief's "the status line
+every action already writes" partly false** — three of the four write one, none says who acted, and
+filing writes none. Before that, ⚠️ **the MCP kits-and-exports
+request reserved D1096–D1105 at `6c871cb` and spent one** — D1096, the maintainer's ruling against
+D1095 (1): a Phase 4 for kits and the library, `run_exports`, `set_exports` and (the session's call)
+`set_pivot`; **D1097–D1105 found at zero sites and released.** Census **995**, arrival D1096, none
+unresolved. ⚠️ **`arch-scribe` corrected six premises**, among them the pivot's rule (D55, not D60)
+and *Export all* being a second walk, not a second renderer. Before that, ⚠️ **the MCP tool-list
+request reserved D1095–D1104 at `6c871cb` and spent one** — D1095, §8.4 extended to the model as it is
+(effects, masks, layout, text spans, images, and a Phase 3 of components, variables and styles
+through the verbs), record-only but for `ondin-mcp`'s gated list; **D1096–D1104 found at zero
+sites and released.** Census **994**, arrival D1095, none unresolved. ⚠️ **`arch-scribe` corrected
+four of the brief's premises** — among them the commit pass order (`propagate::owed` runs the
+component and style half in core; only the ten passes before it are app-only) and a snapshot
+"defect" that was not one: it already reports the drawn value of every bound field it carries.
+Before that, measured 2026-10-16 at `281d4fc`; ⚠️ **the drag-rate request reserved D1094–D1103 at
 `9b2a6db` and spent one** — D1094, the spacing handles at half the pointer's travel;
 **D1095–D1103 found at zero sites and released.** Census **993**, arrival D1094, none unresolved.
 Before that, measured 2026-10-16 at `7cd4511`; ⚠️ **the marquee-and-frame-edge request reserved

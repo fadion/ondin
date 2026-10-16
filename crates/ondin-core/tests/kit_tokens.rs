@@ -15,8 +15,10 @@ use ondin_core::peniko::Color;
 use ondin_core::style::{Style, StyleId, StyleValue};
 use ondin_core::variable::{KitModes, VarRule};
 use ondin_core::{
-    Brush, BrushSource, Cell, Document, Fill, IdSource, Mode, ModeId, NodeId, NodeKind, OpError,
-    Operation, Placement, Transaction, VarId, VarKind, Variable, io, keyed_by_position,
+    Brush, BrushSource, Cell, Document, EFFECT_BLUR, Effect, EffectKind, Fill, IdSource, Mode,
+    ModeId, NodeId, NodeKind, OpError, Operation, Placement, Shadow, Stroke, Transaction, VarId,
+    VarKind, Variable, bind_effect_ops, bind_opacity_ops, bind_stroke_width_ops, io,
+    keyed_by_position,
 };
 
 const L_ID: &str = "5eed0000000000000000000000000011";
@@ -1651,5 +1653,467 @@ fn a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy() {
         d.get(inst).unwrap().paint().strokes[0].width_var,
         Some(spare),
         "and so does the instance's"
+    );
+}
+
+/// Kit L with *Badge* given a stroke and a drop shadow, and two number
+/// variables of the kit's own, `a` and `b` — `values[0]` and `values[1]` in
+/// both modes — then `bind` reading `a` on *Badge*, published as version 2.
+fn kit_with_numbers(
+    bind: &dyn Fn(&Document, NodeId, VarId) -> Vec<Operation>,
+    values: [f64; 2],
+) -> (Kit, VarId, VarId) {
+    let mut k = kit();
+    let (a, b) = (k.ids.mint_var(), k.ids.mint_var());
+    let modes: Vec<ModeId> = k.doc.variables().modes().iter().map(|m| m.id).collect();
+    let number = |id, name: &str, x| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Number,
+            cells: modes.iter().map(|m| (*m, Cell::Number(x))).collect(),
+            origin: None,
+            forked: None,
+        },
+    };
+    k.doc
+        .apply(&Transaction(vec![
+            number(a, "a", values[0]),
+            number(b, "b", values[1]),
+            Operation::SetStrokes {
+                id: k.badge,
+                strokes: keyed_by_position([Stroke {
+                    width: 1.0,
+                    ..Default::default()
+                }]),
+            },
+            Operation::SetEffects {
+                id: k.badge,
+                effects: keyed_by_position([Effect::new(
+                    EffectKind::DropShadow(Shadow::default()),
+                )]),
+            },
+        ]))
+        .expect("Badge stroked and shadowed");
+    let ops = bind(&k.doc, k.badge, a);
+    assert!(!ops.is_empty(), "fixture: a binding to make");
+    k.doc.apply(&Transaction(ops)).expect("Badge bound to a");
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    (k, a, b)
+}
+
+/// One number binding through a kit's three paths (§15 D1064, D1066): `bind`
+/// makes it, `read` answers the variable a node's field is bound to, and
+/// `drawn` the number that field draws, in the variable's unit.
+///
+/// 1. **The insert**: *Badge*'s field bound to `a` lands, on the vault main and
+///    its instance, bound to D's copy of `a` — never the kit's id — and draws
+///    `a`'s value.
+/// 2. **The update**: the kit rebinds the field to `b`, so `a` no longer
+///    travels; the vault main is rebound to D's copy of `b`, `a` is removed,
+///    and the instance **follows** its main — no override.
+/// 3. ***Make local***: the main's binding is its own, so `b` is forked as
+///    *Atlas/b* and the main and, by the follow, its instance read the fork;
+///    nothing drawn changes.
+fn carry_a_number(
+    bind: &dyn Fn(&Document, NodeId, VarId) -> Vec<Operation>,
+    read: &dyn Fn(&Document, NodeId) -> Option<VarId>,
+    drawn: &dyn Fn(&Document, NodeId) -> f64,
+    values: [f64; 2],
+) {
+    let (mut k, a, b) = kit_with_numbers(bind, values);
+    let (mut d, mut ids, _) = consumer(&[]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let held_a = d.variables().by_origin((L_ID, a)).expect("a vendored").id;
+    assert_ne!(held_a, a, "under an id of D's");
+    assert_eq!(read(&d, main), Some(held_a), "the vault main reads D's a");
+    assert_eq!(read(&d, inst), Some(held_a), "the instance reads D's a");
+    assert_eq!(drawn(&d, inst), values[0], "a's value is drawn");
+
+    let ops = bind(&k.doc, k.badge, b);
+    k.doc.apply(&Transaction(ops)).expect("Badge rebound to b");
+    assert_eq!(kit::publish(&mut k.doc, None, 3), Some(3));
+    accept(&mut d, &mut ids, &k);
+    assert!(
+        d.variables().by_origin((L_ID, a)).is_none(),
+        "a no longer travels and is removed"
+    );
+    let held_b = d.variables().by_origin((L_ID, b)).expect("b vendored").id;
+    assert_eq!(read(&d, main), Some(held_b), "the update rebinds the main");
+    assert_eq!(
+        read(&d, inst),
+        Some(held_b),
+        "the instance follows its main"
+    );
+    assert_eq!(drawn(&d, inst), values[1], "b's value is drawn");
+    assert!(
+        !ondin_core::reset::drift(&d, inst).any(),
+        "no override on the instance"
+    );
+
+    let (made_main, made) = make_local(&mut d, &mut ids, inst);
+    assert_eq!(made_main, main);
+    let fork = d
+        .variables()
+        .local()
+        .find(|v| v.name == "Atlas/b")
+        .expect("b forked");
+    assert_eq!(
+        fork.forked.as_ref().map(|o| (o.kit.as_str(), o.var)),
+        Some((L_ID, b))
+    );
+    // `b`, and `brand`, which *Badge*'s fill reads.
+    assert_eq!(made.forked, (2, 0));
+    assert_eq!(read(&d, main), Some(fork.id), "the main reads the fork");
+    assert_eq!(
+        read(&d, inst),
+        Some(fork.id),
+        "the instance follows onto the fork"
+    );
+    assert_eq!(drawn(&d, inst), values[1], "nothing drawn changes");
+}
+
+/// **A layer's opacity bound to a kit's number variable** (§15 D1072) through
+/// the insert, an update and *Make local* (`carry_a_number`): 50 and then 25,
+/// read as a percentage.
+///
+/// Flips, run: `Plan::apply`'s `opacity_var` arm deleted fails at *"one kit
+/// insert"* — the vault copy names L's `a`, which D does not hold, and the
+/// commit refuses it (`BadBinding`). `reads_as_its_source`'s opacity arm
+/// answering `false` for a bound opacity (never alike) fails at *"the instance
+/// follows its main"* — the removal detached the instance to a literal.
+/// `Fork::rebind_ops`' opacity arm deleted fails at *"the main reads the fork"*:
+/// `b` was forked (`own_reads` found it) and the main left on the kit's.
+#[test]
+fn a_kits_opacity_binding_is_carried_to_the_consumers_own_variable() {
+    carry_a_number(
+        &|d, id, v| bind_opacity_ops(d, id, v),
+        &|d, id| d.get(id).unwrap().opacity_var(),
+        &|d, id| f64::from(d.drawn_opacity(id)) * 100.0,
+        [50.0, 25.0],
+    );
+}
+
+/// **A stroke's width bound to a kit's number variable** (§15 D1073) through
+/// the insert, an update and *Make local* (`carry_a_number`) — the width
+/// bound on the layer itself, beside
+/// `a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy`'s style.
+///
+/// Flips, run: `Plan::apply`'s `width_var` arm deleted fails at *"one kit
+/// insert"* (`BadBinding`). `reads_as_its_source`'s width arm answering
+/// `false` for a bound width fails at *"the instance follows its main"*.
+/// `Fork::rebind_ops`' width arm deleted fails at *"the main reads the fork"*.
+#[test]
+fn a_kits_stroke_width_binding_is_carried_to_the_consumers_own_variable() {
+    carry_a_number(
+        &|d, id, v| {
+            let item = d.get(id).unwrap().paint().strokes[0].id;
+            bind_stroke_width_ops(d, id, item, v)
+        },
+        &|d, id| d.get(id).unwrap().paint().strokes[0].width_var,
+        &|d, id| {
+            let s = &d.get(id).unwrap().paint().strokes[0];
+            s.width_var
+                .map_or(s.width, |v| d.stroke_width_drawn_in(d.variables(), id, v))
+        },
+        [3.0, 5.0],
+    );
+}
+
+/// **An effect's blur bound to a kit's number variable** (§15 D1074) through
+/// the insert, an update and *Make local* (`carry_a_number`).
+///
+/// Flips, run: `Plan::apply`'s effects arm deleted fails at *"one kit insert"*
+/// (`BadBinding`). `reads_as_its_source`'s effects arm comparing against no
+/// source binding (`none` for every item) fails at *"the instance follows its
+/// main"*. `Fork::rebind_ops`' effects arm never pushing its `SetEffects` fails
+/// at *"the main reads the fork"*. Each of the three runs flipped the same arm
+/// of all three bindings at once — opacity, width and effects — which these
+/// three tests tell apart, each binding only one of them.
+#[test]
+fn a_kits_effect_binding_is_carried_to_the_consumers_own_variable() {
+    carry_a_number(
+        &|d, id, v| {
+            let item = d.get(id).unwrap().effects()[0].id;
+            bind_effect_ops(d, id, item, EFFECT_BLUR, v)
+        },
+        &|d, id| d.get(id).unwrap().effects()[0].vars[EFFECT_BLUR],
+        &|d, id| {
+            let n = d.get(id).unwrap();
+            d.resolved_effects(id, n.effects())[0].numbers()[EFFECT_BLUR].unwrap()
+        },
+        [6.0, 9.0],
+    );
+}
+
+/// **A kit's effects style holding a bound number lands reading the consumer's
+/// copy of the variable** (§15 D1074, D1064) — `Plan::remap_value`'s effects
+/// arm, which D1074's amendment recorded as read and not run: *Badge* given an
+/// effects style *Glow* whose shadow's blur is bound to the kit's `spare`,
+/// published and inserted; the vendored style's effect, and the instance's,
+/// read D's `spare`, and the blur draws `spare`'s *Day*, 1.
+///
+/// Flip, run: `remap_value`'s effects arm leaving `vars` as it found them
+/// fails at *"the insert commits"* with `Styles(BadVariable)` — the vendored
+/// style names L's id, as the stroke style's twin above did. No other test in
+/// this file failed under it.
+#[test]
+fn a_kits_effects_style_with_a_bound_blur_lands_on_the_consumers_copy() {
+    let mut k = kit();
+    let (glow, item) = (k.ids.mint_style(), k.ids.mint_item());
+    let mut shadow = Effect::new(EffectKind::DropShadow(Shadow::default()));
+    shadow.set_number(EFFECT_BLUR, 0.0);
+    shadow.vars[EFFECT_BLUR] = Some(k.spare);
+    let effects = vec![ondin_core::Keyed::new(item, shadow)];
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddStyle {
+                style: Style {
+                    id: glow,
+                    name: "Glow".into(),
+                    value: StyleValue::Effects(effects.clone()),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetEffects {
+                id: k.badge,
+                effects,
+            },
+            Operation::SetEffectsStyle {
+                id: k.badge,
+                style: Some(glow),
+            },
+        ]))
+        .expect("the badge shadowed by Glow");
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let (mut d, mut ids, _) = consumer(&[]);
+    let root = d.root();
+    let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root).unwrap();
+    d.apply(&tx).expect("the insert commits");
+    let spare = d
+        .variables()
+        .by_origin((L_ID, k.spare))
+        .expect("spare vendored")
+        .id;
+    assert_ne!(spare, k.spare, "under an id of D's");
+    let style = d
+        .styles()
+        .iter()
+        .find(|s| s.name == "Glow")
+        .expect("Glow vendored");
+    let StyleValue::Effects(v) = &style.value else {
+        unreachable!("an effects style")
+    };
+    assert_eq!(
+        v[0].vars[EFFECT_BLUR],
+        Some(spare),
+        "the style's blur reads D's copy"
+    );
+    let n = d.get(inst).unwrap();
+    assert_eq!(
+        n.effects()[0].vars[EFFECT_BLUR],
+        Some(spare),
+        "and so does the instance's"
+    );
+    assert_eq!(
+        d.resolved_effects(inst, n.effects())[0].numbers()[EFFECT_BLUR],
+        Some(1.0),
+        "spare's Day is drawn"
+    );
+}
+
+/// **The document's own stroke and effects styles reading a kit's number
+/// variable the kit drops are detached to the number they drew** (§15 D1073,
+/// D1074; `style::detach_vars`' width and effects arms): D holds the kit's `a`
+/// (*Badge*'s width bound to it, 3) and styles *Rim* and *Haze* of its own read
+/// it — a width and a blur. The kit rebinds *Badge* to `b`, `a` is removed, and
+/// both styles keep 3 as a literal, unbound.
+///
+/// Flips, run: `detach_vars`' width arm keeping every `width_var` fails in
+/// `accept`, the commit refusing *Rim* (`BadVariable`); its effects arm
+/// skipping the slots fails the same way over *Haze*.
+#[test]
+fn a_documents_own_stroke_and_effects_styles_detach_a_removed_kit_number() {
+    let bind = |d: &Document, id: NodeId, v: VarId| {
+        let item = d.get(id).unwrap().paint().strokes[0].id;
+        bind_stroke_width_ops(d, id, item, v)
+    };
+    let (mut k, a, b) = kit_with_numbers(&bind, [3.0, 5.0]);
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().by_origin((L_ID, a)).expect("a vendored").id;
+    let (rim, haze) = (ids.mint_style(), ids.mint_style());
+    let mut shadow = Effect::new(EffectKind::DropShadow(Shadow::default()));
+    shadow.set_number(EFFECT_BLUR, 0.0);
+    shadow.vars[EFFECT_BLUR] = Some(held);
+    d.apply(&Transaction(vec![
+        Operation::AddStyle {
+            style: Style {
+                id: rim,
+                name: "Rim".into(),
+                value: StyleValue::Strokes(keyed_by_position([Stroke {
+                    width: 0.0,
+                    width_var: Some(held),
+                    ..Default::default()
+                }])),
+                origin: None,
+                forked: None,
+            },
+        },
+        Operation::AddStyle {
+            style: Style {
+                id: haze,
+                name: "Haze".into(),
+                value: StyleValue::Effects(keyed_by_position([shadow])),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .expect("D's own styles reading the kit's a");
+
+    let ops = bind(&k.doc, k.badge, b);
+    k.doc.apply(&Transaction(ops)).unwrap();
+    kit::publish(&mut k.doc, None, 3);
+    accept(&mut d, &mut ids, &k);
+    assert!(d.variables().get(held).is_none(), "fixture: a removed");
+    let StyleValue::Strokes(s) = &d.styles().get(rim).unwrap().value else {
+        panic!("a stroke style")
+    };
+    assert_eq!(
+        (s[0].width, s[0].width_var),
+        (3.0, None),
+        "Rim keeps the width it drew"
+    );
+    let StyleValue::Effects(e) = &d.styles().get(haze).unwrap().value else {
+        panic!("an effects style")
+    };
+    assert_eq!(
+        (e[0].numbers()[EFFECT_BLUR], e[0].vars[EFFECT_BLUR]),
+        (Some(3.0), None),
+        "Haze keeps the blur it drew"
+    );
+}
+
+/// **A revealed frame set to a kit's mode is reported, and stays** (§15 D1066,
+/// `MadeLocal::kit_frames`): *Icon* is set to the kit's *Night* on the kit's
+/// page; in D its vault copy is set to D's held *Night* of the kit's. Made
+/// local, the main keeps that mode and is the one frame reported.
+///
+/// Flip, run: `tokens::fork` reporting a frame on one of the **document's own**
+/// modes (`t.mode(m)` for `t.kit_mode_of(m)`) fails at *"the main is
+/// reported"*, an empty list.
+#[test]
+fn make_local_reports_a_frame_set_to_a_kits_mode() {
+    let mut k = kit();
+    let night = k.doc.variables().modes()[1].id;
+    k.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: k.icon,
+            mode: Some(night),
+        }]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let mode = d.get(main).unwrap().mode();
+    assert_eq!(
+        mode.and_then(|m| d.variables().kit_mode_of(m))
+            .map(|(kit, m)| (kit.to_string(), m.name.clone())),
+        Some((L_ID.to_string(), "Night".to_string())),
+        "fixture: the vault main is set to the kit's Night"
+    );
+    let (_, made) = make_local(&mut d, &mut ids, inst);
+    assert_eq!(made.kit_frames, [main], "the main is reported");
+    assert_eq!(d.get(main).unwrap().mode(), mode, "and keeps its mode");
+}
+
+/// ***Make local* forks a style the main reads with its value pointed at the
+/// forked variables** (§15 D1066 (d)): *Badge* is styled *Tinted*, a fill style
+/// bound to `brand`. Made local, D gains *Atlas/brand* and *Atlas/Tinted*, the
+/// forked style's fill reads *Atlas/brand* — not D's held copy of the kit's —
+/// and the main and its instance are styled by it and bound to it.
+///
+/// Flips, run: `tokens::fork` writing the forked style's value unmapped
+/// (`style.value.clone()` for `remap.remap_value(&style.value)`) fails at *"the
+/// forked style reads the forked variable"*, D's held `brand` (and
+/// `a_main_the_kit_removes_forks_a_variable_only_it_read` at *"Badge reads a
+/// fork, not a literal"*). `Fork::rebind_ops`' style arm never binding fails at
+/// *"the main is styled by the fork"*, `None` — the commit detached the slot —
+/// as two older tests here fail too. And `fork` no longer pushing a forked style's own variables
+/// (`pending.extend(st.value.vars())` dropped) **does not bite** — the reading
+/// D1066 (d) records: a styled slot holds its style's paints, which
+/// `own_reads` pushes anyway.
+#[test]
+fn make_local_forks_a_style_with_its_variables_remapped() {
+    let mut k = kit();
+    let tinted = k.ids.mint_style();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddStyle {
+                style: Style {
+                    id: tinted,
+                    name: "Tinted".into(),
+                    value: StyleValue::Fills(bound(k.brand)),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFillStyle {
+                id: k.badge,
+                style: Some(tinted),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let (mut d, mut ids, _) = consumer(&["Day"]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    let held = d.variables().by_origin((L_ID, k.brand)).unwrap().id;
+    assert!(
+        d.get(inst).unwrap().styles().fills.is_some(),
+        "fixture: the instance is styled"
+    );
+    let (main, made) = make_local(&mut d, &mut ids, inst);
+    assert_eq!(made.forked, (1, 1));
+    let fork = d
+        .variables()
+        .local()
+        .find(|v| v.name == "Atlas/brand")
+        .expect("brand forked")
+        .id;
+    assert_ne!(fork, held);
+    let style = d
+        .styles()
+        .iter()
+        .find(|s| s.name == "Atlas/Tinted")
+        .expect("Tinted forked");
+    let StyleValue::Fills(f) = &style.value else {
+        panic!("a fill style")
+    };
+    assert_eq!(
+        f[0].brush.var(),
+        Some(fork),
+        "the forked style reads the forked variable"
+    );
+    assert_eq!(
+        d.get(main).unwrap().styles().fills,
+        Some(style.id),
+        "the main is styled by the fork"
+    );
+    assert_eq!(d.get(inst).unwrap().styles().fills, Some(style.id));
+    for n in [main, inst] {
+        assert_eq!(d.get(n).unwrap().paint().fills[0].brush.var(), Some(fork));
+    }
+    assert_eq!(
+        drawn(&d, inst),
+        Brush::Solid(WHITE),
+        "nothing drawn changes"
+    );
+    assert!(
+        !ondin_core::reset::drift(&d, inst).any(),
+        "no override on the instance"
     );
 }

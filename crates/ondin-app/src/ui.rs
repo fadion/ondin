@@ -1443,6 +1443,33 @@ pub fn text_field(
     })
 }
 
+/// Inner padding of a dropdown's search field ([`search_field`]). Its own
+/// numbers rather than `button_padding`, which is 4x2 across the chrome and
+/// belongs to controls a third this width.
+pub const SEARCH_PAD: egui::Margin = egui::Margin::symmetric(7, 5);
+
+/// The search field at the head of a dropdown list — the font family list's,
+/// which every list that filters as you type now shares (§15 D1085): the
+/// theme's borderless ground and [`SEARCH_PAD`] inside it. A bare `TextEdit`
+/// there had egui's 4x2 margin, and the text sat on the ground's edge.
+///
+/// `width` is the field's outer width; the padding comes out of it.
+pub fn search_field(
+    ui: &mut egui::Ui,
+    text: &mut String,
+    id: egui::Id,
+    hint: &str,
+    width: f32,
+) -> egui::Response {
+    ui.add(
+        egui::TextEdit::singleline(text)
+            .id(id)
+            .margin(SEARCH_PAD)
+            .desired_width(width - SEARCH_PAD.sum().x)
+            .hint_text(hint),
+    )
+}
+
 /// How far a value field's number travels per point of pointer movement,
 /// as a multiple of the rate the field asks for.
 ///

@@ -393,8 +393,10 @@ fn swap_picker(
                 let mut search = ui
                     .data(|d| d.get_temp::<String>(search_id))
                     .unwrap_or_default();
+                // The family list's search field (§15 D1085).
                 ui.add(
                     egui::TextEdit::singleline(&mut search)
+                        .margin(ui::SEARCH_PAD)
                         .desired_width(width.max(160.0))
                         .hint_text("Search…"),
                 );

@@ -985,11 +985,12 @@ impl OndinApp {
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(PICKER_W - 8.0);
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let search = ui.add(
-                        egui::TextEdit::singleline(&mut pk.query)
-                            .id(egui::Id::new("style-picker-search"))
-                            .hint_text(format!("Search {slot_word} styles"))
-                            .desired_width(PICKER_W - 16.0),
+                    let search = ui::search_field(
+                        ui,
+                        &mut pk.query,
+                        egui::Id::new("style-picker-search"),
+                        &format!("Search {slot_word} styles"),
+                        PICKER_W - 8.0,
                     );
                     if pk.focus {
                         search.request_focus();

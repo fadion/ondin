@@ -977,12 +977,12 @@ impl OndinApp {
                     ui.set_width(LIST_W - 8.0);
                     ui.spacing_mut().item_spacing.y = 1.0;
                     if c.own_search {
-                        let resp = ui::text_field(
+                        let resp = ui::search_field(
                             ui,
-                            egui::vec2(LIST_W - 8.0, 26.0),
                             &mut c.query,
+                            egui::Id::new("var-complete-search"),
                             "Search variables",
-                            11.5,
+                            LIST_W - 8.0,
                         );
                         if c.focus {
                             c.focus = false;

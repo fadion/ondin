@@ -625,12 +625,6 @@ const LOADING_DOT_R: f32 = 2.5;
 /// alarm; egui's own `Spinner` turns at about this rate.
 const LOADING_DOT_PERIOD: f64 = 1.2;
 
-/// Inner padding of the family list's search field. Its own numbers rather than
-/// `button_padding`, which is 4x2 across the chrome and belongs to controls a
-/// third this width.
-const FILTER_PAD_X: i8 = 7;
-const FILTER_PAD_Y: i8 = 5;
-
 /// Popup geometry, from `design/Editor.dc.html`.
 ///
 /// **One card, 272 wide, and every tab draws into the same box.** The mockup lays
@@ -1526,7 +1520,7 @@ impl OndinApp {
                     }
                     ui.add(
                         egui::TextEdit::singleline(&mut self.font_filter)
-                            .margin(egui::Margin::symmetric(FILTER_PAD_X, FILTER_PAD_Y))
+                            .margin(ui::SEARCH_PAD)
                             .hint_text("Search…"),
                     );
                     let total = self.fonts.match_count(&self.font_filter);

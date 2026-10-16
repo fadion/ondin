@@ -67,8 +67,17 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1077 index rows, 1077 body headings, next free
-D1078** (measured 2026-10-16 at `4321dbc`; ⚠️ **the "noticed and left alone" request reserved
+anywhere cited either. **The live figures: 1078 index rows, 1078 body headings, next free
+D1079** (measured 2026-10-16 at `5eb191f`; ⚠️ **the spacing-handles request reserved D1078–D1087
+at `3056e89` and spent one** — D1078, spacing handles on the canvas, built from `design/Spacing
+Handles.dc.html` as a reference the session ruled over (the maintainer: *"You have priority over its
+decisions"*). **D1079–D1087 found at zero sites and released.** Census **977**, arrival D1078, none
+unresolved. ⚠️ **`arch-scribe` read three real defects in the first cut** — no `chrome_claims` term
+(a guide over a band took the press, D486's shape again), the bands drawing under every tool, and a
+band dragged under 6 px vanishing mid-drag — plus a missing zero-travel row; each fixed and the first
+and third flip-checked before the commit. ⚠️ **The bound release's guard is a two-defence case**:
+`commit_inner`'s no-op test drops the same commit, so flipping the guard alone stays green. Before
+that, measured at `4321dbc`; ⚠️ **the "noticed and left alone" request reserved
 D1078–D1087 at `3b35e10` and spent none** — the weight row's spared binding, the variant label's faces
 and the Auto readout went into amendments to D1073 and D1077; the provisional citations typed for them
 were re-pointed at those amendments before the record, and **D1078–D1087 found at zero sites and

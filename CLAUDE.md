@@ -68,7 +68,12 @@ entry it stops being true again. Not the file's own header prose, which has gone
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
 anywhere cited either. **The live figures: 1077 index rows, 1077 body headings, next free
-D1078** (measured 2026-10-16 at `47b7238`; ⚠️ **the "continue the styles and variables work" request
+D1078** (measured 2026-10-16 at `4321dbc`; ⚠️ **the "noticed and left alone" request reserved
+D1078–D1087 at `3b35e10` and spent none** — the weight row's spared binding, the variant label's faces
+and the Auto readout went into amendments to D1073 and D1077; the provisional citations typed for them
+were re-pointed at those amendments before the record, and **D1078–D1087 found at zero sites and
+released**. Census **976**, no arrivals, none unresolved. Before that, measured at `47b7238`; ⚠️ **the
+"continue the styles and variables work" request
 reserved D1077–D1086 at `a293655` through the `dnumber-guard` mod and spent one** — D1077, the Type
 card over several text layers (writes fanned out per layer, *Edit* on a text style selecting every
 user); D1073's swatch and D1074's retype cap went into their third amendments. **D1078–D1086 found at

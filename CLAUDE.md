@@ -67,8 +67,20 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1080 index rows, 1080 body headings, next free
-D1081** (measured 2026-10-16 over the uncommitted tree on `1e445d4`; ⚠️ **the pre-QA gaps request
+anywhere cited either. **The live figures: 1089 index rows, 1089 body headings, next free
+D1090** (measured 2026-10-16 at `22b2313`; ⚠️ **the styles-and-variables polish list reserved
+D1081–D1092 at `d04f013` and spent nine** — D1081 (a unit cut to its field, the hugging-column
+panic), D1082 (colour chips in the Fill row's look), D1083 (the browser's in-place fields),
+D1084 (the `--` list under its field), D1085 (search fields), D1086 (small polish), D1087 (the
+`⋯` toggle), D1088 (a bound field keeps its size), D1089 (spacing handles on hover).
+**D1090–D1092 found at zero sites and released.** Census **988**, arrivals D1081–D1089, none
+unresolved. ⚠️ **`arch-scribe` read two consequences of D1089 from the code; one measured false**
+— a click in an empty container's padding still selects it (the click path, not the band) — and
+the other, a marquee started in an unselected container's band becoming a band drag, is recorded
+unmeasured. ⚠️ **The nine commits were split by hunk**: `git diff` cut into per-hunk files by an
+`awk` in the scratchpad, `git apply --cached --recount` per group, each staged tree checked from
+`git checkout-index` with one shared scratch target dir (~1 GB, incremental). Before that,
+measured 2026-10-16 over the uncommitted tree on `1e445d4`; ⚠️ **the pre-QA gaps request
 reserved D1080–D1089 at `1e445d4` and spent one** — D1080, *Paste properties* saying what its bindings
 landed as, *Replace image…* through the drop's wording, and the image-editing card made read-only under a
 styled Fill card; the seven kit-carrying tests went into amendments to D1066 and D1072–D1074 (no defect).

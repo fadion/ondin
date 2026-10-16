@@ -1696,8 +1696,8 @@ band picks, at least 8 screen px across, so a zero gap is a strip on its seam; n
 `HANDLE_PICK_PX` of the outline. A padding band yields to any child on the point but a mask, which
 draws nothing of its own; a gap band yields only to a child pinned by authored insets, since its strip
 reaching into the in-flow items either side is what lets a zero gap be dragged open (§15 D1078's
-second amendment). The drag writes the pointer's delta along the axis in whole px,
-floored at 0, from the **drawn** value, over the **stored** display, so an untouched bound slot stays
+second amendment). The drag writes half the pointer's delta along the axis (`DRAG_RATE`, §15 D1094) in
+whole px, floored at 0, from the **drawn** value, over the **stored** display, so an untouched bound slot stays
 bound; `Shift` steps by 10, `Alt` writes the opposite padding, `Alt+Shift` all four. The press, the
 cursor and the release are §9.4's.
 

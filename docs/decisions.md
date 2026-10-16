@@ -1491,6 +1491,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1091** — **A header's `+` and `⋯` laid out `HEAD_MORE_GAP` apart, each keeping its own press, the gap 5.** The `⋯`'s `add_space(-item_spacing.x)` had put the two boxes touching; the gap sized only the hit pads, which allocate nothing, so the `+`'s pad covered the `⋯`'s left ~8 pt and D1086's 10 → 15 changed nothing visible. `add_space(HEAD_MORE_GAP - item_spacing.x)` lays it out; 5 is what the maintainer saw, 0, plus the 5 asked for — the session's reading. *(Fixed 2026-10-16, uncommitted. **Fixed**; the 5 ***Revisit if*** the maintainer meant more. `a_heads_plus_and_more_keep_their_own_presses`, its flip run. D1063, D1086 amended; `architecture.md` §5.3f)*
 - **D1092** — **A bound field's prefix is the plain field's — `ui::prefix_strip` and `ui::paint_prefix`, `PREFIX_PT` 13 or a 15-pt glyph, left-aligned in `value_field`'s strip — under the plain arrow, D1046's `NotAllowed` overturned by the maintainer.** `number_chip`, `number_retype` and the layout card's *Mixed* capsule had drawn their own 11.5-pt or centred 14-pt badge, so binding shrank and moved the `W`. `FieldKey::prefix()`; the marked face mirrors `value_field`'s marked label. *(Fixed 2026-10-16, uncommitted. **Fixed**; the arrow **Keep**. `a_bound_fields_prefix_is_the_plain_fields`, replacing D1046's test, two flips run. D1046 overturned; D1038 (3), D1048 amended; `architecture.md` §5.3f)*
 - **D1093** — **An unselected container's padding is not a spacing handle, and an occupied frame's edge picks `FRAME_EDGE_PICK_PX` (8) either side of the border — the maintainer's two rulings.** (1) The single selected container keeps every band; a container under the pointer that is not the single selection shows and picks its gaps only (`hovered_only` in `spacing_subject` dropping `BandKind::Padding` before `shown`), its padding being where a marquee over its children starts — D1089's marquee reading answered. A modifier rejected: `Alt`, `Shift` and `Ctrl` are all spoken for. (2) `frame_edge_at` at 8 points where it had `pick_slop`'s 4, still the chains' last link; a press-drag in the strip now moves the frame, both sides of the border, and an unselected container's padding within 8 points of its border is edge. A first-cut clause sparing the dragged container removed before the commit — it brought the padding back during a gap drag. *(Built 2026-10-16, tested and accepted by the maintainer the same day. **Keep**; the strip ***Revisit if*** a marquee beside a frame is missed. `an_unselected_containers_padding_is_a_marquee_start` new, `a_click_in_an_empty_containers_padding_selects_it` and `a_frames_edge_is_pickable_and_its_middle_is_not` amended, two flips run as reported. D1089 narrowed, D816 amended, D1078 noted; `architecture.md` §5.3c, §9.4; `context-menus.md` §2 C5)*
+- **D1094** — **A spacing band drags at half the pointer's travel: `spacing::DRAG_RATE` (0.5) on the delta along the band's axis, before `Shift`'s 10-step and the whole-unit rounding — D1078's one-for-one write halved.** The maintainer found the handles hard to set precisely. One unit per two points at 100%, `Shift`'s step per ~20; whole units, the floor at 0 and the modifiers unchanged. The canvas tests' travels doubled to keep their values. *(Built 2026-10-16, uncommitted. **Keep**; the rate ***Revisit if*** half is still too fast. `DRAG_RATE` at 1 fails `dragging_a_gap_band_writes_the_gap`, 26 against 18. D1078 amended, its fixed-size padding overflow noted as CSS's; `architecture.md` §5.3c)*
 
 ---
 
@@ -28104,8 +28105,8 @@ strip exceeds its neighbours' extent along the axis — *"no room left inside th
 a strip centred on its seam** reaching into the items either side — or it could never be dragged
 open; nothing picks within `HANDLE_PICK_PX` (9) of the outline, where the resize handles and sides win;
 the top and bottom padding own the corners they share with the sides, and a column gap wins where it
-crosses a row gap. **The write** (4, D1, D2): the pointer's delta along the band's axis, in whole px,
-floored at 0, a right or bottom padding growing as the pointer moves in; a gap drag writes the stored
+crosses a row gap. **The write** (4, D1, D2): the pointer's delta along the band's axis — ***halved
+since D1094***, one unit per two points at 100% — in whole px, floored at 0, a right or bottom padding growing as the pointer moves in; a gap drag writes the stored
 gap, so every gap of that axis moves with it; a padding drag writes one side. **Grid and wrap** (5,
 G1, G3): a grid's column-gap and row-gap bands come from its laid tracks (`LaidGrid`'s spans), across
 the other axis's whole run, each writing its own axis; a flex container's items are split into lines
@@ -28286,6 +28287,9 @@ no child — the old rule — fails *"a pinned child over a gap is the child's"*
   Not flipped; it rests on the flex engine's fit-content. ⚠️ **The badge's own drawing is not
   asserted** — the test's doc first said the badge *follows it*, an argument from the box it reads
   rather than a measurement, and now says the badge reads that same box and its drawing is not asserted.
+  A **fixed**-size container does not grow: a padding drag shrinks its content box below its items,
+  which overflow into the padding — centred under `align Center` — as CSS lays them (measured from a QA
+  report, D1094; not a defect).
 - `a_rotated_containers_bands_pick_where_drawn` (8): the row turned a quarter about its origin; world
   (−35, 65) picks the column gap, `spacing_cursor` answers `ResizeVertical`, and a drag 8 down writes
   18. Flip, run: `spacing_at` testing the world point not mapped through the inverse transform fails on
@@ -28316,7 +28320,9 @@ and third flipped. **Amended 2026-10-16**, and **a second time** the same day. D
 `roadmap.md` *Next · Spacing handles on the canvas* struck, its substance here, and the open list's
 canvas half narrowed to the paint door. **(1)'s selected-only rule and H3 widened by D1089**, the
 hovered container the subject; **a bound slot dragged off its number cut by the drag itself since
-D1090**, a drag to 0 having sprung back)*
+D1090**, a drag to 0 having sprung back; **the write's rate halved by D1094**, the tests' pointer
+travels doubled — `a_grids_column_gap_drags` and `a_rotated_containers_bands_pick_where_drawn` drag 16
+points now for their +8)*
 
 **D1089 — Spacing handles on hover: the container under the pointer shows its bands and drags them
 without being selected, and the selected one only where no container is under the pointer — D1078
@@ -28496,6 +28502,25 @@ hovered grid. *(Built 2026-10-16; the maintainer tested it and accepted it the s
 both the maintainer's rulings; the strip's move ***Revisit if*** a marquee begun beside a frame is
 missed. Two tests, one new, two flips run as reported. D1089 narrowed, D816
 amended; D1078 noted; `architecture.md` §5.3c and §9.4; `context-menus.md` §2's C5)*
+
+**D1094 — A spacing band drags at half the pointer's travel: `spacing::DRAG_RATE` (0.5) scales the
+delta along the band's axis before `Shift`'s step and the whole-unit rounding, where D1078 wrote it
+one for one. *The maintainer's request, 2026-10-16; uncommitted when recorded.*** The maintainer
+found the handles hard to set precisely and asked for half the speed. `dragged_value` now multiplies
+the signed delta by `DRAG_RATE` first, so a value moves one unit per two points at 100% and `Shift`'s
+10-step one per ~20 points. ⚠️ **The order is load-bearing**: the rate goes in before the step and
+the rounding, so `Shift` snaps the halved travel to tens and a plain drag rounds it to whole units;
+scaled after either, a snapped value would be halved — a `Shift` drag writing 5s, a plain one halves.
+Unchanged: whole units, the floor at 0, the modifiers' sides and step, the drawn base and the stored
+write. The delta is in the container's local units, as before, so the rate is per local unit and
+the travel it takes on screen still scales with zoom.
+
+**Tests**, as the caller reports them. `spacing::tests::a_drag_writes_whole_units_on_the_sides_its_modifiers_name`
+takes −10.8 for 21 from 16 (5.4 at half rate, rounded). The canvas tests' pointer travels are doubled
+to keep their values — a gap dragged x 65 → 81 for +8, 10 → 18. Flip, run:
+`DRAG_RATE` at 1 fails `dragging_a_gap_band_writes_the_gap` at 26 against 18. *(Built 2026-10-16.
+**Keep** — the maintainer's request; the rate ***Revisit if*** half is still too fast, or too slow
+for a large padding. One flip run, as reported. D1078 amended; `architecture.md` §5.3c)*
 
 **D1069 — Styles and variables, build step 6's second half — string variables' core: a text's content
 and its family bind to string variables, a sidecar of two beside the literals, which are written empty

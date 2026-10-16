@@ -2055,12 +2055,7 @@ impl OndinApp {
                             .color(theme::text::FAINT),
                     );
                 }
-                rect = ui
-                    .allocate_exact_size(
-                        egui::vec2(ui.available_width() + 5.0, ui::CONTROL_H),
-                        egui::Sense::hover(),
-                    )
-                    .0;
+                rect = super::binding::chip_slot(ui);
             });
             self.mixed_chip(ui, key, &vars, rect);
             return true;

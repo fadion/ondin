@@ -333,6 +333,21 @@ pub(crate) fn chip(
     out
 }
 
+/// The rest of a [`ui::field_row`]'s content box, for a chip: allocated at
+/// exactly the room left, so the field keeps its plain size, and handed back
+/// 5 points wider so the capsule reaches into the row's end padding the way a
+/// unit does (§15 D1088).
+///
+/// ⚠️ **The bleed is paint, not allocation.** Allocating it — and 28 tall in a
+/// 26-point content box — grew every bound field 5 by 2 points, and the card
+/// and the inspector with it: binding a variable moved the fields around it.
+pub(crate) fn chip_slot(ui: &mut egui::Ui) -> egui::Rect {
+    let h = ui::CONTROL_H - ui::FIELD_BORDER_H;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::hover());
+    rect.with_max_x(rect.right() + 5.0)
+}
+
 /// `name` fitted to `width`: whole groups cut from the left first —
 /// `…/width-collapsed` — then the leaf, with an ellipsis (D1038 A5).
 pub(crate) fn elide_groups(ui: &egui::Ui, name: &str, font: &egui::FontId, width: f32) -> String {
@@ -1283,7 +1298,7 @@ impl OndinApp {
                 egui::FontId::proportional(11.5)
             }
         };
-        ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
+        ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
             let (slot, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
             let p = ui.painter();
             match mark {
@@ -1327,11 +1342,7 @@ impl OndinApp {
                     resp.on_hover_cursor(egui::CursorIcon::NotAllowed);
                 }
             }
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width() + 5.0, 28.0),
-                egui::Sense::hover(),
-            );
-            chip_rect = rect;
+            chip_rect = chip_slot(ui);
         });
         self.field_chip(ui, key, var, chip_rect);
         reset
@@ -2650,6 +2661,120 @@ mod tests {
             cursor = out.platform_output.cursor_icon;
         }
         assert_eq!(cursor, egui::CursorIcon::NotAllowed);
+    }
+
+    /// **A bound field is the size of the field it replaces** (§15 D1088): the
+    /// chip row's ground has the plain field's width and height, so binding a
+    /// variable moves nothing in the card. Reported as the Transform, Fill and
+    /// Appearance cards growing as a chip arrived: the row allocated its chip 5
+    /// points past its own content box, and 28 tall inside a 26-point one.
+    ///
+    /// Flip, run: the chip allocated `available_width() + 5.0` again fails on the
+    /// width, the ground 5 points wider than the plain field's.
+    #[test]
+    fn a_bound_field_keeps_the_plain_fields_size() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let k = FieldKey::Radius { id: rect };
+        let ground = |out: &egui::FullOutput| {
+            out.shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                    _ => None,
+                })
+                .expect("a field ground")
+        };
+        let w = 120.0;
+        let mut plain = egui::Rect::NOTHING;
+        for _ in 0..2 {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                let mut v = 8.0_f64;
+                ui::value_field(
+                    ui,
+                    egui::vec2(w, ui::CONTROL_H),
+                    ui::Prefix::Text("R"),
+                    &mut v,
+                    ui::Scrub::whole(0.5),
+                    |d| d,
+                );
+            });
+            plain = ground(&out);
+        }
+        app.bind_field(k, radius);
+        let mut bound = egui::Rect::NOTHING;
+        for _ in 0..2 {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                app.number_chip(ui, k, radius, w, None);
+            });
+            bound = ground(&out);
+        }
+        assert_eq!(
+            bound.width(),
+            plain.width(),
+            "width: {bound:?} against {plain:?}"
+        );
+        assert_eq!(
+            bound.height(),
+            plain.height(),
+            "height: {bound:?} against {plain:?}"
+        );
+    }
+
+    /// **Binding moves nothing in the inspector** (§15 D1088): over the whole
+    /// panel, every field ground keeps its place and size when the fill, the
+    /// radius and the opacity take a variable — the reported cards being
+    /// Transform, Fill and Appearance.
+    ///
+    /// Flips, run: `chip_slot` allocating its 5-point bleed again fails here
+    /// as well as in the test above; the Fill row's chip box 28 tall again fails
+    /// on that row alone, 2 points taller.
+    #[test]
+    fn binding_fields_moves_nothing_in_the_inspector() {
+        let (ctx, mut app, rect, brand, radius) = fixture();
+        crate::theme::install(&ctx);
+        app.session.selection.set_one(rect);
+        let grounds = |app: &mut OndinApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 2400.0),
+                )),
+                ..Default::default()
+            };
+            let mut out = None;
+            for _ in 0..4 {
+                out = Some(ctx.run_ui(input.clone(), |ui| {
+                    ui.set_max_width(296.0);
+                    app.inspector_ui(ui)
+                }));
+            }
+            let mut v: Vec<[i32; 4]> = out
+                .unwrap()
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                    _ => None,
+                })
+                .map(|r| [r.min.x, r.min.y, r.max.x, r.max.y].map(|f| (f * 2.0).round() as i32))
+                .collect();
+            v.sort();
+            v
+        };
+        let before = grounds(&mut app);
+        assert!(before.len() > 4, "the panel drew its fields: {before:?}");
+        app.bind_field(
+            FieldKey::Paint {
+                id: rect,
+                slot: PaintSlot::Fill(0),
+            },
+            brand,
+        );
+        app.bind_field(FieldKey::Radius { id: rect }, radius);
+        app.bind_field(FieldKey::Opacity { id: rect }, radius);
+        let after = grounds(&mut app);
+        assert_eq!(after, before, "the field grounds, in half points");
     }
 
     /// **`Enter` on a refused `--` leaves either field as typed, the list still

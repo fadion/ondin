@@ -10035,6 +10035,9 @@ impl OndinApp {
                     // needs the couple of pixels back to carry the same visual
                     // weight in the row — the colour is what the row is about.
                     const CHIP: f32 = 16.0;
+                    // A bound row's chip box: the row's content height, not the
+                    // row's — 28 here grew a bound Fill row by 2 (§15 D1088).
+                    const CHIP_ROW_H: f32 = ui::CONTROL_H - ui::FIELD_BORDER_H;
                     let unknown = mixed.is_some_and(|m| m.brush);
                     // **Asked before the scope, not inside it**, because the two
                     // borrows have to stay disjoint: the cache is `&mut
@@ -10144,7 +10147,7 @@ impl OndinApp {
                             let reserve = if item.is_some() { 106.0 } else { 82.0 };
                             let w = (ui.available_width() - reserve).max(40.0);
                             let (rect, _) =
-                                ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::hover());
+                                ui.allocate_exact_size(egui::vec2(w, CHIP_ROW_H), egui::Sense::hover());
                             self.mixed_chip(ui, key, vars, rect);
                         }
                         _ if unknown => self.paint_hex_field(ui, id, slot, brush, true),
@@ -10159,7 +10162,7 @@ impl OndinApp {
                                     let reserve = if item.is_some() { 106.0 } else { 82.0 };
                                     let w = (ui.available_width() - reserve).max(40.0);
                                     let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(w, 28.0),
+                                        egui::vec2(w, CHIP_ROW_H),
                                         egui::Sense::hover(),
                                     );
                                     self.field_chip(ui, key, var, rect);

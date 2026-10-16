@@ -3634,7 +3634,9 @@ a dangling binding rather than repairing it. The binding's ten shapes:
   chip is on one layer's own strokes (`FieldKey::StrokeWidth { id, item }`, the Stroke card's weight
   field under `PaintScope::Node`); the selection's shared weight row stays a plain field. The
   inspector's doors detach in the edit, so they say nothing (D1071's amendment's rule): the shared row
-  clears every binding it writes — a member already drawing the typed width included — and the sides
+  clears every binding it writes — except a stroke whose bound width already draws the typed one, in
+  its own layer's mode, left unwritten and bound (`inspector::weight_all_tx` through
+  `build::edit_strokes_at_all`, §15 D1073's fourth amendment) — and the sides
   row's *Custom* writes the drawn width unbound. *Paste properties* lands a bound width by D1047's rule
   (`Properties::drawn_widths`, the width variables carried). The dash popup sizes a fresh pattern from
   the drawn width (§15 D1073's amendment). **The pass rewrites the
@@ -3955,7 +3957,9 @@ built: the kit groups (step 4), the text and the layout card's style, and a Type
 several layers.~~ **The Type card draws over several text layers** (§15 D1077): the style card over
 all of them, F10's states and the `⋯`'s counted rows; 🚨 a write **fans out**, each layer its own
 defaults, paragraph or box with the one field changed, in one transaction (`one_char_attrs_tx` per
-layer), never the first layer's style broadcast; a field reads *Mixed* where the layers disagree; the
+layer), never the first layer's style broadcast; a field reads *Mixed* where the layers disagree —
+the variant label comparing each layer's face whole, axes included (`faces_disagree`), and an Auto
+line height the lines each layer lays (`line_height_mixed`), D1077's second amendment; the
 family row is the picker, reading the drawn family; no override marks, no *Content* row, no popup.
 
 **Kits' variables and styles, as built** (step 4, §15 D1064 and D1065 in full). A vendored kit's
@@ -5872,6 +5876,7 @@ pub fn shared_over_fills<T>(doc, ids, of: impl Fn(&Fill) -> T) -> Option<T>;   /
 pub fn shared_over_strokes<T>(doc, ids, of: impl Fn(&Stroke) -> T) -> Option<T>;
 pub fn edit_fills_all(doc, ids, edit: impl Fn(&mut Fill)) -> Transaction;      // in place, each list
 pub fn edit_strokes_all(doc, ids, edit: impl Fn(&mut Stroke)) -> Transaction;  // keeping its own shape
+pub fn edit_strokes_at_all(doc, ids, edit: impl Fn(NodeId, &mut Stroke)) -> Transaction; // + the layer (D1073)
 pub fn set_fills_all(doc, ids, fills: &[Fill], src) -> Transaction;   // these values, to each, its ids
 pub fn set_strokes_all(doc, ids, strokes: &[Stroke], src) -> Transaction; //   kept by position (D980)
 pub fn retarget_fills_all(doc, ids, anchor, edited, src) -> Transaction;  // an EDIT of the shared list,

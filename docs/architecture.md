@@ -3658,7 +3658,10 @@ a dangling binding rather than repairing it. The binding's ten shapes:
   is left as written, **except one on a number the effect's kind no longer has**, which goes whoever
   wrote it (a shadow retyped to a layer blur keeps only its blur's). The chip is on one layer's own
   effect (`FieldKey::EffectNumber { id, item, slot }`, the popover's five number fields drawn through
-  `OndinApp::effect_number_field`), its retype unfloored for an offset or a spread; over several layers
+  `OndinApp::effect_number_field`), its retype held to the card's own field range — a blur `0..=MAX_BLUR`,
+  an offset or a spread `±MAX_OFFSET` (`inspector::effect_number_range`), so unfloored for those two —
+  while a bound number is floored when drawn and never capped, as a file's literal is not (§15 D1074's
+  third amendment); over several layers
   the popover's fields stay plain, seeded from the anchor's resolved number, their write clearing the
   slot's binding on every layer it writes — and the kind combo's retype clearing the bindings its new
   kind has no number for — so the inspector's doors detach in the edit and say nothing (§15 D1074's

@@ -1028,9 +1028,10 @@ pub fn section_head_badged(
 /// The width a header's `⋯` takes from the toggle target beside it, past the
 /// action icon's own — its box and the gap to the `+` (D1038 F8).
 pub const HEAD_MORE_W: f32 = HEAD_ACTION_W + HEAD_MORE_GAP;
-/// The gap between a header's `+` and its `⋯` (F8: 10 between the two glyphs'
-/// boxes).
-const HEAD_MORE_GAP: f32 = 10.0;
+/// The gap between a header's `+` and its `⋯` — F8's 10 between the two glyphs'
+/// boxes, widened by 5 at the maintainer's look (§15 D1086): at 10 the two read
+/// as one control.
+const HEAD_MORE_GAP: f32 = 15.0;
 
 /// The chip a header's reset takes on hover: its height, and its padding either
 /// side of the glyph-and-word.
@@ -1133,8 +1134,10 @@ pub fn section_head_full(
                         // wants it — or, beside a `⋯`, half the gap to it.
                         let pad = egui::Margin {
                             left: HEAD_ACTION_PAD as i8,
+                            // The rest of the gap the `⋯`'s half left, so an odd
+                            // gap is not rounded down a point.
                             right: if more {
-                                (HEAD_MORE_GAP / 2.0) as i8
+                                (HEAD_MORE_GAP - (HEAD_MORE_GAP / 2.0).floor()) as i8
                             } else {
                                 CARD_MARGIN_X as i8
                             },

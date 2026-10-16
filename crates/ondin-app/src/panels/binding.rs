@@ -272,8 +272,10 @@ pub(crate) fn chip(
         cap.left()..=text_right,
         cap.y_range(),
     ))
+    // On the capsule's centre: a point lower, as it was, read as sitting low
+    // at the maintainer's look (§15 D1086).
     .text(
-        egui::pos2(cap.left() + 8.0, cap.center().y + 1.0),
+        egui::pos2(cap.left() + 8.0, cap.center().y),
         egui::Align2::LEFT_CENTER,
         shown,
         font,

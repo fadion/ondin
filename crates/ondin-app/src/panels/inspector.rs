@@ -23300,6 +23300,8 @@ mod rhythm_tests {
         };
         let lit = |size: Size| {
             let mut app = OndinApp::headless(&ctx);
+            // Opened by hand: the panel starts closed (§15 D1086).
+            app.collapsed_panels.remove("Frame templates");
             let id = frame_with_grids(&mut app, 0);
             app.session
                 .try_commit(Transaction(vec![Operation::SetGeometry {

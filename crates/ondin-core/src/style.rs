@@ -902,7 +902,7 @@ pub fn remove_ops(doc: &Document, styles: &[StyleId]) -> Vec<Operation> {
 }
 
 /// The operations that make a style named `name` from `from`'s `slot` and bind
-/// every one of `nodes` to it (*Create style from this…*, D1038 (5)) — the new
+/// every one of `nodes` to it (*Create style…*, D1038 (5)) — the new
 /// style's values are `from`'s list, its item ids kept, so `from` already holds
 /// its look and the others are rewritten by the commit.
 pub fn create_ops(

@@ -2,7 +2,7 @@
 //!
 //! The four style slots' cards — Fill, Stroke, Effects and, since step 6, Type
 //! (§15 D1068) — wear a `⋯` in their
-//! header, always last (F8): *Apply style…*, *Create style from this…* and
+//! header, always last (F8): *Apply style…*, *Create style…* and
 //! *Detach style* (F4). A styled card **collapses to one capsule** — caret,
 //! preview, name and a short summary, *Detach* in the summary's place on hover
 //! (F1, F2) — and opened it shows the card's rows greyed and inert, *Read-only —
@@ -91,7 +91,7 @@ pub(crate) struct StylePicker {
     highlight: usize,
 }
 
-/// A style just made by *Create style from this…*, its name being typed in the
+/// A style just made by *Create style…*, its name being typed in the
 /// capsule (F6): `Enter` keeps, `Escape` undoes.
 pub(crate) struct StyleNaming {
     pub(crate) style: StyleId,
@@ -757,7 +757,7 @@ impl OndinApp {
         Transaction(ops)
     }
 
-    /// *Create style from this…* (F4, F6): the agreed list made a style under a
+    /// *Create style…* (F4, F6): the agreed list made a style under a
     /// free name, every target bound to it, and the capsule opened on its name.
     fn create_style(&mut self, slot: StyleSlot, targets: &[NodeId]) {
         let Some(&from) = targets.first() else { return };
@@ -832,11 +832,12 @@ impl OndinApp {
             StyleShown::Mixed(_) | StyleShown::Partial => false,
         };
         // Every row names how many layers it acts on (F10) — *Create* too, which
-        // binds them all.
+        // binds them all. One layer's rows are the maintainer's shorter words,
+        // *Create style* and *Create style as a copy* (§15 D1086).
         let create = match (&state, n) {
-            (StyleShown::One(_), 1) => "Create style from this as a copy…".to_string(),
+            (StyleShown::One(_), 1) => "Create style as a copy…".to_string(),
             (StyleShown::One(_), n) => format!("Create style from these {n} as a copy…"),
-            (_, 1) => "Create style from this…".to_string(),
+            (_, 1) => "Create style…".to_string(),
             (_, n) => format!("Create style from these {n} layers…"),
         };
         let detach = match (n, styled) {
@@ -1291,7 +1292,7 @@ mod tests {
     }
 
     /// **A styled Fill card is its capsule, and *Detach* keeps the values**
-    /// (F1, F2): after *Create style from this…*, the card draws the style's
+    /// (F1, F2): after *Create style…*, the card draws the style's
     /// name and its summary where the rows were, and detaching leaves the red.
     #[test]
     fn a_styled_card_draws_its_capsule_and_detaching_keeps_its_values() {
@@ -1316,7 +1317,7 @@ mod tests {
     }
 
     /// **The Container card is a style card** (§15 D1075, D1076, F7): a column
-    /// frame's layout made a style through *Create style from this…*, the card
+    /// frame's layout made a style through *Create style…*, the card
     /// draws its capsule — *Column · 6* — where the rows were; applied to a plain
     /// frame it gives it the column; detached, the frame keeps it.
     ///

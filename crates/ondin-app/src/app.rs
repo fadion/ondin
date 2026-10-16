@@ -2398,7 +2398,11 @@ impl OndinApp {
             // holds before any layer has been selected; it used to be the whole
             // answer, on the grounds that the card was a placeholder with nothing
             // in it.
-            collapsed_panels: HashSet::from(["Effects", "Preview"]),
+            //
+            // Frame templates starts closed at the maintainer's look (§15 D1086):
+            // a page of pictures is something reached for, not read on every
+            // frame selected.
+            collapsed_panels: HashSet::from(["Effects", "Preview", "Frame templates"]),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
             child_drift_cache: (u64::MAX, Default::default()),

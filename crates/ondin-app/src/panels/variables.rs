@@ -392,7 +392,9 @@ impl OndinApp {
                         tabs(ui, &mut b.tab);
                         search_row(ui, &mut b, &mut acts);
                         if let Some(line) = &selection_line {
-                            ui.add_space(-8.0);
+                            // Two points further off the search row than it
+                            // sat, at the maintainer's look (§15 D1086).
+                            ui.add_space(-6.0);
                             ui.label(
                                 egui::RichText::new(line)
                                     .size(10.5)
@@ -407,7 +409,7 @@ impl OndinApp {
                             Tab::Styles if doc.styles().is_empty() => empty(
                                 ui,
                                 "No styles yet",
-                                "Use ⋯ on any inspector card and choose Create style from this…",
+                                "Use the … menu on any inspector card and choose Create style…",
                             ),
                             Tab::Styles => styles_tab(
                                 ui,
@@ -1559,8 +1561,10 @@ fn search_row(ui: &mut egui::Ui, b: &mut Browser, acts: &mut Vec<Act>) {
             .on_hover_text(match b.tab {
                 Tab::Variables => "New variable or mode",
                 // A style is made from a card's values (F4), and the `+` takes
-                // the browser to the variables it can make (§15 D1063).
-                Tab::Styles => "New variable or mode — a style is made from a card's ⋯",
+                // the browser to the variables it can make (§15 D1063). The
+                // menu named in words: the chrome's text face has no `⋯`, and
+                // the tooltip drew a missing-glyph box in its place.
+                Tab::Styles => "New variable or mode — a style is made from a card's … menu",
             });
         if add.clicked() {
             acts.push(Act::OpenMenu(

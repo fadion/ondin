@@ -138,7 +138,7 @@ pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static
 }
 
 /// A style's short summary (F1): `1 fill`, `1 · inside`, `2 shadows`.
-fn summary(value: &StyleValue) -> String {
+fn summary(doc: &Document, value: &StyleValue) -> String {
     let plural = |n: usize, one: &str, many: &str| match n {
         1 => format!("1 {one}"),
         n => format!("{n} {many}"),
@@ -148,7 +148,7 @@ fn summary(value: &StyleValue) -> String {
         StyleValue::Strokes(v) => match v.as_slice() {
             [one] => format!(
                 "{} · {}",
-                number(one.width),
+                number(width_shown(doc, one)),
                 format!("{:?}", one.align).to_lowercase()
             ),
             v => plural(v.len(), "stroke", "strokes"),
@@ -194,6 +194,17 @@ fn summary(value: &StyleValue) -> String {
                 ),
             }
         }
+    }
+}
+
+/// A stroke style's width as drawn in the document's default mode, the colour's
+/// rule in [`preview_colour`]: a bound width's literal is its 0 (§15 D1073), and
+/// the summary read `0 · inside` and the ring drew the clamp's 1 over a style
+/// whose layers draw its variable's width.
+fn width_shown(doc: &Document, s: &ondin_core::Stroke) -> f64 {
+    match s.width_var {
+        Some(v) => doc.stroke_width_drawn_in(doc.variables(), doc.root(), v),
+        None => s.width,
     }
 }
 
@@ -247,7 +258,9 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
             let c = preview_colour(doc, &style.value)
                 .map(ui::color_to_egui)
                 .unwrap_or(ink(178));
-            let w = v.first().map_or(1.0, |s| s.width.clamp(1.0, 3.0)) as f32;
+            let w = v
+                .first()
+                .map_or(1.0, |s| width_shown(doc, s).clamp(1.0, 3.0)) as f32;
             p.rect_stroke(rect, 4, egui::Stroke::new(w, c), egui::StrokeKind::Inside);
         }
         StyleValue::Effects(_) => {
@@ -364,7 +377,7 @@ fn capsule(
     let tail = if editing {
         "editing".to_string()
     } else {
-        summary(&style.value)
+        summary(doc, &style.value)
     };
     let tail_w = p
         .layout_no_wrap(tail.clone(), font.clone(), color::text_a(107))
@@ -1682,6 +1695,50 @@ mod tests {
             "the editor lays out at 40: {} against {before}",
             height(&app)
         );
+    }
+
+    /// **A stroke style's bound width reads as drawn** in its summary — `4 · …`
+    /// for a width bound to a variable of 4, not the literal's `0` (§15 D1073's
+    /// reading (e), fixed in its third amendment). The ring reads the same
+    /// `width_shown`, untested — it is pixels.
+    ///
+    /// Flip: `width_shown` returning `s.width` for a bound width fails on the
+    /// summary, at `0 · center`.
+    #[test]
+    fn a_stroke_styles_bound_width_reads_as_drawn() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let (mut app, _, _) = app(&ctx);
+        let mode = app.session.ids.mint_mode();
+        let v = app.session.ids.mint_var();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: v,
+                    name: "stroke/thick".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(4.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ])));
+        let stroke = ondin_core::Stroke {
+            width: 0.0,
+            width_var: Some(v),
+            ..Default::default()
+        };
+        let value = StyleValue::Strokes(vec![Keyed::new(app.session.ids.mint_item(), stroke)]);
+        let text = summary(&app.session.doc, &value);
+        assert!(text.starts_with("4 · "), "summary {text:?}");
     }
 
     /// **Two layers bound to different family variables do not agree** (§15

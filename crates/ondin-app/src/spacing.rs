@@ -35,6 +35,10 @@ const PILL_LEN: f32 = 12.0;
 const PILL_THICK: f32 = 3.0;
 /// The step `Shift` drags in (D1), a nudge's coarse step.
 const SHIFT_STEP: f64 = 10.0;
+/// Units of spacing per local unit the pointer travels — half, so a value
+/// moves one unit per two points at 100% (§15 D1094, the maintainer's
+/// request: one for one was hard to set precisely).
+const DRAG_RATE: f64 = 0.5;
 
 /// One side of a container's padding, in `Display::padding`'s order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -429,15 +433,16 @@ pub(crate) fn written_slots(kind: BandKind, alt: bool, shift: bool) -> Vec<usize
 }
 
 /// The value a drag of `kind` from `base` reaches at local `delta`: the delta
-/// along the band's axis (signed by [`BandKind::sign`]), in whole units, floored
-/// at 0. `step` drags in [`SHIFT_STEP`]s from `base`, as a nudge steps.
+/// along the band's axis (signed by [`BandKind::sign`]) at [`DRAG_RATE`], in
+/// whole units, floored at 0. `step` drags in [`SHIFT_STEP`]s from `base`, as a
+/// nudge steps.
 ///
 /// **`Shift` alone steps, and not under `Alt`** — the session's ruling over the
 /// design, which gave `Shift` both the step (*"it combines with Alt"*) and,
 /// with `Alt`, the all-four chord (D2): one chord cannot mean both, and all
 /// four sides is the reading a designer reaches for with it.
 pub(crate) fn dragged_value(kind: BandKind, base: f64, delta: Vec2, step: bool) -> f64 {
-    let along = if kind.horizontal() { delta.x } else { delta.y } * kind.sign();
+    let along = if kind.horizontal() { delta.x } else { delta.y } * kind.sign() * DRAG_RATE;
     let along = match step {
         true => (along / SHIFT_STEP).round() * SHIFT_STEP,
         false => along,
@@ -1118,11 +1123,13 @@ mod canvas_tests {
     }
 
     /// **Dragging a gap band writes the gap, one undo step** (D1): the band
-    /// between the first two items grabbed at x 65 and dragged 8 to the right
-    /// makes the gap 18 — every gap of the row with it — and undo puts back 10.
+    /// between the first two items grabbed at x 65 and dragged 16 to the right
+    /// — 8 at the drag's half rate (§15 D1094) — makes the gap 18, every gap of
+    /// the row with it, and undo puts back 10.
     ///
     /// Flip, run: `begin_spacing_drag` answering `false` leaves the press to the
-    /// move arm — fails *"the gap took the drag"*, still 10.
+    /// move arm — fails *"the gap took the drag"*, still 10. `DRAG_RATE` back at
+    /// 1 fails there too, 26.
     #[test]
     fn dragging_a_gap_band_writes_the_gap() {
         let ctx = egui::Context::default();
@@ -1132,7 +1139,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             false,
         );
@@ -1163,7 +1170,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             false,
         );
@@ -1273,9 +1280,9 @@ mod canvas_tests {
     }
 
     /// **The modifiers choose the sides and the step** (D1, D2, and the
-    /// session's ruling): `Shift` on a gap steps by 10 — a 13 drag is +10 —
-    /// `Alt` on the left padding writes the right with it, and `Alt+Shift` all
-    /// four, in whole units with no step.
+    /// session's ruling): `Shift` on a gap steps by 10 — a 13-point drag, 6.5
+    /// at half rate (§15 D1094), is +10 — `Alt` on the left padding writes the
+    /// right with it, and `Alt+Shift` all four, in whole units with no step.
     ///
     /// Flip, run: the band's press placed below `begin_select_drag`'s
     /// `Alt`+`Shift` refusal (spelled as the band arm skipped under that chord)
@@ -1306,7 +1313,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(14.0, 120.0),
-            Point::new(22.0, 120.0),
+            Point::new(30.0, 120.0),
             alt,
             false,
         );
@@ -1325,7 +1332,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(200.0, 14.0),
-            Point::new(200.0, 27.0),
+            Point::new(200.0, 40.0),
             both,
             false,
         );
@@ -1405,7 +1412,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             false,
         );
@@ -1571,7 +1578,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(200.0, 14.0),
-            Point::new(200.0, -3.0),
+            Point::new(200.0, -20.0),
             none,
             true,
         );
@@ -1583,7 +1590,7 @@ mod canvas_tests {
             })
         };
         assert!(top(&app), "held thin, still drawn");
-        let end = app.to_screen(Point::new(200.0, -3.0), RECT, 1.0);
+        let end = app.to_screen(Point::new(200.0, -20.0), RECT, 1.0);
         frame(&ctx, &mut app, vec![button(end, false, none)], none);
         frame(&ctx, &mut app, Vec::new(), none);
         assert!(!top(&app), "let go at 3, dropped");
@@ -1607,7 +1614,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             true,
         );
@@ -1616,7 +1623,7 @@ mod canvas_tests {
             "in flight"
         );
         assert!(app.cancel_gesture(&ctx), "the cancel took the drag");
-        let end = app.to_screen(Point::new(73.0, 35.0), RECT, 1.0);
+        let end = app.to_screen(Point::new(81.0, 35.0), RECT, 1.0);
         frame(&ctx, &mut app, vec![button(end, false, none)], none);
         frame(&ctx, &mut app, Vec::new(), none);
         assert_eq!(spacing(&app, row)[0], 10.0, "nothing committed");
@@ -1755,7 +1762,7 @@ mod canvas_tests {
 
     /// **A grid's column gap drags end to end** (G1): a grid of two 100-wide
     /// columns at gap 10 inside padding 20 — the gap band x 120–130 — dragged
-    /// 8 to the right is a gap of 18, the row gap untouched.
+    /// 16 to the right (8 at half rate) is a gap of 18, the row gap untouched.
     ///
     /// Flip, run: `bands`' grid arm switched off fails here at 10 (and
     /// `a_grids_bands_are_between_its_tracks` on *"a column gap"*).
@@ -1781,7 +1788,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(125.0, 40.0),
-            Point::new(133.0, 40.0),
+            Point::new(141.0, 40.0),
             none,
             false,
         );
@@ -1816,7 +1823,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             false,
         );
@@ -1864,7 +1871,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             false,
         );
@@ -1927,7 +1934,8 @@ mod canvas_tests {
     }
 
     /// **A hugging container grows with the drag** (D1): the row's width fit to
-    /// its content, a gap dragged +8 mid-drag lays the row 16 wider — both gaps
+    /// its content, a gap dragged +8 mid-drag (16 points at half rate) lays the
+    /// row 16 wider — both gaps
     /// move. The size badge reads this same preview box; its drawing is not
     /// asserted here.
     #[test]
@@ -1956,7 +1964,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(65.0, 35.0),
-            Point::new(73.0, 35.0),
+            Point::new(81.0, 35.0),
             none,
             true,
         );
@@ -1965,8 +1973,8 @@ mod canvas_tests {
 
     /// **A rotated container's bands pick where they are drawn** (8): the row
     /// turned a quarter about its origin, the first gap's middle at world
-    /// (−35, 65) picks the gap with the vertical arrows, and a drag 8 down —
-    /// along the row's own x — is a gap of 18.
+    /// (−35, 65) picks the gap with the vertical arrows, and a drag 16 down (8
+    /// at half rate) — along the row's own x — is a gap of 18.
     ///
     /// Flip, run: `spacing_at` testing the world point unmapped by the row's
     /// inverse transform fails on *"the gap, turned"*. B3, B4 and the hugging
@@ -1996,7 +2004,7 @@ mod canvas_tests {
             &ctx,
             &mut app,
             Point::new(-35.0, 65.0),
-            Point::new(-35.0, 73.0),
+            Point::new(-35.0, 81.0),
             none,
             false,
         );
@@ -2230,16 +2238,17 @@ mod tests {
         assert_eq!(i.map(|i| thin[i].kind), Some(BandKind::Padding(Side::Top)));
     }
 
-    /// **The write** (D1, D2): a delta in whole units floored at 0, a right
-    /// padding growing as the pointer moves in, `Shift` stepping by 10, and the
-    /// modifiers choosing the sides; a bound slot left untouched keeps its
-    /// literal.
+    /// **The write** (D1, D2): a delta at half the pointer's travel (§15
+    /// D1094) in whole units floored at 0, a right padding growing as the
+    /// pointer moves in, `Shift` stepping by 10, and the modifiers choosing the
+    /// sides; a bound slot left untouched keeps its literal.
     #[test]
     fn a_drag_writes_whole_units_on_the_sides_its_modifiers_name() {
         let right = BandKind::Padding(Side::Right);
         assert_eq!(
-            dragged_value(right, 16.0, Vec2::new(-5.4, 0.0), false),
-            21.0
+            dragged_value(right, 16.0, Vec2::new(-10.8, 0.0), false),
+            21.0,
+            "10.8 in is 5.4 at half rate, 21 in whole units"
         );
         assert_eq!(
             dragged_value(BandKind::ColumnGap, 16.0, Vec2::new(-40.0, 0.0), false),

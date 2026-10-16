@@ -165,6 +165,15 @@ impl FieldKey {
         )
     }
 
+    /// [`Self::badge`] as the unbound field's own prefix — a word or a glyph at
+    /// that field's size (§15 D1092).
+    pub(crate) fn prefix(self) -> ui::Prefix {
+        match self.badge_is_icon() {
+            true => ui::Prefix::Icon(self.badge()),
+            false => ui::Prefix::Text(self.badge()),
+        }
+    }
+
     pub(crate) fn kind(self) -> VarKind {
         match self {
             FieldKey::Paint { .. } => VarKind::Color,
@@ -1291,55 +1300,45 @@ impl OndinApp {
     ) -> bool {
         let mut chip_rect = egui::Rect::NOTHING;
         let mut reset = false;
-        let badge_font = |size: f32| {
-            if key.badge_is_icon() {
-                theme::icon_font(size)
-            } else {
-                egui::FontId::proportional(11.5)
-            }
-        };
         ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
-            let (slot, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
-            let p = ui.painter();
+            // The unbound field's own prefix strip, so binding changes neither the
+            // prefix's size nor its place (§15 D1092).
+            let (strip, lead) = ui::prefix_strip(ui, key.prefix());
+            let p = ui.painter().clone();
             match mark {
-                // **The badge is the mark's place, as a field's label is** (§15
+                // **The prefix is the mark's place, as a field's label is** (§15
                 // D1048, D981): bright with the dot at rest, ↺ while the pointer
                 // is on the row, and a click on it the reset — the chip having no
-                // label of its own to carry one.
+                // label of its own to carry one. `value_field`'s marked label.
                 Some(m) => {
+                    let resp = ui.interact(
+                        strip,
+                        egui::Id::new(("chip-mark", format!("{key:?}"))),
+                        egui::Sense::click(),
+                    );
                     if ui.rect_contains_pointer(ui.max_rect()) {
                         p.text(
-                            slot.center(),
+                            strip.left_center() + egui::vec2(lead.size().x / 2.0, 0.0),
                             egui::Align2::CENTER_CENTER,
                             icon::ARROW_COUNTER_CLOCKWISE,
-                            theme::icon_font(13.0),
-                            color::TEXT,
+                            theme::icon_font(12.0),
+                            theme::text::STRONG,
                         );
                     } else {
-                        p.text(
-                            slot.center(),
-                            egui::Align2::CENTER_CENTER,
-                            key.badge(),
-                            badge_font(14.0),
-                            color::TEXT,
-                        );
-                        ui::override_dot(p, slot.right_top() + egui::vec2(1.0, 2.0));
+                        let lead_w = lead.size().x;
+                        let at = ui::paint_prefix(&p, strip, lead, theme::text::STRONG);
+                        ui::override_dot(&p, at + egui::vec2(lead_w + 1.5, 3.0));
                     }
                     reset = resp.on_hover_text(&m.tip).clicked();
                 }
-                // **The badge says the field will not scrub** (D1038 (3), §15
+                // **The prefix does not scrub while bound** (D1038 (3), §15
                 // D1046): unbound it is the scrub handle; bound, a drag would
-                // detach by accident, so it does not scrub and its cursor
-                // refuses. The glyph is the session's — D1038 names no cursor.
+                // detach by accident. Its cursor is the plain arrow (§15 D1092,
+                // the maintainer's ruling over D1046's `NotAllowed`): the scrub
+                // arrows' absence is the affordance, and a refusal read as an
+                // error over a field that is working as meant.
                 None => {
-                    p.text(
-                        slot.center(),
-                        egui::Align2::CENTER_CENTER,
-                        key.badge(),
-                        badge_font(14.0),
-                        theme::text::FAINT,
-                    );
-                    resp.on_hover_cursor(egui::CursorIcon::NotAllowed);
+                    ui::paint_prefix(&p, strip, lead, theme::text::FAINT);
                 }
             }
             chip_rect = chip_slot(ui);
@@ -1366,15 +1365,8 @@ impl OndinApp {
         let table = self.session.doc.variables();
         let font = egui::FontId::proportional(12.0);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
-            if key.badge_is_icon() {
-                ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
-            } else {
-                ui.label(
-                    egui::RichText::new(key.badge())
-                        .size(11.5)
-                        .color(theme::text::FAINT),
-                );
-            }
+            let (strip, lead) = ui::prefix_strip(ui, key.prefix());
+            ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
             // B4's refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let at = refused(table, key.kind(), buf.as_str()).map(|r| r.1);
@@ -2636,31 +2628,69 @@ mod tests {
         assert_eq!(fill0(&app, other), BrushSource::from(Color::BLACK));
     }
 
-    /// **A bound radius field's badge refuses the scrub cursor** (D1038 (3), §15
-    /// D1046): the pointer over the corner icon asks for `NotAllowed`.
+    /// **A bound field's prefix is the plain field's, under the plain arrow**
+    /// (§15 D1092): bound, `W` is drawn at the size and the place the unbound
+    /// `W` field draws it, and the pointer over it shows the default cursor —
+    /// not the scrub arrows, since it does not scrub (D1046), and not
+    /// `NotAllowed`, which D1046 had.
     ///
-    /// Flip, run: removing the `on_hover_cursor` fails with the default cursor.
+    /// Flips, run: the strip given `Prefix::Label`'s 11-pt type in place of the
+    /// field's own prefix fails *"the prefix's size"*, 11 against 13; a hover
+    /// `interact` over the strip with `on_hover_cursor(NotAllowed)` fails *"the
+    /// plain arrow"*.
     #[test]
-    fn a_bound_radius_badge_says_it_will_not_scrub() {
+    fn a_bound_fields_prefix_is_the_plain_fields() {
         let (ctx, mut app, rect, _, radius) = fixture();
         crate::theme::install(&ctx);
-        let k = FieldKey::Radius { id: rect };
+        let k = FieldKey::Size { id: rect, axis: 0 };
+        // The prefix's run as drawn: its top-left and its type size.
+        let prefix = |out: &egui::FullOutput| {
+            out.shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "W" => {
+                        Some((t.pos, t.galley.job.sections[0].format.font_id.size))
+                    }
+                    _ => None,
+                })
+                .expect("a W drawn")
+        };
+        let w = 120.0;
+        let mut plain = None;
+        for _ in 0..2 {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                let mut v = 72.0_f64;
+                ui::value_field(
+                    ui,
+                    egui::vec2(w, ui::CONTROL_H),
+                    k.prefix(),
+                    &mut v,
+                    ui::Scrub::whole(0.5),
+                    |d| d,
+                );
+            });
+            plain = Some(prefix(&out));
+        }
+        let (plain_at, plain_pt) = plain.unwrap();
         app.bind_field(k, radius);
-        // The badge's centre, measured: it draws at (10, 7)–(24, 21) here.
-        let over = egui::pos2(17.0, 14.0);
+        let mut bound = None;
         let mut cursor = egui::CursorIcon::Default;
+        let over = plain_at + egui::vec2(3.0, 5.0);
         for events in [vec![], vec![egui::Event::PointerMoved(over)], vec![]] {
             let input = egui::RawInput {
                 events,
                 ..Default::default()
             };
             let out = ctx.run_ui(input, |ui| {
-                ui.set_min_width(180.0);
-                app.number_chip(ui, k, radius, 160.0, None);
+                app.number_chip(ui, k, radius, w, None);
             });
+            bound = Some(prefix(&out));
             cursor = out.platform_output.cursor_icon;
         }
-        assert_eq!(cursor, egui::CursorIcon::NotAllowed);
+        let (bound_at, bound_pt) = bound.unwrap();
+        assert_eq!(bound_pt, plain_pt, "the prefix's size");
+        assert_eq!(bound_at, plain_at, "the prefix's place");
+        assert_eq!(cursor, egui::CursorIcon::Default, "the plain arrow");
     }
 
     /// **A bound field is the size of the field it replaces** (§15 D1088): the

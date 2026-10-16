@@ -1866,6 +1866,44 @@ const SUFFIX_BLEED: f32 = 4.0;
 /// four digits at the field's type size (§15 D1081).
 const UNIT_DIGITS_MIN: f32 = 28.0;
 
+/// [`value_field`]'s prefix strip for a field drawn in another face — a bound
+/// field's chip, its retype buffer, A4's *Mixed* capsule — so the prefix keeps
+/// its size and its place from field to field (§15 D1092): reserved at the
+/// cursor as [`value_field`] reserves it, the prefix's width and [`PREFIX_GAP`],
+/// and the row's item spacing zeroed after it so what follows starts where the
+/// digits would. Senses nothing; answers the strip and the prefix's run for the
+/// caller to paint, through [`paint_prefix`] at rest.
+///
+/// The bound faces had their own badge — 11.5-pt type or a 14-pt glyph centred
+/// in a 14-pt slot — so tabbing from `W 72` to a bound `W` shrank the letter
+/// and moved it.
+pub fn prefix_strip(
+    ui: &mut egui::Ui,
+    prefix: Prefix,
+) -> (egui::Rect, std::sync::Arc<egui::Galley>) {
+    let lead = prefix.galley(ui);
+    let inset = (lead.size().x + PREFIX_GAP).round();
+    let (strip, _) = ui.allocate_exact_size(
+        egui::vec2(inset, CONTROL_H - FIELD_BORDER_H),
+        egui::Sense::hover(),
+    );
+    ui.spacing_mut().item_spacing.x = 0.0;
+    (strip, lead)
+}
+
+/// A [`prefix_strip`]'s prefix in `ink`, where [`value_field`] paints its own:
+/// at the strip's left, centred down it.
+pub fn paint_prefix(
+    painter: &egui::Painter,
+    strip: egui::Rect,
+    lead: std::sync::Arc<egui::Galley>,
+    ink: egui::Color32,
+) -> egui::Pos2 {
+    let at = egui::pos2(strip.left(), strip.center().y - lead.size().y / 2.0);
+    painter.galley(at, lead, ink);
+    at
+}
+
 impl Prefix {
     /// The prefix as styled text. Both variants are the design's 38% grey; only the
     /// size and the family differ, and the reason they differ by more than the

@@ -2046,16 +2046,9 @@ impl OndinApp {
         if let Some(vars) = self.field_mixed_vars(key) {
             let mut rect = egui::Rect::NOTHING;
             ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
-                let glyph = key.badge();
-                if key.badge_is_icon() {
-                    ui.label(theme::icon_text(glyph, 14.0, theme::text::FAINT));
-                } else {
-                    ui.label(
-                        egui::RichText::new(glyph)
-                            .size(11.5)
-                            .color(theme::text::FAINT),
-                    );
-                }
+                // The unbound field's own prefix (§15 D1092).
+                let (strip, lead) = ui::prefix_strip(ui, key.prefix());
+                ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
                 rect = super::binding::chip_slot(ui);
             });
             self.mixed_chip(ui, key, &vars, rect);

@@ -638,6 +638,7 @@ fn a_hidden_shadow_draws_nothing_extra() {
             color: Color::from_rgba8(255, 0, 0, 255),
         }),
         visible: false,
+        vars: Default::default(),
     };
     let (with, res_with) = document(vec![hidden], 1.0);
     let (without, res_without) = document(vec![], 1.0);

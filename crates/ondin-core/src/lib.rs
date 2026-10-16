@@ -61,16 +61,17 @@ pub use peniko;
 pub use boolean::evaluate as evaluate_boolean;
 pub use build::{
     ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_paint_in, any_rect_in,
-    bind_brush_at_all, bind_corners_ops, bind_opacity_ops, bind_size_ops, bind_spacing_ops,
-    bind_stroke_width_ops, bind_text_ops, bind_visible_ops, bindable_size_axes, boolean,
-    can_parent, colors_in, detach_brush_at_all, detach_corner_ops, detach_corners_ops,
-    detach_opacity_ops, detach_size_ops, detach_spacing_ops, detach_stroke_width_ops,
-    detach_text_ops, detach_visible_ops, edit_brush_at_all, edit_brushes_all, edit_fill_at_all,
-    edit_fills_all, edit_stroke_at_all, edit_strokes_all, edited_brush, gradients_in, group,
-    insert_subtrees, keep_corner_bindings, keep_opacity_bindings, keep_size_bindings,
-    keep_spacing_bindings, keep_stroke_width_bindings, keep_text_bindings, keep_visible_bindings,
-    kept_size_vars, kept_stroke_widths, local_for_world, move_by_world, outermost, paint_at,
-    paint_targets, place_at_world, recolor, repaint, reparent_preserving_world, retarget_fills_all,
+    bind_brush_at_all, bind_corners_ops, bind_effect_ops, bind_opacity_ops, bind_size_ops,
+    bind_spacing_ops, bind_stroke_width_ops, bind_text_ops, bind_visible_ops, bindable_size_axes,
+    boolean, can_parent, colors_in, detach_brush_at_all, detach_corner_ops, detach_corners_ops,
+    detach_effect_ops, detach_opacity_ops, detach_size_ops, detach_spacing_ops,
+    detach_stroke_width_ops, detach_text_ops, detach_visible_ops, edit_brush_at_all,
+    edit_brushes_all, edit_fill_at_all, edit_fills_all, edit_stroke_at_all, edit_strokes_all,
+    edited_brush, gradients_in, group, insert_subtrees, keep_corner_bindings, keep_effect_bindings,
+    keep_opacity_bindings, keep_size_bindings, keep_spacing_bindings, keep_stroke_width_bindings,
+    keep_text_bindings, keep_visible_bindings, kept_effect_vars, kept_size_vars,
+    kept_stroke_widths, local_for_world, move_by_world, outermost, paint_at, paint_targets,
+    place_at_world, recolor, repaint, reparent_preserving_world, retarget_fills_all,
     retarget_strokes_all, set_boolean_op, set_brush_at_all, set_corner_radius_all, set_fills_all,
     set_opacity_all, set_strokes_all, shared_corner_radius, shared_fills, shared_over_fills,
     shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
@@ -78,8 +79,9 @@ pub use build::{
 pub use container::{AutoMargins, Insets, LengthPct};
 pub use document::{DEFAULT_CANVAS_BACKGROUND, Document, remap_subtree, reserve_existing_ids};
 pub use effect::{
-    BLUR_CUTOFF, BLUR_DEVIATION, DEFAULT_BLUR_RADIUS, Effect, EffectKind, FilterChannel, Filters,
-    Shadow, deviation, reach, stack_escape,
+    BLUR_CUTOFF, BLUR_DEVIATION, DEFAULT_BLUR_RADIUS, EFFECT_BLUR, EFFECT_SPREAD, EFFECT_X,
+    EFFECT_Y, Effect, EffectKind, EffectVars, FilterChannel, Filters, Shadow, deviation, reach,
+    stack_escape,
 };
 pub use export::{ExportBackground, ExportFormat, ExportScale, ExportSpec};
 pub use guide::{

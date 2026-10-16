@@ -3265,6 +3265,7 @@ fn a_stack_that_draws_nothing_leaves_the_markup_untouched() {
             vec![Effect {
                 kind: EffectKind::DropShadow(shadow(12.0, 4.0)),
                 visible: false,
+                vars: Default::default(),
             }],
         ),
         (

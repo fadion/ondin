@@ -626,3 +626,194 @@ fn paste_properties_carries_a_bound_stroke_width_by_the_paste_rule() {
     let s = stroke(&f.doc, other);
     assert_eq!((s.width, s.width_var), (40.0, None), "at the 40 it drew");
 }
+
+/// The rect given one drop shadow at (0, 4), blur 2, spread 0; its item id.
+fn shadowed(f: &mut F) -> ondin_core::ItemId {
+    let item = f.ids.mint_item();
+    let shadow = ondin_core::Shadow {
+        offset: ondin_core::kurbo::Vec2::new(0.0, 4.0),
+        blur: 2.0,
+        spread: 0.0,
+        color: ondin_core::peniko::Color::BLACK,
+    };
+    f.doc
+        .apply(&Transaction(vec![Operation::SetEffects {
+            id: f.rect,
+            effects: vec![ondin_core::Keyed::new(
+                item,
+                ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(shadow)),
+            )],
+        }]))
+        .unwrap();
+    item
+}
+
+fn effect(doc: &Document, id: NodeId) -> ondin_core::Effect {
+    doc.get(id).unwrap().effects()[0].value.clone()
+}
+
+/// The numbers `id`'s first effect draws with, through the one door every
+/// reader takes.
+fn drawn_numbers(doc: &Document, id: NodeId) -> [Option<f64>; 4] {
+    doc.resolved_effects(id, doc.get(id).unwrap().effects())[0].numbers()
+}
+
+/// **A bound effect number draws and reaches at its variable's number** (§15
+/// D1074): the shadow's spread bound to `opacity/muted` (40 in Light) draws a
+/// 40 spread over a literal 0, and the rect's ink grows by it — the shadow's
+/// reach is in `Resolved`'s ink bounds; Dark's 70 widens it again. A layer blur's
+/// X takes no binding, and a binding written there is refused at the commit.
+///
+/// Flip, run: `Resolved`'s ink taking `node.effects()` again fails *"the ink
+/// reaches the bound spread"* — escaped at the 0 literal.
+#[test]
+fn a_bound_effect_number_draws_and_reaches_at_its_number() {
+    use ondin_core::EFFECT_SPREAD;
+    let mut f = fixture();
+    let item = shadowed(&mut f);
+    let plain = ondin_core::Resolved::rebuild(&f.doc)
+        .ink_bounds(f.rect)
+        .unwrap();
+    let ops = ondin_core::bind_effect_ops(&f.doc, f.rect, item, EFFECT_SPREAD, f.muted);
+    assert_eq!(ops.len(), 1, "one list write");
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(effect(&f.doc, f.rect).numbers()[EFFECT_SPREAD], Some(0.0));
+    assert_eq!(drawn_numbers(&f.doc, f.rect)[EFFECT_SPREAD], Some(40.0));
+    let ink = ondin_core::Resolved::rebuild(&f.doc)
+        .ink_bounds(f.rect)
+        .unwrap();
+    assert!(
+        (ink.width() - (plain.width() + 80.0)).abs() < 1e-6,
+        "the ink reaches the bound spread: {} against {}",
+        ink.width(),
+        plain.width()
+    );
+    dark(&mut f);
+    assert_eq!(drawn_numbers(&f.doc, f.rect)[EFFECT_SPREAD], Some(70.0));
+
+    let mut blurred = f.doc.get(f.rect).unwrap().effects().to_vec();
+    blurred[0].value = ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 3.0 });
+    blurred[0].vars[ondin_core::EFFECT_X] = Some(f.muted);
+    let wrong = f.doc.apply(&Transaction(vec![Operation::SetEffects {
+        id: f.rect,
+        effects: blurred,
+    }]));
+    assert!(wrong.is_err(), "a layer blur's X takes no binding");
+}
+
+/// **A list write keeps a bound effect number by two halves** (§15 D1074): the
+/// list written back with its 0 — a colour change — stays bound, and so does
+/// the 40 it draws; a spread of 5 detaches it at 5; and retyped to a layer blur,
+/// whose kind has no spread, the binding goes whoever wrote it.
+///
+/// Flip, run: the literal half taken out of `kept_effect_vars` fails *"a colour
+/// edit keeps the binding"*.
+#[test]
+fn an_effect_list_write_keeps_a_bound_number_by_two_halves() {
+    use ondin_core::EFFECT_SPREAD;
+    let mut f = fixture();
+    let item = shadowed(&mut f);
+    let ops = ondin_core::bind_effect_ops(&f.doc, f.rect, item, EFFECT_SPREAD, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let write = |doc: &Document, edit: &dyn Fn(&mut ondin_core::Effect)| {
+        let mut effects = doc.get(f.rect).unwrap().effects().to_vec();
+        edit(&mut effects[0].value);
+        let tx = ondin_core::keep_effect_bindings(
+            doc,
+            Transaction(vec![Operation::SetEffects {
+                id: f.rect,
+                effects,
+            }]),
+        );
+        let mut d = doc.clone();
+        d.apply(&tx).unwrap();
+        effect(&d, f.rect)
+    };
+    let recoloured = write(&f.doc, &|e| {
+        if let ondin_core::EffectKind::DropShadow(s) = &mut e.kind {
+            s.color = ondin_core::peniko::Color::WHITE;
+        }
+    });
+    assert_eq!(
+        recoloured.vars[EFFECT_SPREAD],
+        Some(f.muted),
+        "a colour edit keeps the binding"
+    );
+    let drawn = write(&f.doc, &|e| e.set_number(EFFECT_SPREAD, 40.0));
+    assert_eq!(
+        (drawn.numbers()[EFFECT_SPREAD], drawn.vars[EFFECT_SPREAD]),
+        (Some(0.0), Some(f.muted)),
+        "a write of what it draws keeps it, the literal put back"
+    );
+    let five = write(&f.doc, &|e| e.set_number(EFFECT_SPREAD, 5.0));
+    assert_eq!(
+        (five.numbers()[EFFECT_SPREAD], five.vars[EFFECT_SPREAD]),
+        (Some(5.0), None),
+        "5 detaches at 5"
+    );
+    let retyped = write(&f.doc, &|e| {
+        e.kind = ondin_core::EffectKind::LayerBlur { radius: 3.0 };
+    });
+    assert_eq!(
+        retyped.vars, [None; 4],
+        "a layer blur keeps no spread binding"
+    );
+}
+
+/// Detaching keeps what it drew; deleting the variable detaches it the same
+/// way; a copy leaving for another document carries the number; the binding
+/// round-trips; and an effects style holding a bound number passes the style
+/// check.
+#[test]
+fn an_effect_binding_detaches_to_what_it_draws_and_round_trips() {
+    use ondin_core::EFFECT_BLUR;
+    let mut f = fixture();
+    let item = shadowed(&mut f);
+    let ops = ondin_core::bind_effect_ops(&f.doc, f.rect, item, EFFECT_BLUR, f.muted);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    assert_eq!(ondin_core::io::load(&bytes).unwrap(), f.doc, "round-trips");
+
+    let mut d = f.doc.clone();
+    d.apply(&Transaction(ondin_core::detach_effect_ops(
+        &d,
+        f.rect,
+        item,
+        EFFECT_BLUR,
+    )))
+    .unwrap();
+    let e = effect(&d, f.rect);
+    assert_eq!(
+        (e.numbers()[EFFECT_BLUR], e.vars[EFFECT_BLUR]),
+        (Some(40.0), None)
+    );
+
+    let mut d = f.doc.clone();
+    let tx = Transaction(ondin_core::variable::remove_ops(&d, &[f.muted]));
+    d.apply(&tx).expect("detach, then remove");
+    let e = effect(&d, f.rect);
+    assert_eq!(
+        (e.numbers()[EFFECT_BLUR], e.vars[EFFECT_BLUR]),
+        (Some(40.0), None),
+        "deleted, detached at 40"
+    );
+
+    let node = f.doc.get(f.rect).unwrap().clone();
+    let out = ondin_core::variable::detached(&f.doc, node);
+    assert_eq!(out.effects()[0].numbers()[EFFECT_BLUR], Some(40.0));
+    assert_eq!(out.effects()[0].vars, [None; 4]);
+
+    let s = f.ids.mint_style();
+    let ops = ondin_core::style::create_ops(
+        &f.doc,
+        s,
+        "Shadow/Soft",
+        f.rect,
+        ondin_core::style::StyleSlot::Effects,
+        &[f.rect],
+    )
+    .unwrap();
+    f.doc
+        .apply(&Transaction(ops))
+        .expect("an effects style holding a bound number is a valid style");
+}

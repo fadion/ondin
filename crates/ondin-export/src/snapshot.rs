@@ -498,8 +498,9 @@ fn node_snapshot(
                 },
             })
             .collect(),
-        effects: node
-            .effects()
+        // And a bound effect number its variable's (§15 D1074).
+        effects: doc
+            .resolved_effects(id, node.effects())
             .iter()
             .filter(|e| e.visible)
             .map(|e| effect_summary(e))

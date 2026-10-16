@@ -2333,6 +2333,7 @@ fn an_effect_stack_round_trips_in_order_and_costs_nothing_when_empty() {
                 ..Shadow::default()
             }),
             visible: false,
+            vars: Default::default(),
         },
         Effect::new(EffectKind::Filters(Filters {
             saturation: 0.0,

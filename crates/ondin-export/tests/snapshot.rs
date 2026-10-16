@@ -432,6 +432,7 @@ fn the_snapshot_carries_a_layers_effects_in_the_units_the_panel_shows() {
                 Effect {
                     kind: EffectKind::LayerBlur { radius: 9.0 },
                     visible: false,
+                    vars: Default::default(),
                 },
             ]),
         }]))

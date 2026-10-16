@@ -5465,6 +5465,7 @@ mod tests {
                     [crate::effect::Effect {
                         kind: EffectKind::LayerBlur { radius },
                         visible: true,
+                        vars: [None, None, None, None],
                     }] if (radius - 6.0).abs() < 1e-9
                 ),
                 "{paint} → {fx:?}"

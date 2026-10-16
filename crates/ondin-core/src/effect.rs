@@ -264,6 +264,30 @@ pub fn shadow_downscale(sigma_device: f64) -> u32 {
 pub struct Effect {
     pub kind: EffectKind,
     pub visible: bool,
+    /// The number variables its numbers are bound to (§15 D1074), in
+    /// [`EffectVars`]' order, **in the item** as a stroke's width binding is —
+    /// so an effects style, a reorder and a copy carry them. A bound number's
+    /// literal is 0 and never drawn: every reader takes the list through
+    /// `Document::resolved_effects`. Absent when none is; new in v8, unreleased.
+    #[serde(default, skip_serializing_if = "no_effect_vars")]
+    pub vars: EffectVars,
+}
+
+/// An effect's number bindings: a shadow's X, Y, blur and spread, in that order
+/// (§15 D1074, D1038 (7)'s *"effect X, Y, blur and spread"*). A layer blur's
+/// radius takes the blur slot — the same number in the same unit, the effects
+/// card's *Blur* field — and its other three are always `None`; a filter's
+/// numbers bind nothing.
+pub type EffectVars = [Option<crate::variable::VarId>; 4];
+
+/// [`EffectVars`]' places.
+pub const EFFECT_X: usize = 0;
+pub const EFFECT_Y: usize = 1;
+pub const EFFECT_BLUR: usize = 2;
+pub const EFFECT_SPREAD: usize = 3;
+
+fn no_effect_vars(v: &EffectVars) -> bool {
+    v.iter().all(Option::is_none)
 }
 
 impl Effect {
@@ -272,6 +296,56 @@ impl Effect {
         Self {
             kind,
             visible: true,
+            vars: Default::default(),
+        }
+    }
+
+    /// The effect's bindable numbers, in [`EffectVars`]' order — `None` where
+    /// its kind has no such number (a layer blur's X, Y and spread; all four of
+    /// a filter's). What a binding stands in for and a detach writes.
+    pub fn numbers(&self) -> [Option<f64>; 4] {
+        match &self.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => [
+                Some(s.offset.x),
+                Some(s.offset.y),
+                Some(s.blur),
+                Some(s.spread),
+            ],
+            EffectKind::LayerBlur { radius } => [None, None, Some(*radius), None],
+            EffectKind::Filters(_) => [None; 4],
+        }
+    }
+
+    /// Write number `slot` ([`EffectVars`]' places), where the kind has it.
+    ///
+    /// Every effect field's valve in the inspector writes through here, so "a
+    /// drop and an inner shadow are authored identically" is stated once (it was
+    /// the app's `shadow_mut` until §15 D1074). **The silent no-op is the honest
+    /// arm**: a row can be retyped between the frame a field was drawn and the
+    /// frame its drag ends, and a write with nowhere to land must not invent one.
+    pub fn set_number(&mut self, slot: usize, x: f64) {
+        match &mut self.kind {
+            EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => match slot {
+                EFFECT_X => s.offset.x = x,
+                EFFECT_Y => s.offset.y = x,
+                EFFECT_BLUR => s.blur = x,
+                EFFECT_SPREAD => s.spread = x,
+                _ => {}
+            },
+            EffectKind::LayerBlur { radius } if slot == EFFECT_BLUR => *radius = x,
+            _ => {}
+        }
+    }
+
+    /// The floor a bound number is read at: 0 for a blur, a radius the effects
+    /// card's field ranges from 0, so a negative variable draws no blur rather
+    /// than a meaningless one; none for an offset or a spread, which the card
+    /// lets go negative (§15 D1074).
+    pub fn number_floor(slot: usize) -> f64 {
+        if slot == EFFECT_BLUR {
+            0.0
+        } else {
+            f64::NEG_INFINITY
         }
     }
 
@@ -1414,6 +1488,7 @@ mod tests {
         let fx = crate::keyed_by_position([Effect {
             kind: EffectKind::LayerBlur { radius: 55.5 },
             visible: false,
+            vars: Default::default(),
         }]);
         assert_eq!(buffer_downscale(&fx, (8.0, 8.0)), 1.0);
     }

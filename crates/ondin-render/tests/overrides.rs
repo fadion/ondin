@@ -5103,3 +5103,106 @@ fn a_stroke_width_binding_previews_as_the_width_it_will_draw() {
         "a width past the binding: preview diverged from commit"
     );
 }
+
+/// **An effect number bound to a number variable previews as the number it will
+/// draw** (§15 D1074): a drop shadow's blur bound — the bind's list write — then
+/// a cell's new number, then a list write past the binding, 3 over a blur bound
+/// to 9, which the commit's `keep_effect_bindings` detaches at 3. The recorder
+/// records the effect stack each layer pushes, so a preview drawing the
+/// variable where the commit draws 3 is a different call.
+///
+/// Flip, run: the renderer's `SetEffects` arm storing the list without
+/// `build::kept_effect_vars` fails *"a blur past the binding: preview diverged
+/// from commit"*.
+#[test]
+fn an_effect_binding_previews_as_the_number_it_will_draw() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCE);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var, item) = (ids.mint(), ids.mint_mode(), ids.mint_var(), ids.mint_item());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(0.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id: rect,
+            effects: vec![ondin_core::Keyed::new(
+                item,
+                Effect::new(EffectKind::DropShadow(Shadow {
+                    offset: Vec2::new(0.0, 4.0),
+                    blur: 2.0,
+                    spread: 0.0,
+                    color: Color::BLACK,
+                })),
+            )],
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "shadow/soft".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(9.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    let blur = ondin_core::EFFECT_BLUR;
+    let tx = Transaction(ondin_core::bind_effect_ops(&doc, rect, item, blur, var));
+    assert_eq!(tx.0.len(), 1, "the bind's list write");
+    assert_preview_matches_commit(&doc, &tx, "blur bound");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Number(4.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the bound blur's cell edited");
+
+    let mut effects = doc.get(rect).unwrap().effects().to_vec();
+    effects[0].value.set_number(blur, 3.0);
+    let write = Transaction(vec![Operation::SetEffects { id: rect, effects }]);
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &write).expect("representable");
+    let previewed = record(&doc, &res, &ov);
+    let mut committed = doc.clone();
+    committed
+        .apply(&ondin_core::keep_effect_bindings(&doc, write))
+        .unwrap();
+    assert_eq!(
+        committed.get(rect).unwrap().effects()[0].vars,
+        [None; 4],
+        "detached"
+    );
+    let committed_res = Resolved::rebuild(&committed);
+    assert_eq!(
+        previewed,
+        record(&committed, &committed_res, &RenderOverrides::default()),
+        "a blur past the binding: preview diverged from commit"
+    );
+}

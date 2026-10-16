@@ -588,6 +588,7 @@ fn a_stack_with_no_ink_asks_for_no_texture() {
         Effect {
             kind: EffectKind::DropShadow(shadow(4.0, 4.0, 4.0, 0.0, [0, 0, 0, 255])),
             visible: false,
+            vars: Default::default(),
         },
         Effect::new(EffectKind::Filters(Filters::default())),
     ];

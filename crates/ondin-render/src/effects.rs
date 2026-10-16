@@ -1197,6 +1197,7 @@ mod tests {
                 vec![Effect {
                     kind: EffectKind::LayerBlur { radius: 20.0 },
                     visible: false,
+                    vars: Default::default(),
                 }],
             ),
             (

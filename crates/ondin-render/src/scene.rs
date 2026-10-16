@@ -931,9 +931,14 @@ fn paint_node<P: ScenePainter>(
     //
     // Ghosts get theirs in `paint_ghost`; an effect that only exists on a node in
     // the document would leave an Alt-drag copy shadowless.
-    let effects = over
-        .and_then(|o| o.effects.as_deref())
-        .unwrap_or(node.effects());
+    // As drawn, bound numbers their variables' (§15 D1074) — an override's too,
+    // whose bound numbers a preview leaves bound for this resolve.
+    let effects = doc.resolved_effects(
+        id,
+        over.and_then(|o| o.effects.as_deref())
+            .unwrap_or(node.effects()),
+    );
+    let effects: &[ondin_core::Keyed<ondin_core::Effect>] = &effects;
     // `Some` exactly when a layer was pushed, so the pop below cannot drift from
     // the push: a node with effects but no cached bounds draws **unfiltered**
     // rather than not at all, which is the safer of the two failures and is the

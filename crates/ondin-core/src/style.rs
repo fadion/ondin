@@ -249,7 +249,12 @@ impl StyleValue {
                 .iter()
                 .flat_map(|s| s.brush.var().into_iter().chain(s.width_var))
                 .collect(),
-            StyleValue::Effects(_) | StyleValue::Text(_) => Vec::new(),
+            // And an effect's numbers (§15 D1074).
+            StyleValue::Effects(v) => v
+                .iter()
+                .flat_map(|e| e.vars.iter().flatten().copied())
+                .collect(),
+            StyleValue::Text(_) => Vec::new(),
         }
     }
 
@@ -515,7 +520,11 @@ pub(crate) fn check<'a>(
             StyleValue::Strokes(v) => v
                 .iter()
                 .any(|x| bad(x.brush.var(), VarKind::Color) || bad(x.width_var, VarKind::Number)),
-            StyleValue::Effects(_) | StyleValue::Text(_) => false,
+            // An effect's numbers a number each (§15 D1074).
+            StyleValue::Effects(v) => v
+                .iter()
+                .any(|e| e.vars.iter().any(|x| bad(*x, VarKind::Number))),
+            StyleValue::Text(_) => false,
         };
         if wrong {
             return Err(StyleRule::BadVariable(s.id));
@@ -854,7 +863,29 @@ pub(crate) fn detach_vars(
                 })
                 .collect(),
         ),
-        StyleValue::Effects(_) | StyleValue::Text(_) => value.clone(),
+        // And an effect's numbers bound to one of them, theirs in `mode` (§15
+        // D1074).
+        StyleValue::Effects(v) => StyleValue::Effects(
+            v.iter()
+                .map(|e| {
+                    let mut e = e.clone();
+                    for slot in 0..4 {
+                        if let Some(x) = e.vars[slot]
+                            && vars.contains(&x)
+                        {
+                            let n = match t.resolve_opt(x, mode) {
+                                Some(Value::Number(n)) => n.max(crate::Effect::number_floor(slot)),
+                                _ => 0.0,
+                            };
+                            e.value.set_number(slot, n);
+                            e.vars[slot] = None;
+                        }
+                    }
+                    e
+                })
+                .collect(),
+        ),
+        StyleValue::Text(_) => value.clone(),
     }
 }
 

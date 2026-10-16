@@ -223,6 +223,7 @@ fn a_stack_with_no_ink_composites_identically_to_no_stack_at_all() {
             vec![Effect {
                 kind: EffectKind::DropShadow(Shadow::default()),
                 visible: false,
+                vars: Default::default(),
             }],
         ),
         (

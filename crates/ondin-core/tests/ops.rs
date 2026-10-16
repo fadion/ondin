@@ -684,6 +684,7 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
                         ..ondin_core::Shadow::default()
                     }),
                     visible: true,
+                    vars: Default::default(),
                 }]),
             },
             Operation::SetExports {

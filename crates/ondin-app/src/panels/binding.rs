@@ -64,6 +64,14 @@ pub(crate) enum FieldKey {
         id: NodeId,
         item: ondin_core::ItemId,
     },
+    /// One of an effect's numbers — the effects popover's X, Y, Blur, Spread or a
+    /// layer blur's Radius (§15 D1074): effect `item` of layer `id`, `slot` an
+    /// `EffectVars` place. One layer only, as the stroke width's.
+    EffectNumber {
+        id: NodeId,
+        item: ondin_core::ItemId,
+        slot: usize,
+    },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -93,7 +101,8 @@ impl FieldKey {
             | FieldKey::Content { id }
             | FieldKey::Family { id }
             | FieldKey::Opacity { id }
-            | FieldKey::StrokeWidth { id, .. } => id,
+            | FieldKey::StrokeWidth { id, .. }
+            | FieldKey::EffectNumber { id, .. } => id,
         }
     }
 
@@ -126,6 +135,11 @@ impl FieldKey {
             FieldKey::Opacity { .. } => icon::DROP_HALF,
             // The weight field's own prefix.
             FieldKey::StrokeWidth { .. } => icon::LINE_SEGMENT,
+            // The popover's own word prefixes.
+            FieldKey::EffectNumber { slot: 0, .. } => "X",
+            FieldKey::EffectNumber { slot: 1, .. } => "Y",
+            FieldKey::EffectNumber { slot: 2, .. } => "Blur",
+            FieldKey::EffectNumber { .. } => "Spread",
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -147,6 +161,7 @@ impl FieldKey {
                 slots: PAD_TOP | PAD_RIGHT | PAD_BOTTOM | PAD_LEFT,
                 ..
             } | FieldKey::Size { .. }
+                | FieldKey::EffectNumber { .. }
         )
     }
 
@@ -158,7 +173,8 @@ impl FieldKey {
             | FieldKey::Spacing { .. }
             | FieldKey::Size { .. }
             | FieldKey::Opacity { .. }
-            | FieldKey::StrokeWidth { .. } => VarKind::Number,
+            | FieldKey::StrokeWidth { .. }
+            | FieldKey::EffectNumber { .. } => VarKind::Number,
             FieldKey::Visible { .. } => VarKind::Boolean,
             FieldKey::Content { .. } | FieldKey::Family { .. } => VarKind::String,
         }
@@ -543,7 +559,8 @@ impl OndinApp {
             | FieldKey::Content { id }
             | FieldKey::Family { id }
             | FieldKey::Opacity { id }
-            | FieldKey::StrokeWidth { id, .. } => vec![id],
+            | FieldKey::StrokeWidth { id, .. }
+            | FieldKey::EffectNumber { id, .. } => vec![id],
         }
     }
 
@@ -594,6 +611,9 @@ impl OndinApp {
             FieldKey::StrokeWidth { id, item } => {
                 Transaction(ondin_core::bind_stroke_width_ops(doc, id, item, var))
             }
+            FieldKey::EffectNumber { id, item, slot } => {
+                Transaction(ondin_core::bind_effect_ops(doc, id, item, slot, var))
+            }
         }
     }
 
@@ -633,6 +653,9 @@ impl OndinApp {
             FieldKey::Opacity { id } => Transaction(ondin_core::detach_opacity_ops(doc, id)),
             FieldKey::StrokeWidth { id, item } => {
                 Transaction(ondin_core::detach_stroke_width_ops(doc, id, item))
+            }
+            FieldKey::EffectNumber { id, item, slot } => {
+                Transaction(ondin_core::detach_effect_ops(doc, id, item, slot))
             }
         }
     }
@@ -779,6 +802,9 @@ impl OndinApp {
                     .find(|s| s.id == item)?
                     .width_var
             }
+            FieldKey::EffectNumber { id, item, slot } => {
+                doc.get(id)?.effects().iter().find(|e| e.id == item)?.vars[slot]
+            }
         }
     }
 
@@ -823,7 +849,8 @@ impl OndinApp {
             | FieldKey::Content { .. }
             | FieldKey::Family { .. }
             | FieldKey::Opacity { .. }
-            | FieldKey::StrokeWidth { .. } => {
+            | FieldKey::StrokeWidth { .. }
+            | FieldKey::EffectNumber { .. } => {
                 return None;
             }
         }
@@ -1396,6 +1423,9 @@ impl OndinApp {
                     Some(_) => self.detach_tx(key).0,
                     None => Vec::new(),
                 };
+                // An effect's offset and spread may be negative (§15 D1074); every
+                // other field here floors at 0.
+                let raw = r;
                 let r = r.max(0.0);
                 let doc = &self.session.doc;
                 match key {
@@ -1483,6 +1513,25 @@ impl OndinApp {
                         s.width_var = None;
                         ops.push(Operation::SetStrokes { id, strokes });
                     }
+                    // The one number, over the list as the detach above leaves
+                    // it, unbound (§15 D1074) — floored only where the slot is (a
+                    // blur at 0).
+                    FieldKey::EffectNumber { id, item, slot } => {
+                        let mut effects = match ops.last() {
+                            Some(Operation::SetEffects { effects, .. }) => effects.clone(),
+                            _ => match doc.get(id) {
+                                Some(n) => n.effects().to_vec(),
+                                None => return,
+                            },
+                        };
+                        let Some(e) = effects.iter_mut().find(|e| e.id == item) else {
+                            return;
+                        };
+                        e.value
+                            .set_number(slot, raw.max(ondin_core::Effect::number_floor(slot)));
+                        e.vars[slot] = None;
+                        ops.push(Operation::SetEffects { id, effects });
+                    }
                     // The content is the text arm's above; the family and the
                     // eye are never typed.
                     FieldKey::Paint { .. }
@@ -1530,6 +1579,15 @@ impl OndinApp {
             }
             // Whether the layer shows.
             FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
+            // The number the effect draws with.
+            FieldKey::EffectNumber { id, item, slot } => {
+                let fx = doc
+                    .resolved_effects(id, doc.get(id)?.effects())
+                    .into_owned();
+                Some(Cell::Number(
+                    fx.iter().find(|e| e.id == item)?.numbers()[slot]?,
+                ))
+            }
             // The width the stroke draws at.
             FieldKey::StrokeWidth { id, item } => {
                 let paint = doc.resolved_paint(id, doc.get(id)?.paint()).into_owned();
@@ -3137,6 +3195,98 @@ mod tests {
         );
         assert_eq!(app.field_var(key), None, "the retype detaches");
         assert_eq!(stroke(&app).width, 3.0, "and writes the width typed");
+        assert_eq!(app.session.status().text, "", "asked for, so silent");
+    }
+
+    /// **An effect's number binds through the field's verbs, a list write over
+    /// it detaches it and says so, and a retype may be negative** (§15 D1074): a
+    /// drop shadow's X bound to *radius/md* (6) draws 6 over a literal 0; an X of
+    /// 2 written through `commit_edit` detaches it, the floating status naming
+    /// the variable — read around the pass, which rewrites the list — and bound
+    /// again, a chip retyped *-6* lands at −6, unbound and silent. Every other
+    /// field's retype floors at 0; an offset may not be.
+    ///
+    /// Flip, run: the retype's effect arm writing the floored `r` in place of
+    /// `raw` fails *"and writes the negative X typed"* at 0.
+    #[test]
+    fn an_effect_number_binds_detaches_and_retypes_negative() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let item = app.session.ids.mint_item();
+        app.commit_edit(Transaction(vec![Operation::SetEffects {
+            id: rect,
+            effects: vec![ondin_core::Keyed::new(
+                item,
+                ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
+                    offset: ondin_core::kurbo::Vec2::new(1.0, 4.0),
+                    blur: 2.0,
+                    spread: 0.0,
+                    color: Color::BLACK,
+                })),
+            )],
+        }]));
+        let x = ondin_core::EFFECT_X;
+        let key = FieldKey::EffectNumber {
+            id: rect,
+            item,
+            slot: x,
+        };
+        let number =
+            |app: &OndinApp| app.session.doc.get(rect).unwrap().effects()[0].numbers()[x].unwrap();
+        app.bind_field(key, radius);
+        assert_eq!(app.field_var(key), Some(radius));
+        assert_eq!(number(&app), 0.0, "the literal 0");
+
+        app.session.info("");
+        let mut effects = app.session.doc.get(rect).unwrap().effects().to_vec();
+        effects[0].value.set_number(x, 2.0);
+        app.commit_edit(Transaction(vec![Operation::SetEffects {
+            id: rect,
+            effects,
+        }]));
+        assert_eq!(
+            app.field_var(key),
+            None,
+            "a number written over it detaches"
+        );
+        assert_eq!(number(&app), 2.0);
+        assert_eq!(
+            app.session.status().text,
+            "Detached radius/md",
+            "and says so"
+        );
+
+        app.bind_field(key, radius);
+        app.session.info("");
+        app.var_retype = Some(Retype {
+            key,
+            text: "-6".into(),
+            focus: true,
+        });
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.number_retype(ui, key, rt, 160.0);
+                }
+            });
+        };
+        run(&mut app, vec![]);
+        run(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(app.field_var(key), None, "the retype detaches");
+        assert_eq!(number(&app), -6.0, "and writes the negative X typed");
         assert_eq!(app.session.status().text, "", "asked for, so silent");
     }
 

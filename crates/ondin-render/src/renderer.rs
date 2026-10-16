@@ -1505,10 +1505,16 @@ impl RenderOverrides {
             // it is the unscrubbable field of §15 D245 — and a shadow reaches
             // outside the node it hangs on, so the node is marked moved as well:
             // its cached bounds no longer cover where its ink lands.
+            //
+            // **As the commit will keep it** (§15 D1074): a bound number the
+            // write leaves bound stays bound and the scene's resolve draws its
+            // variable's; any other is detached — the commit's own rule,
+            // `build::kept_effect_vars`.
             Operation::SetEffects { id, effects } => match self.ghost_mut(*id) {
                 Some(g) => g.effects = effects.clone(),
                 None => {
-                    self.entry(*id).effects = Some(effects.clone());
+                    self.entry(*id).effects =
+                        Some(build::kept_effect_vars(doc, *id, effects.clone()));
                     self.mark_moved(doc, *id);
                 }
             },
@@ -1746,6 +1752,18 @@ impl RenderOverrides {
                     // A bound visibility the same way (§15 D1059).
                     if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
                         self.entry(n).visible = Some(doc.shown_in(&t, n));
+                    }
+                    // And an effect's bound numbers (§15 D1074), over the list
+                    // pending or committed, resolved against the changed table —
+                    // and the ink moves, so the cull hears it.
+                    if let Some(node) = doc.get(n)
+                        && node.effects().iter().any(|e| e.vars.iter().any(Option::is_some))
+                    {
+                        let pending = self.get(n).and_then(|o| o.effects.clone());
+                        let base = pending.unwrap_or_else(|| node.effects().to_vec());
+                        let drawn = doc.resolved_effects_in(&t, n, &base).into_owned();
+                        self.entry(n).effects = Some(drawn);
+                        self.mark_moved(doc, n);
                     }
                     // And a bound opacity (§15 D1072).
                     if let Some(node) = doc.get(n)
@@ -2275,7 +2293,9 @@ fn build_ghost(
         // ghost in, so `scene::ghost_ink` — which has no document — measures a
         // bound stroke width's number and not its 0 (§15 D1073).
         paint: doc.resolved_paint(node.id(), node.paint()).into_owned(),
-        effects: node.effects().to_vec(),
+        // Resolved at capture, as the paint above (§15 D1074): `paint_ghost` and
+        // `scene::ghost_ink` read a ghost's effects with no resolve of their own.
+        effects: doc.resolved_effects(node.id(), node.effects()).into_owned(),
         path,
         // As drawn, a bound opacity resolved (§15 D1072) — over the captured node,
         // whose id is in no document, so `drawn_opacity` would answer its

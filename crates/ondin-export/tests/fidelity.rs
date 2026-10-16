@@ -394,6 +394,7 @@ fn an_invisible_shadow_is_not_reported() {
                     color: Color::BLACK,
                 }),
                 visible: false,
+                vars: Default::default(),
             }]),
         }]))
         .expect("a switched-off drop shadow");

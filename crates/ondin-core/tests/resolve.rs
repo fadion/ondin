@@ -493,6 +493,7 @@ fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
                                 ..Shadow::default()
                             }),
                             visible: rng.next_range(2) == 0,
+                            vars: Default::default(),
                         },
                     ],
                 };

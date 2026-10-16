@@ -689,6 +689,8 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
             s.width = doc.stroke_width_drawn_in(doc.variables(), id, v);
         }
     }
+    // And an effect's bound numbers theirs (§15 D1074).
+    node.effects = doc.resolved_effects(id, &node.effects).into_owned();
     if let crate::NodeKind::Rect { corner_radii, .. } = &mut node.kind
         && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
     {
@@ -776,6 +778,11 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .filter_map(|f| f.brush.var())
             .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
             .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
+            .chain(
+                n.effects
+                    .iter()
+                    .flat_map(|e| e.vars.iter().flatten().copied()),
+            )
             .chain(n.corner_vars.iter().flatten().copied())
             .chain(n.spacing_vars.iter().flatten().copied())
             .chain(n.size_vars.iter().flatten().copied())
@@ -941,6 +948,22 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     }
                 }
             }
+            // An effect's bound numbers the same way, each fallback the twin's
+            // number in that slot (§15 D1074).
+            for (i, e) in n.effects.iter_mut().enumerate() {
+                for slot in 0..4 {
+                    if let Some(v) = e.vars[slot] {
+                        e.vars[slot] = rebind(v);
+                        if e.vars[slot].is_none()
+                            && let Some(x) = twin
+                                .and_then(|d| d.effects.get(i))
+                                .and_then(|t| t.numbers()[slot])
+                        {
+                            e.value.set_number(slot, x);
+                        }
+                    }
+                }
+            }
             if n.corner_vars.iter().any(Option::is_some) {
                 let drawn = twin.and_then(|d| match d.kind {
                     crate::NodeKind::Rect { corner_radii, .. } => Some(corner_radii),
@@ -1095,6 +1118,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
             .strokes
             .iter()
             .any(|s| hit(s.brush.var()) || hit(s.width_var))
+        || n.effects.iter().any(|e| e.vars.iter().any(|v| hit(*v)))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
         || n.size_vars.iter().any(|v| hit(*v))
@@ -1173,6 +1197,26 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 })
                 .collect();
             ops.push(O::SetStrokes { id, strokes });
+        }
+        // And an effect's numbers bound to one, each detached to its number
+        // against the committed table in one list write (§15 D1074).
+        if n.effects
+            .iter()
+            .any(|e| e.vars.iter().flatten().any(|v| vars.contains(v)))
+        {
+            let mut effects = n.effects.clone();
+            for e in effects.iter_mut() {
+                for slot in 0..4 {
+                    if let Some(v) = e.vars[slot]
+                        && vars.contains(&v)
+                    {
+                        let x = doc.effect_number_drawn_in(t, id, v, slot);
+                        e.value.set_number(slot, x);
+                        e.vars[slot] = None;
+                    }
+                }
+            }
+            ops.push(O::SetEffects { id, effects });
         }
         if let crate::NodeKind::Rect { corner_radii, .. } = &n.kind
             && n.corner_vars.iter().flatten().any(|v| vars.contains(v))
@@ -1553,6 +1597,11 @@ pub(crate) fn check<'a>(
                 .filter_map(|f| f.brush.var())
                 .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
                 .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
+                .chain(
+                    n.effects
+                        .iter()
+                        .flat_map(|e| e.vars.iter().flatten().copied()),
+                )
                 .chain(n.corner_vars.iter().flatten().copied())
                 .chain(n.spacing_vars.iter().flatten().copied())
                 .chain(n.size_vars.iter().flatten().copied())
@@ -1575,7 +1624,16 @@ pub(crate) fn check<'a>(
                 && s.width_var
                     .is_none_or(|v| t.kind_of(v) == Some(VarKind::Number))
         });
-        if !(fills && strokes) {
+        // And an effect's numbers bind numbers, each only where its kind has
+        // the number (§15 D1074) — no binding on a layer blur's X.
+        let effects = n.effects.iter().all(|e| {
+            let numbers = e.numbers();
+            (0..4).all(|k| match e.vars[k] {
+                Some(v) => numbers[k].is_some() && t.kind_of(v) == Some(VarKind::Number),
+                None => true,
+            })
+        });
+        if !(fills && strokes && effects) {
             return Err(VarRule::BadBinding(n.id));
         }
         if n.corner_vars.iter().any(Option::is_some) {

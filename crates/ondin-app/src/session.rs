@@ -1292,6 +1292,11 @@ impl EditorSession {
         let widths_bound = stroke_widths_bound(&tx);
         let tx = ondin_core::build::keep_stroke_width_bindings(&self.doc, tx);
         let widths_cut = stroke_widths_cut(&self.doc, &tx, &widths_bound);
+        // And an effect's numbers (§15 D1074), the same way and read the same
+        // way around the pass.
+        let numbers_bound = effect_numbers_bound(&tx);
+        let tx = ondin_core::build::keep_effect_bindings(&self.doc, tx);
+        let numbers_cut = effect_numbers_cut(&self.doc, &tx, &numbers_bound);
         // And a width or a height written over a bound axis, or made computed by
         // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
         // item are among the layout writes it reads.
@@ -1307,7 +1312,7 @@ impl EditorSession {
         let user = tx.0.len();
         ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         let mut vars_cut = variables_detached(&self.doc, &tx, asked_ops, user);
-        for name in widths_cut {
+        for name in widths_cut.into_iter().chain(numbers_cut) {
             if !vars_cut.contains(&name) {
                 vars_cut.push(name);
             }
@@ -1882,6 +1887,49 @@ fn stroke_widths_cut(
             })
         })
         .filter_map(|(_, _, v)| table.get(*v).map(|x| x.name.clone()))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+/// Every effect number `tx` writes bound, as (layer, effect, slot, variable) —
+/// [`stroke_widths_bound`]' twin for `build::keep_effect_bindings` (§15 D1074).
+fn effect_numbers_bound(
+    tx: &Transaction,
+) -> Vec<(NodeId, ondin_core::ItemId, usize, ondin_core::VarId)> {
+    tx.0.iter()
+        .filter_map(|op| match op {
+            Operation::SetEffects { id, effects } => Some((*id, effects)),
+            _ => None,
+        })
+        .flat_map(|(id, effects)| {
+            effects
+                .iter()
+                .flat_map(move |e| (0..4).filter_map(move |k| e.vars[k].map(|v| (id, e.id, k, v))))
+        })
+        .collect()
+}
+
+/// The variables `bound`'s effect numbers lost in `tx`, the pass run —
+/// [`stroke_widths_cut`]'s twin.
+fn effect_numbers_cut(
+    doc: &Document,
+    tx: &Transaction,
+    bound: &[(NodeId, ondin_core::ItemId, usize, ondin_core::VarId)],
+) -> Vec<String> {
+    let table = doc.variables();
+    let mut names: Vec<String> = bound
+        .iter()
+        .filter(|(id, item, slot, _)| {
+            tx.0.iter().any(|op| match op {
+                Operation::SetEffects { id: n, effects } if n == id => effects
+                    .iter()
+                    .any(|e| e.id == *item && e.vars[*slot].is_none()),
+                _ => false,
+            })
+        })
+        .filter_map(|(_, _, _, v)| table.get(*v).map(|x| x.name.clone()))
         .collect();
     names.sort();
     names.dedup();

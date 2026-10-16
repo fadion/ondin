@@ -530,6 +530,64 @@ impl Document {
         Cow::Owned(out)
     }
 
+    /// `effects` as they draw at `id`: every bound number its variable's
+    /// number in the mode in force (§15 D1074) — a blur floored at 0, an offset
+    /// or a spread as it comes, a missing or non-number value 0 — **and unbound
+    /// in what comes out**, `resolved_paint`'s rule, so a preview's override
+    /// resolved here is not resolved again against the committed table. Borrowed
+    /// untouched when nothing in it is bound, which is nearly always.
+    ///
+    /// **What every reader that draws, measures or exports asks** — the scene
+    /// walk, `Resolved`'s ink, the SVG writer, the snapshot — never
+    /// `Node::effects`, whose bound numbers are their literal 0.
+    pub fn resolved_effects<'a>(
+        &self,
+        id: NodeId,
+        effects: &'a [crate::Keyed<crate::Effect>],
+    ) -> std::borrow::Cow<'a, [crate::Keyed<crate::Effect>]> {
+        self.resolved_effects_in(&self.variables, id, effects)
+    }
+
+    /// [`Self::resolved_effects`] against table `t` (§15 D1056's preview of a
+    /// cell).
+    pub fn resolved_effects_in<'a>(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        effects: &'a [crate::Keyed<crate::Effect>],
+    ) -> std::borrow::Cow<'a, [crate::Keyed<crate::Effect>]> {
+        use std::borrow::Cow;
+        if effects.iter().all(|e| e.vars.iter().all(Option::is_none)) {
+            return Cow::Borrowed(effects);
+        }
+        let mut out = effects.to_vec();
+        for e in out.iter_mut() {
+            for slot in 0..4 {
+                if let Some(v) = e.vars[slot].take() {
+                    e.value
+                        .set_number(slot, self.effect_number_drawn_in(t, id, v, slot));
+                }
+            }
+        }
+        Cow::Owned(out)
+    }
+
+    /// The number effect slot `slot` bound to `var` is drawn at, at `id` in table
+    /// `t` (§15 D1074): the variable's number in the mode in force, floored by
+    /// `Effect::number_floor` (a blur at 0); a missing or non-number value 0.
+    pub fn effect_number_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        var: crate::variable::VarId,
+        slot: usize,
+    ) -> f64 {
+        match self.resolve_var_in(t, id, var) {
+            Some(crate::variable::Value::Number(x)) => x.max(crate::Effect::number_floor(slot)),
+            _ => 0.0,
+        }
+    }
+
     /// The width a stroke whose width is bound to `var` is drawn at, at `id` in
     /// table `t` (§15 D1073): the variable's number in the mode in force, never
     /// below 0; a missing or non-number value 0.

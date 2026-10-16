@@ -753,13 +753,12 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
     // references it are described in one space rather than two — the **used**
     // local, where container layout placed the node (§15 D868).
     let transform = outer * res.used_local_of(node);
-    if ondin_render::effects::any_ink(node.effects())
-        && let Some(region) = effect_region(res, id, transform, node.effects())
+    // As drawn, a bound effect number its variable's (§15 D1074).
+    let effects = doc.resolved_effects(id, node.effects());
+    if ondin_render::effects::any_ink(&effects)
+        && let Some(region) = effect_region(res, id, transform, &effects)
     {
-        defs.add(
-            effect_id(id),
-            effect_def(&effect_id(id), node.effects(), region),
-        );
+        defs.add(effect_id(id), effect_def(&effect_id(id), &effects, region));
     }
     // **A rail is a def because `<textPath>` can only name one**, which is the
     // only reason it is in this pass at all — it is geometry belonging to one
@@ -1396,7 +1395,15 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
 /// exports a fixture holding one of every feature and checks the report against
 /// the **markup**, so a writer that stops approximating (or starts) without this
 /// following fails rather than lying quietly.
-fn report_node(node: &Node, filter_written: bool, report: &mut Report) {
+/// `effects` is the stack as drawn (`Document::resolved_effects`): a bound
+/// spread's literal is 0, and the warning is about the `feMorphology` the file
+/// holds, which its variable's number decides (§15 D1074).
+fn report_node(
+    node: &Node,
+    effects: &[ondin_core::Keyed<Effect>],
+    filter_written: bool,
+    report: &mut Report,
+) {
     // A sweep gradient has no SVG 1.1 equivalent and `gradient_def` writes it as a
     // radial one rather than dropping the paint — see that function's own arm.
     let sweep = |brush: &Brush| {
@@ -1435,7 +1442,7 @@ fn report_node(node: &Node, filter_written: bool, report: &mut Report) {
     // to warn a user about markup that is **not in the file** — which is the exact
     // failure mode of a report that restates a rule instead of observing it.
     if filter_written
-        && node.effects().iter().any(|e| {
+        && effects.iter().any(|e| {
             e.visible
                 && match e.kind {
                     EffectKind::DropShadow(ref s) | EffectKind::InnerShadow(ref s) => {
@@ -1500,12 +1507,13 @@ fn emit_node(
     // The wrapper carries no transform, so the region in `effect_region` is
     // written in this node's *parent's* space. The two have to agree and they are
     // computed from the same `transform`.
-    let fx = ondin_render::effects::any_ink(node.effects()) && defs.has(&effect_id(id));
+    let drawn_fx = doc.resolved_effects(id, node.effects());
+    let fx = ondin_render::effects::any_ink(&drawn_fx) && defs.has(&effect_id(id));
     // **Here rather than at the top of the function, and under the visibility
     // guard** (§15 D780): the report is a claim about the file, so it is made
     // where what the file contains is known — a hidden layer is not in it, and
     // neither is a `<filter>` whose region could not be computed.
-    report_node(node, fx, report);
+    report_node(node, &drawn_fx, fx, report);
     let wrap_pad = "  ".repeat(depth);
     let depth = depth + usize::from(fx);
     if fx {

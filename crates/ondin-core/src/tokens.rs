@@ -74,6 +74,11 @@ pub(crate) fn node_vars(n: &Node) -> impl Iterator<Item = VarId> + '_ {
         .filter_map(|f| f.brush.var())
         .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
         .chain(n.paint.strokes.iter().filter_map(|s| s.width_var))
+        .chain(
+            n.effects
+                .iter()
+                .flat_map(|e| e.vars.iter().flatten().copied()),
+        )
         .chain(n.corner_vars.iter().flatten().copied())
         .chain(n.spacing_vars.iter().flatten().copied())
         .chain(n.size_vars.iter().flatten().copied())
@@ -263,6 +268,9 @@ impl Plan {
             if let Some(x) = &mut s.width_var {
                 v(x);
             }
+        }
+        for e in n.effects.iter_mut() {
+            e.vars.iter_mut().flatten().for_each(v);
         }
         n.corner_vars.iter_mut().flatten().for_each(v);
         n.spacing_vars.iter_mut().flatten().for_each(v);
@@ -828,8 +836,19 @@ fn reads_as_its_source(n: &Node, s: &Node, gone: &[VarId], t: &Variables, vault:
             .zip(b)
             .all(|(x, y)| !hit(*x) || x.is_some_and(|x| alike(x, *y)))
     };
+    // And each effect's numbers (§15 D1074), by item.
+    let effects = n.effects.iter().all(|e| {
+        let none = [None; 4];
+        let src = s
+            .effects
+            .iter()
+            .find(|k| k.id == e.id)
+            .map_or(&none, |k| &k.vars);
+        slots(&e.vars, src)
+    });
     fills
         && strokes
+        && effects
         && slots(&n.corner_vars, &s.corner_vars)
         && slots(&n.spacing_vars, &s.spacing_vars)
         && slots(&n.size_vars, &s.size_vars)
@@ -934,6 +953,10 @@ fn own_reads(n: &Node, src: Option<&Node>) -> (Vec<VarId>, Vec<StyleId>) {
             .filter_map(|(i, x)| own(*x, b.and_then(|b| b.get(i).copied().flatten())))
             .collect()
     };
+    for e in &n.effects {
+        let at = src.and_then(|x| x.effects.iter().find(|k| k.id == e.id));
+        vs.extend(slots(&e.vars, at.map(|k| &k.vars[..])));
+    }
     vs.extend(slots(&n.corner_vars, src.map(|s| &s.corner_vars[..])));
     vs.extend(slots(&n.spacing_vars, src.map(|s| &s.spacing_vars[..])));
     vs.extend(slots(&n.size_vars, src.map(|s| &s.size_vars[..])));
@@ -1221,6 +1244,23 @@ impl Fork {
         }
         if wrote {
             ops.push(Operation::SetStrokes { id, strokes });
+        }
+        // And each effect's numbers (§15 D1074), by item, in one list write.
+        let mut effects = n.effects.clone();
+        let mut wrote = false;
+        for e in effects.iter_mut() {
+            let at = src.and_then(|x| x.effects.iter().find(|k| k.id == e.id));
+            for slot in 0..4 {
+                if let Some(var) = e.vars[slot]
+                    && let Some(v) = to(Some(var), at.and_then(|k| k.vars[slot]))
+                {
+                    e.vars[slot] = Some(v);
+                    wrote = true;
+                }
+            }
+        }
+        if wrote {
+            ops.push(Operation::SetEffects { id, effects });
         }
         fn slots<const N: usize>(
             a: [Option<VarId>; N],

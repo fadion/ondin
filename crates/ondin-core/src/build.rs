@@ -3940,6 +3940,119 @@ pub fn kept_stroke_widths(
     strokes
 }
 
+/// Bind number `slot` ([`crate::EffectVars`]' places) of effect `item` on layer
+/// `id` to number variable `var` (§15 D1074): its literal written **0**, the
+/// binding beside it in the item. Empty when nothing would change, the layer has
+/// no such effect, or its kind has no such number (a layer blur's X, Y or
+/// spread; any filter's).
+pub fn bind_effect_ops(
+    doc: &Document,
+    id: NodeId,
+    item: crate::ItemId,
+    slot: usize,
+    var: crate::VarId,
+) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut effects = node.effects().to_vec();
+    let Some(e) = effects.iter_mut().find(|e| e.id == item) else {
+        return Vec::new();
+    };
+    match e.numbers().get(slot).copied().flatten() {
+        None => return Vec::new(),
+        Some(x) if x == 0.0 && e.vars[slot] == Some(var) => return Vec::new(),
+        Some(_) => {}
+    }
+    e.value.set_number(slot, 0.0);
+    e.vars[slot] = Some(var);
+    vec![Operation::SetEffects { id, effects }]
+}
+
+/// Detach number `slot` of effect `item` on layer `id` to what it draws (D1038's
+/// detach, §15 D1074). Empty when it is not bound.
+pub fn detach_effect_ops(
+    doc: &Document,
+    id: NodeId,
+    item: crate::ItemId,
+    slot: usize,
+) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut effects = node.effects().to_vec();
+    let Some(e) = effects.iter_mut().find(|e| e.id == item) else {
+        return Vec::new();
+    };
+    let Some(var) = e.vars.get(slot).copied().flatten() else {
+        return Vec::new();
+    };
+    let x = doc.effect_number_drawn_in(doc.variables(), id, var, slot);
+    e.value.set_number(slot, x);
+    e.vars[slot] = None;
+    vec![Operation::SetEffects { id, effects }]
+}
+
+/// `effects`, an effect list about to be written to layer `id`, with **each
+/// bound number the write leaves bound kept bound and any other detached**
+/// (§15 D1074) — the commit's rule ([`keep_effect_bindings`]) and the
+/// preview's, [`kept_stroke_widths`]' shape.
+///
+/// **Two halves, corners' rule**: a number whose binding the write carries
+/// unchanged stays bound when written **what it draws** or **its own literal
+/// 0**, the literal put back; anything else detaches it to that number. The
+/// literal half is load-bearing: every effects-card edit — a colour, the eye, a
+/// reorder, another field's scrub — rebuilds the whole list from the stored
+/// items, so a bound number arrives with its 0. The price is corners' too: 0
+/// typed over a bound number keeps it, and the chip's retype is that door. A
+/// number whose binding the write changes is left to say what it means —
+/// **except** a binding on a number the effect's kind no longer has (a shadow
+/// retyped to a layer blur keeps only its blur), which goes whoever wrote it.
+pub fn kept_effect_vars(
+    doc: &Document,
+    id: NodeId,
+    mut effects: Vec<crate::Keyed<crate::Effect>>,
+) -> Vec<crate::Keyed<crate::Effect>> {
+    let Some(node) = doc.get(id) else {
+        return effects;
+    };
+    for e in effects.iter_mut() {
+        let numbers = e.numbers();
+        let old = node.effects().iter().find(|o| o.id == e.id);
+        for (slot, number) in numbers.into_iter().enumerate() {
+            let Some(var) = e.vars[slot] else { continue };
+            let Some(x) = number else {
+                e.vars[slot] = None;
+                continue;
+            };
+            let Some(old) = old.filter(|o| o.vars[slot] == Some(var)) else {
+                continue;
+            };
+            let literal = old.numbers()[slot];
+            let drawn = doc.effect_number_drawn_in(doc.variables(), id, var, slot);
+            if literal == Some(x) || (x - drawn).abs() < 1e-9 {
+                e.value.set_number(slot, literal.unwrap_or(0.0));
+            } else {
+                e.vars[slot] = None;
+            }
+        }
+    }
+    effects
+}
+
+/// **A number written over a bound effect detaches it** (D1038 (2), §15 D1074)
+/// — the commit-time half of the binding, every `SetEffects` through
+/// [`kept_effect_vars`], so the effects card's list writes, the effects style's
+/// and MCP's write as they did. (*Paste properties* carries no effects.)
+pub fn keep_effect_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    for op in tx.0.iter_mut() {
+        if let Operation::SetEffects { id, effects } = op {
+            *effects = kept_effect_vars(doc, *id, std::mem::take(effects));
+        }
+    }
+    tx
+}
+
 /// **A width written over a bound stroke detaches it** (D1038 (2), §15 D1073)
 /// — the commit-time half of the binding, every `SetStrokes` through
 /// [`kept_stroke_widths`], so the Stroke card, the Scale tool, *Paste

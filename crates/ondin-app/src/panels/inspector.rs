@@ -726,19 +726,6 @@ fn effect_hint(kind: &EffectKind) -> &'static str {
         }
     }
 }
-/// Write into whichever shadow this kind is, and do nothing for the two kinds
-/// that are not one.
-///
-/// Every shadow field's valve closure goes through here rather than matching for
-/// itself, so that "a drop and an inner shadow are authored identically" is stated
-/// once instead of eight times. The silent no-op is the honest arm: the row can be
-/// retyped between the frame a field was drawn and the frame its drag ends, and a
-/// write with nowhere to land must not invent one.
-fn shadow_mut(kind: &mut EffectKind, edit: impl FnOnce(&mut ondin_core::Shadow)) {
-    if let EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) = kind {
-        edit(s);
-    }
-}
 /// [`OndinApp::sync_paint_collapse`]'s rule, over the two sets it is about.
 ///
 /// A free function because a rule stated on two `HashSet`s is a rule that can be
@@ -11551,10 +11538,19 @@ impl OndinApp {
                 let states = source
                     .as_ref()
                     .map(|s| ondin_core::reset::item_states(s, &effects));
+                // The row's headline number as drawn — a bound layer blur's
+                // radius its variable's, not its 0 (§15 D1074); the popover
+                // seeds its fields from the stored list, a bound one a chip.
+                let drawn = app
+                    .session
+                    .doc
+                    .resolved_effects(anchor, &effects)
+                    .into_owned();
                 for (index, effect) in effects.iter().enumerate() {
                     let open = app.effect_menu == Some((anchor, index));
                     let item = states.as_ref().map(|s| s[index]);
-                    let (row, resp) = Self::effect_row(ui, index, effect, open, item);
+                    let shown = drawn.get(index).unwrap_or(effect);
+                    let (row, resp) = Self::effect_row(ui, index, shown, open, item);
                     if row.remove || row.toggle || row.open || row.reset {
                         out = row;
                         acted = Some(index);
@@ -11888,6 +11884,116 @@ impl OndinApp {
             ),
         );
     }
+    /// One of effect `index`'s numbers in the popover — `slot` an `EffectVars`
+    /// place, `value` the literal, `prefix` the field's word — `size` big.
+    ///
+    /// **Bound, it is a chip** (§15 D1074, D1038 A1), the radius's drawing — or
+    /// the retype buffer once a key lands on it — on one layer's own effect only,
+    /// as the stroke width's. **Unbound, the scrub field** over the anchor's
+    /// resolved number, its write clearing the slot's binding on every subject
+    /// it writes (D1074's amendment, reading (a)), with the radius's two doors,
+    /// `--` and the field menu, where a single layer is the subject.
+    #[allow(clippy::too_many_arguments)]
+    fn effect_number_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        index: usize,
+        slot: usize,
+        prefix: &'static str,
+        size: egui::Vec2,
+        value: f64,
+        range: std::ops::RangeInclusive<f64>,
+    ) -> Option<egui::Response> {
+        let key = match subjects {
+            [id] => self
+                .session
+                .doc
+                .get(*id)
+                .and_then(|n| n.effects().get(index))
+                .map(|e| super::binding::FieldKey::EffectNumber {
+                    id: *id,
+                    item: e.id,
+                    slot,
+                }),
+            _ => None,
+        };
+        let retyping = key.and_then(|k| self.var_retype.as_ref().filter(|r| r.key == k).cloned());
+        if let (Some(k), Some(rt)) = (key, retyping) {
+            self.number_retype(ui, k, rt, size.x);
+            return None;
+        }
+        if let Some(k) = key
+            && let Some(var) = self.field_var(k)
+        {
+            let _ = self.number_chip(ui, k, var, size.x, None);
+            return None;
+        }
+        // **Seeded from what the layers draw, and detached in the edit itself**
+        // (§15 D1074's amendment, reading (a)): over several layers bound alike
+        // there is no chip, and their stored lists agree on a literal 0 — so the
+        // field reads the anchor's resolved number, and a write clears the slot's
+        // binding on every layer it writes, the inspector's doors' rule (D1071's
+        // amendment), rather than leaving the commit's pass to cut it out loud.
+        let anchor = subjects.first().copied();
+        let drawn = anchor
+            .and_then(|a| {
+                let d = self.session.display_node(a)?;
+                let fx = self
+                    .session
+                    .doc
+                    .resolved_effects(a, d.effects())
+                    .into_owned();
+                fx.get(index)?.numbers()[slot]
+            })
+            .unwrap_or(value);
+        let mut v = drawn;
+        let resp = value_field(
+            ui,
+            size,
+            Prefix::Text(prefix),
+            &mut v,
+            Scrub::whole(0.5).range(range),
+            |d| d.custom_formatter(ui::number(2)),
+        );
+        if let Some(a) = anchor
+            && let Some(mut effects) = self.session.display_node(a).map(|n| n.effects().to_vec())
+            && let Some(entry) = effects.get_mut(index)
+        {
+            entry.value.set_number(slot, v);
+            entry.vars[slot] = None;
+            let tx = Transaction(
+                subjects
+                    .iter()
+                    .map(|id| Operation::SetEffects {
+                        id: *id,
+                        effects: effects.clone(),
+                    })
+                    .collect(),
+            );
+            self.edit_valve(&resp, tx);
+        }
+        if let Some(k) = key {
+            if resp.has_focus()
+                && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
+            {
+                self.bind_typing(ui.ctx(), k, &text, resp.rect);
+                if text.starts_with("--") {
+                    self.var_retype = Some(super::binding::Retype {
+                        key: k,
+                        text,
+                        focus: true,
+                    });
+                }
+            }
+            if resp.secondary_clicked()
+                && let Some(at) = resp.interact_pointer_pos()
+            {
+                self.field_menu = Some((k, at, resp.rect));
+            }
+        }
+        Some(resp)
+    }
     /// One effect row: the kind's glyph and name, one headline number, a `×`, and
     /// the eye beside the field.
     ///
@@ -12175,72 +12281,54 @@ impl OndinApp {
                         EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = COL;
-                                let mut x = s.offset.x;
-                                let rx = value_field(
-                                    ui,
-                                    egui::vec2(half, CELL),
-                                    Prefix::Text("X"),
-                                    &mut x,
-                                    Scrub::whole(0.5).range(-MAX_OFFSET..=MAX_OFFSET),
-                                    |d| d.custom_formatter(ui::number(2)),
-                                )
+                                let cell = egui::vec2(half, CELL);
+                                let offset = -MAX_OFFSET..=MAX_OFFSET;
                                 // **The layer's own space, not the page's** — a
                                 // shadow at (0, 4) follows the layer when it is
                                 // rotated, exactly as Figma's does, which is the
-                                // whole reason `effect::escaped` exists.
-                                .on_hover_text("How far the shadow is thrown right, in the layer's own space");
-                                self.effect_valve(&rx, subjects, index, move |k| {
-                                    shadow_mut(k, |sh| sh.offset.x = x);
-                                });
-                                let mut y = s.offset.y;
-                                let ry = value_field(
-                                    ui,
-                                    egui::vec2(half, CELL),
-                                    Prefix::Text("Y"),
-                                    &mut y,
-                                    Scrub::whole(0.5).range(-MAX_OFFSET..=MAX_OFFSET),
-                                    |d| d.custom_formatter(ui::number(2)),
-                                )
-                                .on_hover_text("How far the shadow is thrown down, in the layer's own space");
-                                self.effect_valve(&ry, subjects, index, move |k| {
-                                    shadow_mut(k, |sh| sh.offset.y = y);
-                                });
+                                // whole reason `effect::escaped` exists. Each field
+                                // a chip where bound (§15 D1074).
+                                if let Some(r) = self.effect_number_field(
+                                    ui, subjects, index, ondin_core::EFFECT_X, "X", cell,
+                                    s.offset.x, offset.clone(),
+                                ) {
+                                    let _ = r.on_hover_text(
+                                        "How far the shadow is thrown right, in the layer's own space",
+                                    );
+                                }
+                                if let Some(r) = self.effect_number_field(
+                                    ui, subjects, index, ondin_core::EFFECT_Y, "Y", cell,
+                                    s.offset.y, offset.clone(),
+                                ) {
+                                    let _ = r.on_hover_text(
+                                        "How far the shadow is thrown down, in the layer's own space",
+                                    );
+                                }
                             });
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = COL;
-                                let mut blur = s.blur;
-                                let rb = value_field(
-                                    ui,
-                                    egui::vec2(half, CELL),
-                                    Prefix::Text("Blur"),
-                                    &mut blur,
-                                    Scrub::whole(0.5).range(0.0..=MAX_BLUR),
-                                    |d| d.custom_formatter(ui::number(2)),
-                                )
+                                let cell = egui::vec2(half, CELL);
                                 // The radius as typed, not the gaussian deviation
                                 // the writers take — `effect::BLUR_DEVIATION` is the
                                 // one place the two are related, and this field is
                                 // the reason the model stores the first.
-                                .on_hover_text("How soft the shadow's edge is");
-                                self.effect_valve(&rb, subjects, index, move |k| {
-                                    shadow_mut(k, |sh| sh.blur = blur);
-                                });
-                                let mut spread = s.spread;
-                                let rs = value_field(
-                                    ui,
-                                    egui::vec2(half, CELL),
-                                    Prefix::Text("Spread"),
-                                    &mut spread,
-                                    Scrub::whole(0.5).range(-MAX_OFFSET..=MAX_OFFSET),
-                                    |d| d.custom_formatter(ui::number(2)),
-                                )
+                                if let Some(r) = self.effect_number_field(
+                                    ui, subjects, index, ondin_core::EFFECT_BLUR, "Blur", cell,
+                                    s.blur, 0.0..=MAX_BLUR,
+                                ) {
+                                    let _ = r.on_hover_text("How soft the shadow's edge is");
+                                }
                                 // **On the inner shadow too**, which the mockup left
                                 // it off: it is the same dilation of the same
                                 // silhouette and Figma offers both (§15 D333).
-                                .on_hover_text("Grow the shadow's silhouette before it is blurred — negative shrinks it");
-                                self.effect_valve(&rs, subjects, index, move |k| {
-                                    shadow_mut(k, |sh| sh.spread = spread);
-                                });
+                                if let Some(r) = self.effect_number_field(
+                                    ui, subjects, index, ondin_core::EFFECT_SPREAD, "Spread",
+                                    cell, s.spread, -MAX_OFFSET..=MAX_OFFSET,
+                                ) {
+                                    let _ = r.on_hover_text(
+                                        "Grow the shadow's silhouette before it is blurred — negative shrinks it",
+                                    );
+                                }
                             });
                             self.slot_color_row(
                                 ui,
@@ -12252,21 +12340,21 @@ impl OndinApp {
                             );
                         }
                         EffectKind::LayerBlur { radius } => {
-                            let mut r = *radius;
-                            let resp = value_field(
+                            // The blur slot, a chip where bound (§15 D1074).
+                            if let Some(r) = self.effect_number_field(
                                 ui,
+                                subjects,
+                                index,
+                                ondin_core::EFFECT_BLUR,
+                                "Radius",
                                 egui::vec2(inner, CELL),
-                                Prefix::Text("Radius"),
-                                &mut r,
-                                Scrub::whole(0.5).range(0.0..=MAX_BLUR),
-                                |d| d.custom_formatter(ui::number(2)),
-                            )
-                            .on_hover_text("Blurs the layer's own drawing, children included");
-                            self.effect_valve(&resp, subjects, index, move |k| {
-                                if let EffectKind::LayerBlur { radius } = k {
-                                    *radius = r;
-                                }
-                            });
+                                *radius,
+                                0.0..=MAX_BLUR,
+                            ) {
+                                let _ = r.on_hover_text(
+                                    "Blurs the layer's own drawing, children included",
+                                );
+                            }
                         }
                         EffectKind::Filters(f) => {
                             let f = *f;
@@ -12436,6 +12524,17 @@ impl OndinApp {
             };
             if let Some(entry) = effects.get_mut(index) {
                 entry.kind = entry.kind.retyped(&kind);
+                // **The bindings the new kind has no number for go in the edit
+                // itself** (§15 D1074's amendment, reading (b)) — a shadow made a
+                // layer blur keeps its blur's — so the commit's pass has nothing
+                // to cut out loud, the inspector's doors' rule (D1071's
+                // amendment).
+                let numbers = entry.value.numbers();
+                for (slot, number) in numbers.iter().enumerate() {
+                    if number.is_none() {
+                        entry.vars[slot] = None;
+                    }
+                }
                 self.write_effects(subjects, effects);
             }
         }

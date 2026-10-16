@@ -334,7 +334,8 @@ impl Node {
     }
     /// Whether any field of this node reads a variable — a bound fill, stroke,
     /// stroke width, corner, gap, padding, visibility, width, height, content,
-    /// family or opacity. What a variable's edit dirties (`Document::bound_nodes`).
+    /// family, opacity or effect number. What a variable's edit dirties
+    /// (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self
@@ -348,6 +349,10 @@ impl Node {
             || self.size_vars.iter().any(Option::is_some)
             || self.text_vars.iter().any(Option::is_some)
             || self.opacity_var.is_some()
+            || self
+                .effects
+                .iter()
+                .any(|e| e.vars.iter().any(Option::is_some))
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across

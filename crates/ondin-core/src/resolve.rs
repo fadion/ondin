@@ -1545,7 +1545,11 @@ impl Resolved {
         // whose ink is not a number has no ink rather than infinite ink — which is
         // the absence §15 D495 chose over an infinite box.
         let ink = ink
-            .map(|b| effect::escaped(b, effect::stack_escape(node.effects()), world))
+            // As drawn, a bound effect number its variable's (§15 D1074).
+            .map(|b| {
+                let fx = doc.resolved_effects(id, node.effects());
+                effect::escaped(b, effect::stack_escape(&fx), world)
+            })
             .and_then(geometry::measurable);
         match ink {
             Some(b) => {
@@ -1734,7 +1738,11 @@ fn resolve_subtree(
     // `rebuild` are asserted equal by a randomized differential test, so a guard on
     // one is a divergence.
     let ink = inner
-        .map(|b| effect::escaped(b, effect::stack_escape(node.effects()), w))
+        // As drawn, a bound effect number its variable's (§15 D1074).
+        .map(|b| {
+            let fx = doc.resolved_effects(id, node.effects());
+            effect::escaped(b, effect::stack_escape(&fx), w)
+        })
         .and_then(geometry::measurable);
     if let Some(b) = ink {
         c.ink_bounds.insert(id, b);

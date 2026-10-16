@@ -302,6 +302,13 @@ const CROP_STROKE_PX: f32 = 3.0;
 /// aiming at and nothing else is nearby; a line sits *among* other artwork, and a band
 /// this generous already reaches further than the layer above it in a tight drawing.
 const PICK_SLOP_PX: f32 = 4.0;
+/// How far either side of an occupied frame's border a press takes the frame
+/// ([`OndinApp::frame_edge_at`]) — twice [`PICK_SLOP_PX`] (§15 D1093). The edge
+/// is an occupied frame's one target besides its name tag, and at the line's 4
+/// it had to be hit exactly. It is the chain's last link, so a layer near the
+/// border still wins its own pixels; what the 4 extra points take is the strip
+/// just inside the border where a marquee could start.
+const FRAME_EDGE_PICK_PX: f32 = 8.0;
 /// How close to a pen anchor counts as hitting it, in screen pt — and, because
 /// they are the same number, how close before the pen visibly **snaps** to it.
 ///
@@ -9789,7 +9796,7 @@ impl OndinApp {
         })
     }
 
-    /// An **occupied** frame whose border passes within the pick slop of `world`
+    /// An **occupied** frame whose border passes within [`FRAME_EDGE_PICK_PX`] of `world`
     /// — `context-menus.md` §2's C5, *"or on its edge"* (§15 D816).
     ///
     /// 🚨 **That clause was answered by one door out of three.**
@@ -9804,10 +9811,12 @@ impl OndinApp {
     /// true and which `pick_leaf` skips on purpose so a marquee can be dragged
     /// across a frame's contents (§15 D22).
     ///
-    /// **[`Self::pick_slop`], so the band is the same width as every other pick
-    /// in the app** and the same width on screen at any zoom. A frame narrower
-    /// than twice that has no interior left and is therefore all edge — which is
-    /// the honest answer at that size and not a case worth a branch.
+    /// **[`FRAME_EDGE_PICK_PX`] either side of the border**, the same width on
+    /// screen at any zoom — twice every other pick's [`Self::pick_slop`] since
+    /// §15 D1093, the edge being a frame's one target and fiddly at a line's
+    /// width. A frame narrower than twice that has no interior left and is
+    /// therefore all edge — which is the honest answer at that size and not a
+    /// case worth a branch.
     ///
     /// ⚠️ **The box is the *world* box, so a rotated frame's band is its
     /// axis-aligned bounds rather than its drawn border.** The same limitation
@@ -9819,7 +9828,7 @@ impl OndinApp {
     /// `.rev()`, for [`Self::frame_label_at`]'s reason: `artboards` is paint order,
     /// so the last match of two nested frames is the inner one.
     fn frame_edge_at(&self, world: Point) -> Option<NodeId> {
-        let slop = self.pick_slop();
+        let slop = f64::from(FRAME_EDGE_PICK_PX) / self.points_per_world();
         self.artboards().into_iter().rev().find(|id| {
             // 🚨 **The two predicates every other pick door carries, and this
             // one shipped without either** (§15 D839). `pick_leaf` filters
@@ -25187,9 +25196,11 @@ mod frame_edge_tests {
     /// a marquee can be dragged across its contents (§15 D22). So *"the middle is
     /// not the frame"* is not a boundary check; it is the decision.
     ///
-    /// ⚠️ **The band is `PICK_SLOP_PX` at the camera's zoom**, so the fixture
-    /// works in world units at zoom 1 and says which side of the border each
-    /// sample is on.
+    /// ⚠️ **The band is `FRAME_EDGE_PICK_PX` at the camera's zoom** (§15
+    /// D1093; `PICK_SLOP_PX` before), so the fixture works in world units at
+    /// zoom 1 and says which side of the border each sample is on. Flip, run:
+    /// the band back at `pick_slop` fails *"six points inside the top border is
+    /// the edge"*.
     ///
     /// **Flip-checks, both run.** Dropping the `!…inflate(-slop)` term — so the
     /// band becomes the whole box, which *is* `selected_frame_at`'s answer —
@@ -25211,6 +25222,24 @@ mod frame_edge_tests {
         assert!(
             slop > 0.0 && slop < 50.0,
             "the fixture must reach the state: a usable band at this zoom, got {slop}"
+        );
+        // **Wider than a line's pick** (§15 D1093): six points either side of
+        // the border — past a line's four, inside the frame edge's eight — is
+        // still the edge, and ten points in is not.
+        let pt = 1.0 / app.points_per_world();
+        for (at, what) in [
+            (
+                Point::new(100.0, 6.0 * pt),
+                "six points inside the top border",
+            ),
+            (Point::new(100.0, -6.0 * pt), "six points outside it"),
+        ] {
+            assert_eq!(app.frame_edge_at(at), Some(board), "{what} is the edge");
+        }
+        assert_eq!(
+            app.frame_edge_at(Point::new(100.0, 10.0 * pt)),
+            None,
+            "ten points inside is the interior"
         );
 
         // Just inside the top border, and just outside it: both are the edge.

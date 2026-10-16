@@ -510,11 +510,12 @@ impl OndinApp {
     /// **The container under the pointer, else the one selected** (§15 D1089,
     /// the maintainer's request over D1078's (1), which had the selected one
     /// only): the topmost layer at `pointer`, when it is a container outside
-    /// any group or instance ([`Self::spacing_hover`]), shows its handles on
-    /// hover, so a gap is dragged without selecting its frame first. (An
-    /// occupied frame's background is not something a click selects; its bands
-    /// take a drag all the same.) The one
-    /// being dragged stays the subject whatever is under the pointer.
+    /// any group or instance ([`Self::spacing_hover`]), shows its **gap**
+    /// handles on hover, so a gap is dragged without selecting its frame first —
+    /// its padding only once it is selected (§15 D1093). (An occupied frame's
+    /// background is not something a click selects; its gap bands take a drag
+    /// all the same.) The one being dragged stays the subject whatever is under
+    /// the pointer.
     pub(crate) fn spacing_subject(&self, pointer: Option<Point>) -> Option<Subject> {
         let ids = self.session.selection.ids();
         let selected = match ids {
@@ -593,7 +594,19 @@ impl OndinApp {
         // designer is most likely reading. Every band of the dragged kind is
         // kept — every padding for a padding drag, the modifiers choosing which
         // sides it writes frame by frame.
-        let all = bands(&shown_display, bx, &items, grid.as_ref());
+        let mut all = bands(&shown_display, bx, &items, grid.as_ref());
+        // **An unselected container's padding is not a handle** (§15 D1093, the
+        // maintainer's ruling over D1089's every band on hover): its padding is
+        // where a marquee over its children starts, while a marquee rarely
+        // starts in a gap between two items — so only the gaps answer the
+        // hover, and the padding waits for the container to be selected —
+        // through a gap drag on it too: no padding drag starts on an unselected
+        // container, so sparing the dragged one would only bring its padding
+        // back mid-drag (`arch-scribe`'s read of the first cut).
+        let hovered_only = selected != Some(id);
+        if hovered_only {
+            all.retain(|b| !matches!(b.kind, BandKind::Padding(_)));
+        }
         let bands = match &self.drag {
             Drag::Spacing { id: d, band, .. } if *d == id => {
                 let wide = shown(all.clone(), scale);
@@ -1168,9 +1181,59 @@ mod canvas_tests {
         );
     }
 
+    /// **An unselected container's padding starts a marquee; selected, it is a
+    /// handle** (§15 D1093): with nothing selected, a press in the row's top
+    /// padding and dragged starts a marquee and its gap is still a band; with
+    /// the row selected, the same padding is a band.
+    ///
+    /// Flip, run: the padding filter off (`hovered_only` false) fails *"the
+    /// press in an unselected row's padding starts a marquee"*.
+    #[test]
+    fn an_unselected_containers_padding_is_a_marquee_start() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        app.session.selection.clear();
+        let none = Default::default();
+        let padding = app.to_screen(Point::new(200.0, 14.0), RECT, 1.0);
+        let gap = app.to_screen(Point::new(65.0, 35.0), RECT, 1.0);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(gap)], none);
+        assert!(
+            app.spacing_at(gap, RECT, 1.0).is_some(),
+            "an unselected row's gap is still a band"
+        );
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(200.0, 14.0),
+            Point::new(260.0, 60.0),
+            none,
+            true,
+        );
+        assert!(
+            matches!(app.drag, crate::preview::Drag::Marquee { .. }),
+            "the press in an unselected row's padding starts a marquee"
+        );
+        let end = app.to_screen(Point::new(260.0, 60.0), RECT, 1.0);
+        frame(&ctx, &mut app, vec![button(end, false, none)], none);
+        frame(&ctx, &mut app, Vec::new(), none);
+
+        app.session.selection.set_one(row);
+        frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(padding)],
+            none,
+        );
+        assert!(
+            app.spacing_at(padding, RECT, 1.0).is_some(),
+            "selected, its padding is a band"
+        );
+    }
+
     /// **A click in an empty container's padding still selects it** (§15
-    /// D1089): an empty frame is directly clickable (`pick_leaf`), and the
-    /// padding band its hover shows does not take that click — a press
+    /// D1089): an empty frame is directly clickable (`pick_leaf`). Since §15
+    /// D1093 an unselected container's padding is no band at all; before it,
+    /// the band its hover showed did not take the click either — a press
     /// released where it was pressed is a click, not a band drag.
     ///
     /// Written to pin a reading of `arch-scribe`'s that the band would take the
@@ -1196,8 +1259,8 @@ mod canvas_tests {
         let at = app.to_screen(Point::new(200.0, 10.0), RECT, 1.0);
         frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], none);
         assert!(
-            app.spacing_at(at, RECT, 1.0).is_some(),
-            "the fixture: the top padding band is under the pointer"
+            app.spacing_at(at, RECT, 1.0).is_none(),
+            "an unselected container's padding is no band (§15 D1093)"
         );
         frame(&ctx, &mut app, vec![button(at, true, none)], none);
         frame(&ctx, &mut app, vec![button(at, false, none)], none);

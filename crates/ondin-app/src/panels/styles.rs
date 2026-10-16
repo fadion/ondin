@@ -110,12 +110,30 @@ struct CapsuleOut {
 /// The values a card's targets agree on in `slot`, if they do — what *Create
 /// style from this…* makes a style of.
 fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleValue> {
+    // A layer with no layout has no layout value, so a set holding one agrees on
+    // none (§15 D1075).
     let mut values = targets
         .iter()
         .filter_map(|t| doc.get(*t))
         .map(|n| StyleValue::of(n, slot));
-    let first = values.next()?;
-    values.all(|v| v.same_look(&first)).then_some(first)
+    let first = values.next()??;
+    values
+        .all(|v| v.is_some_and(|v| v.same_look(&first)))
+        .then_some(first)
+}
+
+/// A layout's glyph (F7): Phosphor's *columns* for a row, the same picture
+/// turned, *rows*, for a column — the display glyph turned with the direction —
+/// and the four squares for a grid (§15 D1076).
+pub(crate) fn layout_glyph(display: &ondin_core::container::Display) -> &'static str {
+    use ondin_core::container::{Display, FlexDirection};
+    match display {
+        Display::Flex(f) => match f.direction {
+            FlexDirection::Row | FlexDirection::RowReverse => icon::COLUMNS,
+            FlexDirection::Column | FlexDirection::ColumnReverse => icon::ROWS,
+        },
+        Display::Grid(_) => icon::GRID_FOUR,
+    }
 }
 
 /// A style's short summary (F1): `1 fill`, `1 · inside`, `2 shadows`.
@@ -147,6 +165,34 @@ fn summary(value: &StyleValue) -> String {
         }
         // `Inter · 16` — the family and the size, what a type style is read by.
         StyleValue::Text(t) => format!("{} · {}", t.font_family, number(t.font_size)),
+        // `Column · 12` — the direction and the main-axis gap; a grid its track
+        // counts, `Grid · 3 × 2` (§15 D1076).
+        StyleValue::Layout(l) => {
+            use ondin_core::container::{Display, FlexDirection};
+            match &l.display {
+                Display::Flex(f) => {
+                    // The main axis's gap: a row's column gap (slot 0), a
+                    // column's row gap (slot 1), `SpacingVars`' order.
+                    let (word, gap, slot) = match f.direction {
+                        FlexDirection::Row | FlexDirection::RowReverse => ("Row", f.column_gap, 0),
+                        FlexDirection::Column | FlexDirection::ColumnReverse => {
+                            ("Column", f.row_gap, 1)
+                        }
+                    };
+                    match l.spacing_vars[slot].is_some() {
+                        // A bound gap's literal is its 0: the summary names the
+                        // binding rather than a number the layout never lays.
+                        true => format!("{word} · bound gap"),
+                        false => format!("{word} · {}", number(gap)),
+                    }
+                }
+                Display::Grid(g) => format!(
+                    "Grid · {} × {}",
+                    g.columns.len().max(1),
+                    g.rows.len().max(1)
+                ),
+            }
+        }
     }
 }
 
@@ -166,7 +212,7 @@ fn preview_colour(doc: &Document, value: &StyleValue) -> Option<ondin_core::peni
             .filter(|s| s.visible)
             .map(|s| &s.brush)
             .collect(),
-        StyleValue::Effects(_) | StyleValue::Text(_) => return None,
+        StyleValue::Effects(_) | StyleValue::Text(_) | StyleValue::Layout(_) => return None,
     };
     let b = brushes.first()?;
     match doc.resolve_brush(doc.root(), b).into_owned() {
@@ -218,6 +264,16 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
                 egui::Align2::CENTER_CENTER,
                 "Ag",
                 egui::FontId::proportional(11.0),
+                ink(204),
+            );
+        }
+        // F7: the display glyph turned with the direction (§15 D1076).
+        StyleValue::Layout(l) => {
+            p.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                layout_glyph(&l.display),
+                theme::icon_font(13.0),
                 ink(204),
             );
         }
@@ -683,7 +739,7 @@ impl OndinApp {
                 targets
                     .iter()
                     .filter_map(|t| doc.get(*t))
-                    .map(|n| st.value.write_op(n)),
+                    .flat_map(|n| st.value.write_ops(n)),
             );
         }
         Transaction(ops)
@@ -1248,6 +1304,79 @@ mod tests {
         assert!(!app.session.status().text.starts_with("Detached"));
         let shapes = frame(&ctx, &mut app, vec![]);
         assert!(!drawn(&shapes, "1 fill"), "the plain card is back");
+    }
+
+    /// **The Container card is a style card** (§15 D1075, D1076, F7): a column
+    /// frame's layout made a style through *Create style from this…*, the card
+    /// draws its capsule — *Column · 6* — where the rows were; applied to a plain
+    /// frame it gives it the column; detached, the frame keeps it.
+    ///
+    /// Flip, run: `inspector_container` drawn through `self.panel` again (no
+    /// `style_card`) fails *"the capsule's summary is drawn"*.
+    #[test]
+    fn the_container_card_is_a_layout_style_card() {
+        use ondin_core::container::{Display, Flex, FlexDirection};
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x5F);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (a, b) = (ids.mint(), ids.mint());
+        let mut ops = Vec::new();
+        for (i, id) in [a, b].into_iter().enumerate() {
+            ops.push(Operation::CreateNode {
+                id,
+                parent: root,
+                index: i,
+                kind: NodeKind::Artboard {
+                    size: Size::new(120.0, 120.0),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        ops.push(Operation::SetDisplay {
+            id: a,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                row_gap: 6.0,
+                ..Default::default()
+            })),
+        });
+        doc.apply(&Transaction(ops)).expect("build");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![a]);
+        let layout = |app: &OndinApp, id| app.session.doc.get(id).unwrap().styles().layout;
+
+        app.create_style(StyleSlot::Layout, &[a]);
+        let s = layout(&app, a).expect("bound by the create");
+        app.style_naming = None;
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&ctx, &mut app, vec![]);
+        }
+        assert!(
+            drawn(&shapes, "Column · 6"),
+            "the capsule's summary is drawn"
+        );
+
+        assert!(app.commit_edit(Transaction(vec![style::bind_op(
+            b,
+            StyleSlot::Layout,
+            Some(s)
+        )])));
+        assert_eq!(
+            app.session.doc.get(b).unwrap().display(),
+            app.session.doc.get(a).unwrap().display(),
+            "b takes the column"
+        );
+        app.detach_styles(StyleSlot::Layout, &[b]);
+        assert_eq!(layout(&app, b), None);
+        assert!(
+            app.session.doc.get(b).unwrap().display().is_some(),
+            "and keeps it"
+        );
     }
 
     /// **`Escape` while the new style's name is typed undoes the create** (F6).

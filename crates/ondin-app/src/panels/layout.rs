@@ -1139,40 +1139,49 @@ impl OndinApp {
                 .to_owned()
             },
         );
-        self.panel(ui, "Container", None, |app, ui| {
-            let full = ui.available_width();
-            // Nothing raised while the selection disagrees — `segmented`'s mixed
-            // reading, an index past the last cell — and the first cell's picture
-            // traded for `ui::segment_mixed`'s dash, the Type panel's convention
-            // and one of D130's two dashes; blank read as a bug (§15 D892).
-            let (pick, reset) = ui::segmented_marked(
-                ui,
-                full,
-                ui::SEGMENT_CELL_H,
-                3,
-                mode.unwrap_or(3),
-                |_| true,
-                |i| DISPLAY_TIPS[i],
-                mode_mark.as_ref().map(OverrideMark::field),
-                |p, i, r, on| {
-                    if mode.is_none() && i == 0 {
-                        ui::segment_mixed(p, r);
-                    } else {
-                        display_cell(p, i, r, on);
-                    }
-                },
-            );
-            app.reset_marked(reset, &mode_mark);
-            if let Some(i) = pick {
-                app.set_display(&subjects, i);
-            }
-            let laid: Vec<Display> = displays.iter().flatten().cloned().collect();
-            match mode {
-                Some(1) => app.flex_rows(ui, &subjects, &flexes, &laid),
-                Some(2) => app.grid_container_rows(ui, &subjects, &grids, &laid),
-                _ => {}
-            }
-        });
+        // A style slot since §15 D1075 (D1038 (5)): the `⋯`, and the capsule over
+        // a styled container — expanded, the whole card greyed (F7).
+        let _ = self.style_card(
+            ui,
+            "Container",
+            ondin_core::style::StyleSlot::Layout,
+            &subjects,
+            None,
+            |app, ui| {
+                let full = ui.available_width();
+                // Nothing raised while the selection disagrees — `segmented`'s mixed
+                // reading, an index past the last cell — and the first cell's picture
+                // traded for `ui::segment_mixed`'s dash, the Type panel's convention
+                // and one of D130's two dashes; blank read as a bug (§15 D892).
+                let (pick, reset) = ui::segmented_marked(
+                    ui,
+                    full,
+                    ui::SEGMENT_CELL_H,
+                    3,
+                    mode.unwrap_or(3),
+                    |_| true,
+                    |i| DISPLAY_TIPS[i],
+                    mode_mark.as_ref().map(OverrideMark::field),
+                    |p, i, r, on| {
+                        if mode.is_none() && i == 0 {
+                            ui::segment_mixed(p, r);
+                        } else {
+                            display_cell(p, i, r, on);
+                        }
+                    },
+                );
+                app.reset_marked(reset, &mode_mark);
+                if let Some(i) = pick {
+                    app.set_display(&subjects, i);
+                }
+                let laid: Vec<Display> = displays.iter().flatten().cloned().collect();
+                match mode {
+                    Some(1) => app.flex_rows(ui, &subjects, &flexes, &laid),
+                    Some(2) => app.grid_container_rows(ui, &subjects, &grids, &laid),
+                    _ => {}
+                }
+            },
+        );
     }
 
     /// Give every subject the layout of `display` cell `to` — none, flex or grid.

@@ -553,6 +553,13 @@ pub enum Operation {
         id: NodeId,
         style: Option<crate::style::StyleId>,
     },
+    /// The layout style a frame or a group's container is bound to, as
+    /// [`Self::SetFillStyle`] (§15 D1075). Not [`Self::SetDisplay`], which writes
+    /// the layout itself — one of the values the commit writes beside this one.
+    SetLayoutStyle {
+        id: NodeId,
+        style: Option<crate::style::StyleId>,
+    },
 }
 
 impl Operation {
@@ -623,6 +630,7 @@ impl Operation {
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
             | Operation::SetTypeStyle { id, .. }
+            | Operation::SetLayoutStyle { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -711,7 +719,8 @@ impl Operation {
             | Operation::SetFillStyle { id, .. }
             | Operation::SetStrokeStyle { id, .. }
             | Operation::SetEffectsStyle { id, .. }
-            | Operation::SetTypeStyle { id, .. } => id,
+            | Operation::SetTypeStyle { id, .. }
+            | Operation::SetLayoutStyle { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -875,7 +884,8 @@ impl Operation {
             | Operation::SetFillStyle { .. }
             | Operation::SetStrokeStyle { .. }
             | Operation::SetEffectsStyle { .. }
-            | Operation::SetTypeStyle { .. } => false,
+            | Operation::SetTypeStyle { .. }
+            | Operation::SetLayoutStyle { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -1031,6 +1041,9 @@ impl Operation {
             }
             Operation::SetTypeStyle { id, style } => {
                 node(id).is_some_and(|n| n.styles().text == *style)
+            }
+            Operation::SetLayoutStyle { id, style } => {
+                node(id).is_some_and(|n| n.styles().layout == *style)
             }
 
             Operation::SetVariableName { id, name } => {
@@ -1692,7 +1705,8 @@ mod changes_ink_tests {
     /// entry's `SetVariable` and `SetKitModes` change ink, as `SetVariableCell`
     /// does, and are asserted with the visible ones below. **Twenty-six with
     /// `SetTypeStyle`** (§15 D1067), the same day, the assertion moved after the
-    /// gates' run found it red.
+    /// gates' run found it red. **Twenty-seven with `SetLayoutStyle`** (§15
+    /// D1075), 2026-10-16 — the same way, the gates' run finding it red first.
     /// ⚠️ **Not the whole of `changes_ink`'s `false` arm**: the vault's two,
     /// `SetOrigin` and the variables' four answer `false` there and are not
     /// listed here — older gaps, not this list's subject.
@@ -1771,6 +1785,7 @@ mod changes_ink_tests {
             Operation::SetStrokeStyle { id, style: None },
             Operation::SetEffectsStyle { id, style: None },
             Operation::SetTypeStyle { id, style: None },
+            Operation::SetLayoutStyle { id, style: None },
             // A kit's style's version (§15 D1064): bookkeeping, as `SetOrigin` is.
             Operation::SetStyleOrigin {
                 id: style,
@@ -1783,8 +1798,8 @@ mod changes_ink_tests {
         // mechanism.
         assert_eq!(
             invisible.len(),
-            26,
-            "the chrome list is twenty-six operations"
+            27,
+            "the chrome list is twenty-seven operations"
         );
         for op in &invisible {
             assert!(

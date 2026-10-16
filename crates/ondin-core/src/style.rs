@@ -3,7 +3,8 @@
 //! A **style** is one slot's whole set of values — an isolated CSS class, not the
 //! cascade. Build step 3's slots are a layer's **fills**, its **strokes** and its
 //! **effects**, each the whole list its inspector card edits; step 6 adds a text
-//! layer's **type** (§15 D1067); a container's layout has no step. A node holds at
+//! layer's **type** (§15 D1067), and a frame or a group's **layout** — its display
+//! and the bindings of its gaps and padding (§15 D1075). A node holds at
 //! most one style per slot ([`StyleRefs`]), and styles do not stack.
 //!
 //! **A text style is the node's character defaults, not its spans** (§15 D1067,
@@ -95,14 +96,19 @@ pub enum StyleSlot {
     /// A text layer's type — its character defaults (§15 D1067). Last, as the
     /// Type card sits below the paint cards' slots in the browser's tab.
     Text,
+    /// A container's layout — its `Display` and the bindings of its gaps and
+    /// padding (§15 D1075, D1038 (f)): never an item's grow or `align-self`.
+    /// After the type in the browser's tab, its card the Container card.
+    Layout,
 }
 
 impl StyleSlot {
-    pub const ALL: [StyleSlot; 4] = [
+    pub const ALL: [StyleSlot; 5] = [
         StyleSlot::Fills,
         StyleSlot::Strokes,
         StyleSlot::Effects,
         StyleSlot::Text,
+        StyleSlot::Layout,
     ];
 
     /// The card's title, as the inspector writes it.
@@ -112,8 +118,23 @@ impl StyleSlot {
             StyleSlot::Strokes => "Stroke",
             StyleSlot::Effects => "Effects",
             StyleSlot::Text => "Type",
+            StyleSlot::Layout => "Container",
         }
     }
+}
+
+/// A layout style's value (§15 D1075): **the container's fields** — its whole
+/// [`crate::container::Display`], flex or grid, direction, wrap, alignment,
+/// tracks, gaps and padding, D1038 (f)'s *"only the container's fields"* — **and
+/// the bindings of its gaps and padding**, which live on the node beside the
+/// display (`Node::spacing_vars`, §15 D1058) and so are stated here beside it, as
+/// a paint's binding rides in its item. Never an item's grow or `align-self`: those
+/// are the child's `LayoutItem`, another node's field.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayoutStyle {
+    pub display: crate::container::Display,
+    #[serde(default)]
+    pub spacing_vars: crate::variable::SpacingVars,
 }
 
 /// `style` as a text style holds it (§15 D1067): its colour and its language
@@ -150,6 +171,8 @@ pub enum StyleValue {
     /// A text style: character defaults, colour and language cleared
     /// ([`type_part`], §15 D1067). Boxed: a `TextStyle` is several times a list.
     Text(Box<TextStyle>),
+    /// A layout style (§15 D1075). Boxed for `Text`'s reason.
+    Layout(Box<LayoutStyle>),
 }
 
 impl StyleValue {
@@ -159,14 +182,17 @@ impl StyleValue {
             StyleValue::Strokes(_) => StyleSlot::Strokes,
             StyleValue::Effects(_) => StyleSlot::Effects,
             StyleValue::Text(_) => StyleSlot::Text,
+            StyleValue::Layout(_) => StyleSlot::Layout,
         }
     }
 
     /// `node`'s own list for `slot`, as a style's value. A layer that is not text
     /// answers the default type for [`StyleSlot::Text`] — [`check`] refuses
-    /// binding one, so the answer is only ever compared, never written.
-    pub fn of(node: &crate::Node, slot: StyleSlot) -> StyleValue {
-        match slot {
+    /// binding one, so the answer is only ever compared, never written. A layer
+    /// with no layout answers `None` for [`StyleSlot::Layout`]: there is no value
+    /// to make a style of, and nothing a layout style's look equals.
+    pub fn of(node: &crate::Node, slot: StyleSlot) -> Option<StyleValue> {
+        Some(match slot {
             StyleSlot::Fills => StyleValue::Fills(node.paint.fills.clone()),
             StyleSlot::Strokes => StyleValue::Strokes(node.paint.strokes.clone()),
             StyleSlot::Effects => StyleValue::Effects(node.effects.clone()),
@@ -174,7 +200,11 @@ impl StyleValue {
                 crate::NodeKind::Text { style, .. } => type_part(style),
                 _ => type_part(&TextStyle::default()),
             })),
-        }
+            StyleSlot::Layout => StyleValue::Layout(Box::new(LayoutStyle {
+                display: node.display.clone()?,
+                spacing_vars: node.spacing_vars,
+            })),
+        })
     }
 
     /// Whether the two **look** the same — equal values in the same order, the
@@ -188,6 +218,7 @@ impl StyleValue {
             (StyleValue::Strokes(a), StyleValue::Strokes(b)) => same_values(a, b),
             (StyleValue::Effects(a), StyleValue::Effects(b)) => same_values(a, b),
             (StyleValue::Text(a), StyleValue::Text(b)) => type_part(a) == type_part(b),
+            (StyleValue::Layout(a), StyleValue::Layout(b)) => a == b,
             _ => false,
         }
     }
@@ -196,10 +227,11 @@ impl StyleValue {
     /// the node's own colour and language ([`type_part`]) and re-states its spans
     /// against the new defaults (`spans: None`, `Operation::SetTextStyle`) — so a
     /// span the new defaults now equal is dropped as redundant, the price of the
-    /// spans' one invariant (§15 D1067).
-    pub fn write_op(&self, node: &crate::Node) -> Operation {
+    /// spans' one invariant (§15 D1067). A layout style is **two**: the display
+    /// and the bindings of its gaps and padding beside it (§15 D1075).
+    pub fn write_ops(&self, node: &crate::Node) -> Vec<Operation> {
         let id = node.id;
-        match self {
+        vec![match self {
             StyleValue::Fills(fills) => Operation::SetFills {
                 id,
                 fills: fills.clone(),
@@ -223,16 +255,29 @@ impl StyleValue {
                     spans: None,
                 }
             }
-        }
+            StyleValue::Layout(l) => {
+                return vec![
+                    Operation::SetDisplay {
+                        id,
+                        display: Some(l.display.clone()),
+                    },
+                    Operation::SetSpacingVars {
+                        id,
+                        vars: l.spacing_vars,
+                    },
+                ];
+            }
+        }]
     }
 
-    /// How many items it holds — the summary's count; a text style is one.
+    /// How many items it holds — the summary's count; a text or a layout style
+    /// is one.
     pub fn len(&self) -> usize {
         match self {
             StyleValue::Fills(v) => v.len(),
             StyleValue::Strokes(v) => v.len(),
             StyleValue::Effects(v) => v.len(),
-            StyleValue::Text(_) => 1,
+            StyleValue::Text(_) | StyleValue::Layout(_) => 1,
         }
     }
 
@@ -255,6 +300,8 @@ impl StyleValue {
                 .flat_map(|e| e.vars.iter().flatten().copied())
                 .collect(),
             StyleValue::Text(_) => Vec::new(),
+            // And a layout's gaps and padding (§15 D1075).
+            StyleValue::Layout(l) => l.spacing_vars.iter().flatten().copied().collect(),
         }
     }
 
@@ -263,7 +310,7 @@ impl StyleValue {
             StyleValue::Fills(v) => crate::item::first_duplicate(v),
             StyleValue::Strokes(v) => crate::item::first_duplicate(v),
             StyleValue::Effects(v) => crate::item::first_duplicate(v),
-            StyleValue::Text(_) => None,
+            StyleValue::Text(_) | StyleValue::Layout(_) => None,
         }
     }
 }
@@ -352,7 +399,7 @@ impl Styles {
                 StyleValue::Fills(v) => v.iter().map(|k| k.id.0).collect(),
                 StyleValue::Strokes(v) => v.iter().map(|k| k.id.0).collect(),
                 StyleValue::Effects(v) => v.iter().map(|k| k.id.0).collect(),
-                StyleValue::Text(_) => Vec::new(),
+                StyleValue::Text(_) | StyleValue::Layout(_) => Vec::new(),
             };
             std::iter::once(s.id.0).chain(items)
         })
@@ -378,6 +425,10 @@ pub struct StyleRefs {
     /// A text layer's type (§15 D1067) — `None` on every other kind of layer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<StyleId>,
+    /// A container's layout (§15 D1075) — `None` on a layer that is not a frame
+    /// or a group (`container::is_container`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<StyleId>,
 }
 
 impl StyleRefs {
@@ -387,6 +438,7 @@ impl StyleRefs {
             StyleSlot::Strokes => self.strokes,
             StyleSlot::Effects => self.effects,
             StyleSlot::Text => self.text,
+            StyleSlot::Layout => self.layout,
         }
     }
     pub fn set(&mut self, slot: StyleSlot, style: Option<StyleId>) {
@@ -395,6 +447,7 @@ impl StyleRefs {
             StyleSlot::Strokes => self.strokes = style,
             StyleSlot::Effects => self.effects = style,
             StyleSlot::Text => self.text = style,
+            StyleSlot::Layout => self.layout = style,
         }
     }
     pub fn is_empty(&self) -> bool {
@@ -418,6 +471,7 @@ pub fn bind_op(id: NodeId, slot: StyleSlot, style: Option<StyleId>) -> Operation
         StyleSlot::Strokes => Operation::SetStrokeStyle { id, style },
         StyleSlot::Effects => Operation::SetEffectsStyle { id, style },
         StyleSlot::Text => Operation::SetTypeStyle { id, style },
+        StyleSlot::Layout => Operation::SetLayoutStyle { id, style },
     }
 }
 
@@ -430,12 +484,19 @@ pub fn bind_op(id: NodeId, slot: StyleSlot, style: Option<StyleId>) -> Operation
 /// look has left its style's, so a colour-only write leaves the binding alone.
 /// The spans' ops (`SetTextSpans`, `SetText`) are not the slot's at all: styling a
 /// selection keeps the style (§15 D1067).
+///
+/// **A layout's slot is two operations** (§15 D1075): `SetDisplay`, and
+/// `SetSpacingVars`, the bindings of its gaps and padding. An item's
+/// `SetLayoutItem` is the child's, never the container's style.
 pub fn writes_slot(op: &Operation) -> Option<(NodeId, StyleSlot)> {
     match op {
         Operation::SetFills { id, .. } => Some((*id, StyleSlot::Fills)),
         Operation::SetStrokes { id, .. } => Some((*id, StyleSlot::Strokes)),
         Operation::SetEffects { id, .. } => Some((*id, StyleSlot::Effects)),
         Operation::SetTextStyle { id, .. } => Some((*id, StyleSlot::Text)),
+        Operation::SetDisplay { id, .. } | Operation::SetSpacingVars { id, .. } => {
+            Some((*id, StyleSlot::Layout))
+        }
         _ => None,
     }
 }
@@ -447,6 +508,7 @@ pub fn binds_slot(op: &Operation) -> Option<(NodeId, StyleSlot, Option<StyleId>)
         Operation::SetStrokeStyle { id, style } => Some((*id, StyleSlot::Strokes, *style)),
         Operation::SetEffectsStyle { id, style } => Some((*id, StyleSlot::Effects, *style)),
         Operation::SetTypeStyle { id, style } => Some((*id, StyleSlot::Text, *style)),
+        Operation::SetLayoutStyle { id, style } => Some((*id, StyleSlot::Layout, *style)),
         _ => None,
     }
 }
@@ -460,10 +522,10 @@ pub enum StyleRule {
     DuplicateName(StyleSlot, String),
     #[error("{0:?} repeats an item id")]
     DuplicateItem(StyleId),
-    #[error("{0:?} is bound to a variable that is not there or not a colour")]
+    #[error("{0:?} is bound to a variable that is not there or of the wrong kind")]
     BadVariable(StyleId),
     #[error(
-        "node {0:?} is bound to a style that is not there or of another slot, or to a text style without being text"
+        "node {0:?} is bound to a style that is not there or of another slot, to a text style without being text, or to a layout style without being a frame or a group"
     )]
     BadBinding(NodeId),
     #[error("node {0:?} in the vault is bound to a style of the document's own")]
@@ -525,6 +587,8 @@ pub(crate) fn check<'a>(
                 .iter()
                 .any(|e| e.vars.iter().any(|x| bad(*x, VarKind::Number))),
             StyleValue::Text(_) => false,
+            // A layout's gaps and padding a number each (§15 D1075).
+            StyleValue::Layout(l) => l.spacing_vars.iter().any(|x| bad(*x, VarKind::Number)),
         };
         if wrong {
             return Err(StyleRule::BadVariable(s.id));
@@ -535,8 +599,12 @@ pub(crate) fn check<'a>(
             let Some(style) = styles.get(id).filter(|s| s.slot() == slot) else {
                 return Err(StyleRule::BadBinding(n.id));
             };
-            // Only text has type to style (§15 D1067).
+            // Only text has type to style (§15 D1067), and only a frame or a
+            // group a layout (§15 D1075, `container::is_container`).
             if slot == StyleSlot::Text && !matches!(n.kind, crate::NodeKind::Text { .. }) {
+                return Err(StyleRule::BadBinding(n.id));
+            }
+            if slot == StyleSlot::Layout && !crate::container::is_container(&n.kind) {
                 return Err(StyleRule::BadBinding(n.id));
             }
             // A vault node is bound to kits' styles only (§15 D1064), as it
@@ -636,6 +704,9 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
             if slot == StyleSlot::Text && !matches!(n.kind, crate::NodeKind::Text { .. }) {
                 continue; // `check` refuses it, and says why where `SetTextStyle` would not
             }
+            if slot == StyleSlot::Layout && !crate::container::is_container(&n.kind) {
+                continue; // `check` refuses it
+            }
             // 🚨 **A text style's family is plain, and a bound family under it
             // goes** (§15 D1069). `build::keep_text_bindings` detaches it where
             // the user applies the style, but a copy receives its main's
@@ -647,15 +718,17 @@ pub fn settle(doc: &Document, tx: &Transaction, user: usize) -> Vec<Operation> {
                     vars: [n.text_vars[0], None],
                 });
             }
+            // A container with no layout has no look, so it is off its style: a
+            // layout style applied to a plain frame gives it the layout (§15 D1075).
             let cur = StyleValue::of(n, slot);
-            if cur.same_look(&style.value) {
+            if cur.is_some_and(|c| c.same_look(&style.value)) {
                 continue;
             }
             let wins = restyled.contains(&s) || rebound.contains(&(n.id, slot));
             if !wins && written.contains(&(n.id, slot)) {
                 out.push(bind_op(n.id, slot, None));
             } else {
-                out.push(style.value.write_op(n));
+                out.extend(style.value.write_ops(n));
             }
         }
     }
@@ -713,6 +786,77 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
                 value = Some(StyleValue::Text(Box::new(type_part(s))));
             }
             out.push(op);
+            continue;
+        }
+        // **A layout's value is the edited user's display and its bindings
+        // together** (§15 D1075): the two are separate operations, so the value
+        // starts from the user's own and takes each write over it — a gap typed
+        // writes `SetDisplay` alone, a gap bound writes both.
+        if slot == StyleSlot::Layout {
+            let (id, _) = writes_slot(&op).expect("the hit above");
+            let base = match &value {
+                Some(StyleValue::Layout(l)) => Some((**l).clone()),
+                _ => doc.get(id).and_then(|n| match StyleValue::of(n, slot) {
+                    Some(StyleValue::Layout(l)) => Some(*l),
+                    _ => None,
+                }),
+            };
+            let next = match (op, base) {
+                // **Judged as the commit's spacing pass judges a door's write**
+                // (§15 D1075's amendment, reading (b)): `keep_spacing_bindings`
+                // never sees this write, folded into the style first, so a bound
+                // slot written what it lays out at or its own literal stays bound,
+                // the literal put back, and any other slot detaches to the number
+                // written — the padding pair over a partly bound pair had kept the
+                // bound side with the typed number as an unlaid literal.
+                (
+                    Operation::SetDisplay {
+                        display: Some(mut d),
+                        ..
+                    },
+                    Some(b),
+                ) => {
+                    let kept = crate::build::kept_spacing_vars(doc, id, &d);
+                    let literal = b.display.spacing();
+                    let mut s = d.spacing();
+                    let mut vars = b.spacing_vars;
+                    for k in 0..6 {
+                        if vars[k].is_some() {
+                            if kept[k].is_some() {
+                                s[k] = literal[k];
+                            } else {
+                                vars[k] = None;
+                            }
+                        }
+                    }
+                    d.set_spacing(s);
+                    LayoutStyle {
+                        display: d,
+                        spacing_vars: vars,
+                    }
+                }
+                (
+                    Operation::SetDisplay {
+                        display: Some(d), ..
+                    },
+                    None,
+                ) => LayoutStyle {
+                    display: d,
+                    spacing_vars: Default::default(),
+                },
+                (Operation::SetSpacingVars { vars, .. }, Some(b)) => LayoutStyle {
+                    spacing_vars: vars,
+                    ..b
+                },
+                // A layout taken away, or bindings with no layout: no value a
+                // style can hold, so the write passes through and the commit's
+                // pass detaches the layer as it would any door's.
+                (op, _) => {
+                    out.push(op);
+                    continue;
+                }
+            };
+            value = Some(StyleValue::Layout(Box::new(next)));
             continue;
         }
         if value.is_none() {
@@ -776,7 +920,8 @@ pub fn create_ops(
     if slot == StyleSlot::Text && source.text_vars[1].is_some() {
         source.kind = doc.text_drawn_in(doc.variables(), from, &source.kind, source.text_vars);
     }
-    let value = StyleValue::of(&source, slot);
+    // `None` for a layout style of a layer with no layout — nothing to make one of.
+    let value = StyleValue::of(&source, slot)?;
     let mut ops = vec![Operation::AddStyle {
         style: Style {
             id,
@@ -886,6 +1031,30 @@ pub(crate) fn detach_vars(
                 .collect(),
         ),
         StyleValue::Text(_) => value.clone(),
+        // And a layout's gaps and padding bound to one of them, their numbers in
+        // `mode` written into the display, floored at 0 as the engine floors a
+        // literal (§15 D1075).
+        StyleValue::Layout(l) => {
+            let mut spacing = l.display.spacing();
+            let mut kept = l.spacing_vars;
+            for (k, var) in l.spacing_vars.iter().enumerate() {
+                if let Some(v) = var
+                    && vars.contains(v)
+                {
+                    spacing[k] = match t.resolve_opt(*v, mode) {
+                        Some(Value::Number(x)) => x.max(0.0),
+                        _ => 0.0,
+                    };
+                    kept[k] = None;
+                }
+            }
+            let mut display = l.display.clone();
+            display.set_spacing(spacing);
+            StyleValue::Layout(Box::new(LayoutStyle {
+                display,
+                spacing_vars: kept,
+            }))
+        }
     }
 }
 

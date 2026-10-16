@@ -1490,6 +1490,15 @@ impl Document {
                     style: old,
                 })
             }
+            Operation::SetLayoutStyle { id, style } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.styles.layout, *style);
+                dirty.0.insert(*id);
+                Ok(Operation::SetLayoutStyle {
+                    id: *id,
+                    style: old,
+                })
+            }
         }
     }
 

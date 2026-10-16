@@ -1157,7 +1157,10 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         O::SetInsets { .. } => Some("Position"),
         O::SetLayoutItem { .. } => Some("Item"),
         // A gap's or a padding's binding is the Container card's field (§15 D1058).
-        O::SetDisplay { .. } | O::SetSpacingVars { .. } => Some("Container"),
+        // And its style (§15 D1075).
+        O::SetDisplay { .. } | O::SetSpacingVars { .. } | O::SetLayoutStyle { .. } => {
+            Some("Container")
+        }
         O::SetTextStyle { .. }
         | O::SetParagraphStyle { .. }
         | O::SetBlockStyle { .. }

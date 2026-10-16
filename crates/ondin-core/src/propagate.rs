@@ -81,7 +81,8 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetFillStyle { .. }
         | Operation::SetStrokeStyle { .. }
         | Operation::SetEffectsStyle { .. }
-        | Operation::SetTypeStyle { .. } => Mode::Whole,
+        | Operation::SetTypeStyle { .. }
+        | Operation::SetLayoutStyle { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }
@@ -372,7 +373,21 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // the edit wrote is detached — first, so a main's rewrite or detach reaches
     // its copies through every pass below.
     let styled = crate::style::settle(doc, tx, user);
+    let relayout = styled
+        .iter()
+        .any(|op| matches!(op, Operation::SetDisplay { .. }));
     tx.0.extend(styled);
+    // 🚨 **A layout style's display is a layout write the size pass never saw**
+    // (§15 D1075's amendment, reading (a)): `build::keep_size_bindings` ran at
+    // the commit door before this, so a child whose bound W or H the style's new
+    // layout makes computed — a plain frame given a row, a style edit reaching
+    // its users — stayed bound, against D1061's *only a hand-set size binds*. It
+    // runs again over the whole transaction, which is safe: a node whose size
+    // bindings the transaction already states is left as stated, so only what
+    // the style wrote is judged — before the copies follow, so they follow it.
+    if relayout {
+        *tx = crate::build::keep_size_bindings(doc, std::mem::take(tx));
+    }
     // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
     // back, has its children and fields rewritten in place here — the one place
     // they are — so the picker, a reset and a nested variant switch need write
@@ -407,7 +422,14 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // item onto a copy bound to a style of its own, a swap's or a structural
     // pass's copy of a styled node, put back to its style (§15 D1062).
     let restyled = crate::style::settle(doc, tx, user);
+    let relayout = restyled
+        .iter()
+        .any(|op| matches!(op, Operation::SetDisplay { .. }));
     tx.0.extend(restyled);
+    // And the size pass over a copy's layout put back, the first call's reason.
+    if relayout {
+        *tx = crate::build::keep_size_bindings(doc, std::mem::take(tx));
+    }
 }
 
 /// The nodes `tx` takes away from the source they follow: everything under a

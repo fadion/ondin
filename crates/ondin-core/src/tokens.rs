@@ -305,7 +305,8 @@ impl Plan {
             b => b.clone(),
         };
         // A bound number's variable, likewise: a stroke's width (§15 D1073), an
-        // effect's numbers (§15 D1074). ⚠️ Missing from both entries' first cuts:
+        // effect's numbers (§15 D1074), a layout's gaps and padding (§15 D1075).
+        // ⚠️ Missing from D1073's and D1074's first cuts:
         // a kit's stroke or effects style holding a bound number was vendored
         // naming the kit's variable ids, which `style::check` refused — the
         // whole insert of a main styled by it failed.
@@ -343,6 +344,10 @@ impl Plan {
             ),
             // A text style reads no variable (§15 D1067).
             StyleValue::Text(_) => value.clone(),
+            StyleValue::Layout(l) => StyleValue::Layout(Box::new(crate::style::LayoutStyle {
+                display: l.display.clone(),
+                spacing_vars: l.spacing_vars.map(num),
+            })),
         }
     }
 }

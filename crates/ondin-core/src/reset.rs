@@ -210,6 +210,11 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
             id,
             style: styles.text,
         },
+        // And the Container card's (§15 D1075).
+        O::SetLayoutStyle {
+            id,
+            style: styles.layout,
+        },
     ];
     ops.extend(kind_ops(id, kind));
     ops

@@ -131,7 +131,7 @@ fn styled(f: &mut F) -> StyleId {
 /// **A text style is the type without its colour or its language**, and
 /// applying one writes the type onto the layer while the layer keeps both.
 ///
-/// Flip, run: writing the style's `TextStyle` whole in `write_op` (no
+/// Flip, run: writing the style's `TextStyle` whole in `write_ops` (no
 /// `typed_over`) fails at *"b keeps its language"* — the style holds `None` and
 /// takes `de` away — and `a_style_edit_reaches_a_copy_of_a_styled_main` at its
 /// red.

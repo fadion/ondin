@@ -141,7 +141,7 @@ fn applying_a_style_writes_its_values_onto_the_layer() {
     let style = f.doc.styles().get(s).unwrap();
     assert_eq!(
         StyleValue::of(f.doc.get(f.b).unwrap(), StyleSlot::Fills),
-        style.value,
+        Some(style.value.clone()),
         "a copy of the style's list, its item ids kept"
     );
 }

@@ -2460,7 +2460,8 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 /// out by that build too and added before its commit; thirty-three since the
 /// styles' seven, §15 D1062, all `false` — missed by their build and added by
 /// the commit after it; one more since, `SetTypeStyle` (§15 D1067), added by its
-/// own build and its count by the gates' run. The paragraphs below keep the counts of the finding they
+/// own build and its count by the gates' run; and one more, `SetLayoutStyle` (§15
+/// D1075), missed by its build and found by `arch-scribe`. The paragraphs below keep the counts of the finding they
 /// record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
@@ -2658,6 +2659,10 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         Operation::SetStrokeStyle { id, style: None },
         Operation::SetEffectsStyle { id, style: None },
         Operation::SetTypeStyle { id, style: None },
+        // A layout style's binding (§15 D1075): its values are `SetDisplay` and
+        // `SetSpacingVars`, written beside it. Missed by its build, `arch-scribe`'s
+        // find.
+        Operation::SetLayoutStyle { id, style: None },
         // A kit's style's version (§15 D1064).
         Operation::SetStyleOrigin {
             id: style,
@@ -2668,7 +2673,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
-    assert_eq!(styles.len(), 9, "and the styles' nine");
+    assert_eq!(styles.len(), 10, "and the styles' ten");
     assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
     assert_eq!(

@@ -1603,10 +1603,11 @@ edited down to this the same day.*
 
 ## Next · Styles and variables
 
-**Ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built 2026-10-14, steps 3 and 4 on 2026-10-15, and
-step 6's text styles and string variables the same day** — §15 D1037 is the design and
-says whose each part is, §15 D1038 the accepted chrome and the
-maintainer's rulings on D1037's open questions, and §15 D1039–D1071 what is built; `architecture.md` §5.3f is the section. Variables are typed
+**Ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built 2026-10-14, steps 3 and 4 on 2026-10-15,
+step 6's text styles and string variables the same day, and the rest of D1038 on 2026-10-16** — §15
+D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
+maintainer's rulings on D1037's open questions, and §15 D1039–D1079 what is built; `architecture.md`
+§5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
 whole set of values, read-only in the inspector and detached by any other door's edit.
@@ -1642,7 +1643,7 @@ accepted (D1038):
    counts, 5A's extended summary and the browser's *v8 → v9* line; §15 D1066, *Make local* forking
    what the main reads). **Step 4 owes nothing** — `kit_frames` is untested, a gap D1066 records.
 5. ~~The CSS export~~ — taken out of this work on 2026-10-15 by the maintainer's ruling, into *Later ·
-   Code export* (§15 D1037's amendment). **Step 6 is next.**
+   Code export* (§15 D1037's amendment).
 6. ~~Text styles~~ **built** (§15 D1067, the core: a fourth slot holding the character defaults less
    colour and language, spans the text's own marks over it; §15 D1068, the Type card as a style card),
    ~~and string variables bound to text content and font family~~ **built** (§15 D1069, the core, and
@@ -1651,14 +1652,17 @@ accepted (D1038):
    chrome — the Text property's chip and the Content row's mark — built in its amendment; the Type
    card over several text layers built in §15 D1077). **Step 6 owes nothing.**
 
+**Beside the six steps, built 2026-10-16**: D1038 (2)'s floating status on a detach — the binding
+passes' variables (§15 D1071) and the one canvas door onto a paint, a picture dropped or pasted onto a
+shape (§15 D1079); D1038 (7)'s remaining numbers — opacity (§15 D1072), a stroke's width (§15 D1073),
+an effect's X, Y, blur and spread (§15 D1074); layout styles, the fifth slot (§15 D1075, D1076); and
+spacing handles on the canvas (§15 D1078).
+
 **Open** (what D1037's list and D1038 leave):
 
 - **Whether a preset follows a paste's rule** across documents — D1037's premise (iv) named it beside
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
-- **D1038 (2)'s canvas half** — a gesture on a bound value detaching, *the floating status saying what
-  was detached*: a paint's binding is no pass's, so a door's write over a bound fill says nothing, and
-  whether any canvas door writes one is unmeasured (§15 D1071).
 
 *Opened 2026-10-11, when styles and variables left §0's non-goals; the design pass and (a), (b), (c),
 (d), (f) and premise (iv) struck on 2026-10-14, ruled in §15 D1038; step 1's core and premises (i), (ii)
@@ -1733,7 +1737,8 @@ amendment; D1074's retype ranges and D1073's swatch struck the same day, fixed i
 third amendments, the several-layer weight row's clearing left; that struck the same day, fixed in
 D1073's fourth amendment; the canvas half's gap and padding handles struck the same day, built in §15
 D1078, their design brief — *Next · Spacing handles on the canvas* — struck with them into that entry,
-the paint door left.*
+the paint door left; the paint door struck the same day, measured in §15 D1079 — one canvas door, a
+picture dropped or pasted onto a shape, saying its detach itself — the canvas half closed.*
 
 ## Next · The polishing pass over the accepted calls
 

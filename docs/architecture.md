@@ -3732,7 +3732,11 @@ inspector's doors detach in the edit itself (the identity card's eye, the Proper
 switch and Text commit), so they say nothing; the layers panel's eye and the hide chord are left to the
 pass, and say it (D1071's amendment). 🚨 **The
 run ends before the follows**, which are the cut's consequences in the copies, not the edit's cuts. A
-paint's binding is its `BrushSource`, decided at the write and no pass's, so its detach says nothing.
+paint's binding is its `BrushSource`, decided at the write and no pass's, so the commit says nothing of
+its detach; **the one canvas door that writes over a bound paint says it itself** (§15 D1079) — a
+picture dropped or pasted onto a shape (`replace_image_fill`) reads the fill's variable before the write
+and folds it, with the commit's `EditorSession::last_detached`, into its own *Replaced with ‹file›*,
+which would otherwise overwrite a style's *Detached*.
 **The seventh pass, the stroke width's, appends nothing** (§15 D1073): it rewrites the `SetStrokes`
 lists in place, so no `Set*Vars` op is there to read. `commit_inner` notes every stroke the edit writes
 with its width bound (`stroke_widths_bound`) before `keep_stroke_width_bindings` and names those the

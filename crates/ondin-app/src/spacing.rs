@@ -699,17 +699,71 @@ impl OndinApp {
             return None;
         };
         let node_world = self.session.preview_world_transform(*id)?;
-        let literal = self.session.doc.get(*id)?.display()?.clone();
+        let doc = &self.session.doc;
+        let node = doc.get(*id)?;
+        let literal = node.display()?.clone();
         let delta = node_world.inverse() * world - *anchor;
         let slots = written_slots(*band, alt, shift);
         let step = shift && !(alt && matches!(band, BandKind::Padding(_)));
         let value = dragged_value(*band, *base, delta, step);
-        let display = written(&literal, &slots, value);
-        let tx = Transaction(vec![Operation::SetDisplay {
+        // **The drag cuts a binding itself** where it moves a bound slot off the
+        // number its variable draws. Left to `keep_spacing_bindings`, a drag to
+        // 0 matched the bound slot's literal 0 — the pass's *"written its own
+        // literal"* half, for writers carrying the other slots forward — so the
+        // binding stayed and the slot sprang back to its variable on release
+        // (§15 D1090). A transaction setting the bindings is left alone by that
+        // pass, so the slots kept bound are written their literal here.
+        let bound = node.spacing_vars();
+        let drawn = doc.resolved_display(*id)?.spacing();
+        let mut vars = bound;
+        for k in &slots {
+            if bound[*k].is_some() && value != drawn[*k] {
+                vars[*k] = None;
+            }
+        }
+        let mut display = written(&literal, &slots, value);
+        let mut ops = Vec::new();
+        if vars != bound {
+            let mut s = display.spacing();
+            for k in &slots {
+                if vars[*k].is_some() {
+                    s[*k] = literal.spacing()[*k];
+                }
+            }
+            display.set_spacing(s);
+            ops.push(Operation::SetSpacingVars { id: *id, vars });
+        }
+        ops.push(Operation::SetDisplay {
             id: *id,
             display: Some(display),
-        }]);
-        Some((tx, value, slots))
+        });
+        Some((Transaction(ops), value, slots))
+    }
+
+    /// The variables `tx` — a band drag's, [`Self::band_drag_tx`] — cuts, by
+    /// name, for the floating status. The commit says what its own passes cut
+    /// (§15 D1071) and says nothing of a binding the edit sets itself, which is
+    /// a chip's asked-for detach (F2); a drag's cut is a detach the user wrote
+    /// over, so the release says it.
+    pub(crate) fn band_drag_cut(&self, tx: &Transaction) -> Vec<String> {
+        let doc = &self.session.doc;
+        let mut names: Vec<String> =
+            tx.0.iter()
+                .filter_map(|op| match op {
+                    Operation::SetSpacingVars { id, vars } => Some((doc.get(*id)?, vars)),
+                    _ => None,
+                })
+                .flat_map(|(node, vars)| {
+                    let had = node.spacing_vars();
+                    (0..6)
+                        .filter(move |k| vars[*k].is_none())
+                        .filter_map(move |k| had[k])
+                })
+                .filter_map(|v| doc.variables().get(v).map(|x| x.name.clone()))
+                .collect();
+        names.sort();
+        names.dedup();
+        names
     }
 
     /// The handles' drawing (2, 7): nothing at rest; with the pointer inside the
@@ -1299,6 +1353,142 @@ mod canvas_tests {
             "Detached space/md",
             "and says so"
         );
+    }
+
+    /// **A bound padding dragged to 0 is 0** (§15 D1090): the top padding bound
+    /// to *space/md* (10) — its literal 0 — dragged up past the edge previews 0
+    /// while held, and released stays 0, the binding cut and said.
+    ///
+    /// Flip, run: `band_drag_tx` leaving the cut to `keep_spacing_bindings`
+    /// (no `SetSpacingVars`) fails *"the preview lays out 0"* — 10, the written
+    /// 0 read as the slot's own literal and the binding kept — and, that
+    /// assertion set aside, *"released at 0, detached"*. The renderer's
+    /// `SetDisplay` arm judging the kept bindings against the document in place
+    /// of the pending ones fails *"the preview lays out 0"*, 10.
+    #[test]
+    fn a_bound_padding_dragged_to_zero_is_zero() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let var = bind_top_padding(&ctx, &mut app, row);
+        let bound = |app: &OndinApp| app.session.doc.get(row).unwrap().spacing_vars()[2];
+        assert_eq!(bound(&app), Some(var), "the fixture: bound");
+        assert_eq!(spacing(&app, row)[2], 0.0, "the fixture: its literal is 0");
+
+        app.session.info("");
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(200.0, 12.0),
+            Point::new(200.0, -20.0),
+            none,
+            true,
+        );
+        assert!(
+            matches!(app.drag, crate::preview::Drag::Spacing { .. }),
+            "the fixture: the padding band took the press"
+        );
+        let previewed = {
+            let (_, _, ov) = app.session.render_inputs();
+            ov.get(row)
+                .and_then(|o| o.display.clone())
+                .flatten()
+                .map(|d| d.spacing()[2])
+        };
+        assert_eq!(previewed, Some(0.0), "the preview lays out 0");
+        let end = app.to_screen(Point::new(200.0, -20.0), RECT, 1.0);
+        frame(&ctx, &mut app, vec![button(end, false, none)], none);
+        frame(&ctx, &mut app, Vec::new(), none);
+        assert_eq!(bound(&app), None, "released at 0, detached");
+        assert_eq!(spacing(&app, row)[2], 0.0);
+        assert_eq!(
+            app.session.status().text,
+            "Detached space/md",
+            "and says so"
+        );
+    }
+
+    /// **The maintainer's case: a layout-styled container's bound padding
+    /// dragged to 0** (§15 D1090) — the row the user of a layout style holding
+    /// its top padding's binding, as *Stack/Column* in the report holds its
+    /// row gap's and paddings'. The drag cuts the style and the binding, the
+    /// padding stays 0, and the status counts both.
+    ///
+    /// Flip, run: `band_drag_tx` with no `SetSpacingVars` fails first at *"the
+    /// style cut"* — the release wrote nothing at all, the 0 read as the bound
+    /// slot's literal and the style's value unchanged, which is the report's
+    /// spring-back exactly.
+    #[test]
+    fn a_styled_bound_padding_dragged_to_zero_is_zero() {
+        use ondin_core::style::{self, StyleSlot};
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let var = bind_top_padding(&ctx, &mut app, row);
+        let s = app.session.ids.mint_style();
+        let ops = style::create_ops(
+            &app.session.doc,
+            s,
+            "Stack/Column",
+            row,
+            StyleSlot::Layout,
+            &[row],
+        )
+        .expect("the row has a layout");
+        assert!(app.session.commit(Transaction(ops)));
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let node = |app: &OndinApp| app.session.doc.get(row).unwrap().clone();
+        assert_eq!(node(&app).styles().layout, Some(s), "the fixture: styled");
+        assert_eq!(node(&app).spacing_vars()[2], Some(var), "and bound");
+
+        app.session.info("");
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(200.0, 12.0),
+            Point::new(200.0, -20.0),
+            none,
+            false,
+        );
+        assert_eq!(node(&app).styles().layout, None, "the style cut");
+        assert_eq!(node(&app).spacing_vars()[2], None, "the binding cut");
+        assert_eq!(spacing(&app, row)[2], 0.0, "released at 0");
+        assert_eq!(app.session.status().text, "Detached 2 styles and variables");
+    }
+
+    /// Bind `row`'s top padding to a new *space/md* (10, one mode), answering
+    /// the variable.
+    fn bind_top_padding(ctx: &egui::Context, app: &mut OndinApp, row: NodeId) -> ondin_core::VarId {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "space/md".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(10.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ])));
+        let ops = ondin_core::build::bind_spacing_ops(
+            &app.session.doc,
+            row,
+            [None, None, Some(var), None, None, None],
+        );
+        assert!(app.session.commit(Transaction(ops)));
+        frame(ctx, app, Vec::new(), Default::default());
+        var
     }
 
     /// **A band dragged thin stays drawn while it is dragged**: the top padding

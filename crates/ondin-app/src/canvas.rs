@@ -2569,7 +2569,16 @@ impl OndinApp {
                     Some((tx, value, slots))
                         if !drawn.is_some_and(|s| slots.iter().all(|i| s[*i] == value)) =>
                     {
-                        self.session.commit(tx);
+                        let cut = self.band_drag_cut(&tx);
+                        if self.session.commit(tx) && !cut.is_empty() {
+                            let (styles, mut vars) = self.session.last_detached().clone();
+                            vars.extend(cut);
+                            vars.sort();
+                            vars.dedup();
+                            if let Some(said) = crate::session::said_detached(styles, vars) {
+                                self.session.info(said);
+                            }
+                        }
                     }
                     _ => self.session.clear_preview(),
                 }

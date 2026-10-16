@@ -58,6 +58,12 @@ pub struct NodeOverride {
     /// Replacement layout (`ondin_core::container::Display`) — `Some(None)` takes
     /// one away. Read only by the flex relayout, like `insets`.
     pub display: Option<Option<ondin_core::container::Display>>,
+    /// The gap and padding bindings a `SetSpacingVars` earlier in the preview
+    /// set — read only by a later `SetDisplay`, which resolves with them rather
+    /// than judging the bindings kept against the document's, as the commit's
+    /// `keep_spacing_bindings` leaves a transaction that sets them alone (§15
+    /// D1090).
+    pub spacing_vars: Option<ondin_core::SpacingVars>,
     /// Replacement layout-item properties, read only by the flex relayout (which
     /// lays a grid as well, §15 D914).
     pub item: Option<ondin_core::container::LayoutItem>,
@@ -1313,10 +1319,15 @@ impl RenderOverrides {
                 // variable's number. Resolved with the bindings the commit will
                 // **keep** (`build::kept_spacing_vars`), so a slot a scrub writes
                 // past its drawn number is drawn at the written one, as
-                // `keep_spacing_bindings` will detach it to.
+                // `keep_spacing_bindings` will detach it to — unless a
+                // `SetSpacingVars` earlier in the preview set them, which that
+                // pass leaves alone and so must this (§15 D1090): a band drag
+                // to 0 cuts its binding that way.
                 if self.ghost(*id).is_none() {
+                    let pending = self.get(*id).and_then(|o| o.spacing_vars);
                     let drawn = display.as_ref().map(|d| {
-                        let vars = ondin_core::build::kept_spacing_vars(doc, *id, d);
+                        let vars = pending
+                            .unwrap_or_else(|| ondin_core::build::kept_spacing_vars(doc, *id, d));
                         doc.spacing_drawn_in(doc.variables(), *id, d, vars)
                     });
                     self.entry(*id).display = Some(drawn);
@@ -1336,6 +1347,7 @@ impl RenderOverrides {
                 if self.ghost(*id).is_none() {
                     let drawn = doc.spacing_drawn_in(doc.variables(), *id, &base, *vars);
                     self.entry(*id).display = Some(Some(drawn));
+                    self.entry(*id).spacing_vars = Some(*vars);
                     self.mark_moved(doc, *id);
                 }
             }

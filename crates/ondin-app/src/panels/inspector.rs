@@ -10537,6 +10537,14 @@ impl OndinApp {
         );
         let ctx = ui.ctx().clone();
         let anchor = Self::popover_anchor(&ctx, row, MENU_W);
+        // **The row's lock, carried into the card** (§15 D1080). A styled Fill
+        // card draws its rows disabled — the inspector's read-only door, D1038
+        // (1) — and an `Area` inherits neither the disable nor the grey, so every
+        // control in here wrote the fills and the commit detached the style. Read
+        // off the caller's `Ui`, which is disabled exactly where the row is: a
+        // styled or partly styled card, and not under the style's *Edit*, where
+        // a write is an edit of the style.
+        let locked = !ui.is_enabled();
         // **The node, and not the tab.** The two cards this replaced carried the
         // tab in their `Area` id because they were different sizes hung off
         // different buttons, and an id shared across both would have brought the
@@ -10554,6 +10562,10 @@ impl OndinApp {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
                     let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
                     ui.set_width(inner);
+                    if locked {
+                        ui.disable();
+                        ui.set_opacity(super::styles::GREYED);
+                    }
                     // **Stated here, before the first control** — §15 D195's rule:
                     // egui advances past a widget by the spacing in effect when
                     // *that* widget is placed, so a pitch set later is too late to

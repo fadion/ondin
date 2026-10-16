@@ -31,7 +31,7 @@ const MENU_W: f32 = 210.0;
 const PICKER_W: f32 = 256.0;
 const ROW_H: f32 = 26.0;
 /// Greyed rows' opacity under a read-only capsule (F3).
-const GREYED: f32 = 0.42;
+pub(crate) const GREYED: f32 = 0.42;
 
 /// How a card's targets stand towards styles in one slot.
 #[derive(Clone, Debug, PartialEq)]
@@ -1841,5 +1841,105 @@ mod tests {
             ondin_core::style::StyleValue::Text(t) => assert_eq!(t.font_size, 20.0),
             other => panic!("not a text style: {other:?}"),
         }
+    }
+
+    /// Where `s` is drawn: the centre of its galley.
+    fn text_at(shapes: &[egui::epaint::ClippedShape], s: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        shapes.iter().find_map(|c| find(&c.shape, s))
+    }
+
+    /// **Image editing's card is read-only under a styled Fill card** (§15
+    /// D1080, D1038 (1)): the card is an `Area`, which inherits neither the
+    /// styled rows' disable nor their grey, so its every control wrote the fills
+    /// and the commit detached the style. A picture fill made a style, its
+    /// capsule open, image editing entered, and the card's *Fit* segment
+    /// clicked: the style stays and the picture keeps its mode.
+    ///
+    /// Flip, run: the card's `if locked { ui.disable(); … }` taken out fails at
+    /// *"the style stays"*, the click having written *Fit* and cut the style.
+    #[test]
+    fn the_image_card_is_read_only_under_a_styled_fill() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        let bytes = vec![7u8; 8];
+        let image = crate::app::content_hash(&bytes);
+        let item = app.session.doc.get(a).unwrap().paint().fills[0].id;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddImage {
+                id: image.clone(),
+                entry: ondin_core::ImageEntry {
+                    source: ondin_core::ImageSource::Embedded(bytes.into()),
+                    format: ondin_core::ImageFormat::Png,
+                    width: 4,
+                    height: 4,
+                },
+            },
+            Operation::SetFills {
+                id: a,
+                fills: vec![Keyed::new(
+                    item,
+                    Fill {
+                        brush: ondin_core::image_brush(image).into(),
+                        visible: true,
+                    },
+                )],
+            },
+        ])));
+        app.create_style(StyleSlot::Fills, &[a]);
+        app.style_naming = None;
+        let s = fill_style(&app, a).expect("the fixture: styled");
+        app.style_open.insert(StyleSlot::Fills);
+        app.begin_image_edit(a);
+        assert_eq!(app.edited_image(), Some((a, 0)), "the fixture: editing");
+        let mode = |app: &OndinApp| match app.session.doc.get(a).unwrap().paint().fills[0]
+            .brush
+            .literal()
+        {
+            Some(Brush::Image(img)) => img.image.fit,
+            other => panic!("a picture, got {other:?}"),
+        };
+        let before = mode(&app);
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = tall_frame(&ctx, &mut app);
+        }
+        let at = text_at(&shapes, "Fit").expect("the card's mode strip is drawn");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        // On the screen the strip was found on: the card hangs off its row, and
+        // a shorter screen lays the panel out elsewhere.
+        let tall = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 2400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |_| {
+                app.inspector_panel(&ctx);
+                app.style_popups_ui(&ctx);
+            });
+        };
+        tall(&mut app, vec![egui::Event::PointerMoved(at)]);
+        tall(&mut app, vec![button(true)]);
+        tall(&mut app, vec![button(false)]);
+        tall(&mut app, vec![]);
+        assert_eq!(fill_style(&app, a), Some(s), "the style stays");
+        assert_eq!(mode(&app), before, "and the picture keeps its mode");
     }
 }

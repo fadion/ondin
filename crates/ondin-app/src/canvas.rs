@@ -265,7 +265,7 @@ const GHOST_ID: NodeId = NodeId {
 /// 9 was 6 points at 150% there and 9 on a layer. Every `*_PX` allowance below
 /// that is aimed at by the pointer goes through `OndinApp::points_per_world`, and
 /// the `px` in their names is the historical spelling rather than the unit.
-const HANDLE_PICK_PX: f32 = 9.0;
+pub(crate) const HANDLE_PICK_PX: f32 = 9.0;
 /// The handle square, in screen px (`design/Editor.dc.html` draws 7).
 const HANDLE_PX: f32 = 7.0;
 /// The handle's border. Handles are hollow — a filled square hides the very
@@ -1466,6 +1466,9 @@ impl OndinApp {
             // is holding the start of the text, wherever along the curve it has
             // got to (§15 D410).
             Drag::RailOffset { .. } => return (egui::CursorIcon::Grabbing, None),
+            // A spacing band's arrows for the whole drag, across the band (§15
+            // D1078).
+            Drag::Spacing { id, band, .. } => return (self.spacing_cursor(*id, *band), None),
             _ => {}
         }
 
@@ -1495,6 +1498,15 @@ impl OndinApp {
             && self.grab_rail_handle(p, rect, ppp).is_some()
         {
             return (egui::CursorIcon::Grab, None);
+        }
+
+        // A spacing band, in the order the press resolves it — after the handles,
+        // whose radius `spacing::hit` keeps out of, so the two cannot both claim
+        // a point — and only over a band (§15 D1078's 7).
+        if let Some(p) = resp.hover_pos()
+            && let Some((s, i)) = self.spacing_at(p, rect, ppp)
+        {
+            return (self.spacing_cursor(s.id, s.bands[i].kind), None);
         }
 
         let (Some(p), Some(h)) = (resp.hover_pos(), handles) else {
@@ -2128,6 +2140,9 @@ impl OndinApp {
             || handles
                 .as_ref()
                 .is_some_and(|h| h.armed(screen, false).is_some())
+            // A selected container's spacing band (§15 D1078), the rung after the
+            // handles in `begin_select_drag`.
+            || self.spacing_at(screen, rect, ppp).is_some()
     }
 
     fn begin_select_drag(
@@ -2235,6 +2250,15 @@ impl OndinApp {
                 }
                 None => {}
             }
+        }
+
+        // A selected container's gap or padding band (§15 D1078): below the
+        // handles, which win within their own radius (`spacing::hit` keeps out of
+        // it), and **above the `Alt`+`Shift` refusal below** — that chord is the
+        // band's *all four sides*, and the band is chrome of what is already
+        // selected, so no slip off it designates or duplicates anything.
+        if self.begin_spacing_drag(grab, rect, ppp) {
+            return;
         }
 
         // **`Alt`+`Shift` on the artwork starts no drag at all, and that is the
@@ -2371,6 +2395,13 @@ impl OndinApp {
             Drag::RailOffset { id } => {
                 let tx = self.rail_offset_tx(*id, world);
                 self.session.set_preview(&tx);
+            }
+            // The modifiers are read every frame, so pressing or letting go of
+            // one mid-drag changes the sides written without restarting (D2).
+            Drag::Spacing { .. } => {
+                if let Some((tx, ..)) = self.band_drag_tx(world, shift, alt) {
+                    self.session.set_preview(&tx);
+                }
             }
             // None of the node tool's drags reach here: `node_input` runs first
             // and owns the pointer for the whole gesture, the same way
@@ -2522,6 +2553,25 @@ impl OndinApp {
             Drag::RailOffset { id } => {
                 let tx = self.rail_offset_tx(id, world);
                 self.session.commit(tx);
+            }
+            // Built by the same function the preview used, with the drag put back
+            // for it to read. A release where every slot written already **draws**
+            // the value writes nothing, so a press that wandered and came back is
+            // no undo step — the drawn and not the stored, or a bound slot (literal
+            // 0) released on its variable's number would commit a no-op (B2).
+            drag @ Drag::Spacing { id, .. } => {
+                self.drag = drag;
+                let built = self.band_drag_tx(world, shift, alt);
+                self.drag = Drag::None;
+                let drawn = self.session.doc.resolved_display(id).map(|d| d.spacing());
+                match built {
+                    Some((tx, value, slots))
+                        if !drawn.is_some_and(|s| slots.iter().all(|i| s[*i] == value)) =>
+                    {
+                        self.session.commit(tx);
+                    }
+                    _ => self.session.clear_preview(),
+                }
             }
             // `node_input` commits its own release, for the reason given at the
             // matching arm in the update above.
@@ -8481,13 +8531,13 @@ impl OndinApp {
     /// Split into [`Self::editing_in_place`] and the hold for one caller,
     /// [`Self::draw_grid_tracks`], which keeps a grid's lines up through a scrub
     /// of that grid's own layout (§15 D925) — the two reasons stay one list.
-    fn chrome_hidden(&self) -> bool {
+    pub(crate) fn chrome_hidden(&self) -> bool {
         self.editing_in_place() || self.chrome_hold.holding()
     }
 
     /// The first two of [`Self::chrome_hidden`]'s reasons: a path or an image
     /// being edited on the canvas, the pen's included.
-    fn editing_in_place(&self) -> bool {
+    pub(crate) fn editing_in_place(&self) -> bool {
         self.pen.is_some() || self.edited_path().is_some() || self.edited_image().is_some()
     }
 
@@ -9792,7 +9842,7 @@ impl OndinApp {
     /// deliberately not consulted, unlike `query::is_effectively_interactable`. A
     /// locked frame is one you can see and cannot move, and its name is how you find
     /// it in the layer tree to unlock it.
-    fn shown_visible(&self, id: NodeId) -> bool {
+    pub(crate) fn shown_visible(&self, id: NodeId) -> bool {
         let mut cursor = Some(id);
         while let Some(c) = cursor {
             let Some(node) = self.session.display_node(c) else {
@@ -10889,7 +10939,7 @@ impl OndinApp {
     /// Split out of [`Self::quad_of`] because a text node has **two** boxes worth
     /// drawing (its trimmed one and its line box, [`Self::draw_text_line_boxes`])
     /// and only one of them belongs to a `NodeId` in the sense `quad_of` means.
-    fn local_quad(
+    pub(crate) fn local_quad(
         &self,
         local: KRect,
         world: Affine,
@@ -11462,6 +11512,9 @@ impl OndinApp {
         // A selected grid container's tracks, over the artwork and its labels and
         // under everything that answers the pointer — see the function.
         self.draw_grid_tracks(painter, rect, ppp);
+        // A selected container's spacing bands over its track lines and under the
+        // hover and selection chrome (§15 D1078).
+        self.draw_spacing_bands(painter, rect, ppp);
 
         // What the pointer is over but has not selected — the exact outline of
         // the shape, drawn under the selection chrome so a selected layer's own
@@ -13108,7 +13161,7 @@ fn tag_withheld(doc: &Document, id: NodeId) -> bool {
 /// The colour a component's selection chrome takes (§15 D1001): `COMPONENT` for
 /// a main or an instance root, `SELECT` for everything else — a set and the
 /// layers inside a component included.
-fn chrome_hue(doc: &Document, id: NodeId) -> egui::Color32 {
+pub(crate) fn chrome_hue(doc: &Document, id: NodeId) -> egui::Color32 {
     let component = doc.get(id).is_some_and(|n| n.component())
         || ondin_core::component::instance_root(doc, id) == Some(id);
     if component {
@@ -13251,7 +13304,7 @@ fn rest_cursor(tool: Tool) -> (egui::CursorIcon, Option<Bitmap>) {
 /// `CursorIcon`: every OS ships all four, they are the ones users already know
 /// from every other app, and there is nothing about a double-headed arrow that
 /// a design tool needs to draw differently.
-fn resize_icon(out: egui::Vec2) -> egui::CursorIcon {
+pub(crate) fn resize_icon(out: egui::Vec2) -> egui::CursorIcon {
     if out.length_sq() < f32::EPSILON {
         return egui::CursorIcon::Default;
     }
@@ -19958,11 +20011,99 @@ mod headless_app_tests {
                         | Drag::Resize { .. }
                         | Drag::Rotate { .. }
                         | Drag::Skew { .. }
+                        | Drag::Spacing { .. }
                 );
                 assert_eq!(
                     predicted, claimed,
                     "at {at:?} the guide gate and the press ladder disagree: \
                      chrome_claims said {predicted}, the ladder claimed {claimed}"
+                );
+            }
+        });
+    }
+
+    /// **A spacing band is chrome the guide gate knows about** (§15 D1078): a
+    /// selected row's gap and padding claimed by `chrome_claims` exactly where
+    /// `begin_select_drag` starts a band drag, swept across the row through a
+    /// gap, an item and the padding — so a guide lying over a band does not take
+    /// the press the band's resize arrows promised (D486's shape, the band being
+    /// the rung after the handles).
+    ///
+    /// Flip, run: `chrome_claims` without its `spacing_at` term fails the sweep
+    /// at the first band point, the ladder claiming a `Drag::Spacing` the gate
+    /// did not predict.
+    #[test]
+    fn a_guide_does_not_steal_a_press_a_spacing_band_claims() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let row = ids.mint();
+        let mut ops = vec![Operation::CreateNode {
+            id: row,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 200.0),
+            },
+            transform: Some(Affine::translate((100.0, 100.0))),
+            name: None,
+        }];
+        for i in 0..3 {
+            ops.push(Operation::CreateNode {
+                id: ids.mint(),
+                parent: row,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 30.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        ops.push(Operation::SetDisplay {
+            id: row,
+            display: Some(ondin_core::container::Display::Flex(
+                ondin_core::container::Flex {
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    ..Default::default()
+                },
+            )),
+        });
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(ops)).expect("a row");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![row]);
+        app.canvas_px = (800, 600);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let handles = app.selection_handles(area, 1.0);
+        let at_world = |app: &OndinApp, x: f64, y: f64| app.to_screen(Point::new(x, y), area, 1.0);
+        let gap = at_world(&app, 165.0, 135.0);
+        assert!(
+            app.spacing_at(gap, area, 1.0).is_some(),
+            "the fixture: a band at the gap"
+        );
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            for k in 0..=60 {
+                let at = at_world(&app, 100.0 + f64::from(k) * 5.0, 135.0);
+                // Before the prediction: `spacing_at` answers only with no drag
+                // in flight, and the last point's press may have started one.
+                app.drag = Drag::None;
+                let predicted = app.chrome_claims(at, area, 1.0, &handles);
+                app.begin_select_drag(ui, at, area, 1.0, &handles, false);
+                let claimed = matches!(
+                    app.drag,
+                    Drag::Resize { .. }
+                        | Drag::Rotate { .. }
+                        | Drag::Skew { .. }
+                        | Drag::Spacing { .. }
+                );
+                assert_eq!(
+                    predicted, claimed,
+                    "at {at:?} the guide gate and the press disagree"
                 );
             }
         });
@@ -24320,6 +24461,56 @@ mod zero_travel_release_tests {
         (app, id)
     }
 
+    /// A headless app holding a selected 400 × 200 frame at the origin laid out
+    /// as a row — padding 20, gap 10 — of two 40 × 30 rects: the gap band at
+    /// x 60–70.
+    fn app_with_a_laid_frame(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0x2E83);
+        let root = ids.mint();
+        let row = ids.mint();
+        let mut ops = vec![Operation::CreateNode {
+            id: row,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 200.0),
+            },
+            transform: None,
+            name: None,
+        }];
+        for i in 0..2 {
+            ops.push(Operation::CreateNode {
+                id: ids.mint(),
+                parent: row,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 30.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        ops.push(Operation::SetDisplay {
+            id: row,
+            display: Some(ondin_core::container::Display::Flex(
+                ondin_core::container::Flex {
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    ..Default::default()
+                },
+            )),
+        });
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(ops)).expect("a laid frame");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(row);
+        app.canvas_px = (1200, 1200);
+        app.session.camera.zoom = 1.0;
+        (app, row)
+    }
+
     /// A headless app holding one line from (0, 0) to (100, 0), selected.
     fn app_with_line(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
@@ -24396,7 +24587,10 @@ mod zero_travel_release_tests {
     ///
     /// ⚠️ **The failure message names the arm**, because the value of this test
     /// is telling you *which* one regressed — a bare `assert_eq!` over a
-    /// six-row loop reports a number and leaves you to find the row.
+    /// seven-row loop reports a number and leaves you to find the row. (Six
+    /// until §15 D1078's `Spacing` row, whose own release guard skips before
+    /// `changes_nothing` is reached, so the flip's list below is unchanged —
+    /// read, not run.)
     ///
     /// ⚠️ **Flip, run:** disabling the `tx.changes_nothing(&self.doc)` guard at
     /// `session::commit_inner` fails with
@@ -24477,6 +24671,21 @@ mod zero_travel_release_tests {
                 // most of the way round: the fixture assertion caught it at
                 // `on_path_offset: 0.5737…` against `0.0`.
                 Point::new(200.0, 100.0),
+            ),
+            (
+                // A spacing band's drag (§15 D1078), released where it was
+                // pressed — the gap still 10. Both its own release guard and the
+                // commit door's no-op test answer this, so the row holds while
+                // either does.
+                "Spacing",
+                Box::new(|| app_with_a_laid_frame(&ctx)),
+                Box::new(|id: NodeId| Drag::Spacing {
+                    id,
+                    band: crate::spacing::BandKind::ColumnGap,
+                    anchor: Point::new(65.0, 35.0),
+                    base: 10.0,
+                }),
+                Point::new(65.0, 35.0),
             ),
         ];
 

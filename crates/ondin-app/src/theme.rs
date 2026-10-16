@@ -145,7 +145,16 @@ pub mod color {
     /// A selected grid container's **gaps** on the canvas, between its track
     /// lines (§15 D921): the selection hue, faint enough that the artwork under a
     /// gap still reads — a gap is the one part of a grid nothing is laid in.
+    /// Since §15 D1078 also the tint of every spacing band — a flex container's
+    /// gaps and any container's padding — while the pointer is inside it.
     pub const GRID_GAP: Color32 = select_a(30);
+    /// A spacing band under the pointer or being dragged (§15 D1078): the same
+    /// hue as [`GRID_GAP`], stronger, so the band about to move stands out of
+    /// the faint ones around it.
+    pub const SPACING_STRONG: Color32 = select_a(70);
+    /// The hatch marking a gap's stored part inside the space it lays out (§15
+    /// D1078, the design's G2).
+    pub const SPACING_HATCH: Color32 = select_a(150);
 
     /// The **key layer** outline: the one member of a selection that align aligns
     /// to and that a boolean takes as its base.

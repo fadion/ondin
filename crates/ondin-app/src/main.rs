@@ -80,6 +80,7 @@ mod rulers;
 mod session;
 mod settings;
 mod snap;
+mod spacing;
 mod theme;
 mod thumbs;
 mod tools;

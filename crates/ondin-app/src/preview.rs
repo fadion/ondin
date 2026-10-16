@@ -140,6 +140,18 @@ pub enum Drag {
     RailOffset {
         id: NodeId,
     },
+    /// Dragging a laid container's gap or padding band (§15 D1078): `band` is
+    /// what was grabbed, `anchor` the press in the container's local space, and
+    /// `base` the value the band drew there — the delta along the band's axis is
+    /// added to it. Each frame previews one `SetDisplay` and the release commits
+    /// it, so the binding, style and override passes judge it as they judge the
+    /// Container card's own write.
+    Spacing {
+        id: NodeId,
+        band: crate::spacing::BandKind,
+        anchor: Point,
+        base: f64,
+    },
     /// Moving a layer's transform origin ([`ondin_core::Pivot`]).
     ///
     /// Carries no preview of its own, and needs none: the pivot is not scene

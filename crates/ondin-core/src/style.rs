@@ -913,15 +913,8 @@ pub fn create_ops(
     slot: StyleSlot,
     nodes: &[NodeId],
 ) -> Option<Vec<Operation>> {
-    // A bound family is read as drawn (§15 D1069): a text style holds a plain
-    // family, and `from`'s literal is empty. Binding `from` then detaches its
-    // family (`build::keep_text_bindings`), the style's being the same string.
-    let mut source = doc.get(from)?.clone();
-    if slot == StyleSlot::Text && source.text_vars[1].is_some() {
-        source.kind = doc.text_drawn_in(doc.variables(), from, &source.kind, source.text_vars);
-    }
     // `None` for a layout style of a layer with no layout — nothing to make one of.
-    let value = StyleValue::of(&source, slot)?;
+    let value = value_drawn(doc, from, slot)?;
     let mut ops = vec![Operation::AddStyle {
         style: Style {
             id,
@@ -933,6 +926,23 @@ pub fn create_ops(
     }];
     ops.extend(nodes.iter().map(|n| bind_op(*n, slot, Some(id))));
     Some(ops)
+}
+
+/// `node`'s values in `slot` **as drawn** — what a style made of it would hold.
+///
+/// A bound family is read as drawn (§15 D1069): a text style holds a plain
+/// family, and a bound layer's literal is empty. Binding the layer then detaches
+/// its family (`build::keep_text_bindings`), the style's being the same string.
+/// Read by [`create_ops`] for its source and by the inspector's *Create* when it
+/// asks whether several layers agree (§15 D1077) — compared on the literal, two
+/// layers bound to different families both read `""` and agreed, and the style
+/// then rewrote the second one's family to the first one's.
+pub fn value_drawn(doc: &Document, node: NodeId, slot: StyleSlot) -> Option<StyleValue> {
+    let mut source = doc.get(node)?.clone();
+    if slot == StyleSlot::Text && source.text_vars[1].is_some() {
+        source.kind = doc.text_drawn_in(doc.variables(), node, &source.kind, source.text_vars);
+    }
+    StyleValue::of(&source, slot)
 }
 
 /// A name for a new style of `slot` that no style there holds: `base`, else

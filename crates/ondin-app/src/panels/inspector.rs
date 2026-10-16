@@ -1635,6 +1635,29 @@ impl OndinApp {
         self.inspector_container(ui);
         self.inspector_layout_grids(ui);
         self.inspector_multi_appearance(ui);
+        // The Type card over the selected text layers, where a single layer has
+        // it (§15 D1077): one layer among others gets that layer's own card,
+        // several get the card that writes them all.
+        let texts: Vec<NodeId> = self
+            .session
+            .selection
+            .ids()
+            .iter()
+            .copied()
+            .filter(|id| {
+                self.session
+                    .doc
+                    .get(*id)
+                    .is_some_and(|n| matches!(n.kind(), NodeKind::Text { .. }))
+            })
+            .collect();
+        let subject = match texts.as_slice() {
+            [one] => super::TypeSubject::of(self, *one),
+            many => super::TypeSubject::several(self, many),
+        };
+        if let Some(subject) = subject {
+            self.inspector_type(ui, subject);
+        }
         let fresh = self.paint_subject_changed();
         self.inspector_paint_panels(ui, PaintScope::Selection, fresh);
         self.inspector_group_colors(ui);

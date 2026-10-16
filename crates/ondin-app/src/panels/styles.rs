@@ -111,11 +111,12 @@ struct CapsuleOut {
 /// style from this…* makes a style of.
 fn agreed(doc: &Document, targets: &[NodeId], slot: StyleSlot) -> Option<StyleValue> {
     // A layer with no layout has no layout value, so a set holding one agrees on
-    // none (§15 D1075).
+    // none (§15 D1075). As drawn, so two layers bound to different families do
+    // not agree on the empty literal they both store (§15 D1077).
     let mut values = targets
         .iter()
-        .filter_map(|t| doc.get(*t))
-        .map(|n| StyleValue::of(n, slot));
+        .filter(|t| doc.get(**t).is_some())
+        .map(|t| style::value_drawn(doc, *t, slot));
     let first = values.next()??;
     values
         .all(|v| v.is_some_and(|v| v.same_look(&first)))
@@ -1146,13 +1147,9 @@ impl OndinApp {
             return;
         }
         let slot = self.session.doc.styles().get(s).map(Style::slot);
-        // The Type card draws for one text layer only, so a text style's edit
-        // selects its first user: the door turns that layer's writes into the
-        // style's, and the commit writes them onto every user (§15 D1068).
-        let users = match slot {
-            Some(StyleSlot::Text) => users.into_iter().take(1).collect(),
-            _ => users,
-        };
+        // Every user, a text style's too: the Type card draws over several text
+        // layers (§15 D1077), where it once drew for one and this selected a text
+        // style's first user alone (§15 D1068).
         self.session.selection.set(users);
         self.session.style_edit = Some(s);
         if let Some(slot) = slot {
@@ -1687,10 +1684,85 @@ mod tests {
         );
     }
 
-    /// **A text style's *Edit* selects one user** — the Type card draws for one
-    /// text layer — and an edit through it reaches the other (§15 D1068).
+    /// **Two layers bound to different family variables do not agree** (§15
+    /// D1077), so *Create* is off over them; bound to the same one, they do.
+    ///
+    /// Both store the empty literal a bound family keeps, so compared on the
+    /// literal they agreed, and the style — made from the first layer's family as
+    /// drawn — rewrote the second one's *Georgia* to *Inter*.
+    ///
+    /// Flip: `agreed` reading `StyleValue::of(n, slot)` again fails on
+    /// *"Inter and Georgia agreed"*.
     #[test]
-    fn a_text_styles_edit_selects_one_user_and_reaches_the_other() {
+    fn layers_bound_to_different_families_do_not_agree() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = text_app(&ctx);
+        let mode = app.session.ids.mint_mode();
+        let (inter, georgia) = (app.session.ids.mint_var(), app.session.ids.mint_var());
+        let var = |id, name: &str, family: &str| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::String,
+                cells: [(mode, Cell::String(family.into()))].into(),
+                origin: None,
+                forked: None,
+            },
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            var(inter, "font/ui", "Inter"),
+            var(georgia, "font/serif", "Georgia"),
+        ])));
+        // The same size on both, so the family is the one difference.
+        let size = Transaction(
+            [a, b]
+                .into_iter()
+                .map(|id| Operation::SetTextStyle {
+                    id,
+                    style: ondin_core::TextStyle {
+                        font_size: 16.0,
+                        ..Default::default()
+                    },
+                    spans: None,
+                })
+                .collect(),
+        );
+        assert!(app.session.commit(size));
+        for (id, v) in [(a, inter), (b, georgia)] {
+            let ops = ondin_core::build::bind_text_ops(&app.session.doc, id, [None, Some(v)]);
+            assert!(app.session.commit(Transaction(ops)));
+        }
+        let doc = &app.session.doc;
+        assert!(
+            agreed(doc, &[a, b], StyleSlot::Text).is_none(),
+            "Inter and Georgia agreed"
+        );
+        let ops = ondin_core::build::bind_text_ops(&app.session.doc, b, [None, Some(inter)]);
+        assert!(app.session.commit(Transaction(ops)));
+        assert!(
+            agreed(&app.session.doc, &[a, b], StyleSlot::Text).is_some(),
+            "two layers on one family disagreed"
+        );
+    }
+
+    /// **A text style's *Edit* selects every user**, as the paint styles' does
+    /// — the Type card draws over several text layers (§15 D1077), where it once
+    /// drew for one and this selected the first user alone (§15 D1068) — and the
+    /// several-layer card's write goes into the style, both users still bound.
+    ///
+    /// Flip: `edit_style` selecting `users.into_iter().take(1)` again fails on
+    /// *"every user selected"*.
+    #[test]
+    fn a_text_styles_edit_selects_every_user_and_writes_the_style() {
         let ctx = egui::Context::default();
         let (mut app, a, b) = text_app(&ctx);
         app.create_style(StyleSlot::Text, &[a, b]);
@@ -1698,19 +1770,19 @@ mod tests {
         let s = app.session.doc.get(a).unwrap().styles().text.unwrap();
         assert_eq!(font_size(&app, b), 40.0, "the fixture: b took the style");
         app.edit_style(s);
-        assert_eq!(app.session.selection.ids().len(), 1, "one user selected");
-        let first = app.session.selection.ids()[0];
-        let st = match app.session.doc.get(first).unwrap().kind() {
-            NodeKind::Text { style, .. } => style.with(ondin_core::CharAttr::Size(20.0)),
-            _ => unreachable!(),
-        };
-        app.commit_edit(Transaction(vec![Operation::SetTextStyle {
-            id: first,
-            style: st,
-            spans: None,
-        }]));
+        let selected = app.session.selection.ids().to_vec();
+        assert_eq!(selected.len(), 2, "every user selected");
+        let subject =
+            super::super::TypeSubject::several(&app, &selected).expect("a several-layer subject");
+        app.apply_char_attrs(&subject, vec![ondin_core::CharAttr::Size(20.0)]);
         assert_eq!(font_size(&app, a), 20.0);
         assert_eq!(font_size(&app, b), 20.0);
-        assert_eq!(app.session.doc.get(b).unwrap().styles().text, Some(s));
+        for id in [a, b] {
+            assert_eq!(app.session.doc.get(id).unwrap().styles().text, Some(s));
+        }
+        match &app.session.doc.styles().get(s).unwrap().value {
+            ondin_core::style::StyleValue::Text(t) => assert_eq!(t.font_size, 20.0),
+            other => panic!("not a text style: {other:?}"),
+        }
     }
 }

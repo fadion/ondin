@@ -192,6 +192,14 @@ pub(crate) struct TypeSubject {
     /// and false for an empty node, where there is no paragraph to tell apart from
     /// the node itself.
     pub para_partial: bool,
+    /// **The other selected text layers** a several-layer Type card writes
+    /// beside `id` (§15 D1077) — each its own whole-node subject, never partial,
+    /// since a live session is one layer's. Empty on a single layer's card.
+    ///
+    /// [`Self::mixed`] reads them, so a field over layers that disagree says
+    /// *Mixed*, and [`char_attrs_tx`] writes each its own defaults with the one
+    /// attribute changed, so the layers keep everything the edit does not name.
+    pub others: Vec<TypeSubject>,
 }
 
 impl TypeSubject {
@@ -209,6 +217,9 @@ impl TypeSubject {
     }
 
     fn read(app: &OndinApp, id: NodeId, node: crate::session::DisplayNode<'_>) -> Option<Self> {
+        // The resolved kind (§15 D1069): a bound family is already the drawn one
+        // here, so the several-layer card compares and shows what each layer
+        // draws with no reading of its own (§15 D1077).
         let kind = node.kind().clone();
         // The *first* visible fill, matching the renderer: a decoration takes the
         // bottom of the fill stack and is not repeated per fill.
@@ -280,7 +291,29 @@ impl TypeSubject {
             para_spans,
             para_range,
             para_partial,
+            others: Vec::new(),
         })
+    }
+
+    /// The subject of a **several-layer** Type card (§15 D1077): the first text
+    /// layer of `ids`, the rest as [`Self::others`]. `None` under two text layers
+    /// — a single layer's card is [`Self::of`]'s — or while a live session runs,
+    /// whose selection is one layer's.
+    pub(crate) fn several(app: &OndinApp, ids: &[NodeId]) -> Option<Self> {
+        if ids.len() < 2 || app.text.is_some() {
+            return None;
+        }
+        let mut subjects = ids.iter().filter_map(|id| Self::of(app, *id));
+        let mut first = subjects.next()?;
+        first.others = subjects.collect();
+        (!first.others.is_empty()).then_some(first)
+    }
+
+    /// Every layer the subject writes — `id`, then [`Self::others`]'.
+    pub(crate) fn ids(&self) -> Vec<NodeId> {
+        std::iter::once(self.id)
+            .chain(self.others.iter().map(|o| o.id))
+            .collect()
     }
 
     /// The one colour the text's paint collapses to, for the controls that can
@@ -356,8 +389,15 @@ impl TypeSubject {
         })
     }
 
+    /// Whether a control may not name one value: a partial range that disagrees
+    /// with itself, or — on a several-layer card — layers that disagree (§15
+    /// D1077), two zeroes in different units agreeing as [`Self::shared`]'s do.
     fn mixed(&self, kind: CharAttrKind) -> bool {
-        self.partial && self.shared(kind).is_none()
+        (self.partial && self.shared(kind).is_none())
+            || self.others.iter().any(|o| {
+                let (a, b) = (self.shown(kind), o.shown(kind));
+                a != b && agreed_zero(vec![a, b], char_length).is_none()
+            })
     }
 
     /// Whether the range disagrees with itself about one attribute.
@@ -1115,11 +1155,20 @@ impl OndinApp {
         // the panel closure as a plain local, since `panel` hands the closure
         // `&mut Self` and nothing else.
         let mut menu_button: Option<egui::Rect> = None;
-        let marks = self.type_marks(subject.id);
+        // **Over several text layers** (§15 D1077) the card is the style card over
+        // all of them — F10's capsules and the `⋯`'s counted rows, as the paint
+        // cards draw them — with the five character fields and the alignment
+        // tracks writing every layer, and no override marks, no *Content* row
+        // and no popup: each of those is one layer's.
+        let several = !subject.others.is_empty();
+        let marks = match several {
+            false => self.type_marks(subject.id),
+            true => TypeMarks::default(),
+        };
         // A style slot since step 6 (§15 D1068): the `⋯`, and the capsule over a
         // styled layer — whose rows stay live over a session's selection, since
         // what they write there is spans, which keep the style (§15 D1067).
-        let targets = [subject.id];
+        let targets = subject.ids();
         let live = subject.partial;
         self.style_card_live(
             ui,
@@ -1152,7 +1201,9 @@ impl OndinApp {
             // (§15 D1067, D1069), so they stay live on a styled layer, the popup's
             // opener with them.
             |app, ui| {
-                app.type_content_row(ui, &subject, &marks.content);
+                if !several {
+                    app.type_content_row(ui, &subject, &marks.content);
+                }
                 menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
             },
         );
@@ -1353,7 +1404,13 @@ impl OndinApp {
         // selection is what the row edits, where it writes runs over the bound
         // default, as it does under a text style (§15 D1067).
         let key = super::binding::FieldKey::Family { id: subject.id };
+        // **Over several layers the row is the picker whatever is bound** (§15
+        // D1077): one layer's chip cannot stand for the rest, so a bound family
+        // reads as drawn and a pick writes over it — detaching it, as typing over
+        // a chip does (§15 D1041), and the floating status says so (§15 D1071).
+        let several = !subject.others.is_empty();
         if !subject.partial
+            && !several
             && let Some(var) = self.field_var(key)
         {
             let w = ui.available_width();
@@ -1472,6 +1529,7 @@ impl OndinApp {
             // is a run's, nor under a text style, whose family is the style's.
             if combo.secondary_clicked()
                 && !subject.partial
+                && !several
                 && let Some(at) = combo.interact_pointer_pos()
             {
                 menu_at = Some((at, combo.rect));
@@ -1612,8 +1670,10 @@ impl OndinApp {
         };
         // A family with no faces to choose between has nothing to offer here, so
         // the slot falls back to the bold/italic pair — which is still the fastest
-        // way to ask for those two and is what every keyboard shortcut means.
-        if variants.len() < 2 {
+        // way to ask for those two and is what every keyboard shortcut means. So
+        // does a several-layer card over families that disagree (§15 D1077): one
+        // family's faces would name nothing in the others'.
+        if variants.len() < 2 || subject.mixed(CharAttrKind::Family) {
             self.type_weight_toggles(ui, subject, size);
             return;
         }
@@ -1659,21 +1719,24 @@ impl OndinApp {
         }
         if let Some(i) = pick {
             let v = &variants[i];
-            let mut merged = coords.clone();
-            for axis in &v.coords {
-                match merged.iter_mut().find(|a| a.tag == axis.tag) {
-                    Some(existing) => existing.value = axis.value,
-                    None => merged.push(*axis),
+            let attrs = |coords: &[AxisSetting]| {
+                let mut merged = coords.to_vec();
+                for axis in &v.coords {
+                    match merged.iter_mut().find(|a| a.tag == axis.tag) {
+                        Some(existing) => existing.value = axis.value,
+                        None => merged.push(*axis),
+                    }
                 }
-            }
-            self.apply_char_attrs(
-                subject,
                 vec![
                     CharAttr::Weight(v.weight),
                     CharAttr::Italic(v.italic),
                     CharAttr::Variations(merged),
-                ],
-            );
+                ]
+            };
+            // Each layer's own axes merged (§15 D1077): one coordinate list
+            // written to all would carry the first layer's optical size and
+            // hand-set axes onto the rest.
+            self.apply_char_attrs_each(subject, |m| attrs(&attr!(m, Variations, Variations)));
         }
     }
 
@@ -1702,6 +1765,11 @@ impl OndinApp {
                 false => "upright".to_owned(),
             },
         );
+        // One layer's override marks cannot speak for several (§15 D1077).
+        let (bold_mark, italic_mark) = match subject.others.is_empty() {
+            true => (bold_mark, italic_mark),
+            false => (None, None),
+        };
         let side = egui::Vec2::splat(cell.min(size.y));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
@@ -1866,12 +1934,21 @@ impl OndinApp {
         }
         let unit_clicked = unit.is_some_and(|u| u.clicked());
         if unit_clicked {
-            self.apply_char_attrs(
-                subject,
-                vec![CharAttr::LineHeight(next_line_height(
-                    current, font_size, resolved,
-                ))],
-            );
+            // The first layer's next state, and every layer into it from its
+            // own value, size and laid line (§15 D1077).
+            let like = next_line_height(current, font_size, resolved);
+            self.apply_char_attrs_each(subject, |m| {
+                let own = match m.shown(CharAttrKind::LineHeight) {
+                    CharAttr::LineHeight(v) => v,
+                    _ => None,
+                };
+                vec![CharAttr::LineHeight(line_height_as(
+                    own,
+                    m.font_size(),
+                    m.line_height,
+                    like,
+                ))]
+            });
             return;
         }
         if let Some(l) = current {
@@ -1946,16 +2023,31 @@ impl OndinApp {
         let vertical_w = full - horizontal_w - ROW_H - GAP * 2.0;
         let gap = GAP;
         let mut button = None;
+        // **Over several layers** (§15 D1077) a track lights only the cell they
+        // all agree on, a pick writes each its own paragraph or box with the one
+        // field changed, in one transaction, and there is no popup — its tabs are
+        // one layer's — so the tracks take the button's room.
+        let members: Vec<&TypeSubject> = std::iter::once(subject).chain(&subject.others).collect();
+        let several = members.len() > 1;
+        let vertical_w = if several {
+            full - horizontal_w - GAP
+        } else {
+            vertical_w
+        };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             let align = subject.paragraph.align;
+            let align_cell = match members.iter().all(|m| m.paragraph.align == align) {
+                true => align.cell(),
+                false => TextAlign::OFFERED.len(),
+            };
             // An instance's overridden alignments (§15 D981), on their lit cells.
             let (pick, reset) = ui::segmented_marked(
                 ui,
                 horizontal_w,
                 SEG_CELL_H,
                 4,
-                align.cell(),
+                align_cell,
                 |_| true,
                 |_| "",
                 align_mark.as_ref().map(OverrideMark::field),
@@ -1964,7 +2056,24 @@ impl OndinApp {
                 },
             );
             self.reset_marked(reset, align_mark);
-            if let Some(i) = pick
+            if several && let Some(i) = pick {
+                let to = TextAlign::OFFERED[i];
+                let ops: Vec<Operation> = members
+                    .iter()
+                    .filter(|m| m.paragraph.align != to)
+                    .map(|m| Operation::SetParagraphStyle {
+                        id: m.id,
+                        paragraph: ParagraphStyle {
+                            align: to,
+                            ..m.paragraph.clone()
+                        },
+                        spans: None,
+                    })
+                    .collect();
+                if !ops.is_empty() {
+                    self.commit_edit(Transaction(ops));
+                }
+            } else if let Some(i) = pick
                 && TextAlign::OFFERED[i] != align
             {
                 let mut next = subject.paragraph.clone();
@@ -1972,11 +2081,14 @@ impl OndinApp {
                 self.commit_paragraph(subject.id, next);
             }
             let valign = subject.block.vertical_align;
-            let current = VerticalAlign::ALL
-                .iter()
-                .position(|v| *v == valign)
-                .unwrap_or(0);
-            let enabled = subject.sizing.height_is_authored();
+            let current = match members.iter().all(|m| m.block.vertical_align == valign) {
+                true => VerticalAlign::ALL
+                    .iter()
+                    .position(|v| *v == valign)
+                    .unwrap_or(0),
+                false => VerticalAlign::ALL.len(),
+            };
+            let enabled = members.iter().all(|m| m.sizing.height_is_authored());
             let resp = ui.scope(|ui| {
                 // **Dimmed where there is no free space to distribute.** An
                 // auto-height box is exactly as tall as its text, so all three
@@ -1999,7 +2111,23 @@ impl OndinApp {
                     },
                 );
                 self.reset_marked(reset, valign_mark);
-                if let Some(i) = pick
+                if several && let Some(i) = pick {
+                    let to = VerticalAlign::ALL[i];
+                    let ops: Vec<Operation> = members
+                        .iter()
+                        .filter(|m| m.block.vertical_align != to)
+                        .map(|m| Operation::SetBlockStyle {
+                            id: m.id,
+                            block: BlockStyle {
+                                vertical_align: to,
+                                ..m.block
+                            },
+                        })
+                        .collect();
+                    if !ops.is_empty() {
+                        self.commit_edit(Transaction(ops));
+                    }
+                } else if let Some(i) = pick
                     && VerticalAlign::ALL[i] != valign
                 {
                     let next = BlockStyle {
@@ -2021,6 +2149,9 @@ impl OndinApp {
                     egui::Sense::empty(),
                 )
                 .on_hover_text("Only a fixed-height box has room to align in");
+            }
+            if several {
+                return;
             }
             let open = self.type_menu.is_some();
             let head = field_button(
@@ -4337,8 +4468,13 @@ impl OndinApp {
             }
         };
         if unit.is_some_and(|u| u.clicked()) {
-            let next = current.in_unit(current.unit().other(), font_size);
-            self.apply_char_attrs(subject, vec![length_attr(kind, next)]);
+            // Every layer into the first one's other unit, each at its own size
+            // (§15 D1077).
+            let to = current.unit().other();
+            self.apply_char_attrs_each(subject, |m| {
+                let own = char_length(&m.shown(kind)).unwrap_or(Length::ZERO);
+                vec![length_attr(kind, own.in_unit(to, m.font_size()))]
+            });
             return;
         }
         let next = match current {
@@ -4698,7 +4834,7 @@ impl OndinApp {
     /// Apply character attributes now — for the controls that are a click rather
     /// than a drag, and for the unit toggles, which change the value without any
     /// drag for a valve to wait on.
-    fn apply_char_attrs(&mut self, subject: &TypeSubject, attrs: Vec<CharAttr>) {
+    pub(super) fn apply_char_attrs(&mut self, subject: &TypeSubject, attrs: Vec<CharAttr>) {
         if subject.partial {
             if let Some(s) = self.text.as_mut().filter(|s| s.id == subject.id) {
                 for attr in attrs {
@@ -4719,6 +4855,35 @@ impl OndinApp {
             // caret reaches here — so the editor has to adopt the cleared list rather
             // than win with its own (§15 D164).
             self.text_session_restyled_after(&tx);
+        }
+    }
+
+    /// [`Self::apply_char_attrs`] with **each layer's own attributes** — `each`
+    /// asked once per layer of a several-layer subject (§15 D1077), for the
+    /// writes whose value depends on the layer: a unit click converting each
+    /// layer's own amount at its own size, a variant merged into each layer's own
+    /// axes. One layer's answer written to all would carry the first layer's
+    /// amount onto the rest — read in the first cut (`arch-scribe`), where 120% at
+    /// 12pt clicked to px would have made a 48pt layer's lines 14.4px; measured for
+    /// tracking by `a_unit_click_converts_each_layer_at_its_own_size`.
+    fn apply_char_attrs_each(
+        &mut self,
+        subject: &TypeSubject,
+        each: impl Fn(&TypeSubject) -> Vec<CharAttr>,
+    ) {
+        if subject.others.is_empty() {
+            self.apply_char_attrs(subject, each(subject));
+            return;
+        }
+        let mut tx = Transaction(Vec::new());
+        let mut changes = false;
+        for m in std::iter::once(subject).chain(&subject.others) {
+            let (more, moved) = one_char_attrs_tx(m, each(m));
+            tx.0.extend(more.0);
+            changes |= moved;
+        }
+        if changes {
+            self.commit_edit(tx);
         }
     }
 
@@ -5069,7 +5234,21 @@ fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
 /// the new style therefore equals it, and a valve given `None` never commits. The
 /// two callers want different answers to the same comparison, so it is theirs to
 /// make (§15 D109).
+///
+/// **A several-layer subject writes every layer** (§15 D1077): each its own
+/// defaults with `attrs` set, in one transaction, the equality any layer's.
 fn char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
+    let (mut tx, mut changes) = one_char_attrs_tx(subject, attrs.clone());
+    for other in &subject.others {
+        let (more, moved) = one_char_attrs_tx(other, attrs.clone());
+        tx.0.extend(more.0);
+        changes |= moved;
+    }
+    (tx, changes)
+}
+
+/// [`char_attrs_tx`] for `subject`'s own layer alone.
+fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
     let mut style = subject.style.clone();
     let mut spans = subject.spans.clone();
     for attr in attrs {
@@ -5449,6 +5628,16 @@ fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> O
         .position(|v| length_of(v) != Some(Length::ZERO))
         .unwrap_or(0);
     values.into_iter().nth(pick)
+}
+
+/// A character attribute's `Length`, for [`agreed_zero`] — the three spacings.
+fn char_length(a: &CharAttr) -> Option<Length> {
+    match a {
+        CharAttr::LetterSpacing(l) | CharAttr::WordSpacing(l) | CharAttr::BaselineShift(l) => {
+            Some(*l)
+        }
+        _ => None,
+    }
 }
 
 fn length_attr(kind: CharAttrKind, l: Length) -> CharAttr {
@@ -5897,6 +6086,26 @@ fn next_line_height(
         Some(l @ Length::Em(_)) => Some(l.in_unit(LengthUnit::Px, font_size)),
         Some(Length::Px(_)) => None,
     }
+}
+
+/// One layer's line height `current` moved into the state `like` names — Auto,
+/// a multiple or px — keeping what it draws where the state allows: the
+/// several-layer card's unit click (§15 D1077), where `like` is the first
+/// layer's [`next_line_height`] and each other layer converts its own value at
+/// its own size. Auto into a state reads the laid line as [`next_line_height`]
+/// does, 1.2 of the size with nothing laid.
+fn line_height_as(
+    current: Option<Length>,
+    font_size: f64,
+    resolved: Option<f64>,
+    like: Option<Length>,
+) -> Option<Length> {
+    let unit = like?.unit();
+    let from = current.unwrap_or_else(|| match resolved {
+        Some(px) => Length::Px(px.max(0.0)),
+        None => Length::Em(1.2),
+    });
+    Some(from.in_unit(unit, font_size))
 }
 
 /// A short prefix for an axis field — the tag itself, which is what a type
@@ -9041,6 +9250,7 @@ mod tests {
             para_spans: ParaSpans::default(),
             para_range: 0..8,
             para_partial: false,
+            others: Vec::new(),
         }
     }
 
@@ -10125,6 +10335,286 @@ fn app_with_text_of(content: &str) -> (egui::Context, crate::app::OndinApp, ondi
 #[cfg(test)]
 fn app_with_text() -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
     app_with_text_of("hello")
+}
+
+/// The Type card over several text layers (§15 D1077): what its fields read and
+/// what their writes reach.
+#[cfg(test)]
+mod several_layer_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::{Document, IdSource};
+
+    /// Three text layers, selected: sizes 20, 20 and 32, weights 400, 700 and
+    /// 400 — so size disagrees across the three and agrees across the first two,
+    /// and the weight is what a size write must leave alone.
+    fn three() -> (egui::Context, OndinApp, Vec<NodeId>) {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let mut texts = Vec::new();
+        for (i, (size, weight)) in [(20.0, 400), (20.0, 700), (32.0, 400)]
+            .into_iter()
+            .enumerate()
+        {
+            let id = ids.mint();
+            doc.apply(&Transaction(vec![Operation::CreateNode {
+                id,
+                parent: root,
+                index: i,
+                kind: ondin_core::NodeKind::Text {
+                    content: "hello".into(),
+                    style: Box::new(TextStyle {
+                        font_family: "Inter".into(),
+                        font_size: size,
+                        weight,
+                        ..TextStyle::default()
+                    }),
+                    spans: CharSpans::default(),
+                    para_spans: ParaSpans::default(),
+                    paragraph: ParagraphStyle::default(),
+                    block: BlockStyle::default(),
+                    sizing: TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: None,
+                name: None,
+            }]))
+            .expect("a text node");
+            texts.push(id);
+        }
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(texts.clone());
+        (ctx, app, texts)
+    }
+
+    fn style(app: &OndinApp, id: NodeId) -> TextStyle {
+        match app.session.doc.get(id).map(|n| n.kind()) {
+            Some(ondin_core::NodeKind::Text { style, .. }) => (**style).clone(),
+            other => panic!("not a text: {other:?}"),
+        }
+    }
+
+    /// **The size reads *Mixed* where the layers disagree and not where they
+    /// agree**, while the family — the same on all three — never does.
+    ///
+    /// Flip: `mixed` without its `others` clause reads every several-layer field
+    /// as one value — the first assertion fails, the first layer's 20 standing
+    /// for the third layer's 32.
+    #[test]
+    fn a_field_over_layers_that_disagree_reads_mixed() {
+        let (_ctx, app, texts) = three();
+        let all = TypeSubject::several(&app, &texts).expect("a several-layer subject");
+        assert_eq!(all.ids(), texts);
+        assert!(
+            all.mixed(CharAttrKind::Size),
+            "20, 20 and 32 read as one size"
+        );
+        assert!(!all.mixed(CharAttrKind::Family));
+        let pair = TypeSubject::several(&app, &texts[..2]).expect("a pair");
+        assert!(!pair.mixed(CharAttrKind::Size), "20 and 20 read as mixed");
+        assert!(pair.mixed(CharAttrKind::Weight));
+        assert!(
+            TypeSubject::several(&app, &texts[..1]).is_none(),
+            "one layer is the single card's"
+        );
+    }
+
+    /// **A write reaches every layer and leaves what it does not name**: a size
+    /// set over the three makes each 24 and keeps each its own weight.
+    ///
+    /// Flip: `char_attrs_tx` returning `one_char_attrs_tx(subject, attrs)` alone
+    /// writes the first layer only — the second layer's size assertion fails at
+    /// 20.
+    #[test]
+    fn a_write_reaches_every_layer_and_keeps_their_own_values() {
+        let (_ctx, mut app, texts) = three();
+        let all = TypeSubject::several(&app, &texts).expect("a several-layer subject");
+        app.apply_char_attrs(&all, vec![CharAttr::Size(24.0)]);
+        for (id, weight) in texts.iter().zip([400, 700, 400]) {
+            let s = style(&app, *id);
+            assert_eq!(s.font_size, 24.0, "{id:?} never took the size");
+            assert_eq!(s.weight, weight, "{id:?} lost its own weight");
+        }
+        // One step: undo puts all three back.
+        app.undo();
+        let sizes: Vec<f64> = texts.iter().map(|id| style(&app, *id).font_size).collect();
+        assert_eq!(sizes, [20.0, 20.0, 32.0]);
+    }
+
+    /// **A unit click converts each layer at its own size**: tracking of 10%
+    /// over layers of 20, 20 and 32 clicked to px is 2, 2 and 3.2 — each layer
+    /// drawing what it drew — where the first cut converted the first layer's
+    /// and wrote 2 to all three.
+    ///
+    /// Driven through the field: the suffix is the field's right end.
+    ///
+    /// Flip: the click converting at `subject.font_size()` instead of each
+    /// layer's own fails on the third layer, at 2.
+    #[test]
+    fn a_unit_click_converts_each_layer_at_its_own_size() {
+        let (ctx, mut app, texts) = three();
+        let all = TypeSubject::several(&app, &texts).expect("a subject");
+        app.apply_char_attrs(&all, vec![CharAttr::LetterSpacing(Length::Em(0.1))]);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| -> egui::Rect {
+            let mut field = egui::Rect::NOTHING;
+            let all = TypeSubject::several(app, &texts).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(TEST_AREA),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let top = ui.cursor().min;
+                    let size = egui::vec2(130.0, ROW_H);
+                    app.type_letter_spacing_field(ui, &all, size, None);
+                    field = egui::Rect::from_min_size(top, size);
+                },
+            );
+            field
+        };
+        let field = frame(&mut app, Vec::new());
+        let at = egui::pos2(field.right() - 8.0, field.center().y);
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }],
+            );
+        }
+        let tracking: Vec<Length> = texts
+            .iter()
+            .map(|id| style(&app, *id).letter_spacing)
+            .collect();
+        assert_eq!(
+            tracking,
+            [Length::Px(2.0), Length::Px(2.0), Length::Px(3.2)],
+            "each layer at its own size"
+        );
+    }
+
+    /// **The line height's states, one layer at a time** — `line_height_as`
+    /// moving a layer into the state the first layer's click names, keeping
+    /// what it draws: 150% at 32 into px is 48, Auto over a 30px laid line
+    /// into a multiple is 1.5 at 20, and anything into Auto is Auto.
+    #[test]
+    fn a_line_height_moves_into_the_first_layers_next_state() {
+        let px = Some(Length::Px(1.0));
+        let em = Some(Length::Em(1.0));
+        assert_eq!(
+            line_height_as(Some(Length::Em(1.5)), 32.0, None, px),
+            Some(Length::Px(48.0))
+        );
+        assert_eq!(
+            line_height_as(None, 20.0, Some(30.0), em),
+            Some(Length::Em(1.5))
+        );
+        assert_eq!(line_height_as(None, 20.0, None, em), Some(Length::Em(1.2)));
+        assert_eq!(
+            line_height_as(Some(Length::Px(24.0)), 20.0, None, None),
+            None
+        );
+    }
+
+    /// **The alignment tracks write every layer, each its own paragraph**: a
+    /// pick of *Center* over the three, one already centred, writes the other
+    /// two and leaves the centred one's spacing as it was.
+    ///
+    /// Driven through the row with real pointer events, since the fan-out lives
+    /// in the row: the first frame lays it out and the second clicks the second
+    /// cell of the horizontal track.
+    ///
+    /// Flip: the row's several-layer arm switched off (`several && false`), so
+    /// the pick takes the single layer's `commit_paragraph` — the second layer's
+    /// assertion fails, still `Start`.
+    #[test]
+    fn an_alignment_pick_writes_every_layer() {
+        let (ctx, mut app, texts) = three();
+        app.commit_edit(Transaction(vec![Operation::SetParagraphStyle {
+            id: texts[2],
+            paragraph: ParagraphStyle {
+                align: TextAlign::Center,
+                spacing: Length::Px(6.0),
+                ..ParagraphStyle::default()
+            },
+            spans: None,
+        }]));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| -> egui::Rect {
+            let mut track = egui::Rect::NOTHING;
+            let all = TypeSubject::several(app, &texts).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(TEST_AREA),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(268.0);
+                    let top = ui.cursor().min;
+                    let menu = app.type_alignment_row(ui, &all, [&None, &None]);
+                    assert!(menu.is_none(), "a several-layer row offers the popup");
+                    track = egui::Rect::from_min_size(top, egui::vec2(130.0, ROW_H));
+                },
+            );
+            track
+        };
+        let track = frame(&mut app, Vec::new());
+        let aligns: Vec<TextAlign> = texts
+            .iter()
+            .filter_map(|id| match app.session.doc.get(*id).map(|n| n.kind()) {
+                Some(ondin_core::NodeKind::Text { paragraph, .. }) => Some(paragraph.align),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(aligns[2], TextAlign::Center);
+        assert!(
+            aligns[..2].iter().all(|a| *a != TextAlign::Center),
+            "{aligns:?}"
+        );
+        // The second of four cells.
+        let at = egui::pos2(track.left() + track.width() * 0.375, track.center().y);
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }],
+            );
+        }
+        for id in &texts {
+            let Some(ondin_core::NodeKind::Text { paragraph, .. }) =
+                app.session.doc.get(*id).map(|n| n.kind())
+            else {
+                panic!("not a text");
+            };
+            assert_eq!(paragraph.align, TextAlign::Center, "{id:?} not centred");
+        }
+        let Some(ondin_core::NodeKind::Text { paragraph, .. }) =
+            app.session.doc.get(texts[2]).map(|n| n.kind())
+        else {
+            panic!("not a text");
+        };
+        assert_eq!(
+            paragraph.spacing,
+            Length::Px(6.0),
+            "the third lost its spacing"
+        );
+    }
 }
 
 /// The screen the panel tests lay a `Ui` out in, 400×600. Was declared three

@@ -963,7 +963,15 @@ pub enum DashStyle { Solid, Dotted, Dashed, Custom }  // presentation only: clas
 ### 5.3a Effects (`effect.rs`)
 
 ```rust
-pub struct Effect { pub kind: EffectKind, pub visible: bool }   // mirrors Fill exactly
+pub struct Effect { pub kind: EffectKind, pub visible: bool,     // mirrors Fill exactly, and
+                    pub vars: EffectVars }   // its numbers' bindings IN the item — §5.3f, §15 D1074
+pub type EffectVars = [Option<VarId>; 4];   // X, Y, blur, spread: EFFECT_X / _Y / _BLUR / _SPREAD;
+                                            // a layer blur's radius is the BLUR slot, its others None
+impl Effect {
+    pub fn numbers(&self) -> [Option<f64>; 4];  // the four, None where the kind has no such number
+    pub fn set_number(&mut self, slot: usize, x: f64);  // a silent no-op where the kind lacks it
+    pub fn number_floor(slot: usize) -> f64;    // a blur 0; an offset or a spread unfloored
+}
 
 pub enum EffectKind {
     DropShadow(Shadow),
@@ -1064,6 +1072,11 @@ pub fn escaped(bounds: Rect, escape: Insets, world: Affine) -> Rect;   // local 
   (§7), and saved as an additive `NodeDto::effects` (§5.11). Authored in the inspector's **Effects
   card** — one row per effect, each with a popover behind it (§9.4, §15 D337) — and, for the same
   reasons every other panel does, through the operation as well.
+- **A shadow's X, Y, blur and spread and a layer blur's radius bind to number variables** (§5.3f,
+  §15 D1074), the bindings in the item (`vars`) and the bound number's literal 0. So every reader
+  above — the ink bounds, the scene walk, the ghost, the SVG writer, the snapshot — takes the stack
+  through `Document::resolved_effects`, never `Node::effects` bare; `escape` and `stack_escape` are
+  asked of what it returns.
 
 ### 5.3b Layout grids (`layout.rs`, §15 D385)
 
@@ -3441,8 +3454,9 @@ never a hugging frame's, a text box's, or a size a flex or grid layout deals out
 **Layer opacity binds as a percentage** (§15 D1072, the session's under the maintainer's delegation):
 the variable's number in the Appearance field's own unit, 0–100, so *40* draws 0.4. **A stroke's
 width binds in the item** (§15 D1073, the session's under the delegation), one stroke of one layer at
-a time, and not where the stroke draws per-side widths of its own. An effect's numbers bind nothing
-yet (`roadmap.md`).
+a time, and not where the stroke draws per-side widths of its own. **An effect's numbers bind in the
+item** (§15 D1074, the session's under the delegation), a layer blur's radius as the blur, each only
+where the effect's kind has that number.
 **Colours** bind a **whole solid paint**,
 never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
 stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
@@ -3452,8 +3466,8 @@ plain family, never a variable** (the maintainer's ruling, §15 D1069). A field 
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)` — ⚠️ **in nine shapes, as built** (§15 D1039, D1058, D1059, D1061,
-D1069, D1072, D1073; *What is built*, below) — and
+`Literal(T) | Bound(VarId)` — ⚠️ **in ten shapes, as built** (§15 D1039, D1058, D1059, D1061,
+D1069, D1072, D1073, D1074; *What is built*, below) — and
 the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
@@ -3525,9 +3539,10 @@ name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`, and since §15 
 reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
 `resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it
 (with `resolved_display`, D1058, `shown`, D1059, `resolved_kind`, D1061, which applies
-`text_drawn_in` since D1069, `drawn_opacity`, D1072, and `stroke_width_drawn_in`, D1073).
+`text_drawn_in` since D1069, `drawn_opacity`, D1072, `stroke_width_drawn_in`, D1073, and
+`resolved_effects`, D1074).
 **`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
-a dangling binding rather than repairing it. The binding's nine shapes:
+a dangling binding rather than repairing it. The binding's ten shapes:
 
 - **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
   **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
@@ -3619,6 +3634,30 @@ a dangling binding rather than repairing it. The binding's nine shapes:
   the drawn width (§15 D1073's amendment). **The pass rewrites the
   list in place rather than appending**, so `commit_inner` reads the widths bound before it and the
   widths cut after it and merges the names into the floating status (below).
+- **An effect's numbers** (§15 D1074): `Effect::vars: EffectVars` — X, Y, blur, spread — **in the
+  item**, the stroke width's reason; a layer blur's radius takes the blur slot, its other three always
+  `None`, and a `Filters` row binds nothing. A number variable only, and only on a number the kind has
+  (`Effect::numbers`); binding writes the literal **0**. 🚨 **`Document::resolved_effects(_in)`
+  substitutes each bound number** (`effect_number_drawn_in`, floored by `Effect::number_floor` — a blur
+  at 0, an offset or a spread not at all) **and clears the bindings in its output**, `resolved_paint_in`'s
+  rule for the same reason. Every reader that draws, measures or exports takes the stack through it:
+  `Resolved`'s ink, the scene walk (an override's list too), the ghost (resolved at capture), the SVG
+  writer — whose fidelity report reads the drawn stack, so a bound spread's `feMorphology` is reported
+  — the snapshot, and the Effects card's row headline. **An effect list written over a bound number is
+  judged at the commit** (`build::keep_effect_bindings`, after `keep_stroke_width_bindings`, over every
+  `SetEffects`) by **corners' two halves** (`build::kept_effect_vars`, which the preview's `SetEffects`
+  arm runs too): a binding the write carries unchanged stays bound written what it draws **or its own
+  literal 0**, the literal put back, and detaches to any other number — the literal half load-bearing,
+  every Effects card edit rebuilding the whole list from the stored items; a binding the write changes
+  is left as written, **except one on a number the effect's kind no longer has**, which goes whoever
+  wrote it (a shadow retyped to a layer blur keeps only its blur's). The chip is on one layer's own
+  effect (`FieldKey::EffectNumber { id, item, slot }`, the popover's five number fields drawn through
+  `OndinApp::effect_number_field`), its retype unfloored for an offset or a spread; over several layers
+  the popover's fields stay plain, seeded from the anchor's resolved number, their write clearing the
+  slot's binding on every layer it writes — and the kind combo's retype clearing the bindings its new
+  kind has no number for — so the inspector's doors detach in the edit and say nothing (§15 D1074's
+  amendment, D1071's amendment's rule). Like the stroke width's, **the pass rewrites in place**, and
+  `commit_inner` reads the numbers bound before it and cut after it.
 - **Width and height** (§15 D1061): `Node::size_vars: [Option<VarId>; 2]` beside the stored `size`
   of the five kinds that have one (`NodeKind::box_size` — `Artboard`, `Rect`, `Ellipse`, `Polygon`,
   `Star`; a text box's W and H do not bind, by decision). A bound axis's literal is written 0, and 🚨
@@ -3664,7 +3703,10 @@ paint's binding is its `BrushSource`, decided at the write and no pass's, so its
 lists in place, so no `Set*Vars` op is there to read. `commit_inner` notes every stroke the edit writes
 with its width bound (`stroke_widths_bound`) before `keep_stroke_width_bindings` and names those the
 pass left unbound (`stroke_widths_cut`) after it, merged with `variables_detached`' names; a stroke the
-edit itself unbinds — the chip's detach — never enters the first reading, so it says nothing.
+edit itself unbinds — the chip's detach — never enters the first reading, so it says nothing. **The
+eighth, an effect's numbers', is read the same way** (§15 D1074): `effect_numbers_bound` before
+`keep_effect_bindings`, `effect_numbers_cut` after, per (layer, effect, slot), the names merged with the
+widths'.
 
 The operations, the save format's v7 and v8, invalidation, the paste rule and the readers are in §5.7, §5.11,
 §5.9 and §15 D1039. **A ghost resolves in the default mode**, being in no frame yet — its paint, and since §15 D1059 (3) its
@@ -3842,7 +3884,8 @@ detach with no door knowing. Both runs are load-bearing: the first lets a main's
 its copies, the second puts back a copy on another style that a follow drifted. **`style::check`** (a
 post-condition of `apply` and of the loader) holds names unique per slot, no item id twice in a style,
 paints bound to colour variables only and a stroke's width to number variables only (§15 D1073 — a
-check per kind, where it had refused any variable not a colour), every binding to a style of its slot,
+check per kind, where it had refused any variable not a colour), an effect's numbers to number
+variables only and only where its kind has them (§15 D1074), every binding to a style of its slot,
 and **no vault node
 bound to a style of the document's own** — a vault node's styles are kits' (§15 D1064), and a kit's
 style reads only kits' variables. A bare
@@ -5468,7 +5511,9 @@ pub enum Operation {
     SetFills    { id: NodeId, fills: Vec<Keyed<Fill>> },     // each item with its id — §5.3d, D980
     SetStrokes  { id: NodeId, strokes: Vec<Keyed<Stroke>> }, // a bound width's binding rides in the
                                                       // item, so no op of its own — §15 D1073
-    SetEffects  { id: NodeId, effects: Vec<Keyed<Effect>> },  // the whole stack — §5.3a, §15 D333. For
+    SetEffects  { id: NodeId, effects: Vec<Keyed<Effect>> },  // the whole stack — §5.3a, §15 D333; a
+                                                       // bound number's binding rides in the item,
+                                                       // no op of its own — §15 D1074. For
                                                        // SetStrokes' reason: a reorder, a removal, a
                                                        // visibility toggle and a tuned number are one
                                                        // op with one inverse. Gated on the ROOT only,
@@ -6991,7 +7036,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   **And a layer's opacity** (§15 D1072): `NodeDto::opacity_var`, skipped when unbound. **And a
   stroke's width** (§15 D1073): `Stroke::width_var`, saved **in the stroke item** rather than on
   `NodeDto` — the stroke serialises as itself — and skipped when unbound, so an unbound stroke saves as
-  it did. **And styles** (§15 D1062): `DocumentDto::styles`, above the
+  it did. **And an effect's numbers** (§15 D1074): `Effect::vars`, saved in the effect item the same
+  way, skipped when no slot is bound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
   images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
   the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
   style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
@@ -7489,7 +7535,13 @@ pub trait ScenePainter {
   and reachable more often now that a bind can preview a wider number (*Revisit if* it is seen at a
   viewport edge).~~ **`SetStrokes`' arm marks the node moved**, as `SetEffects`' does — a stroke's
   reach is ink the cull tests, so a widened outside stroke or a bound width's new number is not culled
-  on the committed bounds (§15 D1073's amendment; no test culls at a viewport edge).
+  on the committed bounds (§15 D1073's amendment; no test culls at a viewport edge). **A bound effect
+  number is drawn at its number** (§15 D1074): `SetEffects`' arm writes the list through
+  `build::kept_effect_vars`, the commit's judgement, its kept bindings left on the override for the
+  scene's own resolve (`an_effect_binding_previews_as_the_number_it_will_draw`); `SetVariableCell`'s arm
+  stores a bound stack, pending or committed, already resolved against the changed table — unbound, as
+  `Document::resolved_effects_in` returns it, so the scene's second resolve against the committed table
+  leaves it alone — and marks the node moved; the ghost's stack is resolved at capture.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds

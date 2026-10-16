@@ -1658,8 +1658,9 @@ accepted (D1038):
 - **Whether a preset follows a paste's rule** across documents — D1037's premise (iv) named it beside
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
-- **The rest of D1038's bindable numbers** — an effect's X, Y, blur and spread — bound by nothing and
-  given no step (§15 D1058; layer opacity built, §15 D1072; stroke width, §15 D1073).
+- **D1074's last reading** (read, not run): the effect chip's retype is capped at none of the card's
+  ranges (`MAX_BLUR`, `MAX_OFFSET`), where the stroke width's caps at `ui::MAX_STROKE_WIDTH`, and a bound
+  effect number is floored when drawn but never capped — *Revisit if* it misleads (§15 D1074).
 - **D1073's last readings** (read, not run): the styles browser's stroke swatch (`panels/styles.rs`)
   draws a bound width's 0, clamped to 1; and the several-layer weight row clears every member's binding
   it writes, a member already drawing the typed width included, where D1072's opacity row leaves such a
@@ -1730,7 +1731,10 @@ fixed in D1072's amendment; stroke width struck from the remaining numbers the s
 stroke item in §15 D1073 under the maintainer's delegation, its six readings opened in the list above;
 five of those struck the same day, fixed in D1073's amendment, the swatch left, and two readings of
 the fixes opened beside it; the pasted `Custom` stroke struck the same day, fixed in the same
-amendment, the several-layer row's clearing left.*
+amendment, the several-layer row's clearing left; an effect's X, Y, blur and spread — the last of the
+remaining numbers — struck the same day, bound in the effect item in §15 D1074 under the maintainer's
+delegation, the item closed and its four readings opened in the list above; three of those struck the
+same day, fixed in D1074's amendment, the retype's ranges left.*
 
 ## Next · The polishing pass over the accepted calls
 

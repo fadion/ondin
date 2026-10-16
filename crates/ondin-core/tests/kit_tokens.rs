@@ -1578,3 +1578,74 @@ fn a_second_make_local_reuses_the_fork() {
         Some(forks[0].id)
     );
 }
+
+/// **A kit's stroke style holding a bound width lands reading the consumer's
+/// copy of the variable** (§15 D1073, D1064): the badge given a stroke style
+/// *Edge* whose width is bound to the kit's `spare`, published and inserted; the
+/// vendored style's stroke, and the instance's, read D's `spare`, not L's id.
+///
+/// Flip, run: `Plan::remap_value` leaving `width_var` as it found it — D1073's
+/// committed cut — fails *"the insert commits"* with `Styles(BadVariable)`: the
+/// vendored style names L's id, which D does not hold, so `style::check` refuses
+/// the whole insert. Predicted at *"the style's width reads D's copy"*; the
+/// defect was worse than a wrong binding — such a kit could not be inserted.
+#[test]
+fn a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy() {
+    let mut k = kit();
+    let (edge, item) = (k.ids.mint_style(), k.ids.mint_item());
+    let strokes = vec![ondin_core::Keyed::new(
+        item,
+        ondin_core::Stroke {
+            width: 0.0,
+            width_var: Some(k.spare),
+            ..Default::default()
+        },
+    )];
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddStyle {
+                style: Style {
+                    id: edge,
+                    name: "Edge".into(),
+                    value: StyleValue::Strokes(strokes.clone()),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetStrokes {
+                id: k.badge,
+                strokes,
+            },
+            Operation::SetStrokeStyle {
+                id: k.badge,
+                style: Some(edge),
+            },
+        ]))
+        .expect("the badge stroked by Edge");
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let (mut d, mut ids, _) = consumer(&[]);
+    let root = d.root();
+    let (tx, inst) = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.badge, root).unwrap();
+    d.apply(&tx).expect("the insert commits");
+    let spare = d
+        .variables()
+        .iter()
+        .find(|v| v.name == "spare")
+        .map(|v| v.id)
+        .expect("spare vendored");
+    assert_ne!(spare, k.spare, "under an id of D's");
+    let style = d
+        .styles()
+        .iter()
+        .find(|s| s.name == "Edge")
+        .expect("Edge vendored");
+    let StyleValue::Strokes(v) = &style.value else {
+        unreachable!("a stroke style")
+    };
+    assert_eq!(v[0].width_var, Some(spare), "the style's width reads D's copy");
+    assert_eq!(
+        d.get(inst).unwrap().paint().strokes[0].width_var,
+        Some(spare),
+        "and so does the instance's"
+    );
+}

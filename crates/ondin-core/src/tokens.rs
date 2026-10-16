@@ -304,6 +304,12 @@ impl Plan {
             },
             b => b.clone(),
         };
+        // A bound number's variable, likewise: a stroke's width (§15 D1073), an
+        // effect's numbers (§15 D1074). ⚠️ Missing from both entries' first cuts:
+        // a kit's stroke or effects style holding a bound number was vendored
+        // naming the kit's variable ids, which `style::check` refused — the
+        // whole insert of a main styled by it failed.
+        let num = |v: Option<VarId>| v.map(|v| *self.vars.get(&v).unwrap_or(&v));
         match value {
             StyleValue::Fills(v) => StyleValue::Fills(
                 v.iter()
@@ -320,13 +326,23 @@ impl Plan {
                     .map(|s| {
                         s.map(|s| crate::node::Stroke {
                             brush: to(&s.brush),
+                            width_var: num(s.width_var),
                             ..s.clone()
                         })
                     })
                     .collect(),
             ),
+            StyleValue::Effects(v) => StyleValue::Effects(
+                v.iter()
+                    .map(|e| {
+                        let mut e = e.clone();
+                        e.vars = e.vars.map(num);
+                        e
+                    })
+                    .collect(),
+            ),
             // A text style reads no variable (§15 D1067).
-            StyleValue::Effects(_) | StyleValue::Text(_) => value.clone(),
+            StyleValue::Text(_) => value.clone(),
         }
     }
 }

@@ -67,8 +67,14 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1078 index rows, 1078 body headings, next free
-D1079** (measured 2026-10-16 at `48c4575`; ⚠️ **the spacing-handles "left alone" request reserved
+anywhere cited either. **The live figures: 1079 index rows, 1079 body headings, next free
+D1080** (measured 2026-10-16 over the uncommitted tree on `3c2a954`; ⚠️ **the canvas-fill measurement
+request reserved D1079–D1088 at `3c2a954` and spent one** — D1079, the one canvas door onto a paint (a
+picture dropped or pasted onto a shape) saying what it detached, its *Replaced with* no longer
+overwriting a style's *Detached*. **D1080–D1088 found at zero sites and released.** Census **978**,
+arrival D1079, none unresolved. ⚠️ **`arch-scribe` corrected two premises of the brief**: F2 names only
+the style capsule's own Detach, not every inspector door, and *Replace image…* is the inspector's image
+row, not a canvas door. Before that, measured 2026-10-16 at `48c4575`; ⚠️ **the spacing-handles "left alone" request reserved
 D1079–D1088 at `cea486d` and spent none** — a gap band yielding to a pinned child, masks left out of
 the children bands yield to, and seven new canvas tests went into D1078's second amendment;
 **D1079–D1088 found at zero sites and released**. Census **977**, no arrivals, none unresolved.

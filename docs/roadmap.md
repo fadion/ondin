@@ -1657,7 +1657,8 @@ accepted (D1038):
   *Paste properties*, which follows the rule since §15 D1047. Nothing to answer yet: the one preset in
   the code is the export panel's `prefs::ExportPreset`, whose specs hold no bindable field.
 - **D1038 (2)'s canvas half** — a gesture on a bound value detaching, *the floating status saying what
-  was detached*: no canvas handle writes a gap or a padding yet (§15 D1058); a resize handle on a bound
+  was detached*: no canvas handle writes a gap or a padding yet (§15 D1058; the handles' design brief is
+  *Next · Spacing handles on the canvas*, below); a resize handle on a bound
   W or H detaches and says so (§15 D1061, D1071); a paint's binding is no pass's, so a door's write over
   a bound fill says nothing, and whether any canvas door writes one is unmeasured (§15 D1071).
 
@@ -1733,6 +1734,62 @@ two of its readings opened in the list above; those two struck the same day, fix
 amendment; D1074's retype ranges and D1073's swatch struck the same day, fixed in D1074's and D1073's
 third amendments, the several-layer weight row's clearing left; that struck the same day, fixed in
 D1073's fourth amendment.*
+
+## Next · Spacing handles on the canvas
+
+**A design brief, not a design — for the maintainer or a Claude Design pass to settle before anything
+is built** (the maintainer's choice on 2026-10-16, over building the session's own design). A laid
+container's gaps and padding are edited only in the Container card today, by scrub or by typing; no
+canvas gesture writes one (§15 D1058's *No door but the inspector's yet*), and D1038 (2)'s *"dragging a
+gap handle … detaches"* has no handle to happen on. Nothing in `design/` draws one.
+
+**Settled by the record, so not open** — a design should take these as given:
+
+- **The write is the card's**: one `SetDisplay` through the commit door, so `keep_spacing_bindings`
+  judges a bound slot as it judges a typed one — written what it lays out at, or its literal, it stays
+  bound; anything else detaches it (§15 D1058) — the floating status names the variable cut (§15
+  D1071), and `Ctrl+Z` restores (D1038 (2)). On a layout-styled container the drag detaches the style,
+  the floating status saying so (D1038 (1)–(2), §15 D1075). On an instance it is an override like any
+  other field's.
+- **It previews and cancels like every gesture**: a render override while dragging, the right button
+  or `Escape` abandoning it (§9.4, §15 D1033); a grid's track lines stay up through it, being the
+  feedback (§15 D925).
+- **An occupied frame's interior is not a pick target** (§15 D22): handles can only live on a container
+  that is already selected, never on hover over an unselected one.
+- A main's or instance's chrome is violet (§15 D1001).
+
+**Open, each with the session's recommendation:**
+
+1. **When they show.** *Recommended*: on a single selected flex or grid container, not over a
+   several-layer selection (each container's spacing is its own), hidden while another gesture runs
+   and hidden at a zoom where a band is too thin to hold a handle (under ~6 screen px).
+2. **What is drawn.** Today only a grid draws its gaps (`color::GRID_GAP` bands, §15 D921); a flex
+   container draws none, and padding is drawn nowhere. *Recommended*: while selected, the padding as
+   four faint bands just inside the frame's edge and a flex container's gaps as bands between items,
+   in `GRID_GAP`'s tint; the band under the pointer strengthened, with a short pill at its middle as
+   the handle (Figma's convention). A design should say whether bands show at rest or only on hover.
+3. **Hit areas and priority.** *Recommended*: the whole band picks, at least 8 screen px across even
+   when the value is 0 (so a zero gap can be dragged open); the frame's resize handles and edges win
+   within their own pick radius (`HANDLE_PICK_PX`), so padding grabs stay inset from the edge.
+4. **What a drag writes.** *Recommended*: the pointer's delta along the band's axis, whole px
+   (`Scrub::whole`), floored at 0. A gap drag sets the stored gap, so every gap of that axis moves
+   together. A padding drag sets one side; `Alt` sets the opposite side with it; `Alt+Shift` all four
+   (Figma's modifiers). Whether `Shift` alone steps by 10, as a nudge does, is the design's to say.
+5. **Grid and wrapped flex.** A grid gets column-gap bands and row-gap bands, each writing its own
+   axis; a wrapped flex container's row gap is drawn between its lines. *Recommended*: as stated.
+6. **Derived space.** Under `space-between` and its kin the space between items is the gap plus what
+   the justify hands out (§15 D921 shows this for a grid's tracks). *Recommended*: the band draws the
+   space laid, the label reads the stored gap, and the drag writes the stored gap — never the laid one.
+7. **Feedback while dragging.** *Recommended*: a value label beside the pointer, the size badge's
+   drawing; the cursor the existing resize arrows (`ResizeHorizontal`/`ResizeVertical`), §9.2's rule
+   that a cursor changes only where it means something. A bound slot's label names its variable before
+   the drag, so the detach the status reports afterwards is not a surprise.
+8. **Reversed and nested.** A `row-reverse` or `column-reverse` container's gaps are drawn where they
+   lay out; a container inside a selected container shows nothing until it is selected itself.
+   *Recommended*: as stated.
+
+*Opened 2026-10-16 from the styles-and-variables open list's canvas half, as the brief for the gap and
+padding handles that half assumes.*
 
 ## Next · The polishing pass over the accepted calls
 

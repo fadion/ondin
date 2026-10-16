@@ -565,10 +565,15 @@ pub struct Flex {
     pub align_items: AlignItems,
     #[serde(default, skip_serializing_if = "is_default")]
     pub align_content: AlignContent,
-    /// The gap between lines (CSS `row-gap`).
+    /// The **vertical** gap (CSS `row-gap`): between a wrapped row's lines, and
+    /// between a column's items. These comments read *"between lines"* and
+    /// *"between items on a line"* until §15 D1078, true of a row only — the
+    /// engine hands Taffy `column_gap` as the width and `row_gap` as the height
+    /// whatever the direction.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub row_gap: f64,
-    /// The gap between items on a line (CSS `column-gap`).
+    /// The **horizontal** gap (CSS `column-gap`): between a row's items, and
+    /// between a wrapped column's lines.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub column_gap: f64,
     /// Top, right, bottom, left — CSS's order.

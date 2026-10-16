@@ -349,10 +349,12 @@ pub(crate) fn shown(bands: Vec<Band>, scale: Vec2) -> Vec<Band> {
 /// of the box's outline (the resize handles' and sides' own pick radius, P4),
 /// and **no band under a pinned child** — a layer pinned by its insets may sit
 /// on the padding or across a gap, and a click there is the layer's.
-/// `children` is every child's box with whether it is pinned (out of flow).
+/// `children` is every child's box with whether it is pinned by authored
+/// insets — masks already left out by `OndinApp::spacing_subject`, a mask
+/// drawing nothing of its own.
 ///
-/// **A padding band yields to any child on it; a gap band only to a pinned
-/// one.** A gap thinner than `min` is a strip centred on its seam (P4), which
+/// **A padding band yields to any child in that list on it; a gap band only to
+/// a pinned one.** A gap thinner than `min` is a strip centred on its seam (P4), which
 /// reaches into the in-flow items either side by design, or a gap of 0 could
 /// never be dragged open. It yielded to no child at all until §15 D1078's
 /// second amendment, so a pinned layer over a gap lost its click to the band.
@@ -491,7 +493,8 @@ pub(crate) struct Subject {
     pub bx: Rect,
     /// The display as drawn — a bound slot its variable's number.
     pub drawn: Display,
-    /// Every shown child's box, with whether it is pinned (out of flow).
+    /// Every shown child's box but a mask's, with whether it is pinned by
+    /// authored insets.
     pub children: Vec<(Rect, bool)>,
     pub bands: Vec<Band>,
     /// Screen points per local unit along x and y.

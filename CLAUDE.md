@@ -67,8 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1089 index rows, 1089 body headings, next free
-D1090** (measured 2026-10-16 at `22b2313`; ⚠️ **the styles-and-variables polish list reserved
+anywhere cited either. **The live figures: 1092 index rows, 1092 body headings, next free
+D1093** (measured 2026-10-16 at `4b4b5d5`; ⚠️ **the second polish list reserved D1090–D1099 at
+`b6f5a91` through the `dnumber-guard` mod and spent three** — D1090 (a band drag to 0 over a bound
+slot cutting the binding itself; the pass's literal half had read the 0 as unchanged and the slot
+sprang back), D1091 (the header's `+`/`⋯` gap laid out — it had never been, the pads overlapping),
+D1092 (a bound field's prefix the plain field's, D1046's `NotAllowed` overturned). **D1093–D1099
+found at zero sites and released.** Census **991**, arrivals D1090–D1092, none unresolved.
+⚠️ **`arch-scribe` found the maintainer's own case untested** (a layout-styled container's bound
+padding); its test's flip showed the old release wrote *nothing*, the reported spring-back exactly.
+⚠️ **A constant that only sized hit pads read as a laid-out gap through two rulings** (F8's 10,
+D1086's 15) — measure the boxes, not the constant. Before that, measured 2026-10-16 at `22b2313`;
+⚠️ **the styles-and-variables polish list reserved
 D1081–D1092 at `d04f013` and spent nine** — D1081 (a unit cut to its field, the hugging-column
 panic), D1082 (colour chips in the Fill row's look), D1083 (the browser's in-place fields),
 D1084 (the `--` list under its field), D1085 (search fields), D1086 (small polish), D1087 (the

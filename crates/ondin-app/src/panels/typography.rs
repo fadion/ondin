@@ -457,6 +457,33 @@ impl TypeSubject {
         false
     }
 
+    /// Whether the line height field may not name one value: [`Self::mixed`],
+    /// and — **on a several-layer card all on Auto** (§15 D1077's amendment) —
+    /// layers whose
+    /// laid lines differ. Auto is one stored value, so `mixed` reads three Auto
+    /// layers as agreeing, but the field's digits are what Auto is *worth*, in
+    /// px, and those were the first layer's alone: 24 at 20pt shown over a 38px
+    /// line at 32pt.
+    fn line_height_mixed(&self) -> bool {
+        if self.mixed(CharAttrKind::LineHeight) {
+            return true;
+        }
+        let auto = |s: &TypeSubject| {
+            matches!(
+                s.shown(CharAttrKind::LineHeight),
+                CharAttr::LineHeight(None)
+            )
+        };
+        auto(self)
+            && self
+                .others
+                .iter()
+                .any(|o| match (self.line_height, o.line_height) {
+                    (Some(a), Some(b)) => (a - b).abs() > 0.005,
+                    (a, b) => a.is_some() != b.is_some(),
+                })
+    }
+
     fn font_size(&self) -> f64 {
         match self.shown(CharAttrKind::Size) {
             CharAttr::Size(v) => v,
@@ -1660,7 +1687,18 @@ impl OndinApp {
         let current = variants
             .iter()
             .position(|v| matches_variant(v, weight, italic, &coords));
-        let label = if subject.mixed(CharAttrKind::Weight) || subject.mixed(CharAttrKind::Italic) {
+        // **Over several layers the face is compared whole** (§15 D1077's
+        // amendment): weight
+        // and italic agreeing is not enough where the axes the faces set do not,
+        // so each layer's face is classified as the first one's is, and a layer
+        // on another face — or on none — makes the field *Mixed*, no row lit and
+        // no *Custom* claimed.
+        let faces_differ = faces_disagree(&variants, subject);
+        let current = current.filter(|_| !faces_differ);
+        let label = if faces_differ
+            || subject.mixed(CharAttrKind::Weight)
+            || subject.mixed(CharAttrKind::Italic)
+        {
             "Mixed".to_string()
         } else {
             match current {
@@ -1704,7 +1742,7 @@ impl OndinApp {
                     // Shown, and inert: it is a readout of "none of the above",
                     // not a thing to choose. Picking it could only mean "leave the
                     // axes as they are", which is what not opening the list does.
-                    if current.is_none() {
+                    if current.is_none() && !faces_differ {
                         ui.add_enabled(false, egui::Button::new("Custom"));
                     }
                 })
@@ -1859,7 +1897,7 @@ impl OndinApp {
             CharAttr::LineHeight(v) => v,
             _ => None,
         };
-        let mixed = subject.mixed(CharAttrKind::LineHeight);
+        let mixed = subject.line_height_mixed();
         let font_size = subject.font_size();
         let (unit_label, tooltip) = match current {
             None => ("auto", "The font's own line height — click for %"),
@@ -5492,6 +5530,28 @@ fn matches_variant(v: &FontVariant, weight: u16, italic: bool, coords: &[AxisSet
             .find(|c| c.tag == a.tag)
             .is_none_or(|c| (c.value - a.value).abs() < 0.05)
     })
+}
+
+/// Whether a several-layer subject's layers sit on different faces of
+/// `variants` (§15 D1077's amendment) — each classified by [`matches_variant`]
+/// as the first
+/// layer is, a layer on no face differing from one on a face. False on a single
+/// layer. Two cuts of one weight and slope that differ by an axis they name
+/// (a condensed and a regular bold) are different faces here, which comparing
+/// weight and italic alone could not see.
+fn faces_disagree(variants: &[FontVariant], subject: &TypeSubject) -> bool {
+    let face = |m: &TypeSubject| {
+        variants.iter().position(|v| {
+            matches_variant(
+                v,
+                attr!(m, Weight, Weight),
+                attr!(m, Italic, Italic),
+                &attr!(m, Variations, Variations),
+            )
+        })
+    };
+    let first = face(subject);
+    subject.others.iter().any(|m| face(m) != first)
 }
 
 /// Replace a `DragValue`'s digits with a dash when the range disagrees with
@@ -10423,6 +10483,74 @@ mod several_layer_tests {
             TypeSubject::several(&app, &texts[..1]).is_none(),
             "one layer is the single card's"
         );
+    }
+
+    /// **Two layers of one weight on different faces disagree** (§15 D1077's
+    /// amendment): a
+    /// family with a regular and a condensed cut at 400, told apart by `wdth`
+    /// alone — one layer at `wdth 75`, the other at 100 — reads as two faces,
+    /// though weight and italic agree; both at 75, one face.
+    ///
+    /// Flip, run: `faces_disagree` answering false fails on *"regular and
+    /// condensed read as one face"*.
+    #[test]
+    fn layers_on_different_faces_of_one_weight_disagree() {
+        let (_ctx, mut app, texts) = three();
+        let wdth = Tag::new(*b"wdth");
+        let face = |name: &str, w: f64| FontVariant {
+            name: name.into(),
+            weight: 400,
+            italic: false,
+            coords: vec![AxisSetting::new(wdth, w)],
+        };
+        let variants = [face("Regular", 100.0), face("Condensed", 75.0)];
+        let pair = [texts[0], texts[2]];
+        for (id, w) in pair.iter().zip([75.0, 100.0]) {
+            let one = TypeSubject::of(&app, *id).expect("a subject");
+            app.apply_char_attrs(
+                &one,
+                vec![CharAttr::Variations(vec![AxisSetting::new(wdth, w)])],
+            );
+        }
+        let both = TypeSubject::several(&app, &pair).expect("a pair");
+        assert!(!both.mixed(CharAttrKind::Weight), "the fixture: one weight");
+        assert!(
+            faces_disagree(&variants, &both),
+            "regular and condensed read as one face"
+        );
+        let one = TypeSubject::of(&app, texts[2]).expect("a subject");
+        app.apply_char_attrs(
+            &one,
+            vec![CharAttr::Variations(vec![AxisSetting::new(wdth, 75.0)])],
+        );
+        let both = TypeSubject::several(&app, &pair).expect("a pair");
+        assert!(!faces_disagree(&variants, &both), "one face read as two");
+    }
+
+    /// **Auto over lines of different heights reads mixed** (§15 D1077's
+    /// amendment): the
+    /// three layers all on Auto, laid at 24, 24 and 38px — the readout is what
+    /// Auto is worth, so the field may not name the first layer's 24. Laid
+    /// lines are set by hand here (nothing is shaped in a unit test), and an
+    /// agreeing pair reads one value.
+    ///
+    /// Flip, run: `line_height_mixed` answering `self.mixed(..)` alone fails
+    /// on *"24 and 38 read as one line"*.
+    #[test]
+    fn auto_over_lines_of_different_heights_reads_mixed() {
+        let (_ctx, app, texts) = three();
+        let mut all = TypeSubject::several(&app, &texts).expect("a subject");
+        all.line_height = Some(24.0);
+        for (o, h) in all.others.iter_mut().zip([24.0, 38.0]) {
+            o.line_height = Some(h);
+        }
+        assert!(
+            !all.mixed(CharAttrKind::LineHeight),
+            "the fixture: all Auto"
+        );
+        assert!(all.line_height_mixed(), "24 and 38 read as one line");
+        all.others.truncate(1);
+        assert!(!all.line_height_mixed(), "24 and 24 read as mixed");
     }
 
     /// **A write reaches every layer and leaves what it does not name**: a size

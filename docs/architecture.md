@@ -3424,8 +3424,9 @@ Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a lay
 > ruling): the core (§15 D1069: a text's content and family bound, the literals empty while bound,
 > the spans cleared, an edit detaching) and the chrome (§15 D1070: the Type card's *Content* row, the
 > family's chip, *String variable* in the browser), D1069's four readings fixed in its amendment — so
-> step 6 owes ~~only D1070's Text property chip and the Content row's override mark~~ nothing but a
-> Type card over several layers, the chip and the mark built in D1070's amendment. **Layout styles
+> step 6 owes ~~only D1070's Text property chip and the Content row's override mark~~ ~~nothing but a
+> Type card over several layers~~ nothing, the chip and the mark built in D1070's amendment and the
+> Type card over several text layers in §15 D1077 (2026-10-16). **Layout styles
 > are built** (2026-10-16, under the maintainer's delegation) — the core (§15 D1075: a fifth slot
 > holding a container's whole `Display` and its gap and padding bindings) and the Container card as a
 > style card (§15 D1076). The
@@ -3935,7 +3936,8 @@ holding any layer that is not its user. A detach a door made — `settle`'s, not
 `settle`**: the picker's and an edit's previews write the lists themselves. **The Type card is a style
 card** (§15 D1068): *Ag* its preview, `Family · size` its summary, and its rows **live under the capsule
 over a live session's non-empty selection**, where they write spans and keep the style; *Apply* over a
-live session re-opens the editor; *Edit* on a text style selects its first user only. 🚨 **The card is
+live session re-opens the editor; *Edit* on a text style selects every user (§15 D1077; its first
+user only until then). 🚨 **The card is
 wider than its slot, so it leaves live the rows its style does not hold** (D1068's amendment): a
 `tail` drawn after whatever the card's state draws, under a collapsed capsule too, holds the alignment
 row and the popup's opener — the popup closing when its opener is not drawn — and the popup locks its
@@ -3945,9 +3947,13 @@ held fields carry no mark of their own (`type_marks`, D1068's second amendment):
 style's, and *Reset Type* their reset, as the paint cards' (F9). **The Container card is a style card**
 (§15 D1076): its capsule's preview F7's display glyph turned with the direction — Phosphor's *columns*
 for a row, *rows* for a column, *grid-four* for a grid (`styles::layout_glyph`) — and its summary the
-direction and the main-axis gap, *Column · 6*, or *Row · bound gap*, a grid's *Grid · c × r*. Not
-built: ~~the kit groups (step 4),~~ ~~the text and~~ ~~the layout card's style, and~~ a Type card over
-several layers.
+direction and the main-axis gap, *Column · 6*, or *Row · bound gap*, a grid's *Grid · c × r*. ~~Not
+built: the kit groups (step 4), the text and the layout card's style, and a Type card over
+several layers.~~ **The Type card draws over several text layers** (§15 D1077): the style card over
+all of them, F10's states and the `⋯`'s counted rows; 🚨 a write **fans out**, each layer its own
+defaults, paragraph or box with the one field changed, in one transaction (`one_char_attrs_tx` per
+layer), never the first layer's style broadcast; a field reads *Mixed* where the layers disagree; the
+family row is the picker, reading the drawn family; no override marks, no *Content* row, no popup.
 
 **Kits' variables and styles, as built** (step 4, §15 D1064 and D1065 in full). A vendored kit's
 variables and styles sit **in the consumer's own tables**, each minted the consumer's id and carrying
@@ -11553,7 +11559,10 @@ be done one at a time even though the canvas already handled the set completely 
 carries a Transform panel, an Appearance panel, Fill and Stroke, **Group Colors** and **Export** —
 every panel
 backed by §5.7a's bulk builders, so the app, MCP writes and the command line cannot disagree about
-what "set the fill of these" means. §15 D53 has the reasoning, of which the load-bearing part is that
+what "set the fill of these" means. A selection with **text layers** in it also gets the **Type**
+card, between Appearance and the paint panels as on a single layer: one text layer among others gets
+its own single-layer card, two or more the several-layer card, whose writes the panel builds per
+layer rather than through a §5.7a builder (§15 D1077). §15 D53 has the reasoning, of which the load-bearing part is that
 **"Mixed" is a panel rather than a label**. A selection with **frames** in it also gets *Frame
 templates*, directly under the identity card, and *Layout grid*, under Container, in the same order
 as on a single frame — the two frame panels that are not a single layer's (§15 D389, D390, below).

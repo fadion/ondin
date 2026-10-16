@@ -67,8 +67,24 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1070 index rows, 1070 body headings, next free
-D1071** (measured 2026-10-15 over the uncommitted tree on `7a349aa`; ⚠️ **the string-variables
+anywhere cited either. **The live figures: 1076 index rows, 1076 body headings, next free
+D1077** (measured 2026-10-16 at `77846f6`; ⚠️ **the "continue the roadmap" request reserved
+D1071–D1082 at `7a349aa` through the `dnumber-guard` mod and spent six** — D1071 (a variable's
+detach said on the floating status), D1072 (opacity bound, read as a percentage), D1073 (a
+stroke's width bound, in the item), D1074 (an effect's X, Y, blur and spread bound, in the item),
+D1075 and D1076 (layout styles, the fifth slot, and the Container card a style card); D1038 (7)'s
+numbers all bind now. **D1077–D1082 found at zero sites and released.** Census **975**, arrivals
+D1069–D1076, none unresolved. ⚠️ **`arch-scribe` read real defects in every batch again** —
+among them every Alt-drag ghost previewing at 100% opacity, *Paste properties* carrying a width
+binding verbatim, a layout style's display reaching children after the size pass had run — and
+**a defect in committed work turned up while building the next piece**: the kit planner's style
+remap left stroke-width and effect bindings naming the kit's ids, so such a kit could not be
+inserted at all (`2df4cd4`). A render test found `resolved_paint` keeping a binding on its output,
+which the scene then resolved again against the committed table. ⚠️ **An on-device GPU timing test
+(`fx_gpu::a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block`) failed once under load
+from a concurrent workspace test run and passed three of three alone**; run `--ignored` with
+nothing else on the machine. Before that, measured 2026-10-15 over the uncommitted tree on
+`7a349aa`; ⚠️ **the string-variables
 request reserved D1069–D1078 at `7a349aa` through the `dnumber-guard` mod and spent two** —
 D1069, string variables' core (a text's content and family bound, literals empty while bound,
 `resolved_kind` substituting, `keep_text_bindings`), and D1070, their chrome (the Type card's

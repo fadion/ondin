@@ -7002,10 +7002,10 @@ impl OndinApp {
                 // stroke, so the binding goes with it here rather than through
                 // the commit's pass, and the floating status says nothing — the
                 // inspector's own doors' rule (D1071's amendment).
-                let tx = ondin_core::edit_strokes_all(&self.session.doc, &ids, |s| {
-                    set_stroke_weight(s, width);
-                    s.width_var = None;
-                });
+                //
+                // **Except where it already draws the weight typed** (§15
+                // D1073's fourth amendment) — `weight_all_tx`.
+                let tx = weight_all_tx(&self.session.doc, &ids, width);
                 self.edit_valve(&rw, tx);
             }
             // The two the per-stroke row ends in, dimmed. Each says in its tooltip
@@ -14899,6 +14899,27 @@ pub(super) fn set_stroke_weight(stroke: &mut Stroke, width: f64) {
             left: width,
         };
     }
+}
+
+/// The several-layer weight row's write: `width` onto every stroke in scope
+/// through [`set_stroke_weight`], each bound width detached in the edit itself
+/// (§15 D1073's amendment, reading (c)) — **except a stroke whose bound width
+/// already draws `width`**, left unwritten and bound (§15 D1073's fourth
+/// amendment), as D1072's
+/// opacity row leaves a layer already at the typed opacity. Resolved in each
+/// layer's own mode, which is why this goes through
+/// [`ondin_core::edit_strokes_at_all`] and not the id-blind `edit_strokes_all`.
+pub(super) fn weight_all_tx(doc: &ondin_core::Document, ids: &[NodeId], width: f64) -> Transaction {
+    ondin_core::edit_strokes_at_all(doc, ids, |id, s| {
+        let drawn = s
+            .width_var
+            .map(|v| doc.stroke_width_drawn_in(doc.variables(), id, v));
+        if drawn.is_some_and(|d| (d - width.max(0.0)).abs() < 1e-9) {
+            return;
+        }
+        set_stroke_weight(s, width);
+        s.width_var = None;
+    })
 }
 
 fn sides_hint(s: StrokeSides) -> &'static str {

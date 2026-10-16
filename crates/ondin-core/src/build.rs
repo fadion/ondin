@@ -4726,12 +4726,24 @@ pub fn edit_brush_at_all(
 /// [`edit_fills_all`]'s twin, over the same targets — frames included, see
 /// [`shared_strokes`].
 pub fn edit_strokes_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Stroke)) -> Transaction {
+    edit_strokes_at_all(doc, ids, |_, s| edit(s))
+}
+
+/// [`edit_strokes_all`] with the layer each stroke is on — for an edit that
+/// reads the layer, as one resolving a bound width in the layer's mode does
+/// (the several-layer weight row sparing a binding that already draws the
+/// width typed, §15 D1073's fourth amendment).
+pub fn edit_strokes_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    edit: impl Fn(NodeId, &mut Stroke),
+) -> Transaction {
     let mut ops = Vec::new();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let mut strokes = node.paint().strokes.clone();
         for stroke in &mut strokes {
-            edit(stroke);
+            edit(id, stroke);
         }
         if strokes != node.paint().strokes {
             ops.push(Operation::SetStrokes { id, strokes });

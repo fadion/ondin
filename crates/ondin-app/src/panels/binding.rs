@@ -3199,6 +3199,81 @@ mod tests {
         assert_eq!(app.session.status().text, "", "asked for, so silent");
     }
 
+    /// **The several-layer weight row spares a binding that already draws the
+    /// weight typed** (§15 D1073's fourth amendment): one rect's stroke bound to
+    /// *radius/md* (6),
+    /// another's literal 2. Typed 6, the bound one is left unwritten and still
+    /// bound while the other takes 6; typed 8, both take it and the bound one
+    /// detaches, as D1073's amendment (c) has it.
+    ///
+    /// Flip, run: `weight_all_tx` without its drawn-width guard fails on *"the
+    /// stroke already at 6 stays bound"*.
+    #[test]
+    fn the_weight_row_spares_a_binding_already_at_the_weight() {
+        let (_ctx, mut app, rect, _, radius) = fixture();
+        let other = app.session.ids.mint();
+        let root = app.session.doc.root();
+        let (a, b) = (app.session.ids.mint_item(), app.session.ids.mint_item());
+        let stroke = |width| ondin_core::Stroke {
+            width,
+            ..Default::default()
+        };
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: other,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetStrokes {
+                id: rect,
+                strokes: vec![ondin_core::Keyed::new(a, stroke(2.0))],
+            },
+            Operation::SetStrokes {
+                id: other,
+                strokes: vec![ondin_core::Keyed::new(b, stroke(2.0))],
+            },
+        ])));
+        app.bind_field(FieldKey::StrokeWidth { id: rect, item: a }, radius);
+        let first = |app: &OndinApp, id| {
+            app.session.doc.get(id).unwrap().paint().strokes[0]
+                .value
+                .clone()
+        };
+        assert_eq!(
+            first(&app, rect).width_var,
+            Some(radius),
+            "the fixture: bound"
+        );
+        assert_eq!(
+            app.session
+                .doc
+                .stroke_width_drawn_in(app.session.doc.variables(), rect, radius),
+            6.0,
+            "the fixture: drawing 6"
+        );
+
+        let tx = super::super::inspector::weight_all_tx(&app.session.doc, &[rect, other], 6.0);
+        assert!(app.commit_edit(tx));
+        assert_eq!(
+            first(&app, rect).width_var,
+            Some(radius),
+            "the stroke already at 6 stays bound"
+        );
+        assert_eq!(first(&app, other).width, 6.0);
+
+        let tx = super::super::inspector::weight_all_tx(&app.session.doc, &[rect, other], 8.0);
+        assert!(app.commit_edit(tx));
+        assert_eq!(first(&app, rect).width_var, None, "a new weight detaches");
+        assert_eq!(first(&app, rect).width, 8.0);
+        assert_eq!(first(&app, other).width, 8.0);
+    }
+
     /// **An effect's number binds through the field's verbs, a list write over
     /// it detaches it and says so, and a retype may be negative** (§15 D1074): a
     /// drop shadow's X bound to *radius/md* (6) draws 6 over a literal 0; an X of

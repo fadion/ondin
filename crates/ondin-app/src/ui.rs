@@ -1798,6 +1798,9 @@ const SUFFIX_PT: f32 = 11.0;
 /// near it, and it was the reported symptom: *"the %/px toggle is still outside
 /// the control"*.
 const SUFFIX_BLEED: f32 = 4.0;
+/// The room a unit leaves its number before it is cut short with an ellipsis —
+/// four digits at the field's type size (§15 D1081).
+const UNIT_DIGITS_MIN: f32 = 28.0;
 
 impl Prefix {
     /// The prefix as styled text. Both variants are the design's 38% grey; only the
@@ -2729,6 +2732,14 @@ fn value_field_f64_marked(
                 // `into_galley` fills an unset colour with the style's own
                 // `text_color`, so the unit came out full-strength white at rest.
                 // The sentinel has to be asked for by name.
+                //
+                // **Cut to the room the digits leave, not extended past it**
+                // (§15 D1081). A long unit in a narrow field — `fit content` in
+                // the Transform card's H — asked for more than the field had,
+                // and the number's box below came out negative: egui panics on
+                // a negative desired size, so selecting a hugging column crashed
+                // the app.
+                let room = (full - inset - UNIT_DIGITS_MIN - PREFIX_GAP + SUFFIX_BLEED).max(0.0);
                 let galley = egui::WidgetText::from(
                     egui::RichText::new(s.text)
                         .size(SUFFIX_PT)
@@ -2736,8 +2747,8 @@ fn value_field_f64_marked(
                 )
                 .into_galley(
                     ui,
-                    Some(egui::TextWrapMode::Extend),
-                    f32::INFINITY,
+                    Some(egui::TextWrapMode::Truncate),
+                    room,
                     egui::TextStyle::Body,
                 );
                 (s, galley)
@@ -2757,7 +2768,10 @@ fn value_field_f64_marked(
             // real allocation rather than paint: the frame came out exactly one
             // `item_spacing.x` wider than the size asked for.
             ui.spacing_mut().item_spacing.x = 0.0;
-            ui.spacing_mut().interact_size = egui::vec2(full - inset - trail_w, inner_h);
+            // Floored, though the unit is cut to fit: a field narrower than its
+            // own prefix would otherwise still ask egui for a negative box.
+            let digits_w = (full - inset - trail_w).max(0.0);
+            ui.spacing_mut().interact_size = egui::vec2(digits_w, inner_h);
 
             // The prefix strip, sensed *before* the number is laid out so its drag is
             // already in the value by the time the number renders — otherwise the
@@ -2950,7 +2964,7 @@ fn value_field_f64_marked(
             ui.add_space(inset);
             let mut resp = ui
                 .allocate_ui_with_layout(
-                    egui::vec2(full - inset - trail_w, inner_h),
+                    egui::vec2(digits_w, inner_h),
                     egui::Layout::left_to_right(egui::Align::Center).with_main_align(main),
                     |ui| ui.add(dv),
                 )
@@ -7534,6 +7548,43 @@ mod transform_row_tests {
             .collect();
         rects.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
         rects
+    }
+
+    /// **A unit longer than its field leaves is cut, and the field keeps its size**
+    /// (§15 D1081). The Transform card's H on a hugging column reads `fit content`
+    /// beside its number; in a narrow inspector that asked for more than the field
+    /// had, the number's box came out negative, and egui panics on a negative
+    /// desired size — selecting the column crashed the app.
+    ///
+    /// Flip: `Extend` back in the unit's `into_galley`, the digits' floor kept,
+    /// fails the width assertion — the field grows to 124 for its 90.
+    #[test]
+    fn a_unit_wider_than_its_field_is_cut_and_the_field_keeps_its_width() {
+        // About the Transform card's H in a narrow inspector: room for the
+        // prefix and three digits, not for the whole unit beside them.
+        let w = 90.0;
+        let rects = grounds(|ui| {
+            let mut v = 120.0_f64;
+            value_field_suffixed(
+                ui,
+                egui::vec2(w, H),
+                Prefix::Text("H"),
+                Some(Suffix {
+                    text: "fit content",
+                    clickable: true,
+                    tooltip: "",
+                }),
+                &mut v,
+                Scrub::whole(0.5),
+                |d| d,
+            );
+        });
+        assert_eq!(rects.len(), 1, "one field ground: {rects:?}");
+        assert!(
+            rects[0].width() <= w + 0.5,
+            "the field grew to {} for a {w} slot",
+            rects[0].width()
+        );
     }
 
     /// **Tab goes from one field's digits to the next field's digits, and stops

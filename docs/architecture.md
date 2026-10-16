@@ -1669,6 +1669,26 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
+**Spacing handles on the canvas** (§15 D1078, from `design/Spacing Handles.dc.html` with the session's
+rulings over it). A single selected flex or grid container's gaps and padding are drawn as bands and
+dragged to write them, under a tool that selects — **one `SetDisplay` through the commit door, the Container card's own write**,
+so `keep_spacing_bindings` (§15 D1058), the style pass (§15 D1075) and the override marks judge it as
+they judge a typed value. `spacing::bands` answers them in the container's local space: the four
+paddings edge to edge, a grid's column-gap and row-gap bands from its laid tracks across the other
+axis's run, a flex container's between-items bands across each line's cross band and a wrapped one's
+line gaps across the content's whole main extent — every band where the layout puts it, the space as
+laid. ⚠️ **A gap band names its axis, not its role**: `column_gap` is the horizontal gap and
+`row_gap` the vertical in every direction, the engine's reading, so a column's between-items gap is
+the row gap. **Nothing is drawn at rest**: with the pointer inside the selected container every band
+is drawn in `GRID_GAP`'s tint — a grid's gaps excepted, its track lines drawing them already — the
+band under the pointer in `SPACING_STRONG` with a pill; a band under 6 screen px is dropped, but
+not the kind a drag is writing while it runs. The whole
+band picks, at least 8 screen px across, so a zero gap is a strip on its seam; nothing picks within
+`HANDLE_PICK_PX` of the outline. The drag writes the pointer's delta along the axis in whole px,
+floored at 0, from the **drawn** value, over the **stored** display, so an untouched bound slot stays
+bound; `Shift` steps by 10, `Alt` writes the opposite padding, `Alt+Shift` all four. The press, the
+cursor and the release are §9.4's.
+
 ### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985, D988, D989, D991)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
@@ -10103,7 +10123,10 @@ input event (winit/egui)
   down as a contract, so
   `canvas::zero_travel_release_tests::no_committing_drag_arm_spends_an_undo_step_on_a_zero_travel_release`
   asserts the **outcome** over all six and not the route, and a seventh arm added later has to join the
-  table or fail it.
+  table or fail it. ⚠️ **Nothing makes it join**: the table is a hand-written list, and `Drag::Spacing`
+  (§15 D1078) went in without a row — its release skipped where every written slot already draws the
+  value, and the commit door's no-op test behind that. It has one since D1078's amendment, so the
+  table is seven rows; adding the arm is still what owes the row, not anything that would fail.
 - The preview step costs O(nodes the gesture touches), not O(document): `set_preview` projects the
   pending transaction into `RenderOverrides` rather than cloning and re-resolving. ⚠️ **Except while a
   main component's layer is edited**: the propagation it runs then (§5.3d's preview) cloned the
@@ -14183,7 +14206,27 @@ a parameter because the two callers legitimately ask about different ones — th
 `press_origin` there (§15 D29). **A parallel ladder rather than a lifted one**, so the two can drift,
 and `a_guide_does_not_steal_a_press_the_chrome_claims` is what binds them: it sweeps a strip of points
 and asserts the gate and the ladder agree at every one. A fifth rung in `begin_select_drag` owes
-`chrome_claims` a term.
+`chrome_claims` a term. **The fifth is a selected container's spacing band** (§15 D1078), a rung
+below the box handles — the press asks `begin_spacing_drag` after them, the cursor asks `spacing_at`
+before the handles' `armed` and ahead of `guide_cursor` — and it went in without its term, so a guide
+lying over a band took the press the cursor had just promised to the band. `chrome_claims` asks
+`spacing_at` after the handles since D1078's amendment, and
+`a_guide_does_not_steal_a_press_a_spacing_band_claims` sweeps a row's padding and gaps as the line's
+test sweeps its endpoints. ⚠️ **`spacing_at` answers `None` while any drag is up**, so a sweep that
+drives the ladder has to reset `drag` *before* asking the gate.
+
+**A spacing band's drag** (§15 D1078; §5.3c draws the bands). `Drag::Spacing { id, band, anchor,
+base }`: `band` is what was grabbed, `anchor` the press in the container's local space, `base` the
+value the band **drew** there. Its press sits **above the `Alt`+`Shift` refusal** below — that chord
+is the band's all four sides, and the band is chrome of what is already selected, so no slip off it
+designates or duplicates anything, the argument the handles' arms rest on (§15 D289).
+`spacing::canvas_tests::the_modifiers_choose_the_sides_and_the_step` pins the order. Each frame
+previews one `SetDisplay`, the modifiers read every frame; the cursor is the resize arrows along the
+band's axis, turned through the container's world transform, for the whole drag; the right button or
+`Escape` abandons it through `cancel_gesture`. **The release commits through `session.commit`, skipped
+where every written slot already draws the value** — the drawn and not the stored, or a bound slot's
+literal 0 would make a release on its variable's number a commit; the commit door's no-op test is a
+second defence behind it.
 
 **Everything above is decided on the press, from `press_origin`, not at drag-start** — the ruler
 bar's claim included. Getting that wrong is what made a guide nearly impossible to pick up at all;

@@ -1028,10 +1028,11 @@ pub fn section_head_badged(
 /// The width a header's `⋯` takes from the toggle target beside it, past the
 /// action icon's own — its box and the gap to the `+` (D1038 F8).
 pub const HEAD_MORE_W: f32 = HEAD_ACTION_W + HEAD_MORE_GAP;
-/// The gap between a header's `+` and its `⋯` — F8's 10 between the two glyphs'
-/// boxes, widened by 5 at the maintainer's look (§15 D1086): at 10 the two read
-/// as one control.
-const HEAD_MORE_GAP: f32 = 15.0;
+/// The gap between a header's `+` and its `⋯` boxes. It was F8's 10, then 15
+/// at the maintainer's look (§15 D1086), but neither was ever laid out — the
+/// boxes sat touching and only the hit pads took the gap. Laid out since §15
+/// D1091 at what the maintainer saw plus the 5 asked for twice.
+const HEAD_MORE_GAP: f32 = 5.0;
 
 /// The chip a header's reset takes on hover: its height, and its padding either
 /// side of the glyph-and-word.
@@ -1125,7 +1126,12 @@ pub fn section_head_full(
                         .on_hover_text("Styles");
                         clicks.more = resp.clicked();
                         clicks.more_rect = Some(resp.rect - pad);
-                        ui.add_space(-ui.spacing().item_spacing.x);
+                        // **The gap is laid out, not only padded** (§15 D1091):
+                        // the pads are hit targets past the boxes and allocate
+                        // nothing, so this had cancelled the item spacing and
+                        // put the `+`'s box against the `⋯`'s, its right pad
+                        // reaching over the `⋯`'s left side.
+                        ui.add_space(HEAD_MORE_GAP - ui.spacing().item_spacing.x);
                     }
                     if let Some(a) = action {
                         // Rightwards the pad runs all the way out to the card's
@@ -6601,6 +6607,75 @@ mod tests {
 #[cfg(test)]
 mod head_tests {
     use super::*;
+
+    /// **A header's `+` and `⋯` sit `HEAD_MORE_GAP` apart, and each keeps its
+    /// own press** (§15 D1091): the boxes the two paint are the gap apart, a
+    /// press anywhere on the `⋯`'s box is the `⋯`'s, and the two padded targets
+    /// meet in the middle of the gap.
+    ///
+    /// The bug was that the gap was never allocated — the `⋯`'s
+    /// `add_space(-item_spacing)` put the `+`'s box against it — while each
+    /// button's hit pad still reached half the gap past its box, so the `+`
+    /// took the `⋯`'s left 8 points. Flip, run: that `add_space` put back fails
+    /// *"the boxes are the gap apart"*, 0.
+    #[test]
+    fn a_heads_plus_and_more_keep_their_own_presses() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 200.0));
+        let run = |events: Vec<egui::Event>| {
+            let mut clicks = HeadClicks::default();
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    clicks = section_head_full(
+                        ui,
+                        "Fill",
+                        true,
+                        Some(HeadAction::new(icon::PLUS, "Add")),
+                        None,
+                        None,
+                        true,
+                        true,
+                    );
+                },
+            );
+            clicks
+        };
+        run(Vec::new());
+        let at_rest = run(Vec::new());
+        let (plus, more) = (
+            at_rest.action_rect.expect("a +"),
+            at_rest.more_rect.expect("a ⋯"),
+        );
+        assert_eq!(
+            more.left() - plus.right(),
+            HEAD_MORE_GAP,
+            "the boxes are the gap apart"
+        );
+        let click = |p: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: p,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            run(vec![egui::Event::PointerMoved(p)]);
+            run(vec![press(true), press(false)])
+        };
+        let y = more.center().y;
+        let on_more = click(egui::pos2(more.left() + 1.0, y));
+        assert!(on_more.more && !on_more.acted, "the ⋯'s edge is the ⋯'s");
+        let mid = (plus.right() + more.left()) / 2.0;
+        let left = click(egui::pos2(mid - 1.0, y));
+        assert!(left.acted && !left.more, "left of the gap's middle, the +");
+        let right = click(egui::pos2(mid + 1.0, y));
+        assert!(right.more && !right.acted, "right of it, the ⋯");
+    }
 
     /// A press **on the glyph** opens the menu.
     ///

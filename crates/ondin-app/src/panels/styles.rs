@@ -242,17 +242,11 @@ pub(crate) fn paint_preview(p: &egui::Painter, doc: &Document, style: &Style, re
     let ink = |a: u8| color::text_a(a);
     match &style.value {
         StyleValue::Fills(_) => {
-            let c = preview_colour(doc, &style.value);
-            ui::paint_checkerboard(p, rect, 3.5);
-            if let Some(c) = c {
-                p.rect_filled(rect, 4, ui::color_to_egui(c));
-            }
-            p.rect_stroke(
-                rect,
-                4,
-                egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
-                egui::StrokeKind::Inside,
-            );
+            // The Fill row's chip (§15 D1082); a style with no colour to show
+            // reads as the checkerboard alone.
+            let c = preview_colour(doc, &style.value)
+                .map_or(egui::Color32::TRANSPARENT, ui::color_to_egui);
+            ui::paint_colour_chip(p, rect, c);
         }
         StyleValue::Strokes(v) => {
             let c = preview_colour(doc, &style.value)

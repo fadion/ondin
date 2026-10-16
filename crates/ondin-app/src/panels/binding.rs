@@ -1835,16 +1835,18 @@ fn face_row(
         egui::pos2(rect.left() + 3.0 + 6.0, y),
         egui::vec2(12.0, 12.0),
     );
-    if let Some(Value::Color(c)) = value {
-        ui::paint_checkerboard(p, sw, 3.0);
-        p.rect_filled(sw, 3, ui::color_to_egui(c));
+    match value {
+        // The Fill row's chip (§15 D1082).
+        Some(Value::Color(c)) => ui::paint_colour_chip(p, sw, ui::color_to_egui(c)),
+        _ => {
+            p.rect_stroke(
+                sw,
+                3,
+                egui::Stroke::new(1.0, egui::Color32::from_black_alpha(89)),
+                egui::StrokeKind::Inside,
+            );
+        }
     }
-    p.rect_stroke(
-        sw,
-        3,
-        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(89)),
-        egui::StrokeKind::Inside,
-    );
     let check_w = 12.0;
     // A row that would loop dims and reads why in place of its hex (G15).
     let hex = match (refusal, value) {
@@ -1919,8 +1921,7 @@ fn list_row(
     let y = rect.center().y;
     if let Some(Value::Color(c)) = value {
         let sw = egui::Rect::from_center_size(egui::pos2(x + 6.0, y), egui::vec2(12.0, 12.0));
-        ui::paint_checkerboard(p, sw, 3.0);
-        p.rect_filled(sw, 0, ui::color_to_egui(c));
+        ui::paint_colour_chip(p, sw, ui::color_to_egui(c));
         x = sw.right() + 8.0;
     }
     // A kit's variable wears the kit mark (D1038 E1's package glyph, §15 D1065).

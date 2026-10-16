@@ -2654,17 +2654,11 @@ fn edit_field(
     out.response.response
 }
 
-/// A 12×12 colour chip, the checkerboard under a translucent one (G1).
+/// A 12×12 colour chip, the checkerboard under a translucent one (G1) — the
+/// Fill row's look (§15 D1082).
 pub(crate) fn swatch(p: &egui::Painter, rect: egui::Rect, c: Color) {
     let painter = p.with_clip_rect(rect.intersect(p.clip_rect()));
-    ui::paint_checkerboard(&painter, rect, 3.0);
-    painter.rect_filled(rect, 0, ui::color_to_egui(c));
-    painter.rect_stroke(
-        rect,
-        3,
-        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(90)),
-        egui::StrokeKind::Inside,
-    );
+    ui::paint_colour_chip(&painter, rect, ui::color_to_egui(c));
 }
 
 /// The mode frame `id` inherits when it sets none — the nearest ancestor frame's

@@ -4788,6 +4788,55 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect, cell: f32) 
     }
 }
 
+/// A colour chip painted straight onto `p`, in the Fill row's look ([`swatch`]):
+/// a rounded square with [`SWATCH_HAIRLINE`] round it, the checkerboard under a
+/// translucent colour only — for the rows that draw their chip as paint rather
+/// than as a widget (the style and variable browsers, the `--` list, a styled
+/// card's capsule).
+///
+/// **Rounded without a ground to mask against** (§15 D1082). [`swatch`] squares
+/// its checkerboard off with [`mask_corners`] in the colour it sits on; these
+/// rows sit on a hover wash or a lit row, so there is no one colour to name, and
+/// the square checkerboard behind a rounded fill was what read as a light patch
+/// with a blob in it. The checkerboard's own cells are rounded at the corners
+/// instead, and an opaque colour paints none of it.
+pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) {
+    let r = (rect.width().min(rect.height()) * 0.25).round();
+    if c.a() < 255 {
+        let cell = rect.width() * 0.5;
+        let r8 = r as u8;
+        p.rect_filled(rect, r8, egui::Color32::WHITE);
+        let dark = egui::Color32::from_gray(0xd8);
+        // Two by two, the dark ones on the diagonal — each touching one corner
+        // of the chip, and rounded there.
+        let tl = egui::Rect::from_min_size(rect.min, egui::vec2(cell, cell));
+        let br = egui::Rect::from_min_max(rect.min + egui::vec2(cell, cell), rect.max);
+        p.rect_filled(
+            tl,
+            egui::CornerRadius {
+                nw: r8,
+                ..Default::default()
+            },
+            dark,
+        );
+        p.rect_filled(
+            br,
+            egui::CornerRadius {
+                se: r8,
+                ..Default::default()
+            },
+            dark,
+        );
+    }
+    p.rect_filled(rect, r, c);
+    p.rect_stroke(
+        rect,
+        r,
+        egui::Stroke::new(1.0, SWATCH_HAIRLINE),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// Paint a left-to-right ramp of `stops` across `rect` as a vertex-coloured
 /// mesh. Square corners — see [`mask_corners`].
 ///

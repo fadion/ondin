@@ -1642,7 +1642,11 @@ fn a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy() {
     let StyleValue::Strokes(v) = &style.value else {
         unreachable!("a stroke style")
     };
-    assert_eq!(v[0].width_var, Some(spare), "the style's width reads D's copy");
+    assert_eq!(
+        v[0].width_var,
+        Some(spare),
+        "the style's width reads D's copy"
+    );
     assert_eq!(
         d.get(inst).unwrap().paint().strokes[0].width_var,
         Some(spare),

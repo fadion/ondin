@@ -532,7 +532,14 @@ impl OndinApp {
         if clicks.more
             && let Some(under) = clicks.more_rect
         {
-            self.style_menu = Some(StyleMenu {
+            // **The `⋯` toggles its menu** (§15 D1087): a second click on it
+            // closes what the first opened. The menu's own press-away test spares
+            // the button, so without this the click only opened it again.
+            let open = self
+                .style_menu
+                .as_ref()
+                .is_some_and(|m| m.slot == slot && m.targets == targets);
+            self.style_menu = (!open).then(|| StyleMenu {
                 slot,
                 targets: targets.to_vec(),
                 under,

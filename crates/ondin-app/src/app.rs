@@ -8435,9 +8435,8 @@ impl OndinApp {
             && let Some(target) = self.image_drop_target(Some(p))
         {
             let image = &loaded[0];
-            if self.replace_image_fill(target, image) {
-                self.session
-                    .info(format!("Replaced with {}", image.label()));
+            if let Some(said) = self.replace_image_fill(target, image) {
+                self.session.info(said);
                 return;
             }
         }
@@ -8490,20 +8489,35 @@ impl OndinApp {
 
     /// Put `image` into the fill `target` names, keeping how it was framed.
     ///
-    /// Returns whether there was anything to replace. The framing is carried
+    /// Returns what the floating status says — *Replaced with ‹file›*, and
+    /// what the replace detached after it — or `None` when there was nothing to
+    /// replace. The framing is carried
     /// because that is what §5.5a requires of *replace image* by name: the
     /// common case is swapping a stand-in for the real photograph, and re-cropping
     /// every time is the annoyance that generates a second report.
-    fn replace_image_fill(&mut self, target: (NodeId, usize), image: &LoadedImage) -> bool {
+    ///
+    /// 🚨 **The one canvas door that writes over a bound paint** (D1038 (2)'s
+    /// canvas half, §15 D1079): a fill bound to a colour variable is no binding
+    /// pass's — a `BrushSource` is replaced whole, not cut — so the commit cannot
+    /// name it, and the variable is read here, before the write. And this report
+    /// replaces the status the commit wrote, so a fill style the commit detached
+    /// is carried into it from [`EditorSession::last_detached`] rather than
+    /// overwritten.
+    fn replace_image_fill(
+        &mut self,
+        target: (NodeId, usize),
+        image: &LoadedImage,
+    ) -> Option<String> {
         let (id, index) = target;
-        let Some(node) = self.session.doc.get(id) else {
-            return false;
-        };
+        let node = self.session.doc.get(id)?;
         let mut fills = node.paint().fills.clone();
-        let Some(fill) = fills.get_mut(index) else {
-            return false;
-        };
+        let fill = fills.get_mut(index)?;
         let known = self.session.doc.has_image(&image.id);
+        let cut_var = fill
+            .brush
+            .var()
+            .and_then(|v| self.session.doc.variables().get(v))
+            .map(|v| v.name.clone());
         fill.brush = match fill.brush.literal() {
             // Keep the crop, the mode, the tile scale, the orientation and the
             // sampler's alpha — everything but which picture it is.
@@ -8511,8 +8525,8 @@ impl OndinApp {
                 r.id = image.id.clone();
             }),
             // A shape that was not showing a picture becomes one that is, at the
-            // defaults — a bound one detached (§15 D1039). There is no framing to
-            // keep, so there is nothing to say.
+            // defaults — a bound one detached (§15 D1039), and said below. There
+            // is no framing to keep.
             _ => ondin_core::image_brush(image.id.clone()),
         }
         .into();
@@ -8524,7 +8538,20 @@ impl OndinApp {
             });
         }
         ops.push(Operation::SetFills { id, fills });
-        self.commit_edit(Transaction(ops))
+        if !self.commit_edit(Transaction(ops)) {
+            return None;
+        }
+        let (styles, mut vars) = self.session.last_detached().clone();
+        if let Some(name) = cut_var
+            && !vars.contains(&name)
+        {
+            vars.push(name);
+        }
+        let replaced = format!("Replaced with {}", image.label());
+        Some(match crate::session::said_detached(styles, vars) {
+            Some(detached) => format!("{replaced} · {detached}"),
+            None => replaced,
+        })
     }
 
     /// Paste an image off the OS clipboard, if there is one.
@@ -8594,10 +8621,9 @@ impl OndinApp {
         // demand the point be *on* the selected shape, so the two aims have to
         // agree before anything is overwritten. See this function's own docs.
         if let Some(target) = self.image_drop_target(at)
-            && self.replace_image_fill(target, &image)
+            && let Some(said) = self.replace_image_fill(target, &image)
         {
-            self.session
-                .info(format!("Replaced with {}", image.label()));
+            self.session.info(said);
             return true;
         }
         let landed = self.create_image_at(&image, at.unwrap_or_else(|| self.viewport_centre()));
@@ -14337,6 +14363,116 @@ mod image_drop_tests {
             app.session.doc.image_count(),
             1,
             "sharing one entry between them"
+        );
+    }
+
+    /// **A picture dropped onto a bound or styled fill says what it detached**
+    /// (D1038 (2)'s canvas half, §15 D1079) — the one canvas door that writes
+    /// over a paint. A fill bound to a colour variable is no binding pass's, so
+    /// the commit could not name it, and the door's own *Replaced with …*
+    /// overwrote the *Detached Fill style* the commit did say.
+    ///
+    /// Flip, run: `cut_var` forced to `None` fails at the first status, *"Replaced
+    /// with photo"*; the `last_detached` read dropped fails at the second, the
+    /// style's detach lost under the report again.
+    #[test]
+    fn a_drop_onto_a_bound_or_styled_fill_says_what_it_detached() {
+        use ondin_core::style::{Style, StyleValue};
+        use ondin_core::{
+            BrushSource, Cell, Fill, Mode, NodeKind, Operation, Transaction, VarKind, Variable,
+            keyed_by_position, peniko::Color,
+        };
+        let ctx = egui::Context::default();
+        let mut app = app_with_an_empty_document(&ctx);
+        let root = app.session.doc.root();
+        let (a, b) = (app.session.ids.mint(), app.session.ids.mint());
+        let (mode, var) = (app.session.ids.mint_mode(), app.session.ids.mint_var());
+        let style = app.session.ids.mint_style();
+        let rect = |id, x: f64| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 100.0),
+                corner_radii: Default::default(),
+            },
+            transform: Some(ondin_core::kurbo::Affine::translate((x, 0.0))),
+            name: None,
+        };
+        let red = keyed_by_position([Fill {
+            brush: Color::from_rgba8(255, 0, 0, 255).into(),
+            visible: true,
+        }]);
+        assert!(app.commit_edit(Transaction(vec![
+            rect(a, 0.0),
+            rect(b, 200.0),
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand/primary".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFills {
+                id: a,
+                fills: keyed_by_position([Fill {
+                    brush: BrushSource::Bound { var, alpha: 1.0 },
+                    visible: true,
+                }]),
+            },
+            Operation::SetFills {
+                id: b,
+                fills: red.clone(),
+            },
+            Operation::AddStyle {
+                style: Style {
+                    id: style,
+                    name: "Surface".into(),
+                    value: StyleValue::Fills(red),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFillStyle {
+                id: b,
+                style: Some(style),
+            },
+        ])));
+        assert_eq!(app.session.doc.get(b).unwrap().styles().fills, Some(style));
+
+        app.session.selection.set_one(a);
+        app.drop_images_at(vec![loaded(1, Some("photo"))], Some(Point::new(50.0, 50.0)));
+        let fill = &app.session.doc.get(a).unwrap().paint().fills[0];
+        assert_eq!(
+            fill.brush.var(),
+            None,
+            "the picture replaced the bound fill"
+        );
+        assert_eq!(
+            app.session.status().text,
+            "Replaced with photo · Detached brand/primary"
+        );
+
+        app.session.selection.set_one(b);
+        app.drop_images_at(
+            vec![loaded(2, Some("photo"))],
+            Some(Point::new(250.0, 50.0)),
+        );
+        assert_eq!(app.session.doc.get(b).unwrap().styles().fills, None);
+        assert_eq!(
+            app.session.status().text,
+            "Replaced with photo · Detached Surface"
         );
     }
 }

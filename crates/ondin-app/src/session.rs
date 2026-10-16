@@ -569,6 +569,11 @@ pub struct EditorSession {
     /// What the last commit's resize did to flex items' growth — see
     /// [`FlexReceipt`] and [`Self::flex_receipt`], which is the only reader.
     flex_receipt: Option<FlexReceipt>,
+    /// The styles and the variables the last commit's passes detached, by
+    /// name — what [`said_detached`] worded onto the status — so a door whose
+    /// own report overwrites that status can carry them in it
+    /// ([`Self::last_detached`], §15 D1079).
+    last_detached: (Vec<String>, Vec<String>),
     status: Status,
 }
 
@@ -639,6 +644,7 @@ impl EditorSession {
             revision: 0,
             commits: 0,
             flex_receipt: None,
+            last_detached: Default::default(),
             status: Status::default(),
         }
     }
@@ -1243,6 +1249,9 @@ impl EditorSession {
     /// [`Self::try_commit`], with `run` saying whether this edit may be folded into
     /// the step before it.
     fn commit_inner(&mut self, tx: Transaction, run: bool) -> Result<(), OpError> {
+        // Cleared first, so a commit that empties, changes nothing or fails
+        // never hands the caller the one before it's detaches.
+        self.last_detached = Default::default();
         if tx.0.is_empty() {
             return Ok(());
         }
@@ -1318,7 +1327,9 @@ impl EditorSession {
             }
         }
         vars_cut.sort();
-        let detached = said_detached(styles_detached(&self.doc, &tx, user), vars_cut);
+        let styles_cut = styles_detached(&self.doc, &tx, user);
+        let cut = (styles_cut.clone(), vars_cut.clone());
+        let detached = said_detached(styles_cut, vars_cut);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation
@@ -1440,6 +1451,7 @@ impl EditorSession {
         if let Some(said) = detached {
             self.info(said);
         }
+        self.last_detached = cut;
         Ok(())
     }
 
@@ -1733,6 +1745,14 @@ impl EditorSession {
         &self.status
     }
 
+    /// What the last commit's passes detached, as `(styles, variables)` by
+    /// name — empty after a commit that detached nothing or did not land. For
+    /// a door whose own report replaces the status the commit wrote, so the
+    /// detach is said in it rather than lost under it (§15 D1079).
+    pub fn last_detached(&self) -> &(Vec<String>, Vec<String>) {
+        &self.last_detached
+    }
+
     /// The slot itself, so a test can age a message past its hold.
     #[cfg(test)]
     pub fn status_mut(&mut self) -> &mut Status {
@@ -1940,7 +1960,7 @@ fn effect_numbers_cut(
 /// wrote over (D1038 (2)): *Detached surface/raised*, *Detached space/gap*, or
 /// a count — *3 styles*, *2 variables*, *3 styles and variables* — `None` when
 /// nothing was (§15 D1063, D1071).
-fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<String> {
+pub(crate) fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<String> {
     match (styles.as_slice(), vars.as_slice()) {
         ([], []) => None,
         ([one], []) | ([], [one]) => Some(format!("Detached {one}")),

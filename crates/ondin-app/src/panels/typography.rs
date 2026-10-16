@@ -1487,8 +1487,9 @@ impl OndinApp {
             let combo = egui::ComboBox::from_id_salt("font-family")
                 .icon(ui::combo_chevron)
                 .width(width)
-                // **This is the one combo whose popup you are meant to click into**,
-                // and egui's default does not allow it: `PopupCloseBehavior` for a
+                // **This combo's popup is one you are meant to click into** (the
+                // swap picker's and two of `variants.rs`'s popups are too), and
+                // egui's default does not allow it: `PopupCloseBehavior` for a
                 // `ComboBox` is `CloseOnClick`, which is a click *anywhere, inside or
                 // outside*. So clicking the search field this list exists to be
                 // filtered by dismissed the list. Reported.

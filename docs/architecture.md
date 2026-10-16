@@ -1676,7 +1676,10 @@ selected one (§15 D1089: `spacing_subject`'s pointer, `spacing_hover` the topmo
 or instance and not locked; one of several selected is never the subject, and a drag selects nothing) —
 **one `SetDisplay` through the commit door, the Container card's own write**,
 so `keep_spacing_bindings` (§15 D1058), the style pass (§15 D1075) and the override marks judge it as
-they judge a typed value. `spacing::bands` answers them in the container's local space: the four
+they judge a typed value — **but for a bound slot the drag moves off its variable's number, whose
+binding the drag cuts itself**, a `SetSpacingVars` ahead of the `SetDisplay` (§15 D1090): left to the
+pass, a drag to 0 was the slot written its own literal 0, kept bound, and laid back at its variable.
+`spacing::bands` answers them in the container's local space: the four
 paddings edge to edge, a grid's column-gap and row-gap bands from its laid tracks across the other
 axis's run, a flex container's between-items bands across each line's cross band and a wrapped one's
 line gaps across the content's whole main extent — every band where the layout puts it, the space as
@@ -3822,8 +3825,11 @@ detaches the corners before its write only when a chip was typed over — otherw
 `keep_corner_bindings` judges each corner, as for the `DragValue`'s edit. **A refused `Enter` leaves
 either field as typed** — focused, its list up — though the `TextEdit` gives the keyboard up on it: the
 hex field sends its text back through the retype buffer to be refocused, and `number_retype` keeps its
-buffer. A bound radius field's badge asks the not-allowed cursor, saying it will
-not scrub (§15 D1046). **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one
+buffer. ~~A bound radius field's badge asks the not-allowed cursor, saying it will
+not scrub (§15 D1046).~~ **A bound number field draws the unbound field's own prefix** — its size and
+its place, `ui::prefix_strip` and `ui::paint_prefix` (§15 D1092) — **under the plain arrow**: the
+scrub arrows' absence says it will not scrub, D1046's not-allowed cursor overturned by the
+maintainer. **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one
 transaction — the variable, a first mode if the document has none, and the bind — and then the browser
 renames it, with no pending row or dashed capsule — kept over D1038's pending row, being one undo
 step (§15 D1041's amendment). *Extract* files a solid at full alpha, the `%` staying the bind's.
@@ -3957,7 +3963,8 @@ users are rewritten from it, staying styled — a user in another mode changes c
 style by id, else by name and slot, else detaches.
 
 **The chrome** (§15 D1063 in full). The Fill, Stroke and Effects cards' headers carry a `⋯`, always
-last, the `+` moved in beside it (`ui::HEAD_MORE_W`, a 15 gap since §15 D1086): *Apply style…*,
+last, the `+` moved in beside it (`ui::HEAD_MORE_W`, a 5 gap laid out between the two boxes since §15
+D1091 — D1086's 15, like F8's 10, sized only the hit pads, the boxes touching): *Apply style…*,
 *Create style…* (*Create style as a copy…* when styled, *…from these N layers…* over several, §15 D1086; off over *Mixed*, a partly styled card or lists that disagree) and *Detach style*,
 each counting the layers it acts on where there are several (F10).
 `OndinApp::style_card` reads `styles::shown`: a card whose targets share one style is a 28-high capsule
@@ -7567,7 +7574,9 @@ pub trait ScenePainter {
   the commit will keep, `build::kept_spacing_vars` — the pass's own judgement, shared — and the
   preview's `LayoutView` answers an override's layout as it is, the document's through
   `resolved_display`. **`SetSpacingVars` is patched** over the pending layout, else the document's
-  resolved one, with the bindings it sets, and `SetVariableCell`'s arm re-resolves each node with a
+  resolved one, with the bindings it sets — kept on the override (`NodeOverride::spacing_vars`), so a
+  later `SetDisplay` on that node resolves with them rather than with `kept_spacing_vars`, as the
+  commit's pass leaves a transaction that sets the bindings alone (§15 D1090) — and `SetVariableCell`'s arm re-resolves each node with a
   bound slot against the changed table. ~~⚠️ The preview runs no `keep_spacing_bindings`, so a write that
   the commit will detach still previews at the variable's number — the partly bound field's scrub, §15
   D1058's *Fix*.~~ ⚠️ **The preview still runs no keep pass as such** — `set_preview` and
@@ -12922,12 +12931,16 @@ the catalog and the system scan land. Each of those arrivals wakes the UI thread
 rows still in flight when a scroll stops otherwise keep the fallback font until the mouse moves
 (§15 D110).
 
-**This is the one popup in the app you are meant to click *into*, so it does not close on a click
-inside itself.** egui's `ComboBox` default counts a click anywhere as a dismissal, which meant the
-search field the list exists to be filtered by closed the list (§15 D194). This combo alone asks for
-`CloseOnClickOutside` and then closes itself explicitly where a family row is picked, since with that
-behaviour nothing else does; every other combo in the app is a plain list of rows and keeps the
-default.
+**This is a popup you are meant to click *into*, so it does not close on a click inside itself.**
+egui's `ComboBox` default counts a click anywhere as a dismissal, which meant the search field the
+list exists to be filtered by closed the list (§15 D194). This combo asks for `CloseOnClickOutside`
+and then closes itself explicitly where a family row is picked, since with that behaviour nothing else
+does. ~~This combo alone …; every other combo in the app is a plain list of rows and keeps the
+default.~~ **It is not the only one**: the variant swap picker (`variants::swap_picker`, §15 D983) is
+a combo with a search field at its top too, and asks for the same, closing by hand on a pick; and two
+`Popup`s in `panels/variants.rs` ask for it as well — a variant value chip's menu, which holds its
+rename field, and the Properties card's `+` menu. The app's other combos are plain lists of rows and
+keep the default.
 
 **Applying a family clears the layer's variable-axis settings and its OpenType features**, because
 both are named by tag and a tag means something different in the next typeface — `wdth 75` on a family
@@ -14249,12 +14262,15 @@ D1089 the band may be an unselected container's**, so *"already selected"* is no
 band; what still holds is that a band drag designates nothing — its release selects nothing — and
 duplicates nothing.
 `spacing::canvas_tests::the_modifiers_choose_the_sides_and_the_step` pins the order. Each frame
-previews one `SetDisplay`, the modifiers read every frame; the cursor is the resize arrows along the
+previews one `SetDisplay` — led by a `SetSpacingVars` cutting the touched bound slots where the value
+leaves their variable's number (§15 D1090) — the modifiers read every frame; the cursor is the resize arrows along the
 band's axis, turned through the container's world transform, for the whole drag; the right button or
 `Escape` abandons it through `cancel_gesture`. **The release commits through `session.commit`, skipped
 where every written slot already draws the value** — the drawn and not the stored, or a bound slot's
 literal 0 would make a release on its variable's number a commit; the commit door's no-op test is a
-second defence behind it.
+second defence behind it. A release that cuts a binding says so itself — *Detached ‹name›*, read by
+`OndinApp::band_drag_cut` before the commit and merged with the commit's own through `said_detached`
+— because the commit's `variables_detached` is silent on a binding the edit sets (§15 D1090).
 
 **Everything above is decided on the press, from `press_origin`, not at drag-start** — the ruler
 bar's claim included. Getting that wrong is what made a guide nearly impossible to pick up at all;

@@ -1658,7 +1658,7 @@ shape (§15 D1079), and *Paste properties* and *Replace image…* saying what th
 detached (§15 D1080); D1038 (7)'s remaining numbers — opacity (§15 D1072), a stroke's width (§15 D1073),
 an effect's X, Y, blur and spread (§15 D1074); layout styles, the fifth slot (§15 D1075, D1076);
 spacing handles on the canvas (§15 D1078), shown on hover since (§15 D1089); and the maintainer's
-polish list over the chrome (§15 D1081–D1088).
+polish list over the chrome (§15 D1081–D1088, D1090–D1092).
 
 **Open** (what D1037's list and D1038 leave):
 

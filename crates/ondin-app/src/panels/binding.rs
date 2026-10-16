@@ -1514,8 +1514,8 @@ impl OndinApp {
                         ops.push(Operation::SetStrokes { id, strokes });
                     }
                     // The one number, over the list as the detach above leaves
-                    // it, unbound (§15 D1074) — floored only where the slot is (a
-                    // blur at 0).
+                    // it, unbound (§15 D1074) — within the card's own range for
+                    // the slot, as the stroke width's retype caps at its field's.
                     FieldKey::EffectNumber { id, item, slot } => {
                         let mut effects = match ops.last() {
                             Some(Operation::SetEffects { effects, .. }) => effects.clone(),
@@ -1527,8 +1527,9 @@ impl OndinApp {
                         let Some(e) = effects.iter_mut().find(|e| e.id == item) else {
                             return;
                         };
+                        let range = super::inspector::effect_number_range(slot);
                         e.value
-                            .set_number(slot, raw.max(ondin_core::Effect::number_floor(slot)));
+                            .set_number(slot, raw.clamp(*range.start(), *range.end()));
                         e.vars[slot] = None;
                         ops.push(Operation::SetEffects { id, effects });
                     }
@@ -3288,6 +3289,51 @@ mod tests {
         assert_eq!(app.field_var(key), None, "the retype detaches");
         assert_eq!(number(&app), -6.0, "and writes the negative X typed");
         assert_eq!(app.session.status().text, "", "asked for, so silent");
+
+        // **And a retype stops where the card's field stops** (§15 D1074's
+        // reading (d), fixed in its third amendment): a blur typed with an extra
+        // three digits lands at `MAX_BLUR`, the protective cap the card's own
+        // field scrubs to, not at a radius whose buffer the CPU backend would
+        // have to allocate. Flip, run: the arm flooring at the range's start
+        // alone fails here at 50 000.
+        let blur = FieldKey::EffectNumber {
+            id: rect,
+            item,
+            slot: ondin_core::EFFECT_BLUR,
+        };
+        app.bind_field(blur, radius);
+        app.var_retype = Some(Retype {
+            key: blur,
+            text: "50000".into(),
+            focus: true,
+        });
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    if let Some(rt) = app.var_retype.clone() {
+                        app.number_retype(ui, blur, rt, 160.0);
+                    }
+                },
+            );
+        };
+        run(&mut app, vec![]);
+        run(
+            &mut app,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        let blurred =
+            app.session.doc.get(rect).unwrap().effects()[0].numbers()[ondin_core::EFFECT_BLUR];
+        assert_eq!(blurred, Some(super::super::inspector::MAX_BLUR), "capped");
     }
 
     /// **An axis something else sizes takes no binding** (§15 D1061, the

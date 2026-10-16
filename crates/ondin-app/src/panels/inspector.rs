@@ -482,6 +482,32 @@ impl AngleScrub {
 /// list of three took a moment to read; the swatch keeps its full strength either
 /// way, so the extra 10% costs nothing that matters.
 const HIDDEN_OPACITY: f32 = 0.6;
+
+/// How far an effect's blur may be scrubbed or typed.
+///
+/// A bound rather than none, and a protective one: the CPU backend
+/// allocates padding proportional to `effect::reach`, so a radius typed with
+/// an extra digit is an enormous buffer rather than a silly picture. A
+/// thousand is already far past any radius that means anything on a page,
+/// and — like every range in this file — a first-draft number (§15 D186).
+/// Module-level since the bound chip's retype caps at it too (§15 D1074's
+/// reading (d), fixed in its third amendment).
+pub(super) const MAX_BLUR: f64 = 1_000.0;
+/// The reach of an effect's offset or spread, in both directions.
+pub(super) const MAX_OFFSET: f64 = 10_000.0;
+
+/// The range an effect number's field takes in `slot` — a blur's
+/// `0..=MAX_BLUR`, an offset's or a spread's `±MAX_OFFSET` — for the bound
+/// chip's retype, which wrote any number typed until §15 D1074's reading (d)
+/// was fixed (its third amendment) where the card's fields stop at these.
+pub(super) fn effect_number_range(slot: usize) -> std::ops::RangeInclusive<f64> {
+    if slot == ondin_core::EFFECT_BLUR {
+        0.0..=MAX_BLUR
+    } else {
+        -MAX_OFFSET..=MAX_OFFSET
+    }
+}
+
 /// Everything a paint row needs beyond the brush it is showing.
 struct RowCtx {
     /// The node the slot hangs off — the picker's key, and the reorder's anchor.
@@ -12196,16 +12222,6 @@ impl OndinApp {
         /// on a line inside a 272pt frame — already draws, and matching the thing
         /// beside it beats matching one of the mockup's three answers.
         const COL: f32 = 6.0;
-        /// How far a blur may be scrubbed.
-        ///
-        /// A bound rather than none, and a protective one: the CPU backend
-        /// allocates padding proportional to `effect::reach`, so a radius typed with
-        /// an extra digit is an enormous buffer rather than a silly picture. A
-        /// thousand is already far past any radius that means anything on a page,
-        /// and — like every range in this file — a first-draft number (§15 D186).
-        const MAX_BLUR: f64 = 1_000.0;
-        /// The reach of an offset or a spread, in both directions.
-        const MAX_OFFSET: f64 = 10_000.0;
         /// The largest a `Filters` factor goes — **twice its neutral, so the range
         /// is symmetric about it**.
         ///

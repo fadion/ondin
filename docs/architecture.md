@@ -3410,7 +3410,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 and 6 built; §15 D1037–D1071)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1–4 and 6 built; §15 D1037–D1080)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3736,7 +3736,12 @@ paint's binding is its `BrushSource`, decided at the write and no pass's, so the
 its detach; **the one canvas door that writes over a bound paint says it itself** (§15 D1079) — a
 picture dropped or pasted onto a shape (`replace_image_fill`) reads the fill's variable before the write
 and folds it, with the commit's `EditorSession::last_detached`, into its own *Replaced with ‹file›*,
-which would otherwise overwrite a style's *Detached*.
+which would otherwise overwrite a style's *Detached*. The inspector's *Replace image…* reports through
+the same `OndinApp::replaced_status` (§15 D1080) — a styled picture fill reaches it only under the
+style's *Edit*, where nothing is detached (the image card is read-only under a styled card, like its
+row), and a bound paint, being a colour, not at all. ***Paste properties* says the same** (§15 D1080): read before the commit, the carried
+bindings `variable::rebind` lands elsewhere (*Rebound ‹name›*) or detaches, and the bound paints its
+writes take off the targets, merged with `last_detached()` into its own status.
 **The seventh pass, the stroke width's, appends nothing** (§15 D1073): it rewrites the `SetStrokes`
 lists in place, so no `Set*Vars` op is there to read. `commit_inner` notes every stroke the edit writes
 with its width bound (`stroke_widths_bound`) before `keep_stroke_width_bindings` and names those the
@@ -6067,7 +6072,8 @@ rules this section already states rather than a third. Each of the three skips t
 already agree, so pasting an appearance a layer already has is an empty transaction and no undo step.
 **A bound paint lands by a paste's rule** (§5.3f, §15 D1047): the clipboard is the app's and outlives
 a document switch, so `Properties` also carries each bound variable's name and kind and each paint as
-drawn, and `paste_properties` keeps, rebinds through `variable::rebind` or detaches to the drawn brush.
+drawn, and `paste_properties` keeps, rebinds through `variable::rebind` or detaches to the drawn brush;
+the app's status names what it rebound and detached (§5.3f, §15 D1080).
 
 **What is shared is the whole list, not the first brush.** `shared_fills` and `shared_strokes` answer
 with the list every target agrees on, so two layers that

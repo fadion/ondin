@@ -1684,7 +1684,10 @@ is drawn in `GRID_GAP`'s tint — a grid's gaps excepted, its track lines drawin
 band under the pointer in `SPACING_STRONG` with a pill; a band under 6 screen px is dropped, but
 not the kind a drag is writing while it runs. The whole
 band picks, at least 8 screen px across, so a zero gap is a strip on its seam; nothing picks within
-`HANDLE_PICK_PX` of the outline. The drag writes the pointer's delta along the axis in whole px,
+`HANDLE_PICK_PX` of the outline. A padding band yields to any child on the point but a mask, which
+draws nothing of its own; a gap band yields only to a child pinned by authored insets, since its strip
+reaching into the in-flow items either side is what lets a zero gap be dragged open (§15 D1078's
+second amendment). The drag writes the pointer's delta along the axis in whole px,
 floored at 0, from the **drawn** value, over the **stored** display, so an untouched bound slot stays
 bound; `Shift` steps by 10, `Alt` writes the opposite padding, `Alt+Shift` all four. The press, the
 cursor and the release are §9.4's.

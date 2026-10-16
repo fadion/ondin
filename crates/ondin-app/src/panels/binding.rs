@@ -963,10 +963,11 @@ impl OndinApp {
         let at = c.key.at();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
         let mut chosen: Option<VarId> = None;
-        let pos = ui::menu_place(
+        let pos = ui::dropdown_place(
             ctx,
-            c.under.left_bottom() + egui::vec2(0.0, 6.0),
+            c.under,
             egui::vec2(LIST_W, (list.len().clamp(1, 8) as f32) * LIST_ROW_H + 40.0),
+            6.0,
         );
         let rect = egui::Area::new(egui::Id::new("var-complete"))
             .order(egui::Order::Tooltip)
@@ -1050,7 +1051,16 @@ impl OndinApp {
                                 // kit's variable under a frame set to one of its kit's
                                 // modes reads that column (§15 D1064, D1065).
                                 let value = doc.resolve_var(at, v.id);
-                                if list_row(ui, v, value, &c.query, i == c.highlight).clicked() {
+                                let lit = i == c.highlight;
+                                let row = list_row(ui, v, value, &c.query, lit);
+                                // **The arrows scroll the list to the row they
+                                // light** (§15 D1084): past the eighth row the
+                                // highlight previewed on the canvas from below
+                                // the list's bottom edge, out of sight.
+                                if lit && (down || up) {
+                                    row.scroll_to_me(None);
+                                }
+                                if row.clicked() {
                                     chosen = Some(v.id);
                                 }
                             }

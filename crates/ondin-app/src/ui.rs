@@ -581,6 +581,34 @@ pub fn menu_place(ctx: &egui::Context, at: egui::Pos2, size: egui::Vec2) -> egui
     pos
 }
 
+/// Where a list `size` big opens under the field `under`, `gap` below it: left
+/// edges together, or **right edges together** when that would run off the
+/// screen, and above the field when below has no room — then clamped by
+/// [`menu_place`].
+///
+/// ⚠️ **Not [`menu_place`] at the field's corner** (§15 D1084). That function
+/// places a menu at a *point* and flips it to the point's other side, which for
+/// a context menu is the pointer's left; for a list anchored on a field it put
+/// the list one list-width left of the field's left edge — in the inspector,
+/// out over the canvas and away from the field it belongs to.
+pub fn dropdown_place(
+    ctx: &egui::Context,
+    under: egui::Rect,
+    size: egui::Vec2,
+    gap: f32,
+) -> egui::Pos2 {
+    let screen = ctx.content_rect();
+    let x = match under.left() + size.x > screen.right() {
+        true => under.right() - size.x,
+        false => under.left(),
+    };
+    let y = match under.bottom() + gap + size.y > screen.bottom() {
+        true => under.top() - gap - size.y,
+        false => under.bottom() + gap,
+    };
+    menu_place(ctx, egui::pos2(x, y), size)
+}
+
 /// Height of a top-bar dropdown's head, and so of its hit target. The design's
 /// control height (its undo/redo squares are 26×26), which is also comfortably
 /// more than the 16pt glyph and 12pt caret inside it.

@@ -6192,11 +6192,36 @@ impl OndinApp {
         touched.sort_unstable();
         touched.dedup();
         let layers = touched.len();
+        // Read before the commit: what the paste's bindings land as, and the
+        // paint bindings it writes over on the targets — neither is any pass's,
+        // so the commit cannot say them (§15 D1080).
+        let (rebound, mut cut) = properties_landing(&self.session.doc, &props);
+        for name in paints_overwritten(&self.session.doc, &tx) {
+            if !cut.contains(&name) {
+                cut.push(name);
+            }
+        }
         if self.session.commit(tx) {
-            self.session.info(match layers {
+            let (styles, mut vars) = self.session.last_detached().clone();
+            for name in cut {
+                if !vars.contains(&name) {
+                    vars.push(name);
+                }
+            }
+            vars.sort();
+            let mut said = match layers {
                 1 => "Pasted properties".to_owned(),
                 n => format!("Pasted properties onto {n} layers"),
-            });
+            };
+            match rebound.as_slice() {
+                [] => {}
+                [one] => said.push_str(&format!(" · Rebound {one}")),
+                many => said.push_str(&format!(" · Rebound {} variables", many.len())),
+            }
+            if let Some(detached) = crate::session::said_detached(styles, vars) {
+                said.push_str(&format!(" · {detached}"));
+            }
+            self.session.info(said);
         }
     }
 
@@ -8180,8 +8205,34 @@ impl OndinApp {
         }
         ops.extend(self.slot_transaction(id, slot, next).0);
         if self.commit_edit(Transaction(ops)) {
-            self.session
-                .info(format!("Replaced with {}", image.label()));
+            // **Through the drop's wording** (§15 D1079, D1080), so a detach the
+            // commit said is never overwritten here. Today none reaches it: a
+            // colour variable cannot — the row exists only over a picture, and a
+            // bound paint is a colour — and a fill style holding a picture locks
+            // the card (`image_edit_card`'s `locked`) except under the style's
+            // *Edit*, where the write is an edit of the style and detaches
+            // nothing. Kept for the door that changes that.
+            let said = self.replaced_status(image.label(), None);
+            self.session.info(said);
+        }
+    }
+
+    /// *Replaced with ‹label›*, and what the commit just made detached after it —
+    /// [`EditorSession::last_detached`], with `cut_var` (a variable the door read
+    /// off the paint before writing over it) among the variables. The two doors
+    /// that replace a picture report through this, so neither overwrites the
+    /// *Detached ‹style›* the commit said (§15 D1079, D1080).
+    fn replaced_status(&self, label: &str, cut_var: Option<String>) -> String {
+        let (styles, mut vars) = self.session.last_detached().clone();
+        if let Some(name) = cut_var
+            && !vars.contains(&name)
+        {
+            vars.push(name);
+        }
+        let replaced = format!("Replaced with {label}");
+        match crate::session::said_detached(styles, vars) {
+            Some(detached) => format!("{replaced} · {detached}"),
+            None => replaced,
         }
     }
 
@@ -8541,17 +8592,7 @@ impl OndinApp {
         if !self.commit_edit(Transaction(ops)) {
             return None;
         }
-        let (styles, mut vars) = self.session.last_detached().clone();
-        if let Some(name) = cut_var
-            && !vars.contains(&name)
-        {
-            vars.push(name);
-        }
-        let replaced = format!("Replaced with {}", image.label());
-        Some(match crate::session::said_detached(styles, vars) {
-            Some(detached) => format!("{replaced} · {detached}"),
-            None => replaced,
-        })
+        Some(self.replaced_status(image.label(), cut_var))
     }
 
     /// Paste an image off the OS clipboard, if there is one.
@@ -8836,6 +8877,92 @@ impl LoadedImage {
     pub(crate) fn label(&self) -> &str {
         self.name.as_deref().unwrap_or("the pasted image")
     }
+}
+
+/// What *Paste properties*' bindings land as in `doc`, by D1038's paste rule
+/// (`variable::rebind`, §15 D1047): the names rebound to another variable of
+/// the same name or kit origin — a paste into another document — and the names
+/// detached to what they drew at the copy, where `doc` has none. A binding kept
+/// as itself, a paste into the document it came from, is neither (§15 D1080).
+fn properties_landing(
+    doc: &ondin_core::Document,
+    props: &ondin_core::build::Properties,
+) -> (Vec<String>, Vec<String>) {
+    let t = doc.variables();
+    let bound = props
+        .fills
+        .iter()
+        .map(|f| &f.brush)
+        .chain(props.strokes.iter().map(|s| &s.brush))
+        .filter_map(ondin_core::BrushSource::var)
+        .chain(props.strokes.iter().filter_map(|s| s.width_var))
+        .chain(props.opacity_var);
+    let (mut rebound, mut detached) = (Vec::new(), Vec::new());
+    for v in bound {
+        let Some(c) = props.carried.iter().find(|c| c.id == v) else {
+            continue;
+        };
+        let list = match ondin_core::variable::rebind(t, &props.carried, v) {
+            Some(to) if to == v => continue,
+            Some(_) => &mut rebound,
+            None => &mut detached,
+        };
+        if !list.contains(&c.name) {
+            list.push(c.name.clone());
+        }
+    }
+    rebound.sort();
+    detached.sort();
+    (rebound, detached)
+}
+
+/// The colour variables `tx`'s fill and stroke writes take off the layers they
+/// write — a target's own bound paint replaced by the pasted one. A paint's
+/// binding is no binding pass's (§15 D1079), so the commit cannot name these;
+/// a stroke's bound width is, and is left to it (§15 D1073).
+fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<String> {
+    use ondin_core::BrushSource;
+    let t = doc.variables();
+    let mut names: Vec<String> = Vec::new();
+    for op in &tx.0 {
+        let (had, now): (Vec<_>, Vec<_>) = match op {
+            Operation::SetFills { id, fills } => match doc.get(*id) {
+                Some(n) => (
+                    n.paint()
+                        .fills
+                        .iter()
+                        .filter_map(|f| f.brush.var())
+                        .collect(),
+                    fills.iter().filter_map(|f| f.brush.var()).collect(),
+                ),
+                None => continue,
+            },
+            Operation::SetStrokes { id, strokes } => match doc.get(*id) {
+                Some(n) => (
+                    n.paint()
+                        .strokes
+                        .iter()
+                        .filter_map(|s| s.brush.var())
+                        .collect(),
+                    strokes
+                        .iter()
+                        .filter_map(|s| BrushSource::var(&s.brush))
+                        .collect(),
+                ),
+                None => continue,
+            },
+            _ => continue,
+        };
+        for v in had.into_iter().filter(|v| !now.contains(v)) {
+            if let Some(var) = t.get(v)
+                && !names.contains(&var.name)
+            {
+                names.push(var.name.clone());
+            }
+        }
+    }
+    names.sort();
+    names
 }
 
 /// The document-wide id for these bytes: `sha256:<hex>` of the **encoded**
@@ -14473,6 +14600,181 @@ mod image_drop_tests {
         assert_eq!(
             app.session.status().text,
             "Replaced with photo · Detached Surface"
+        );
+    }
+}
+
+/// *Paste properties* says what its bindings landed as (§15 D1080).
+#[cfg(test)]
+mod paste_properties_report_tests {
+    use super::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::peniko::Color;
+    use ondin_core::style::{Style, StyleValue};
+    use ondin_core::{
+        BrushSource, Cell, Document, Fill, IdSource, Mode, NodeId, NodeKind, Operation, Stroke,
+        Transaction, VarId, VarKind, Variable, keyed_by_position,
+    };
+
+    fn rect(id: NodeId, parent: NodeId) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(50.0, 50.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }
+    }
+
+    fn colour(ids: &mut IdSource, mode: ondin_core::ModeId, name: &str) -> (VarId, Operation) {
+        let id = ids.mint_var();
+        let op = Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Color,
+                cells: [(mode, Cell::Color(Color::from_rgba8(0, 0, 255, 255)))].into(),
+                origin: None,
+                forked: None,
+            },
+        };
+        (id, op)
+    }
+
+    fn bound(var: VarId) -> BrushSource {
+        BrushSource::Bound { var, alpha: 1.0 }
+    }
+
+    /// **A paste into another document says what it rebound and what it
+    /// detached** (§15 D1080) — the copied fill's *brand/primary* found again
+    /// here by name, its stroke's *only/there* with no namesake detached to
+    /// what it drew, the first target's fill style cut by the commit, and the
+    /// second target's own bound fill written over. Until D1080 the status was
+    /// *Pasted properties onto 2 layers* alone, the commit's *Detached Surface*
+    /// overwritten under it.
+    ///
+    /// Flips, run: `properties_landing` answering two empty lists fails at the
+    /// status, *"… · Detached 2 styles and variables"*, the rebound and the
+    /// missing namesake gone; `paints_overwritten` answering empty fails at the
+    /// same assertion, *"… · Rebound brand/primary · Detached 2 styles and
+    /// variables"*.
+    #[test]
+    fn a_paste_into_another_document_says_what_it_rebound_and_detached() {
+        // The copying document: a fill on brand/primary, a stroke on only/there.
+        let mut ids = IdSource::new(0xA1A);
+        let mut there = Document::new(ids.mint());
+        let mode = ids.mint_mode();
+        let (brand, add_brand) = colour(&mut ids, mode, "brand/primary");
+        let (only, add_only) = colour(&mut ids, mode, "only/there");
+        let src = ids.mint();
+        there
+            .apply(&Transaction(vec![
+                Operation::AddMode {
+                    mode: Mode {
+                        id: mode,
+                        name: "Mode 1".into(),
+                    },
+                    index: 0,
+                    cells: vec![],
+                },
+                add_brand,
+                add_only,
+                rect(src, there.root()),
+                Operation::SetFills {
+                    id: src,
+                    fills: keyed_by_position([Fill {
+                        brush: bound(brand),
+                        visible: true,
+                    }]),
+                },
+                Operation::SetStrokes {
+                    id: src,
+                    strokes: keyed_by_position([Stroke {
+                        brush: bound(only),
+                        width: 2.0,
+                        ..Default::default()
+                    }]),
+                },
+            ]))
+            .expect("the copying document");
+        let props = ondin_core::build::properties_of(&there, src).expect("a rect's properties");
+
+        // The pasting document: its own brand/primary, a styled target and a
+        // target bound to local/x.
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xB2B);
+        app.session.adopt_document(Document::new(ids.mint()), None);
+        let root = app.session.doc.root();
+        let ids = &mut app.session.ids;
+        let mode = ids.mint_mode();
+        let (_, add_brand) = colour(ids, mode, "brand/primary");
+        let (local, add_local) = colour(ids, mode, "local/x");
+        let (a, b, style) = (ids.mint(), ids.mint(), ids.mint_style());
+        let red = keyed_by_position([Fill {
+            brush: Color::from_rgba8(255, 0, 0, 255).into(),
+            visible: true,
+        }]);
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            add_brand,
+            add_local,
+            rect(a, root),
+            rect(b, root),
+            Operation::SetFills {
+                id: a,
+                fills: red.clone(),
+            },
+            Operation::AddStyle {
+                style: Style {
+                    id: style,
+                    name: "Surface".into(),
+                    value: StyleValue::Fills(red),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFillStyle {
+                id: a,
+                style: Some(style),
+            },
+            Operation::SetFills {
+                id: b,
+                fills: keyed_by_position([Fill {
+                    brush: bound(local),
+                    visible: true,
+                }]),
+            },
+        ])));
+        assert_eq!(app.session.doc.get(a).unwrap().styles().fills, Some(style));
+
+        app.property_clipboard = Some(props);
+        app.session.selection.set(vec![a, b]);
+        app.paste_properties();
+
+        let doc = &app.session.doc;
+        assert_eq!(doc.get(a).unwrap().styles().fills, None, "the style cut");
+        let fill = doc.get(b).unwrap().paint().fills[0].brush.var();
+        let here = doc.variables().by_name("brand/primary").map(|v| v.id);
+        assert_eq!(
+            fill, here,
+            "the fill rebound to this document's brand/primary"
+        );
+        assert_eq!(
+            app.session.status().text,
+            "Pasted properties onto 2 layers · Rebound brand/primary · \
+             Detached 3 styles and variables"
         );
     }
 }

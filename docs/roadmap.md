@@ -1606,7 +1606,7 @@ edited down to this the same day.*
 **Ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built 2026-10-14, steps 3 and 4 on 2026-10-15,
 step 6's text styles and string variables the same day, and the rest of D1038 on 2026-10-16** — §15
 D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
-maintainer's rulings on D1037's open questions, and §15 D1039–D1080 what is built; `architecture.md`
+maintainer's rulings on D1037's open questions, and §15 D1039–D1089 what is built; `architecture.md`
 §5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
@@ -1656,8 +1656,9 @@ accepted (D1038):
 passes' variables (§15 D1071) and the one canvas door onto a paint, a picture dropped or pasted onto a
 shape (§15 D1079), and *Paste properties* and *Replace image…* saying what they rebound and
 detached (§15 D1080); D1038 (7)'s remaining numbers — opacity (§15 D1072), a stroke's width (§15 D1073),
-an effect's X, Y, blur and spread (§15 D1074); layout styles, the fifth slot (§15 D1075, D1076); and
-spacing handles on the canvas (§15 D1078).
+an effect's X, Y, blur and spread (§15 D1074); layout styles, the fifth slot (§15 D1075, D1076);
+spacing handles on the canvas (§15 D1078), shown on hover since (§15 D1089); and the maintainer's
+polish list over the chrome (§15 D1081–D1088).
 
 **Open** (what D1037's list and D1038 leave):
 

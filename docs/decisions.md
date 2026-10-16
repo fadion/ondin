@@ -1475,9 +1475,18 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1075** — **Styles and variables, layout styles' core: a fifth slot, a container's layout — its whole `Display`, a grid's tracks included, and its gap and padding bindings beside it — linked copies settled at the commit, written by two operations.** The session's calls under the maintainer's delegation; D1038 (f) gives the fields, nothing the model. `StyleSlot::Layout` (last in `ALL`, title *Container*), `StyleValue::Layout(Box<LayoutStyle { display, spacing_vars }>)`, `StyleRefs::layout`, `SetLayoutStyle`. 🚨 The whole `Display` — (f)'s *"only the container's fields"* read as the type whole — and the bindings, which live on the node (D1058). `write_op` → `write_ops` (`SetDisplay` + `SetSpacingVars`); `writes_slot` maps both; `StyleValue::of` an `Option`, a layer with no layout having none (`create_ops` `None`, `agreed` following). `check`: a frame or a group only, spacing bindings numbers. 🚨 `settle` reads a container with no layout as off its style, so applying one to a plain frame gives it the layout. `edit_through` builds the value from the user's display and bindings plus each write, a layout taken away passing through. `detach_vars` floored at 0; `remap_value`'s layout arm; `changes_ink` false (27), `Whole`, `state_ops`, `card_of` *Container*. v8, no bump. ~~⚠️ Read, not run: `settle`'s `SetDisplay` lands after the door passes, which leaves `keep_spacing_bindings`, `keep_insets` and `kept_flow_translations` right but **skips `keep_size_bindings`' layout half**, so a child's bound W or H stays bound on an axis the new layout computes; and under *Edit* a write over a partly bound pair keeps the bound side's binding beside the typed literal, previewed as a detach. ⚠️ `overrides.rs`' no-op fixture omits `SetLayoutStyle`.~~ All three fixed the same day (amendment): 🚨 `propagate::owed` re-runs `keep_size_bindings` over the whole transaction after either `settle` call that writes a `SetDisplay`, safe because the pass leaves a node whose size bindings the transaction states; `edit_through` judges the user's `SetDisplay` by `kept_spacing_vars`; the fixture lists it, ten. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep**; the whole `Display` **Keep**, *revisit if* the maintainer reads (f) narrower; the size-binding skip, the *Edit* pair and the fixture ~~***Fix***~~ **Resolved**. ~~Four tests, one flip~~ Six tests, three flips as reported; the re-run after the last `settle` and the app's padding pair untested. D1062 and D1063 amended, D1073 and D1074 for the planner defect it found; `architecture.md` invariant 4, §5.3f, §5's operation listing, §5.11; `roadmap.md` *Layout styles* struck, the three readings opened, then struck. **Amended 2026-10-16**)*
 - **D1076** — **Styles and variables, layout styles' chrome: the Container card a style card — the slot's `⋯`, F1's capsule, the greyed rows — its preview F7's display glyph turned with the direction, its summary the direction and the main-axis gap, or a grid's track counts.** The session's, under the maintainer's delegation; F7's one sentence the design. `inspector_container` through `style_card`; `styles::layout_glyph` — Phosphor *columns* for a row, *rows* for a column, *grid-four* for a grid; `summary` *Row · 12*, *Column · 6*, *Row · bound gap*, *Grid · c × r*; `paint_preview`'s layout arm. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep**, the glyph and summary not looked at. One test, one flip; the browser's tab listing a layout style, *Edit* of one, the *Mixed* capsule, the glyph and the grid summary untested. D1063 amended; `architecture.md` §5.3f; `roadmap.md` *Layout styles* struck)*
 - **D1077** — **Styles and variables, the Type card over several text layers: one card over the selection's directly selected text layers, the style card over all of them, its character fields and alignment tracks writing every layer — each its own values kept but the one changed, in one transaction — with no override marks, no *Content* row and no popup.** The session's chrome, under the maintainer's delegation; no design pass, F1–F10 as for the paint cards. `TypeSubject::others`, ~~`drawn_family`,~~ `several` (`None` under a live session), `ids`~~, `drawn`~~; `mixed` reads the others too, zeroes agreeing (D799). 🚨 A write fans out: `char_attrs_tx` is `one_char_attrs_tx` per layer, the variant pick merges each layer's own axes, the alignment pick writes each its own paragraph or box. The family row the picker over several, a pick over a bound member detached by `keep_text_bindings` and named by D1071's status; the toggles over families that disagree; vertical alignment only when every height is authored. `inspector_multi`: one text among others its own single-layer card, two or more this one. *Edit* on a text style selects every user (D1068's third amendment). ⚠️ Three readings, not run: 🚨 `styles::agreed` compares the stored family, so layers bound to different family variables agree on the empty literal and *Create* gives them all the first one's family (and a bound and an unbound layer drawing one family disagree); a unit click converts the first layer's value and writes it to all; `drawn_family` looks redundant, the display kind already drawn. All three answered the same day (amendment): `agreed` and `create_ops` read through `style::value_drawn`; unit clicks convert per layer through `apply_char_attrs_each`, line height moving each layer into the first one's next state (`line_height_as`); `drawn_family` measured redundant and removed. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the mixed scrub **Keep** — `Spread::base`'s first-member rule (second amendment); the Auto readout ~~**Keep**~~ and the variant label's axes ~~*Revisit if* it misleads~~ **Resolved** (second amendment: `TypeSubject::line_height_mixed` reads Auto over laid lines more than 0.005 px apart as mixed; `typography::faces_disagree` classifies each layer's face whole, axes included, and the label reads *Mixed*, no row lit, no *Custom*); `agreed` ~~***Fix with*** each target's type as drawn~~ and the unit click ~~***Fix with*** a per-layer conversion~~ **Resolved**; `drawn_family` ~~*Revisit if* it misleads~~ removed. ~~Four tests, four flips~~ Seven tests, six flips as reported, the line-height test not flipped; the family detach, the variant merge, the toggles' fallback and `inspector_multi`'s wiring untested. D1068 amended; `architecture.md` §5.3f and the multi-selection inspector; `roadmap.md` step 6 and the open list, the readings opened and struck. **Amended 2026-10-16**; **again**, the variant label and the Auto readout, two tests, two flips)*
-- **D1078** — **Spacing handles on the canvas: a selected flex or grid container's gaps and padding drawn as bands while the pointer is inside it, and dragged to write them — one `SetDisplay` through the commit door, the Container card's own write, so the binding, style and override rules already decided judge it.** From `design/Spacing Handles.dc.html`, which answered the roadmap's brief the same day, taken as a reference under the maintainer's *"You have priority over its decisions"*. One selected container; nothing new at rest, every band in `GRID_GAP`'s tint with the pointer inside (a grid's gaps left to its track lines), the band under it `SPACING_STRONG` with a pill; bands under 6 screen px dropped one at a time; the whole band picks, 8 px at least, a zero gap a strip on its seam, nothing within `HANDLE_PICK_PX` of the outline; the delta along the axis, whole px, floor 0. The session's five rulings: `Shift` alone steps 10, `Alt` the opposite side, `Alt+Shift` all four unstepped; a thin padding picks past the resize radius; a padding band yields to a child on it (since the second amendment any child but a mask, and a gap band to a child pinned by authored insets only); the label's words; `color::COMPONENT` for the design's violet placeholder. 🚨 Base the **drawn** value, the write over the **stored** display, the release skipped where every written slot already draws the value; the press above `begin_select_drag`'s `Alt+Shift` refusal. `container::Flex`'s two gap docs corrected. ⚠️ Three readings, not run: ~~`chrome_claims` has no band term, so a guide across a band takes the press the cursor promised; the bands draw under every tool; a band dragged under 6 screen px vanishes with its label mid-drag~~. All three fixed the same day (amendment): `chrome_claims` asks `spacing_at`; `spacing_subject` answers only under a selecting tool; the dragged kind's bands kept through `shown` while the drag runs; and the zero-travel table given its row. *(Built 2026-10-16, uncommitted when recorded. **Keep**; the rulings the session's under the design's priority; the three readings ~~***Fix***~~ and the zero-travel table's missing row ~~***Fix***~~ **Resolved**. Seven geometry tests, six through the whole canvas, flips as reported — since the amendment a seventh canvas test, the band sweep and the table's row, two flipped — the bound release's guard a flip that does not bite (two defences); since the second amendment seven more canvas tests (fourteen) — a mask across the container, the hatch and label, a grid drag, B3, B4, D1 and a rotated container, four flipped — and the picking test's pinned child over a gap, flipped; 🚨 its first cut read *pinned* as "not a flex item" and let a padding band yield to a mask, hiding every band under a container-wide mask — fixed, the mask left out of the children and *pinned* authored insets; the pixel geometry, the size badge's own drawing, the per-axis strip and H3 untested. D1038, D1058 and D1071 amended; `architecture.md` §5.3c, §9.3, §9.4; `roadmap.md` *Next · Spacing handles on the canvas* struck and the open list's canvas half narrowed. **Amended 2026-10-16**, the readings fixed, three minor ones with them; **amended 2026-10-16, a second time**, a gap band yielding to a child pinned by insets, no band to a mask, and the untested paths tested)*
+- **D1078** — **Spacing handles on the canvas: a selected flex or grid container's gaps and padding drawn as bands while the pointer is inside it, and dragged to write them — one `SetDisplay` through the commit door, the Container card's own write, so the binding, style and override rules already decided judge it.** From `design/Spacing Handles.dc.html`, which answered the roadmap's brief the same day, taken as a reference under the maintainer's *"You have priority over its decisions"*. One selected container; nothing new at rest, every band in `GRID_GAP`'s tint with the pointer inside (a grid's gaps left to its track lines), the band under it `SPACING_STRONG` with a pill; bands under 6 screen px dropped one at a time; the whole band picks, 8 px at least, a zero gap a strip on its seam, nothing within `HANDLE_PICK_PX` of the outline; the delta along the axis, whole px, floor 0. The session's five rulings: `Shift` alone steps 10, `Alt` the opposite side, `Alt+Shift` all four unstepped; a thin padding picks past the resize radius; a padding band yields to a child on it (since the second amendment any child but a mask, and a gap band to a child pinned by authored insets only); the label's words; `color::COMPONENT` for the design's violet placeholder. 🚨 Base the **drawn** value, the write over the **stored** display, the release skipped where every written slot already draws the value; the press above `begin_select_drag`'s `Alt+Shift` refusal. `container::Flex`'s two gap docs corrected. ⚠️ Three readings, not run: ~~`chrome_claims` has no band term, so a guide across a band takes the press the cursor promised; the bands draw under every tool; a band dragged under 6 screen px vanishes with its label mid-drag~~. All three fixed the same day (amendment): `chrome_claims` asks `spacing_at`; `spacing_subject` answers only under a selecting tool; the dragged kind's bands kept through `shown` while the drag runs; and the zero-travel table given its row. *(Built 2026-10-16, uncommitted when recorded. **Keep**; the rulings the session's under the design's priority; the three readings ~~***Fix***~~ and the zero-travel table's missing row ~~***Fix***~~ **Resolved**. Seven geometry tests, six through the whole canvas, flips as reported — since the amendment a seventh canvas test, the band sweep and the table's row, two flipped — the bound release's guard a flip that does not bite (two defences); since the second amendment seven more canvas tests (fourteen) — a mask across the container, the hatch and label, a grid drag, B3, B4, D1 and a rotated container, four flipped — and the picking test's pinned child over a gap, flipped; 🚨 its first cut read *pinned* as "not a flex item" and let a padding band yield to a mask, hiding every band under a container-wide mask — fixed, the mask left out of the children and *pinned* authored insets; the pixel geometry, the size badge's own drawing, the per-axis strip and H3 untested. D1038, D1058 and D1071 amended; `architecture.md` §5.3c, §9.3, §9.4; `roadmap.md` *Next · Spacing handles on the canvas* struck and the open list's canvas half narrowed. **Amended 2026-10-16**, the readings fixed, three minor ones with them; **amended 2026-10-16, a second time**, a gap band yielding to a child pinned by insets, no band to a mask, and the untested paths tested; the selected-only rule and H3 widened by D1089, the hovered container the subject)*
 - **D1079** — **D1038 (2)'s canvas half for paint, measured: the one canvas door that writes over a bound or styled fill is a picture dropped or pasted onto the selected shape, `replace_image_fill` — and its *Replaced with ‹file›* now says what the replace detached, the colour variable read before the write and the style the commit cut carried into the door's own report.** D1071 left *whether any canvas door writes over a bound fill* unmeasured; the maintainer asked for the measurement. Every production `SetFills` and `SetStrokes` outside the inspector and the panels was read: the crop pan and crop handle (`crop_tx`, `crop_resize_tx`) take `literal_mut()` and want `Brush::Image`, which a bound paint never is; the creation tools write new nodes; the Scale tool carries each stroke's brush untouched; the seed document is no door. `replace_image_fill`, reached by `drop_images_at` and `paste_image` through `image_drop_target`, replaces `croppable_fill` or else the **last** fill — and detached a bound fill silently, and, the second defect, its own status overwrote the *Detached ‹style›* the commit had said (D1063). `EditorSession::last_detached`, the last commit's detaches by name, cleared at the top of `commit_inner` and set only after a successful one; `said_detached` `pub(crate)`. No general paint pass: the inspector's paint doors stay silent, and a `BrushSource` has no op of its own by which an asked-for detach could be told apart. ~~⚠️ *Replace image…* (`replace_image_action`, the inspector's image row) writes the same `info` after its commit, so a style its write detached would be lost the same way — whether a styled or bound fill reaches that row is unmeasured.~~ Answered in D1080: a bound fill cannot reach it, a styled one only under the style's *Edit*, where nothing is detached (the image card read-only under a styled card, D1080's amendment) — so nothing reaches it with a detach today; both doors word their report through `OndinApp::replaced_status`, so the second flip is a mutation inside it. *(Built 2026-10-16 on D1038 (2)'s ruling, uncommitted when recorded. **Keep**; the *Replace image…* row ~~*Revisit if* a styled or bound fill reaches it~~ answered, D1080. One test, two halves, two flips as reported; the paste route untested, the same function. D1038 and D1071 amended; `architecture.md` §5.3f; `roadmap.md` (2)'s canvas half struck. **Amended 2026-10-16** (D1080))*
 - **D1080** — ***Paste properties* says what its bindings landed as — *Rebound ‹name›* and the variables and styles it detached — and the two doors that replace a picture word their report through one helper, so *Replace image…* no longer overwrites the commit's *Detached ‹style›*.** The maintainer's *"make paste properties speak"*, answering D1047's unruled reading; the status had been *Pasted properties onto N layers* alone, its `info` overwriting a styled target's *Detached ‹style›* (D1079's defect at a second door). *Replace image…*, read: the image card draws only over a picture, so a colour variable cannot reach its rows; a fill style holding a picture could, and its report overwrote the commit's — since the card was locked (below), only under the style's *Edit*, which detaches nothing, so no fill reaches the row with a detach today — both doors now through `OndinApp::replaced_status(label, cut_var)`, `last_detached()` with the door's pre-read variable. *Paste properties* reads two things **before the commit**: `properties_landing` — D1047's `rebind` over every carried binding (paints, stroke widths, opacity), kept as itself nothing, another id *rebound*, `None` *detached* — and `paints_overwritten`, the colour variables the paste's `SetFills`/`SetStrokes` take off its targets, no pass's (D1079); a bound width left to D1073's pass. After the commit, `said_detached` over `last_detached()`'s styles and the merged variables: *Pasted properties onto 2 layers · Rebound brand/primary · Detached 3 styles and variables*. The rebound said because across documents it is a substitution of a different variable sharing a name — the session's call. Under a read-only styled Fill card (capsule open) the image card, an `Area` on the context, escaped `ui.disable()`, so all its controls wrote and the commit detached the style — against D1038 (1); reproduced and **resolved**: `image_edit_card` reads `!ui.is_enabled()` off the caller's `Ui` before the `Area` (disabled where the row is, live under *Edit*) and disables and greys (`styles::GREYED`) its frame, pinned by `the_image_card_is_read_only_under_a_styled_fill`, whose first cut clicked on a different screen size and did not bite. ⚠️ Three readings, not run: the landing is the clipboard's, said whether or not that field was written; a same-document paste still names an overwritten own binding; a styled target whose style's paint is bound counts twice. *(Built 2026-10-16 at the maintainer's request, uncommitted when recorded. **Keep**; the image card under a read-only card ~~***Fix***~~ ***Resolved***, read-only like its row; the readings ***Revisit if*** they mislead. Two tests, three flips as reported; a same-document paste, opacity's landing, *Rebound N variables*, the *Replace image…* row, the card live under *Edit* and a partly styled card untested. D1047 and D1079 amended; `architecture.md` §5.3f, §5.7a; `roadmap.md` the built list. **Amended 2026-10-16**)*
+- **D1081** — **A unit longer than the room its field leaves is cut with an ellipsis, the digits' width floored at 0 — selecting a hugging flex column in a narrow inspector panicked.** The maintainer's polish pass. The Transform card's H showed *fit content* (`SizeMode::word`, D884's), laid out `TextWrapMode::Extend` in `ui::value_field_f64_marked`, so `full - inset - trail_w` went negative and egui panicked (*"Negative desired size"*). Now `Truncate` to the room left after the prefix and `UNIT_DIGITS_MIN` (28, four digits), and `digits_w` floored; the word kept, cut only in a field too narrow for it. *(Fixed 2026-10-16, `67d1b72`. **Fixed**; the word **Keep**. One test, one flip as reported — `Extend` back, the field 124 for its 90; the panic not reproduced. D892 amended)*
+- **D1082** — **Every colour chip drawn as paint is the Fill row's — a quarter-side radius, `SWATCH_HAIRLINE` inside, the checkerboard only under a translucent colour and rounded at its own corners — where the style browser, a styled card's capsule, the variable browser and the `--` list's and picker's rows painted a square checkerboard under a rounded fill.** `ui::paint_colour_chip`, one helper; rounded cells rather than `mask_corners`, these rows having no one ground colour to mask against. *(Fixed 2026-10-16, `0e379fc`. **Fixed**; the rounded cells **Keep**. Untested)*
+- **D1083** — **The browser's in-place fields are one row tall, centred on their outline, `EDIT_PAD_X` (6) in, and drawn in `ui.new_child` rather than a scope — the text had sat on the top edge flush left, and the table under a mode being renamed had risen 5 points.** `variables::edit_field`; F6's naming capsule centred the same way. ⚠️ A scope advances the parent's cursor; the child does not. *(Fixed 2026-10-16, `500036a`. **Fixed**; the child **Keep**. One test, one flip as reported — `scope_builder`, 436 against 441)*
+- **D1084** — **The `--` list opens by `ui::dropdown_place` — left edges together, right edges together on overflow, above the field where below has no room, then `menu_place`'s clamp — and the arrows scroll the lit row into view.** `menu_place` at the field's corner flipped a right overflow to `at.x - size.x`, a context menu's rule, putting the list one list-width left of its field, out over the canvas; past row 8 the highlight previewed out of sight. *(Fixed 2026-10-16, `9ae7724`. **Fixed**; the second placer **Keep**. Untested. `architecture.md`'s `menu_place` passage)*
+- **D1085** — **Every list that filters as you type has the font family list's search field — the theme's borderless ground, a 7 × 5 margin — through `ui::search_field` and `ui::SEARCH_PAD`** (from `typography.rs`' `FILTER_PAD_X`/`Y`): *Apply style…*'s picker (a bare `TextEdit`), the `--` list's own search (`ui::text_field`, bordered) and the variant swap's search. *(Fixed 2026-10-16, `0aad3f8`. **Fixed**. Untested)*
+- **D1086** — **Six things from the maintainer's look: one layer's *Create style…* and *Create style as a copy…*; `ui::HEAD_MORE_GAP` 10 → 15, the `+`'s right pad the remainder; the browser's selection line 2 lower; *"a card's ⋯"* in the text face, a missing-glyph box, now *"… menu"*, the empty *Styles* tab too; the chip's name on the capsule's centre; *Frame templates* in the initial `collapsed_panels`.** *(Changed 2026-10-16, `eeff0b1`. **Keep**; the remainder **Intentional**. Untested but for the templates test opening the panel. D1038 (5) and D1063 amended; `architecture.md` §5.3f and the frame cards)*
+- **D1087** — **A style card's `⋯` toggles its menu.** The menu's press-away test spares `menu.under`, so a second click reopened it; `clicks.more` now closes an open menu with the same slot and targets and opens otherwise. *(Fixed 2026-10-16, `676177a`. **Fixed**. Untested)*
+- **D1088** — **A bound field is the size of the field it replaces: `binding::chip_slot` allocates exactly the content box's room, 26 tall, and the 5-point reach into the end padding is paint — binding a variable had grown a field 5 wider and 2 taller, and a bound Fill row 2 taller.** `number_chip` and the layout cards' mixed chip had allocated `available_width() + 5` and 28 tall inside a `field_row` whose content box is `CONTROL_H - FIELD_BORDER_H`; the Fill row's box `CHIP_ROW_H`. D1038 A1's *"the field's width unchanged"* holds again. *(Fixed 2026-10-16, `9d741cc`. **Fixed**. Two tests, flips as reported. D1038 amended)*
+- **D1089** — **Spacing handles on hover: the container under the pointer shows its bands and drags them unselected, the single selected one only where none is — D1078 (1) widened.** The maintainer's request. `spacing_subject(pointer)`: the dragged container; else `spacing_hover` — the topmost `hit_test` at 0 slop with a resolved display, in no group chain or instance, not effectively locked, and not one of several selected (D1078's multi-selection rule kept); else the selected one. A band drag writes and selects nothing; H3 goes, a nested container under the pointer winning; a hovered unselected grid draws no faint gaps, its track lines drawn for the selection only. ⚠️ A reading, not run: a marquee begun in an unselected container's band is a band drag now. ~~An empty container's padding no longer selects it on a click~~ — measured false in the amendment: a zero-travel press goes through the click path and selects the frame (`a_click_in_an_empty_containers_padding_selects_it`, its flip not biting). *(Built 2026-10-16, `37fb395`. **Keep**; the grid's gaps and the marquee reading ***Revisit if*** they mislead; the empty container **Resolved**, unchanged. Two tests, one flip biting, as reported. D1078 amended; `architecture.md` §5.3c, §9.4. **Amended 2026-10-16**)*
 
 ---
 
@@ -24641,7 +24650,7 @@ picture dropped or pasted over a bound or styled fill, the one canvas door onto 
 can never detach by accident, and the cursor says the field will not scrub. (4) **A × inside the
 chip, on hover, detaches** — it takes the chip's last 14 px and the name elides; bound fields only.
 (5) **A `⋯` menu in the card header** — *Apply style…*, *Create style from this…* (*…as a copy…* on a
-styled card), *Detach style* — **on the five style slots' cards only**: fill, stroke, effects, text,
+styled card; for one layer *Create style…* and *Create style as a copy…* since D1086), *Detach style* — **on the five style slots' cards only**: fill, stroke, effects, text,
 and layout's Container card. The header's order (F8): at the left end the title, then the override dot
 and count, the count becoming the *Reset …* chip on header hover (Components 4E); at the right end the
 `+` and then the `⋯`, always last; the `+` hides while the card is styled and nothing moves. This is
@@ -24661,7 +24670,7 @@ highlighted autocomplete row the neutral hover. The override dot sits on the lab
 the value — never touching. *Do not* round any other control: the shape is the whole of the signal.
 
 **A bound field (A1–A7).** The capsule fills the value area; the label badge and the field's width are
-unchanged (D1037's constraint). A bound colour row keeps its swatch, showing the resolved colour, and
+unchanged (D1037's constraint; built 5 wider and 2 taller until D1088). A bound colour row keeps its swatch, showing the resolved colour, and
 the chip replaces the hex; a field's trailing CSS name gives way to the chip. Hover: a tooltip with the
 resolved value and the mode it resolved in, the full name first when elided. Focus selects the chip as
 one token: **`Backspace` detaches, leaving the resolved literal selected**; `--` rebinds; any other key
@@ -27366,11 +27375,11 @@ this entry says so; the largest is G9.
 
 **The header (F8, F4).** `ui::section_head_full` gains a `more` flag and `HeadClicks::more`/`more_rect`;
 the `⋯` takes the header's right-hand corner and the `+` moves in beside it, `HEAD_MORE_W` — the action
-box and a 10 gap — further in. So the `+` moved on all three cards, and the Effects card's tests now
+box and a 10 gap (15 since D1086) — further in. So the `+` moved on all three cards, and the Effects card's tests now
 find it there (`the_header_plus_adds_a_shadow_and_brings_up_its_numbers`). The menu
 (`styles::style_menu_ui`) has three rows, glyphs swatches, plus-square (`theme::PLUS_SQUARE`, new) and
 link-break: *Apply style…* (*Apply style to N layers…*), *Create style from this…* (*…as a copy…* on a
-styled card) and *Detach style* (*Detach style from N layers*, N the **styled** targets, not all of
+styled card; one layer's *Create style…* and *Create style as a copy…* since D1086) and *Detach style* (*Detach style from N layers*, N the **styled** targets, not all of
 them; off when none is). *Create* is off over a *Mixed* or a partly styled card and over a plain one
 whose lists disagree (`agreed`, compared by look). ⚠️ **F10's *"every `⋯` row names how many layers it
 acts on"* is not met by *Create***, which names no count however many layers it binds — read from the
@@ -27420,10 +27429,11 @@ group's path is — each row a preview, the whole name and its count. A right-cl
 *Rename* (in place, refused in B4's manner: *A style needs a name.*, *X already exists.*), *Edit*,
 *Select N layers* and *Delete* — no confirmation, `style::remove_ops`, one undo, the status *Deleted X.
 N layers keep their values.* (D1038 (6)). *In selection* is shared with the *Variables* tab, its line
-*Used by X · N styles*, a group's count *1 of 4*. The empty state reads *No styles yet* / *Use ⋯ on any
-inspector card and choose Create style from this…* — **the mockup's *"…, or use +."* dropped**, the
+*Used by X · N styles*, a group's count *1 of 4*. The empty state reads *No styles yet* / ~~*Use ⋯ on any
+inspector card and choose Create style from this…*~~ *Use the … menu on any inspector card and choose
+Create style…* (D1086) — **the mockup's *"…, or use +."* dropped**, the
 session's call: the `+` on this tab still makes variables, its tooltip saying a style is made from a
-card's `⋯`.
+card's ~~`⋯`~~ *… menu* — the text face has no `⋯`, which drew a missing-glyph box (D1086).
 
 🚨 **G9's *Edit* is not a card inside the browser.** D1038 drew *"the style's card inline"* on the
 *Styles* tab. Built, *Edit* (`OndinApp::edit_style`) **selects the style's users** and sets
@@ -28050,7 +28060,10 @@ decisions' numbers (1–8) are the design's, and the code's comments cite them.
 **The design's answers, as built** (`spacing.rs`). **When** (1, H1–H3): on one selected flex or grid
 container only — never several, each container's spacing being its own; hidden while any other
 gesture runs, while a path or an image is edited in place, under the inspector's edit hold, and for a
-hidden container; a container nested inside the selection shows nothing until it is selected itself.
+hidden container; ~~a container nested inside the selection shows nothing until it is selected itself~~.
+***Widened by D1089*** at the maintainer's request: the container under the pointer shows its handles
+unselected — a nested one included — and the selected one only where none is; a container that is one
+of several selected still shows none.
 **Drawn on hover, not at rest** (2, P1–P3): selecting a container draws nothing new — the design's
 *Tweak* of bands drawn at rest not taken — and with the pointer inside it every band is drawn in
 `color::GRID_GAP`'s tint, **a grid's gaps excepted**, its track lines drawing them already (D921); the
@@ -28104,7 +28117,8 @@ nothing of its own.
 **The press.** `canvas::begin_select_drag` asks `begin_spacing_drag` **after the box handles**, whose
 radius `spacing::hit` keeps out of so the two cannot both claim a point, and **above the `Alt+Shift`
 refusal** (D289): that chord is the band's all four sides, and the band is chrome of what is already
-selected, so no slip off it designates or duplicates anything — D289's own argument for the handles.
+selected (*not of a hovered band since D1089, whose drag still selects nothing*), so no slip off it
+designates or duplicates anything — D289's own argument for the handles.
 Pinned by `spacing::canvas_tests::the_modifiers_choose_the_sides_and_the_step`; flip, run, as the caller
 reports it: the band arm skipped under that chord fails *"alt+shift: all four, no step"*. `select_cursor`
 asks `spacing_at` in the press's order — after the set's `+`, the line ends and the rail handle, before
@@ -28267,7 +28281,69 @@ pinned by authored insets, and neither band to a mask; the first cut's mask defe
 **Resolved** in the same amendment, flipped; readings 1–3 and the table's row ~~***Fix***~~ **Resolved** in the amendment, the first
 and third flipped. **Amended 2026-10-16**, and **a second time** the same day. D1038, D1058 and D1071 amended; `architecture.md` §5.3c, §9.3 and §9.4;
 `roadmap.md` *Next · Spacing handles on the canvas* struck, its substance here, and the open list's
-canvas half narrowed to the paint door)*
+canvas half narrowed to the paint door. **(1)'s selected-only rule and H3 widened by D1089**, the
+hovered container the subject)*
+
+**D1089 — Spacing handles on hover: the container under the pointer shows its bands and drags them
+without being selected, and the selected one only where no container is under the pointer — D1078
+(1)'s *one selected container* widened. *The maintainer's request, 2026-10-16, from the polish list;
+committed as `37fb395`.*** D1078 drew the bands for a single selected container, so a gap was dragged
+in two gestures — select the frame, then drag — and the maintainer asked for the handles on hover.
+**`OndinApp::spacing_subject` now takes the pointer**, and its subject is, in order: the container a
+`Drag::Spacing` is writing, whatever is under the pointer; else **the container under the pointer**;
+else the single selected container. **`spacing_hover`** answers the pointer's container: the topmost
+layer `hit_test` returns there **with no slop**, if it has a resolved display, sits in no group chain
+(`group_chain` empty for the entered group) and in no instance (`component::instance_root`), and is not
+effectively locked. An item, or anything else on top, answers `None` — a pointer over an item never
+lights the container behind it, and falls back to the selected one. **D1078's rule for a multi-selection
+is kept**: a hovered container that is one of several selected is no subject, a drag on it writing it
+alone out of the set; an unselected one hovered beside a multi-selection is. The tool gate, the
+edit-in-place gate and the hidden-container gate apply to the hovered subject as to the selected one, so
+the drawing, the cursor, `chrome_claims` and the press still read one answer.
+
+**A band drag on an unselected container writes its spacing and leaves the selection alone** — the
+release commits the one `SetDisplay` and selects nothing. ⚠️ **D1078's argument for the press sitting
+above the `Alt+Shift` refusal loses a premise**: *"the band is chrome of what is already selected"* is
+no longer true of a hovered band. What D289's argument needs still holds — a band drag designates and
+duplicates nothing — and §9.4 now says so. ⚠️ **H3 goes with it**: a container nested
+inside the selection, under the pointer and clear of any item over it, is now the subject over the
+selected one, where D1078 showed it nothing until it was selected itself. **A hovered unselected grid
+draws its padding and the band under the pointer only**: `draw_spacing_bands` skips a grid's faint gap
+bands because its track lines draw them, and `draw_grid_tracks` draws those lines for the selection (and
+a moved item's parent) only — so an unselected grid's gaps show nothing at rest inside it until the
+pointer is on one. Read from the code; the session's, not looked at.
+
+⚠️ **One reading, from the code and not run: a press in an unselected container's band is a band
+drag, not a marquee.** `begin_select_drag` asks `begin_spacing_drag` after the box handles and before
+the marquee, so a selection box begun in an occupied container's padding or between its items — the
+press `pick_leaf` passes through an occupied frame's background for (D22) — now drags the spacing.
+`spacing_hover` reads no occupancy: an occupied frame's background is not click-selected, but its bands
+take a drag, as `spacing_subject`'s doc now says (it had said the hovered container is one *"a click at
+`pointer` would select"*).
+
+~~(2) **An empty container is directly clickable** (`pick_leaf`'s exception), and a press in its padding
+band is now the band's: a zero-travel click there no longer selects the frame.~~ **Measured false**,
+amendment below.
+
+**Amended 2026-10-16: the empty container's click measured, and it still selects.** A press released
+where it was pressed goes through the click path, not a band drag's release, so a zero-travel click in
+an empty flex frame's top padding band selects the frame as it did before D1089. Pinned by
+`spacing::canvas_tests::a_click_in_an_empty_containers_padding_selects_it`, as the caller reports it.
+⚠️ **Its flip did not bite, and that is the finding**: a selection added to the band release's no-op
+arm in `canvas.rs` and then taken out left the test green both ways — the arm is not what selects — so
+the addition was removed and the code is unchanged; the test pins the outcome, not a line. *(Built
+2026-10-16 at the maintainer's request, committed as `37fb395`. **Keep** — the multi-selection
+exclusion above all; H3's widening **Keep**, the hovered container being what the request asks for;
+the unselected grid's gaps ***Revisit if*** they read as missing; the marquee reading ***Revisit if*** a
+marquee is missed; the empty container's click ~~***Revisit if*** it is missed~~ measured, unchanged,
+**Resolved**. One test at the build, a second in the amendment:
+`spacing::canvas_tests::an_unselected_containers_gap_drags_on_hover` — nothing selected, the row's first
+gap dragged 8 to 18, the selection still empty, the cursor `ResizeHorizontal` on hover. Flip, run, as
+the caller reports it: `spacing_subject` ignoring the hover, the selected container only as D1078 had
+it, fails *"the hovered gap took the drag"*, still 10. The multi-selection exclusion, a nested container
+over the selected one, the hovered grid, the locked, grouped and instance exclusions and the marquee
+reading untested. D1078 amended; `architecture.md` §5.3c and §9.4. **Amended 2026-10-16**: the empty
+container's reading measured false, one test, its flip not biting)*
 
 **D1069 — Styles and variables, build step 6's second half — string variables' core: a text's content
 and its family bind to string variables, a sidecar of two beside the literals, which are written empty
@@ -28802,6 +28878,152 @@ variables* and the *Replace image…* row untested. D1047 and D1079 amended; `ar
 §5.7a; `roadmap.md` *Next · Styles and variables*' list of what is built. **Amended 2026-10-16**: the
 image card locked under a styled card, one test and one flip as reported, the first cut's that did not
 bite; *Replace image…* reached with a detach by no fill today; D1079 and §5.3f corrected to match)*
+
+**D1081 — A unit longer than the room its field leaves is cut with an ellipsis, and the digits' width
+is floored at 0 — selecting a hugging flex column in a narrow inspector panicked. *Found in the
+maintainer's polish pass of 2026-10-16, committed as `67d1b72`.*** The Transform card's H on a column
+whose height is `FitContent` shows the unit *fit content* (`SizeMode::word`, D884's lower-case unit),
+and `ui::value_field_f64_marked` laid the unit's galley out `TextWrapMode::Extend` — the whole word,
+whatever the field had. The number's room is `full - inset - trail_w`, and in a narrow inspector the
+word was wider than the field left: the width came out **negative**, egui panics on a negative desired
+size (*"Negative desired size"*), and selecting the column crashed the app. **The fix is two halves.**
+The unit is laid out `Truncate` to the room left after the prefix and **`UNIT_DIGITS_MIN`**, 28 —
+four digits at the field's type size — so it gives way before the number does, with an ellipsis; and
+`digits_w` is floored at 0, since a field narrower than its own prefix would still ask for a negative
+box with the unit cut to nothing. **The word is kept**: it is cut only when the field is too narrow to
+hold it beside four digits, and reads whole at the inspector's ordinary width. ⚠️ **Do not take the
+floor for the fix**: with `Extend` back and the floor kept nothing panics, but the field grows past the
+slot it was given and pushes its row. ⚠️ D892's *"`ui::Suffix` is laid out to its text"* is true now only up to
+that room; `panels/layout.rs`' `mixed_if` doc, which said the same, notes the cut. *(Fixed
+2026-10-16. **Fixed**; the word **Keep**. One test,
+`ui::transform_row_tests::a_unit_wider_than_its_field_is_cut_and_the_field_keeps_its_width` — an H field
+90 wide carrying *fit content*, one ground no wider than its slot. Flip, run, as the caller reports it:
+`Extend` back in the unit's `into_galley`, the floor kept, fails the width assertion, the field 124 for
+its 90. The panic itself is not reproduced by the test. D892 amended)*
+
+**D1082 — Every colour chip drawn as paint is the Fill row's chip — a quarter-side radius, the
+swatch hairline inside, the checkerboard only under a translucent colour and rounded at its own corners
+— where four of them had painted a square checkerboard under a rounded fill. *The maintainer's polish
+pass, 2026-10-16, committed as `0e379fc`.*** The style browser's rows and a styled card's capsule
+(`styles::paint_preview`'s Fills arm), the variable browser (`variables::swatch`), and the `--` list's
+and the picker's *Variables* face's rows (`binding.rs`) each drew a chip of their own, a square
+checkerboard always under a rounded fill — which read as a light patch with a blob of colour in it.
+**One painter helper now, `ui::paint_colour_chip`**, in `ui::swatch`'s look: radius a quarter of the
+side (the Fill row's 16-point chip has 4), `SWATCH_HAIRLINE` stroked inside, and the checkerboard drawn
+only where the colour's alpha is under 255. ⚠️ **It cannot do what `ui::swatch` does**: the Fill row
+paints a square checkerboard and then `mask_corners` in the colour it sits on, and these rows sit on a
+hover wash or a lit row, with no one ground colour to name — a chip told the wrong one shows four
+notches. So the checkerboard is two by two, the dark cells on the diagonal, each touching one of the
+chip's corners and rounded there. A fill style with no colour to show passes a transparent colour and
+draws the checkerboard alone. *(Fixed 2026-10-16. **Fixed**; the rounded cells **Keep** while these
+rows have no single ground. Untested — the chip's pixels are chrome)*
+
+**D1083 — The browser's in-place fields sit one row tall, centred on their outline and inset 6, and
+are drawn in a child `Ui` that leaves the parent's cursor alone — the table under a mode being renamed
+had risen 5 points. *The maintainer's polish pass, 2026-10-16, committed as `500036a`.*** A variable's,
+a group's, a mode's or a style's name, and a cell's value, are typed in place in the browser through
+`variables::edit_field`, and the text sat on the box's **top edge flush against its left**: a
+`Frame::NONE` edit has no margin, and the `centered_and_justified` layout it was put in stretches it
+over the whole box with its row at the top. Now the edit's box is exactly one row of its font tall,
+centred on the outline's height, **`EDIT_PAD_X`** (6) in from either side — where the label it replaces
+was. 🚨 **And it is a `ui.new_child`, not a `scope_builder`**: a scope advances the parent's cursor past
+what it drew, and a field inside a row the caller had already allocated put the cursor back *above* that
+row's bottom, so the variable rows under a mode being renamed came up 5 points while the field was open.
+F6's naming capsule (`styles::naming_capsule`, the new style's name) had the same high text and is
+centred the same way, a one-row field on the capsule's middle. *(Fixed 2026-10-16. **Fixed**; the child
+`Ui` **Keep** — a scope "simplifying" it moves the table again. One test,
+`panels::variables::tests::renaming_a_mode_leaves_the_rows_where_they_are` — a variable's name drawn at
+the same place with the first mode's rename open and shut. Flip, run, as the caller reports it:
+`edit_field` drawing in a `scope_builder` fails, the name at 436 against 441. The inset, the centring and
+the naming capsule untested)*
+
+**D1084 — The `--` list opens under its field by `ui::dropdown_place` — left edges together, right
+edges together where that would run off the screen, above the field where below has no room — and the
+arrows scroll the lit row into view. *The maintainer's polish pass, 2026-10-16, committed as
+`9ae7724`.*** `binding::var_complete_ui` placed the list with `ui::menu_place` at the field's
+bottom-left corner, 6 below. `menu_place` places a menu at a **point** and, on a right overflow, flips it
+to `at.x - size.x` — a context menu's rule, opening to the pointer's left. For a list anchored on a
+field that put it one list-width left of the field's left edge: from the inspector, out over the canvas
+and away from the field it belongs to. **`ui::dropdown_place(ctx, under, size, gap)`** answers a field's
+list: the field's left edge, or its right edge where the left would overflow; below by `gap`, or above
+by `gap` where below has no room; and then `menu_place`'s clamp, which has the last word as it does for
+every menu (D666). The list is the only caller. **And `↑`/`↓` scroll the lit row into view**
+(`scroll_to_me`): the list's scroll area shows eight rows, and past the eighth the highlight previewed on
+the canvas from a row out of sight under the list's bottom edge. ⚠️ **Do not "unify" the two
+placers**: a point and a field are different anchors, and `menu_place`'s flip is right for the first.
+*(Fixed 2026-10-16. **Fixed**; the second placer **Keep**. Untested — the placement and the scroll are
+chrome, and no test drives either. `architecture.md`'s `menu_place` passage)*
+
+**D1085 — Every list that filters as you type has the font family list's search field: the theme's
+borderless ground with a 7 × 5 margin, `ui::search_field` and `ui::SEARCH_PAD`. *The maintainer's polish
+pass, 2026-10-16, committed as `0aad3f8`.*** *Apply style…*'s picker had a bare `TextEdit`, egui's 4 × 2
+margin, the text sitting on the ground's edge; the `--` list's own search (`own_search`, the list
+*Bind to variable…* opens) was `ui::text_field`, a bordered field unlike any other list's; the variant swap's search
+was another bare `TextEdit`. The font family list's search had the look the others lacked, under
+`typography.rs`' `FILTER_PAD_X`/`FILTER_PAD_Y`. Those numbers moved to **`ui::SEARCH_PAD`**
+(`Margin::symmetric(7, 5)`), and **`ui::search_field(ui, text, id, hint, width)`** — `width` the outer
+width, the padding out of it — serves the style picker and the `--` list; the swap's combo, a field in
+a `ComboBox`, takes `SEARCH_PAD` on its own `TextEdit`, as the family list does. *(Fixed 2026-10-16.
+**Fixed**. Untested — chrome)*
+
+**D1086 — Six things from the maintainer's look, each small: one layer's *Create* rows shorter, the
+header's `+`–`⋯` gap 15, the browser's selection line lower, a `⋯` the text face cannot draw put into
+words, the chip's name on the capsule's centre, and *Frame templates* starting closed. *The
+maintainer's polish pass, 2026-10-16, committed as `eeff0b1`.***
+
+- **The menu's *Create* rows for one layer read *Create style…* and *Create style as a copy…*** — they
+  were D1038 (5)'s *Create style from this…* and *…from this as a copy…*. The several-layer rows keep
+  their words and their counts (*Create style from these N layers…*, *…from these N as a copy…*).
+- **`ui::HEAD_MORE_GAP` 10 → 15.** F8 drew 10 between the `+`'s and the `⋯`'s glyph boxes, and D1063
+  built it; at 10 the two read as one control. The `⋯` takes the gap's floored half as its left pad and
+  the `+` the **remainder** as its right, so an odd gap is not rounded down a point (7 and 8 here).
+  `HEAD_MORE_W` follows.
+- **The browser's selection line** (*Used by …*) **sits 2 points lower**, `add_space(-8)` → `-6` under
+  the search row.
+- **The *Styles* tab's `+` tooltip said *"a card's ⋯"*, and the chrome's text face has no `⋯`**: it drew
+  a missing-glyph box. It reads *"… a style is made from a card's … menu"*, and the empty tab's line
+  likewise, *Use the … menu on any inspector card and choose Create style…* — D1063's empty state
+  carrying the new label too.
+- **The bound chip's name is drawn on the capsule's centre** (`binding.rs`), not 1 point below it,
+  which read as sitting low.
+- ***Frame templates* joins the initial `collapsed_panels`** beside *Effects* and *Preview*: a page of
+  pictures is reached for, not read on every frame selected. It is the seed only; a test that drives
+  the panel opens it by hand.
+
+*(Changed 2026-10-16 at the maintainer's look. **Keep**, all six; the gap's remainder ***Intentional***
+— the pad that rounds is the `+`'s. Untested, but for the templates test opening the panel. D1038 (5)
+and D1063 amended; `architecture.md` §5.3f and the inspector's frame cards)*
+
+**D1087 — A style card's `⋯` toggles its menu: a second click on it closes what the first opened.
+*The maintainer's polish pass, 2026-10-16, committed as `676177a`.*** The menu (`style_menu`) closes on
+a press away from it, and its away test **spares the button it hangs from** (`menu.under`), so the
+second click on `⋯` was no press away — it reached `style_card_live`'s `clicks.more` arm, which opened
+the menu again. Now that arm reads whether the open menu is this card's — **the same slot and the same
+targets** — and clears it if so, opening it otherwise; a `⋯` on another card, or the same card over a
+changed selection, still opens its own. ⚠️ **The comparison is the whole of it**: a toggle on any open
+menu would close card A's on a click of card B's `⋯` and open nothing. *(Fixed 2026-10-16. **Fixed**.
+Untested)*
+
+**D1088 — A bound field is the size of the field it replaces: its chip allocated at exactly the room
+the row's content box leaves, the 5-point reach into the end padding painted rather than allocated —
+binding a variable had grown its field 5 wider and 2 taller. *The maintainer's polish pass,
+2026-10-16, committed as `9d741cc`.*** D1038 A1: *"the label badge and the field's width are
+unchanged"*. They were not. `binding::number_chip` and the layout cards' mixed chip allocated
+`available_width() + 5` and 28 tall inside a `ui::field_row` whose content box is `CONTROL_H -
+FIELD_BORDER_H`, 26 — so every bound number field, D1058's gaps and padding and D1061's W and H among
+them, came out 5 wider and 2 taller than the plain field, and the card and the inspector moved with it;
+the Fill row's chip box was 28 tall, a bound Fill row 2 taller. **`binding::chip_slot(ui)`**, the one
+allocation both chips now take, allocates the room left at the content box's height and hands back a
+rect 5 points wider, so the capsule still reaches into the row's end padding the way a unit does; the
+Fill row's box is `CHIP_ROW_H`, the same height. ⚠️ **The bleed is
+paint, not allocation** — the sentence on `chip_slot` — and a "tidier" allocation of the rect it returns
+regrows every bound field. *(Fixed 2026-10-16. **Fixed**. Two tests, as the caller reports them:
+`panels::binding::tests::a_bound_field_keeps_the_plain_fields_size` — a radius field 120 wide, its ground
+the same width and height bound as plain — and `binding_fields_moves_nothing_in_the_inspector`, every
+field ground over the whole inspector in place and the same size when the fill, the radius and the
+opacity take a variable. Flips, run: `chip_slot` allocating its 5-point bleed again fails both; the Fill
+row's box 28 tall again fails the second, on that row alone, 2 points taller. D1038 A1 holds again,
+amended to say when it did not; D1058 and D1061 named)*
 
 **D1064 — Styles and variables, build step 4's core: a kit carries the variables and styles its mains
 read, frozen with them at a publish and bindings kept, and a consumer holds them in its own tables under
@@ -35976,7 +36198,8 @@ state; ***gone since D906***, a keyword in the digits having no unit.) That is a
 `ui::Swatch::Mixed`, so D130's *"exactly two"* does not count it. The comment shipped with it gave
 D130's own reason, *"five letters do not fit a unit's slot"*, and **the widget does not bear that
 out**: `ui::Suffix` is laid out to its text and its width taken from the number's room, and it
-already holds *fit content*. `mixed_if`'s doc is corrected to say so rather than argue from size. What
+already holds *fit content* (*cut with an ellipsis since D1081 where the field leaves it less than four
+digits' room* — a field too narrow for it had panicked). `mixed_if`'s doc is corrected to say so rather than argue from size. What
 is left in the dash's favour is that the same field's digits already read "Mixed" — an observation,
 not a reason anyone has ruled on. **And a mixed segmented row** — `display`, direction, wrap — still
 raises no cell and draws no mark, where D130's segmented spelling is `segment_mixed`'s dash and that

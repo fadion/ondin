@@ -522,7 +522,8 @@ fn shared<T: Copy + PartialEq, S>(all: &[S], f: impl Fn(&S) -> T) -> Option<T> {
 /// keyword, and §15 D906 took the unit away there altogether, the keyword in the
 /// digits already saying how the size is set (the release review's
 /// `[R2-L8-06]`). Room was never the reason (`ui::Suffix` is laid out to its text
-/// and holds *fit content*); an earlier line here said it was. The mixed segment
+/// and holds *fit content* — cut with an ellipsis only where a narrow field
+/// leaves its digits too little, §15 D1081); an earlier line here said it was. The mixed segment
 /// rows use `ui::segment_mixed`, one of D130's two dashes (§15 D892).
 fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {

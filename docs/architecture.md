@@ -1670,8 +1670,11 @@ first was, it saved only the track list.
 edge, quadratic in the track count.
 
 **Spacing handles on the canvas** (§15 D1078, from `design/Spacing Handles.dc.html` with the session's
-rulings over it). A single selected flex or grid container's gaps and padding are drawn as bands and
-dragged to write them, under a tool that selects — **one `SetDisplay` through the commit door, the Container card's own write**,
+rulings over it). A flex or grid container's gaps and padding are drawn as bands and dragged to write
+them, under a tool that selects — the container under the pointer, unselected or not, else the single
+selected one (§15 D1089: `spacing_subject`'s pointer, `spacing_hover` the topmost layer there in no group
+or instance and not locked; one of several selected is never the subject, and a drag selects nothing) —
+**one `SetDisplay` through the commit door, the Container card's own write**,
 so `keep_spacing_bindings` (§15 D1058), the style pass (§15 D1075) and the override marks judge it as
 they judge a typed value. `spacing::bands` answers them in the container's local space: the four
 paddings edge to edge, a grid's column-gap and row-gap bands from its laid tracks across the other
@@ -1679,8 +1682,9 @@ axis's run, a flex container's between-items bands across each line's cross band
 line gaps across the content's whole main extent — every band where the layout puts it, the space as
 laid. ⚠️ **A gap band names its axis, not its role**: `column_gap` is the horizontal gap and
 `row_gap` the vertical in every direction, the engine's reading, so a column's between-items gap is
-the row gap. **Nothing is drawn at rest**: with the pointer inside the selected container every band
-is drawn in `GRID_GAP`'s tint — a grid's gaps excepted, its track lines drawing them already — the
+the row gap. **Nothing is drawn at rest**: with the pointer inside the subject container every band
+is drawn in `GRID_GAP`'s tint — a grid's gaps excepted, its track lines drawing them already, which for
+a hovered unselected grid they do not, so only its padding and the band under the pointer show — the
 band under the pointer in `SPACING_STRONG` with a pill; a band under 6 screen px is dropped, but
 not the kind a drag is writing while it runs. The whole
 band picks, at least 8 screen px across, so a zero gap is a strip on its seam; nothing picks within
@@ -3545,7 +3549,8 @@ every layer is bound, else the plain grey *Mixed*; it sits beside §5.3d's overr
 *Bind to variable…*, *Extract into variable…* (its value into every mode, disabled when bound) and
 *Detach variable*, omitted on an unbound field (`context-menus.md` §6.7, §3's exception); a colour's swatch popup gains a *Variables* segment, a fourth paint kind; a
 styled card collapses to one capsule with *Detach* on hover, and the five slot cards' headers gain a `⋯`
-— *Apply style…*, *Create style from this…*, *Detach style* — after the `+`. **The browser** is a
+— *Apply style…*, *Create style…* (*Create style from these N layers…* over several), *Detach style* —
+after the `+`. **The browser** is a
 floating panel on §5.3e's insert picker's model, its button directly above the hexagon at the
 toolbar's foot, swapping in place with the picker, opened by `Shift+S`; *Variables* and *Styles* tabs,
 modes as columns at a width of 340, 436 or 532 by mode count (the cap at three, sideways scrolling
@@ -3952,8 +3957,8 @@ users are rewritten from it, staying styled — a user in another mode changes c
 style by id, else by name and slot, else detaches.
 
 **The chrome** (§15 D1063 in full). The Fill, Stroke and Effects cards' headers carry a `⋯`, always
-last, the `+` moved in beside it (`ui::HEAD_MORE_W`): *Apply style…*, *Create style from this…* (*…as
-a copy…* when styled; off over *Mixed*, a partly styled card or lists that disagree) and *Detach style*,
+last, the `+` moved in beside it (`ui::HEAD_MORE_W`, a 15 gap since §15 D1086): *Apply style…*,
+*Create style…* (*Create style as a copy…* when styled, *…from these N layers…* over several, §15 D1086; off over *Mixed*, a partly styled card or lists that disagree) and *Detach style*,
 each counting the layers it acts on where there are several (F10).
 `OndinApp::style_card` reads `styles::shown`: a card whose targets share one style is a 28-high capsule
 — preview, name, summary, *Detach* on hover, saying nothing — opened greyed and inert under *Read-only
@@ -10831,7 +10836,11 @@ as did `menu_place`'s own doc comment; the code has always been `snap(pos).clamp
 correcting the code to the design would have introduced the bug.
 `ui::context_menu_chrome_tests::a_menu_is_clamped_after_it_is_rounded_and_not_before` pins it at the
 one input where the two orders differ — every ordinary placement agrees under both.
-It measures against `content_rect()` — egui 0.35's name for `screen_rect`, and
+⚠️ **A list anchored on a field is not placed at a point**: `ui::dropdown_place` (§15 D1084) puts the
+`--` list's left edge on the field's, its right edge on the field's where that would overflow, and
+above the field where below has no room, then hands the result to `menu_place` for the clamp —
+`menu_place`'s own flip, to `at.x - size.x`, had opened it one list-width left of its field.
+`menu_place` measures against `content_rect()` — egui 0.35's name for `screen_rect`, and
 the better one, a row under a notch being as hidden as a row off the bottom edge. The height it
 places is **computed** from the row and separator constants rather than measured, since the placement
 is needed before the `Area` is shown and reading last frame's rect back would leave a menu opened
@@ -11712,7 +11721,9 @@ below.
 **A frame gets two cards of its own, *Frame templates* and *Layout grid*, and the ordinary Fill and
 Stroke panels for its paint** (§5.3b, §15 D385, D387). *Frame templates* sits **second, above Align
 and Transform** — under the identity and mask cards, because it says what kind of page this is, and
-everything below it is about a layer among layers. ⚠️ **Not on a component** since §15 D1000: where any
+everything below it is about a layer among layers. It starts collapsed (§15 D1086), a page of
+pictures being reached for rather than read on every frame selected. ⚠️ **Not on a component** since
+§15 D1000: where any
 selected frame is a main, a variant, a set or an instance root there is no *Frame templates* card — a
 part is not a page. ⚠️ ***Layout grid* sat third, beside it, until the
 layout cards** (§15 D878): it sits under *Container* now, the grid dividing what the container lays
@@ -14219,7 +14230,8 @@ a parameter because the two callers legitimately ask about different ones — th
 `press_origin` there (§15 D29). **A parallel ladder rather than a lifted one**, so the two can drift,
 and `a_guide_does_not_steal_a_press_the_chrome_claims` is what binds them: it sweeps a strip of points
 and asserts the gate and the ladder agree at every one. A fifth rung in `begin_select_drag` owes
-`chrome_claims` a term. **The fifth is a selected container's spacing band** (§15 D1078), a rung
+`chrome_claims` a term. **The fifth is a container's spacing band** — the selected container's, or
+since §15 D1089 the one under the pointer (§15 D1078), a rung
 below the box handles — the press asks `begin_spacing_drag` after them, the cursor asks `spacing_at`
 before the handles' `armed` and ahead of `guide_cursor` — and it went in without its term, so a guide
 lying over a band took the press the cursor had just promised to the band. `chrome_claims` asks
@@ -14232,7 +14244,10 @@ drives the ladder has to reset `drag` *before* asking the gate.
 base }`: `band` is what was grabbed, `anchor` the press in the container's local space, `base` the
 value the band **drew** there. Its press sits **above the `Alt`+`Shift` refusal** below — that chord
 is the band's all four sides, and the band is chrome of what is already selected, so no slip off it
-designates or duplicates anything, the argument the handles' arms rest on (§15 D289).
+designates or duplicates anything, the argument the handles' arms rest on (§15 D289). ⚠️ **Since §15
+D1089 the band may be an unselected container's**, so *"already selected"* is no longer true of every
+band; what still holds is that a band drag designates nothing — its release selects nothing — and
+duplicates nothing.
 `spacing::canvas_tests::the_modifiers_choose_the_sides_and_the_step` pins the order. Each frame
 previews one `SetDisplay`, the modifiers read every frame; the cursor is the resize arrows along the
 band's axis, turned through the container's world transform, for the whole drag; the right button or

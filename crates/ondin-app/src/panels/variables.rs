@@ -41,6 +41,9 @@ const GROUP_H: f32 = 26.0;
 const ROW_H: f32 = 28.0;
 /// A variable row's name indent past its group's caret (G1).
 const INDENT: f32 = 23.0;
+/// An in-place field's text inset from its outline (§15 D1083) — so a field
+/// opened over a label puts the text where the label was.
+const EDIT_PAD_X: f32 = 6.0;
 const MENU_ROW_H: f32 = 26.0;
 /// The browser's ground — the text at 17% over black, `#282828` (G1), a step
 /// above the inspector's card.
@@ -2151,7 +2154,7 @@ fn var_row(
             ui.painter().rect_filled(r, 4, color::text_a(13));
             let field = edit_field(
                 ui,
-                r.shrink2(egui::vec2(4.0, 0.0)),
+                r,
                 text,
                 id.with(("cell", m.id)),
                 11.0,
@@ -2617,6 +2620,9 @@ fn scroll_bar(ctx: &egui::Context, panel: egui::Rect, modes: usize, b: &mut Brow
 /// inspector's fields' own layouter and dots (`binding::refusal_galley`,
 /// `underline_refusal`), and the sentence above the table says why. A keystroke
 /// makes it ordinary text again.
+///
+/// `r` is the field's outline; the text sits [`EDIT_PAD_X`] inside it, centred
+/// on its height.
 fn edit_field(
     ui: &mut egui::Ui,
     r: egui::Rect,
@@ -2639,16 +2645,28 @@ fn edit_field(
     if let Some(h) = hint {
         edit = edit.hint_text(h);
     }
-    let out = ui
-        .scope_builder(
-            egui::UiBuilder::new()
-                .max_rect(r)
-                .layout(egui::Layout::centered_and_justified(
-                    egui::Direction::TopDown,
-                )),
-            |ui| edit.show(ui),
-        )
-        .inner;
+    // **Inset and centred in `r`, which is the outline the caller strokes**
+    // (§15 D1083): the text sat on the box's top edge flush against its left,
+    // because a `Frame::NONE` edit has no margin and `centered_and_justified`
+    // stretches it to the whole box with its row at the top. A box exactly one
+    // row tall, [`EDIT_PAD_X`] in from either side, puts it where the label it
+    // replaces was.
+    let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(pt)));
+    let inner = egui::Rect::from_min_max(
+        egui::pos2(r.left() + EDIT_PAD_X, r.center().y - row_h / 2.0),
+        egui::pos2(
+            (r.right() - EDIT_PAD_X).max(r.left() + EDIT_PAD_X),
+            r.center().y + row_h / 2.0,
+        ),
+    );
+    // **A child that leaves the parent's cursor alone**, not a scope: a scope
+    // advances the cursor past what it drew, and a field inside a row the
+    // caller had already allocated put the cursor back *above* that row's
+    // bottom — the table under a mode being renamed came up five points.
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(
+        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+    ));
+    let out = edit.show(&mut child);
     let at = (refused == Some(text.as_str())).then_some(0);
     super::binding::underline_refusal(ui, &out, at);
     out.response.response
@@ -3513,6 +3531,41 @@ mod tests {
             ..Default::default()
         };
         ctx.run_ui(input, |_| draw(app, ctx)).shapes
+    }
+
+    /// **Renaming a mode moves nothing below the header** (§15 D1083): the
+    /// variable rows sit where they sat. Reported as the table shifting up a
+    /// point or two while the mode's field was open.
+    ///
+    /// Flip, run: `edit_field` drawing in a `scope_builder` again fails, the
+    /// name 5 points higher (436 against 441).
+    #[test]
+    fn renaming_a_mode_leaves_the_rows_where_they_are() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        let v = the_only_var(&app);
+        let mode = app.session.doc.variables().modes()[0].clone();
+        app.var_browser.as_mut().unwrap().edit = None;
+        let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
+        let mut shapes = vec![];
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, vec![], draw);
+        }
+        let name = v.name.rsplit('/').next().unwrap().to_string();
+        let resting = last_text(&shapes, &name).expect("the variable's name");
+        let b = app.var_browser.as_mut().unwrap();
+        b.edit = Some(Edit::Mode {
+            mode: mode.id,
+            text: mode.name.clone(),
+        });
+        b.edit_focus = true;
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, vec![], draw);
+        }
+        let editing = last_text(&shapes, &name).expect("the variable's name, the mode open");
+        assert_eq!(editing, resting, "the row moved while the mode was renamed");
     }
 
     /// Click the text `s` that `draw` lays out — moved to, pressed, released.

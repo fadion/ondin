@@ -644,9 +644,13 @@ impl OndinApp {
             egui::vec2(14.0, 14.0),
         );
         paint_preview(p, &self.session.doc, style, sw);
+        // **One row tall, centred on the capsule** (§15 D1083): `put` stretches a
+        // `Frame::NONE` edit over the whole box with its row at the top, so the
+        // name sat high in the capsule.
+        let row_h = ui.fonts_mut(|f| f.row_height(&egui::FontId::proportional(12.0)));
         let field = egui::Rect::from_min_max(
-            egui::pos2(sw.right() + 8.0, rect.top() + 4.0),
-            egui::pos2(rect.right() - 12.0, rect.bottom() - 4.0),
+            egui::pos2(sw.right() + 8.0, mid - row_h / 2.0),
+            egui::pos2(rect.right() - 12.0, mid + row_h / 2.0),
         );
         let id = ui.id().with(("style-naming-field", style.id));
         let edit = ui.put(

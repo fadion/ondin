@@ -481,8 +481,15 @@ permission.
    identical bytes (nodes serialized in sorted-id order, stable field order) — the property the golden
    tests rest on, and what makes documents git-friendly. The determinism is real and tested, and since
    2026-08-22 the SVG and JSON goldens do rest on it (§11); the PNG golden is the one still unbuilt.
-10. **MCP is a thin adapter.** Tool handlers only translate to/from `Operation`s and queries; any
-    logic they need lives in `ondin-core`.
+10. **MCP is a thin adapter.** Tool handlers only translate to/from `Operation`s, queries and the
+    owning process's **document-level actions** — marking a document a kit, publishing it, stopping
+    its sharing, and filing a new document in the library (§8.3, §15 D1097); any logic they need
+    lives in `ondin-core`. The four are not everything a person does to a document short of editing
+    it — renaming, moving, duplicating and deleting one stay the person's, on the dashboard (§8.4) —
+    but they are what an agent needs to build and publish a design system on request, and widening
+    the invariant to them is what lets it; the invariant predates kits. They are still never the
+    handler's own: each is a request to the owning process, which runs the app's own verbs for it —
+    the ones the document menu's rows and the dashboard's *New file* end in.
     ⚠️ **Much of the logic the first handlers will need does not live there yet, and the move is
     scheduled rather than done** (§15 D786, `[A2-L7-01]`). `tools/mod.rs` and `preview.rs` hold
     thousands of lines of headless geometry — `resize_box_to`, `rotate_node`, `pen_outline`,
@@ -2317,9 +2324,10 @@ so without the restatement it previewed at its main's placement while the commit
 insets put it.
 
 **The snapshot** (the session's). No `snapshot_version` bump in the first build: a copy reads as an
-ordinary node, which is not a misreading of it. Exposing `component` and `link` is the parked MCP
-work's question, and so is whether a fill in the snapshot carries its item id (§15 D980) — a change
-of the snapshot's own shape, if it is made, owes its own bump.
+ordinary node, which is not a misreading of it. Exposing `component` and `link` is decided for the
+parked MCP work — §8.4 has the snapshot name each node's component link (§15 D1095) — and whether a
+fill in the snapshot carries its item id is still its question (§15 D980) — a change of the
+snapshot's own shape owes its own bump.
 
 🚨 **The pass lives in `ondin-core` — `propagate.rs` since `45730f6`, where this design put it beside
 `keep_insets` in `build.rs` — and `EditorSession`'s commit is the only door that runs it** (the
@@ -8854,6 +8862,13 @@ deliverable.
 - The owning process holds `Document` + `History` + `Resolved` on its main thread.
 - All mutations funnel through a single-writer **op queue**:
   `mpsc<OpRequest { tx: Transaction, reply: oneshot<Result<ApplyOutcome, OpError>> }>`.
+- Document-level actions (invariant 10, §15 D1097) — `make_kit`, `publish_kit(note)`,
+  `stop_sharing_kit`, `create_document(name, project?)` — ride **the same queue** as a second
+  request kind, `ActionRequest { action, reply }`, so they are ordered against the edits around
+  them: a publish sent after a batch of writes publishes those writes. The owning thread runs the
+  app's own code for each — `make_kit`, `publish_now` and `stop_sharing_kit`, the verbs the
+  document menu's rows end in past its publish and *Stop sharing* dialogs, and
+  `library::store::file_document` — and replies with its result. None is a `Transaction`, so none enters the history and `undo` reverts none.
 - MCP handlers (async, own thread/runtime) build transactions with their session `IdSource`, submit
   to the queue, await the reply. The GUI pumps the queue every frame; `serve` pumps it in its main
   loop. One source of truth, one history, AI edits appear live on the canvas through the same path
@@ -8864,31 +8879,171 @@ deliverable.
 
 Phase 1 — read/export (ship first):
 `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `hit_test(x,y)`,
-`get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`.
+`get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`,
+`run_exports(ids?) -> Vec<File>`, `list_components()`, `list_variables() -> VariableTable`,
+`list_styles() -> StyleTable`.
 
 Phase 2 — write (1:1 with operations/composites):
-`create_node`, `insert_subtree`, `delete_node`, `reparent`, `reorder`, `set_transform`,
-`set_geometry`, `set_text`, `set_text_style`, `set_fills`, `set_strokes`, `set_opacity`,
-`set_visible`, `set_name`, `group(ids)`, `ungroup(id)`, `duplicate(id)`, `undo()`, `redo()`,
-`set_selection(ids)`.
+`create_node`, `insert_subtree`, `delete_node`, `reparent`, `reorder`, `group(ids)`, `ungroup(id)`,
+`duplicate(id)`, `set_transform`, `set_pivot`, `set_geometry`, `set_name`, `set_visible`,
+`set_locked`, `set_opacity`, `set_clip`, `set_mask(id, mode?)`, `set_text`, `set_text_style`,
+`set_text_spans`, `set_paragraph_style`, `set_block_style`, `set_fills`, `set_strokes`,
+`set_effects`, `add_image(bytes) -> ImageId`, `set_display`, `set_layout_item`, `set_insets`,
+`set_exports`, `undo()`, `redo()`, `set_selection(ids)`.
+
+Phase 3 — components, variables and styles (through the verbs, never the raw ops):
+`make_component(id)`, `create_instance(main, parent, at)`, `detach_instance(id)`,
+`swap_instance(id, main)`, `combine_as_variants(ids)`, `switch_variant(id, property, value)`,
+`define_property(main, field)`, `set_instance_property(id, property, value)`,
+`reset_overrides(id, scope)`, `add_variable(kind, name, value)`, `remove_variable(id)`,
+`rename_variable(id, name)`, `set_variable_value(id, mode, value | alias)`, `add_mode(name)`,
+`remove_mode(id)`, `rename_mode(id, name)`, `set_frame_mode(id, mode?)`,
+`bind_variable(id, field, var?)`, `add_style(slot, name, value)`, `remove_style(id)`,
+`rename_style(id, name)`, `set_style_value(id, value)`, `apply_style(id, slot, style?)`.
+
+Phase 4 — kits and the library (the app's own actions, some outside undo):
+`list_documents()`, `create_document(name, project?) -> Path`, `list_kits()`, `get_kit(kit)`,
+`insert_from_kit(kit, main, parent, at)`, `list_kit_updates()`, `accept_kit_updates(kit?)`,
+`make_local(ids)`, `map_kit_modes(kit, mapping)`, `make_kit()`, `publish_kit(note)`,
+`stop_sharing_kit()`.
 
 Selection is app state, not document state (§9.3) — but it is deliberately part of the MCP surface,
 because "the selected layer" is how humans will phrase almost every AI request. The MCP layer reads
 it from (and writes it to) the owning process's session state, never the `Document`.
 
 Notes: `create_node`/`insert_subtree`/`duplicate` return the new ids (the handler minted them, so
-it knows them). Snapshot exposes world transforms so agents can compute local placements; a
+it knows them), and so do `create_instance`, `insert_from_kit`, `add_image`, `add_variable`,
+`add_mode` and `add_style`. Snapshot exposes world transforms so agents can compute local placements; a
 convenience `place_at_world(id, world_transform)` adapter is allowed in core if agents struggle.
+**`insert_subtree` is the tool a whole layout goes through**: a page of a few hundred layers is a
+handful of calls, one tree per section, where `create_node` would be one round trip per layer. And
+**`export_png` is the agent's eyes**: placement errors that no read tool reports (a card under the
+band below it, a label over a button) show only in the render, so a client that can see images is
+expected to export, look and correct, the way a designer does.
 
-🚨 **The two phase paragraphs above are parsed by a test, and editing them can break the build**
-(§15 D726). `ondin-mcp/src/tools.rs` holds the same twenty-eight names as `PHASE_1` and `PHASE_2`, and
-a `#[cfg(test)]` module there `include_str!`s this file and diffs both phases **in order** — the
+**Every write goes through the commit door the app's own edits use** (§8.3, `EditorSession`), so
+the passes that run there run for an agent's transaction too: `keep_insets` and `keep_flex_sizes`,
+the eight `keep_*_bindings` passes, then `propagate::owed` — `style::settle`, `swap::settle`,
+`propagate_structure`, `component::settle_links`, `variant::settle`, `propagate` and `style::settle`
+once more, in that order, which `owed`'s doc says the core tests pin. An agent never has to know a
+copy exists to keep it in step with its main, nor that a style's users must be rewritten.
+⚠️ **That sequence lives in `ondin-app` today** (`EditorSession::commit_inner`), so `serve` (§8.2)
+has no route to it. The component and style half is one core function, `propagate::owed`, but the
+ten passes before it are called in that order nowhere else, and `ondin-app` has no lib target —
+§15 D786's wall, met by the commit rather than the gestures. The sequence has to be reachable
+without a window before the headless half of M6 can honour this paragraph. ⚠️ **And the door reads
+an edit of a styled layer as an edit of the style while the browser's *Edit* is open**
+(`style::edit_through`, first in `commit_inner`, §15 D1063), so an agent's write landing during one
+would change the style and every user of it — a question for the GUI half of M6, not answered here.
+
+**Phase 3 names verbs rather than ops because the ops alone are refused or wrong.** Binding a field
+writes a canonical literal beside the binding (`build::bind_*_ops` — 0 for a number, empty for a
+string, `true` for a visibility), which is what lets a main and its copy bound to one variable
+compare equal whatever either held before; a colour binding replaces the paint's brush outright,
+keeping its `%` (`BrushSource::Bound`, `build::bind_brush_at_all`). Removing a variable or a style
+detaches its users to what they drew in the same transaction (`variable::remove_ops`,
+`style::remove_ops`), and removing a mode returns its frames to *Inherit*
+(`variable::remove_mode_ops`) — each refused at the commit otherwise (§15 D1038). Making an
+instance writes a linked copy (§15 D978). A tool that wrote `RemoveStyle` bare would hand the
+commit a transaction it refuses, and one that wrote `SetCornerVars` bare a binding over a literal
+that is not the canonical one.
+`bind_variable`'s `field` names any bindable field — corner radii, gaps and padding, width and
+height, visibility, opacity, a text's content and family, a fill's or a stroke's colour, a stroke's
+width, and a shadow's X, Y, blur and spread or a layer blur's radius (an effect's colour and a
+filter's numbers bind nothing) — and is one tool over the six `Set*Vars` ops and the bindings a
+fill, a stroke and an effect carry in their own items (`BrushSource`, §15 D1039; D1073, D1074);
+`var: None` detaches to the value drawn. ⚠️ **An item's binding names its item**: the core verbs
+take a stroke's or an effect's `ItemId`, and a paint's colour its index in the list.
+
+**The reads have to grow with Phase 3, and the snapshot is where.** A bound field's stored literal
+is a placeholder, so an agent reading the model would see a 0-wide layer and an empty text: the
+snapshot reports the **drawn** value of every bound field with the binding beside it, plus each
+node's style per slot, its component link (main, instance, variant, overrides) and a frame's mode.
+Today it does the first half of that and none of the rest: every bound field it carries — a paint's
+colour, a stroke's width, an effect's numbers, the size and corners through `Resolved`'s used kind,
+the visibility, the opacity, a text's content and family — is reported as drawn (§15 D1039, D1059,
+D1061, D1069, D1072–D1074), and no binding is named. ⚠️ **And Phase 2's layout tools write what it
+does not read**: a container's display, gaps and padding and an item's insets and layout-item
+settings are in no field of `NodeSnapshot`, and its fill, stroke and effect lists are the visible
+entries only, with no item id — which `bind_variable` on an item needs (§5.3d's open question, §15
+D980). `list_variables` returns every mode's cells, aliases unresolved and resolved; `list_styles`
+returns each style's slot, name and value with its users' count. That is a `SNAPSHOT_VERSION` bump
+when it lands.
+
+**Phase 4 is how an agent builds a design system and uses one** (§15 D1096). Building one: a
+document is filled through Phases 2 and 3 with mains, variables and styles, marked with `make_kit`
+and published with `publish_kit`; using one: another document lists the library's kits, reads a
+kit's published mains, variables and styles with `get_kit`, places a main with `insert_from_kit`,
+and takes later publishes with `accept_kit_updates`. **The tools are the app's verbs**, as Phase 3's
+are: `insert_from_kit` is `kit::insert`, which vendors the main and every nested main it reaches into
+the vault (§15 D1012), its variables and styles carried by `tokens::plan` into the document's own
+tables (§15 D1064); `accept_kit_updates` is the app's accept, per kit or every kit and never per main
+(§15 D1016), its transaction built by `kit::update_all`; `make_local` is `kit::make_local`, forking
+the kit variables and styles the main reads (§15 D1066); `map_kit_modes` is the variables
+browser's mapping row (`panels/variables.rs`), a `SetKitModes` carrying the kit's held record with
+only its hand-set `map` changed. `swap_instance` takes a kit main too, vendoring it first, as the
+swap picker's kit rows do (`kit::swap_offers`, `kit::vendored`, §15 D1019). So the raw kit ops —
+`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriting the kit's name or modes,
+`SetStyleOrigin` and whole-variable `SetVariable` — stay behind those verbs, which is where the
+planner keeps them consistent.
+⚠️ **Three of them are outside undo, and one is the only outward write in this list.** The kit mark
+is document metadata, not an operation (§5.11a, §15 D1011 (2)), so `make_kit`, `publish_kit` and
+`stop_sharing_kit` save the file and `undo()` reverts none of them (`make_kit` minting the
+document's id first when it has none, §15 D1013). `publish_kit` changes what every consuming
+document is offered — an open one's update pill within the watch's 45 seconds or on regaining the
+focus (§15 D1020), a closed one's when it is next opened. **The agent publishes, stops sharing and
+files documents on request, with no dialog** (§15 D1097): the request is the person's ask, the
+publish note is the tool's argument, and a dialog waiting on a click would leave the agent hung on
+a window it cannot see. What the person gets instead is the status line saying the agent did it.
+The three kit actions write one already, through `EditorSession::info` — *Published Atlas v4 · 3
+components*, *Atlas is a kit — nothing is shared until you publish it* — and none says who; filing
+a document writes none, the dashboard's *New file* opening the document instead. So the words *by
+the agent* on the three, and a line for the fourth, are M6's to write. These four reach the owning
+process as document-level actions, invariant 10's second kind of request, on §8.3's queue.
+⚠️ **The endpoint is one document** (§8.1). `create_document` files a new document in the library
+(`library::store::file_document`) and returns its path; the agent reaches it through the proxy's
+pick-by-path once the GUI has opened it in a window of its own or `serve` hosts it, never by the
+current endpoint switching documents under the person using it. Renaming, moving, duplicating and
+trashing documents stay the person's, on the dashboard.
+⚠️ **And half of it is `ondin-app` code** — not behind a linking wall, since `serve` is the same
+`ondin` binary, but held by the windowed app: the kit actions are `OndinApp` methods, which a
+windowless `serve` does not construct (§15 D1097). The verbs
+are core — `kit::insert`, `update_all`, `make_local`, `publish`, `swap_offers` and `vendored`,
+`tokens::plan` — but everything that finds a kit and reads it is the app's: which documents are
+kits and their published states (the library scan's `meta.kit` and `KitShelf`, `kits/index.rs`),
+which updates wait (`kits_waiting` and the watch), the saves around marking and publishing, and
+filing a document (`library/`). So Phase 4 is GUI-only until those move.
+
+**`run_exports` and `set_exports` let an agent prepare a hand-off**: `set_exports` writes a layer's
+export list — the *Export* card's rows, each format, scale, prefix and suffix, background, quality,
+trim and square padding (`ExportSpec`, §7) — and `run_exports` renders the listed layers' files
+through `ondin_export::plan` and `plan::render`, the path `ondin export --all` takes, returning the
+bytes with their names rather than writing them: where files land is the client's and the person's
+call, not the endpoint's. The panel's *Export all* plans and renders through the same two
+functions; what it and the CLI each keep a copy of is the walk that collects the layers carrying
+settings, the two held to one answer by `build::all_in_document_order` (§15 D516, D626).
+
+**`set_pivot` is for the person who comes after the agent** (§15 D1096, the session's call). An agent
+can turn a layer about any point already, by `set_transform` with an affine it computes, because the
+pivot is baked by the gesture that reads it and never composed into the world transform (§15 D55).
+What the pivot stores is where a person's later turn goes — the canvas's rotation, the inspector's
+rotation and skew fields, a flip (resize and a skew drag ignore it, §15 D60) — a needle about its
+hub, a door about its hinge; a design handed over with the hinge in the right place is the authored
+intent, cheap to write and invisible until someone turns it.
+
+**Not exposed, on purpose** (§15 D1095, D1096 — the maintainer: visual only and irrelevant to an
+agent): guides, layout grids, the canvas background, the fill rule and the proportions lock.
+Paragraph spans travel inside `set_paragraph_style`, which carries them.
+
+🚨 **The four phase paragraphs above are parsed by a test, and editing them can break the build**
+(§15 D726). `ondin-mcp/src/tools.rs` holds the same names as `PHASE_1` to `PHASE_4`, and
+a `#[cfg(test)]` module there `include_str!`s this file and diffs every phase **in order** — the
 second copy having sat here unreadable to any gate, in a crate deferred to M6, for as long as the
 lists could quietly drift. The parser anchors on each phase's opening sentence, takes the paragraph up
 to the first blank line, and reads **every backticked token in it as a tool name**, dropping any
-signature at the `(`. So: do not reword either opening sentence, do not reflow a phase paragraph into
-the one below it, and do not put a backticked aside inside one — the *Selection* and *Notes*
-paragraphs are outside the parse and are where such a thing belongs. A rename here fails at the
+signature at the `(`. So: do not reword any phase's opening sentence, do not reflow a phase paragraph
+into the one below it, and do not put a backticked aside inside one — the paragraphs after the last
+phase are outside the parse and are where such a thing belongs. A rename here fails at the
 comparison, and a moved heading fails loudly at the parse rather than silently comparing two empty
 lists.
 
@@ -16336,7 +16491,9 @@ color editor, copy/paste/duplicate, grouping, multi-select, snapping, unsaved-ch
 picking an uninstalled Google font downloads, caches, and applies it; reopening that document
 offline still renders it correctly from cache.
 
-**M6 — MCP + headless.** Socket endpoint + stdio proxy + `ondin serve`; Phase 1 tools, then Phase 2.
+**M6 — MCP + headless.** Socket endpoint + stdio proxy + `ondin serve`; Phase 1 tools, then Phase 2,
+then Phase 3, then Phase 4 (§8.4) — Phase 4 a running GUI's only until the library moves out of
+`ondin-app`.
 ✅ an external agent can query/export against both a running GUI and `ondin serve`; its edits appear
 live on the canvas, participate in shared undo, and survive save/load.
 

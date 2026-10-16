@@ -2127,11 +2127,17 @@ what comes after is visible from one place, not so the design gets restated.
   tool list, no handlers, no socket. **Three things are queued behind it** and whoever builds the
   span emitter should do all three: per-run colour, the list marker and its nesting level (§15 D169,
   D172), and the missing-font warning under *Now · Doc drift*.
-  ⚠️ **And the snapshot's questions, which are this work's by the record's own word**: whether it
-  exposes a node's `component` and `link`, and whether a fill carries its item id (`architecture.md`
-  §5.3d's snapshot paragraph, §15 D980) — a change of the snapshot's own shape, owing its own bump —
-  and whether it carries specified values beside the used ones it reports (§7, §15 D868). *Added
-  2026-10-06.*
+  ⚠️ **And the snapshot's questions, which are this work's by the record's own word**: whether a
+  fill carries its item id (`architecture.md` §5.3d's snapshot paragraph, §15 D980) — a change of
+  the snapshot's own shape, owing its own bump — and whether it carries specified values beside the
+  used ones it reports (§7, §15 D868). *Added 2026-10-06.* Whether it names a node's component link
+  was answered by §8.4's Phase 3 scope (§15 D1095), which also has it name bindings, styles and a
+  frame's mode, and found it reads none of Phase 2's layout fields. ⚠️ **§8.4 has a second thing to
+  move before `serve` can honour it**: the commit door's pass sequence is called only in
+  `EditorSession::commit_inner`, behind D786's same wall. **And a third for Phase 4** (§15 D1096):
+  the kit verbs are core, but finding a kit, reading its published state, the waiting updates and
+  filing a document are `kits/` and `library/` code, so kits and the library are GUI-only until
+  those move.
   ⚠️ **One thing has to happen *before* the first tool handler rather than behind it** (§15 **D786**,
   `[A2-L7-01]`): the headless half of `tools/mod.rs` and `preview.rs` moves to `ondin-core`.
   `ondin-app` has no lib target, so nothing outside the binary can link `resize_box_to`,

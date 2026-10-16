@@ -25,7 +25,7 @@
 ///
 /// **The list, in the order §8.4 gives it**, so a diff against the design is a
 /// diff and not a set comparison that hides a reordering.
-pub const PHASE_1: [&str; 8] = [
+pub const PHASE_1: [&str; 12] = [
     "get_document",
     "get_node",
     "list_children",
@@ -34,38 +34,111 @@ pub const PHASE_1: [&str; 8] = [
     "get_selection",
     "export_svg",
     "export_png",
+    "run_exports",
+    "list_components",
+    "list_variables",
+    "list_styles",
 ];
 
 /// Phase 2 — write, 1:1 with operations/composites (§8.4).
 ///
-/// `create_node`, `insert_subtree` and `duplicate` return the new ids: the
-/// handler minted them, so it knows them.
-pub const PHASE_2: [&str; 20] = [
+/// `create_node`, `insert_subtree`, `duplicate` and `add_image` return the new
+/// ids: the handler minted them, so it knows them.
+pub const PHASE_2: [&str; 33] = [
     "create_node",
     "insert_subtree",
     "delete_node",
     "reparent",
     "reorder",
-    "set_transform",
-    "set_geometry",
-    "set_text",
-    "set_text_style",
-    "set_fills",
-    "set_strokes",
-    "set_opacity",
-    "set_visible",
-    "set_name",
     "group",
     "ungroup",
     "duplicate",
+    "set_transform",
+    "set_pivot",
+    "set_geometry",
+    "set_name",
+    "set_visible",
+    "set_locked",
+    "set_opacity",
+    "set_clip",
+    "set_mask",
+    "set_text",
+    "set_text_style",
+    "set_text_spans",
+    "set_paragraph_style",
+    "set_block_style",
+    "set_fills",
+    "set_strokes",
+    "set_effects",
+    "add_image",
+    "set_display",
+    "set_layout_item",
+    "set_insets",
+    "set_exports",
     "undo",
     "redo",
     "set_selection",
 ];
 
+/// Phase 3 — components, variables and styles, through the verbs rather than
+/// the raw ops (§8.4, §15 D1095).
+///
+/// **Verbs, because the ops alone are refused or wrong**: a `Set*Vars` op writes
+/// the binding and not the literal beside it (a colour's binding is a
+/// `BrushSource` inside the paint list instead), and removing a variable, a mode
+/// or a style still in use is refused at the commit. `create_instance`, `add_variable`,
+/// `add_mode` and `add_style` return the new ids.
+pub const PHASE_3: [&str; 23] = [
+    "make_component",
+    "create_instance",
+    "detach_instance",
+    "swap_instance",
+    "combine_as_variants",
+    "switch_variant",
+    "define_property",
+    "set_instance_property",
+    "reset_overrides",
+    "add_variable",
+    "remove_variable",
+    "rename_variable",
+    "set_variable_value",
+    "add_mode",
+    "remove_mode",
+    "rename_mode",
+    "set_frame_mode",
+    "bind_variable",
+    "add_style",
+    "remove_style",
+    "rename_style",
+    "set_style_value",
+    "apply_style",
+];
+
+/// Phase 4 — kits and the library, the app's own actions (§8.4, §15 D1096).
+///
+/// How an agent builds a design system (`make_kit`, `publish_kit`) and uses one
+/// (`list_kits` through `accept_kit_updates`). `make_kit`, `publish_kit` and
+/// `stop_sharing_kit` write the kit mark, which is document metadata rather
+/// than an operation, so `undo` reverts none of them. `insert_from_kit` returns
+/// the new instance's id and `create_document` the new file's path.
+pub const PHASE_4: [&str; 12] = [
+    "list_documents",
+    "create_document",
+    "list_kits",
+    "get_kit",
+    "insert_from_kit",
+    "list_kit_updates",
+    "accept_kit_updates",
+    "make_local",
+    "map_kit_modes",
+    "make_kit",
+    "publish_kit",
+    "stop_sharing_kit",
+];
+
 #[cfg(test)]
 mod tests {
-    use super::{PHASE_1, PHASE_2};
+    use super::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
 
     /// `docs/architecture.md`, embedded at compile time.
     ///
@@ -142,6 +215,14 @@ mod tests {
             (
                 "Phase 2 — write (1:1 with operations/composites):",
                 &PHASE_2[..],
+            ),
+            (
+                "Phase 3 — components, variables and styles (through the verbs, never the raw ops):",
+                &PHASE_3[..],
+            ),
+            (
+                "Phase 4 — kits and the library (the app's own actions, some outside undo):",
+                &PHASE_4[..],
             ),
         ] {
             let theirs = listed(prefix);

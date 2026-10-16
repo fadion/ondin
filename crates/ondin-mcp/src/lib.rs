@@ -1,9 +1,11 @@
 //! ondin-mcp — the MCP adapter (§8, invariant 10).
 //!
-//! A thin adapter: tool handlers only translate to/from `Operation`s and
-//! queries; all logic lives in core. The owning process (GUI or `serve`) holds
-//! the document; mutations funnel through a single-writer op queue. This crate
-//! has no rendering or UI dependency.
+//! A thin adapter: tool handlers only translate to/from `Operation`s, queries
+//! and the owning process's document-level actions — making a kit, publishing,
+//! stopping sharing, filing a document (§15 D1097); all logic lives in core or
+//! in the owning process. The owning process (GUI or `serve`) holds the
+//! document; mutations and actions funnel through a single-writer queue. This
+//! crate has no rendering or UI dependency.
 //!
 //! M0 scaffold: op-queue message types and the tool list are sketched; the
 //! socket listener and stdio proxy land at M6.

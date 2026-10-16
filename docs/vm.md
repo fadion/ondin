@@ -293,10 +293,13 @@ is a deliberate plugin story, which is a different feature with a different secu
 
 ## 11. Relationship to MCP and `/ai`
 
-`ondin-mcp` is **46 lines** today, and `tools.rs` is a doc comment listing 28 planned tools — Phase 1
-read, Phase 2 write mapped 1:1 onto `Operation`. Nothing is built. **This is the reason to decide the
-VM's role now even though the build stays parked:** committing to Luau `eval` as the bulk-write
-surface costs nothing today and costs a deprecation once those 28 write tools ship.
+`ondin-mcp` has no handler today, and `tools.rs` holds §8.4's planned tools as the constants
+`PHASE_1` to `PHASE_4`, checked against it (§15 D726, D1095, D1096) — Phase 1 read and export,
+Phase 2 write mapped 1:1 onto `Operation`, Phase 3 components, variables and styles through the
+verbs, Phase 4 kits and the library through the app's own actions. Nothing is built. **This is the
+reason to decide the VM's role now even though the build stays parked:** committing to Luau `eval`
+as the bulk-write surface costs nothing today and costs a deprecation once the write tools of
+Phases 2 and 3 ship.
 
 The split that survives contact with an agent:
 

@@ -1123,7 +1123,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D723** — **Three copies of one `DragValue` chrome strip, and one of them overrode a default with the default.** `ui::value_field_f64`, `ui::badge_field` and `ui::bare_drag_value` each held a verbatim eight-line sequence and its own paragraph restating the same two egui facts. New `ui::strip_drag_value_chrome` states them once: a `DragValue` has **two faces and both ground themselves** (a `Button` from `bg_fill`/`weak_bg_fill`/`bg_stroke`, a `TextEdit` from `extreme_bg_color` and `selection.stroke`); and 🚨 **the width goes and the colour stays, which is a reported bug** — `selection.stroke` is *also* the colour `paint_text_selection` writes into the galley's vertices, so `Stroke::NONE` turned every selected digit invisible and left an opaque selection block with nothing in it. 🚨 **The "parser precedence divergence" the finding names is the signature and not two decisions**: the first two build the `DragValue` so they can set a parser the caller's `build` may replace, and the third is handed a **finished** one with nowhere earlier to put it. **The rule is the same in all three and only there is it unofferable** — both docs said it as though each were the only copy, one calling it a feature and the other a limitation. *(Fixed and tested 2026-09-10; Keep. Closes `[S18.1-L3-06]`. ⚠️ **`badge_field`'s `.update_while_editing(true)` is removed** — measured against the vendored `egui-0.35.0/src/widgets/drag_value.rs:81`, where `update_while_editing: true` is the default — so it did nothing, and it sat *after* `build`, so it would silently have overridden a caller asking for `false`. *An override that is a no-op is the worst kind: nothing tests it and nothing announces it.* ⚠️ **The behaviour is load-bearing elsewhere and comes from the default, not from any call site**: `inspector::escaping_the_field_abandons_the_edit`'s doc credited it to *"`ui::value_field` builds every field with `update_while_editing(true)`"*, which `value_field_f64` has never done — corrected there, with its conclusion (that `edit_valve`'s `Escape` guard is load-bearing and looks redundant, §15 D315/D316) unchanged. ⚠️ **`selected_digits_are_never_painted_transparent` covers all three now**; `badge_field` was the third and had never been in that table, which is that test's own doc argument happening again to the test written to stop it happening. The per-helper arm is kept anyway: what it pins is that each helper is still *wired* to the rule. **Flip**: `Stroke::NONE` in the extracted helper is red. §9.4's numeric-field family gains a paragraph; nothing struck from `roadmap.md`)*
 - **D724** — **A tool switch cleared five pieces of gesture state by name and not the drag.** `OndinApp::choose_tool` cleared the text session, the pen, `pen_bias`, `points` and `pending_images`, each with a sentence saying why, and never touched `self.drag`. Pressing any tool key or a rail button mid-crop-drag left a live `Drag::CropResize` **and last frame's crop preview installed**, while `edited_image()` went `None` and brought the layer's selection box and handles back — a crop preview of a layer no longer in crop mode, under transform chrome answering a gesture that is not the one in hand. Measured headless: `drag live = true, gesture preview = true` after `choose_tool(Select)`. §9.4 names picking another tool as one of the three ways out of image editing (§15 D268, D270), and it was the one that did not finish the gesture. ⚠️ **`Escape` was already clean by ordering rather than by design** — its ladder reaches `cancel_gesture` before its `choose_tool(Tool::Select)` rung, and that gate is `self.drag.is_none()`, kind-agnostic — so **the one door anybody would test was the one door that worked**. *(Fixed and tested 2026-09-10; Keep — `cancel_gesture` deliberately not reused. Closes `[S12.4-L1-07]`. Three lines at the top of `choose_tool`: `self.drag = Drag::None`, `self.alt_clone = None`, `self.session.clear_gesture_preview()`. **`clear_gesture_preview`, not `clear_preview`** (§15 D109) — the two share one override set and only one belongs to the drag, and `[A1-L2-04]` is that mistake made once already. **`alt_clone` because the release will not clear it**: `finish_drag` drops it on its no-pointer arm and at the end of `Drag::Move`, and with `self.drag` already `None` and a pointer position in hand the match falls through `Drag::None => {}` and neither runs. 🚨 **Not routed through `cancel_gesture`, though the finding's sketch prefers it**: that takes a `&egui::Context` this function has not got across **seventeen** call sites, and its gate answers for inspector field scrubs, a Settings nudge, an export-quality scrub and a guide-position drag — states a tool switch cannot be in the middle of, the keyboard belonging to the field. What the two share is the **list**, not the funnel. `[A2-L7-02]` is the architectural cause and is **not** closed: with 101 fields and one privacy scope, *"is a gesture in flight?"* is a hand-written list at every site that needs one, and this adds a fourth rather than removing one. **Test** `canvas::tool_switch_drops_the_drag_tests`, with the `Drag::CropResize` **built by hand rather than driven** — what `choose_tool` owes is an answer to *any* live `Drag`, and driving the crop mechanics would make it fail for unrelated reasons — and the fixture asserted live first. Flip-checked; **all 1,242 app tests pass**, which is the real check with seventeen call sites gaining a clear. ⚠️ **`Escape` is the control this entry claims and is *not* asserted anywhere**; the test's doc said *"asserting it here"* and was corrected in the same pass. *Fix by adding the Escape arm if the ladder is ever touched.* §9.4's *"arming a tool whose verb is create clears the selection"* paragraph amended; nothing struck from `roadmap.md`)*
 - **D725** — **The Transform card's numbers changed shape when a second layer was selected, and its corner radius reported one the document does not hold.** §9.4 states the rule once — *"Every scrubbable field therefore pins its own: `ui::number(n)` as a `custom_formatter` where trailing zeros should be trimmed"* (§15 D66) — and the multi-selection card pinned a formatter without pinning **that** one. `inspector::multi_number` handed `custom_formatter` a raw `format!("{v:.2}")`, which does not trim, so `20` became `20.00` beside a single-layer field still reading `20`; `spacing_row` carried the same. 🚨 **And `inspector_multi_appearance`'s corner radius printed at *zero* decimals** where its single-layer twin prints two, so a shared **4.5 read `4`** and 5.5 read `6` — the panel reporting a radius the document does not hold, which is a different and worse failure from a cosmetic one. **Half-integers are what the control beside it produces**: `Scrub::whole(0.5)` steps by half units and photographic scaling carries corner radii, so 5 becomes 4.5 at 90%. *(Fixed and tested 2026-09-10; Keep. Closes `[S14.2-L3-07]`. ⚠️ **The card claims this parity in its own comment**, three hundred lines above the formatter that broke it — *"the single-layer panel's arithmetic, to the pixel — walking from one layer to two shifted the numbers sideways, which is what makes a panel feel cheap"* — written about the **widths**, which were fixed. *A parity claim scoped to one axis reads as a claim about the control.* ⚠️ **Bounded to the readout**, which is what separates this from `[S14.2-L1-02]`: a `custom_formatter` commits nothing, and what stops a click, Enter or Tab out of the multi radius field writing is `edit_valve`'s engagement latch (§15 D316, D519), pinned by `a_bare_click_through_a_mixed_corner_radius_field_writes_nothing`. ⚠️ **`interacting` is not that guard and reads as one** — it answers `dragged() || drag_stopped() || lost_focus() || changed()`, so it is **true** on the frame the field is tabbed away from, and its own comment says it decides whether to *build* a transaction while *"the valves ask their own latch"*. **Test** `a_number_reads_the_same_with_one_layer_selected_and_with_two`, asserting on the **galleys of both cards over one document** rather than on the formatters, since a test of `ui::number` would pass while the card called something else — which is what had happened. **Flipped separately, one per assertion**, the messages printing the whole card. ⚠️ **The multi opacity field's `{v:.0}%` is deliberately left and is not a fourth instance**: its single-layer twins spell the same thing as `.suffix("%").max_decimals(0)`. §9.4's D66 paragraph amended; nothing struck from `roadmap.md`)*
-- **D726** — **§8.4's tool list had a second copy in a crate nobody opens for three milestones, and nothing compared them.** `ondin-mcp/src/tools.rs` was fourteen lines of module doc and **no code**, holding §8.4's twenty-eight tool names a second time — identical name for name and phase for phase on the day the finding was written, checked rather than assumed. **What was wrong is that nothing could ever say so**, and the window in which the two can drift is the *whole* of the time nobody reads the file: `roadmap.md` files M6 under *Later · Post-v1* and §15 D4 defers `serve`/`mcp-proxy` until the editor is feature-complete, so **the copy that is not the design would read as the design to anyone who opened the crate**. ⚠️ **`cargo doc` reads this crate and could not help**: a prose list of names contains no `[link]`, so the one gate that reads doc comments had nothing to resolve — and none of the usual excuses apply, `ondin-mcp` being a lib crate with a `deny` rather than a `#[cfg(test)]` module (D319), a `tests/` target or a `build.rs` (D622). **The list had to stop being prose before anything could check it** — this round's *a count in a comment is a gate nobody built*, with a list in place of the count. *(Fixed and tested 2026-09-10; Keep — and the shape has a boundary, below. Closes `[S22-L3-06]`. `PHASE_1: [&str; 8]` and `PHASE_2: [&str; 20]` are constants, and a `#[cfg(test)]` module `include_str!`s `docs/architecture.md` and diffs both phases **in order** — a set comparison would call a reordered list identical and lose exactly what the phases carry. Names are parsed from the backticks with any signature dropped at the `(`, §8.4 writing `get_document() -> Snapshot` and `group(ids)` where the crate writes bare names. ⚠️ **`include_str!` rather than a runtime read is what makes it a gate**: it registers the dependency, so editing §8.4 rebuilds and re-runs the test, where a `fs::read` would depend on the working directory and leave a stale binary passing. Green under both `cargo test -p ondin-mcp` and `cargo test --workspace`, which is not a formality here (§15 D600). 🚨 **A gate whose subject is prose has two failure modes and only one is interesting.** Renaming an entry is red at the comparison; rewording the *heading* the parser looks for is red at `listed`'s own panic, **loudly rather than by returning an empty list that compares equal to an empty list** — the vacuity trap in its purest form, the gate going quiet at the exact moment the document it watches was edited. Both flip-checked. ⚠️ **The load-bearing detail for a future editor of §8.4 is that its two phase paragraphs are now parsed** — opening sentences as anchors, each paragraph ending at the first blank line, every backticked token inside read as a tool name — so reflowing one breaks the build rather than the record; §8.4 says so in place. 🚨 **First thing in the workspace coupling a crate's source to `docs/architecture.md`, and the maintainer asked whether to repeat it: yes, narrowly.** The technique is not new — `app::only_the_layers_panel_commits_without_the_committer` (§15 D679) `include_str!`s seven panel sources — so only the *subject* is. Repeat it where the document states an **exhaustive list or enumerated set** rather than an argument, the code holds a copy of that set, and the spelling is stable enough that the parser is not the thing that breaks. **Do not repeat it for prose that carries a reason**, which is most of this document: a test that diffed a paragraph of argument would be red on every honest edit, and the second time that happens somebody deletes the test rather than reads it. Nothing struck from `roadmap.md` — the *Later · Post-v1* MCP row is about M6 being deferred and still describes `ondin-mcp` as *"a stub: message shapes and the tool list, no handlers, no socket"*, which is still true)*
+- **D726** — **§8.4's tool list had a second copy in a crate nobody opens for three milestones, and nothing compared them.** `ondin-mcp/src/tools.rs` was fourteen lines of module doc and **no code**, holding §8.4's twenty-eight tool names a second time — identical name for name and phase for phase on the day the finding was written, checked rather than assumed. **What was wrong is that nothing could ever say so**, and the window in which the two can drift is the *whole* of the time nobody reads the file: `roadmap.md` files M6 under *Later · Post-v1* and §15 D4 defers `serve`/`mcp-proxy` until the editor is feature-complete, so **the copy that is not the design would read as the design to anyone who opened the crate**. ⚠️ **`cargo doc` reads this crate and could not help**: a prose list of names contains no `[link]`, so the one gate that reads doc comments had nothing to resolve — and none of the usual excuses apply, `ondin-mcp` being a lib crate with a `deny` rather than a `#[cfg(test)]` module (D319), a `tests/` target or a `build.rs` (D622). **The list had to stop being prose before anything could check it** — this round's *a count in a comment is a gate nobody built*, with a list in place of the count. *(Fixed and tested 2026-09-10; Keep — and the shape has a boundary, below. Closes `[S22-L3-06]`. `PHASE_1: [&str; 8]` and `PHASE_2: [&str; 20]` are constants, and a `#[cfg(test)]` module `include_str!`s `docs/architecture.md` and diffs both phases **in order** — a set comparison would call a reordered list identical and lose exactly what the phases carry. Names are parsed from the backticks with any signature dropped at the `(`, §8.4 writing `get_document() -> Snapshot` and `group(ids)` where the crate writes bare names. ⚠️ **`include_str!` rather than a runtime read is what makes it a gate**: it registers the dependency, so editing §8.4 rebuilds and re-runs the test, where a `fs::read` would depend on the working directory and leave a stale binary passing. Green under both `cargo test -p ondin-mcp` and `cargo test --workspace`, which is not a formality here (§15 D600). 🚨 **A gate whose subject is prose has two failure modes and only one is interesting.** Renaming an entry is red at the comparison; rewording the *heading* the parser looks for is red at `listed`'s own panic, **loudly rather than by returning an empty list that compares equal to an empty list** — the vacuity trap in its purest form, the gate going quiet at the exact moment the document it watches was edited. Both flip-checked. ⚠️ **The load-bearing detail for a future editor of §8.4 is that its two phase paragraphs are now parsed** — opening sentences as anchors, each paragraph ending at the first blank line, every backticked token inside read as a tool name — so reflowing one breaks the build rather than the record; §8.4 says so in place. 🚨 **First thing in the workspace coupling a crate's source to `docs/architecture.md`, and the maintainer asked whether to repeat it: yes, narrowly.** The technique is not new — `app::only_the_layers_panel_commits_without_the_committer` (§15 D679) `include_str!`s seven panel sources — so only the *subject* is. Repeat it where the document states an **exhaustive list or enumerated set** rather than an argument, the code holds a copy of that set, and the spelling is stable enough that the parser is not the thing that breaks. **Do not repeat it for prose that carries a reason**, which is most of this document: a test that diffed a paragraph of argument would be red on every honest edit, and the second time that happens somebody deletes the test rather than reads it. Nothing struck from `roadmap.md` — the *Later · Post-v1* MCP row is about M6 being deferred and still describes `ondin-mcp` as *"a stub: message shapes and the tool list, no handlers, no socket"*, which is still true. **Amended 2026-10-16** (D1095): three phase paragraphs and `PHASE_3` now; the gate compares two hand-kept lists, never the model; (D1096) four, `PHASE_4`)*
 - **D727** — **Four creation builders no test had ever called, and the clamp two of them share is on the door the tested one is not.** `create_ellipse`, `create_polygon`, `create_star` and `create_image_in_box` had **zero** test callers workspace-wide, all four being reached from one place — `canvas.rs` committing a `Drag::Create`. 🚨 **The identical side-count bound is tested three times over on the door beside them**: `step_sides` is the *keyboard* door, `↑`/`↓` mid-drag, and its doc says why it matters (*"`↓` held at three would wrap a `u32` straight to four billion"*), while `create_polygon` and `create_star` are the *commit* door — and deleting either `clamp` left the whole suite green. *(Tested 2026-09-10; Keep — this entry records coverage; no production line moved. Closes `[S13.2-L6-06]`. ⚠️ **The two doors fail differently, which is why one clamp cannot answer for the other**: `step_sides` subtracts, so its lower end is where an overflow lives, while a `u32` at the commit door cannot go below zero — what a bare `0` stores is a **count nothing honours**, `geometry::star_path` clamping again before it draws, so the canvas shows a triangle while the model, the file and the *Sides* field say `0`. **The clamp here defends the document, not the drawing.** 🚨 **The shipped test comment says *"a polygon with no area — `geometry` has no arm that draws one"* and that is false** — `star_path`'s first line is the clamp; the verdict it supports stands and only the account of the failure is wrong. ~~*Fix the sentence in `the_creation_builders_clamp_their_side_count_at_both_ends`' doc.*~~ *Fixed* — `tools/mod.rs`' doc now says a stored `0` draws a triangle, verified against the code 2026-10-06. ⚠️ **Nothing delivers an out-of-range count today** — `Drag::Create` seeds from `POLYGON_DEFAULT_SIDES`/`STAR_DEFAULT_POINTS` and moves only through `step_sides` — so this is defence against a second producer that does not exist yet, which is why deleting it costs nothing and why a future editor would. Both builders are driven because the constant reaches them through two differently-named fields, `sides` and `points`. The same test pins `STAR_DEFAULT_RATIO`'s one path into a document. 🚨 **`create_image_in_box`'s contract is *negative***: what it must not do is call `fitted_image_size`, which its click-door sibling `create_image` does — **a negative contract needs a fixture in which the positive one would visibly differ**, hence a 400×200 image drawn into a 50×300 box, asserted to be a box the fit rule argues with before anything else. ⚠️ **Flip, run**: inserting `fitted_image_size` is red at `50×25` against `50×300` while `a_placed_image_shrinks_to_fit_and_is_never_scaled_up` and `a_placed_image_is_centred_on_the_click` **both stayed green** — *a flip that leaves a neighbouring test green measures where that test's coverage stops*, here at the click path. ⚠️ `create_ellipse` is the fourth: `create_shape_box_is_order_independent` reads like its test and calls the private `local_box` directly, never reaching a builder. Nothing amended in `architecture.md` — §5.5a's *"A click fits, a drag draws"* and §9.4's copy both state the distinction correctly; nothing struck from `roadmap.md`)*
 - **D728** — **The sidebar counted the trash by scanning it, once per nav and once per frame.** `nav_count`'s `Nav::Trash` arm ran `store::trashed`, which is `scan::scan_dir` — one file open and one JSON prefix parse **per document in `.trash`** — and the sidebar paints that count on every nav, every frame, whether or not the trash is being looked at, with `visible_entries` scanning the same folder a second time in the same frame when it is. Two hundred trashed documents was two hundred file opens a frame, four hundred on *Trash*, for a number that changes only when the user acts. 🚨 **Two module heads forbade exactly this and both named the wrong road** — *"Nothing in this file may call it from inside a layout loop"* and *"a scan is a real cost and must not be per-frame"*, both of `Library::refresh`, which nothing calls per frame. **A rule that names one road is not a rule about the destination.** *(Fixed and tested 2026-09-10; Keep — the one invalidation door this entry left open was closed the same day, and the hazard it is an instance of was not. Closes `[S20.1-L3-07]`. `Library::trashed` holds the listing, `trashed()` reads it and `refresh_trash()` is the only thing that moves it; ⚠️ **private where `entries` is `pub`**, because one reader and one writer is what keeps the invalidation set *enumerable*. 🚨 **That set is the whole risk and it is a standing hazard**: `entries` has one producer, where the trash is written by `store::trash`, `store::purge_trash`, `relocate` and a bare `fs::remove_file` — and before the cache **none of them had to tell anybody**. `trash_or_purge`'s trash arm, `delete_project`'s sweep and `Act::Restore` already refreshed, `relocate` is followed by `Library::open`, and the two `purge_trash` calls now call `refresh_trash`. 🚨 **One door was missed and was live for a day**: `trash_or_purge`'s permanent-delete arm was `fs::remove_file` then `return`, so a document deleted for good stayed in the list and the count until something else refreshed — **the enumeration was of `store`'s writers and this is the one door that does not go through `store`**, a grep for `store::trash` / `store::purge_trash` being unable to see an `fs::remove_file` sitting in a panel. **Fixed 2026-09-10**: `refresh_trash()` on that arm, unconditionally rather than inside an `Ok` arm, since on a failure the file is still there and re-reading the folder is still the right answer. 🚨 **Before the cache that path was self-correcting and needed nothing** — `visible_entries` rescanned `.trash` every frame — so it is the hazard's **first instance** rather than a slip: **caching a scan turns every writer that never had to announce itself into one that must**, the door unchanged and the contract around it not. ⚠️ **`refresh_trash`'s own doc carries no count now**: it read *"two of the five call sites already called `refresh` and three did not … a sixth writer added later has to know"* while the sixth writer was **already in the tree**, so it read as a survey of a closed set at the moment it was most wrong. Two greps stand in its place, and the second — `remove_file` / `fs::rename` — is the one that matters, being the only one that finds a writer which never names `store`. ⚠️ **The launch ordering is load-bearing**: `Library::open` counts the trash before `open_at_launch` sweeps it, so without the added call the count is the pre-sweep one for the session. **Test** `the_trash_count_is_cached_rather_than_rescanned_every_frame`, asserted **by deleting `.trash` behind the app's back** — a count that survives its own directory being removed was not read from it — with a **third** assertion that a refresh moves it, without which this is a test for a count that is merely *frozen*, a worse bug than the scan. Nothing amended in `architecture.md`, whose §9.5 `.trash` bullet is about the folder and the retention window; nothing struck from `roadmap.md`, *"no fact may live only in the cache"* being a rule a held **scan** is inside)*
 - **D729** — **The library's two floating menus were the same thirty-five lines twice, and the copy that named the relationship copied it instead of sharing it.** `panels::dashboard`. `project_filter_menu` and `file_menu_popup` each hand-rolled the panel, the rows, their hover ground and the click-away test — identical down to the `+ 4.0` on the anchor and the `+ 10.0` on the height — and the first one's own doc called itself *"the shape `file_menu_popup` already uses on this screen"*. One `anchored_menu(ui, id, anchor, w, rows, paint) -> MenuOutcome` now, with a per-row `paint` closure keeping what genuinely differs: the filter's colour dot and tick, the ⋮ menu's label that turns red on *Delete*. *(Fixed and tested 2026-09-10; Keep. Closes `[S20.2-L3-05]`. 🚨 **Deliberately *not* where `[S20.2-L1-01]`'s Escape lives, which is the entry's most useful sentence.** The finding proposed extracting first so that fix and `[S20.2-L1-02]`'s click-swallow would land here; both were closed before this extraction, in `dashboard_keys` behind `library_menu_open()` (§15 D578, D558) — one predicate answering for **both** menus and for the eight pointer-side doors that already ask it. That is the better place, because a keyboard rule living inside a *drawing* helper only runs on the frames the menu is drawn. **A shared implementation and a shared predicate are different kinds of sharing, and this screen wanted both.** 🚨 **No test drove either menu, so the whole 1,247-test suite was silent about this refactor** — *a green suite is not evidence about code no test reaches, and an extraction is exactly the change that looks safe because everything stays green*. **Test** `both_library_menus_draw_their_rows_through_the_shared_shell`, on row **contents** rather than row count, since a count passes against a shell drawing the right number of empty rectangles. ⚠️ **Its first version was vacuous and the flip is what said so**: `"All projects"` is the filter *button's* own label and `"Kestrel"` a *sidebar* row, so `contains` found both with the menu shut — the file-menu half went red under the flip and the filter half stayed green. It asserts a **difference** now, that opening the menu paints each string one more time. **A string the closed state also paints is not evidence about the open one.** ⚠️ **`fn elide` narrowed from `&Ui` to `&Context` and that did *not* force the other four call sites to change**, `egui::Ui` being `Deref<Target = Context>` — so reading `elide(ui, …)` is not evidence a site was reviewed. `file_menu_popup`'s bare `28.0`, written three times, is `FILTER_ROW_H`; the leftover `let _ = label;` is gone. 🚨 **A quotation of `panels/mod.rs` was corrected while this entry was being written**, below. Nothing amended in `architecture.md`, which does not describe either menu's construction; nothing struck from `roadmap.md`)*
@@ -1492,6 +1492,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1092** — **A bound field's prefix is the plain field's — `ui::prefix_strip` and `ui::paint_prefix`, `PREFIX_PT` 13 or a 15-pt glyph, left-aligned in `value_field`'s strip — under the plain arrow, D1046's `NotAllowed` overturned by the maintainer.** `number_chip`, `number_retype` and the layout card's *Mixed* capsule had drawn their own 11.5-pt or centred 14-pt badge, so binding shrank and moved the `W`. `FieldKey::prefix()`; the marked face mirrors `value_field`'s marked label. *(Fixed 2026-10-16, uncommitted. **Fixed**; the arrow **Keep**. `a_bound_fields_prefix_is_the_plain_fields`, replacing D1046's test, two flips run. D1046 overturned; D1038 (3), D1048 amended; `architecture.md` §5.3f)*
 - **D1093** — **An unselected container's padding is not a spacing handle, and an occupied frame's edge picks `FRAME_EDGE_PICK_PX` (8) either side of the border — the maintainer's two rulings.** (1) The single selected container keeps every band; a container under the pointer that is not the single selection shows and picks its gaps only (`hovered_only` in `spacing_subject` dropping `BandKind::Padding` before `shown`), its padding being where a marquee over its children starts — D1089's marquee reading answered. A modifier rejected: `Alt`, `Shift` and `Ctrl` are all spoken for. (2) `frame_edge_at` at 8 points where it had `pick_slop`'s 4, still the chains' last link; a press-drag in the strip now moves the frame, both sides of the border, and an unselected container's padding within 8 points of its border is edge. A first-cut clause sparing the dragged container removed before the commit — it brought the padding back during a gap drag. *(Built 2026-10-16, tested and accepted by the maintainer the same day. **Keep**; the strip ***Revisit if*** a marquee beside a frame is missed. `an_unselected_containers_padding_is_a_marquee_start` new, `a_click_in_an_empty_containers_padding_selects_it` and `a_frames_edge_is_pickable_and_its_middle_is_not` amended, two flips run as reported. D1089 narrowed, D816 amended, D1078 noted; `architecture.md` §5.3c, §9.4; `context-menus.md` §2 C5)*
 - **D1094** — **A spacing band drags at half the pointer's travel: `spacing::DRAG_RATE` (0.5) on the delta along the band's axis, before `Shift`'s 10-step and the whole-unit rounding — D1078's one-for-one write halved.** The maintainer found the handles hard to set precisely. One unit per two points at 100%, `Shift`'s step per ~20; whole units, the floor at 0 and the modifiers unchanged. The canvas tests' travels doubled to keep their values. *(Built 2026-10-16, uncommitted. **Keep**; the rate ***Revisit if*** half is still too fast. `DRAG_RATE` at 1 fails `dragging_a_gap_band_writes_the_gap`, 26 against 18. D1078 amended, its fixed-size padding overflow noted as CSS's; `architecture.md` §5.3c)*
+- **D1095** — **§8.4's tool list extended to the model as it is — Phase 1 three reads, Phase 2 eleven writes, a new Phase 3 of 23 verbs for components, variables and styles — the maintainer's request.** The list predated masks, the effect stack, container layout, components, variables and styles, and D726's gate, comparing two hand-kept copies, could not see it. The session's calls: kits (`OpenVault`, `CloseVault`, `SetOrigin`, `SetKitModes`, `SetStyleOrigin`, `SetVariable` — the kit planner's alone) and chrome/export settings left out; `SetMaskMode` folded into `set_mask` and paragraph spans into `set_paragraph_style`, the second against Phase 2's 1:1 heading; Phase 3 through the verbs, the bare ops refused or binding over a non-canonical literal. The brief's premises corrected: the commit's real pass order, `propagate::owed` in core and the ten passes before it only in `ondin-app` (D786's wall); `style::edit_through` turning a write into a style edit under *Edit*; a colour binding is `BrushSource::Bound` with no literal; the snapshot already draws every bound field it carries — no defect — but reads no layout field and no item id. *(Designed 2026-10-16; record-only bar `tools.rs`'s constants. **Keep**; the omissions and folds ***Revisit if*** an agent needs one; the pass sequence ***Fix before the first handler***, with D786. D726 amended; `architecture.md` §8.4, §5.3d, §10; `vm.md` §11. **Amended 2026-10-16** (D1096): (1) overturned in part by the maintainer — kits and the library and export settings are in, and the pivot, left to the session, too; guides, layout grids, the canvas background, the fill rule and the proportions lock stay out)*
+- **D1096** — **§8.4 gains a Phase 4 of twelve tools for kits and the library, `run_exports` in Phase 1, and `set_pivot` and `set_exports` in Phase 2 — the maintainer's ruling against D1095 (1).** *"Kits and library operations: since it can build and use design systems … Export settings … may be useful for the AI to automatically configure export … The rest are visual only and irrelevant for an AI."* The pivot left to the session, and taken: an agent can turn about any point through `set_transform` already, the pivot being baked by the gesture (D55), so what `set_pivot` writes is the authored hinge for the person who turns the layer next. The session's calls inside Phase 4: the library's only write is `create_document` (rename, move, duplicate and trash stay the person's); `run_exports` returns bytes and names rather than writing files; `publish_kit` and `stop_sharing_kit` go through the app's own dialogs when a window is open; the tools are the app's verbs, the raw kit ops behind them, `map_kit_modes` the browser's mapping row. Read while recording: the kit verbs are core and finding, reading and filing kits are `kits/` and `library/`, so Phase 4 is GUI-only until those move; `make_kit`, `publish_kit`, `stop_sharing_kit` and `create_document` are neither an `Operation` nor a query, which is all invariant 10 lets a handler translate to — open. *(Ruled 2026-10-16; record-only bar `tools.rs`'s `PHASE_4`. **Keep**; `set_pivot` ***Revisit if*** no agent ever writes one; invariant 10 against Phase 4's four non-op tools ***Fix before the first Phase 4 handler***. D1095 and D726 amended; `architecture.md` §8.4, §10; `vm.md` §11; `roadmap.md`'s M6 entry. **Amended 2026-10-16** (D1097): the *Fix* answered — the maintainer widened invariant 10 to document-level actions; the dialogs call overturned — the agent publishes and stops sharing with no dialog)*
+- **D1097** — **Invariant 10 widened to the owning process's document-level actions — `make_kit`, `publish_kit(note)`, `stop_sharing_kit`, `create_document` — on §8.3's queue as a second request kind, `ActionRequest`; Phase 4's publish made without a dialog — the maintainer's ruling on D1096's open question.** *"Yes widen the invariant. Those were written before the idea of a kits became a thing. The agent should be able to publish kits and create documents on request."* Each action is a request to the owning process, which runs the app's verbs (`make_kit`, `publish_now`, `stop_sharing_kit`, `library::store::file_document`); on the same queue as the edits so a publish after a batch of writes publishes them; none a `Transaction`, so `undo` reverts none. D1096's dialogs call overturned: the request is the ask, the note the tool's argument, and a dialog would hang the agent on a window it cannot see — the cost a publish and an unsharing nobody confirms. Read while recording: the three kit verbs already write a status line, none naming who, and filing writes none; the four are not every non-edit action (rename, duplicate, move, delete stay the person's). *(Ruled 2026-10-16; record-only bar `queue.rs`'s `DocAction` and `ActionRequest`. **Keep**; no dialog ***Revisit if*** an agent's publish reaches consumers nobody meant it to; *by the agent* and filing's line ***Fix with M6's action handlers***. D1096 amended; `architecture.md` §4 invariant 10, §8.3, §8.4; `ondin-mcp`'s crate doc)*
 
 ---
 
@@ -48638,6 +48641,307 @@ otherwise be tempted to write down twice.
 `roadmap.md`: the *Later · Post-v1* MCP row is about M6 being deferred, which this does not touch,
 and it already describes `ondin-mcp` as *"a stub: message shapes and the tool list, no handlers, no
 socket"* — still true. Closes `[S22-L3-06]`.)*
+
+**Amended 2026-10-16 (§15 D1095).** The phase paragraphs are **three** now: `PHASE_3` joined the
+constants, and the test's table gained its row, anchored on Phase 3's opening sentence like the
+other two. Everything above about the anchors, the paragraph ending at the first blank line and the
+backticked tokens holds for it unchanged. ⚠️ **What this gate compares is two hand-kept lists**,
+§8.4 and `tools.rs` — gate hole 16's shape, by design: it says the copies agree, never that either
+is the model's. That is how both sat at twenty-eight names while the model grew masks, an effect
+stack, layout, components, variables and styles under them, and it is D1095's subject.
+**Four** since D1096, the same day: `PHASE_4` and its row, anchored on Phase 4's opening sentence;
+a flip — `stop_sharing_kit` renamed in `PHASE_4` — failed at the comparison under that prefix, as
+the caller reports it, and was reverted.
+
+**D1095 — §8.4's tool list extended to the model as it is: Phase 1 gains three reads, Phase 2
+eleven writes, and a new Phase 3 carries 23 verbs for components, variables and styles. *The
+maintainer's request, 2026-10-16; record-only — nothing in `ondin-mcp` is built (§15 D4) but the
+gated list.***
+
+The maintainer: *"update §8.4 with the missing tools. We also have styles and variables in the
+toolbox now, which the mcp should be aware when it's build."* §8.4's list was older than most of
+the model it was to drive. Its twenty-eight names could not set a mask, an effect, a lock, a clip, a
+text's paragraph or block style, an image, or anything of container layout (D867 onwards), and nothing in
+it knew a component (D978–D985, D988), a variable (D1037, D1039 onwards) or a style (D1062 onwards)
+existed. Nothing could see the gap: M6 is parked (D4), and D726's gate — the one check on this
+list — compares §8.4 with `tools.rs`, so it was green over two copies that agreed and were both out
+of date.
+
+**What it says now.** Phase 1 gains `list_components`, `list_variables` and `list_styles`. Phase 2
+is reordered by subject and gains `set_locked`, `set_clip`, `set_mask`, `set_text_spans`,
+`set_paragraph_style`, `set_block_style`, `set_effects`, `add_image`, `set_display`,
+`set_layout_item` and `set_insets`. A new **Phase 3 — components, variables and styles (through the
+verbs, never the raw ops)** names 23. The lists are 11, 31 and 23, in `tools.rs`'s `PHASE_1`,
+`PHASE_2` and `PHASE_3`. New paragraphs below the phases say: `insert_subtree` is the route for a
+whole layout and `export_png` the agent's eyes; every write goes through the app's commit door, so
+its passes run for an agent too; the snapshot has to grow; and what is left out on purpose.
+
+**The session's three calls**, made under the request and not ruled on by the maintainer:
+
+(1) **What is not exposed.** Kits are left out: `OpenVault`, `CloseVault`, `SetOrigin`,
+`SetKitModes`, `SetStyleOrigin` and the whole-variable `SetVariable`. Measured: the kit planner,
+`tokens::plan`, is the only production writer of `SetVariable`, apart from that op's own inverse in
+`Document::apply`. So these are the library's machinery, not authoring. Guides, exports, layout
+grids, the canvas background, the pivot, the fill rule and the proportions lock are left out too:
+they are chrome or export settings rather than the design, and each could be added 1:1.
+
+(2) **Two ops folded into a neighbour's tool.** `set_mask(id, mode?)` carries `SetMaskMode`.
+Paragraph spans go inside `set_paragraph_style`, whose op carries an optional list
+(`SetParagraphStyle`'s `spans`). ⚠️ **That second fold is a departure from Phase 2's own heading,
+*"1:1 with operations/composites"*.** `SetParagraphSpans` is an op of its own, and its character
+twin `SetTextSpans` does get a tool (`set_text_spans`), so the two scopes are not exposed alike.
+
+(3) **Phase 3 names verbs, not ops**, because on their own the ops are either refused or wrong. A
+remove of a variable, a style or a mode that still has users is refused by the post-conditions
+(`variable::check`, `style::check`). The verbs `variable::remove_ops`, `style::remove_ops` and
+`variable::remove_mode_ops` detach the users in the same transaction. A `Set*Vars` op writes the
+binding alone. Its verb (`build::bind_*_ops`) also writes the canonical literal beside it, and that
+literal is what lets a main and its copy bound to one variable compare equal.
+
+**The brief's premises, read against the code while recording; §8.4 corrected where they were
+wrong:**
+
+- The pass list named seven passes in an order that put `variant::settle` before
+  `component::settle_links`, and it left out `swap::settle` and `propagate_structure`. The real
+  sequence in `commit_inner` is:
+  1. `keep_insets`;
+  2. `keep_flex_sizes`;
+  3. the eight binding passes;
+  4. `propagate::owed`, which runs `style::settle`, `swap::settle`, `propagate_structure`,
+     `settle_links`, `variant::settle`, `propagate`, and `style::settle` again.
+
+  `owed` is in core and its order is pinned there. ⚠️ **The ten passes before it are called in
+  that order only in `ondin-app`, which has no lib target** — D786's wall, met by the commit. So
+  the sequence moves to core before a headless handler can commit, on D786's trigger and for its
+  reason.
+- `commit_inner` also runs `style::edit_through` first while the style browser's *Edit* is open
+  (D1063). In that state the GUI's door reads an edit of a styled layer as an edit of the style.
+  An agent's write landing then would change every user of the style. §8.4 names this as a question
+  for the GUI half of M6, and §8.3's *"through the same path as UI edits"* stands with it as its
+  consequence.
+- *"Binding writes its literal beside the binding"* is true of the number and string verbs, and of
+  visibility, whose literal is `true`. It is not true of a colour: `build::bind_brush_at_all`
+  replaces the paint's brush with `BrushSource::Bound`, keeping its `%`, with no literal left
+  beside it.
+- An effect binds a shadow's X, Y, blur and spread, or a layer blur's radius (`EffectVars`). An
+  effect's colour and a filter's numbers bind nothing.
+- A stroke's width and an effect's numbers are bound by `ItemId`. A paint's colour is bound by its
+  index in the list.
+- The snapshot was said to report drawn values only for a bound stroke width and effect number.
+  **It reports drawn values for every bound field it carries** (D1059, D1061, D1069, D1072–D1074).
+  Paints go through `resolve_brush`. The size, corners, content and family come through
+  `Resolved::used_kind_of`, whose `with_bound_size` and `with_bound_corners` resolve a layer
+  neither laid out nor pinned. It names no binding. **No placeholder literal leaks** — there is no
+  defect in `ondin_export::snapshot` here.
+- What the snapshot does lack, and §8.4 now says so: Phase 2's layout tools write what it does not
+  read. `NodeSnapshot` has no display, gaps, padding, insets or layout-item field. Its paint and
+  effect lists are the visible entries only, with no item id, and an item-level `bind_variable`
+  needs that id — §5.3d's and D980's open question, still open. §5.3d's companion question,
+  whether the snapshot exposes `component` and `link`, is answered by this entry, and §5.3d says
+  so.
+
+⚠️ **Load-bearing**: Phase 3's opening sentence is now one of D726's parse anchors. Reword it and
+the build breaks, not the record. The caller reports the gate green, and a flip — `apply_style`
+renamed in `PHASE_3` — failing at the comparison under the Phase 3 prefix, reverted.
+
+*(Designed 2026-10-16; record-only apart from `tools.rs`'s constants, which cite this entry.
+**Keep** — the maintainer's request. The left-out ops and the two folds are ***Revisit if*** an
+agent needs one, or if Phase 2's 1:1 heading is to hold for paragraph spans. The pass sequence is
+***Fix before the first handler***, with D786's move. D726 amended. `architecture.md` §8.4
+written, §5.3d's snapshot paragraph and §10's M6 line amended; `vm.md` §11's tool count corrected.
+`roadmap.md`'s M6 entry loses the component-link question and gains the pass sequence.)*
+
+**Amended 2026-10-16 (§15 D1096).** **(1) is overturned in part by the maintainer the same day.**
+Kits and the library are in, as a Phase 4 of twelve tools; export settings are in, as `set_exports`
+and `run_exports`; the pivot was left to the session and is in, as `set_pivot`. What (1) read as
+*"the library's machinery, not authoring"* was right about the ops and wrong about the scope: the
+ops stay hidden, behind the app's verbs. Guides, layout grids, the canvas background, the fill rule
+and the proportions lock stay out, now by the maintainer's word rather than the session's. The
+lists are 12, 33, 23 and 12.
+
+**D1096 — §8.4 gains a Phase 4 for kits and the library, `run_exports` in Phase 1, and `set_pivot`
+and `set_exports` in Phase 2. *The maintainer's ruling against D1095 (1), 2026-10-16; record-only —
+nothing in `ondin-mcp` is built (§15 D4) but the gated list.***
+
+The maintainer, answering D1095's exclusions: *"It would be useful for the mcp to have: Kits and
+library operations: since it can build and use design systems. Pivot may be useful to rotate a part
+off center, but I'll let you decide if that's something an AI will ever need. Export settings, if
+it's the configuration of the export inspector panel, may be useful for the AI to automatically
+configure export for certain layers the user will need to export. The rest are visual only and
+irrelevant for an AI."* D1095 (1) had left kits out as machinery, measuring that the kit planner was
+the only writer of the whole-variable `SetVariable`; that was true of the ops and is why they stay
+hidden. It was not a reason to keep an agent from *using* a kit, which is the maintainer's point:
+an agent building a design system has to publish it, and one using it has to insert from it.
+
+**What it says now.** Phase 1 gains `run_exports(ids?)`. Phase 2 gains `set_pivot` after
+`set_transform` and `set_exports` after `set_insets`. A new **Phase 4 — kits and the library (the
+app's own actions, some outside undo)** names twelve: `list_documents`, `create_document`,
+`list_kits`, `get_kit`, `insert_from_kit`, `list_kit_updates`, `accept_kit_updates`, `make_local`,
+`map_kit_modes`, `make_kit`, `publish_kit` and `stop_sharing_kit`. The lists are 12, 33, 23 and 12,
+in `tools.rs`'s `PHASE_1` to `PHASE_4`, and D726's gate has a fourth row.
+
+**The pivot, the session's call: in.** An agent does not need it to turn something about a point —
+the pivot is baked by the gesture that reads it and never composed into the world transform (D55),
+so `set_transform` with an affine the agent computes already turns a layer about anything. What the
+pivot holds is where the *next person's* turn goes: the canvas's rotation, the inspector's rotation
+and skew fields, a flip. A needle an agent hands over with its pivot on the hub turns about the hub
+when a designer drags it; without one it turns about its box's centre. That is cheap to write and
+invisible until someone turns the layer, which is the argument for having it. The cost is a tool
+that may never be called.
+
+**The session's calls inside Phase 4**, made under the ruling and not ruled on themselves:
+
+- **The library's only write is `create_document`.** It files a document through
+  `library::store::file_document` and returns its path. Renaming, moving, duplicating and trashing
+  stay the person's, on the dashboard. *Revisit if* an agent's work needs one of them.
+- **`run_exports` returns bytes and names, never writes files.** Where an asset set lands is the
+  client's and the person's call, not the endpoint's (§8.4's reason).
+- **`publish_kit` and `stop_sharing_kit` go through the app's own dialogs when a window is open** —
+  the publish dialog with its note, *Stop sharing*'s confirmation — so a person watching sees a
+  publish happen. A publish is the one write in the whole list that reaches *other* documents.
+- **The tools are the app's verbs**, as Phase 3's are: `kit::insert`, the app's accept over
+  `kit::update_all`, `kit::make_local`, and `map_kit_modes` as the variables browser's mapping row,
+  a `SetKitModes` with only the record's hand-set `map` changed. The raw kit ops stay behind them.
+
+**The brief's premises, read against the code while recording; §8.4 corrected where they were
+wrong:**
+
+- `kit::insert` vendors the main and every main it reaches (D1012), its variables and styles through
+  `tokens::plan` (D1064); the app's accept takes one kit or every kit, never one main (D1016,
+  `accept_kit_updates(only)`), through `update_all`; `make_local` forks the kit variables and styles
+  the main reads (D1066). All true.
+- *"`map_kit_modes` writes the mapping the browser's row writes"* — the row exists
+  (`panels/variables.rs`, `Act::KitMap`). But §8.4 then listed *"`SetKitModes` bare"* among the ops
+  kept behind the verbs, which the row itself writes bare. §8.4 now says the row writes a
+  `SetKitModes` changing only the mapping, and what stays hidden is one rewriting the kit's name or
+  modes.
+- *"Vendoring it first, as the slot's own swap does"* — D1019 is the swap picker's kit rows:
+  `kit::swap_offers` lists the unvendored mains, and a pick builds the swap against `kit::vendored`'s
+  scratch. §8.4 names those.
+- The kit mark is metadata and `undo` reverts none of the three; `make_kit`, `stop_sharing_kit` and
+  `publish_now` each save, and `make_kit` mints the document's id when it has none (D1013). The
+  publish dialog has a note (D1015). *"Within the watch's 45 seconds"* is true of an **open**
+  consumer only, and also on regaining the focus — D1020's watch runs on the editor's frames; a
+  closed consumer sees the publish when it is next opened. §8.4 says both.
+- 🚨 *"All of it is `ondin-app` code"* was **half true**. The verbs are core — `kit::insert`,
+  `update_all`, `make_local`, `publish`, `swap_offers`, `vendored`, `tokens::plan`. What is the
+  app's is everything that finds a kit and reads it: which documents are kits (the library scan's
+  `meta.kit`), their published states (`KitShelf`, `kits/index.rs`), which updates wait
+  (`kits_waiting`, the watch), the saves, and `library::store::file_document`. So the wall is the
+  library and the file I/O, not the verbs, and §8.4 and `roadmap.md`'s M6 entry say so.
+- *"It is not the panel's *Export all*, which is a second implementation of the same walk (D626)"*
+  read as if the panel rendered by another route. **It does not**: `export_plan` calls
+  `ondin_export::plan` and the write calls `plan::render`, as `run_export_all` does. What is copied
+  is the walk that collects the layers carrying settings — `exportable_layers` and the CLI's own
+  loop — held to one answer by `build::all_in_document_order` (D516). D626 is the entry that names
+  the copy; D516 is the one that made them agree. §8.4 cites both and says which is which.
+- `set_pivot` cited D60 for *"the pivot composes into nothing"*. **D60 is Alt-resize about the
+  pivot reversed.** The rule is D55's, whose heading is the sentence. And *"the rotate and mirror
+  handles"* was wrong: mirroring is a flip, not a handle, and the inspector's rotation and skew
+  fields turn about the pivot too (D55). §8.4 now lists the three, and that resize and a skew drag
+  ignore it (D60, `Operation::SetPivot`'s doc).
+- `ExportSpec`'s fields — format, scale, prefix, suffix, background, quality, trim and
+  `pad_square` — as listed. True.
+
+⚠️ **Open, and the one thing here a handler cannot route around: invariant 10.** It says a handler
+*"only translate[s] to/from `Operation`s and queries"*, and §8.3's op queue carries a `Transaction`
+and nothing else. `make_kit`, `publish_kit` and `stop_sharing_kit` write the document's metadata and
+save it, and `create_document` writes a file; none is an `Operation`. `kit::publish` is in core,
+which meets the rule's second clause, but the save and the filing are not, and nothing in §8 says
+how a non-op write reaches the owning process. This entry does not soften the invariant; §8.4 names
+the gap where Phase 4 is described.
+
+⚠️ **Load-bearing**: Phase 4's opening sentence is a parse anchor for D726's gate, as the other
+three are. The caller reports the gate green, and a flip — `stop_sharing_kit` renamed in `PHASE_4`
+— failing at the comparison under the Phase 4 heading, reverted.
+
+*(Ruled 2026-10-16; record-only apart from `tools.rs`'s `PHASE_4`, whose doc cites this entry.
+**Keep** — the maintainer's ruling; the pivot and the four Phase 4 calls are the session's.
+`set_pivot` ***Revisit if*** no agent ever writes one. Invariant 10 against the four non-op tools
+***Fix before the first Phase 4 handler*** — by a rule for metadata and file actions, or by those
+tools leaving the list. D1095 and D726 amended. `architecture.md` §8.4 corrected as above and §10's
+M6 line given Phase 4; `vm.md` §11's counts replaced by the constants' names; `roadmap.md`'s M6 entry
+gains the library's wall. Nothing struck: the M6 entry is still open work.)*
+
+**Amended 2026-10-16 (§15 D1097).** **The *Fix before the first Phase 4 handler* is answered**, by
+the first of the two routes it named: the maintainer widened invariant 10 to the owning process's
+document-level actions, and the four tools stay in the list. **And the third of the session's
+Phase 4 calls is overturned**: `publish_kit` and `stop_sharing_kit` no longer go through the app's
+dialogs when a window is open. The agent acts on request with the note as the tool's argument, and
+the person learns of it from the status line — D1097 has the reason and what that line still owes.
+The other three calls stand, `create_document` still the library's only write.
+
+**D1097 — Invariant 10 widened to the owning process's document-level actions — marking a kit,
+publishing, stopping sharing, filing a document — carried on §8.3's queue as a second request kind,
+and Phase 4's publish made without a dialog. *The maintainer's ruling on D1096's open question,
+2026-10-16; record-only — nothing in `ondin-mcp` is built (§15 D4) but the queue's sketch.***
+
+The maintainer, answering D1096's open question: *"Yes widen the invariant. Those were written
+before the idea of a kits became a thing. The agent should be able to publish kits and create
+documents on request."* D1096 had found four of Phase 4's tools — `make_kit`, `publish_kit`,
+`stop_sharing_kit` and `create_document` — to be neither an `Operation` nor a query, which was all
+invariant 10 let a handler translate to, and §8.3's queue to carry a `Transaction` and nothing else.
+The kit mark is document metadata (D1011 (2)), so the three kit actions write the meta and save, and
+filing writes a new file. D1096 named two routes, a rule for such actions or the tools leaving the
+list; the ruling takes the first.
+
+**What it says now.** Invariant 10: handlers translate to and from `Operation`s, queries and the
+owning process's document-level actions, those four; any logic they need still lives in
+`ondin-core`, and an action is never the handler's own — it is a request to the owning process,
+which runs the app's verbs: `make_kit`, `publish_now` and `stop_sharing_kit`, which the document
+menu's rows end in past its publish and *Stop sharing* dialogs, and `library::store::file_document`.
+§8.3: the actions ride **the same single-writer queue** as the edits, a second request kind
+`ActionRequest { action, reply }` beside `OpRequest`, sketched in `queue.rs` with a `DocAction` of
+four variants. None is a `Transaction`, so none enters the history and `undo` reverts none — what
+D1096 recorded of the kit mark, now said of the queue.
+
+⚠️ **Load-bearing: the one queue, not a second channel.** It is what orders an action against the
+edits around it, so a publish sent after a batch of writes publishes those writes. An action
+channel beside the op queue would let a publish overtake the transactions sent before it and send a
+kit out without them — and nothing would say so, since the publish itself succeeds.
+
+**The dialogs call, D1096's and the session's, is overturned with the ruling.** It had a window's
+publish and *Stop sharing* go through the app's own dialogs so a person watching would see a publish
+happen. *"On request"* reads the other way: the request is the person's ask, the publish note is
+the tool's argument, and a dialog waiting on a click would leave the agent's call hung on a window
+it cannot see — under `serve` there is no window at all. **The cost is real and is the trade**: a
+publish is the one write in the list that reaches other documents, and *Stop sharing*'s dialog is
+where a person reads how many documents use the kit (D1021) — the agent's call skips both. What the
+person gets instead is the status line saying the agent did it.
+
+**The brief's premises, read against the code while recording; `architecture.md` corrected where
+they were wrong:**
+
+- *"The status line every action of the app already writes"* was **three in four**. `make_kit`,
+  `publish_now` and `stop_sharing_kit` each end in `EditorSession::info` — *Published Atlas v4 · 3
+  components*, *Atlas is a kit — nothing is shared until you publish it*, *Atlas is no longer shared
+  — documents using it keep their copies* — and none says who acted. Filing writes none: the
+  dashboard's *New file* (`new_library_document`) opens the document it filed instead. And the
+  brief's example, *Published v4 by the agent*, drops the kit's name the real line carries. §8.4 now
+  says the three lines exist and that *by the agent* on them, and a line for filing, are M6's to
+  write. ⚠️ **A failed save's message stands** in place of the success line (`make_kit`'s *"the
+  status line has one slot"*), so an action's reply has to carry the failure itself; the line is the
+  person's view, not the agent's.
+- *"The four things a person does to a document that are not an edit of it"* was **false**: the
+  dashboard renames, duplicates, moves and deletes documents too, and D1096 kept those the person's.
+  Invariant 10 now names the four as what an agent needs to build and publish a design system, not
+  as all there are.
+- §8.3 had the owning thread run *"the library writer"*. `library::writer` is the background thread
+  every record is written on (D392), not what files a document; that is `library::store::file_document`,
+  and §8.3 names it.
+- `ondin-mcp`'s crate doc still said handlers *"only translate to/from `Operation`s and queries"*;
+  it names the actions now. D786's clause in invariant 10 is about the headless geometry and is
+  untouched — the actions run in the owning process, not in a handler, so they add nothing to what
+  has to move for a handler to link. D1096's *GUI-only* stands: the three kit verbs are `OndinApp`
+  methods and filing is `library/` code, none of which a windowless `serve` holds today.
+
+*(Ruled 2026-10-16; record-only bar `queue.rs`'s `DocAction` and `ActionRequest`, which cite this
+entry. **Keep** — the maintainer's ruling; no dialog is the session's reading of *"on request"*,
+***Revisit if*** an agent's publish or unsharing reaches consumers nobody meant it to. *By the
+agent* on the three lines and a line for filing ***Fix with M6's action handlers***. D1096 amended,
+its *Fix* answered and its dialogs call overturned. `architecture.md` §4 invariant 10, §8.3, §8.4;
+`ondin-mcp`'s crate doc. Nothing struck from `roadmap.md`: its M6 entry never carried the invariant
+gap, and the rest of it is still open work.)*
 
 **D725 — The Transform card's numbers changed shape when a second layer was selected, and its corner
 radius reported one the document does not hold. *Fixed and tested 2026-09-10; Keep.***

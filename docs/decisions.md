@@ -1470,8 +1470,10 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1070** — **Styles and variables, build step 6's second half — string variables' chrome: a *Content* row on the Type card, live under a text style, the chip when bound and a one-line field when not; the family row's chip and field menu; the browser's *String variable*, its cells quoted; a bound family's fonts loaded.** The row and the chip the maintainer's ruling (D1069), the rest the session's. *String variable* (`TEXT_T`), *string n* holding "Text"; a cell quoted, typed bare and untrimmed — a literal beginning `--` untypeable. `FieldKey::Content` typed, `FieldKey::Family` not, both `String`; the retype's refusal by the key's kind. `type_content_row` in `style_card_live`'s tail; its write re-bases spans through one minimal edit; read-only over several lines or a live session. `family_mark` resets literal and binding together (D1048, D1061). `begin_edit_text`/`restyle_session` on `resolved_kind`, flipped. `bound_families`, `bound_fonts_at`. ~~⚠️ Open: the Properties card's Text row draws no chip (D1038 (d), D1060's for Boolean); the Content row no override mark.~~ Both built (amendment, 2026-10-16): `variants::bound_chip`, A4's rule, now the Boolean and the Text rows' one decision, `PropCache::chips` a label and a tooltip; the Text row's chip `binding::chip`, × or `Backspace` detaching every counterpart to its drawn string, a typed key held under `retype` and committed through `set_property`; `content_mark`, `family_mark`'s rule for the content — the binding with the literal, reset the main's `SetText` and content binding beside the copy's own family binding — on the chip bound and on the badge unbound. *(Built on the maintainer's ruling, uncommitted when recorded. **Keep**; the two open items **Resolved**. ~~One test, one flip~~ Three tests, four flips as reported; the rest untested and not looked at. D1038, D1040 amended; `architecture.md` §5.3d, §5.3f, §5.4a; `roadmap.md` step 6, and its owed chrome struck. **Amended 2026-10-16**)*
 - **D1071** — **A variable's detach says so on the floating status: the variables the commit's five binding passes cut where an edit wrote over a bound field are named — *Detached size/w*, or a count — beside the styles D1063 names, unless the edit's own ops set a binding of those kinds.** D1038 (2)'s *"the floating status says what was detached"*, which D1058, D1059, D1061 and D1063 recorded as unbuilt for variables. 🚨 Each pass **appends** its `Set*Vars`, so `commit_inner` notes `asked_ops` after `keep_flex_sizes`, before `keep_corner_bindings`, and `session::variables_detached` reads the binding ops from there to `user`, `propagate::owed`'s mark, each slot `Some` → `None` against the document's binding — the run ending **before the follows**, the cut's consequences in the copies rather than the edit's cuts (the canvas test's flip reads past it). `styles_detached` returns names; `said_detached` words both: *Detached ‹name›*, *N styles*, *N variables*, *N styles and variables*. ⚠️ The asked-for guard is transaction-wide and its flip does not bite — every pass already leaves to the edit a node whose binding it sets — so it decides only an edit binding one layer and writing over another's. ⚠️ Not covered: a paint's binding written over (a `BrushSource`, no pass's); no canvas handle writes a gap or padding, and the Scale tool keeps a bound corner. ~~⚠️ Read, not run: the inspector's detaches through a pass — among them the bound eye's click, the Boolean property's switch, a key typed over the Text property's chip — now say *Detached ‹name›*, where the chips' × and the Content and number chips' retypes, which detach first, say nothing.~~ Fixed the same day (amendment): the identity card's eye and the Properties card's Boolean switch and Text commit detach in the edit itself (`detach_visible_ops`, `detach_text_ops` ahead of the write), so F2 keeps them silent; the layers panel's eye and the hide chord left to the pass, doors outside the inspector. *(Built 2026-10-16 on D1038 (2)'s ruling, uncommitted when recorded. **Keep**, the appended run read between the two marks above all; the guard **Keep**; the inspector's spoken detaches ~~unruled, ***Revisit*** with a ruling~~ fixed, **Keep**. Two tests, the canvas drag the first to drive a handle over a bound field; two flips, one not biting; the two property tests' silent-status assertions flipped since, each failing at *Detached state/on* or *Detached copy/cta* with its door's detach taken out; the identity eye untested. D1058, D1059, D1061, D1063 amended; `architecture.md` §5.3f; `roadmap.md` (2)'s canvas half edited down; the passes six since D1072, seven since D1073, whose pass rewrites in place and is read around itself, eight since D1074, read the same way)*
 - **D1072** — **Styles and variables, the first of D1038 (7)'s remaining numbers: a layer's opacity binds to a number variable read as a percentage, a sidecar beside a literal written 0 while bound and resolved by `Document::drawn_opacity` at every reader that draws; a write over it detaches by one half, visibility's.** The session's four calls under the maintainer's delegation, D1038 silent on each: (1) the variable's number is the Appearance field's **percent**, 0–100, clamped, a missing or non-number value 0 — a fraction rejected, the field, the chip's tooltip and *Extract*'s `field_value` disagreeing under it; (2) the literal **0**, D1039's, chosen to be seen; (3) `keep_opacity_bindings` after `keep_visible_bindings`: a write of what it draws stays bound, its literal put back, and **a write of the literal 0 is not excused** — 0% means *make it invisible* — affordable since no writer builds an opacity from the literal (`replace_with_path` carries the drawn value); `set_opacity_all` filters on the drawn value (on the literal it dropped 0% and wrote a no-op 40%); (4) the chip on one layer only (`FieldKey::Opacity`, `inspector_appearance`), as W and H, the several-layer row a plain field. `Node::opacity_var`, `SetOpacityVar` (`Whole`, no placement, so it reaches instances; `kit.rs` untouched); v8, no bump. Readers: the scene walk, the SVG writer, the snapshot, the ghost, `DisplayNode::opacity`. *Paste properties* by D1047's rule; detach, delete, carry and the kit planner as the visibility's. Preview: a `SetOpacityVar` arm and the cell arm. Marks `Mark::and(binding, literal)`. ~~⚠️ Four readings: the point-editing card draws a plain field over a bound layer; 🚨 the ghost asks `drawn_opacity` of a captured id in no document, so **every Alt-drag and paste ghost previews at 100%**; the multi row's and point card's detaches are said, against D1071's silent inspector; `keep_opacity_bindings`' doc names a Scale tool writer that does not exist.~~ All four fixed the same day (amendment): 🚨 `build_ghost` reads `opacity_drawn_in` over the captured node's literal and binding in the default mode — a plain 50% copy had previewed at 100%; one `opacity_field` helper draws the chip on both single-layer cards; the several-layer row puts `detach_opacity_ops` ahead of each `SetOpacity` it writes, silent by D1071's rule; the doc corrected. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the single-layer chip **Intentional**; the ghost ~~***Fix with*** `opacity_drawn_in` over the captured node~~, the doc ~~***Fix***~~, the other two ~~*Revisit if* they mislead~~ **Resolved**. ~~Nine tests, six flips~~ Ten tests, seven flips as reported; the chip's drawing, the mark, the kit arms, the snapshot and the several-layer row's detach untested. D1058, D1071 amended; `architecture.md` §5.3f, §5's operation listing, §5.11, §6.2; `roadmap.md` the open list's numbers narrowed, its readings struck. **Amended 2026-10-16**)*
-- **D1073** — **Styles and variables, the second of D1038 (7)'s remaining numbers: a stroke's width binds to a number variable in the stroke item, `Stroke::width_var`, substituted by `Document::resolved_paint_in` — whose output comes out unbound — and a stroke list written over it is judged by corners' two halves.** The session's calls under the maintainer's delegation, D1038 silent: (1) **in the item**, as `BrushSource` is, so a stroke style, a reorder, a copy and the keyed list ops carry it — no op of its own; literal 0; v8, no bump, saved in the stroke; (2) 🚨 the seam clears `width_var` on its output — the first cut kept it, and the cell preview drew the committed 9 over the previewed 4, the scene resolving an override's paint again; `Resolved`'s bounds, `contains_local` (a new `paint` parameter), the preview bounds, the snapshot and the ghost (resolved at capture) take the seam; (3) `kept_stroke_widths`, run by `keep_stroke_width_bindings` after `keep_opacity_bindings` **and by the preview's `SetStrokes` arm**: written what it draws **or its literal 0** stays bound — the literal half load-bearing, every Stroke card edit and the Scale tool rebuilding the list from stored items — the price corners', 0 typed keeping the binding; (4) a `Custom`-sided stroke takes no binding, made `Custom` it detaches to what it drew; (5) the chip on one layer's own strokes (`FieldKey::StrokeWidth`), the shared row plain; (6) the pass rewrites in place, so `commit_inner` reads `stroke_widths_bound` before it and `stroke_widths_cut` after and merges the names. `style::check` per kind now. ~~⚠️ Six readings: 🚨 *Paste properties* copies `width_var` verbatim, so a paste into another document is refused at the commit; `Custom` draws only on a box, but the bind refuses it on an ellipse or a path too, and the `--` door is offered where the bind refuses; the several-layer weight row and the sides row's *Custom* detach through the pass and say so, against D1071's amendment; the dash popup seeds a pattern from the literal;~~ the styles browser's swatch draws the 0~~; `contains_local`'s doc stale~~. Five of the six fixed the same day (amendment): 🚨 `Properties::drawn_widths` and the carried width variables, `paste_properties` landing `width_var` by D1047's rule; `build::draws_own_sides` through `effective_sides`, asked by the bind, the pass and the chip's key; the several-layer row and the sides row's *Custom* detaching in the edit, silent — the row clearing a member that already draws the typed width; the dash seed at `drawn_stroke_width`; the doc rewritten — and the `SetStrokes` preview arm now `mark_moved`, as `SetEffects`'. ~~⚠️ An ellipse's bound `Custom` stroke pasted onto a rect lands bound and draws its own sides, read, not run.~~ Fixed the same day: `kept_stroke_widths` detaches a stroke that `draws_own_sides` before its exemption for a binding the write states, whoever wrote it. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the chip **Intentional**; the paste ~~***Fix***~~, `Custom` ~~***Fix with*** `effective_sides`~~, the spoken doors ~~***Fix***~~, the dash seed ~~***Fix with*** the drawn width~~ and the doc ~~***Fix***~~ **Resolved**, and the preview's `mark_moved`; the pasted `Custom` ~~*Revisit if*~~ **Resolved**; the swatch and the several-layer row's clearing *Revisit if* they mislead. ~~Six tests, six flips~~ ~~Eight tests, eight flips~~ Eight tests, nine flips as reported; the chip's drawing, the `Custom` seed, the kit arms, `detach_vars`' arm, the snapshot, the two inspector doors, the dash seed and the cull untested. D1058, D1062, D1071 amended; `architecture.md` §5, §5.3f, §5.10, §5.11, §6.2; `roadmap.md` the open list's numbers narrowed, the readings opened, then narrowed to the swatch. **Amended 2026-10-16**)*
-- **D1074** — **Styles and variables, the last of D1038 (7)'s numbers: an effect's X, Y, blur and spread bind to number variables in the effect item, `Effect::vars`, substituted by `Document::resolved_effects`, whose output comes out unbound, and an effect list written over them is judged by corners' two halves — D1073's shape for a list of items.** The session's calls under the maintainer's delegation, D1038 silent: (1) **in the item**, `EffectVars` (`[Option<VarId>; 4]`, `EFFECT_X`/`Y`/`BLUR`/`SPREAD`), a layer blur's radius taking the **blur** slot and its other three always `None`, a filter binding nothing; `Effect::numbers`, `set_number` (the silent no-op where the kind lacks the number — the app's `shadow_mut` folded in), `number_floor` (a blur at 0, an offset or a spread unfloored); literal 0; v8, no bump; (2) the seam clears the bindings on its output, D1073's lesson; `Resolved`'s ink, the scene walk (an override's list too), the ghost (resolved at capture), the SVG writer — `report_node` taking the drawn stack, so a bound spread's `feMorphology` is reported — the snapshot and the effect row's headline take it; (3) `kept_effect_vars`, run by `keep_effect_bindings` after the stroke width's pass **and by the preview's `SetEffects` arm**: written what it draws **or its literal 0** stays bound — load-bearing, every Effects card edit rebuilding the list — and a binding on a number the kind no longer has goes **whoever wrote it**; (4) read around the pass, `effect_numbers_bound` and `effect_numbers_cut`, D1073's twins; (5) the chip on one layer's own effect (`FieldKey::EffectNumber`, `OndinApp::effect_number_field`), its retype **not floored** for an offset or a spread. ⚠️ Four readings: ~~the several-layer popover draws a bound number's literal 0 and detaches through the pass, said; the kind combo's retype detaches through the pass, said; `keep_effect_bindings`' doc names *Paste properties*, which writes no effect;~~ the retype is capped at none of the card's ranges. Three fixed the same day (amendment): the popover's plain field seeded from the anchor's resolved number, its write clearing the slot's binding on every subject in one `edit_valve` transaction, silent; the kind retype clearing the bindings its new kind has no number for before `write_effects`, a layer blur keeping the blur's; the doc corrected. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the chip **Intentional**; the 0 ~~***Fix with*** the resolved list~~, the two spoken doors ~~***Fix***~~ and the doc ~~***Fix***~~ **Resolved**; the ranges *Revisit if* they mislead; `effect_number_field`'s doc, still naming `effect_valve`, ~~***Fix***~~ **Resolved** the same day; the chip's *Blur* badge over the layer blur's *Radius* field left. Five tests, four flips as reported; the popover's chip drawing, the several-layer field, the kind retype, the headline, the SVG report, the kit arms, `detach_vars`' arm, the cell preview's arm and the snapshot untested. D1058, D1062, D1071 amended; `architecture.md` §5, §5.3a, §5.3f, §5.11, §6.2; `roadmap.md` the remaining numbers struck, the readings opened, then narrowed to the ranges. **Amended 2026-10-16**)*
+- **D1073** — **Styles and variables, the second of D1038 (7)'s remaining numbers: a stroke's width binds to a number variable in the stroke item, `Stroke::width_var`, substituted by `Document::resolved_paint_in` — whose output comes out unbound — and a stroke list written over it is judged by corners' two halves.** The session's calls under the maintainer's delegation, D1038 silent: (1) **in the item**, as `BrushSource` is, so a stroke style, a reorder, a copy and the keyed list ops carry it — no op of its own; literal 0; v8, no bump, saved in the stroke; (2) 🚨 the seam clears `width_var` on its output — the first cut kept it, and the cell preview drew the committed 9 over the previewed 4, the scene resolving an override's paint again; `Resolved`'s bounds, `contains_local` (a new `paint` parameter), the preview bounds, the snapshot and the ghost (resolved at capture) take the seam; (3) `kept_stroke_widths`, run by `keep_stroke_width_bindings` after `keep_opacity_bindings` **and by the preview's `SetStrokes` arm**: written what it draws **or its literal 0** stays bound — the literal half load-bearing, every Stroke card edit and the Scale tool rebuilding the list from stored items — the price corners', 0 typed keeping the binding; (4) a `Custom`-sided stroke takes no binding, made `Custom` it detaches to what it drew; (5) the chip on one layer's own strokes (`FieldKey::StrokeWidth`), the shared row plain; (6) the pass rewrites in place, so `commit_inner` reads `stroke_widths_bound` before it and `stroke_widths_cut` after and merges the names. `style::check` per kind now. ~~⚠️ Six readings: 🚨 *Paste properties* copies `width_var` verbatim, so a paste into another document is refused at the commit; `Custom` draws only on a box, but the bind refuses it on an ellipse or a path too, and the `--` door is offered where the bind refuses; the several-layer weight row and the sides row's *Custom* detach through the pass and say so, against D1071's amendment; the dash popup seeds a pattern from the literal;~~ the styles browser's swatch draws the 0~~; `contains_local`'s doc stale~~. Five of the six fixed the same day (amendment): 🚨 `Properties::drawn_widths` and the carried width variables, `paste_properties` landing `width_var` by D1047's rule; `build::draws_own_sides` through `effective_sides`, asked by the bind, the pass and the chip's key; the several-layer row and the sides row's *Custom* detaching in the edit, silent — the row clearing a member that already draws the typed width; the dash seed at `drawn_stroke_width`; the doc rewritten — and the `SetStrokes` preview arm now `mark_moved`, as `SetEffects`'. ~~⚠️ An ellipse's bound `Custom` stroke pasted onto a rect lands bound and draws its own sides, read, not run.~~ Fixed the same day: `kept_stroke_widths` detaches a stroke that `draws_own_sides` before its exemption for a binding the write states, whoever wrote it. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the chip **Intentional**; the paste ~~***Fix***~~, `Custom` ~~***Fix with*** `effective_sides`~~, the spoken doors ~~***Fix***~~, the dash seed ~~***Fix with*** the drawn width~~ and the doc ~~***Fix***~~ **Resolved**, and the preview's `mark_moved`; the pasted `Custom` ~~*Revisit if*~~ **Resolved**; the swatch and the several-layer row's clearing *Revisit if* they mislead. ~~Six tests, six flips~~ ~~Eight tests, eight flips~~ Eight tests, nine flips as reported; the chip's drawing, the `Custom` seed, the kit arms, `detach_vars`' arm, the snapshot, the two inspector doors, the dash seed and the cull untested. D1058, D1062, D1071 amended; `architecture.md` §5, §5.3f, §5.10, §5.11, §6.2; `roadmap.md` the open list's numbers narrowed, the readings opened, then narrowed to the swatch. **Amended 2026-10-16**; **again**, `2df4cd4`: 🚨 `Plan::remap_value` left a kit stroke style's `width_var` on the kit's id, so `style::check` refused the vendored style and inserting a main styled by one failed (`Styles(BadVariable)`) — fixed, **Resolved**, one test, flipped; the effects arm the same, untested)*
+- **D1074** — **Styles and variables, the last of D1038 (7)'s numbers: an effect's X, Y, blur and spread bind to number variables in the effect item, `Effect::vars`, substituted by `Document::resolved_effects`, whose output comes out unbound, and an effect list written over them is judged by corners' two halves — D1073's shape for a list of items.** The session's calls under the maintainer's delegation, D1038 silent: (1) **in the item**, `EffectVars` (`[Option<VarId>; 4]`, `EFFECT_X`/`Y`/`BLUR`/`SPREAD`), a layer blur's radius taking the **blur** slot and its other three always `None`, a filter binding nothing; `Effect::numbers`, `set_number` (the silent no-op where the kind lacks the number — the app's `shadow_mut` folded in), `number_floor` (a blur at 0, an offset or a spread unfloored); literal 0; v8, no bump; (2) the seam clears the bindings on its output, D1073's lesson; `Resolved`'s ink, the scene walk (an override's list too), the ghost (resolved at capture), the SVG writer — `report_node` taking the drawn stack, so a bound spread's `feMorphology` is reported — the snapshot and the effect row's headline take it; (3) `kept_effect_vars`, run by `keep_effect_bindings` after the stroke width's pass **and by the preview's `SetEffects` arm**: written what it draws **or its literal 0** stays bound — load-bearing, every Effects card edit rebuilding the list — and a binding on a number the kind no longer has goes **whoever wrote it**; (4) read around the pass, `effect_numbers_bound` and `effect_numbers_cut`, D1073's twins; (5) the chip on one layer's own effect (`FieldKey::EffectNumber`, `OndinApp::effect_number_field`), its retype **not floored** for an offset or a spread. ⚠️ Four readings: ~~the several-layer popover draws a bound number's literal 0 and detaches through the pass, said; the kind combo's retype detaches through the pass, said; `keep_effect_bindings`' doc names *Paste properties*, which writes no effect;~~ the retype is capped at none of the card's ranges. Three fixed the same day (amendment): the popover's plain field seeded from the anchor's resolved number, its write clearing the slot's binding on every subject in one `edit_valve` transaction, silent; the kind retype clearing the bindings its new kind has no number for before `write_effects`, a layer blur keeping the blur's; the doc corrected. *(Built 2026-10-16 under the maintainer's delegation, uncommitted when recorded. **Keep**; the chip **Intentional**; the 0 ~~***Fix with*** the resolved list~~, the two spoken doors ~~***Fix***~~ and the doc ~~***Fix***~~ **Resolved**; the ranges *Revisit if* they mislead; `effect_number_field`'s doc, still naming `effect_valve`, ~~***Fix***~~ **Resolved** the same day; the chip's *Blur* badge over the layer blur's *Radius* field left. Five tests, four flips as reported; the popover's chip drawing, the several-layer field, the kind retype, the headline, the SVG report, the kit arms, `detach_vars`' arm, the cell preview's arm and the snapshot untested. D1058, D1062, D1071 amended; `architecture.md` §5, §5.3a, §5.3f, §5.11, §6.2; `roadmap.md` the remaining numbers struck, the readings opened, then narrowed to the ranges. **Amended 2026-10-16**; **again**, `2df4cd4`: `Plan::remap_value` left an effects style's `Effect::vars` on the kit's ids, D1073's second amendment's defect — fixed, **Resolved**, untested)*
+- **D1075** — **Styles and variables, layout styles' core: a fifth slot, a container's layout — its whole `Display`, a grid's tracks included, and its gap and padding bindings beside it — linked copies settled at the commit, written by two operations.** The session's calls under the maintainer's delegation; D1038 (f) gives the fields, nothing the model. `StyleSlot::Layout` (last in `ALL`, title *Container*), `StyleValue::Layout(Box<LayoutStyle { display, spacing_vars }>)`, `StyleRefs::layout`, `SetLayoutStyle`. 🚨 The whole `Display` — (f)'s *"only the container's fields"* read as the type whole — and the bindings, which live on the node (D1058). `write_op` → `write_ops` (`SetDisplay` + `SetSpacingVars`); `writes_slot` maps both; `StyleValue::of` an `Option`, a layer with no layout having none (`create_ops` `None`, `agreed` following). `check`: a frame or a group only, spacing bindings numbers. 🚨 `settle` reads a container with no layout as off its style, so applying one to a plain frame gives it the layout. `edit_through` builds the value from the user's display and bindings plus each write, a layout taken away passing through. `detach_vars` floored at 0; `remap_value`'s layout arm; `changes_ink` false (27), `Whole`, `state_ops`, `card_of` *Container*. v8, no bump. ~~⚠️ Read, not run: `settle`'s `SetDisplay` lands after the door passes, which leaves `keep_spacing_bindings`, `keep_insets` and `kept_flow_translations` right but **skips `keep_size_bindings`' layout half**, so a child's bound W or H stays bound on an axis the new layout computes; and under *Edit* a write over a partly bound pair keeps the bound side's binding beside the typed literal, previewed as a detach. ⚠️ `overrides.rs`' no-op fixture omits `SetLayoutStyle`.~~ All three fixed the same day (amendment): 🚨 `propagate::owed` re-runs `keep_size_bindings` over the whole transaction after either `settle` call that writes a `SetDisplay`, safe because the pass leaves a node whose size bindings the transaction states; `edit_through` judges the user's `SetDisplay` by `kept_spacing_vars`; the fixture lists it, ten. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep**; the whole `Display` **Keep**, *revisit if* the maintainer reads (f) narrower; the size-binding skip, the *Edit* pair and the fixture ~~***Fix***~~ **Resolved**. ~~Four tests, one flip~~ Six tests, three flips as reported; the re-run after the last `settle` and the app's padding pair untested. D1062 and D1063 amended, D1073 and D1074 for the planner defect it found; `architecture.md` invariant 4, §5.3f, §5's operation listing, §5.11; `roadmap.md` *Layout styles* struck, the three readings opened, then struck. **Amended 2026-10-16**)*
+- **D1076** — **Styles and variables, layout styles' chrome: the Container card a style card — the slot's `⋯`, F1's capsule, the greyed rows — its preview F7's display glyph turned with the direction, its summary the direction and the main-axis gap, or a grid's track counts.** The session's, under the maintainer's delegation; F7's one sentence the design. `inspector_container` through `style_card`; `styles::layout_glyph` — Phosphor *columns* for a row, *rows* for a column, *grid-four* for a grid; `summary` *Row · 12*, *Column · 6*, *Row · bound gap*, *Grid · c × r*; `paint_preview`'s layout arm. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep**, the glyph and summary not looked at. One test, one flip; the browser's tab listing a layout style, *Edit* of one, the *Mixed* capsule, the glyph and the grid summary untested. D1063 amended; `architecture.md` §5.3f; `roadmap.md` *Layout styles* struck)*
 
 ---
 
@@ -26748,7 +26750,8 @@ is saved in the stroke, `skip_serializing_if` unbound, so an unbound stroke save
 unreleased. Every walk the visibility and the opacity took takes it: `Node::reads_variables`;
 `variable::detached`, the carried walk, `land` (rebound by name, else the detached twin's width),
 `reads`, `remove_ops` (detached to its number in the same list write) and the vault check; `tokens.rs`'
-`node_vars`, remap, per-stroke `alike`, `own_reads` with a new `src_stroke_width`, and the plan's
+`node_vars`, a node's remap (`Plan::apply`) — **not a style's** (`Plan::remap_value`) until the second
+amendment below —, per-stroke `alike`, `own_reads` with a new `src_stroke_width`, and the plan's
 rebind; `StyleValue::vars`, and `style::detach_vars` detaching a bound width in the default mode. ⚠️
 **`style::check` is per kind now** — a paint a colour, a width a number — where it had refused any
 variable a style read that was not a colour (as the caller reports the old check); with the widths
@@ -26894,6 +26897,26 @@ D1062 and D1071 amended; `architecture.md` §5's `Stroke` and operation listing,
 and §6.2; `roadmap.md` *Next · Styles and variables*' open list narrowed and the readings opened, then
 narrowed to (e))*
 
+**Amended 2026-10-16, the next commit (`2df4cd4`): a kit's stroke style with a bound width could not be
+inserted.** (1)'s walk list was wrong about the kit planner. `Plan::apply` points a vendored node's
+`width_var` at the consumer's copy, but `Plan::remap_value` — which does the same for a vendored
+**style's** value — pointed only the paints' `BrushSource`s and copied each stroke's `width_var` as it
+found it: the kit's variable id. The consumer holds that variable under an id of its own (D1064), so
+`style::check` found the vendored style bound to a variable that is not there and refused it
+(`StyleRule::BadVariable`), and 🚨 **the whole insert of a main styled by such a stroke style failed**
+(`OpError::Styles`) — a kit that would not insert, where a wrong binding was the worst the record had
+imagined. Found while building layout styles (D1075), whose arm the same function needed. The Strokes
+arm now maps `width_var` through the plan's variables, the Effects arm each slot of `Effect::vars` the
+same way (D1074's amendment, the same omission), and D1075's layout arm the spacing bindings. *Do not*
+read `remap_value` as the paints' function: every binding a style's value can hold passes through it.
+**Test**: `tests/kit_tokens.rs::a_kits_stroke_style_with_a_bound_width_lands_on_the_consumers_copy` —
+the kit's badge stroked by a style *Edge* whose width is bound to `spare`, published and inserted; the
+vendored style and the instance read the consumer's `spare`, not the kit's id. Flip, run: `remap_value`
+leaving `width_var` as it found it fails at *"the insert commits"* with `Styles(BadVariable)` — one
+assertion earlier than predicted, at *"the style's width reads D's copy"*, and worse. ⚠️ **The Effects
+arm is untested**; the rest of the planner's width arms stay untested as above. *(Fixed in `2df4cd4`,
+**Resolved**. One test, one flip)*
+
 **D1074 — Styles and variables, the last of D1038 (7)'s numbers: an effect's X, Y, blur and spread bind
 to number variables in the effect item itself, substituted by `Document::resolved_effects`, whose output
 comes out unbound, and an effect list written over them is judged by corners' two halves — D1073's shape
@@ -26922,7 +26945,8 @@ while bound, D1039's. A number variable only, and only on a number the kind has 
 saved in the effect, `skip_serializing_if` when no slot is bound. Every walk the stroke width took takes
 it: `Node::reads_variables`; `variable::detached`, the carried walk, `land` (rebound by name, else the
 detached twin's number per slot), `reads`, `remove_ops` (one list write against the committed table)
-and the vault check; `tokens.rs`' `node_vars`, remap, per-effect `alike` by item, `own_reads`, and the
+and the vault check; `tokens.rs`' `node_vars`, a node's remap (`Plan::apply`) — **not a style's**
+(`Plan::remap_value`) until the amendment below —, per-effect `alike` by item, `own_reads`, and the
 plan's rebind writing one `SetEffects`; `StyleValue::vars`, `style::check` per kind — an effect's numbers
 a number each — and `style::detach_vars`' Effects arm, in the default mode, floored.
 
@@ -27030,6 +27054,15 @@ amended; `architecture.md` §5's `Effect` and operation listing, §5.3a, §5.3f,
 `roadmap.md` *Next · Styles and variables*' remaining numbers struck, the readings opened, then
 narrowed to (d))*
 
+**Amended 2026-10-16, the next commit (`2df4cd4`): the kit planner's style remap missed an effect's
+numbers too.** (1)'s walk list was wrong about it as D1073's was: `Plan::remap_value` cloned an effects
+style's items whole, `Effect::vars` still naming the kit's variable ids, which the consumer does not
+hold — so `style::check` refuses the vendored style (`BadVariable`) and the insert of a main styled by
+it fails, D1073's second amendment's defect for a stroke width, which found it and records the fix.
+The Effects arm now maps each of the four slots through the plan's variables. ⚠️ **Read, not run**: no
+test inserts a kit main styled by an effects style with a bound number, so the defect and the arm are
+both readings — the stroke test's flip reaches neither. *(Fixed in `2df4cd4`, **Resolved**; untested)*
+
 **D1062 — Styles and variables, build step 3's core: a style is one slot's whole list — fills, strokes
 or effects — in a table beside the variables, and a styled layer holds a linked copy of it in its own
 list, written by a commit-time pass that rewrites the copy when the style or the binding changed and
@@ -27055,7 +27088,8 @@ unique within a slot and not across slots**: a fill style and a stroke style may
 inspector and the browser never listing the two together, and a paste rebinding by name *and* slot. A
 layer's bindings are a sidecar, `Node::styles: StyleRefs { fills, strokes, effects }`, each an
 `Option<StyleId>`. ~~Text styles are step 6~~ Text styles are D1067's — a fourth slot, `StyleRefs::text`
-and `SetTypeStyle`, the commit's pass unchanged; a layout style, D1037's fifth slot, has no step yet.
+and `SetTypeStyle`, the commit's pass unchanged; a layout style, D1037's fifth slot, ~~has no step yet~~
+is D1075's — `StyleRefs::layout` and `SetLayoutStyle`, its value written by two operations.
 
 🚨 **Linked copies, not a read-time resolve — D978's argument made again.** A variable is resolved at
 read (D1037), and the obvious spelling of a style is the same: a styled layer stores the binding and
@@ -27291,9 +27325,9 @@ one case no test drives**: a main detached by the chip, its copies' detaches fol
 Variables' detaches are said too since D1071, beside the styles', through `said_detached`.
 
 **Not built.** ~~The kit groups in the picker and the tab (step 4);~~ (built in step 4, D1065, a kit
-style inert there and `edit_style` refusing one;) the ~~text and~~ layout ~~cards'~~ card's `⋯` and a
-layout style's capsule, F7 (~~text styles are step 6,~~ the text card's built in D1068; layout styles
-have no step); a swatch popup for a
+style inert there and `edit_style` refusing one;) the ~~text and~~ ~~layout~~ ~~cards'~~ ~~card's `⋯` and a
+layout style's capsule, F7~~ (~~text styles are step 6,~~ the text card's built in D1068; ~~layout
+styles have no step~~ the layout card's in D1076); a swatch popup for a
 style, which the mockup does not draw. F9's override marks are D1062's — `card_of` files each binding
 under its card.
 
@@ -27323,6 +27357,9 @@ into one.
 
 **Amended 2026-10-15: the text card's `⋯` built** (D1068). The Type card is a style card, and *Not
 built* above now names the layout card's `⋯` and F7's capsule alone.
+
+**Amended 2026-10-16: the layout card's `⋯` and F7's capsule built** (D1076). The Container card is a
+style card, and *Not built* above names only a style's swatch popup.
 
 **D1067 — Styles and variables, build step 6's first half — text styles' core: a fourth style slot,
 a text layer's type, holding the node's character defaults less their colour and language; a span stays
@@ -27537,6 +27574,162 @@ detaching, against D1038 (1). **Alignment keeps its mark**: no text style holds 
 *Heading/H2*, its main unstyled at 20 — asserts the size unmarked and the alignment marked, then commits
 the size mark `unstyled_marks` builds and asserts the copy left with **no text style**, the defect
 reproduced. Flip, run: `type_marks` without its `styled` arm fails *"the size is the style's"*.
+
+**D1075 — Styles and variables, layout styles' core: a fifth style slot, a container's layout — its
+whole `Display`, a grid's tracks included, and the bindings of its gaps and padding beside it — linked
+copies settled at the commit as the other four slots are, but written by two operations where theirs
+are one. *The session's calls under the maintainer's delegation; uncommitted when recorded.*** D1037
+names layout the fifth slot and D1038 (f) gives its fields — *"A layout style carries only the
+container's fields — display, direction, wrap, alignment, gaps, padding — and never an item's grow or
+`align-self`"* — but no step built it (D1062 and D1063 left it open, `roadmap.md`'s *Layout styles*) and
+nothing said how one is stored. The model is the session's.
+
+**The model.** `StyleSlot::Layout` — title *Container*, the card it stands for, serde `"layout"`,
+appended last in `ALL`, after the type — with `StyleValue::Layout(Box<LayoutStyle>)`, boxed for
+`Text`'s reason, `StyleRefs::layout` and one binding op, `Operation::SetLayoutStyle { id, style }`.
+`LayoutStyle { display: Display, spacing_vars: SpacingVars }`. 🚨 **The whole `Display`, grid tracks
+included** — flex or grid, direction, wrap, alignment, gaps, padding and a grid's column and row
+templates. Every field the type holds is the container's, so the session read (f)'s *"only the
+container's fields"* as the type whole and its list as naming kinds of field rather than closing it;
+an item's fields are another node's (`LayoutItem`, the child's) and so out by construction. **And the
+gap and padding bindings ride beside the display**, because they live on the node
+(`Node::spacing_vars`, D1058), not in it: a style holding the display alone would carry a bound gap's
+literal 0 to every user, unbound — which is what the first flip below draws.
+
+**Two operations.** `StyleValue::write_op` became **`write_ops`**, returning a `Vec`: a layout style
+is written as `SetDisplay` and `SetSpacingVars`, every other slot as its one op, and `settle` and the
+*Apply style…* picker's preview extend by it. `writes_slot` maps **both** `SetDisplay` and
+`SetSpacingVars` to the slot — so a door that binds or detaches a gap on a styled container detaches
+the style, as a door writing the gap does — and never `SetLayoutItem`, the child's. ⚠️
+**`StyleValue::of` returns `Option` now**: a layer with no layout has no layout value — nothing to make
+a style of, and nothing a layout style's look equals — so `create_ops` answers `None` there and the
+app's `styles::agreed` follows. `same_look` compares two `LayoutStyle`s whole, literals and bindings.
+
+**Rules and the pass.** `style::check` lets only a container bind one (`container::is_container`, a
+frame or a group; `BadBinding` otherwise) and a layout style's spacing bindings be number variables
+only (`BadVariable`); `settle` skips a non-container's slot, so the refusal is `check`'s, D1067's
+reason. 🚨 **A container with no layout is off its style**: `settle` reads `of`'s `None` as a look that
+differs, so **applying a layout style to a plain frame gives it the layout**, and a door taking the
+layout away (`SetDisplay` to `None`) is a write of the slot and detaches. **`edit_through`** (D1063's
+*Edit*): the two ops are separate, so the style's new value starts from the edited user's own display
+and bindings and takes each write over it in turn — a gap typed writes `SetDisplay` alone, a gap bound
+writes both — and a layout taken away, or bindings with no layout beside them, passes through for the
+pass to detach as any door's write. **Deleting a variable a layout style reads**
+(`style::detach_vars`) writes its number in the default mode into the style's display, floored at 0 as
+the engine floors a literal, and drops the binding; the users are rewritten from it and stay styled,
+D1062's rule. The kit planner's `remap_value` gained the layout arm, and building it found D1073's
+second amendment. `SetLayoutStyle`: `changes_ink` false — `op.rs`' chrome-list test now 27 —, `apply`
+and its inverse, propagation `Mode::Whole` (F9), `reset::state_ops` stating it, `absorb`'s no-op arm,
+and the override marks filing it under *Container* with `SetDisplay` and `SetSpacingVars`
+(`component::card_of`). ~~⚠️ **`ondin-render/tests/overrides.rs`' no-op fixture does not list it** — its
+styles still nine — the gap D1062's build left in both fixtures and D1067 closed for its own op.~~
+Listed since, the styles ten (amendment below).
+**Schema: v8, no bump** — an optional field in `StyleRefs` and an enum variant, v8 unreleased, D1067's
+reading.
+
+⚠️ **`settle` writes its `SetDisplay` after the commit's door passes** — inside `propagate::owed`, so
+after `keep_insets`, `keep_flex_sizes` and every binding pass, as a text style's `SetTextStyle` is —
+and under *Edit*, `edit_through`, first in `commit_inner`, has already taken the user's own
+`SetDisplay` out of the transaction. Read pass by pass, not run: **`keep_spacing_bindings` is
+unaffected**, `settle` writing the style's own `SetSpacingVars` beside each display, so the pair
+states its bindings and the pass would skip it anyway; **`keep_insets` is unaffected** — it rewrites
+only placements the transaction writes, no style door writes a pinned child's, and a pin is placed
+against its parent's box at read; **`keep_flex_sizes`' `kept_flow_translations`** exempts the children
+of a container whose `SetDisplay` the transaction holds, which `settle`'s is not yet, and that is inert
+because no style door writes a child's transform beside it. ~~🚨 **`keep_size_bindings`' layout half is
+the one the order defeats.** It finds the children of every container a `SetDisplay` in the
+transaction re-lays and detaches a bound W or H the new layout makes computed (D1061 — a stretched
+cross axis, a grown main axis), to the size drawn — and `settle`'s `SetDisplay` arrives after it. So
+applying a layout style to a plain frame, a style edit reaching its users and an *Edit* through one each
+leave a child's binding on an axis its new layout deals out, where the Container card's own `SetDisplay`
+on an unstyled frame detaches it — against D1061's *only a hand-set size binds*. What the left binding
+then draws is unmeasured.~~ 🚨 **`keep_size_bindings`' layout half was the one the order defeated** —
+fixed in the amendment below, `propagate::owed` running it again after a `settle` that writes a
+display.
+
+~~⚠️ **And under *Edit* `keep_spacing_bindings` never judges the user's write**: `edit_through` folds the
+`SetDisplay` into the style's value before that pass runs, keeping the user's bindings whole. A chip's
+retype detaches first — a `SetSpacingVars` with the slot cleared, folded in too — and lands right; but
+a write over a bound slot that carries no detach of its own — the Container card's plain field over a
+partly bound padding pair (`spacing_partly_bound`), which writes both sides, where it is drawn — keeps
+the bound side's binding with the typed number as its literal. The style then holds a binding beside a
+literal that is not 0, the typed number never lays out, and the preview, whose `SetDisplay` arm judges
+by `kept_spacing_vars`, draws the detach the commit does not make. Read, not run.~~ Fixed in the
+amendment below: `edit_through` judges the write by `kept_spacing_vars` itself.
+
+**Tests**, `crates/ondin-core/tests/layout_styles.rs`, four as first recorded (six since the
+amendment), each committing through `propagate::owed` as `tests/styles.rs` does — so none runs the
+door passes above: a layout style carries the display and
+its gap's binding onto a plain frame; a style edit reaches both users and a door's `SetDisplay` on one
+detaches it, its 30 kept; only a container takes one, and `create_ops` over a frame with no layout is
+`None`; a round trip, the style's delete detaching its users with their layouts kept, and the
+variable's delete detaching the gap in the style and on both users at its 12. Flip, run, as the caller
+reports it: `write_ops` writing the display alone fails *"b's gap bound as a's"* — and the round-trip
+test at its 12, since `b`, given `a`'s literal 0 and no binding, has nothing for the variable's delete
+to detach. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep** —
+the slot, the bindings beside the display, the two operations and a plain frame taking the layout above
+all; the whole `Display`, a grid's tracks included, **Keep**, *revisit if* the maintainer reads (f)
+narrower; the layout half of `keep_size_bindings` skipped ~~***Fix***, read, not run~~, the *Edit* write
+over a partly bound pair ~~***Fix***, read, not run~~ and the render fixture's missing op ~~***Fix***~~
+fixed, **Resolved**, below. ~~One flip~~ Three flips as reported. D1062 and D1063 amended, and D1073 and
+D1074 for the planner defect it found; `architecture.md` invariant 4, §5.3f, §5's operation listing,
+§5.11; `roadmap.md` *Layout styles* struck, these three readings opened, then struck. **Amended
+2026-10-16**)*
+
+**Amended 2026-10-16, the same session: the three readings fixed.** (a) 🚨 **`propagate::owed` runs
+`build::keep_size_bindings` again over the whole transaction whenever a `style::settle` call wrote a
+`SetDisplay`** — after the first call, before the component passes, so a copy follows the detach
+through its main's `SetSizeVars`; and after the last, for a copy's layout put back. It is safe to run
+twice because the pass leaves a node whose size bindings the transaction already states
+(`sets_vars`), which is every node its first run detached; an axis it kept bound has had its literal
+put back, which the second run keeps bound again. So a layout style applied to a plain frame, a style
+edit reaching its users and an *Edit* through one now detach a child's bound W or H its new layout
+computes, to the size drawn — D1061's rule kept. *Do not* fold the re-run into the door's call in
+`commit_inner`: the display it must see is not written until `owed`. (b) **`edit_through`'s layout
+arm judges the user's `SetDisplay` by `build::kept_spacing_vars`**, the commit's spacing pass's own
+judgement: a bound slot written what it lays out at, or its own literal, stays bound in the style, its
+literal put back; any other detaches to the number written. The chip's retype is unchanged — its
+`SetSpacingVars` folds in as before. (c) `ondin-render/tests/overrides.rs`' styles no-op list gains
+`SetLayoutStyle`, ten, its doc's tally extended. **Tests**, two more:
+`a_layout_style_detaches_a_child_size_its_layout_computes` — a rect with a hand-set width bound to
+`space/md` in the plain frame `b`, `b` given the column style, whose default `align-items: stretch`
+computes the width, the binding gone; flip, run as the caller reports it: the re-run after the first
+`settle` disabled fails *"the stretched width detaches"* (the test's doc first called it *"its second
+`keep_size_bindings`"*, rewritten the same day to name the re-run after the first `settle`; the re-run
+after the last `settle` has no test of its own). `an_edit_through_a_user_judges_a_bound_gap` — the user's row gap
+written its drawn 12 keeps the style's binding over a 0 literal, written 30 detaches the style's gap at
+30; flip, run: the bindings taken whole, the first cut, fails *"the drawn gap keeps the binding"* —
+bound, but over a literal of 12 — one assertion earlier than predicted, at *"30 detaches the style's
+gap"*. ⚠️ **Neither test drives the app's padding pair** that reading (b) named; the second asserts
+`edit_through`'s output directly. *(**Resolved** all three. Six tests, three flips as reported)*
+
+**D1076 — Styles and variables, layout styles' chrome: the Container card is a style card — the slot's
+`⋯`, F1's capsule, the greyed rows — its capsule's preview F7's display glyph turned with the
+direction, its summary the direction and the main-axis gap, or a grid's track counts. *The session's,
+under the maintainer's delegation; uncommitted when recorded.*** D1038 F7 draws it in one sentence —
+*"A layout style's capsule shows the display glyph turned with the direction; expanded it is the whole
+Container card, greyed"* — and no Claude Design pass went further.
+
+**The card.** `inspector_container` (`panels/layout.rs`) is drawn through `style_card`, slot
+`StyleSlot::Layout`, in place of `self.panel`: so it wears the slot's `⋯` — *Apply style…*, *Create
+style from this…*, *Detach style* — collapses to the capsule over a styled container and opens greyed
+and inert, as D1063's paint cards do, the `display` segments and the flex or grid rows its body.
+**The glyph** (`styles::layout_glyph`): Phosphor's *columns* for a row, the same picture turned —
+*rows* — for a column, *grid-four* for a grid, a reversed direction taking its axis's; drawn by
+`paint_preview`'s layout arm at 13 in the chrome's ink. **The summary**: *Row · 12* or *Column · 6*,
+the direction and the **main-axis gap** — a row's column gap, a column's row gap, `SpacingVars`' slots
+0 and 1 — or *Row · bound gap* where that gap is bound, its literal being the 0 nothing lays out; a
+grid *Grid · c × r*, its templates' track counts, at least 1 each.
+
+**Tests**: `panels::styles::tests::the_container_card_is_a_layout_style_card` — a column frame's layout
+made a style by *Create style from this…*, the capsule's *Column · 6* drawn, the style applied to a
+plain frame by its bind op giving it the column, and a detach keeping it. Flip, run:
+`inspector_container` drawn through `self.panel` again fails *"the capsule's summary is drawn"*.
+**Untested**: the browser's *Styles* tab listing a layout style (it iterates `StyleSlot::ALL`, so the
+fifth group comes with the slot), *Edit* of a layout style, the *Mixed* capsule, the glyph and the grid
+summary. *(Built under the maintainer's delegation, uncommitted when recorded, 2026-10-16. **Keep**;
+the glyph and the summary the session's reading of F7, not looked at. D1063 amended; `architecture.md`
+§5.3f; `roadmap.md` *Layout styles* struck)*
 
 **D1069 — Styles and variables, build step 6's second half — string variables' core: a text's content
 and its family bind to string variables, a sidecar of two beside the literals, which are written empty

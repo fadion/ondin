@@ -320,8 +320,8 @@ permission.
    consumer are the third member's kind (built 2026-10-15, §15 D1064): copies of the kit's at a
    published version, each with its origin, rewritten only by the commit that accepts an update.
    ⚠️ **Styles make it the first of four** (§5.3f, §15
-   D1062): a styled layer's fills, strokes or effects — or, since D1067, its type — are a copy of
-   its style's list, written by the commit (`style::settle`) — the second member's shape, for a style.
+   D1062): a styled layer's fills, strokes or effects — or, since D1067, its type, and since D1075 a
+   container's layout — are a copy of its style's list, written by the commit (`style::settle`) — the second member's shape, for a style.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -3424,7 +3424,11 @@ Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a lay
 > ruling): the core (§15 D1069: a text's content and family bound, the literals empty while bound,
 > the spans cleared, an edit detaching) and the chrome (§15 D1070: the Type card's *Content* row, the
 > family's chip, *String variable* in the browser), D1069's four readings fixed in its amendment — so
-> step 6 owes only D1070's Text property chip and the Content row's override mark. The
+> step 6 owes ~~only D1070's Text property chip and the Content row's override mark~~ nothing but a
+> Type card over several layers, the chip and the mark built in D1070's amendment. **Layout styles
+> are built** (2026-10-16, under the maintainer's delegation) — the core (§15 D1075: a fifth slot
+> holding a container's whole `Display` and its gap and padding bindings) and the Container card as a
+> style card (§15 D1076). The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3489,7 +3493,8 @@ nothing a preset holds being bindable yet.
 **A style** is one slot's isolated set of values — an isolated CSS class, not the cascade. **The slots
 are fills, strokes, effects, text and layout**; a node holds at most one style per slot, and styles do
 not stack. **A layout style carries only the container's fields** — display, direction, wrap,
-alignment, gaps, padding — never an item's grow or `align-self` (D1038). **A card is styled or not, as
+alignment, gaps, padding — never an item's grow or `align-self` (D1038); ⚠️ as built, the whole
+`Display`, a grid's tracks included, with the gap and padding bindings beside it (§15 D1075). **A card is styled or not, as
 a whole**: editing any field of a styled card detaches it, with no partial override and no inheritance
 (the maintainer's ruling). ⚠️ **The inspector is the one door that does not**: there a styled card is
 **read-only**, and a style's values change only through the browser's *Edit*, live to every user
@@ -3866,8 +3871,9 @@ opaque than its variable.
 variables — each `Style` a name and a `StyleValue`: `Fills`, `Strokes` or `Effects`, **the card's whole
 list** of `Keyed` items, so a stroke style carries each stroke's width, join, cap, dashes and alignment.
 Names are slash paths, **unique within a slot, not across slots**. A layer's bindings are
-`Node::styles: StyleRefs { fills, strokes, effects, text }`. The binding ops are per slot — `SetFillStyle`,
-`SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle` — and write the binding alone.
+`Node::styles: StyleRefs { fills, strokes, effects, text, layout }`. The binding ops are per slot —
+`SetFillStyle`, `SetStrokeStyle`, `SetEffectsStyle`, `SetTypeStyle`, `SetLayoutStyle` — and write the
+binding alone.
 **A text style** (step 6, §15 D1067 in full) is `StyleValue::Text(Box<TextStyle>)`, the type part
 (`style::type_part`: the defaults with `color` and `locale` cleared); the commit writes it as
 `SetTextStyle { spans: None }` over the layer's own colour and language, compares type parts, and so
@@ -3875,6 +3881,18 @@ re-states the spans against the new defaults — ⚠️ a span the new defaults 
 `Ctrl+Z` alone bringing it back. `SetTextSpans` and `SetText` are not the slot's writes; a
 `SetTextStyle` is, but detaches only when it moves the type part. `style::check` refuses a text style on
 a layer that is not text.
+**A layout style** (§15 D1075 in full) is `StyleValue::Layout(Box<LayoutStyle { display,
+spacing_vars }>)`: the container's whole `Display` — flex or grid, a grid's tracks included — and the
+gap and padding bindings, which live on the node (`Node::spacing_vars`) and so ride beside it. It is
+the one slot **written by two operations**, `SetDisplay` and `SetSpacingVars` (`StyleValue::write_ops`),
+and `writes_slot` maps both to it; a layer with no layout has no layout value (`StyleValue::of` answers
+`None`), so no style is made of one and **a layout style applied to a plain frame gives it the
+layout**. Only a frame or a group binds one. `edit_through` builds the edited value from the user's own
+display and bindings with each write taken over it, 🚨 **judging a `SetDisplay` by `kept_spacing_vars`**
+as the commit's spacing pass would — that pass never sees a write folded into the style. And since
+`settle`'s `SetDisplay` lands after the door passes, 🚨 **`propagate::owed` runs `keep_size_bindings`
+again over the whole transaction after any `settle` call that writes one**, so a child's bound W or H
+the style's layout makes computed detaches (§15 D1075's amendment).
 🚨 **`style::settle` is the whole of "styled or not, as a whole"**: run by `propagate::owed` first and
 last, it finds every bound slot not holding its style's look (values compared, item ids not) and
 **rewrites** it from the style when the transaction edited the style or set that binding, or when no
@@ -3885,7 +3903,8 @@ its copies, the second puts back a copy on another style that a follow drifted. 
 post-condition of `apply` and of the loader) holds names unique per slot, no item id twice in a style,
 paints bound to colour variables only and a stroke's width to number variables only (§15 D1073 — a
 check per kind, where it had refused any variable not a colour), an effect's numbers to number
-variables only and only where its kind has them (§15 D1074), every binding to a style of its slot,
+variables only and only where its kind has them (§15 D1074), a layout style's gaps and padding to
+number variables only (§15 D1075), every binding to a style of its slot,
 and **no vault node
 bound to a style of the document's own** — a vault node's styles are kits' (§15 D1064), and a kit's
 style reads only kits' variables. A bare
@@ -3903,7 +3922,7 @@ each counting the layers it acts on where there are several (F10).
 — Detach to edit*, open per slot (`style_open`), not per layer; styled differently, a caretless *Mixed*
 capsule; partly styled, the rows greyed and inert as a styled card's are. The `+` hides while any target is styled, except under
 an edit. *Apply style…* is a 256-wide picker of the slot's styles, grouped by path, the highlight
-previewed — 🚨 its preview carries the style's `write_op`s beside the binds, which `absorb` no-ops.
+previewed — 🚨 its preview carries the style's `write_ops` beside the binds, which `absorb` no-ops.
 *Create* names the new style in the capsule, `Escape` undoing it (`escape_styles`, a rung of `escape`).
 The browser's *Styles* tab groups by card, each row a preview, the whole name and a count, its menu
 *Rename*, *Edit*, *Select N layers* and *Delete*. 🚨 ***Edit* is an edit mode, not a card in the
@@ -3923,8 +3942,12 @@ row and the popup's opener — the popup closing when its opener is not drawn �
 Character tab's held sections where the card is read-only — its Colour and Language rows live, as a
 text style holds neither — and Paragraph and Box live. On an instance a text-styled layer's five
 held fields carry no mark of their own (`type_marks`, D1068's second amendment): their values are the
-style's, and *Reset Type* their reset, as the paint cards' (F9). Not built: ~~the kit groups (step 4),~~ ~~the text
-and~~ the layout card's style, and a Type card over several layers.
+style's, and *Reset Type* their reset, as the paint cards' (F9). **The Container card is a style card**
+(§15 D1076): its capsule's preview F7's display glyph turned with the direction — Phosphor's *columns*
+for a row, *rows* for a column, *grid-four* for a grid (`styles::layout_glyph`) — and its summary the
+direction and the main-axis gap, *Column · 6*, or *Row · bound gap*, a grid's *Grid · c × r*. Not
+built: ~~the kit groups (step 4),~~ ~~the text and~~ ~~the layout card's style, and~~ a Type card over
+several layers.
 
 **Kits' variables and styles, as built** (step 4, §15 D1064 and D1065 in full). A vendored kit's
 variables and styles sit **in the consumer's own tables**, each minted the consumer's id and carrying
@@ -5591,7 +5614,8 @@ pub enum Operation {
     SetFillStyle { id: NodeId, style: Option<StyleId> }, // a layer's binding alone, one op per slot;
     SetStrokeStyle { id: NodeId, style: Option<StyleId> }, // the commit writes the values beside it
     SetEffectsStyle { id: NodeId, style: Option<StyleId> }, // (`style::settle`); and a text layer's type
-    SetTypeStyle { id: NodeId, style: Option<StyleId> },   // (§15 D1067). All eight change no ink
+    SetTypeStyle { id: NodeId, style: Option<StyleId> },   // (§15 D1067), and a container's layout
+    SetLayoutStyle { id: NodeId, style: Option<StyleId> }, // (§15 D1075). All nine change no ink
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -7040,7 +7064,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   way, skipped when no slot is bound. **And styles** (§15 D1062): `DocumentDto::styles`, above the
   images, sorted by id and skipped when empty, and `NodeDto::styles`, skipped when nothing is bound;
   the loader refuses a repeated style id and runs `style::check`. A layer whose list differs from its
-  style's loads as written, and the next commit that runs `style::settle` puts it back. **And the kits'
+  style's loads as written, and the next commit that runs `style::settle` puts it back. **And layout
+  styles** (§15 D1075): a `"layout"` style value and `StyleRefs::layout`, skipped when unset. **And the kits'
   variables and styles** (§15 D1064): `VariablesDto::kits`, each kit's modes and mapping by kit id,
   skipped when empty, and a variable's and a style's `origin`, skipped when `None` — the published
   document's table saved the same way, its bindings now kept. **And *Make local*'s fork marks** (§15

@@ -1,5 +1,6 @@
-//! **Spacing handles on the canvas** (§15 D1078): dragging a selected flex or
-//! grid container's gaps and padding, as the Container card's fields edit them.
+//! **Spacing handles on the canvas** (§15 D1078): dragging a flex or grid
+//! container's gaps and padding, as the Container card's fields edit them — the
+//! selected container's, or the one under the pointer (§15 D1089).
 //!
 //! The write is the card's — one `SetDisplay` through the commit door — so the
 //! binding pass (`keep_spacing_bindings`, §15 D1058), the style pass (§15
@@ -502,14 +503,33 @@ pub(crate) struct Subject {
 }
 
 impl OndinApp {
-    /// The one selected flex or grid container the handles are for (1), its
-    /// bands as the preview lays it out, or `None`: several selected, nothing
-    /// laid out, a hidden container, or an edit in place.
-    pub(crate) fn spacing_subject(&self) -> Option<Subject> {
-        let [id] = self.session.selection.ids() else {
-            return None;
+    /// The flex or grid container the handles are for, its bands as the preview
+    /// lays it out, or `None`: nothing laid out, a hidden container, or an edit
+    /// in place.
+    ///
+    /// **The container under the pointer, else the one selected** (§15 D1089,
+    /// the maintainer's request over D1078's (1), which had the selected one
+    /// only): the topmost layer at `pointer`, when it is a container outside
+    /// any group or instance ([`Self::spacing_hover`]), shows its handles on
+    /// hover, so a gap is dragged without selecting its frame first. (An
+    /// occupied frame's background is not something a click selects; its bands
+    /// take a drag all the same.) The one
+    /// being dragged stays the subject whatever is under the pointer.
+    pub(crate) fn spacing_subject(&self, pointer: Option<Point>) -> Option<Subject> {
+        let ids = self.session.selection.ids();
+        let selected = match ids {
+            [id] => Some(*id),
+            _ => None,
         };
-        let id = *id;
+        // A container that is one of several selected keeps D1078's rule, no
+        // handles: a drag on it would write it alone out of the set.
+        let hovered = pointer
+            .and_then(|p| self.spacing_hover(p))
+            .filter(|h| ids.len() < 2 || !ids.contains(h));
+        let id = match &self.drag {
+            Drag::Spacing { id, .. } => *id,
+            _ => hovered.or(selected)?,
+        };
         // Only under a tool that selects (`arch-scribe`'s read of the first cut):
         // the press reaches `begin_select_drag` for no other, so under a create
         // tool a band drawn strong would promise a drag the press turns into a
@@ -597,6 +617,21 @@ impl OndinApp {
         })
     }
 
+    /// The flex or grid container directly under world point `world` — the
+    /// topmost layer there, with no exact pick slop — when a click there would
+    /// take it: not one inside a group or an instance, whose click takes the
+    /// group (`pick_leaf`'s chain). An item or anything else on top answers
+    /// `None`, so a pointer over an item never lights its container.
+    fn spacing_hover(&self, world: Point) -> Option<NodeId> {
+        let doc = &self.session.doc;
+        let top = *ondin_core::hit_test(&self.session.resolved, doc, world, 0.0).first()?;
+        let laid = doc.resolved_display(top).is_some();
+        let free = ondin_core::group_chain(doc, top, self.entered_group).is_empty()
+            && ondin_core::component::instance_root(doc, top).is_none()
+            && !ondin_core::is_effectively_locked(doc, top);
+        (laid && free).then_some(top)
+    }
+
     /// The band under screen point `screen`, with its subject — what a press
     /// there would grab and what the cursor answers for (7).
     pub(crate) fn spacing_at(
@@ -608,8 +643,9 @@ impl OndinApp {
         if !matches!(self.drag, Drag::None) {
             return None;
         }
-        let s = self.spacing_subject()?;
-        let local = s.world.inverse() * self.to_world(screen, rect, ppp);
+        let world = self.to_world(screen, rect, ppp);
+        let s = self.spacing_subject(Some(world))?;
+        let local = s.world.inverse() * world;
         let min = Vec2::new(
             MIN_PICK_PX / s.scale.x.max(1e-9),
             MIN_PICK_PX / s.scale.y.max(1e-9),
@@ -677,7 +713,7 @@ impl OndinApp {
     }
 
     /// The handles' drawing (2, 7): nothing at rest; with the pointer inside the
-    /// selected container every band faint in `GRID_GAP`'s tint — a grid's gaps
+    /// subject container ([`Self::spacing_subject`]) every band faint in `GRID_GAP`'s tint — a grid's gaps
     /// are already drawn by its track lines, so only its padding is added — the
     /// band under the pointer strong with its pill; while dragging only the
     /// bands being written, strong, and the label beside the pointer. A bound
@@ -690,13 +726,13 @@ impl OndinApp {
         if !dragging && (!matches!(self.drag, Drag::None) || self.chrome_hidden()) {
             return;
         }
-        let Some(s) = self.spacing_subject() else {
-            return;
-        };
         let Some(pointer) = painter.ctx().input(|i| i.pointer.latest_pos()) else {
             return;
         };
         let world_ptr = self.to_world(pointer, rect, ppp);
+        let Some(s) = self.spacing_subject(Some(world_ptr)) else {
+            return;
+        };
         let local = s.world.inverse() * world_ptr;
         if !dragging && !s.bx.contains(local) {
             return;
@@ -1043,6 +1079,82 @@ mod canvas_tests {
         assert_eq!(spacing(&app, row)[0], 10.0);
     }
 
+    /// **An unselected container's gap drags on hover** (§15 D1089): with
+    /// nothing selected a drag across the row's first gap writes the gap and
+    /// leaves the selection alone, and the cursor there is the horizontal
+    /// arrows.
+    ///
+    /// Flip, run: `spacing_subject` ignoring the hover (the selected container
+    /// only, as D1078 had it) fails *"the hovered gap took the drag"*, still 10.
+    #[test]
+    fn an_unselected_containers_gap_drags_on_hover() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        app.session.selection.clear();
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(65.0, 35.0),
+            Point::new(73.0, 35.0),
+            none,
+            false,
+        );
+        assert_eq!(spacing(&app, row)[0], 18.0, "the hovered gap took the drag");
+        assert!(app.session.selection.is_empty(), "a drag selects nothing");
+        let at = app.to_screen(Point::new(65.0, 35.0), RECT, 1.0);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], none);
+        let cursor = frame(&ctx, &mut app, Vec::new(), none)
+            .platform_output
+            .cursor_icon;
+        assert_eq!(
+            cursor,
+            egui::CursorIcon::ResizeHorizontal,
+            "the arrows on hover"
+        );
+    }
+
+    /// **A click in an empty container's padding still selects it** (§15
+    /// D1089): an empty frame is directly clickable (`pick_leaf`), and the
+    /// padding band its hover shows does not take that click — a press
+    /// released where it was pressed is a click, not a band drag.
+    ///
+    /// Written to pin a reading of `arch-scribe`'s that the band would take the
+    /// click; it did not. A selection added in the band release's no-op arm
+    /// was flipped out and the test stayed green, the click path selecting the
+    /// row on its own — so there is no such arm.
+    #[test]
+    fn a_click_in_an_empty_containers_padding_selects_it() {
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let items = app.session.doc.get(row).unwrap().children().to_vec();
+        app.session.commit(Transaction(
+            items
+                .into_iter()
+                .map(|id| Operation::DeleteNode { id })
+                .collect(),
+        ));
+        app.session.selection.clear();
+        let none = Default::default();
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new(), none);
+        }
+        let at = app.to_screen(Point::new(200.0, 10.0), RECT, 1.0);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)], none);
+        assert!(
+            app.spacing_at(at, RECT, 1.0).is_some(),
+            "the fixture: the top padding band is under the pointer"
+        );
+        frame(&ctx, &mut app, vec![button(at, true, none)], none);
+        frame(&ctx, &mut app, vec![button(at, false, none)], none);
+        frame(&ctx, &mut app, Vec::new(), none);
+        assert_eq!(
+            app.session.selection.ids(),
+            [row],
+            "the click selects the empty row"
+        );
+    }
+
     /// **The modifiers choose the sides and the step** (D1, D2, and the
     /// session's ruling): `Shift` on a gap steps by 10 — a 13 drag is +10 —
     /// `Alt` on the left padding writes the right with it, and `Alt+Shift` all
@@ -1211,7 +1323,7 @@ mod canvas_tests {
             true,
         );
         let top = |app: &OndinApp| {
-            app.spacing_subject().is_some_and(|s| {
+            app.spacing_subject(None).is_some_and(|s| {
                 s.bands
                     .iter()
                     .any(|b| b.kind == super::BandKind::Padding(super::Side::Top))
@@ -1223,7 +1335,10 @@ mod canvas_tests {
         frame(&ctx, &mut app, Vec::new(), none);
         assert!(!top(&app), "let go at 3, dropped");
         app.tool = crate::tools::Tool::Rect;
-        assert!(app.spacing_subject().is_none(), "a create tool: no bands");
+        assert!(
+            app.spacing_subject(None).is_none(),
+            "a create tool: no bands"
+        );
     }
 
     /// **A cancel abandons a band drag** (§9.4): the gap dragged to 18 and

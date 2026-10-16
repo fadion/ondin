@@ -2140,7 +2140,8 @@ impl OndinApp {
             || handles
                 .as_ref()
                 .is_some_and(|h| h.armed(screen, false).is_some())
-            // A selected container's spacing band (§15 D1078), the rung after the
+            // A selected or hovered container's spacing band (§15 D1078, D1089),
+            // the rung after the
             // handles in `begin_select_drag`.
             || self.spacing_at(screen, rect, ppp).is_some()
     }
@@ -11512,8 +11513,8 @@ impl OndinApp {
         // A selected grid container's tracks, over the artwork and its labels and
         // under everything that answers the pointer — see the function.
         self.draw_grid_tracks(painter, rect, ppp);
-        // A selected container's spacing bands over its track lines and under the
-        // hover and selection chrome (§15 D1078).
+        // A selected or hovered container's spacing bands over its track lines
+        // and under the hover and selection chrome (§15 D1078, D1089).
         self.draw_spacing_bands(painter, rect, ppp);
 
         // What the pointer is over but has not selected — the exact outline of

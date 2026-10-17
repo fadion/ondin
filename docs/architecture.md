@@ -1233,9 +1233,10 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 
 **The model is CSS, under CSS's names** (§15 D867) — `display: flex` and `display: grid` and the
 properties CSS spells them with, explicitly not Figma's auto layout. It is behaviour designers
-already know, and it is what a future HTML/CSS export writes without translating. The chrome writes
-those names in sentence case — *Justify content*, *Flex start* — and the model, the file and the
-snapshot keep CSS's spelling (§15 D884). **Where CSS and design-tool convention disagree, CSS wins**,
+already know, and it is what a future HTML/CSS export writes without translating — code export,
+designed and not built, writes it as specified and reports where the model departs (§15 D1098
+(4)). The chrome writes those names in sentence case — *Justify content*, *Flex start* — and the
+model, the file and the snapshot keep CSS's spelling (§15 D884). **Where CSS and design-tool convention disagree, CSS wins**,
 and four cases are decided:
 
 - **Transforms do not affect layout.** A rotated item keeps its unrotated slot and may overlap its
@@ -3577,7 +3578,9 @@ is not this work's**: by the maintainer's ruling of 2026-10-15 (D1037's amendmen
 **code export** — HTML/CSS and perhaps framework code for a frame, a group or one element, a later
 feature in a separate release (`roadmap.md`'s *Later · Code export*) — and the variables' sheet with
 it, since generated layer code is what would read them through `var()`. §7 writes paint as
-presentation attributes today, so where a `var()` would go is that feature's question.
+presentation attributes today, so where a `var()` would go is that feature's question — **designed
+2026-10-17, not built** (§15 D1098): a tree-shaken `tokens.css`, the default mode on `:root` and the
+others as `[data-mode="…"]`, and styles resolved into each user with their variables kept as `var()`.
 
 **What is built** (step 1's core, §15 D1039 in full). `ondin_core::variable` holds the table —
 `Variables { modes, vars }`, the modes in order and the first the default, the variables by id
@@ -8572,6 +8575,10 @@ other were right, which is why both exist.
   attributes (`fill="#…"`, `stroke="…"`), a `style` attribute appearing only for an alpha mask's
   `mask-type`; an export as CSS custom properties belongs to code export, a later feature in a
   separate release, by the maintainer's ruling of 2026-10-15 (§5.3f, §15 D1037's amendment).
+  **There is no HTML/CSS export of any kind.** Code export is designed (§15 D1098) and nothing of it
+  is built: a DOM core with HTML/CSS, React and Vue emitters, a pipeline separate from this
+  section's `ExportSpec` → `plan` → `PlannedFile`, which it asks for raster assets, and a report of
+  every downgrade on the model of `Export`'s `approximated`.
 - **PNG** — `png(doc, res, vp) -> Vec<u8>` via `VelloCpuRenderer` + PNG encoder. No GPU anywhere in
   this path. It shares the walk, so it needs no rule of its own about a picture that cannot be drawn:
   the placeholder is ink and lands on the pixels, which is where a hole would do the most damage and

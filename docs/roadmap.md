@@ -47,7 +47,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Next · Styles and variables* | **Opened 2026-10-11**, ruled (§15 D1037), leaving §0's non-goals: a six-step build; the Claude Design pass on the chrome **done and accepted** (§15 D1038), with the maintainer's rulings of 2026-10-13 on (a)–(d), (f) and premise (iv); **step 1 built 2026-10-14** — the core (§15 D1039), the browser (§15 D1040), binding a field (§15 D1041), a frame's *Mode* row (§15 D1042), the swatch popup's *Variables* segment (§15 D1043), B4's refusal (§15 D1044), the *Mixed* capsule (§15 D1045), the no-scrub cursor (§15 D1046), *Paste properties* by a paste's rule (§15 D1047), a copy's binding and mode marks (§15 D1048), the per-corner chips (§15 D1049), a corner's preview (§15 D1050), the mode on every frame tag (§15 D1051), the browser's leftovers (§15 D1052–D1055) and a cell's preview on every bound layer (§15 D1056), its leftovers closed the same day (§15 D1057, E1's kit group moved to step 4); **step 2's gaps and padding built** the same day (§15 D1058, its partly bound and bound-resize previews fixed in its amendments), **and its booleans bound to visibility** (§15 D1059, its five read defects fixed in its amendment), their chip and bound eye (§15 D1060), **and W and H** (§15 D1061, the maintainer's ruling: a hand-set size only), so step 2 owes nothing; **step 3's core built** (§15 D1062: styles for fills, strokes and effects as linked copies, settled at the commit), **and its chrome** (§15 D1063: the cards' `⋯` and capsule, the *Styles* tab, *Edit* as an edit mode on the users), so step 3 owes nothing; **step 4, kits carrying both, built** (§15 D1064: the consumer's own tables with origins, the per-kit mapping, the frozen table, one planner for insert, update and paste; §15 D1065: kit groups last, the browser's kit header with the mapping, inert rows, the toast's counts), and *Make local*'s fork of what a main reads (§15 D1066, the maintainer's ruling), and 5A's extended summary and the *v8 → v9* line, so step 4 owes nothing; **step 5, the CSS export, and (g) taken out of this work on 2026-10-15** into *Later · Code export* (§15 D1037's amendment, the maintainer's ruling), so step 6 is next; **step 6's text styles built** the same day under the maintainer's delegation (§15 D1067: a fourth slot holding the character defaults less colour and language, spans the text's own marks over it, (e) answered; §15 D1068: the Type card a style card, live over a session's selection), **and string variables** the same day (§15 D1069, D1070, the maintainer's ruling); their owed chrome built on 2026-10-16 (D1070's amendment, D1068's second), and a variable's detach said on the floating status (§15 D1071), **and layout styles** on 2026-10-16 (§15 D1075, D1076), and the Type card over several text layers the same day (§15 D1077); and spacing handles, the canvas detach of paint and *Paste properties*' status (§15 D1078–D1080); open is whether a preset follows a paste's rule ~~and what is left of its canvas detach~~ — every number D1038 lists now binds (§15 D1072–D1074), their last reading closed in D1073's fourth amendment. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
 | *Next · Shared component libraries* | **Closed into §15 on 2026-10-08** (D1010's amendment): every step is built — the vault and vendoring (§15 D1012) through the swap to a main never used (D1019), the pill noticing a publish while the document is open (D1020, the maintainer's ruling of 30 to 60 seconds) and 1D's count (D1021, the maintainer's ruling to load every file); the ⋯ menu's width was answered by reading (D1016 (d)). Its *Later* paragraph — the review table, the kit verbs in a palette, team publishing — moved to *Later · Components and layout, past the first build*. *The text below is the row as it stood before.* **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. **Step 1 built in core** the same day (§15 D1012 — the vault a second parentless root, refining D1011 (9)), no chrome; **the document menu, the insert picker, publishing, and updates with *Make local* built** the same day (§15 D1013–D1016), and the dashboard's kits with 1D's confirmation, less its count (§15 D1017), and a tile's drag and 3G's *Open library* (§15 D1018), and a swap to a kit main the document has never used (§15 D1019): open are the card ⋯ menu's width to measure, the pill's timing (unruled), and how 1D counts a kit's consumers. |
-| *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06; the kit review table, the kit verbs in a palette and team publishing — joined 2026-10-08; binding an extracted value's other users — joined 2026-10-11, §15 D1037, D1038); code export — HTML/CSS and perhaps framework code for a frame, a group or one element, in a separate release, opened 2026-10-15 when styles and variables' step 5 left that work (§15 D1037's amendment); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
+| *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06; the kit review table, the kit verbs in a palette and team publishing — joined 2026-10-08; binding an extracted value's other users — joined 2026-10-11, §15 D1037, D1038); code export — HTML/CSS and perhaps framework code for a frame, a group or one element, in a separate release, opened 2026-10-15 when styles and variables' step 5 left that work (§15 D1037's amendment), designed 2026-10-17 (§15 D1098) with its trigger and the build open; the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Now · Images*, *Now · SVG import*, *Now · Path editing*, *Now · Text
 alignment and measurement*, *Now · Distribution*. **Five more came off this line later on
@@ -329,6 +329,15 @@ day — cannot come back.
 
 MCP and Command Mode are non-goals for v1 only and have designs of their own — `architecture.md` §8
 and §13, and `vm.md` for the language behind the second. The rest are unstarted.
+
+**Code export's non-goals were decided 2026-10-17** (§15 D1098 (12)), with its design: **native
+targets** (SwiftUI, Compose, Flutter, Floem) — an agent reading the HTML ports it better than a
+translator Ondin writes; **interaction states**, so a variant named *hover* does not become `:hover`;
+**responsive breakpoints**; and **Tailwind and CSS-in-JS** in v1. The feature itself is open work, in
+*Later · Code export*. **Code layers and importing code were ruled out the same day** (§15 D1099):
+no canvas node draws live HTML or a framework's code, and neither HTML/CSS nor framework code comes
+in as layers — doing it fully is too complex and doing it partially is messy. SVG import (§15 D394)
+is untouched, and an agent rebuilding a page through the MCP verbs is not an importer.
 
 ### How this list got shorter
 
@@ -1784,44 +1793,39 @@ items joined on 2026-10-08, when* Next · Shared component libraries *closed int
 amendment): every step of the build is built, §15 D1012–D1021. The rebinding offer joined on
 2026-10-11, with §15 D1037.*
 
-## Later · Code export (HTML/CSS, and perhaps framework code)
+## Later · Code export (HTML/CSS, React and Vue)
 
-**Opened by the maintainer's ruling of 2026-10-15** (§15 D1037's amendment), which took styles and
-variables' step 5, the CSS export, out of that work: *"Exporting is in fact a separate feature. Since
-I'd want to implement HTML/CSS, and maybe React, Vue, etc, too. Applying to the whole frame, to groups,
-or even single elements. So this is bigger than styles and I think we can skip it to tackle in a
-separate release."* **The scope is ruled; nothing else is.** Code for a whole frame, a group or a single
-element — HTML/CSS, and possibly React, Vue and other frameworks — in a release of its own. D1037's open
-question (g), the export's CSS shape, came with it. **There is no HTML/CSS export of any kind today**:
-§7's outputs are SVG, PNG and the JSON snapshot.
+**Designed 2026-10-17 by the maintainer's rulings, and nothing is built** (§15 D1098, which holds the
+whole design and its decided non-goals — native targets, interaction states, breakpoints, Tailwind and
+CSS-in-JS in v1; do not re-open them here). A DOM core with plain HTML/CSS, React and Vue emitters, a
+pipeline separate from the image exports that asks them for raster assets, three doors (the GUI,
+`ondin export`, an MCP tool beside `run_exports`), and every downgrade in a report. **There is no
+HTML/CSS export of any kind today**: §7's outputs are SVG, PNG, JPEG and the JSON snapshot.
 
-**Design notes from the session of 2026-10-15 — the session's, not ruled:**
+**What is open:**
 
-- **One core, frameworks as thin emitters.** The core is *a layer (frame, group, element) → an element
-  tree plus CSS*; React, Vue and the rest differ in templating. The starting points are §15 D869's kind
-  mapping — a frame → a `div` with a background and `overflow`; a group with `display` → a `div`; a
-  group without → a positioned `div` with absolutely positioned children — and §5.3c's layout model,
-  already spelled in CSS (`container::tracks_css`, `container::placement_css`).
-- **Selection-scoped**, so its chrome belongs with the Export card and the *Copy as SVG* / *Copy as PNG*
-  rows, not with the Variables browser.
-- **The token sheet is part of its output**, which is why it left styles and variables with the rest
-  (D1037's amendment: generated layer code is what reads it through `var()`, so its naming, mode
-  selectors and kit prefixes are decided once, with that code). Variables as custom properties; the
-  default mode on `:root` and every other mode as `[data-mode="<name>"]`, matching a frame mode's
-  inheritance; an alias as `var(--other)`; a kit's variables name-prefixed; numbers in `px`, every
-  number binding built today being a length; booleans with no CSS form; a bound paint's alpha as
-  `color-mix(in srgb, var(--x) N%, transparent)`.
-- ⚠️ **The alias trap** — read from CSS's specified behaviour, **not measured in a browser**: a custom
-  property's `var()` is substituted at computed-value time on the element that declares it, and
-  descendants inherit the computed value. So an alias declared only on `:root` keeps the default
-  mode's value inside a `[data-mode="dark"]` subtree. **Every alias has to be re-declared in every
-  mode block.** Check it in a real browser when this is built.
-- **What does not translate whole**: strokes (one centred solid stroke is a `border`; several, inside
-  or outside alignment and dash patterns are not); image fills; Ondin's gradients as CSS gradients, a
-  linear angle depending on the box's aspect; `Filters` effects in part. And the SVG writer emits paint
-  as presentation attributes today, and no export reads the document's variables or styles at all.
+- **How it is triggered** — the maintainer's to try in design: the Exports panel (one place for every
+  export) if per-framework options do not make a mess of it, otherwise a menu, and **no new
+  context-menu rows** — those menus are to be cleaned up. The session's view, not ruled: a one-shot
+  export for any selection, saved settings only on component mains and sets (D1098).
+- **The build** — the core and its report, the three emitters, `tokens.css` and the zip, the three
+  doors; no build order is ruled. ⚠️ The MCP tool joins `architecture.md` §8.4 and `ondin-mcp`'s `tools.rs` in
+  one commit — D726's gate compares the two. The first build commit owes D1098 its citation.
+- **The fidelity goldens** (D1098 (11), ruled): each export rendered in a headless browser and diffed
+  against the CPU renderer's PNG. Which browser, and how CI runs it, is undecided.
+- **Owed before tier 1 is built** (D1098's premises): which stroke alignment a CSS `border` writes
+  exactly — under `border-box` it is an inside stroke's geometry, not `Center`'s — and how the
+  others go; the tier for gradients, a CSS linear angle depending on the box's aspect; and the unit
+  for a bound layer opacity, a number that is not a length (D1072), against 6's *numbers in px*.
+- ⚠️ **The alias trap, unmeasured**: an alias declared only on `:root` keeps the default mode's value
+  in a `[data-mode]` subtree, read from CSS's specified behaviour — so aliases are re-declared in every
+  mode block (D1098 (6)). Check it in a real browser when this is built.
+- **Text styles as classes**, D1098 (7)'s revisit once real exports exist; v1 resolves styles into
+  each user.
+- **A per-layer *HTML tag* field**, parked (D1098 (3)): it is new model.
 
-*Opened 2026-10-15, when styles and variables' step 5 and (g) were taken out of that work.*
+*Opened 2026-10-15, when styles and variables' step 5 and (g) were taken out of that work; rewritten
+2026-10-17, when D1098 designed it.*
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 
@@ -2149,7 +2153,8 @@ what comes after is visible from one place, not so the design gets restated.
   `TextSession` and `CaretBlink` stay).
 - **Command Mode** — `architecture.md` §13 for the vision and the four settled decisions, `vm.md`
   for the language. The seams v1 must reserve are all cheap and all listed in §13; none is
-  outstanding.
+  outstanding. The maintainer named its scripting layer the preferred direction on 2026-10-17 —
+  scripts generating and editing native layers, over code layers (§15 D1099).
 - **Multiplayer** — `architecture.md` §12. Nothing is being built; four properties of the model keep
   it possible, and they are already true. ⚠️ Components bend the fourth (§15 D978), and they are built
   since 2026-10-04 — `architecture.md` §12 says how.

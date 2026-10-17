@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1097 index rows, 1097 body headings, next free
-D1098** (measured 2026-10-16 over the uncommitted tree on `6c871cb`; ⚠️ **the invariant-10 request
+anywhere cited either. **The live figures: 1099 index rows, 1099 body headings, next free
+D1100** (measured 2026-10-17 over the uncommitted tree on `cb3b302`; ⚠️ **the code-import request
+reserved D1099–D1108 at `cb3b302` and spent one** — D1099, code layers and importing HTML or
+framework code ruled non-goals (SVG import untouched), record-only; **D1100–D1108 found at zero
+sites and released.** ⚠️ **`arch-scribe` corrected one premise**: the CPU renderer draws PNG export
+and `ondin serve`, not *every* export — SVG is §7's writer. Before that, ⚠️ **the code-export request
+reserved D1098–D1107 at `cb3b302` through the `dnumber-guard` mod and spent one** — D1098, code
+export designed (a DOM core with HTML, React and Vue; native targets a non-goal; the trigger left
+open), record-only: **no code cites it yet**, the first build commit owes the citation.
+**D1099–D1107 found at zero sites and released.** ⚠️ **`arch-scribe` corrected the brief's
+premises** — among them background blur being a decided non-goal (no `backdrop-filter`), a single
+`border` being an inside stroke, and opacity binding (D1072) breaking "numbers in px". Before that,
+measured 2026-10-16 over the uncommitted tree on `6c871cb`; ⚠️ **the invariant-10 request
 reserved D1097–D1106 at `6c871cb` and spent one** — D1097, the maintainer widening invariant 10 to
 document-level actions (mark a kit, publish, stop sharing, file a document) on §8.3's one queue, and
 the agent publishing on request with no dialog; **D1098–D1106 found at zero sites and released.**

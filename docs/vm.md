@@ -94,7 +94,7 @@ a small set of textual rewrites that produce Luau, and the bar displays the Luau
 terse commands therefore teaches the scripting language rather than competing with it — the same
 trick as Blender's Info log, which shows the Python for whatever you just clicked.
 
-**The sugar belongs to the command bar, not to the language.** A `.lua` script file is Luau with no
+**The sugar belongs to the command bar, not to the language.** A `.luau` script file is Luau with no
 rewriting. Rule 2 below would turn every bare word in a script body into a call, and a leading `.`
 inside a multi-line function is baffling rather than terse. This is a deliberate asymmetry, and it is
 why the bar shows its desugaring.
@@ -243,9 +243,13 @@ A script should call `end_edit_run` before committing, so it never merges into a
 
 ## 8. Sandbox and limits
 
-**State the threat model honestly, because it changes what is worth building.** For v1 the script is
-the user's own, so the realistic failure is a runaway loop freezing the app, not exfiltration. The
-adversarial model only becomes real if scripts travel — which §10 forbids for exactly this reason.
+**State the threat model honestly, because it changes what is worth building.** A script the user
+typed or keeps in their library is their own, and the realistic failure there is a runaway loop
+freezing the app, not exfiltration. **Scripts travel since §15 D1100** — in a document, in a kit, as a
+shared `.luau` file — so the adversarial model is real, and §10 answers it with two things together:
+nothing runs a script but the person, by hand, and every run is inside this sandbox. What is left is a
+sandbox escape through a bug in Luau or `mlua` — real, and small, Luau's sandbox being built to run code
+its host does not trust.
 
 - `Lua::sandbox` on, globals read-only.
 - Removed if present: `io`, `package`, `require`, `dofile`, `loadstring`/`load`, and `debug` beyond
@@ -278,18 +282,66 @@ shows the command that would have done it.
 
 ## 10. Where scripts live
 
-**Outside the document. Never in the `.ondin` file.** Two reasons, and the first is the one that
-matters:
+**A script may be stored in the document; it is never run by the document** (§15 D1100, the
+maintainer's ruling of 2026-10-17). This section read *"Never in the `.ondin` file"* until then. The
+rule that replaced it is about running, not storage: **no script runs on open, none re-runs on any
+change, ever** — the maintainer: *"one would never want to autorun a script."* The two reasons the old
+rule gave are both still answered, the first whole:
 
-1. **A script in the document is a constraint engine wearing a disguise.** §13 decision 1 forbids
+1. **A script the document runs is a constraint engine wearing a disguise.** §13 decision 1 forbids
    expression syntax growing into "an accidental constraint engine", and the way that happens is not
-   through syntax — it is through a script that the document re-runs. Keeping scripts out of the file
-   keeps evaluation one-shot by construction rather than by discipline.
-2. Opening a shared document would execute someone else's code, which turns the v1 threat model in §8
-   from "the user's own runaway loop" into a real security surface.
+   through syntax — it is through a script that the document re-runs. Absence enforced this once; the
+   no-automatic-run rule enforces it now, and it is the load-bearing half of D1100. ⚠️ **A "re-run when
+   the inputs change" convenience is this reason being broken**, however small it looks.
+2. Opening a shared document would execute someone else's code. It cannot: nothing runs on open, and a
+   run the person starts is inside §8's sandbox — no filesystem, network, clock or randomness, and
+   step, wall-clock and memory budgets.
 
-Scripts live in a folder beside preferences (`dirs` is already a dependency). Revisit only when there
-is a deliberate plugin story, which is a different feature with a different security design.
+**No warning on open.** The alternative first floated was to warn when a document carrying scripts
+opens, offer its source as text, then run. Warnings train people to click *Allow* — Office macros'
+*Enable content*, until Microsoft blocked macros in downloaded files by default; Blender ships *Auto
+Run Python Scripts* off — and reading source protects few people. With nothing running on open there
+is nothing to warn about.
+
+**A document never needed a script to be complete.** A script is a tool whose run commits native
+layers (§7), and the document records the result, so an `.ondin` file never needed a reference to an
+external script — it was always complete. A stored script is a tool shipped beside the work, not part
+of it.
+
+**Three places a script can be:**
+
+- **Unsaved** — typed into the command bar or the editor, run, discarded: tier 1 and tier 2 as §3 has
+  them.
+- **Library** — saved outside any document, as plain `.luau` files in a folder beside preferences
+  (`dirs` is already a dependency), so they can be git-tracked and shared as files.
+- **Document** — saved in the `.ondin` file, inert. Listed in the script list marked as coming from this
+  document, and run only by hand; **the first time one is run, Ondin shows that it came with the
+  document, and its source.** A kit can carry document scripts under the same rule, listed as coming
+  from the kit.
+
+**Copies, never links.** Promoting a document script to the library, or putting a library script into
+a document, copies it. Components, styles and kits are already three linked-copy systems, and scripts
+are not a fourth. A document script and a library script with the same name are both listed, each
+with its source; neither shadows the other.
+
+**The editor is in the app** (the maintainer: sending people to Zed or VS Code *"would be weird"*).
+egui ships no code editor, so this is built. Its v1: monospace text, line numbers, syntax highlighting,
+undo, find, an error placed on its line after a run, and an output area for `print`. **Completion
+covers Ondin's API only** — `sel`, node fields, the verbs — not Lua itself, and is generated from the
+same definitions as the bindings, so the two cannot drift. Type-aware completion is not promised:
+Luau's type checker is a separate C++ analysis library that `mlua` is believed not to expose —
+**unverified**. A `.d.luau` definitions file generated from the same source gives an outside editor
+completion through luau-lsp at nearly no cost — an extra, not a replacement. Agents are expected to
+write most scripts (§11), so the editor's first job is reading, tweaking and running: highlighting and
+errors come before completion. Its UI waits on a Claude Design pass.
+
+**Parameters are designed for, not in the first build.** A script may declare its inputs in a header,
+and Ondin draws them as a small form when it is run — Blender's operator properties. It is still a run
+the person starts, not reactivity. The header's shape is to be settled up front, before the first
+build (§13).
+
+Plugins stay out (§12): a script mutates the document, and a plugin story is a different feature with
+a different security design.
 
 ## 11. Relationship to MCP and `/ai`
 
@@ -318,7 +370,10 @@ runs*, and it lands as one undoable step. Natural language in, reviewable code o
 ## 12. Non-goals
 
 - **Constraints or reactivity.** §13 decision 1, reinforced by §10 above.
-- **Scripts stored in the document.** §10.
+- **Scripts run by the document** — on open, on a change, or on any trigger but the person's own.
+  §10. *Storing* one in the document is allowed since §15 D1100, which took this line's old form,
+  *"Scripts stored in the document"*, out.
+- **Links between a document's scripts and the library's.** Copies only (§10, §15 D1100).
 - **Plugins and UI extension.** A script mutates the document; it does not add panels, tools or
   chrome. Different feature, different security design.
 - **An embedded model.** §13 already says Ondin embeds no model; `/ai` targets a configured provider.
@@ -342,10 +397,33 @@ These are the parts worth arguing about before anything is built.
    2026-08-26 and there is one, px (§15 D358), which is what closed `roadmap.md`'s *Units* section
    this line used to point at. The referent is the whole of what is left, it is shared with
    `expr::eval`, and it should be answered once for both.
-4. **How full scripts are edited.** An external file plus reload, or a panel? A panel means an editor
-   widget in egui, which is a real cost.
+4. ~~**How full scripts are edited.**~~ **Answered 2026-10-17 (§15 D1100): in the app** — an editor
+   built in egui, its v1 scope in §10, its UI waiting on a design pass. Library scripts being plain
+   `.luau` files, an outside editor still works, with completion from the generated `.d.luau`.
 5. **Whether the API is typed.** Luau type annotations would let an agent's script be checked before
-   it runs. This is a meaningful win for unattended agents and meaningful work to maintain.
+   it runs. This is a meaningful win for unattended agents and meaningful work to maintain. ⚠️ The
+   checker is Luau's separate analysis library, which `mlua` is believed not to expose (unverified,
+   §10) — so in-app checking is not free; a generated `.d.luau` gives luau-lsp the types either way.
 6. **Completion and history in the bar.** Not designed. Interacts with the registry from §9.
 7. **`/ai` invocation mechanics** remain deferred exactly as §13 leaves them — provider vs. connected
    client, keys, streaming into the bar.
+8. **The parameter header's shape** (§10). Designed for and not in the first build, but to be settled
+   up front.
+9. **Reaching outside the document — parked** (§15 D1100 (7)). The maintainer's case: one base design
+   in twenty colour-and-logo variations, each its own file. That needs writing files and reading
+   images, which §8 forbids. The recorded answer today is one document: the script generates the
+   frames, or a variable mode per brand with each frame exported. If files are wanted, two shapes are
+   on the table and neither is ruled: (a) **host-mediated** — the script returns new documents and
+   Ondin saves them into a folder the person picks after the run, and images arrive as data from a
+   folder the person picks, never as paths; (b) **a CLI batch run** — `ondin run script.luau --in
+   base.ondin --out dir/`, the shell owning the files. It is its own decision because it is the first
+   time a script reaches past the document.
+10. **The build order.** The session's recommendation, not ruled: §9's cheap proof first — log each
+    committed transaction in its scriptable form, sizing the coverage before any Luau exists — then
+    the VM with unsaved scripts, then library scripts, then document scripts, the editor growing
+    alongside.
+11. **Details of document scripts the ruling leaves open** (this file's reading, not ruled): whether
+    the first-run disclosure comes back when a document script's text has changed since it was last
+    shown; where scripts sit in the `.ondin` schema; and whether a kit's scripts follow the kit's
+    updates, as the rest of a kit's content does (§15 D1016), or are copied once like everything else in
+    §10.

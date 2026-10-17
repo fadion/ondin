@@ -1496,7 +1496,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1096** — **§8.4 gains a Phase 4 of twelve tools for kits and the library, `run_exports` in Phase 1, and `set_pivot` and `set_exports` in Phase 2 — the maintainer's ruling against D1095 (1).** *"Kits and library operations: since it can build and use design systems … Export settings … may be useful for the AI to automatically configure export … The rest are visual only and irrelevant for an AI."* The pivot left to the session, and taken: an agent can turn about any point through `set_transform` already, the pivot being baked by the gesture (D55), so what `set_pivot` writes is the authored hinge for the person who turns the layer next. The session's calls inside Phase 4: the library's only write is `create_document` (rename, move, duplicate and trash stay the person's); `run_exports` returns bytes and names rather than writing files; `publish_kit` and `stop_sharing_kit` go through the app's own dialogs when a window is open; the tools are the app's verbs, the raw kit ops behind them, `map_kit_modes` the browser's mapping row. Read while recording: the kit verbs are core and finding, reading and filing kits are `kits/` and `library/`, so Phase 4 is GUI-only until those move; `make_kit`, `publish_kit`, `stop_sharing_kit` and `create_document` are neither an `Operation` nor a query, which is all invariant 10 lets a handler translate to — open. *(Ruled 2026-10-16; record-only bar `tools.rs`'s `PHASE_4`. **Keep**; `set_pivot` ***Revisit if*** no agent ever writes one; invariant 10 against Phase 4's four non-op tools ***Fix before the first Phase 4 handler***. D1095 and D726 amended; `architecture.md` §8.4, §10; `vm.md` §11; `roadmap.md`'s M6 entry. **Amended 2026-10-16** (D1097): the *Fix* answered — the maintainer widened invariant 10 to document-level actions; the dialogs call overturned — the agent publishes and stops sharing with no dialog)*
 - **D1097** — **Invariant 10 widened to the owning process's document-level actions — `make_kit`, `publish_kit(note)`, `stop_sharing_kit`, `create_document` — on §8.3's queue as a second request kind, `ActionRequest`; Phase 4's publish made without a dialog — the maintainer's ruling on D1096's open question.** *"Yes widen the invariant. Those were written before the idea of a kits became a thing. The agent should be able to publish kits and create documents on request."* Each action is a request to the owning process, which runs the app's verbs (`make_kit`, `publish_now`, `stop_sharing_kit`, `library::store::file_document`); on the same queue as the edits so a publish after a batch of writes publishes them; none a `Transaction`, so `undo` reverts none. D1096's dialogs call overturned: the request is the ask, the note the tool's argument, and a dialog would hang the agent on a window it cannot see — the cost a publish and an unsharing nobody confirms. Read while recording: the three kit verbs already write a status line, none naming who, and filing writes none; the four are not every non-edit action (rename, duplicate, move, delete stay the person's). *(Ruled 2026-10-16; record-only bar `queue.rs`'s `DocAction` and `ActionRequest`. **Keep**; no dialog ***Revisit if*** an agent's publish reaches consumers nobody meant it to; *by the agent* and filing's line ***Fix with M6's action handlers***. D1096 amended; `architecture.md` §4 invariant 10, §8.3, §8.4; `ondin-mcp`'s crate doc)*
 - **D1098** — **Code export: one DOM core writing a layer tree as elements and CSS, plain HTML/CSS, React and Vue in v1, a pipeline of its own beside the image exports, three doors, and what CSS cannot draw downgraded in three tiers, every downgrade reported — the maintainer's rulings on D1037's moved step 5.** *"Go for your recommendations. They're sensible. Record it."* Native targets (SwiftUI, Compose, Flutter, Floem) a decided non-goal — an agent reading the HTML ports it better than a translator would. `ExportSpec`/`plan`/`PlannedFile` untouched; code export separate in UI and code, asking `plan::render` for its raster assets. The trigger **open** — the Exports panel tried in design, else a menu, no new context-menu rows; the session's one-shot export with saved settings on mains and sets recorded, not ruled. Doors: the GUI, `ondin export`, an MCP tool beside `run_exports` — the snapshot's used values (D868) yield absolute positioning. The twelve, numbered: styling by target (one `styles.css`, CSS modules, `<style scoped>`, no Tailwind); TypeScript only; `div`/`span`/`p`/`img`/`svg`, class names from layer names, an *HTML tag* field parked; layout as specified, a group without `display` absolutely positioned and reported, px; exact CSS, then inline SVG, then a PNG through the image pipeline; a tree-shaken `tokens.css`, default mode on `:root`, others `[data-mode]`, aliases re-declared per mode (unmeasured); styles resolved into users, variables kept as `var()` (ruled); text as spans, no font files; variants one component with union props, properties as props, an instance with non-property overrides inlined and reported (ruled), kit components in a kit folder, none in plain HTML; a fixed zip; headless-browser goldens against the CPU PNG, anything unreported matching (ruled); non-goals native targets, interaction states, breakpoints, Tailwind and CSS-in-JS in v1. Read while recording: D869 names no element mapping (the 2026-10-15 notes' reading); the departures the report owes are D874's two-inset stretch (against D872), §5.3c's stretch over hug (D933) and D869's boxless group; background blur is a non-goal, so `backdrop-filter` has nothing to write; a `border` is an inside stroke's geometry, not `Center`'s; gradients have no tier; a bound opacity (D1072) is no length, against *numbers in px*; the MCP tool joins §8.4 and `tools.rs` together (D726). *(Ruled 2026-10-17; **not built**, record-only, no code cites this number — the first build commit owes the citation. **Keep**; the trigger ***Revisit when*** the design pass answers it, text styles as classes ***Revisit when*** real exports exist, the stroke alignment, gradients' tier and a bound opacity's unit ***Fix before tier 1 is built***. D1037 amended; `architecture.md` §5.3c, §5.3f, §7; `roadmap.md`'s *Later · Code export* rewritten, its table row and §0 pointed. Code import and code layers ruled non-goals the same day, D1099)*
-- **D1099** — **Code layers and importing code are decided non-goals — no canvas node draws live HTML or framework code, and neither HTML/CSS nor framework code comes in as layers, whole or in part — the maintainer's rulings.** *"Code layers isn't something I'm aiming … most designs nowadays are built by agents and tweaked by humans. You don't need to see code for that."* and *"doing it fully is too complex, and doing it partially is messy."* The session's analysis: `ScenePainter` (§6.2) has no external-content primitive and both backends run one `scene.rs` walk (§6.3), so a live node needs three system webviews in the render path — one document drawing three ways, no CPU or SVG form, no determinism; against D813, `vm.md` §10 and §0's *plugins*. A full web import needs a browser engine (an outside browser's computed boxes, or Blitz, unmeasured); an `svg_in`-shaped subset importer is the *messy* form. SVG import (D394, D806) untouched; an agent rebuilding HTML through §8.4's planned verbs (D1095, D1096) is not an importer and is not forbidden (the session's observation). The scripting layer (`vm.md`) named the preferred direction, its design not ruled. *(Ruled 2026-10-17; record-only, cited from no code. **Keep** — a decided non-goal. D1098 pointed; `roadmap.md` §0 and its *Command Mode* entry)*
+- **D1099** — **Code layers and importing code are decided non-goals — no canvas node draws live HTML or framework code, and neither HTML/CSS nor framework code comes in as layers, whole or in part — the maintainer's rulings.** *"Code layers isn't something I'm aiming … most designs nowadays are built by agents and tweaked by humans. You don't need to see code for that."* and *"doing it fully is too complex, and doing it partially is messy."* The session's analysis: `ScenePainter` (§6.2) has no external-content primitive and both backends run one `scene.rs` walk (§6.3), so a live node needs three system webviews in the render path — one document drawing three ways, no CPU or SVG form, no determinism; against D813, `vm.md` §10 and §0's *plugins*. A full web import needs a browser engine (an outside browser's computed boxes, or Blitz, unmeasured); an `svg_in`-shaped subset importer is the *messy* form. SVG import (D394, D806) untouched; an agent rebuilding HTML through §8.4's planned verbs (D1095, D1096) is not an importer and is not forbidden (the session's observation). The scripting layer (`vm.md`) named the preferred direction, its design not ruled. *(Ruled 2026-10-17; record-only, cited from no code. **Keep** — a decided non-goal. D1098 pointed; `roadmap.md` §0 and its *Command Mode* entry. **Amended 2026-10-17** (D1100): `vm.md` §10 now lets a script be stored in the file and never run by it — the code-layer argument stands in that form)*
+- **D1100** — **Scripts may be stored in the `.ondin` file as inert text and are never run by the document — no run on open, no re-run on any change — `vm.md` §10's *"never in the file"* become *"never run by the file"*, the maintainer's rulings.** *"One would never want to autorun a script"*; *"your points are correct."* §10's first reason (a constraint engine in disguise, §13 decision 1) kept whole, enforced by the rule rather than by absence; the second (someone else's code on open) answered by the rule plus §8's sandbox, the residual risk a Luau or `mlua` escape bug. An open-time warning rejected — warnings train *Allow* (Office's *Enable content*, Blender's *Auto Run* off). The premise that a document needed a reference to an external script corrected: a run commits native layers, so it was always complete. Rulings: three places (unsaved; library, plain `.luau` beside preferences; document, inert); a document script run only by hand, its first run showing its origin and source; copies, never links, no shadowing by name; kits carry scripts under the same rule; an editor in the app, completion over Ondin's API only, generated with the bindings, a `.d.luau` for luau-lsp, type-aware completion not promised (`mlua` believed not to expose Luau's analysis, unverified), its UI awaiting a design pass; parameters in a header designed for, not first-build; files outside the document parked (host-mediated folders, or `ondin run`). The build order (§9's log first) the session's, not ruled. *(Ruled 2026-10-17; **not built**, record-only, cited from no code — read in `vm.md` §10 and `roadmap.md`'s *Command Mode* entry. **Keep**; files outside the document ***Revisit when*** a script needs to write one; type-aware completion ***Revisit if*** `mlua` exposes Luau's analysis. D1099 amended; `architecture.md` §13; `vm.md` §3, §8, §10, §12, §13)*
 
 ---
 
@@ -49149,7 +49150,99 @@ ruled on here.
 analysis, the import routes' detail and the agent's route the session's. **Keep** — a decided
 non-goal. Record-only and cited from no code: a reader meets the question here and in `roadmap.md`
 §0, which carries both beside D1098 (12)'s. D1098 pointed at it; `roadmap.md`'s *Command Mode* entry
-given the maintainer's preference.)*
+given the maintainer's preference. **Amended 2026-10-17** (D1100): `vm.md` §10 no longer keeps
+scripts out of the file — a script may be stored there and is never run by it. The argument above
+survives in that form: a code layer is code the document runs in order to draw, which is what the
+amended §10 forbids.)*
+
+**D1100 — Scripts may be stored in the `.ondin` file, as inert text, and are never run by the
+document: no run on open, no re-run on any change. Three places a script can be — unsaved, library,
+document — copies between them, never links; an editor in the app; parameters designed for; files
+outside the document parked. *The maintainer's rulings of 2026-10-17; Keep — record-only, a design
+change to an unbuilt design.***
+
+`vm.md` §10 read *"Outside the document. Never in the `.ondin` file"*, on two reasons: a script in the
+document is a constraint engine wearing a disguise (§13 decision 1), and opening a shared document
+would run someone else's code. The maintainer ruled the rule into a different one — **never run by the
+file**, not never in it — accepting the session's points: *"your points are correct."* The first reason
+is kept whole and is now enforced by the no-automatic-run rule rather than by absence: *"one would
+never want to autorun a script."* The second is answered by the same rule together with §8's sandbox —
+no filesystem, network, clock or randomness, step, wall-clock and memory budgets, Luau's sandbox
+designed for untrusted code. The maintainer's own worry had been abuse through Luau or `mlua`, which
+they and the session judged very low risk; the residual risk is a sandbox escape bug in either, real
+and small.
+
+**The alternative first floated, and why not.** The maintainer's first shape was to warn when such a
+document opens, offer the script as text, and then run it. The session's argument against: a warning
+trains people to click *Allow* — Office macros' *Enable content*, until Microsoft blocked macros in
+downloaded files by default, and Blender ships *Auto Run Python Scripts* off — and offering the source
+protects few people. With nothing running on open there is nothing to warn about, so no open-time
+warning exists.
+
+**A premise corrected while ruling.** The maintainer had held that an `.ondin` file would need a
+reference to an external script. It never did: a script is a tool whose run commits native layers, and
+the document records the result, so it was always complete without one.
+
+The rulings:
+
+1. **Three places.** *Unsaved* — typed, run, discarded: the command bar and tier-2 scripts as `vm.md`
+   §3 already has them. *Library* — saved outside any document, as plain `.luau` files in the folder
+   beside preferences §10 already named, so they can be git-tracked and shared as files. *Document* —
+   saved in the `.ondin` file, inert.
+2. **A document script runs only by hand.** The script list marks it as coming from this document; the
+   first time it is run, Ondin shows that it came with the document, and its source.
+3. **Copies, never links**, between document and library, in both directions. Components, styles and
+   kits are already three linked-copy systems, and scripts are not a fourth. A document script and a
+   library script of the same name are both listed with their source; neither shadows the other.
+4. **Kits can carry document scripts**, under the same rule: listed as coming from the kit, run only by
+   hand.
+5. **An editor in the app** — the maintainer: sending people to Zed or VS Code *"would be weird"*; egui
+   ships none, so it is built. v1: monospace text, line numbers, syntax highlighting, undo, find, an
+   error placed on its line after a run, an output area for `print`. **Completion covers Ondin's API
+   only** — `sel`, node fields, the verbs — not Lua, generated from the definitions the bindings come
+   from so the two cannot drift. Type-aware completion is not promised: Luau's type checker is a
+   separate C++ analysis library that `mlua` is believed not to expose — **unverified**. A `.d.luau`
+   file generated from the same source gives an outside editor completion through luau-lsp — an
+   extra, not a replacement. Agents are expected to write most scripts (`vm.md` §11's `/ai` emits
+   reviewable Luau), so the editor's first job is reading, tweaking and running: highlighting and
+   errors before completion. Its UI waits on a Claude Design pass. The scope is the session's
+   proposal, accepted.
+6. **Parameters, designed for and not in the first build.** A script may declare its inputs in a
+   header, drawn as a small form when it is run — Blender's operator properties. Still a run the
+   person starts, not reactivity. The header's shape is to be settled up front.
+7. **Files outside the document — parked.** The maintainer's case: one base design in twenty colour
+   and logo variations, each its own file. That needs writing files and reading images, which §8
+   forbids. The recorded answer is one document: the script generates the frames, or a variable mode
+   per brand with each frame exported. Parked as a decision of its own because it would be the first
+   time a script reaches outside the document, with two shapes recorded: (a) host-mediated — the
+   script returns new documents, Ondin saves them into a folder the person picks after the run, and
+   images arrive as data from a folder the person picks, never as paths; (b) a CLI batch run,
+   `ondin run script.luau --in base.ondin --out dir/`, the shell owning the files.
+8. **The build order** — the session's recommendation, **not ruled**: `vm.md` §9's cheap proof first
+   (each committed transaction logged in its scriptable form, sizing the coverage before any Luau
+   exists), then the VM with unsaved scripts, then library scripts, then document scripts, the editor
+   growing alongside.
+
+⚠️ **Load-bearing: "never run by the document" is the whole of what keeps §13 decision 1 true now.**
+Before this entry the constraint engine was impossible because there was nothing in the file to run;
+now there is, and the only thing between a stored script and a re-run is this rule. A *re-run when
+its inputs change*, a *run on open for trusted documents*, or a parameter form that re-runs as its
+fields move would each be the engine arriving as a convenience. Parameters (6) are safe precisely
+because the form is filled and then run once by the person.
+
+Read while recording: `vm.md` §8's threat model had said the adversarial case *"only becomes real if
+scripts travel — which §10 forbids"*; they travel now, and §8 says so. `vm.md` §13's question 4 (how
+scripts are edited) is answered by 5, and three details are left open there rather than invented —
+whether the first-run disclosure returns when a document script's text has changed, where scripts
+sit in the schema, and whether a kit's scripts follow its updates (D1016) or are copied once like
+everything else in 3.
+
+*(Ruled 2026-10-17 by the maintainer — 1–7 theirs, the editor's scope and the argument against an
+open-time warning the session's, accepted; 8 the session's, not ruled. **Not built**, record-only, and
+no code cites this number: a reader meets it in `vm.md` §10, where the rule now lives, and in
+`roadmap.md`'s *Command Mode* entry. **Keep.** 7 ***Revisit when*** a script needs to write a file;
+type-aware completion ***Revisit if*** `mlua` turns out to expose Luau's analysis library. D1099
+amended; `architecture.md` §13 pointed; `vm.md` §3, §8, §10, §12 and §13 amended.)*
 
 **D725 — The Transform card's numbers changed shape when a second layer was selected, and its corner
 radius reported one the document does not hold. *Fixed and tested 2026-09-10; Keep.***

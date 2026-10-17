@@ -16702,9 +16702,10 @@ collection, and a property read across a disagreeing selection reuses core's exi
 `PaintShown::Mixed` / `shared_corner_radius` answer rather than inventing a second one (`vm.md` still
 names `shared_opacity` there, which §15 D607 deleted); a script is one
 working copy, one commit, one undo step, widening `Document::apply`'s clone-then-swap from a
-transaction to a whole script so reads see writes; and scripts live outside the `.ondin` file,
-because a script the document re-runs is precisely the accidental constraint engine decision 1
-forbids. MCP keeps typed read and single-edit tools and routes bulk or procedural work through the
+transaction to a whole script so reads see writes; and a script may be stored in the `.ondin` file
+but is never run by it — no run on open, no re-run on a change (§15 D1100, which replaced *"outside
+the `.ondin` file"*) — because a script the document re-runs is precisely the accidental constraint
+engine decision 1 forbids. MCP keeps typed read and single-edit tools and routes bulk or procedural work through the
 one `eval` tool decision 2 already anticipated. The four decisions above stand unreopened; `vm.md`
 builds on them and carries its own open questions.
 

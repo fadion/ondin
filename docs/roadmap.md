@@ -2154,7 +2154,16 @@ what comes after is visible from one place, not so the design gets restated.
 - **Command Mode** — `architecture.md` §13 for the vision and the four settled decisions, `vm.md`
   for the language. The seams v1 must reserve are all cheap and all listed in §13; none is
   outstanding. The maintainer named its scripting layer the preferred direction on 2026-10-17 —
-  scripts generating and editing native layers, over code layers (§15 D1099).
+  scripts generating and editing native layers, over code layers (§15 D1099) — and ruled the same day
+  where scripts live (§15 D1100, `vm.md` §10): stored in the document as inert text, in a library of
+  plain `.luau` files, or unsaved, **never run by the document**, copies between them, an editor in the
+  app. Open, in `vm.md` §13: the editor's UI (a Claude Design pass before it is built); the parameter
+  header's shape, to settle up front though parameters are not in the first build; whether `mlua`
+  exposes Luau's analysis library (unverified — type-aware completion waits on it); files outside the
+  document, **parked** (host-mediated folders, or an `ondin run` batch); the first-run disclosure
+  after a script changes, scripts' place in the schema, and whether a kit's scripts follow its
+  updates. The build order recommended, not ruled: `vm.md` §9's transaction log first, then the VM
+  with unsaved scripts, then library, then document scripts.
 - **Multiplayer** — `architecture.md` §12. Nothing is being built; four properties of the model keep
   it possible, and they are already true. ⚠️ Components bend the fourth (§15 D978), and they are built
   since 2026-10-04 — `architecture.md` §12 says how.

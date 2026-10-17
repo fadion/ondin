@@ -67,8 +67,14 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1099 index rows, 1099 body headings, next free
-D1100** (measured 2026-10-17 over the uncommitted tree on `cb3b302`; ⚠️ **the code-import request
+anywhere cited either. **The live figures: 1100 index rows, 1100 body headings, next free
+D1101** (measured 2026-10-17 over the uncommitted tree on `8e40bdc`; ⚠️ **the scripting request
+reserved D1100–D1109 at `8e40bdc` and spent one** — D1100, scripts stored in the `.ondin` file as
+inert text and never run by it (`vm.md` §10's *"never in the file"* become *"never run by the
+file"*), three places, copies not links, an in-app editor; record-only; **D1101–D1109 found at zero
+sites and released.** ⚠️ **`arch-scribe` found three passages the brief missed that the ruling made
+false** — `vm.md` §8's threat model, D1099's body and `architecture.md` §13. Before that, measured
+2026-10-17 over the uncommitted tree on `cb3b302`; ⚠️ **the code-import request
 reserved D1099–D1108 at `cb3b302` and spent one** — D1099, code layers and importing HTML or
 framework code ruled non-goals (SVG import untouched), record-only; **D1100–D1108 found at zero
 sites and released.** ⚠️ **`arch-scribe` corrected one premise**: the CPU renderer draws PNG export

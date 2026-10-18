@@ -190,7 +190,6 @@ periodic review's job, and repeating it buries the twenty facts that are about t
 | `#[allow(...)]` added | census — each is a silenced signal | L3 |
 | `TODO` / `FIXME` / `HACK` added | census | L3 / triage |
 | New `src/*.rs` modules, and whether each is named in `docs/architecture.md` | census | L8 |
-| D-numbers newly cited from `crates/`, set-differenced against the base, and **which of them resolve to a §15 entry** | census | L8 — a cited number with no entry is invisible to every gate here |
 | Test-count delta per changed file (`#[test]` added vs. changed lines) | census | L6 |
 | New intra-doc `[` links added inside `#[cfg(test)]` prose or under `crates/*/tests/` | census — **the correct population is zero** (§15 D319, D622) | L8 |
 | New `#[ignore]` without a reason string | census | L6 |
@@ -209,7 +208,7 @@ Three, in order. Each is one delegated pass with a ledger row.
 | # | Sweep | Lenses | Shape |
 | --- | --- | --- | --- |
 | **R1** | **Invariant conformance on what changed** | L2 | Walk `docs/architecture.md`'s eleven architecture invariants (`../codebase-review/SKILL.md` has the evidence set for each) and, for each, enumerate the sites **the range added or moved** — not the whole population, which is the periodic review's A1. New `NodeKind`/`Operation` variants against every predicate that switches on them; new geometry against the pivot and escape rules; new paint against the resolve boundary; new writes against the atomic temp-then-rename rule; new document mutations against undo. Ask `design-oracle` for a rule rather than paging `architecture.md` in. This is the highest-yield sweep on a feature range and it is cheap, because the candidate sites are already in `facts.md`. |
-| **R2** | **Doc drift & test map** | L8, L6 | `docs/architecture.md` is this project's specification and a large range is where it goes stale: every claim the range touched, checked against the code that now exists; every §15 entry the range contradicts — **including entries it silently widened a departure from**, which no gate can see; the doc-comment placement candidates from `facts.md`, each read against the item beneath it; new decision functions against the tests that should exist; and whether the invariant-enforcing tests still enforce over the new surface (the export goldens, `deps_forbidden`, the `panic = "abort"` `compile_error!`). |
+| **R2** | **Doc drift & test map** | L8, L6 | `docs/design/*.md` is this project's specification and a large range is where it goes stale: every claim the range touched, checked against the code that now exists; every `docs/decisions.md` or `docs/non-goals.md` line the range contradicts, which no gate can see; the doc-comment placement candidates from `facts.md`, each read against the item beneath it; new decision functions against the tests that should exist; and whether the invariant-enforcing tests still enforce over the new surface (the export goldens, `deps_forbidden`, the `panic = "abort"` `compile_error!`). |
 | **R3** | **Document safety across the range** | L5 | Run it **only if** the range touches the save path, schema migration, crash recovery, the library store, autosave, image decode, SVG import, or file/path handling — the plan decides from `--name-only` and says which. Trace end to end rather than per slice: what a new write can destroy, what a malformed import can do, whether a migration can lose a field, whether recovery can offer a snapshot it should have dropped, what a new error message leaks about a path. |
 
 R1's findings are **candidates, not settled facts**, and the slice-pass briefs say so — in the
@@ -332,7 +331,7 @@ range <base>..<head>. Read these first:
   longer-lived ledger that this run must not touch.
 - .claude/skills/codebase-review/SKILL.md — "Project-specific notes for reviewers". The
   deliberate-conservatism traps listed there are the most common source of wrong findings, and
-  §15's four verdicts mean a live entry is never a bug to re-raise.
+  a line in `docs/decisions.md` or `docs/non-goals.md` is the design accepting the code, not a bug to re-raise.
 - .claude/skills/release-review/SKILL.md — "Reviewing a diff, not a tree". Those rules are what
   this pass is for.
 - <run-dir>/index.md — every finding raised so far, one line each, plus the rejected ones. Check
@@ -341,8 +340,8 @@ range <base>..<head>. Read these first:
 - <run-dir>/facts.md — Pass 0's census. Cite it; never restate one of its linter items as a
   finding.
 
-Ask the `design-oracle` subagent what the design says rather than reading docs/architecture.md or
-docs/decisions.md yourself — together they are ~56,000 lines and paging them costs the pass.
+The design is indexed by docs/architecture.md and lives in docs/design/*.md, one file per
+subsystem. Read only the file your slice touches, or ask the `design-oracle` subagent.
 
 Your pass:
   Slice:  <slice name>

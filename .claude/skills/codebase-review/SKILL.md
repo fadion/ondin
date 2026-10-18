@@ -185,7 +185,6 @@ census below, written to `review/facts.md`.
 | `cargo deny check` (installed), `cargo tree --duplicates` | census | L5 / L3 |
 | `cargo llvm-cov --workspace --summary-only` per file (installed) | census | L6 / A5 baseline |
 | `#[ignore]` sites + their reason strings | census (**25** attributes) | L6 — a gate nothing runs |
-| Every `D<n>` cited from `crates/` (298) → resolves to a §15 heading or index line | census + **set-difference vs. the previous list** | A7 |
 | Contiguous `///` run lengths, module docs (`//!`, runs starting at line 1) excluded, sorted desc with the item each precedes | census | A6 doc-comment theft |
 | `pub` items in `ondin-core` with zero callers in the workspace | **candidate list** — counts per module only; `dead_code` never fires on a `pub` lib item | L3 |
 | Structs deriving `PartialEq` (any crate) with fields written but never read | **candidate list** — a derived `PartialEq` silences `dead_code` on an unread field, measured | L3 |
@@ -226,7 +225,7 @@ like they cover.
 | **A4** | Performance map | L4 | Not a code read: a *map*. Per-frame (the scene walk, `nodes_in_view`, the canvas overlays, the rulers), per-keystroke (text shaping/`TextLayout`, the typography panel), per-gesture (hit test, snap, `RenderOverrides` rebuild), per-image (the adjust pass and its preview reduction, the decode cache, thumbnails), per-export. Output: ranked ≤8 paths worth deep L4 attention. Note that `ondin-render` is `opt-level = 3` even in debug, so a debug-build measurement of anything else is not comparable. |
 | **A5** | Test map | L6 | `llvm-cov` per file against decision functions; logic sitting in `&mut self` app methods where no test can reach it (§15 D269 — the fix is lifting it into a free function, not a harness); modules at zero; and whether the invariant-enforcing tests still enforce — `deps_forbidden.rs`, the SVG/JSON goldens, the round-trip suite, the boolean unwind guard. |
 | **A6** | Doc-comment ownership | L3, L8 | The `///`-run ranking from Pass 0. **Five instances of a doc comment silently reassigned to the wrong item are on record**, all with every gate green; one block had swallowed three. Investigate every run over 54 lines that is not one of the five excused baseline entries, and check the head of the ranking entry by entry rather than against a remembered top. The ranking is blind to short thefts and to deletions — so also spot-check `grep -n -B2 "fn <name>"` around items added in the last ~50 commits. |
-| **A7** | Record integrity | L8 | The thing CLAUDE.md is written about. Every `D<n>` cited from `crates/` resolves (298). Every §15 *Keep* / *Intentional* / *Deviation* entry still describes the code as it stands — those are the live ones; *Resolved* is history. `docs/roadmap.md` holds open work **only**, and nothing in it is already recorded in §15. Code comments asserting behaviour that does not exist — that has happened here at scale twice (several modules; seven passages about golden files). Doc comments whose prose contradicts the field or function below them. |
+| **A7** | Record integrity | L8 | Every `docs/design/*.md` passage and `docs/decisions.md` line still describes the code as it stands. `docs/roadmap.md` holds open work **only**, and nothing in it is already built or a decided non-goal. Code comments asserting behaviour that does not exist — that has happened here at scale twice (several modules; seven passages about golden files). Doc comments whose prose contradicts the field or function below them. |
 | **A8** | Gate holes | L6, L3 | **Five gates that look like they cover the code and do not are on record**, by five unrelated mechanisms, and CLAUDE.md predicts a sixth. This sweep goes looking on purpose: take each gate, break something it claims to cover, and check it goes red. Known five, to re-confirm rather than rediscover: clippy without `--all-targets` lints no test; `cargo doc` cannot see a `#[cfg(test)]` module; `cargo doc` without `--document-private-items` checks no private item; `cargo clippy --workspace` drops a member crate's warnings; a `pub` item in core is never `dead_code`, and a derived `PartialEq` hides an unread field anywhere. Then: what about the files under `crates/*/tests/`, which are separate crate roots and carry **no `deny`** — their intra-doc links are checked by nothing, and neither is `build.rs`, which is a third target kind (§15 D622, `[A8-L6-01]`). *No numbers here on purpose: this row said "21 files … 11 links" while the tree held 23 and 19, and it was one of seven stale copies of a figure nothing recomputes. Count it during the sweep.* And `.claude/agents/rust-verify.md`'s gate list is itself stale (no `--document-private-items`, no per-package clippy), which is a gate hole one level up. |
 
 A1 is **attended** — a wrong call there is read as settled by every slice pass after it. A2–A8
@@ -269,12 +268,10 @@ a generic one.
 
 - **The invariants are the point.** `docs/architecture.md` §4 heads them "non-negotiable", and each
   encodes a decision already paid for. **L2 outranks everything else here.**
-- **§15 has no "open defect" verdict.** Its four verdicts are *Resolved* (history — the code no
-  longer deviates), *Keep*, *Intentional*, *Deviation*. The last three describe the code **as it
-  stands and as the design accepts it**. So a §15 entry is never a bug to re-raise: if a finding
-  contradicts a live entry, the finding is probably wrong, and if it is right the entry is the
-  drift. Open work lives in `docs/roadmap.md` only, never duplicated into §15. §15.0 is the
-  numeric index.
+- **A decision or non-goal is not a defect.** A line in `docs/decisions.md` or
+  `docs/non-goals.md` describes the code as the design accepts it: if a finding contradicts one,
+  the finding is probably wrong, and if it is right the line is the drift. Open work lives in
+  `docs/roadmap.md` only. The old §15 ledger is frozen in `docs/archive/` and is history.
 - **This codebase is deliberately conservative in specific places**, and each is a trap for a
   plausible-but-wrong finding. **Check the guard before claiming the gap** (reference §3.2):
   - `RenderOverrides` returns `None` rather than a wrong preview (§6.2).

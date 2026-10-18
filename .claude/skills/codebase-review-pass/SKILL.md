@@ -93,10 +93,10 @@ You are running pass <ID> of an in-progress codebase review of Ondin, a Rust 2D 
   §4 the per-pass protocol, §5 the ledger format and its integrity rules. Follow them exactly.
 - .claude/skills/codebase-review/SKILL.md — "Project-specific notes for reviewers". The
   deliberate-conservatism traps listed there are the most common source of wrong findings, and
-  the note about §15 verdicts is the second.
-- docs/architecture.md §3 (layering) and §4 (the 11 invariants). L2 is the highest-yield lens
-  here. Use the `design-oracle` subagent to ask what the design says rather than paging
-  architecture.md or decisions.md into your own context — together they are 31k lines.
+  the note about decisions and non-goals is the second.
+- docs/design/foundations.md §3 (layering) and docs/design/invariants.md (§4). L2 is the
+  highest-yield lens here. docs/architecture.md indexes the design files; read only the one
+  your slice touches, or ask the `design-oracle` subagent.
 - CLAUDE.md — the editing rules, the gates and their known holes, and "Checking the chrome
   without a window" if your pass needs a measurement.
 - review/index.md — every finding raised so far, one line each, plus the rejected candidates.
@@ -116,9 +116,8 @@ in this codebase live in the model->resolve->scene->render seam and the gesture-
 transaction seam, not inside one function); draft candidates with their lens's required evidence;
 verify each against §3 before it enters the ledger; write survivors ranked, capped at 12.
 
-Before claiming a gap, search for the guard. Before claiming a deviation, check §15 — a *Keep*,
-*Intentional* or *Deviation* entry is the design accepting the current code, not an open defect,
-and *Resolved* is history. Ask design-oracle if you are unsure.
+Before claiming a gap, search for the guard. Before claiming a deviation, check `docs/decisions.md` and
+`docs/non-goals.md` — a line there is the design accepting the current code, not an open defect. Ask design-oracle if you are unsure.
 
 Anchor every location on its enclosing item, not on a line number alone — the tree is NOT frozen
 for this review, so line numbers drift and symbols do not. Write

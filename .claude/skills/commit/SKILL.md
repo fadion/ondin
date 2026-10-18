@@ -138,19 +138,13 @@ doc`, and that is now permanent once pushed.
   the copy that survived — a duplicated comment no detector in this project can
   see.
 
-### If the change earned a §15 entry
+### If the change altered the design
 
-A decision entry and its citation belong with the change, not after it. Before
-writing a line of it: take the D-number block from `docs/decisions.md` §15.0's
-**last index line**, run a negative grep over the range to confirm it is free,
-and write the numbers down. Then route the prose through `arch-scribe`, which
-also strikes the `docs/roadmap.md` row the change closes — and **read its closing
-notes**, because it checks the brief against the code and has caught a wrong
-mechanism, a wrong citation and a live bug that way.
-
-Entry and code may be one commit or two adjacent ones. What they must not be is
-one pushed and one forgotten: a D-number cited from code with no entry behind it
-is invisible to every gate here (CLAUDE.md records that hole twice).
+Route the doc update through `arch-scribe` only when the change altered something
+a design file states — a rule, a structure, a behaviour — or closed a roadmap
+entry. A pixel nudge or a bug fix that restores the documented behaviour needs no
+doc edit. **Read its notes**: it checks the brief against the code. No D-numbers
+are issued; the docs and the code ship in the same commit.
 
 ## Reviewing on request
 

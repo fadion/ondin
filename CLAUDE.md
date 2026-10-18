@@ -8,7 +8,8 @@ Ondin is a native 2D design tool in Rust (egui + wgpu), published at
 
 | File | Holds |
 | --- | --- |
-| `docs/architecture.md` | The design and its invariants. Large: ask `design-oracle`, do not page it in. |
+| `docs/architecture.md` | The index: the invariants in brief and one row per design file. Read it first. |
+| `docs/design/*.md` | The design, one file per subsystem; headings keep the old § numbers. Open only the one you need, or ask `design-oracle`. |
 | `docs/decisions.md` | The key decisions, stated as they stand, under their old D-numbers. |
 | `docs/archive/ledger.md` | The old §15 ledger (D1–D1100), **frozen**. Agents are denied `Read` on it; grep it for one number. |
 | `docs/roadmap.md` | Open work and parked decisions, nothing else. |

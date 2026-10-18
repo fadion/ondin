@@ -9,7 +9,8 @@ Ondin is a native 2D design tool in Rust (egui + wgpu), published at
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and its invariants. Large: ask `design-oracle`, do not page it in. |
-| `docs/decisions.md` | §15, the old deviation ledger (D1–D1100). **Frozen** — see below. |
+| `docs/decisions.md` | The key decisions, stated as they stand, under their old D-numbers. |
+| `docs/archive/ledger.md` | The old §15 ledger (D1–D1100), **frozen**. Agents are denied `Read` on it; grep it for one number. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions. |
 | `docs/shortcuts.md` | The keymap. |
 | `docs/context-menus.md` | The context-menu spec. |
@@ -27,9 +28,11 @@ rather than trusting an earlier look, and never keep a spec only there.
 - **When code and docs disagree, find out which is wrong** — it has often been the doc. If a
   fix changes a rule, change the sentence that states it; never leave it standing.
 - **Edit the passage in place.** A change to the design rewrites the section it touches.
-- **D-numbers are frozen.** Code comments cite `§15 D<n>` thousands of times and those still
-  resolve in `docs/decisions.md`, but **no new D-number is minted** and no new ledger entry
-  is written. A new comment gives its reason in the comment.
+- **D-numbers are frozen.** Code comments cite `§15 D<n>` thousands of times; those resolve
+  in `docs/decisions.md` for the key ones and in `docs/archive/ledger.md` for the rest
+  (`grep -n '^\*\*D123 —' docs/archive/ledger.md`). **No new D-number is minted** and no
+  ledger entry is written. A new comment gives its reason in the comment; a new decision
+  that matters goes into `docs/decisions.md` as a line.
 - **The roadmap holds open work only.** When something lands, delete its entry. A decided
   non-goal stays as one line so it is not re-argued.
 - Name the subject in a sentence rather than "that function" — an insertion above it

@@ -1321,7 +1321,7 @@ pub struct Context<'a> {
     /// 2026-08-18 and is the wrong question in both directions: a payload the OS
     /// clipboard no longer describes is stale and must not be offered, and text
     /// copied in another application is pasteable without the app holding anything
-    /// (`docs/decisions.md` §15 D218).
+    /// (`docs/archive/ledger.md` §15 D218).
     ///
     /// **Three payloads, not two**, since 2026-08-19: a picture is what both paste
     /// paths try *first*, and a clipboard holding only a screenshot answered no to

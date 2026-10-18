@@ -475,7 +475,7 @@ fn guarded(
                     "ondin: the boolean arithmetic panicked and was caught — this \
                      boolean draws nothing. This is NOT the defect the guard was \
                      written for: flo_curves 0.8.1 fixed that one, so an unwind \
-                     here is something new and unreported. See docs/decisions.md \
+                     here is something new and unreported. See docs/archive/ledger.md \
                      §15 D239. Reported once per run."
                 );
             }

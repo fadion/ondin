@@ -140,7 +140,7 @@ pub const PHASE_4: [&str; 12] = [
 mod tests {
     use super::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
 
-    /// `docs/architecture.md`, embedded at compile time.
+    /// `docs/design/mcp.md` (§8), embedded at compile time.
     ///
     /// **`include_str!` rather than a path read, and that is the half that makes
     /// this a gate.** A runtime `fs::read` would depend on the working directory
@@ -148,7 +148,7 @@ mod tests {
     /// document — so editing §8.4 would leave a stale binary passing. `include_str!`
     /// registers the dependency, so a change to the design rebuilds and re-runs
     /// this.
-    const ARCHITECTURE: &str = include_str!("../../../docs/architecture.md");
+    const ARCHITECTURE: &str = include_str!("../../../docs/design/mcp.md");
 
     /// The tool names §8.4 lists under a paragraph starting with `prefix`.
     ///

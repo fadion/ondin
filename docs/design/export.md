@@ -1,0 +1,141 @@
+# 7. ondin-export
+
+The export crate: SVG, PNG, JPEG, the MCP snapshot, the export plan and the CLI. It also documents the SVG writer's mirror, the `svg_in` reader, where the two meet.
+
+## 7. ondin-export
+
+### SVG writer
+
+- API: `svg_of_reported(doc, res, origins: &[NodeId]) -> Export`; `svg_of(...) -> String` keeps only the markup; `svg(doc, res, artboard: Option<NodeId>)` exports the whole document or one artboard.
+- **`Export`** is the writer's side of `svg_in::Import`'s `skipped`/`approximated`: `svg`, plus `approximated` (the picture differs) and `round_trip` (picture right, re-reading gives a different document). The export card and *Copy as SVG* word both through one helper.
+- **Selections**: the viewBox is the union of the origins' bounds (`crate::extent`, shared with the PNG writer, unions `ink_bounds` not `world_bounds` so a drop shadow is not cropped). Each subtree is emitted under its **parent's** world transform (`emit_node` composes `outer * res.used_local_of(node)`, the *used* local; passing the origin's own world applies it twice). Caller order is kept (output is byte-stable and SVG has no z-index). Nothing is deduplicated; the caller filters with `build::in_document_order` (`outermost` plus document order).
+- **Structure**: groups and artboards become nested `<g>` with local transform and opacity (group opacity is only correct on a `<g>`); shapes use local coordinates; a clipping artboard gets a `clipPath`; gradients are real `<linearGradient>`/`<radialGradient>` defs. `gradientTransform` is omitted at identity; the stop list is written clamped monotonic on a copy.
+- A **sweep** gradient has no SVG 1.1 form and is approximated as a `<radialGradient>`: centre from the brush, radius from the node's box to its farthest corner, pulled back through the brush transform (`cx`/`cy`/`r` are read before `gradientTransform`). The call is gated on the kind because it asks `paint_frame` for a box.
+- **Model-completeness gate**: everything the model expresses must round-trip to valid SVG, and anything it can only approximate must be reported, not silently substituted.
+
+#### Masks
+
+- A **shape mask** is `<clipPath id="mask-{id}">` plus a `<g clip-path="url(#mask-...)">` wrapping the run of siblings above it; it emits no element of its own (the markup shape of `scene::MaskRun`). No transform and no `clip-rule` (defaults match the canvas). A mask whose path is `None` wraps nothing.
+- An **alpha mask** is `<mask id maskUnits="userSpaceOnUse" style="mask-type:alpha">` holding the layer's own markup, with `<g mask="url(#...)">` over the run. `mask-type: alpha` is load-bearing (SVG defaults to luminance). It is written as the CSS property, not the attribute, for support.
+- The alpha arm has a `visible()` guard: a hidden mask must not erase the run (an alpha mask laying no ink does erase, which is correct). No emptiness test, matching the canvas.
+- The `<mask>` region is written explicitly, as the mask's own `ink_bounds` mapped into the referencing node's local space and inflated a tenth. The default `-10%..120%` is relative to the viewport in the current (possibly transformed) user space and loses artwork under a scaled group. A mask with no ink keeps the absent region. `<clipPath>` takes no region.
+
+#### Effects
+
+- An effect stack is **one `<filter id="fx-{id}">`** and a `<g filter="url(#fx-...)">` wrapping everything the node emits (§5.3a, §6.4). Properties that are load-bearing:
+  - The region is explicit, `filterUnits="userSpaceOnUse"`, from `Resolved::ink_bounds` mapped into the wrapper's space, **then padded for inner shadows** (`svg::inner_working_pad` = `reach(blur) + |spread| + |offset|` over visible inner shadows, uniform). Outside the region every primitive is transparent black, so with the layer's ink as the region the alpha-inverting `feComponentTransfer tableValues="1 0"` has nothing to invert from and a rect/frame/image/text inner shadow drew nothing. A filter's working region and the layer's ink bounds are two quantities.
+  - The wrapper sits outside the clip (SVG applies `filter` before `clip-path` on one element), which is also the only position that works for multi-element output (`emit_stacked`). It carries no transform, so the region is in the node's parent's space (what `effect_region` composes for).
+  - A `<filter>` with no primitives renders its element as nothing, so a stack that is all off or all neutral emits no filter; an attribute-less `<feOffset/>` is the shortest "unchanged".
+  - The graph is built in the same two stages as the CPU pass (§6.4); every filter carries `color-interpolation-filters="sRGB"`.
+- `ondin_core::svg_in::effects_of` reads a `<filter>` back as an effect stack (shadow chain drop or inner, lone `<feDropShadow>`, lone `<feGaussianBlur>`, `<feMerge>` as assembly, bare `<feOffset/>` as an **empty** stack, not a skip). Stack order is document order; `feMerge` lists results differently so is not used for order. A `Filters` row's `feColorMatrix` is written but not invertible (brightness and contrast scale the same channels), so such a stack is skipped whole and reported.
+
+#### Reporting
+
+- Five features are known inexact and reported to the user: sweep as radial, shadow spread as a square kernel, type on a rail (glyph placement is the viewer's), a flipped rail as a reversed path, an image fill as a `<pattern>`. The last two are **round-trip** losses, not approximations (the picture is identical), and the report keeps the two lists apart.
+- The report is read off the node in `emit_node` under the visibility guard, **not** in `collect_defs` (which has no visibility guard, an unreferenced def being harmless). The shadow arm checks that spread is nonzero, the effect visible and `effect_region` answerable, so it never warns about markup absent from the file. `ondin-export/tests/fidelity.rs` pairs every reported claim with the markup that caused it. `svg_roundtrip.rs` binds the writer only for tests that call `svg_of`; a test on hand-written markup binds nothing.
+
+#### Names, numbers and the reader
+
+- A layer's **name** goes in `data-name` (`name_attr`, written at the leaf in `emit_shape`, the container `<g>` in `emit_node` (the outer one in the split-clip case), and `emit_stacked`'s `<g>`), not `id`: `id` shares a namespace with the synthesised `grad-`/`img-`/`clip-`/`mask-`/`fx-` ids, so a layer named `clip-601d_2` would shadow a real `<clipPath>`. Unnamed writes nothing. The reader prefers `data-name` and falls back to `id` (Illustrator and Inkscape put layer identity there), going through `naming::usable` (§5.7b): blank or all-space names fall through to numbering.
+- `svg::fmt` is the single number formatter. A non-finite number floors to `0` (a non-`<number>` makes the whole file unparseable). A floored `<filter>` region has no area and renders the element as nothing, so a **singular world transform writes no filter** (artwork exports unfiltered, as `ScenePainter::push_effect_layer` does). The predicate is `build::affine_is_invertible`, not a relative-epsilon determinant test that could never fire at large coordinates.
+- **Reader behaviour** (`svg_in`) that bears on round-trip:
+  - Style cascade follows CSS's invalid-declaration rule: an unparseable `fill`/`stroke` leaves the inherited paint. Three meanings share `None`: `none` and `transparent` mean unpainted; an unresolvable `url(#...)` is a valid declaration with a dead reference, unpainted (so a missing image does not become opaque black). `!important` is stripped in `declaration` (no important tier exists).
+  - `svg_in::Css` reads compounds of type, class, id and `*` joined by descendant and child combinators. It refuses `+`/`~` (sibling order), `:pseudo` (state) and `[attr]`, reported once per sheet. A selector list is read member by member (`.a, rect:hover` still paints `.a`, as Chromium).
+  - A `<style>` is all its text children joined (`svg_in::style_sheets`, built in `import` above the `Builder` it is handed, because `Css` rules borrow it). `roxmltree`'s `text()` returns only the first child and lost sheets with a leading comment.
+  - A paint that is genuinely unreadable is reported via a fourth flag beside `Css::complex`, `Gradients::patterns` and `Gradients::resampled`; it is a `Cell` (a fact about elements, set while the gradient table is borrowed) and a `skip`, not an `approximate`.
+  - `stdDeviation="0"` is a value, not a refusal: a lone zero blur is an identity primitive like bare `<feOffset/>`; negative is refused. `shadow_chain`'s "neither moved nor softened" test is on values, not presence (a zeroed offset plus zeroed blur is not a chain). `flood-color="currentColor"` resolves against the referencing element's `color`.
+  - A `<text>`'s own `opacity`, `display`/`visibility` and `filter` reach every run it splits into (positioned `<tspan>` becomes its own node). Opacity multiplies, hiding is either-or, and for `filter` the run's own wins where stated.
+  - A `<tspan>` is read at any depth, content flattened to one piece per text node carrying the innermost element's resolved style.
+  - Text whitespace collapses to XML's four characters (`XML_SPACE`: space, tab, CR, LF), not Unicode's set (no-break and ideographic spaces must survive). `text_node`'s two trims share the constant; `lead` re-bases span byte ranges onto the trimmed string.
+  - A duplicate id is **first-wins** in all three id maps (`ids`, `clips` (clipPath and mask), `by_id`), as browsers do.
+
+#### Paint emission
+
+- A shape with at most one fill and one centred whole-outline stroke is **one plain element** with `fill`/`stroke` attributes. Anything else goes to `emit_stacked`: a `<g>` carrying the node's transform and opacity, then one element per visible paint in §6.3 order, strokes with `fill="none"`. Transform and opacity move to the group so the paints share one user space (also the `clipPath` space) and fade together. `write_element` is the single per-kind element writer both paths share. `fill-rule` rides with the fill through `with_fill_rule` on both arms (an `Exclude` given an aligned stroke once exported non-zero, a union).
+- Non-plain shapes:
+  - **Non-centred stroke**: `align_clip`, a `<clipPath>` plus double-width stroke, per stroke (`sa-<node>-<i>`; the id carries the paint's own index). An outside clip's outer ring carries the canvas's mitre allowance (`effective_sides(...).max_width(s.width) * miter_limit`); the two must agree.
+  - **Per-side stroke**: one `<path>` per edge from `geometry::side_path`, sharing one alignment `clipPath`. `plain` requires `effective_sides(...).is_all()`.
+  - **Fitted dash on a multi-subpath path**: one `<path>` per subpath, each with its own `stroke-dasharray` (`plain` requires `dash_fit_pieces(...).is_none()`).
+  - **Frame border**: painted over contents and outside the frame's clip, so a frame with both becomes two `<g>`s (outer transform and opacity, inner `clip-path`) with the border `<rect>` between them, only when both are present.
+  - **Text stroke** rides the `<text>` element (re-shapeable); an aligned one is clipped against `ondin_core::text::outline`.
+- `stroke-dasharray` carries the resolved pattern (SVG cannot express a zero-length dot or fit-to-corners). `stroke-miterlimit` is emitted only for Miter joins with limit != 4 (SVG's and kurbo's default). Gradient slot names carry the paint index (`grad-<node>-fill-0`, `-stroke-1`), even when there is one paint.
+- **Known divergence**: past `scene::lay_stroke`'s gate the canvas fills an expanded outline while this writer hands `stroke-width` to the consumer, so a very wide stroke (e.g. 309pt on a 200x120 shape) is only as correct as the viewer.
+- **`Defs`** is insertion-ordered (byte stability, goldens) and deduped through a set, not a scan of the `Vec` (a scan was O(D^2) and 87% of export time at 16,000 defs). Ids are a `DefKey` newtype whose equality is counted under `cfg(test)`; `def_count_tests` bounds 2,000 defs below 2,000 comparisons (a timed ratio measured the machine).
+- **Image fill** is a `<pattern>` (a paint server, through `Defs`, `image_id` spelled like `gradient_id`; `paint_attr` names it). The tile is the source's intrinsic pixel box; the whole framing is one `patternTransform`, omitted at identity via `matrix_attr`. Inside the pattern is a `<use>` of one shared `<image id="pix-<hash>">` per distinct `ImageId`, written once in `<defs>` and carrying `ImageEntry::href` (data URI, or a link's path as written). Per-node `<pattern>` stays (its transform is the node's framing); `opacity` and `filter` sit on the `<use>`; no `width`/`height` on the `<use>`. An **adjusted** picture gets a `<filter>` on the `<use>` (never on the pattern): `feColorMatrix` and `feComponentTransfer` straight from `ImageAdjust::pipeline`, each only where not identity, no `feFuncA`, sRGB interpolation, region pinned to the element's own box (the default 10% bleed would show between tiles). Unadjusted emits no filter. A letterboxing picture forces stacking (the clip belongs to one paint). The framing frame mirrors the walk: an artboard's own box, a text node's layout bounds, otherwise the outline's bounding box.
+- An image fill the table cannot answer for exports as the **missing-image placeholder** (`emit_missing`, off `ondin_core::missing_placeholder`, with `clipPath` `mi-<node>-<slot>`), never as a dangling `url(#...)`, and forces stacking. A stroke with an unanswerable image writes `none` (the canvas draws nothing). A frame's ground is an ordinary fill and goes through the same path.
+- **Two-walk gate**: `ondin-export/tests/two_walks.rs` compares the *ink set* (which nodes each walk puts paint down for, through a unique solid colour per node) between this emitter and the scene walk (§4 invariant 11). The two recorded divergences were of that kind.
+- **Variables** arrive as resolved values: each node's paint is taken through `Document::resolved_paint` in the mode in force there; helpers read only literal brushes; a bound corner arrives as `rx` through the used kind. Paint is presentation attributes; `style` appears only for an alpha mask's `mask-type`.
+- **No HTML/CSS export exists.** Code export is designed (§15 D1098) and not built: a DOM core with HTML/CSS, React and Vue emitters, a pipeline separate from `ExportSpec` -> `plan` -> `PlannedFile` (which it asks for raster assets), and a report of every downgrade modelled on `Export`'s `approximated`. CSS custom-property export belongs there.
+
+### Raster
+
+- **PNG**: `png(doc, res, vp) -> Vec<u8>` via `VelloCpuRenderer` and a PNG encoder; no GPU. It shares the scene walk, so placeholders are ink on the pixels. Shapes, backgrounds, images and text all rasterize (`ScenePainter::draw_text`, `cpu.rs`).
+- **PNG of a selection**: `png_of(doc, res, origins) -> Option<Vec<u8>>` walks from each origin through `scene::build_of`. Ancestor clipping does not travel and nothing behind is painted (so a selection exports on transparency). 1:1, one device pixel per world unit. It is a shortcut with no production caller (the panel, CLI and goldens use `RasterOpts`); nothing will warn about it since the crate is a library.
+- **JPEG**: `jpeg::encode_rgba8(rgba, w, h, quality)`, no renderer of its own; all pixels come from `png::raster_of`. Alpha is dropped, not flattened: the matte is the export's background, decided in `plan` and composited before the encoder.
+- **Finishing**: `png::raster_of(doc, res, origins, RasterOpts)`. `RasterOpts` is the *resolved* spec: **scale**, optional **background** (under the artwork), **trim**, **pad-to-square**. Resolution (e.g. `Background::Frame`, `Width(512)`) needs the tree/box and happens in `plan`. Steps run **trim, then pad, then composite**: trim reads alpha (a background first would make it a no-op), pad before trim would be trimmed away, compositing last covers art and padding in one pass.
+- **Size cap**: per side `png::MAX_RASTER_SIDE` = 511 x 128 = 65408 (both factors are vello's and private), emphatically not `u16::MAX`, the value vello panics on. The cap is applied to the **scale**, not each axis (independent clamping squashes aspect). The number lives in `ondin-render`; `png::MAX_RASTER_SIDE` is an alias (the font picker's `rasterize_glyph_run` shares it). Two tests re-measure it against the dependency (`a_raster_at_the_cap_renders_on_either_axis`, `cpu::preview_tests::a_strip_too_big_for_the_backend_is_refused_rather_than_truncated`). Finishing steps widen before multiplying (`png::square_bytes` in `usize`; `u32` wrapped at 32768).
+
+### Plan
+
+`plan(doc, res, subjects, PlanOptions) -> Vec<PlannedFile>` is the one place a saved `ExportSpec` (§5.3) is interpreted: scale becomes a multiplier against a layer's box, `Background::Frame` a colour by walking to the enclosing artboard, a layer name a filename sanitized for the strictest filesystem. The spec's `prefix` and the layer name are **composed before sanitizing**, so `/` means one thing across the whole path.
+
+- `PlannedFile` carries the pixel size the panel shows and a `clamped` flag. `raster_size` and `raster_opts` measure `ink_bounds` (the box `extent` frames), so rows predict file size for layers with effects and `Width(512)` resolves against the framed box.
+- `render(doc, res, file)` returns bytes; `zip(files)` packs a set. Nothing here touches the filesystem (app and CLI do).
+- **No two files in a plan share a name**: `ExportSpec::effective_suffix` separates specs on one layer (typed suffix, else the scale's marker), and a case-insensitive ` (2)` de-collision (`de_collide`) catches same-name layers and duplicated layers (which carry their specs). This covers names *inside one plan* only; a file already in the destination is replaced by whichever writer runs.
+- Two doors write with no dialog and owe a count: the panel's *folder* arm (`Exported 4 files (2 replaced) -> ...`) and the CLI's `--all` (`wrote 4 files to ... (2 replaced)`). *File* and *Archive* destinations were named in a save dialog, so are exempt.
+- `folders_from_names` reads `/` in a layer name as a folder separator, **off by default** (it changes what a name means).
+
+### CLI
+
+- `ondin export <file> [--svg|--png|--json] [--scale <n>|--width <px>|--height <px>] [-o out]` runs headless, no GPU. `ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]` runs the **document's own** export settings (every layer carrying any); it is a different command, so `--all --png` is refused.
+- On Windows a release `ondin.exe` is GUI-subsystem with no console, so the CLI is reached through the console twin `ondin.com` beside it, which runs `ondin.exe` with its own standard handles. It exits with the child's code whole (no clamp to a byte) and puts the child in a kill-on-close job object so Ctrl+C ends the export. A non-Unicode argument is refused with exit 2.
+- One document: a second positional is refused naming both files. `-o` takes a filename and refuses an argument beginning with `-` (otherwise `-o --png` swallowed the format flag and wrote SVG into a file named `--png`).
+- With no `-o` it writes into the folder holding the `.ondin` (`.` only if no parent).
+- **Exit 1 when no file is produced** (gate is on the rendered set, not on "has settings": a raster spec over an empty group writes nothing and must fail; an SVG spec always writes a file and exits 0).
+- Size flags are the panel's three questions (`ExportScale` variants). They are **refused** on `--svg`/`--json` and `--all`, and only one at a time (the same flag twice is refused; `--png --svg` takes the last, since formats have an obvious ordering). The derived output name is not decorated with `@2x`. `Width`/`Height` resolve against the box the render frames.
+- `--scale-override` (for `--all`) *overrules* a size the document carries; the file still decides which layers export and at what formats. It parses the row vocabulary via `ExportScale::from_label` (`2x`, `512w`, `512h`, bare number = `x`). It lives in `PlanOptions`, because the scale is half the filename through `ExportScale::marker`. Specs that become identical under an override collapse to one file; the dedupe runs only under an override.
+- When `viewport_at`'s cap reduces a size the command says so on stderr, in the spec's vocabulary (`200000w`, not `655.350x`).
+
+### In the app
+
+- The only export door is the inspector's **Export** panel (§9.4), editing the layer's own `exports` list. The one-off *Export as...* and its `Ctrl+Shift+E` were removed (it asked everything on every use and remembered nothing). `Ctrl+Shift+E` is unbound but not free: plain `Ctrl+E` is *Flatten*, and the `!m.shift` guard is held by `a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening`. `scene::build_of` stands (Copy as PNG, the panel, CLI, goldens).
+- **Destination follows file count**: one file gets a save dialog with a name; several get a folder; *Export as ZIP* appears when there is more than one file. A planned path is folder and name: with `folders_from_names`, `save_dialog_target` sends the folder half to `set_directory` and the name to `set_file_name` (only if the folder exists); the write side creates the folder for both destinations.
+- *Export all* (`Ctrl+Alt+E` and a page-menu row) re-runs every layer into the last folder with no dialog after the first time. Every layer means nesting included: a spec on a nested layer is a deliberate instruction. Panel and CLI collect through `build::all_in_document_order` (document ordering without `outermost`); the *selection* door (`export_subjects`) keeps `outermost` so a group and its picked child do not plan the child twice. The sort supplies the order; `exportable_layers` collects in any order.
+
+### Snapshot (AI handoff / MCP projection)
+
+`snapshot(doc, res) -> Snapshot`, serde-serializable and **distinct from the save schema**. Content: id, kind, name, local and world transform, world bounds, paint summary (gradients as kind and stops; images by content-hash id, framing mode, alpha, non-rest adjustments), full text style, children ids, artboard membership, and a `warnings` list (missing font families).
+
+- `snapshot_version` is currently **11**. Bump when a reader who does not know the field would misdescribe the page, or when an untouched document's snapshot changes bytes (a consumer diffing snapshots reads the version first):
+
+| Version | Change |
+| --- | --- |
+| 3 | Text attribute model |
+| 4 | Image detail |
+| 5 | Image adjustments |
+| 6 | `NodeSnapshot::mask` (reported for every node like `clip`, so untouched documents change bytes) |
+| 7 | `mask_mode` (string `"Shape"`/`"Alpha"`, so adding a mode does not shift an integer discriminant; owned because the type is `Deserialize`) |
+| 8 | `effects`: visible entries in compositing order, skipped when empty, string `kind`, **authored** numbers (a blur's radius, not the gaussian deviation) |
+| 9 | A frame's ground leaves `Geometry::Artboard` and is an ordinary entry in `fills` |
+| 10 | A gradient's `opacity` |
+| 11 | Numbers platforms disagree about, written at the SVG writer's four places (`geometry.svg`, `local_transform`, `world_transform`, `world_bounds`); no key moves |
+
+- `local_transform` and `geometry` are **used** values (§5.3 layout), not what the user set; `world_transform`/`world_bounds` come from `Resolved`. A local an agent computes from these and writes back is a used value saved as typed. Whether the snapshot also carries specified values is MCP-work's question.
+- `NodeSnapshot::pivot` is skipped when unset and reports the **resolved local point** (fraction resolved against `local_box`). It is the one derived field: a node with no measurable box falls to `Rect::ZERO`, so its fraction reports `[0, 0]`. Additive, no bump. `pivot` is not rounded.
+- `name` is usually distinguishing (numbered generated names, §5.7b) but **not unique**; `id`, `parent` and `children` sit beside it for disambiguation.
+
+### Deliberate absences
+
+The canvas ground and the guides are in none of SVG, PNG or the snapshot: the ground is the surface behind and around frames, and a guide is scaffolding. Both are document state (§5.5), not exported state. Guides are never in the scene walk (§9.4), so no export path can emit one.
+
+## Traps
+
+- Image markup has no gate: the §11 golden holds no image and `svg_in` has no `<pattern>` handling. Check changes in a browser: export, hand-rewrite a copy into the new shape, serve both over HTTP, draw to canvases, difference the pixels.
+- A filter's region and the layer's ink bounds differ for inner shadows; the pad is not slack.
+- `mask-type: alpha` and explicit mask/filter regions are all load-bearing; the markup is well-formed in every wrong version.
+- Report claims from `emit_node` under the visibility guard, never from `collect_defs`.
+- Do not use `id` for layer names (collides with synthesised ids).
+- Do not turn `Defs` into a map (byte order) or its membership into a scan (quadratic).
+- Raster finishing order trim -> pad -> composite is the meaning of each step.
+- A snapshot change that alters bytes needs a bump even if it adds no key; two stale version numbers have sat in prose before.
+- `all_in_document_order` vs `in_document_order`: the first keeps nested exporting layers, the second filters to outermost.

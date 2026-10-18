@@ -11,7 +11,8 @@ Ondin is a native 2D design tool in Rust (egui + wgpu), published at
 | `docs/architecture.md` | The design and its invariants. Large: ask `design-oracle`, do not page it in. |
 | `docs/decisions.md` | The key decisions, stated as they stand, under their old D-numbers. |
 | `docs/archive/ledger.md` | The old §15 ledger (D1–D1100), **frozen**. Agents are denied `Read` on it; grep it for one number. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions. |
+| `docs/roadmap.md` | Open work and parked decisions, nothing else. |
+| `docs/non-goals.md` | What is deliberately not built, one line each. |
 | `docs/shortcuts.md` | The keymap. |
 | `docs/context-menus.md` | The context-menu spec. |
 | `docs/vm.md` | The Command Mode language. Nothing of it is built. |

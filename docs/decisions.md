@@ -74,6 +74,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D77** Five paragraph attributes are spanned (`ParaSpans`); the rest are node-level.
 - **D598** `CharAttrKind`'s declaration order is the sort key of every saved span list.
 - **D405** Type on a path is a rail on the text node: shaped flat, then bent by a warp pass.
+- **Alignment never uses ink bounds**: they depend on the string, so labels aligned by ink jump apart when edited. Font-metric box trim is the datum. Optical margins move the ink to meet the datum; they don't move the datum.
 - **D356** Underlines skip ink per run (`Decoration::skip_ink`, default on).
 - **D83** The Google Fonts catalog is fetched online and disk-cached, not shipped with the build.
 - **D330/D720** *Load web fonts* is one switch, and off means no request leaves the machine.
@@ -106,6 +107,9 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D663** The writer normalizes inert state, so `save(load(save(d))) == save(d)`.
 - **D823** Cross-window copy is the document schema as JSON on the OS clipboard (`io::clip`). **D796** Clipboard handles are serialized process-wide.
 - **D1100** Scripts may be stored in the file as inert text; the document never runs them.
+- **Filesystem is truth.** Every action writes to disk and re-scans. Nothing about a document lives only in the app's memory, and no fact lives only in a cache.
+- **The format stays git-friendly**: pretty JSON (line-level diffs), an id-sorted node list, stable string ids, byte-stable output (invariant 9), the camera in `EditorSession` rather than the DTO, and `skip_serializing_if`. A modified-at stamp or view state in `DocumentDto` would break all of it, so an edit time is read off the directory entry. An edit touches only its node and its parent, with no cascade across unrelated nodes.
+- **Autosave is debounced**: writing on every op into a synced folder thrashes the sync client.
 
 ## Workspace and build
 

@@ -20,6 +20,12 @@ code before picking an item up — an item's premise can go stale while its ask 
   textures are pooled since (D1003 (7)); whether that cured it is unconfirmed. Wait for the
   `GPU device lost (<reason>)` line in `ondin.log`, or for the crash to stop being seen.
 
+- **A context menu's Hide/Show and Lock/Unlock label reads the right-clicked layer alone**
+  (`layer_menu_state(id)`), while the action decides over the whole selection. So a panel
+  right-click on a hidden layer among visible ones reads *Show* and hides everything. Found from
+  reading the code while the context-menus spec was rewritten; not yet reproduced.
+- **Rename's menu row is live in present mode while its chord refuses.** One of the two is wrong.
+
 ## Now · Inspector
 
 - **The boolean row's *Flatten* gives one sentence for three refusals** (§15 D734). Show the `Err`

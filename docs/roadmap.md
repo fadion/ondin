@@ -73,6 +73,48 @@ code before picking an item up — an item's premise can go stale while its ask 
   three greps standing in for `clippy::duplicated_attributes` (silent inside `impl` blocks). Run each
   against a fixture that must match and one that must not.
 
+## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
+
+**What was measured (2026-10-20):** comments are **8.4 MB of the 17 MB of Rust (49%)**:
+`ondin-app` 5.3 of 10.5 MB, `ondin-core` 2.3 of 4.8 MB, `ondin-render` 0.5 of 1.0 MB,
+`ondin-export` 0.3 of 0.7 MB. About 4.7 MB of that sits in test code and 3.7 MB in production.
+The worst files: `panels/inspector.rs`, `canvas.rs` and `app.rs` each carry 650–710 KB of
+comments, about half of each file. Next come `dashboard.rs`, `typography.rs`, `core/text.rs`,
+`ui.rs`, `tools/mod.rs` and `svg_in.rs`, at 240–320 KB each. 1,175 doc runs are 20 lines or
+longer. D-number citations appear 8,700 times.
+
+**Why:** an agent reading code pays for every comment line, so half of every code read is prose.
+Much of that prose is the same history the docs had: amendment trails, "found in session N",
+flip-check write-ups, §15 citation chains and counts that have gone stale. The docs went
+state-only on 2026-10-18 (CLAUDE.md 175 → 11 KB, architecture 1.5 MB → a 4 KB index and
+per-subsystem files). The comments are the last place that history piles up, and they are read
+far more often than the docs.
+
+**The rule to apply:**
+- A doc comment says what the item does and, when it is not obvious, why, in 1–5 lines.
+- A non-obvious constraint keeps one sentence: two defences, an ordering, a trap the next
+  editor would "simplify" away.
+- A test's doc says in one line what it pins. Keep the flip result only as "flip: <mutation> →
+  fails at <assertion>" when the flip is what proves the test.
+- Drop history, session stories, ledger trails and measurements kept only as history.
+- An existing `§15 D<n>` citation may stay as a bare pointer when the archived reasoning
+  matters. Otherwise drop it.
+- Add this rule to `CLAUDE.md` as the first step, so new comments follow it.
+
+**How:**
+- One agent per file, or per line range for the files over ~500 KB. Disjoint files, so several
+  can run at once.
+- **`Edit` only.** No script rewrites, per CLAUDE.md. `doc-run-guard` flags any doc comment an
+  edit carries off its item.
+- Comment-only changes. Each batch runs `cargo fmt`, `cargo check --all-targets`, the doc gate
+  (`--document-private-items`) and `cargo test`, then commits per crate or per large file.
+- After each batch, `git diff` should show no change outside `//` lines (`git diff -U0 | grep '^[+-]' | grep -v '^[+-][[:space:]]*//'` returns only the file headers).
+- Order: the three largest app files, then the rest of `ondin-app`, then `ondin-core`,
+  `ondin-render` and `ondin-export`.
+
+**Cost:** roughly 5–6M subagent tokens; reading the tree alone is about 4.5M. Target: comments
+down to about 15–20% of the source, roughly 2.5–3.5 MB in place of 8.4 MB.
+
 ## Next · Nested component properties
 
 - **The maintainer's look** at what D988 built; every call D988 marks as the session's stays open to it.

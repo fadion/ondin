@@ -90,16 +90,9 @@ state-only on 2026-10-18 (CLAUDE.md 175 → 11 KB, architecture 1.5 MB → a 4 K
 per-subsystem files). The comments are the last place that history piles up, and they are read
 far more often than the docs.
 
-**The rule to apply:**
-- A doc comment says what the item does and, when it is not obvious, why, in 1–5 lines.
-- A non-obvious constraint keeps one sentence: two defences, an ordering, a trap the next
-  editor would "simplify" away.
-- A test's doc says in one line what it pins. Keep the flip result only as "flip: <mutation> →
-  fails at <assertion>" when the flip is what proves the test.
-- Drop history, session stories, ledger trails and measurements kept only as history.
-- An existing `§15 D<n>` citation may stay as a bare pointer when the archived reasoning
-  matters. Otherwise drop it.
-- Add this rule to `CLAUDE.md` as the first step, so new comments follow it.
+**The rule to apply** is `AGENTS.md`'s *Code comments*, in force for new comments since
+2026-10-20. For the trim, one addition: an existing `§15 D<n>` citation may stay as a bare
+pointer when the archived reasoning matters; otherwise drop it.
 
 **How:**
 - One agent per file, or per line range for the files over ~500 KB. Disjoint files, so several

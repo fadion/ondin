@@ -5569,6 +5569,58 @@ mod pulse_tests {
 }
 
 #[cfg(test)]
+mod dropdown_place_tests {
+    use super::dropdown_place;
+    use eframe::egui;
+
+    /// **A list opens under its field, left edges together, or right edges
+    /// together at the screen's right, and above the field at its bottom**
+    /// (§15 D1084), then clamped on screen.
+    ///
+    /// flip: `dropdown_place` answering `menu_place` at the field's bottom-left
+    /// (the reported bug) → fails *"under it, left edges together"*, the gap
+    /// lost.
+    #[test]
+    fn a_list_opens_under_its_field_or_flips_at_the_edges() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |_| {},
+        );
+        let size = egui::vec2(200.0, 150.0);
+        let field =
+            |x: f32, y: f32| egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(100.0, 20.0));
+        assert_eq!(
+            dropdown_place(&ctx, field(50.0, 50.0), size, 4.0),
+            egui::pos2(50.0, 74.0),
+            "under it, left edges together"
+        );
+        assert_eq!(
+            dropdown_place(&ctx, field(650.0, 50.0), size, 4.0),
+            egui::pos2(550.0, 74.0),
+            "right edges together"
+        );
+        assert_eq!(
+            dropdown_place(&ctx, field(50.0, 500.0), size, 4.0),
+            egui::pos2(50.0, 346.0),
+            "above it at the bottom"
+        );
+        let tall = egui::vec2(200.0, 900.0);
+        assert_eq!(
+            dropdown_place(&ctx, field(50.0, 50.0), tall, 4.0).y,
+            0.0,
+            "a list taller than the screen is clamped to its top"
+        );
+    }
+}
+
+#[cfg(test)]
 mod logo_tests {
     //! Plain backticks in this module's prose: `cargo doc` cannot see a
     //! `cfg(test)` module, so a link here is checked by nothing (§15 D319).

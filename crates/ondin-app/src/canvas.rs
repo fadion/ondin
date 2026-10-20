@@ -11023,6 +11023,10 @@ impl OndinApp {
 
     /// Whether `screen` is grabbing that handle.
     fn grab_rail_handle(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
+        // Refused on a locked selection, as the box handles are (§15 D323).
+        if self.selection_locked() {
+            return None;
+        }
         let (id, at) = self.rail_handle(rect, ppp)?;
         (at.distance(screen) <= HANDLE_PICK_PX).then_some(id)
     }
@@ -11093,6 +11097,10 @@ impl OndinApp {
     /// matters on a line short enough for both grabs to overlap, where picking the
     /// closer one is the only sensible answer.
     fn grab_line_end(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<LineEnd> {
+        // A line's endpoints are its handles: refused on a locked selection.
+        if self.selection_locked() {
+            return None;
+        }
         let (_, start, end) = self.line_ends(rect, ppp)?;
         [(LineEnd::Start, start), (LineEnd::End, end)]
             .into_iter()
@@ -11361,7 +11369,8 @@ impl OndinApp {
     /// that the marker is not on — whereas a pivot parked on a corner would
     /// otherwise be impossible to grab back.
     fn on_pivot(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
-        if !self.show_pivot || self.mode != Mode::Normal {
+        // The marker is drawn on a locked layer and does not move (§15 D323).
+        if !self.show_pivot || self.mode != Mode::Normal || self.selection_locked() {
             return None;
         }
         self.pivot_screen(rect, ppp)

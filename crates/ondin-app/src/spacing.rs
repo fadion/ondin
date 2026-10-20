@@ -1861,6 +1861,55 @@ mod canvas_tests {
         }
     }
 
+    /// **A locked line's endpoints refuse too** (§15 D323): a lone line's end
+    /// dragged commits unlocked and nothing locked — the endpoints are the
+    /// line's handles.
+    ///
+    /// flip: `grab_line_end`'s lock refusal removed → fails *"the locked end"*.
+    #[test]
+    fn a_locked_lines_endpoints_take_no_drag() {
+        let ctx = egui::Context::default();
+        let none = Default::default();
+        for locked in [false, true] {
+            let (mut app, _) = app_with_a_row(&ctx);
+            let line = app.session.ids.mint();
+            let root = app.session.doc.root();
+            let mut ops = vec![Operation::CreateNode {
+                id: line,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Line {
+                    end: Point::new(60.0, 0.0),
+                },
+                transform: Some(Affine::translate((100.0, 300.0))),
+                name: None,
+            }];
+            if locked {
+                ops.push(Operation::SetLocked {
+                    id: line,
+                    locked: true,
+                });
+            }
+            assert!(app.session.commit(Transaction(ops)));
+            app.session.selection.set_one(line);
+            frame(&ctx, &mut app, Vec::new(), Default::default());
+            let depth = app.session.history.undo_depth();
+            drag(
+                &ctx,
+                &mut app,
+                Point::new(160.0, 300.0),
+                Point::new(200.0, 330.0),
+                none,
+                false,
+            );
+            let moved = app.session.history.undo_depth() - depth;
+            match locked {
+                false => assert_eq!(moved, 1, "the fixture: the end drags unlocked"),
+                true => assert_eq!(moved, 0, "the locked end"),
+            }
+        }
+    }
+
     /// Whether, with nothing selected, the pointer on world `at` offers a band.
     fn hover_offers(ctx: &egui::Context, app: &mut OndinApp, at: Point) -> bool {
         app.session.selection.set(Vec::new());

@@ -8,7 +8,7 @@ the library.
 **Unbuilt (five):** §8's `Ctrl+K` / `Ctrl+/` command palette and `Ctrl+Shift+/` cheatsheet
 (waiting on the command registry, `roadmap.md`), and §10's `Ctrl+B` / `Ctrl+I`. The cheatsheet
 **is** this file rendered from the registry; when it lands this document becomes the registry's
-test. Not kept in `design/`: that folder is regenerated.
+test. Not kept on the design canvas: its artboards are mockups, not specs.
 
 **Sources.** Figma and Sketch agree with each other far more than with Adobe, so take their
 binding where they disagree with Adobe about a concept both have, and Adobe's where Figma has no

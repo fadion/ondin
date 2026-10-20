@@ -386,7 +386,7 @@ No variable is offered on a field's label badge (it scrubs).
 
 ## 8. Chrome
 
-`design/Editor.dc.html`'s canvas menu is normative for style only; this file decides content and
+The design canvas's Editor artboard's canvas menu is normative for style only; this file decides content and
 order.
 
 | | Value |

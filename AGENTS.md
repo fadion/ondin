@@ -20,8 +20,10 @@ git.
 | `docs/vm.md` | The Command Mode language. Nothing of it is built. |
 | `todo.md` | The maintainer's private scratchpad, untracked. Never record anything there. |
 
-`design/` holds mockups. It is untracked and regenerated between sessions, so re-read it
-rather than trusting an earlier look, and never keep a spec only there.
+The mockups live on a claude.ai Design canvas,
+`https://claude.ai/artifact/5crMbaHmNpm78vSLrhDf3D`, one artboard per feature. Others may edit
+it, so read an artboard with the Artifact tool rather than trusting an earlier look, and never
+keep a spec only there. The untracked `design/` folder is a stale export; don't read it.
 
 ### Keeping the record
 

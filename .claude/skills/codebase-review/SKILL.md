@@ -318,7 +318,7 @@ Carried across rounds unless the user changes them:
 - **In scope:** everything under `crates/` — source, inline test modules, and the 21 integration
   test files. Test code is reviewed under L6 and L3; its *prose* is A6/A7's problem.
 - **Out of scope:** `docs/` as documents (A7 reviews them only where they contradict the code),
-  `design/` (regenerated mockups, not source), `todo.md` (untracked scratchpad), `icons/`,
+  `design/` (stale mockup export, not source), `todo.md` (untracked scratchpad), `icons/`,
   `stress.ondin`, `Cargo.lock`, `target/`, and `.claude/agents/*` except where A8 finds a gate list
   there that is wrong.
 - **`Cargo.toml`'s dependency notes are in scope** (S22) — they carry the interop pins and two

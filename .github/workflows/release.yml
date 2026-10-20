@@ -262,7 +262,7 @@ jobs:
       # certificate exists; adding one is a `--signParams` argument on `vpk
       # pack`. Velopack's own integrity is HTTPS plus the size and hash in the
       # feed, which signing does not change.
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
       # **Pinned to the `velopack` crate's own version** (§15 D974): Velopack

@@ -548,6 +548,14 @@ pub(crate) fn plan<'a>(
         }
         let to = match t.by_origin(o.key()) {
             Some(h) => h.id,
+            // A name the held version gives another of the kit's variables: the
+            // source is a version on, and the held one must be brought up to it
+            // first, or the commit refuses the name twice.
+            None if sync != Some(o.kit.as_str())
+                && t.of_kit(&o.kit).any(|h| h.name == var.name) =>
+            {
+                return Err(KitError::Modes(o.kit.clone()));
+            }
             None => ids.mint_var(),
         };
         plan.vars.insert(*v, to);
@@ -640,6 +648,16 @@ pub(crate) fn plan<'a>(
         }
         let to = match doc.styles().by_origin((&o.kit, o.style)) {
             Some(h) => h.id,
+            // The variables' reason: a held version names another this way.
+            None if sync != Some(o.kit.as_str())
+                && doc.styles().iter().any(|h| {
+                    h.origin.as_ref().is_some_and(|x| x.kit == o.kit)
+                        && h.slot() == style.slot()
+                        && h.name == style.name
+                }) =>
+            {
+                return Err(KitError::Modes(o.kit.clone()));
+            }
             None => ids.mint_style(),
         };
         plan.styles.insert(*s, to);

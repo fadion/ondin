@@ -742,7 +742,9 @@ pub enum KitError {
     /// The document holds this kit's variables at **other modes** than the
     /// publish read (§15 D1064) — a mode the kit added or removed since: the
     /// variables held have no cell in a mode they lack, so accepting the kit's
-    /// update comes first, as [`Self::NeedsUpdate`] says for a main.
+    /// update comes first, as [`Self::NeedsUpdate`] says for a main. Also when
+    /// the publish brings a variable or style under a name a held one of the
+    /// kit's already has — the held version is behind it the same way.
     Modes(String),
 }
 

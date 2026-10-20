@@ -758,6 +758,55 @@ fn kit_a(k: &Kit) -> (Document, IdSource, NodeId) {
     (a, ids, card)
 }
 
+/// **A main reading a variable the held version names otherwise asks for the
+/// update**: L renamed `brand` to `old` and made a new `brand`; D, holding the
+/// first under its old name, would mint the second beside it and the commit
+/// would refuse the name twice.
+///
+/// flip: `plan`'s name-collision arm for variables removed → the insert
+/// answers `Ok` (and its commit refuses `DuplicateName`). The styles' twin arm
+/// is not driven here.
+#[test]
+fn a_kit_variable_named_as_a_held_one_asks_for_the_update() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let night = k.doc.variables().modes()[1].id;
+    let fresh = k.ids.mint_var();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetVariableName {
+                id: k.brand,
+                name: "old".into(),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: fresh,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(k.day, Cell::Color(RED)), (night, Cell::Color(GOLD))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFills {
+                id: k.dot,
+                fills: bound(fresh),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let root = d.root();
+    let r = kit::insert(&d, &mut ids, L_ID, 2, published(&k), k.icon, root);
+    assert!(
+        matches!(r, Err(KitError::Modes(ref kit)) if kit == L_ID),
+        "{r:?}"
+    );
+    accept(&mut d, &mut ids, &k);
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    assert_eq!(drawn(&d, first_child(&d, inst)), Brush::Solid(RED));
+}
+
 /// **Renaming a document mode dirties every kit-bound layer**: an unmapped kit
 /// mode is matched by the document mode's name, so the rename can move which
 /// column a layer reads, and `Resolved::update` returns early on an empty set.

@@ -105,6 +105,9 @@ pub(crate) struct StyleNaming {
     text: String,
     focus: bool,
     refusal: Option<String>,
+    /// The session's commit count once the create committed: while it stands,
+    /// the create is the last step, and `Escape`'s undo is the create's.
+    commits: u64,
 }
 
 /// What a capsule was asked this frame.
@@ -787,6 +790,7 @@ impl OndinApp {
                 text: name,
                 focus: true,
                 refusal: None,
+                commits: self.session.commits(),
             });
         }
     }
@@ -809,8 +813,12 @@ impl OndinApp {
                 self.session.style_edit = None;
             }
         }
+        // A naming is over once its style is gone, or once anything else has
+        // committed — a refused name left behind while the user went on to
+        // edit elsewhere, whose `Escape` would otherwise undo that edit.
         if let Some(n) = &self.style_naming
-            && self.session.doc.styles().get(n.style).is_none()
+            && (self.session.doc.styles().get(n.style).is_none()
+                || self.session.commits() != n.commits)
         {
             self.style_naming = None;
         }
@@ -1146,8 +1154,11 @@ impl OndinApp {
         if self.style_menu.take().is_some() {
             return true;
         }
-        if self.style_naming.take().is_some() {
-            self.undo();
+        if let Some(n) = self.style_naming.take() {
+            // The create's undo only while it is still the last step.
+            if self.session.commits() == n.commits {
+                self.undo();
+            }
             return true;
         }
         if self.session.style_edit.take().is_some() {
@@ -1953,6 +1964,39 @@ mod tests {
         tall(&mut app, vec![]);
         assert_eq!(fill_style(&app, a), Some(s), "the style stays");
         assert_eq!(mode(&app), before, "and the picture keeps its mode");
+    }
+
+    /// **`Escape` after a style's naming was left behind undoes nothing else**:
+    /// a create's name refused and abandoned, another layer recoloured, then
+    /// `Escape` — the recolour stays.
+    ///
+    /// flip: `escape_styles`' commit-count check removed → fails *"B stays
+    /// green"*, the undo taking B's recolour.
+    #[test]
+    fn escape_after_an_abandoned_naming_undoes_nothing_else() {
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app(&ctx);
+        app.create_style(StyleSlot::Fills, &[a]);
+        assert!(app.style_naming.is_some(), "the fixture: naming");
+        app.session.selection.set(vec![b]);
+        let item = app.session.doc.get(b).unwrap().paint().fills[0].id;
+        let green = ondin_core::peniko::Color::from_rgba8(20, 200, 40, 255);
+        assert!(app.session.commit(Transaction(vec![Operation::SetFills {
+            id: b,
+            fills: vec![Keyed::new(
+                item,
+                Fill {
+                    brush: Brush::Solid(green).into(),
+                    visible: true,
+                },
+            )],
+        }])));
+        assert!(app.escape_styles(), "the key is the naming's");
+        assert_eq!(
+            app.session.doc.get(b).unwrap().paint().fills[0].brush,
+            Brush::Solid(green).into(),
+            "B stays green"
+        );
     }
 
     /// **The effect popover left open when a style lands is read-only** (§15

@@ -309,6 +309,38 @@ fn an_edit_through_a_user_judges_a_bound_gap() {
     );
 }
 
+/// **A gap's *Detach* under the style's *Edit* detaches the style's gap to
+/// what it draws**: the detach states display and bindings together, and
+/// `edit_through` takes the display as written rather than judging it against
+/// the binding the same edit removes.
+///
+/// flip: `edit_through`'s stated-binding arm removed → fails *"the style's gap
+/// detaches at 12"*, at 0.
+#[test]
+fn a_detach_under_a_layout_styles_edit_keeps_the_number() {
+    let mut f = fixture();
+    let s = styled(&mut f);
+    let detach =
+        ondin_core::detach_spacing_ops(&f.doc, f.a, [false, true, false, false, false, false]);
+    let tx = ondin_core::style::edit_through(&f.doc, Transaction(detach), s);
+    commit(&mut f, tx.0).unwrap();
+    let value = match &f.doc.styles().get(s).unwrap().value {
+        ondin_core::style::StyleValue::Layout(l) => (**l).clone(),
+        v => panic!("not a layout: {v:?}"),
+    };
+    assert_eq!(
+        (value.spacing_vars[1], value.display.spacing()[1]),
+        (None, 12.0),
+        "the style's gap detaches at 12"
+    );
+    let b = f.doc.get(f.b).unwrap();
+    assert_eq!(
+        (b.spacing_vars()[1], b.display().unwrap().spacing()[1]),
+        (None, 12.0),
+        "and every user with it"
+    );
+}
+
 /// **A layout style's display detaches a child's size binding it makes
 /// computed** (§15 D1075's amendment, reading (a); D1061's *only a hand-set size
 /// binds*): a rect in the plain frame `b`, its width bound to `space/md`; `b`

@@ -787,6 +787,16 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
     } else {
         FxHashSet::default()
     };
+    // The users whose spacing bindings the edit states itself — a bind or a
+    // detach, display and bindings together — whose display is taken as written,
+    // as `keep_spacing_bindings` leaves a stated binding as stated.
+    let states_spacing: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetSpacingVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
     let mut value: Option<StyleValue> = None;
     let mut out = Vec::with_capacity(tx.0.len());
     for op in tx.0 {
@@ -819,6 +829,17 @@ pub fn edit_through(doc: &Document, tx: Transaction, style: StyleId) -> Transact
                 }),
             };
             let next = match (op, base) {
+                // A bind or a detach states the bindings beside the display:
+                // the display as written, the `SetSpacingVars` below taken over it.
+                (
+                    Operation::SetDisplay {
+                        display: Some(d), ..
+                    },
+                    Some(b),
+                ) if states_spacing.contains(&id) => LayoutStyle {
+                    display: d,
+                    spacing_vars: b.spacing_vars,
+                },
                 // **Judged as the commit's spacing pass judges a door's write**
                 // (§15 D1075's amendment, reading (b)): `keep_spacing_bindings`
                 // never sees this write, folded into the style first, so a bound

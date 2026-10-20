@@ -782,16 +782,16 @@ impl RenderOverrides {
             .collect();
         for id in released {
             let Some(node) = doc.get(id) else { continue };
-            // Its specified kind, a bound size resolved (§15 D1061).
-            let Some(own) = doc.resolved_kind(id) else {
+            // Its specified kind, a bound size and bound corners resolved.
+            let Some(own) = specified_kind(doc, id) else {
                 continue;
             };
             let moved = res.used_local(doc, id) != Some(node.transform());
-            let resized = res.used_kind(doc, id) != Some(&*own);
+            let resized = res.used_kind(doc, id) != Some(&own);
             if moved || resized || res.used_frame(id).is_some() {
                 self.entry(id).transform = Some(node.transform());
                 if resized {
-                    self.set_kind(doc, res, id, own.into_owned());
+                    self.set_kind(doc, res, id, own);
                 }
                 self.entry(id).frame = None;
                 self.mark_moved(doc, id);
@@ -1976,7 +1976,7 @@ impl RenderOverrides {
         // and drew the layer with no size. Unbound, this is the stored kind.
         self.get(id)
             .and_then(|o| o.kind.clone())
-            .or_else(|| doc.resolved_kind(id).map(std::borrow::Cow::into_owned))
+            .or_else(|| specified_kind(doc, id))
     }
 
     /// The kind to **measure and draw** `id` with: a ghost's, then the override's,
@@ -2230,7 +2230,35 @@ fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode
 /// is empty.
 fn ghost_kind(doc: &Document, n: &ondin_core::Node) -> NodeKind {
     let sized = doc.size_drawn_in(doc.variables(), n.id(), n.kind(), n.size_vars());
-    doc.text_drawn_in(doc.variables(), n.id(), &sized, n.text_vars())
+    let kind = doc.text_drawn_in(doc.variables(), n.id(), &sized, n.text_vars());
+    with_corners_drawn(doc, n, kind)
+}
+
+/// `id`'s kind as specified, with every binding of its own resolved — size,
+/// text and corners — and not layout's: what a preview patches and what it
+/// draws a node the layout lets go with. `Document::resolved_kind` leaves the
+/// corners to `Resolved`, which a preview's re-laid kind never passes through.
+fn specified_kind(doc: &Document, id: NodeId) -> Option<NodeKind> {
+    let kind = doc.resolved_kind(id)?.into_owned();
+    Some(with_corners_drawn(doc, doc.get(id)?, kind))
+}
+
+/// `kind` with `n`'s bound corners read in the mode in force, for a rect.
+fn with_corners_drawn(doc: &Document, n: &ondin_core::Node, kind: NodeKind) -> NodeKind {
+    match kind {
+        NodeKind::Rect { size, corner_radii } if n.corner_vars().iter().any(Option::is_some) => {
+            NodeKind::Rect {
+                size,
+                corner_radii: doc.corners_drawn_in(
+                    doc.variables(),
+                    n.id(),
+                    corner_radii,
+                    n.corner_vars(),
+                ),
+            }
+        }
+        k => k,
+    }
 }
 
 /// Whether a captured node shows: its binding resolved through `doc` — in the

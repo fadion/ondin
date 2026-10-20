@@ -4981,6 +4981,132 @@ fn a_bound_item_beside_a_resize_previews_at_its_number() {
     assert_preview_matches_commit(&doc, &copy, "an Alt-drag copy of a bound rect");
 }
 
+/// **A rect with bound corners previews rounded through every gesture that
+/// re-lays it or ghosts it** (§15 D1039): a gap scrubbed, a neighbour resized,
+/// the layout taken away and an Alt-drag copy each draw the corners at their
+/// variable, as the commit does — never at the 0 their literals hold.
+///
+/// flip: `specified_kind` answering `Document::resolved_kind` alone → fails
+/// *"the gap scrubbed"*; `ghost_kind` without `with_corners_drawn` → fails *"an
+/// Alt-drag copy"*.
+#[test]
+fn a_rect_with_bound_corners_previews_rounded_when_relaid_or_ghosted() {
+    use ondin_core::container::{Display, Flex};
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xDD);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, a, b, mode, r) = (
+        ids.mint(),
+        ids.mint(),
+        ids.mint(),
+        ids.mint_mode(),
+        ids.mint_var(),
+    );
+    let rect = |id, index| Operation::CreateNode {
+        id,
+        parent: frame,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(40.0, 20.0),
+            corner_radii: RoundedRectRadii::from_single_radius(0.0),
+        },
+        transform: None,
+        name: None,
+    };
+    let fill = |id| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+            visible: true,
+        }]),
+    };
+    let row = |gap: f64| {
+        Some(Display::Flex(Flex {
+            column_gap: gap,
+            align_items: ondin_core::container::AlignItems::Start,
+            ..Flex::default()
+        }))
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(300.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        },
+        rect(a, 0),
+        rect(b, 1),
+        fill(a),
+        fill(b),
+        Operation::SetDisplay {
+            id: frame,
+            display: row(10.0),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: r,
+                name: "radius/md".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(8.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    doc.apply(&Transaction(ondin_core::bind_corners_ops(
+        &doc,
+        a,
+        [Some(r); 4],
+    )))
+    .unwrap();
+    let gap = Transaction(vec![Operation::SetDisplay {
+        id: frame,
+        display: row(30.0),
+    }]);
+    assert_preview_matches_commit(&doc, &gap, "the gap scrubbed");
+    let resize = Transaction(vec![Operation::SetGeometry {
+        id: b,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(60.0, 50.0)),
+    }]);
+    assert_preview_matches_commit(&doc, &resize, "the neighbour resized");
+    let unlaid = Transaction(vec![Operation::SetDisplay {
+        id: frame,
+        display: None,
+    }]);
+    assert_preview_matches_commit(&doc, &unlaid, "the layout taken away");
+
+    let template = doc.capture_subtree(a).expect("capture the bound rect");
+    let mut fresh = IdSource::new(0xDE);
+    let (nodes, new_root) = ondin_core::remap_subtree(&template, &mut fresh).expect("remap");
+    let index = doc.get(root).unwrap().children().len();
+    let copy = Transaction(vec![
+        Operation::InsertSubtree {
+            nodes,
+            parent: root,
+            index,
+        },
+        Operation::SetTransform {
+            id: new_root,
+            transform: kurbo::Affine::translate((0.0, 200.0)),
+        },
+    ]);
+    assert_preview_matches_commit(&doc, &copy, "an Alt-drag copy");
+}
+
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
 /// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
 /// whose corners read *radius*, previewed under a new *brand* colour and a new

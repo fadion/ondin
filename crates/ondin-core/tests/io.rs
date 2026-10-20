@@ -2828,7 +2828,90 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
     )
     .unwrap();
 
+    // A style, a mode and a number for the styles' and variables' arms.
+    use ondin_core::style::{Style, StyleId, StyleValue};
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let style = StyleId(ids.mint());
+    let (mode, var) = (ids.mint_mode(), ids.mint_var());
+    let stroke = |width: f64| {
+        keyed_by_position([Stroke {
+            brush: Brush::Solid(peniko::color::palette::css::BLACK).into(),
+            width,
+            ..Default::default()
+        }])
+    };
+    hist.commit(
+        &mut doc,
+        Transaction(vec![
+            Operation::AddStyle {
+                style: Style {
+                    id: style,
+                    name: "Hairline".into(),
+                    value: StyleValue::Strokes(stroke(1.0)),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(peniko::color::palette::css::RED))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]),
+    )
+    .unwrap();
+
     let refused: Vec<(&str, Operation)> = vec![
+        // The styles' half: a style's value is written onto its users only by
+        // `style::settle`, so a style with none held whatever it was given.
+        (
+            "AddStyle (fill colour)",
+            Operation::AddStyle {
+                style: Style {
+                    id: StyleId(ids.mint()),
+                    name: "Broken".into(),
+                    value: StyleValue::Fills(keyed_by_position([Fill {
+                        brush: Brush::Solid(Color::new([f32::NAN, 0.0, 0.0, 1.0])).into(),
+                        visible: true,
+                    }])),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ),
+        (
+            "SetStyleValue (stroke width)",
+            Operation::SetStyleValue {
+                id: style,
+                value: StyleValue::Strokes(stroke(f64::INFINITY)),
+            },
+        ),
+        (
+            "SetFills (bound alpha)",
+            Operation::SetFills {
+                id: rect,
+                fills: keyed_by_position([Fill {
+                    brush: ondin_core::BrushSource::Bound {
+                        var,
+                        alpha: f32::NAN,
+                    },
+                    visible: true,
+                }]),
+            },
+        ),
         (
             "SetTransform",
             Operation::SetTransform {
@@ -3083,6 +3166,47 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             io::save(&doc).unwrap(),
             before,
             "{name} left the document alone"
+        );
+    }
+
+    // A variable's cell, refused by the table's post-condition rather than the
+    // op — the same last place before the save.
+    let cells: Vec<(&str, Operation)> = vec![
+        (
+            "SetVariableCell (number)",
+            Operation::SetVariableCell {
+                id: var,
+                mode,
+                cell: Cell::Number(f64::NAN),
+            },
+        ),
+        (
+            "AddVariable (colour)",
+            Operation::AddVariable {
+                var: Variable {
+                    id: ids.mint_var(),
+                    name: "broken".into(),
+                    kind: VarKind::Color,
+                    cells: [(
+                        mode,
+                        Cell::Color(Color::new([0.0, f32::INFINITY, 0.0, 1.0])),
+                    )]
+                    .into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ),
+    ];
+    for (name, op) in cells {
+        assert!(
+            matches!(
+                doc.apply(&Transaction(vec![op])),
+                Err(OpError::Variables(
+                    ondin_core::variable::VarRule::NonFinite(_)
+                ))
+            ),
+            "{name} must be refused"
         );
     }
 

@@ -508,3 +508,62 @@ fn deleting_a_variable_inside_a_style_detaches_the_style() {
     };
     assert_eq!(list[0].brush, BrushSource::from(Brush::Solid(GREEN)));
 }
+
+/// **An effects style binding a number its effect's kind lacks is refused**
+/// (§15 D1074): `settle` writes the list verbatim onto every user, whose own
+/// rule refuses it, so such a style could never be applied.
+///
+/// flip: `style::check`'s per-kind clause removed → the `AddStyle` commits.
+#[test]
+fn an_effects_style_binding_a_number_its_kind_lacks_is_refused() {
+    let mut f = fixture();
+    let (mode, var) = (f.ids.mint_mode(), f.ids.mint_var());
+    commit(
+        &mut f,
+        vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "space/x".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(4.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ],
+    )
+    .unwrap();
+    let mut blur = ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 4.0 });
+    blur.vars[ondin_core::EFFECT_X] = Some(var);
+    let id = StyleId(f.ids.mint());
+    let r = commit(
+        &mut f,
+        vec![Operation::AddStyle {
+            style: Style {
+                id,
+                name: "Soft".into(),
+                value: StyleValue::Effects(ondin_core::keyed_by_position([blur])),
+                origin: None,
+                forked: None,
+            },
+        }],
+    );
+    assert!(
+        matches!(
+            r,
+            Err(OpError::Styles(ondin_core::style::StyleRule::BadVariable(
+                _
+            )))
+        ),
+        "{r:?}"
+    );
+}

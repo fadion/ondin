@@ -536,6 +536,18 @@ pub enum StyleRule {
     KitStyle(StyleId),
 }
 
+/// Whether `value` reads back from a save as it is — every number in it finite
+/// (invariant 8). Asked of the save format itself: `serde_json` writes a
+/// non-finite `f64` as `null` and refuses it on the way back, and a style
+/// value holds numbers in every paint, stroke, effect, text style and layout,
+/// so a per-field check would be one more list to keep complete.
+pub(crate) fn survives_save(value: &StyleValue) -> bool {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|v| serde_json::from_value::<StyleValue>(v).ok())
+        .is_some()
+}
+
 /// The style rules, over the table and every node's bindings — a post-condition
 /// of every transaction (`Document::apply`) and of the loader.
 ///
@@ -582,10 +594,15 @@ pub(crate) fn check<'a>(
             StyleValue::Strokes(v) => v
                 .iter()
                 .any(|x| bad(x.brush.var(), VarKind::Color) || bad(x.width_var, VarKind::Number)),
-            // An effect's numbers a number each (§15 D1074).
-            StyleValue::Effects(v) => v
-                .iter()
-                .any(|e| e.vars.iter().any(|x| bad(*x, VarKind::Number))),
+            // An effect's numbers a number each (§15 D1074), and only where
+            // its kind has them: `settle` writes the list onto every user, whose
+            // own rule refuses the rest, so the style could never be applied.
+            StyleValue::Effects(v) => v.iter().any(|e| {
+                e.vars
+                    .iter()
+                    .zip(e.numbers())
+                    .any(|(x, n)| bad(*x, VarKind::Number) || (x.is_some() && n.is_none()))
+            }),
             StyleValue::Text(_) => false,
             // A layout's gaps and padding a number each (§15 D1075).
             StyleValue::Layout(l) => l.spacing_vars.iter().any(|x| bad(*x, VarKind::Number)),

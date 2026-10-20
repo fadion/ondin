@@ -1414,6 +1414,9 @@ impl Document {
             // a style's values are written onto its users by ops of their own
             // (`style::settle`), so these dirty nothing.
             Operation::AddStyle { style } => {
+                if !crate::style::survives_save(&style.value) {
+                    return Err(OpError::NonFinite);
+                }
                 if self.styles.styles.contains_key(&style.id) {
                     return Err(OpError::DuplicateStyle(style.id));
                 }
@@ -1438,6 +1441,9 @@ impl Document {
                 Ok(Operation::SetStyleName { id: *id, name: old })
             }
             Operation::SetStyleValue { id, value } => {
+                if !crate::style::survives_save(value) {
+                    return Err(OpError::NonFinite);
+                }
                 let s = self
                     .styles
                     .styles

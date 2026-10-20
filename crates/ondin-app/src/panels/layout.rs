@@ -1556,7 +1556,7 @@ impl OndinApp {
                 ui::disable_unless(ui, live, |ui| {
                     // **Bound, the field is a chip** (§15 D1058, D1038 A1): the
                     // CSS name trailing it gives way, the glyph naming the field.
-                    if self.spacing_bound_ui(ui, key, half.x, &mark) {
+                    if self.bound_field_ui(ui, key, half.x, &mark) {
                         return;
                     }
                     let mut v = shown.unwrap_or_else(|| get(first));
@@ -1585,7 +1585,7 @@ impl OndinApp {
                         })
                     };
                     self.edit_valve(&resp, tx);
-                    self.spacing_doors(ui, key, &resp);
+                    self.field_doors(ui, key, &resp);
                 });
             }
         });
@@ -1681,7 +1681,7 @@ impl OndinApp {
                         },
                     ),
                 );
-                if self.spacing_bound_ui(ui, key, pair.x, &mark) {
+                if self.bound_field_ui(ui, key, pair.x, &mark) {
                     continue;
                 }
                 let (resp, hit) = ui::value_field_marked(
@@ -1705,7 +1705,7 @@ impl OndinApp {
                     })
                 };
                 self.edit_valve(&resp, tx);
-                self.spacing_doors(ui, key, &resp);
+                self.field_doors(ui, key, &resp);
             }
             let state = if uneven {
                 ui::FieldButton::Set
@@ -1751,7 +1751,7 @@ impl OndinApp {
                             |v| super::component::mark_num(*v),
                         ),
                     );
-                    if self.spacing_bound_ui(ui, key, half.x, &mark) {
+                    if self.bound_field_ui(ui, key, half.x, &mark) {
                         continue;
                     }
                     let (resp, hit) = ui::value_field_marked(
@@ -1770,7 +1770,7 @@ impl OndinApp {
                         self.display_tx(subjects, |d| d.padding_mut()[s] = v.max(0.0))
                     };
                     self.edit_valve(&resp, tx);
-                    self.spacing_doors(ui, key, &resp);
+                    self.field_doors(ui, key, &resp);
                 }
             });
         }
@@ -2021,42 +2021,6 @@ impl OndinApp {
         )
     }
 
-    /// A spacing field while bound or typed over (§15 D1058): the chip, A4's
-    /// *Mixed* capsule, or the buffer a key on either began — `true` when it drew
-    /// one, and the caller's plain field is not drawn. `mark` is the field's whole
-    /// override mark, binding and literal. Nothing in it is spacing's own: the
-    /// Transform card's W and H draw theirs through it too (§15 D1061).
-    pub(super) fn spacing_bound_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        key: super::binding::FieldKey,
-        w: f32,
-        mark: &Option<OverrideMark>,
-    ) -> bool {
-        let retyping = self.var_retype.as_ref().filter(|r| r.key == key).cloned();
-        if let Some(rt) = retyping {
-            self.number_retype(ui, key, rt, w);
-            return true;
-        }
-        if let Some(var) = self.field_var(key) {
-            let hit = self.number_chip(ui, key, var, w, mark.as_ref());
-            self.reset_marked(hit, mark);
-            return true;
-        }
-        if let Some(vars) = self.field_mixed_vars(key) {
-            let mut rect = egui::Rect::NOTHING;
-            ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
-                // The unbound field's own prefix (§15 D1092).
-                let (strip, lead) = ui::prefix_strip(ui, key.prefix());
-                ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
-                rect = super::binding::chip_slot(ui);
-            });
-            self.mixed_chip(ui, key, &vars, rect);
-            return true;
-        }
-        false
-    }
-
     /// Whether some of a spacing field's places are bound and some are not —
     /// D1038 A4's second case, which reads the plain grey *Mixed* whatever the
     /// numbers laid out (§15 D1058): a number there would stand for a binding on
@@ -2073,36 +2037,6 @@ impl OndinApp {
             }
         }
         any && !all
-    }
-
-    /// An unbound spacing field's two doors to a binding (§15 D1058, D1038 B1 and
-    /// C1): `--` typed into it opens the list — and hands the text to the retype
-    /// buffer, which can draw B4's refused tail where a `DragValue` cannot (§15
-    /// D1044) — and a right-click opens the field menu. The radius field's wiring,
-    /// and W's and H's (§15 D1061).
-    pub(super) fn spacing_doors(
-        &mut self,
-        ui: &egui::Ui,
-        key: super::binding::FieldKey,
-        resp: &egui::Response,
-    ) {
-        if resp.has_focus()
-            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
-        {
-            self.bind_typing(ui.ctx(), key, &text, resp.rect);
-            if text.starts_with("--") {
-                self.var_retype = Some(super::binding::Retype {
-                    key,
-                    text,
-                    focus: true,
-                });
-            }
-        }
-        if resp.secondary_clicked()
-            && let Some(at) = resp.interact_pointer_pos()
-        {
-            self.field_menu = Some((key, at, resp.rect));
-        }
     }
 
     /// [`Self::display_mark`] for one field of a flex layout.
@@ -5875,7 +5809,7 @@ mod tests {
     /// after `a` and the field is the chip, its CSS name gone; a 6 typed over the
     /// chip and `Enter` leave the gap 6 and unbound.
     ///
-    /// Flip, run: `gap_row` without its `spacing_bound_ui` arm fails at
+    /// Flip, run: `gap_row` without its `bound_field_ui` arm fails at
     /// `p.run("space/4")` — *no run reads "space/4"*, the plain field drawn over a
     /// 0 literal.
     #[test]

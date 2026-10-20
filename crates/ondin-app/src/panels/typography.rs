@@ -1216,7 +1216,7 @@ impl OndinApp {
     /// content field and the maintainer accepting this one without a design.
     ///
     /// **Bound, it is the chip**, the number fields' own drawing
-    /// (`spacing_bound_ui`): `Backspace` detaches, a key typed starts the text
+    /// (`bound_field_ui`): `Backspace` detaches, a key typed starts the text
     /// that replaces it, the right-click is the field menu. **Unbound, it is a
     /// field**: `--` typed opens the list, `Enter` or a click away writes the
     /// text, `Escape` abandons. The write is the one edit the typing made — the
@@ -1242,7 +1242,7 @@ impl OndinApp {
         let key = super::binding::FieldKey::Content { id };
         let w = ui.available_width();
         let live = self.text.as_ref().is_some_and(|s| s.id == id);
-        if !live && self.spacing_bound_ui(ui, key, w, mark) {
+        if !live && self.bound_field_ui(ui, key, w, mark) {
             return;
         }
         let Some(ondin_core::NodeKind::Text {
@@ -1334,7 +1334,7 @@ impl OndinApp {
         if field.has_focus() {
             ui.data_mut(|d| d.insert_temp(edit_id, text.clone()));
             // `--` hands the text to the retype buffer, which draws the list's
-            // refused tail and binds (`spacing_doors`' door for a number field).
+            // refused tail and binds (`field_doors`' door for a number field).
             self.bind_typing(ui.ctx(), key, &text, field.rect);
             if text.starts_with("--") {
                 self.var_retype = Some(super::binding::Retype {

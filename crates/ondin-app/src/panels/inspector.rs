@@ -5472,7 +5472,7 @@ impl OndinApp {
                         let bindable = ondin_core::bindable_size_axes(&app.session.doc, id)[axis];
                         let held = if horizontal { &marks.w } else { &marks.h };
                         if (bindable || app.field_var(key).is_some())
-                            && app.spacing_bound_ui(ui, key, slot.x, held)
+                            && app.bound_field_ui(ui, key, slot.x, held)
                         {
                             continue;
                         }
@@ -5552,7 +5552,7 @@ impl OndinApp {
                         };
                         app.edit_valve(&resp, tx);
                         if bindable {
-                            app.spacing_doors(ui, key, &resp);
+                            app.field_doors(ui, key, &resp);
                         }
                     }
                     // The design's chain button. A *broken* chain when it is
@@ -6043,14 +6043,7 @@ impl OndinApp {
         mark: &Option<Mark>,
     ) {
         let key = super::binding::FieldKey::Opacity { id };
-        let retyping = self.var_retype.as_ref().filter(|r| r.key == key).cloned();
-        if let Some(var) = self.field_var(key).filter(|_| retyping.is_none()) {
-            let hit = self.number_chip(ui, key, var, fw, mark.as_ref());
-            self.reset_marked(hit, mark);
-            return;
-        }
-        if let Some(rt) = retyping {
-            self.number_retype(ui, key, rt, fw);
+        if self.bound_field_ui(ui, key, fw, mark) {
             return;
         }
         let mut pct = opacity0 * 100.0;
@@ -6072,23 +6065,7 @@ impl OndinApp {
                 opacity: (pct / 100.0).clamp(0.0, 1.0),
             }]),
         );
-        if ro.has_focus()
-            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(ro.id))
-        {
-            self.bind_typing(ui.ctx(), key, &text, ro.rect);
-            if text.starts_with("--") {
-                self.var_retype = Some(super::binding::Retype {
-                    key,
-                    text,
-                    focus: true,
-                });
-            }
-        }
-        if ro.secondary_clicked()
-            && let Some(at) = ro.interact_pointer_pos()
-        {
-            self.field_menu = Some((key, at, ro.rect));
-        }
+        self.field_doors(ui, key, &ro);
     }
     /// Opacity, corner radius, and the vertex counts — the design's Appearance
     /// panel.
@@ -6130,13 +6107,7 @@ impl OndinApp {
                 // **Bound, the field is a chip** (§15 D1041, D1038 A1) — or the
                 // buffer replacing it once a key has landed on it (A3).
                 let key = super::binding::FieldKey::Radius { id };
-                let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
-                if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
-                    let hit = app.number_chip(ui, key, var, fw, marks.radius.as_ref());
-                    app.reset_marked(hit, &marks.radius);
-                } else if let Some(rt) = retyping {
-                    app.number_retype(ui, key, rt, fw);
-                } else {
+                if !app.bound_field_ui(ui, key, fw, &marks.radius) {
                     // The single field edits all four at once, and shows the shared
                     // value — or the largest, when they differ, so dragging it from
                     // a mixed state is a sensible starting point rather than 0.
@@ -6189,31 +6160,7 @@ impl OndinApp {
                             }]),
                         );
                     }
-                    // `--` typed into it opens the list (B1): the field's text is the
-                    // drag value's own, kept by egui under its id while it is typed.
-                    //
-                    // **And hands the text to the retype buffer** (§15 D1044): a
-                    // `DragValue` lays its own text out, so B4's dimmed tail cannot be
-                    // drawn in it, and `number_retype`'s `TextEdit` can. From the next
-                    // frame that buffer is the field, caret at the end; `Enter` there
-                    // writes a number typed back over the `--` as this field would.
-                    if rr.has_focus()
-                        && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(rr.id))
-                    {
-                        app.bind_typing(ui.ctx(), key, &text, rr.rect);
-                        if text.starts_with("--") {
-                            app.var_retype = Some(super::binding::Retype {
-                                key,
-                                text,
-                                focus: true,
-                            });
-                        }
-                    }
-                    if rr.secondary_clicked()
-                        && let Some(at) = rr.interact_pointer_pos()
-                    {
-                        app.field_menu = Some((key, at, rr.rect));
-                    }
+                    app.field_doors(ui, key, &rr);
                 }
                 if ui::field_button(
                     ui,
@@ -6297,14 +6244,7 @@ impl OndinApp {
                             id,
                             slot: corner.var_slot(),
                         };
-                        let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
-                        if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
-                            let hit = app.number_chip(ui, key, var, fw, mark.as_ref());
-                            app.reset_marked(hit, mark);
-                            continue;
-                        }
-                        if let Some(rt) = retyping {
-                            app.number_retype(ui, key, rt, fw);
+                        if app.bound_field_ui(ui, key, fw, mark) {
                             continue;
                         }
                         let mut v = corner.get(&corners);
@@ -6328,25 +6268,7 @@ impl OndinApp {
                                 geometry: GeometryPatch::CornerRadii(next),
                             }]),
                         );
-                        // `--` and the field menu as on the radius field — the
-                        // text handed to the retype buffer (§15 D1044).
-                        if resp.has_focus()
-                            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
-                        {
-                            app.bind_typing(ui.ctx(), key, &text, resp.rect);
-                            if text.starts_with("--") {
-                                app.var_retype = Some(super::binding::Retype {
-                                    key,
-                                    text,
-                                    focus: true,
-                                });
-                            }
-                        }
-                        if resp.secondary_clicked()
-                            && let Some(at) = resp.interact_pointer_pos()
-                        {
-                            app.field_menu = Some((key, at, resp.rect));
-                        }
+                        app.field_doors(ui, key, &resp);
                     }
                 });
             }
@@ -7182,15 +7104,7 @@ impl OndinApp {
                         .map(|s| super::binding::FieldKey::StrokeWidth { id, item: s.id }),
                     _ => None,
                 };
-                let retyping =
-                    key.and_then(|k| self.var_retype.as_ref().filter(|r| r.key == k).cloned());
-                if let (Some(k), Some(rt)) = (key, retyping) {
-                    self.number_retype(ui, k, rt, field_w);
-                } else if let Some(k) = key
-                    && let Some(var) = self.field_var(k)
-                {
-                    let _ = self.number_chip(ui, k, var, field_w, None);
-                } else {
+                if !key.is_some_and(|k| self.bound_field_ui(ui, k, field_w, &None)) {
                     let mut width = stroke.width;
                     let rw = value_field(
                         ui,
@@ -7205,26 +7119,8 @@ impl OndinApp {
                         Scrub::whole(0.5).range(0.0..=ui::MAX_STROKE_WIDTH),
                         |d| d.custom_formatter(ui::number(2)),
                     );
-                    // `--` typed into it opens the list, and the right-click is the
-                    // field menu — the radius field's two doors (§15 D1073).
                     if let Some(k) = key {
-                        if rw.has_focus()
-                            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(rw.id))
-                        {
-                            self.bind_typing(ui.ctx(), k, &text, rw.rect);
-                            if text.starts_with("--") {
-                                self.var_retype = Some(super::binding::Retype {
-                                    key: k,
-                                    text,
-                                    focus: true,
-                                });
-                            }
-                        }
-                        if rw.secondary_clicked()
-                            && let Some(at) = rw.interact_pointer_pos()
-                        {
-                            self.field_menu = Some((k, at, rw.rect));
-                        }
+                        self.field_doors(ui, k, &rw);
                     }
                     // Whole units under the hand and any number typed is `Scrub::whole`
                     // now, not three lines here — the rule and the speed it rounds
@@ -12079,15 +11975,7 @@ impl OndinApp {
                 }),
             _ => None,
         };
-        let retyping = key.and_then(|k| self.var_retype.as_ref().filter(|r| r.key == k).cloned());
-        if let (Some(k), Some(rt)) = (key, retyping) {
-            self.number_retype(ui, k, rt, size.x);
-            return None;
-        }
-        if let Some(k) = key
-            && let Some(var) = self.field_var(k)
-        {
-            let _ = self.number_chip(ui, k, var, size.x, None);
+        if key.is_some_and(|k| self.bound_field_ui(ui, k, size.x, &None)) {
             return None;
         }
         // **Seeded from what the layers draw, and detached in the edit itself**
@@ -12163,23 +12051,7 @@ impl OndinApp {
             self.edit_valve(&resp, tx);
         }
         if let Some(k) = key {
-            if resp.has_focus()
-                && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
-            {
-                self.bind_typing(ui.ctx(), k, &text, resp.rect);
-                if text.starts_with("--") {
-                    self.var_retype = Some(super::binding::Retype {
-                        key: k,
-                        text,
-                        focus: true,
-                    });
-                }
-            }
-            if resp.secondary_clicked()
-                && let Some(at) = resp.interact_pointer_pos()
-            {
-                self.field_menu = Some((k, at, resp.rect));
-            }
+            self.field_doors(ui, k, &resp);
         }
         Some(resp)
     }

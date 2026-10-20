@@ -1375,6 +1375,67 @@ impl OndinApp {
         reset
     }
 
+    /// A bindable number field while bound or typed over (D1038 A1–A4): the
+    /// buffer a key on its chip began, the chip, or A4's *Mixed* capsule — `true`
+    /// when it drew one, and the caller's plain field is not drawn. `mark` is the
+    /// field's whole override mark, binding and literal. Every bindable number
+    /// field draws its bound face here.
+    pub(super) fn bound_field_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        w: f32,
+        mark: &Option<super::component::OverrideMark>,
+    ) -> bool {
+        let retyping = self.var_retype.as_ref().filter(|r| r.key == key).cloned();
+        if let Some(rt) = retyping {
+            self.number_retype(ui, key, rt, w);
+            return true;
+        }
+        if let Some(var) = self.field_var(key) {
+            let hit = self.number_chip(ui, key, var, w, mark.as_ref());
+            self.reset_marked(hit, mark);
+            return true;
+        }
+        if let Some(vars) = self.field_mixed_vars(key) {
+            let mut rect = egui::Rect::NOTHING;
+            ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
+                // The unbound field's own prefix (§15 D1092).
+                let (strip, lead) = ui::prefix_strip(ui, key.prefix());
+                ui::paint_prefix(ui.painter(), strip, lead, theme::text::FAINT);
+                rect = chip_slot(ui);
+            });
+            self.mixed_chip(ui, key, &vars, rect);
+            return true;
+        }
+        false
+    }
+
+    /// An unbound field's two doors to a binding (D1038 B1 and C1): `--` typed
+    /// into it opens the list — and hands the text to the retype buffer, which
+    /// can draw B4's refused tail where a `DragValue` cannot (§15 D1044) — and a
+    /// right-click opens the field menu. Every bindable field's unbound face
+    /// calls it with its response.
+    pub(super) fn field_doors(&mut self, ui: &egui::Ui, key: FieldKey, resp: &egui::Response) {
+        if resp.has_focus()
+            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
+        {
+            self.bind_typing(ui.ctx(), key, &text, resp.rect);
+            if text.starts_with("--") {
+                self.var_retype = Some(Retype {
+                    key,
+                    text,
+                    focus: true,
+                });
+            }
+        }
+        if resp.secondary_clicked()
+            && let Some(at) = resp.interact_pointer_pos()
+        {
+            self.field_menu = Some((key, at, resp.rect));
+        }
+    }
+
     /// A number field typed over (A3) — a radius, a gap or a padding: the buffer
     /// the chip's first key began. `Enter` writes the number and detaches; `--`
     /// reopens the list.

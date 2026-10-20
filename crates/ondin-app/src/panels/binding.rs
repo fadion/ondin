@@ -473,6 +473,26 @@ pub(crate) fn kit_name(doc: &ondin_core::Document, kit: &str) -> String {
         .unwrap_or_else(|| "Kit".to_string())
 }
 
+/// Where lowercase `q` first matches `name` case aside, as a byte range of
+/// `name` itself. Walked char by char: `to_lowercase` is not length-preserving
+/// (`İ` folds to two chars), so an offset found in the lowered name can land on
+/// the wrong letters of the original.
+pub(crate) fn folded_find(name: &str, q: &str) -> Option<std::ops::Range<usize>> {
+    for (start, _) in name.char_indices() {
+        let mut folded = String::new();
+        for (i, c) in name[start..].char_indices() {
+            folded.extend(c.to_lowercase());
+            if !q.starts_with(folded.as_str()) {
+                break;
+            }
+            if folded.len() == q.len() {
+                return Some(start..start + i + c.len_utf8());
+            }
+        }
+    }
+    None
+}
+
 /// B4's refusal (§15 D1044): a field's buffer, `--` and all, that names a whole
 /// variable of `kind` and then goes on — `--space/4 * 2` — when a variable fills
 /// the whole field, a live relationship breaching §13 decision 1 (D1037). The
@@ -486,10 +506,13 @@ pub(crate) fn refused<'a>(
     kind: VarKind,
     text: &str,
 ) -> Option<(&'a Variable, usize)> {
-    let q = text.strip_prefix("--")?;
-    if !matches(table, kind, q).is_empty() {
+    let raw = text.strip_prefix("--")?;
+    if !matches(table, kind, raw).is_empty() {
         return None;
     }
+    // Leading space trimmed, as `matches` trims it.
+    let q = raw.trim_start();
+    let lead = 2 + raw.len() - q.len();
     table
         .iter()
         .filter(|v| v.kind == kind)
@@ -499,7 +522,7 @@ pub(crate) fn refused<'a>(
                 && !q[v.name.len()..].trim().is_empty()
         })
         .max_by_key(|v| v.name.len())
-        .map(|v| (v, 2 + v.name.len()))
+        .map(|v| (v, lead + v.name.len()))
 }
 
 /// A bindable field's text laid out with B4's refused tail — from byte `at` on —
@@ -1014,6 +1037,11 @@ impl OndinApp {
                             c.focus = false;
                             resp.request_focus();
                         }
+                        // A new search lights its first match, as the typed
+                        // `--` does: the old index names an unrelated row.
+                        if resp.changed() {
+                            c.highlight = 0;
+                        }
                         ui.add_space(3.0);
                     }
                     // B4: a whole name with more after it is refused in one plain
@@ -1433,11 +1461,14 @@ impl OndinApp {
                 // (§15 D1044): the buffer is the unbound field's too since a `--`
                 // hands it here, and on a rect with *some* corners bound the
                 // commit's `keep_corner_bindings` must judge each corner as it
-                // would the `DragValue`'s edit, not see them all detached.
-                let mut ops = match self.field_var(key) {
-                    Some(_) => self.detach_tx(key).0,
-                    None => Vec::new(),
-                };
+                // would the `DragValue`'s edit, not see them all detached. A
+                // *Mixed* capsule — every slot bound, to more than one variable —
+                // is a chip too: its retype starts a literal for them all.
+                let mut ops =
+                    match self.field_var(key).is_some() || self.field_mixed_vars(key).is_some() {
+                        true => self.detach_tx(key).0,
+                        false => Vec::new(),
+                    };
                 // An effect's offset and spread may be negative (§15 D1074); every
                 // other field here floors at 0.
                 let raw = r;
@@ -1952,18 +1983,17 @@ fn list_row(
     }
     let font = egui::FontId::proportional(11.5);
     let mut job = egui::text::LayoutJob::default();
-    let lower = v.name.to_lowercase();
     let q = query.trim().to_lowercase();
-    let hit = (!q.is_empty()).then(|| lower.find(&q)).flatten();
+    let hit = (!q.is_empty()).then(|| folded_find(&v.name, &q)).flatten();
     let dim = egui::TextFormat::simple(font.clone(), color::text_a(153));
     let bright = egui::TextFormat::simple(font.clone(), color::TEXT);
     match hit {
-        Some(at) if v.name.is_char_boundary(at) && v.name.is_char_boundary(at + q.len()) => {
-            job.append(&v.name[..at], 0.0, dim.clone());
-            job.append(&v.name[at..at + q.len()], 0.0, bright);
-            job.append(&v.name[at + q.len()..], 0.0, dim);
+        Some(r) => {
+            job.append(&v.name[..r.start], 0.0, dim.clone());
+            job.append(&v.name[r.clone()], 0.0, bright);
+            job.append(&v.name[r.end..], 0.0, dim);
         }
-        _ => job.append(&v.name, 0.0, if q.is_empty() { bright } else { dim }),
+        None => job.append(&v.name, 0.0, if q.is_empty() { bright } else { dim }),
     }
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     p.galley(
@@ -2389,6 +2419,20 @@ mod tests {
         );
     }
 
+    /// **The `--` list's highlight lands on the matched letters of the name
+    /// itself**, though case-folding changes a letter's length: `kon` in
+    /// `İkon/primary` is bytes 2–5, the `İ` being two bytes that fold to three.
+    ///
+    /// flip: `folded_find` as `name.to_lowercase().find(q)` → fails, `on/`.
+    #[test]
+    fn the_match_highlight_is_the_names_own_letters() {
+        let name = "İkon/primary";
+        let r = folded_find(name, "kon").expect("a match");
+        assert_eq!(&name[r], "kon");
+        assert_eq!(folded_find("Brand/500", "and/5"), Some(2..7));
+        assert_eq!(folded_find("brand", "x"), None);
+    }
+
     /// **B4: a whole name with more after it is refused, and only then** (§15
     /// D1044): `--radius/md * 2` refuses ` * 2`, case aside; a name still being
     /// typed, or the whole name alone, is not; and a whole name that is the start
@@ -2422,6 +2466,11 @@ mod tests {
             at(VarKind::Number, "--RADIUS/md*2"),
             Some(("radius/md".into(), 11)),
             "case aside, as the list matches"
+        );
+        assert_eq!(
+            at(VarKind::Number, "-- radius/md * 2"),
+            Some(("radius/md".into(), 12)),
+            "a space after the dashes aside, as the list trims it"
         );
         assert_eq!(at(VarKind::Number, "--radius/m"), None, "still being typed");
         assert_eq!(
@@ -2937,6 +2986,80 @@ mod tests {
             Some(radius),
             "the bound corner written 6 stays bound"
         );
+    }
+
+    /// **A number typed over a spacing *Mixed* capsule writes it on every slot**
+    /// (§15 D1058, A4): the left padding bound to one variable and the right to
+    /// another, `0` typed — the capsule is a chip, so both detach first and the
+    /// pair lays out at 0, though 0 is each slot's own literal.
+    ///
+    /// flip: `number_retype` detaching first only for `field_var` → fails *"both
+    /// detach"*, the commit keeping each slot bound at its literal 0.
+    #[test]
+    fn a_number_typed_over_a_mixed_spacing_capsule_detaches_every_slot() {
+        let (ctx, mut app, _, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let (frame, wide) = (app.session.ids.mint(), app.session.ids.mint_var());
+        let mode = app.session.doc.variables().modes()[0].id;
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(200.0, 100.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(ondin_core::container::Display::Flex(Default::default())),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: wide,
+                    name: "space/wide".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(12.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ])));
+        let ops = ondin_core::bind_spacing_ops(
+            &app.session.doc,
+            frame,
+            [None, None, None, Some(radius), None, Some(wide)],
+        );
+        assert!(app.commit_edit(Transaction(ops)));
+        let k = FieldKey::Spacing {
+            id: frame,
+            slots: (1 << 3) | (1 << 5),
+        };
+        assert_eq!(app.field_var(k), None, "the fixture: no one variable");
+        assert!(app.field_mixed_vars(k).is_some(), "the fixture: Mixed");
+        app.var_retype = Some(Retype {
+            key: k,
+            text: "0".into(),
+            focus: true,
+        });
+        for events in [vec![], vec![], vec![key(egui::Key::Enter)]] {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.number_retype(ui, k, rt, 160.0);
+                }
+            });
+        }
+        let n = app.session.doc.get(frame).unwrap();
+        assert_eq!(n.spacing_vars(), [None; 6], "both detach");
+        let s = n.display().unwrap().spacing();
+        assert_eq!((s[3], s[5]), (0.0, 0.0), "and lay out at 0");
     }
 
     /// **One corner binds, detaches and is typed over alone** (§15 D1049): the

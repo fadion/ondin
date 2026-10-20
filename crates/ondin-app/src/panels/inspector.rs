@@ -3416,26 +3416,72 @@ impl OndinApp {
         let opacity = self.shared_opacity_shown();
         let radius = self.shared_radius_shown();
         let has_rect = ondin_core::any_rect_in(&self.session.doc, &ids);
+        let (opacity_mark, radius_mark) = self.multi_appearance_marks(&ids, has_rect);
+        self.multi_appearance_card(
+            ui,
+            &ids,
+            opacity,
+            radius,
+            has_rect,
+            opacity_mark,
+            radius_mark,
+        );
+    }
+
+    /// The several-layer Appearance card's override marks: opacity over `ids`,
+    /// the radius over every rect in their subtree, each its binding's first.
+    fn multi_appearance_marks(
+        &self,
+        ids: &[NodeId],
+        has_rect: bool,
+    ) -> (Option<Mark>, Option<Mark>) {
+        // The main's binding as a tip names it, the single card's wording.
+        let table = self.session.doc.variables();
+        let say_vars = |v: &[Option<ondin_core::VarId>]| match v {
+            [first, rest @ ..] if rest.iter().all(|x| x == first) => match first {
+                Some(var) => table
+                    .get(*var)
+                    .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+                None => "unbound".to_owned(),
+            },
+            _ => "per corner".to_owned(),
+        };
         // Several instances' overridden opacity (§15 D981, 4G): the dot if any one
         // overrides it — beside *Mixed* where they disagree — and the reset for all.
-        let opacity_mark = self.sub_mark(
-            &ids,
-            |op| match op {
-                Operation::SetOpacity { opacity, .. } => Some(*opacity),
-                _ => None,
-            },
-            |n| Some(n.opacity()),
-            |v| *v,
-            |c, v| *c = v,
-            |id, opacity| Operation::SetOpacity { id, opacity },
-            |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
+        // Its binding first, as the single card's mark reads it (§15 D1072): a
+        // copy bound apart from its main differs by the binding alone.
+        let opacity_mark = Mark::and(
+            self.sub_mark(
+                ids,
+                |op| match op {
+                    Operation::SetOpacityVar { var, .. } => Some(*var),
+                    _ => None,
+                },
+                |n| Some(n.opacity_var()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, var| Operation::SetOpacityVar { id, var },
+                |v| say_vars(std::slice::from_ref(v)),
+            ),
+            self.sub_mark(
+                ids,
+                |op| match op {
+                    Operation::SetOpacity { opacity, .. } => Some(*opacity),
+                    _ => None,
+                },
+                |n| Some(n.opacity()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, opacity| Operation::SetOpacity { id, opacity },
+                |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
+            ),
         );
         // And the radius, over every rect the field writes — the selection's
         // subtree, as `set_corner_radius_all` reaches it — compared on the whole
         // four radii as the single-layer field's mark is. A layer outside any
         // instance has no source and costs one lookup.
         let rects: Vec<NodeId> = match has_rect {
-            true => ondin_core::subtree_nodes(&self.session.doc, &ids)
+            true => ondin_core::subtree_nodes(&self.session.doc, ids)
                 .into_iter()
                 .filter(|id| {
                     self.session
@@ -3446,27 +3492,57 @@ impl OndinApp {
                 .collect(),
             false => Vec::new(),
         };
-        let radius_mark = self.sub_mark(
-            &rects,
-            |op| match op {
-                Operation::SetGeometry {
+        // The corners' binding first, as the single card's (§15 D1048).
+        let radius_mark = Mark::and(
+            self.sub_mark(
+                &rects,
+                |op| match op {
+                    Operation::SetCornerVars { vars, .. } => Some(*vars),
+                    _ => None,
+                },
+                |n| Some(n.corner_vars()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, vars| Operation::SetCornerVars { id, vars },
+                |v| say_vars(&v[..]),
+            ),
+            self.sub_mark(
+                &rects,
+                |op| match op {
+                    Operation::SetGeometry {
+                        geometry: GeometryPatch::CornerRadii(r),
+                        ..
+                    } => Some(*r),
+                    _ => None,
+                },
+                |n| match n.kind() {
+                    NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
+                    _ => None,
+                },
+                |r| *r,
+                |c, v| *c = v,
+                |id, r| Operation::SetGeometry {
+                    id,
                     geometry: GeometryPatch::CornerRadii(r),
-                    ..
-                } => Some(*r),
-                _ => None,
-            },
-            |n| match n.kind() {
-                NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
-                _ => None,
-            },
-            |r| *r,
-            |c, v| *c = v,
-            |id, r| Operation::SetGeometry {
-                id,
-                geometry: GeometryPatch::CornerRadii(r),
-            },
-            |r| uniform(*r).map_or_else(|| "per corner".to_owned(), super::component::mark_num),
+                },
+                |r| uniform(*r).map_or_else(|| "per corner".to_owned(), super::component::mark_num),
+            ),
         );
+        (opacity_mark, radius_mark)
+    }
+
+    /// The several-layer Appearance card, drawn with its marks.
+    #[allow(clippy::too_many_arguments)]
+    fn multi_appearance_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        ids: &[NodeId],
+        opacity: Option<f32>,
+        radius: Option<f64>,
+        has_rect: bool,
+        opacity_mark: Option<Mark>,
+        radius_mark: Option<Mark>,
+    ) {
         self.panel(ui, "Appearance", None, |app, ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -3515,7 +3591,7 @@ impl OndinApp {
                 if interacting(&ro) {
                     let doc = &app.session.doc;
                     let to = (pct / 100.0).clamp(0.0, 1.0) as f32;
-                    let set = ondin_core::set_opacity_all(doc, &ids, to);
+                    let set = ondin_core::set_opacity_all(doc, ids, to);
                     // **Each bound layer the write changes detached in the edit
                     // itself** (§15 D1072's reading (c), D1071's amendment): the
                     // inspector's own doors say nothing of a detach they make,
@@ -3574,7 +3650,7 @@ impl OndinApp {
                 );
                 app.reset_marked(hit, &radius_mark);
                 if interacting(&rr) {
-                    let tx = ondin_core::set_corner_radius_all(&app.session.doc, &ids, r.max(0.0));
+                    let tx = ondin_core::set_corner_radius_all(&app.session.doc, ids, r.max(0.0));
                     app.edit_valve(&rr, tx);
                 }
                 // **Present and inert**, the same answer the pivot toggle gives on the
@@ -19858,6 +19934,71 @@ mod several_layer_binding_tests {
         };
         assert_eq!(brush(a), bound, "the anchor keeps its binding");
         assert_eq!(brush(b), bound, "the Dark layer keeps its binding");
+    }
+
+    /// **The several-layer card marks an opacity bound apart from its main**,
+    /// as the single card does: a copy whose opacity reads another variable
+    /// than its main's, selected with a plain layer.
+    ///
+    /// flip: `multi_appearance_marks`' binding mark removed → fails *"the
+    /// copy's binding is marked"* (both literals are 0).
+    #[test]
+    fn the_several_layer_card_marks_an_opacity_bound_apart() {
+        let ctx = egui::Context::default();
+        let (mut app, ids, var) = bound_pair(&ctx);
+        let (frame, other) = (app.session.ids.mint(), app.session.ids.mint_var());
+        let mode = app.session.doc.variables().modes()[0].id;
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: other,
+                    name: "o/2".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(40.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 2,
+                kind: NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: ids[0],
+                new_parent: frame,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: frame,
+                component: true,
+            },
+        ])));
+        let ops = ondin_core::bind_opacity_ops(&app.session.doc, ids[0], var);
+        assert!(app.session.commit(Transaction(ops)));
+        let place = ondin_core::Placement {
+            nodes: app.session.doc.capture_subtree(frame).unwrap(),
+            parent: root,
+            index: None,
+        };
+        let (tx, made) = ondin_core::insert_subtrees(
+            &app.session.doc,
+            &mut app.session.ids,
+            &[place],
+            Default::default(),
+        );
+        assert!(app.session.commit(tx));
+        let copy = app.session.doc.get(made[0]).unwrap().children()[0];
+        let ops = ondin_core::bind_opacity_ops(&app.session.doc, copy, other);
+        assert!(app.session.commit(Transaction(ops)));
+        let (opacity, _) = app.multi_appearance_marks(&[copy, ids[1]], false);
+        assert!(opacity.is_some(), "the copy's binding is marked");
     }
 
     fn x_var(app: &OndinApp, id: NodeId) -> Option<ondin_core::VarId> {

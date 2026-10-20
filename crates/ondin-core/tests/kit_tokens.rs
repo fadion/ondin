@@ -673,6 +673,58 @@ fn an_alias_of_the_documents_own_to_a_kits_reads_through_the_mapping() {
     );
 }
 
+/// **A kit's own variable aliasing a third kit's travels and is inserted**:
+/// kit A holds L's `brand`, makes `surface` an alias of it and fills *Card*
+/// with `surface`; D inserts *Card*, whose `surface` (A's) aliases `brand`
+/// (L's) — drawing L's white.
+///
+/// flip: `check_table` holding a kit's alias to its own kit's → the insert's
+/// commit is refused `BadAlias`.
+#[test]
+fn a_kits_alias_of_a_third_kits_variable_is_inserted() {
+    let k = kit();
+    let (mut a, mut aids, card) = kit_a(&k);
+    let held = a.variables().iter().next().unwrap().id;
+    let (light, surface) = (aids.mint_mode(), aids.mint_var());
+    a.apply(&Transaction(vec![
+        Operation::AddMode {
+            mode: Mode {
+                id: light,
+                name: "Light".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: surface,
+                name: "surface".into(),
+                kind: VarKind::Color,
+                cells: [(light, Cell::Alias(held))].into(),
+                origin: None,
+                forked: None,
+            },
+        },
+        Operation::SetFills {
+            id: card,
+            fills: bound(surface),
+        },
+    ]))
+    .expect("A's own alias of L's brand");
+    kit::publish(&mut a, None, 2);
+    let (mut d, mut ids, _) = consumer(&[]);
+    let root = d.root();
+    let av = a.meta().kit.as_ref().unwrap().version;
+    let (tx, inst) =
+        kit::insert(&d, &mut ids, A_ID, av, a.published().unwrap(), card, root).expect("plans");
+    d.apply(&tx).expect("the insert commits");
+    assert_eq!(
+        drawn(&d, inst),
+        Brush::Solid(WHITE),
+        "L's brand, through A's surface"
+    );
+}
+
 /// Copy `inst` out of `from` through the clipboard's text and paste it into
 /// `to`'s root, through `land` and the carrying insert and the commit's passes.
 fn paste(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSource) -> NodeId {

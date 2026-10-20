@@ -340,10 +340,13 @@ impl Variables {
             {
                 return Some(*to);
             }
-            if let Some(named) = self
+            // By name: the document mode's, or — another kit's variable having
+            // aliased this kit's — that kit's mode's.
+            let name = self
                 .mode(m)
-                .and_then(|dm| k.modes.iter().find(|x| x.name == dm.name))
-            {
+                .map(|dm| dm.name.as_str())
+                .or_else(|| self.kit_mode_of(m).map(|(_, km)| km.name.as_str()));
+            if let Some(named) = name.and_then(|n| k.modes.iter().find(|x| x.name == n)) {
                 return Some(named.id);
             }
         }
@@ -1569,7 +1572,7 @@ pub enum VarRule {
 /// The table's own rules, without the bindings.
 ///
 /// A kit's variable (§15 D1064) has a cell in every mode **of its kit** and no
-/// other, aliases only a variable of the same kit, and is named uniquely among
+/// other, aliases only a kit's variable (its own kit's or another's), and is named uniquely among
 /// its kit's; the document's own are held to the document's modes and named
 /// uniquely among themselves. A kit's modes and the document's never share an
 /// id, and a mapping maps a mode of the document onto a mode of its kit.
@@ -1626,13 +1629,13 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
             }
             match cell {
                 Cell::Alias(target) => {
-                    // A kit's variable aliases only its own kit's: its kit
-                    // published it so, and a column of a kit is no column of
-                    // anything else.
-                    let same_kit = v
-                        .kit()
-                        .is_none_or(|k| t.get(*target).and_then(Variable::kit) == Some(k));
-                    if t.kind_of(*target) != Some(v.kind) || !same_kit {
+                    // A kit's variable aliases a kit's — its own, or one its
+                    // kit held when it published (each step reads its own
+                    // kit's column, `kit_mode`) — never the document's own,
+                    // which its kit never had.
+                    let kits_only =
+                        v.kit().is_none() || t.get(*target).and_then(Variable::kit).is_some();
+                    if t.kind_of(*target) != Some(v.kind) || !kits_only {
                         return Err(VarRule::BadAlias(v.id));
                     }
                     if t.would_loop(v.id, *mode, *target) {

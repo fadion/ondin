@@ -1912,6 +1912,13 @@ impl OndinApp {
         // out falls back to that.
         let resolved = subject.line_height;
         let (mut shown, scrub, typed) = match current {
+            // Over several layers that disagree, a number typed is px for them
+            // all, whatever the first layer holds — click order decides nothing.
+            None if mixed => (
+                resolved.unwrap_or(0.0),
+                Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
+                expr::Unit::Px,
+            ),
             // Auto shows px and cannot be typed into — a zero-width scrub range,
             // and the write below is gated on `current` being `Some` — so its unit
             // is the honest one rather than a reachable one.
@@ -1984,13 +1991,29 @@ impl OndinApp {
             });
             return;
         }
-        if let Some(l) = current {
-            let next = match l {
-                Length::Em(_) => Length::Em(shown / 100.0),
-                Length::Px(_) => Length::Px(shown),
-            };
-            self.char_valve(&resp, subject, CharAttr::LineHeight(Some(next)));
+        let next = match current {
+            Some(Length::Em(_)) => Some(Length::Em(shown / 100.0)),
+            Some(Length::Px(_)) => Some(Length::Px(shown)),
+            None if mixed => Some(Length::Px(shown)),
+            None => None,
+        };
+        let Some(next) = next else { return };
+        // A Mixed field writes once its number has moved: seeded from the first
+        // layer, a click in and out would otherwise put that layer's value on
+        // every other.
+        if mixed {
+            let key = resp.id.with("line-height-moved");
+            if resp.changed() {
+                ui.ctx().data_mut(|d| d.insert_temp(key, true));
+            }
+            if !ui.ctx().data(|d| d.get_temp::<bool>(key)).unwrap_or(false) {
+                return;
+            }
+            if !(resp.dragged() || resp.has_focus()) {
+                ui.ctx().data_mut(|d| d.insert_temp(key, false));
+            }
         }
+        self.char_valve(&resp, subject, CharAttr::LineHeight(Some(next)));
     }
 
     /// Letter spacing: `%` by default, with a `px` alternative.
@@ -10623,6 +10646,114 @@ mod several_layer_tests {
             tracking,
             [Length::Px(2.0), Length::Px(2.0), Length::Px(3.2)],
             "each layer at its own size"
+        );
+    }
+
+    /// **A Mixed line height takes a typed px on every layer, whatever the
+    /// first holds** — here Auto — and a click in and out writes nothing.
+    ///
+    /// flips: the `None if mixed` arms removed → fails *"every layer at 30px"*
+    /// (Auto takes no typing); the Mixed field's moved gate removed → fails
+    /// *"a click in and out writes nothing"*.
+    #[test]
+    fn a_mixed_line_height_over_auto_takes_a_typed_px() {
+        let (ctx, mut app, texts) = three();
+        let mut set = style(&app, texts[1]);
+        set.line_height = Some(Length::Px(24.0));
+        app.commit_edit(Transaction(vec![Operation::SetTextStyle {
+            id: texts[1],
+            style: set,
+            spans: None,
+        }]));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| -> egui::Rect {
+            let mut field = egui::Rect::NOTHING;
+            let all = TypeSubject::several(app, &texts).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(TEST_AREA),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let top = ui.cursor().min;
+                    let size = egui::vec2(130.0, ROW_H);
+                    app.type_line_height_field(ui, &all, size, None);
+                    field = egui::Rect::from_min_size(top, size);
+                },
+            );
+            field
+        };
+        let heights = |app: &OndinApp| -> Vec<Option<Length>> {
+            texts.iter().map(|id| style(app, *id).line_height).collect()
+        };
+        let before = heights(&app);
+        assert_eq!(
+            before,
+            [None, Some(Length::Px(24.0)), None],
+            "the fixture: Mixed"
+        );
+        let field = frame(&mut app, Vec::new());
+        let at = field.center();
+        let click = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let away = egui::pos2(at.x, at.y + 200.0);
+        let click_away = |pressed| egui::Event::PointerButton {
+            pos: away,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, vec![click(true)]);
+        frame(&mut app, vec![click(false)]);
+        frame(&mut app, Vec::new());
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(away), click_away(true)],
+        );
+        frame(&mut app, vec![click_away(false)]);
+        frame(&mut app, Vec::new());
+        assert_eq!(heights(&app), before, "a click in and out writes nothing");
+
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut app, vec![click(true)]);
+        frame(&mut app, vec![click(false)]);
+        frame(&mut app, Vec::new());
+        let key = |key, pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut app,
+            vec![
+                key(egui::Key::A, true),
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+            ],
+        );
+        frame(&mut app, vec![egui::Event::Text("30".into())]);
+        frame(
+            &mut app,
+            vec![key(egui::Key::Enter, true), key(egui::Key::Enter, false)],
+        );
+        frame(&mut app, Vec::new());
+        frame(&mut app, Vec::new());
+        assert_eq!(
+            heights(&app),
+            [Some(Length::Px(30.0)); 3],
+            "every layer at 30px"
         );
     }
 

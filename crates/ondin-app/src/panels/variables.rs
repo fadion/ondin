@@ -744,7 +744,9 @@ impl OndinApp {
                             // A kit's style is inert here (§15 D1065): its users
                             // can be selected, and nothing else.
                             if st.origin.is_some() {
-                                let who = sty::users(doc, st.id);
+                                // Never a vault node, which is never selected.
+                                let mut who = sty::users(doc, st.id);
+                                who.retain(|u| !doc.in_vault(*u));
                                 let select = ui::menu_row(
                                     ui,
                                     ui::MenuRow::new(icon::SELECTION_ALL, &layers_label(who.len()))
@@ -3860,6 +3862,110 @@ mod tests {
         ]);
         assert!(app.session.commit(tx), "the fixture commits");
         (light, night, surface, brand, accent, rect)
+    }
+
+    /// **The browser's group, mode and selection doors** (D1038 G): a group
+    /// renamed moves its members, refusing an empty part and a name taken; a
+    /// mode renamed, refusing an empty name and a taken one; *Duplicate mode*
+    /// names its copy after its source, then *copy 2*, each placed after it;
+    /// *Delete mode* returns a frame set to it to *Inherit*; the count's
+    /// *Select* selects its layers.
+    ///
+    /// flip: `GroupName`'s empty-part refusal removed → fails *"an empty part
+    /// is refused"*, the rename committed to `a//b`'s parts.
+    #[test]
+    fn the_browsers_group_mode_and_select_doors() {
+        let (_ctx, mut app) = app();
+        let (light, _, _, _, _, rect) = with_a_kit(&mut app);
+        app.toggle_var_browser();
+        let number = |id, name: &str| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Number,
+                cells: [(light, Cell::Number(1.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        };
+        let ids: Vec<VarId> = (0..3).map(|_| app.session.ids.mint_var()).collect();
+        assert!(app.session.commit(Transaction(vec![
+            number(ids[0], "ui/a"),
+            number(ids[1], "ui/b"),
+            number(ids[2], "other/a"),
+        ])));
+        let name =
+            |app: &OndinApp, v: VarId| app.session.doc.variables().get(v).unwrap().name.clone();
+        let refusal = |app: &OndinApp| app.var_browser.as_ref().unwrap().refusal.clone();
+
+        app.var_act(Act::GroupName("ui".into(), "theme".into()));
+        assert_eq!(
+            (name(&app, ids[0]), name(&app, ids[1])),
+            ("theme/a".into(), "theme/b".into())
+        );
+        app.var_act(Act::GroupName("theme".into(), "a//b".into()));
+        assert!(refusal(&app).is_some(), "an empty part is refused");
+        assert_eq!(name(&app, ids[0]), "theme/a");
+        app.var_act(Act::GroupName("theme".into(), "other".into()));
+        assert_eq!(
+            refusal(&app).as_deref(),
+            Some("other/a already exists."),
+            "a name taken is refused"
+        );
+
+        app.var_act(Act::ModeName(light, "  ".into()));
+        assert_eq!(refusal(&app).as_deref(), Some("A mode needs a name."));
+        app.var_act(Act::ModeName(light, "Day".into()));
+        let modes = |app: &OndinApp| -> Vec<String> {
+            app.session
+                .doc
+                .variables()
+                .modes()
+                .iter()
+                .map(|m| m.name.clone())
+                .collect()
+        };
+        assert_eq!(modes(&app), ["Day"]);
+        app.var_act(Act::DuplicateMode(light));
+        app.var_act(Act::DuplicateMode(light));
+        assert_eq!(
+            modes(&app),
+            ["Day", "Day copy 2", "Day copy"],
+            "each after its source"
+        );
+        app.var_act(Act::ModeName(light, "Day copy".into()));
+        assert_eq!(refusal(&app).as_deref(), Some("Day copy already exists."));
+
+        let copy = app.session.doc.variables().modes()[2].id;
+        let frame = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetMode {
+                id: frame,
+                mode: Some(copy),
+            },
+        ])));
+        app.var_act(Act::DeleteMode(copy));
+        assert_eq!(modes(&app), ["Day", "Day copy 2"]);
+        assert_eq!(
+            app.session.doc.get(frame).unwrap().mode(),
+            None,
+            "back to Inherit"
+        );
+
+        app.session.selection.set(Vec::new());
+        app.var_act(Act::Select(vec![rect]));
+        assert_eq!(app.session.selection.ids(), &[rect]);
     }
 
     /// **A document group's menu reaches the document's own variables only**:

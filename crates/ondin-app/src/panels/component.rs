@@ -440,6 +440,23 @@ impl OndinApp {
         }
     }
 
+    /// Layer `id`'s field resets — the `reset` operations of its
+    /// `reset::overrides`, which a mark reads its source's value out of: this
+    /// frame's cache ([`OndinApp::field_overrides`]) for a selected layer, else
+    /// computed — a card's subject outside the selection, the Mask card's masks
+    /// inside a selected group.
+    pub(super) fn resets_of(&self, id: NodeId) -> std::borrow::Cow<'_, [Operation]> {
+        match self.field_overrides.iter().find(|(n, _)| *n == id) {
+            Some((_, r)) => std::borrow::Cow::Borrowed(r.as_slice()),
+            None => std::borrow::Cow::Owned(
+                ondin_core::reset::overrides(&self.session.doc, id)
+                    .into_iter()
+                    .map(|o| o.reset)
+                    .collect(),
+            ),
+        }
+    }
+
     /// A **sub-field's** override mark over `subjects` (§15 D981): one number or
     /// choice inside a struct payload — a layout item's grow, a container's gap, a
     /// text style's size, one inset — which `reset::overrides` compares and resets
@@ -469,19 +486,7 @@ impl OndinApp {
         let mut ops = Vec::new();
         let mut tip = None;
         for id in subjects {
-            // A card's subject outside the selection — the Mask card's masks inside
-            // a selected group — is compared here rather than in the frame's cache.
-            let computed: Vec<Operation>;
-            let resets = match self.field_overrides.iter().find(|(n, _)| n == id) {
-                Some((_, r)) => r.as_slice(),
-                None => {
-                    computed = ondin_core::reset::overrides(&self.session.doc, *id)
-                        .into_iter()
-                        .map(|o| o.reset)
-                        .collect();
-                    computed.as_slice()
-                }
-            };
+            let resets = self.resets_of(*id);
             let (Some(src), Some(mut cur)) = (
                 resets.iter().find_map(&theirs),
                 self.session.doc.get(*id).and_then(&mine),

@@ -826,17 +826,7 @@ impl OndinApp {
     /// family at all.
     fn family_mark(&self, id: NodeId) -> Option<OverrideMark> {
         let doc = &self.session.doc;
-        let computed: Vec<Operation>;
-        let resets = match self.field_overrides.iter().find(|(n, _)| *n == id) {
-            Some((_, r)) => r.as_slice(),
-            None => {
-                computed = ondin_core::reset::overrides(doc, id)
-                    .into_iter()
-                    .map(|o| o.reset)
-                    .collect();
-                computed.as_slice()
-            }
-        };
+        let resets = self.resets_of(id);
         let node = doc.get(id)?;
         let ondin_core::NodeKind::Text { style, .. } = node.kind() else {
             return None;
@@ -890,17 +880,7 @@ impl OndinApp {
     /// `keep_text_bindings` leaves as stated.
     fn content_mark(&self, id: NodeId) -> Option<OverrideMark> {
         let doc = &self.session.doc;
-        let computed: Vec<Operation>;
-        let resets = match self.field_overrides.iter().find(|(n, _)| *n == id) {
-            Some((_, r)) => r.as_slice(),
-            None => {
-                computed = ondin_core::reset::overrides(doc, id)
-                    .into_iter()
-                    .map(|o| o.reset)
-                    .collect();
-                computed.as_slice()
-            }
-        };
+        let resets = self.resets_of(id);
         let node = doc.get(id)?;
         let ondin_core::NodeKind::Text { content, .. } = node.kind() else {
             return None;

@@ -1751,7 +1751,14 @@ impl OndinApp {
             return;
         }
         if let Some(i) = pick {
-            let v = &variants[i];
+            self.apply_variant(subject, &variants[i]);
+        }
+    }
+
+    /// Variant `v` picked over `subject`: its weight, slope and axes, each
+    /// layer's own other axes kept.
+    fn apply_variant(&mut self, subject: &TypeSubject, v: &text::FontVariant) {
+        {
             let attrs = |coords: &[AxisSetting]| {
                 let mut merged = coords.to_vec();
                 for axis in &v.coords {
@@ -10646,6 +10653,197 @@ mod several_layer_tests {
             tracking,
             [Length::Px(2.0), Length::Px(2.0), Length::Px(3.2)],
             "each layer at its own size"
+        );
+    }
+
+    /// **A variant picked over several layers keeps each layer's own other
+    /// axes** (§15 D1077): the first on `opsz 14`, the third on `wdth 75`, a
+    /// variant setting `GRAD 50` — each takes the grade beside its own axis.
+    ///
+    /// flip: `apply_variant` merging into the first layer's coords for every
+    /// layer → fails at the second layer, given the first's `opsz`.
+    #[test]
+    fn a_variant_pick_keeps_each_layers_own_axes() {
+        use ondin_core::typography::{AxisSetting, Tag};
+        let (_ctx, mut app, texts) = three();
+        let axis = |tag: &[u8; 4], value| AxisSetting {
+            tag: Tag::new(*tag),
+            value,
+        };
+        for (i, coords) in [
+            (0, vec![axis(b"opsz", 14.0)]),
+            (2, vec![axis(b"wdth", 75.0)]),
+        ] {
+            let mut s = style(&app, texts[i]);
+            s.variations = coords;
+            app.commit_edit(Transaction(vec![Operation::SetTextStyle {
+                id: texts[i],
+                style: s,
+                spans: None,
+            }]));
+        }
+        let all = TypeSubject::several(&app, &texts).expect("a subject");
+        app.apply_variant(
+            &all,
+            &text::FontVariant {
+                name: "Graded".into(),
+                weight: 500,
+                italic: false,
+                coords: vec![axis(b"GRAD", 50.0)],
+            },
+        );
+        // As sets: the stored order is not the question.
+        let has = |i: usize, want: &[AxisSetting]| {
+            let got = style(&app, texts[i]).variations;
+            got.len() == want.len() && want.iter().all(|a| got.contains(a))
+        };
+        assert!(
+            has(0, &[axis(b"opsz", 14.0), axis(b"GRAD", 50.0)]),
+            "the first keeps its size"
+        );
+        assert!(has(1, &[axis(b"GRAD", 50.0)]));
+        assert!(
+            has(2, &[axis(b"wdth", 75.0), axis(b"GRAD", 50.0)]),
+            "the third keeps its width"
+        );
+        assert!(texts.iter().all(|id| style(&app, *id).weight == 500));
+    }
+
+    /// **The line height's unit click converts each layer at its own size**
+    /// (§15 D1077): 120% at 20, 20 and 32 into px is 24, 24 and 38.4.
+    ///
+    /// flip: the click converting at `subject.font_size()` → fails on the third
+    /// layer, 24.
+    #[test]
+    fn a_line_height_unit_click_converts_each_layer_at_its_own_size() {
+        let (ctx, mut app, texts) = three();
+        for id in &texts {
+            let mut s = style(&app, *id);
+            s.line_height = Some(Length::Em(1.2));
+            app.commit_edit(Transaction(vec![Operation::SetTextStyle {
+                id: *id,
+                style: s,
+                spans: None,
+            }]));
+        }
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| -> egui::Rect {
+            let mut field = egui::Rect::NOTHING;
+            let all = TypeSubject::several(app, &texts).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(TEST_AREA),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let top = ui.cursor().min;
+                    let size = egui::vec2(130.0, ROW_H);
+                    app.type_line_height_field(ui, &all, size, None);
+                    field = egui::Rect::from_min_size(top, size);
+                },
+            );
+            field
+        };
+        let field = frame(&mut app, Vec::new());
+        let at = egui::pos2(field.right() - 8.0, field.center().y);
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }],
+            );
+        }
+        let heights: Vec<Option<Length>> = texts
+            .iter()
+            .map(|id| style(&app, *id).line_height)
+            .collect();
+        let near = |l: Option<Length>, want: f64| matches!(l, Some(Length::Px(v)) if (v - want).abs() < 1e-3);
+        assert!(
+            near(heights[0], 24.0) && near(heights[1], 24.0) && near(heights[2], 38.4),
+            "each layer at its own size: {heights:?}"
+        );
+    }
+
+    /// **The vertical-alignment track writes every fixed-height box its own
+    /// block with the one field changed** (§15 D1077): *Bottom* picked over the
+    /// three, the third's overflow kept.
+    ///
+    /// flip: the vertical track's several-layer arm switched off → fails at
+    /// the second layer, still `Top`.
+    #[test]
+    fn a_vertical_alignment_pick_writes_every_layer() {
+        let (ctx, mut app, texts) = three();
+        let mut ops: Vec<Operation> = texts
+            .iter()
+            .map(|id| Operation::SetGeometry {
+                id: *id,
+                geometry: ondin_core::GeometryPatch::TextSizing(TextSizing::Fixed(
+                    ondin_core::kurbo::Size::new(120.0, 80.0),
+                )),
+            })
+            .collect();
+        ops.push(Operation::SetBlockStyle {
+            id: texts[2],
+            block: BlockStyle {
+                overflow: ondin_core::TextOverflow::Clip,
+                ..BlockStyle::default()
+            },
+        });
+        app.commit_edit(Transaction(ops));
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| -> egui::Rect {
+            let mut row = egui::Rect::NOTHING;
+            let all = TypeSubject::several(app, &texts).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(TEST_AREA),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(268.0);
+                    let top = ui.cursor().min;
+                    app.type_alignment_row(ui, &all, [&None, &None]);
+                    row = egui::Rect::from_min_size(top, egui::vec2(268.0, ROW_H));
+                },
+            );
+            row
+        };
+        let row = frame(&mut app, Vec::new());
+        // The vertical track follows the horizontal one and a gap; its third of
+        // three cells is *Bottom*.
+        let start = row.left() + (row.width() - GAP) / 2.0 + GAP;
+        let at = egui::pos2(start + (row.right() - start) * 5.0 / 6.0, row.center().y);
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                }],
+            );
+        }
+        let blocks: Vec<BlockStyle> = texts
+            .iter()
+            .map(|id| match app.session.doc.get(*id).map(|n| n.kind()) {
+                Some(ondin_core::NodeKind::Text { block, .. }) => *block,
+                _ => panic!("not a text"),
+            })
+            .collect();
+        for (i, b) in blocks.iter().enumerate() {
+            assert_eq!(b.vertical_align, VerticalAlign::Bottom, "layer {i}");
+        }
+        assert_eq!(
+            blocks[2].overflow,
+            ondin_core::TextOverflow::Clip,
+            "the third kept its overflow"
         );
     }
 

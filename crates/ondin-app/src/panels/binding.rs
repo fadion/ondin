@@ -2224,6 +2224,121 @@ mod tests {
         );
     }
 
+    /// **Every kind of field draws as before once extracted** — the value
+    /// `field_value` files is the one the field draws in the unit its binding
+    /// reads: opacity 30% as 30, a stroke's width, an effect's blur, a corner, a
+    /// size axis and a text's content.
+    ///
+    /// flip: `field_value`'s opacity arm without its `* 100.0` → fails
+    /// *"opacity"*, the layer redrawn at 0.3%.
+    #[test]
+    fn every_field_extracted_draws_as_before() {
+        let (_ctx, mut app, rect, _, _) = fixture();
+        let (stroke, shadow, text) = (
+            app.session.ids.mint_item(),
+            app.session.ids.mint_item(),
+            app.session.ids.mint(),
+        );
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::SetOpacity {
+                id: rect,
+                opacity: 0.3,
+            },
+            Operation::SetStrokes {
+                id: rect,
+                strokes: vec![ondin_core::Keyed::new(
+                    stroke,
+                    ondin_core::Stroke {
+                        width: 3.0,
+                        ..Default::default()
+                    },
+                )],
+            },
+            Operation::SetEffects {
+                id: rect,
+                effects: vec![ondin_core::Keyed::new(
+                    shadow,
+                    ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
+                        ondin_core::Shadow {
+                            blur: 8.0,
+                            ..Default::default()
+                        },
+                    )),
+                )],
+            },
+            Operation::CreateNode {
+                id: text,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "Hello".into(),
+                    style: Default::default(),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: ondin_core::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+        ])));
+        let extract = |app: &mut OndinApp, k: FieldKey| {
+            let value = app.field_value(k).expect("a value");
+            app.extract_field(k, value);
+            assert!(app.field_var(k).is_some(), "{k:?} bound");
+        };
+        extract(&mut app, FieldKey::Opacity { id: rect });
+        assert!(
+            (app.session.doc.drawn_opacity(rect) - 0.3).abs() < 1e-6,
+            "opacity"
+        );
+        extract(
+            &mut app,
+            FieldKey::StrokeWidth {
+                id: rect,
+                item: stroke,
+            },
+        );
+        let doc = &app.session.doc;
+        let paint = doc
+            .resolved_paint(rect, doc.get(rect).unwrap().paint())
+            .into_owned();
+        assert_eq!(paint.strokes[0].width, 3.0, "stroke width");
+        extract(
+            &mut app,
+            FieldKey::EffectNumber {
+                id: rect,
+                item: shadow,
+                slot: ondin_core::EFFECT_BLUR,
+            },
+        );
+        let doc = &app.session.doc;
+        let fx = doc
+            .resolved_effects(rect, doc.get(rect).unwrap().effects())
+            .into_owned();
+        assert_eq!(fx[0].numbers()[ondin_core::EFFECT_BLUR], Some(8.0), "blur");
+        extract(&mut app, FieldKey::Corner { id: rect, slot: 2 });
+        extract(&mut app, FieldKey::Size { id: rect, axis: 0 });
+        app.session.resolved = ondin_core::Resolved::rebuild(&app.session.doc);
+        match app.session.resolved.used_kind(&app.session.doc, rect) {
+            Some(NodeKind::Rect { size, corner_radii }) => {
+                assert_eq!(corner_radii.bottom_right, 2.0, "corner");
+                assert_eq!(size.width, 40.0, "width");
+            }
+            k => panic!("a rect: {k:?}"),
+        }
+        extract(&mut app, FieldKey::Content { id: text });
+        match app.session.doc.resolved_kind(text).map(|k| k.into_owned()) {
+            Some(NodeKind::Text { content, .. }) => assert_eq!(content, "Hello", "content"),
+            k => panic!("a text: {k:?}"),
+        }
+    }
+
     /// *Extract into variable…* files the value as a new variable, binds the
     /// field to it in the same transaction — one undo takes both — and opens the
     /// browser on its name (D1–D3).

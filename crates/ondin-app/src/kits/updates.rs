@@ -116,35 +116,49 @@ impl OndinApp {
         Some(WATCH_EVERY)
     }
 
-    /// The kits the vault holds mains of, each once.
+    /// The kits the vault holds mains of, and those whose variables or styles
+    /// are held without one, each once.
     fn used_kit_ids(&self) -> Vec<String> {
         let doc = &self.session.doc;
-        let Some(vault) = doc.vault().and_then(|v| doc.get(v)) else {
-            return Vec::new();
-        };
-        let mut out: Vec<String> = Vec::new();
-        for o in vault
-            .children()
+        let tops: &[NodeId] = doc
+            .vault()
+            .and_then(|v| doc.get(v))
+            .map_or(&[], |v| v.children());
+        let mains = tops
             .iter()
             .filter_map(|t| doc.get(*t).and_then(|n| n.origin()))
-        {
-            if !out.contains(&o.kit) {
-                out.push(o.kit.clone());
+            .map(|o| o.kit.as_str());
+        let vars = doc
+            .variables()
+            .iter()
+            .filter_map(|v| v.origin.as_ref().map(|o| o.kit.as_str()));
+        let styles = doc
+            .styles()
+            .iter()
+            .filter_map(|s| s.origin.as_ref().map(|o| o.kit.as_str()));
+        let mut out: Vec<String> = Vec::new();
+        for kit in mains.chain(vars).chain(styles) {
+            if !out.iter().any(|k| k == kit) {
+                out.push(kit.to_string());
             }
         }
         out
     }
 
-    /// Every kit this document uses with a newer publish in the library.
+    /// Every kit this document uses with a newer publish in the library — by a
+    /// vendored main, or by variables or styles alone, held through another
+    /// kit's main; such a kit's update is what that kit's own update and every
+    /// insert from it wait on.
     ///
     /// `count` asks for each kit's instance count, which is a scan of the whole
     /// document per vendored main — the open popover's, never the pill's, which
     /// asks every frame.
     pub(crate) fn kits_waiting(&self, count: bool) -> Vec<Waiting> {
         let doc = &self.session.doc;
-        let Some(vault) = doc.vault().and_then(|v| doc.get(v)) else {
-            return Vec::new();
-        };
+        let tops: &[NodeId] = doc
+            .vault()
+            .and_then(|v| doc.get(v))
+            .map_or(&[], |v| v.children());
         let own = doc.meta().id.clone();
         let library = kits_in(&self.library, own.as_deref());
         let later = own
@@ -153,7 +167,7 @@ impl OndinApp {
             .cloned()
             .unwrap_or_default();
         let mut out: Vec<Waiting> = Vec::new();
-        for top in vault.children() {
+        for top in tops {
             let Some(o) = doc.get(*top).and_then(|n| n.origin()) else {
                 continue;
             };
@@ -183,6 +197,37 @@ impl OndinApp {
                     held: o.version,
                     mains: 1,
                     instances,
+                    later: false,
+                }),
+            }
+        }
+        let tokens = doc
+            .variables()
+            .iter()
+            .filter_map(|v| v.origin.as_ref().map(|o| (o.kit.as_str(), o.version)))
+            .chain(
+                doc.styles()
+                    .iter()
+                    .filter_map(|s| s.origin.as_ref().map(|o| (o.kit.as_str(), o.version))),
+            );
+        for (kit, version) in tokens {
+            if tops.iter().any(|t| {
+                doc.get(*t)
+                    .and_then(|n| n.origin())
+                    .is_some_and(|o| o.kit == kit)
+            }) {
+                continue;
+            }
+            let Some(k) = library.iter().find(|k| k.id == kit) else {
+                continue;
+            };
+            match out.iter_mut().find(|w| w.kit.id == kit) {
+                Some(w) => w.held = w.held.min(version),
+                None => out.push(Waiting {
+                    kit: k.clone(),
+                    held: version,
+                    mains: 0,
+                    instances: 0,
                     later: false,
                 }),
             }
@@ -660,6 +705,7 @@ fn waiting_row(ui: &mut egui::Ui, w: &Waiting, part: Option<&super::summary::Kit
     let line = match part.map(super::summary::headline) {
         Some(h) if !h.is_empty() => h,
         Some(_) => "No component you use changes".to_string(),
+        None if w.mains == 0 => "Its variables and styles".to_string(),
         None => format!(
             "{} component{}",
             w.mains,
@@ -786,6 +832,81 @@ mod tests {
         .unwrap();
         assert!(app.session.commit(tx));
         (app, inst)
+    }
+
+    /// **A kit held only through its variables waits for its update too**: its
+    /// update is what the kit carrying it and every insert from it wait on.
+    ///
+    /// flip: `kits_waiting`'s held-tokens loop removed → fails *"the kit waits"*.
+    #[test]
+    fn a_kit_held_only_through_its_variables_waits() {
+        use ondin_core::variable::{Cell, KitMode, KitModes, Mode, VarKind, VarOrigin, Variable};
+        let ctx = egui::Context::default();
+        let root = temp_root("tokens-only");
+        let (path, kit, _, dot) = file_kit(&root);
+        let mut app = OndinApp::headless(&ctx);
+        app.prefs.base_folder = Some(root.to_path_buf());
+        app.library = Library::open(root.to_path_buf());
+        let mut doc = Document::new(app.session.ids.mint());
+        let doc_path =
+            crate::library::store::file_document(&root, None, "Landing", &mut doc).unwrap();
+        app.library.refresh();
+        app.open_path(&doc_path);
+        let (mine, theirs, var) = (
+            app.session.ids.mint_mode(),
+            app.session.ids.mint_mode(),
+            app.session.ids.mint_var(),
+        );
+        let held = Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mine,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::SetKitModes {
+                kit: kit.clone(),
+                modes: Some(KitModes {
+                    name: Some("Atlas".into()),
+                    modes: vec![KitMode {
+                        id: theirs,
+                        name: "Default".into(),
+                        from: theirs,
+                    }],
+                    map: Default::default(),
+                }),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "brand".into(),
+                    kind: VarKind::Number,
+                    cells: [(theirs, Cell::Number(1.0))].into(),
+                    origin: Some(VarOrigin {
+                        kit: kit.clone(),
+                        var,
+                        version: 4,
+                    }),
+                    forked: None,
+                },
+            },
+        ]);
+        assert!(app.session.commit(held));
+        assert!(app.kits_waiting(false).is_empty(), "up to date");
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        app.library.refresh();
+        let w = app.kits_waiting(true);
+        assert_eq!(w.len(), 1, "the kit waits");
+        assert_eq!((w[0].held, w[0].kit.version, w[0].mains), (4, 5, 0));
     }
 
     fn settle_for_accept(app: &mut OndinApp) {

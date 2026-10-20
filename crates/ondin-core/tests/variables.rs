@@ -1341,15 +1341,17 @@ impl Lcg {
 }
 
 /// **`update` ≡ `rebuild` over random variable and mode edits** (§5.9, D1037
-/// premise (ii)): the operations that name no node — a cell edit, a mode added or
-/// removed — and the ones that change which mode a subtree reads — a frame's
-/// mode, a reparent across frames — authored at random over rectangles whose
-/// corners are bound, with undos between. `tests/resolve.rs`'s three runs author
-/// none of these, so they could never see a stale bound corner.
+/// premise (ii)): the operations that name no node — a cell edit, a variable
+/// rewritten, a mode added, removed or renamed, a kit's mapping — and the ones
+/// that change which mode a subtree reads — a frame's mode, a reparent across
+/// frames — authored at random over rectangles whose corners, gaps, sizes,
+/// visibility, stroke widths and shadow blurs are bound to the document's
+/// variables and a kit's, with undos between.
 ///
-/// Flip, run: a cell edit dirtying nothing (`op_set_variable_cell` without its
-/// `bound_nodes` extend) fails here with a used-kind mismatch on a bound rect —
-/// the live map's resolved radii one cell edit behind the rebuild's.
+/// flips: a cell edit dirtying nothing (`op_set_variable_cell` without its
+/// `bound_nodes` extend) fails here with a used-kind mismatch; `SetModeName`
+/// or `SetKitModes` without its extend fails here too, a kit-bound rect a
+/// rename or a mapping behind.
 #[test]
 fn incremental_update_equals_rebuild_over_random_variable_ops() {
     for seed in 0..40u64 {
@@ -1374,13 +1376,50 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
         // And a boolean, so a bound visibility takes an item out of the flow
         // (§15 D1059).
         let show = show_var(&mut f);
+        // And a kit whose modes match the document's by name or not — so a
+        // mode's rename or the kit's mapping moves which column its variable
+        // reads (§15 D1064).
+        const KIT: &str = "5eed0000000000000000000000000011";
+        let (k_light, k_night, kr) = (f.ids.mint_mode(), f.ids.mint_mode(), f.ids.mint_var());
+        let kit_mode = |id, name: &str| ondin_core::variable::KitMode {
+            id,
+            name: name.into(),
+            from: id,
+        };
+        f.doc
+            .apply(&Transaction(vec![
+                Operation::SetKitModes {
+                    kit: KIT.into(),
+                    modes: Some(ondin_core::variable::KitModes {
+                        name: None,
+                        modes: vec![kit_mode(k_light, "Light"), kit_mode(k_night, "Night")],
+                        map: Default::default(),
+                    }),
+                },
+                Operation::AddVariable {
+                    var: Variable {
+                        id: kr,
+                        name: "kit/radius".into(),
+                        kind: VarKind::Number,
+                        cells: [(k_light, Cell::Number(3.0)), (k_night, Cell::Number(9.0))].into(),
+                        origin: Some(ondin_core::variable::VarOrigin {
+                            kit: KIT.into(),
+                            var: kr,
+                            version: 1,
+                        }),
+                        forked: None,
+                    },
+                },
+            ]))
+            .unwrap();
         let mut rects = vec![f.rect, second];
         let mut hist = ondin_core::History::new();
         let mut res = Resolved::rebuild(&f.doc);
         for step in 0..50 {
             let modes: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
             let rect = rects[rng.below(rects.len())];
-            let tx = match rng.below(14) {
+            let number = if rng.below(2) == 0 { f.radius } else { kr };
+            let tx = match rng.below(19) {
                 0 => {
                     let id = f.ids.mint();
                     rects.push(id);
@@ -1398,7 +1437,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                 }
                 1 => {
                     let mut vars = [None; 4];
-                    vars[rng.below(4)] = Some(f.radius);
+                    vars[rng.below(4)] = Some(number);
                     Transaction(ondin_core::bind_corners_ops(&f.doc, rect, vars))
                 }
                 2 => Transaction(ondin_core::detach_corners_ops(&f.doc, rect)),
@@ -1429,7 +1468,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                     let cells = f
                         .doc
                         .variables()
-                        .iter()
+                        .local()
                         .map(|v| {
                             let cell = match v.kind {
                                 VarKind::Color => Cell::Color(RED),
@@ -1476,6 +1515,56 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                     } else {
                         Transaction(ondin_core::detach_size_ops(&f.doc, id, axes))
                     }
+                }
+                // A stroke whose width is bound — its ink is the width's.
+                13 => Transaction(vec![Operation::SetStrokes {
+                    id: rect,
+                    strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
+                        width: 0.0,
+                        width_var: Some(number),
+                        ..Default::default()
+                    }]),
+                }]),
+                // A drop shadow whose blur is bound — its ink is the blur's.
+                14 => {
+                    let mut e = ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
+                        ondin_core::Shadow::default(),
+                    ));
+                    e.vars[ondin_core::EFFECT_BLUR] = Some(number);
+                    Transaction(vec![Operation::SetEffects {
+                        id: rect,
+                        effects: ondin_core::keyed_by_position([e]),
+                    }])
+                }
+                // A variable rewritten whole, as a kit update writes one.
+                15 => {
+                    let mut v = f.doc.variables().get(number).unwrap().clone();
+                    for c in v.cells.values_mut() {
+                        *c = Cell::Number(rng.below(25) as f64);
+                    }
+                    Transaction(vec![Operation::SetVariable { var: v }])
+                }
+                // A document mode renamed onto a kit mode's name, or off it.
+                16 => Transaction(vec![Operation::SetModeName {
+                    id: modes[rng.below(modes.len())],
+                    name: ["Light", "Night", "Dusk"][rng.below(3)].into(),
+                }]),
+                // The kit's mapping: a document mode set to a kit mode by hand,
+                // or the entries cleared.
+                17 => {
+                    let mut km = f.doc.variables().kits()[KIT].clone();
+                    if rng.below(2) == 0 {
+                        km.map.clear();
+                    } else {
+                        km.map.insert(
+                            modes[rng.below(modes.len())],
+                            [k_light, k_night][rng.below(2)],
+                        );
+                    }
+                    Transaction(vec![Operation::SetKitModes {
+                        kit: KIT.into(),
+                        modes: Some(km),
+                    }])
                 }
                 // Remove a mode (never the last), returning its frames to Inherit.
                 _ if modes.len() > 1 => {

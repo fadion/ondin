@@ -1509,3 +1509,101 @@ fn a_file_repeating_a_property_id_loads_with_the_repeat_rekeyed() {
         "and stable once re-saved"
     );
 }
+
+/// **A styled layer through a switch and a structural add** (§15 D1062,
+/// `propagate::owed`'s second `style::settle`): Small's `Bg` on style *Red*,
+/// Large's on *Blue*. An untouched instance switched to Large takes *Blue*
+/// and its look; an instance whose `Bg` is on a third style keeps it across
+/// the switch, an override `drift` reads; and a styled layer added to Small
+/// reaches the instance bound, holding the style's look.
+///
+/// flips: either `settle` call's `extend` removed alone stays green — here the
+/// two cover each other; both removed fails at *"the fixture: its own Green"*.
+#[test]
+fn a_styled_layer_crosses_a_switch_and_a_structural_add() {
+    use ondin_core::style::{Style, StyleId, StyleSlot, StyleValue, bind_op};
+    let mut f = fixture();
+    let style = |ids: &mut IdSource, name: &str, r: u8| {
+        let id = StyleId(ids.mint());
+        (
+            id,
+            Operation::AddStyle {
+                style: Style {
+                    id,
+                    name: name.into(),
+                    value: StyleValue::Fills(fills(r)),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        )
+    };
+    let (red, add_red) = style(&mut f.ids, "Red", 10);
+    let (blue, add_blue) = style(&mut f.ids, "Blue", 200);
+    let (green, add_green) = style(&mut f.ids, "Green", 99);
+    f.commit(vec![
+        add_red,
+        add_blue,
+        add_green,
+        bind_op(f.bg, StyleSlot::Fills, Some(red)),
+        bind_op(f.lbg, StyleSlot::Fills, Some(blue)),
+    ]);
+    let ibg = f.kids(f.i)[0];
+    let styled = |f: &F, id| f.doc.get(id).unwrap().styles().fills;
+    assert_eq!(
+        styled(&f, ibg),
+        Some(red),
+        "the fixture: the copy follows Red"
+    );
+
+    let tx = variant::switch(&f.doc, f.i, f.large, &mut f.ids).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        (styled(&f, ibg), f.fill(ibg)),
+        (Some(blue), solid(200)),
+        "an untouched copy takes Large's style"
+    );
+
+    // A second instance whose Bg is on a style of its own.
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(f.small).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let (j, jbg) = (made[0], f.kids(made[0])[0]);
+    f.commit(vec![bind_op(jbg, StyleSlot::Fills, Some(green))]);
+    assert_eq!(f.fill(jbg), solid(99), "the fixture: its own Green");
+    let tx = variant::switch(&f.doc, j, f.large, &mut f.ids).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        (styled(&f, jbg), f.fill(jbg)),
+        (Some(green), solid(99)),
+        "its own style carries"
+    );
+    assert!(
+        ondin_core::reset::drift(&f.doc, j).any(),
+        "and reads as an override"
+    );
+
+    // A styled layer added to Small reaches the instance switched back to it.
+    let tx = variant::switch(&f.doc, f.i, f.small, &mut f.ids).unwrap();
+    f.commit(tx.0);
+    let dot = f.ids.mint();
+    f.commit(vec![
+        create(dot, f.small, 2, rect(), "Dot"),
+        bind_op(dot, StyleSlot::Fills, Some(blue)),
+    ]);
+    let idot = *f.kids(f.i).last().unwrap();
+    assert_eq!(f.link(idot), Some(dot), "the fixture: the copy arrived");
+    assert_eq!(
+        (styled(&f, idot), f.fill(idot)),
+        (Some(blue), solid(200)),
+        "the added copy is bound and holds the look"
+    );
+}

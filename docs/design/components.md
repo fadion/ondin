@@ -105,7 +105,11 @@ copies at every depth through the reverse link map, each level compared against 
   `SetVisible`, `SetVisibleVar` (`propagate::is_placement`) do not follow onto a root linked straight
   to a main (`linked_to_main`). A main hidden on a components page hides no instance. A nested
   instance moved inside its outer main does move in the outer instances.
-- Spans follow only onto a copy with the same content.
+- Spans follow only onto a copy with the same content, and no content write (`SetText`, span writes)
+  follows onto a copy whose content binding differs from its source's.
+- **A copy's own binding holds its literal**: a size or corner follow keeps the copy's literal on
+  each axis or corner it binds otherwise than its source (`propagate::keep_own_bound_geometry`), and
+  is dropped when nothing else is left to follow.
 
 ### Item ids — `item.rs`
 
@@ -404,8 +408,11 @@ Order is one function, `propagate::owed`, called by `commit_inner` and the core 
 4. `settle_links`
 5. `variant::settle`
 6. `propagate`
-7. `style::settle` once more (a follow or copy that reached a styled slot is put back to its style),
-   and `keep_size_bindings` again if that wrote a display
+7. `style::settle` once more (a follow or copy that reached a styled slot is put back to its style)
+8. `keep_size_bindings` again, always: a copy holding its own size binding that a follow makes
+   computed (growth, a stretch) detaches as the main's did
+9. `inert_spacing`: a copy holding its own gap/padding binding whose layout a follow takes away has
+   the binding cleared
 
 All after `keep_insets` and `keep_flex_sizes` (incl. `kept_flow_translations`), so what those append
 to a main propagates and a follow carries the door's value.
@@ -493,7 +500,8 @@ Inspector:
   compared on the auto margins), Container (`display` cells by mode, `ByMode`), Item, Type (on the
   node's own style, never a run's; the Type popup one mark per section via `section_marked`,
   *Optical size*/*Axes*/face as disjoint parts of `variations` reset in the main's order by
-  `axes_reset`; *Sizing* on mode alone), multi-selection radius. A dropdown's ↺ is the first row of its
+  `axes_reset`; *Sizing* on mode alone), the multi-selection Appearance card (opacity and radius,
+  each joining its binding, `multi_appearance_marks`). A dropdown's ↺ is the first row of its
   open list; a segmented control's mark sits on its lit cell; a switch row's dot has no ↺.
 - Not marked, by decision: the multi-selection Transform card, each grid track's field, the identity
   card.

@@ -1642,6 +1642,8 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
                 // "corrected" later.
                 (egui::Key::A, Tool::Node),
                 (egui::Key::T, Tool::Text),
+                // Figma's letter; a second `I` hands back (`choose_tool`).
+                (egui::Key::I, Tool::Eyedropper),
                 // **`C` is free again.** It was cropping's, on the argument that a
                 // built feature outranks an inert rail button; image editing
                 // replaced the crop tool and deliberately has no letter (§15

@@ -3173,6 +3173,91 @@ pub fn edit_brushes_all(
     Transaction(ops)
 }
 
+/// Every paint target in scope's **top** fill (or stroke) — the last visible
+/// one, painted last — rebrushed with what `top` makes of it as drawn, or a new
+/// one put on top where none is visible: the eyedropper's write onto a selection.
+///
+/// `top` gets `None` for a layer with nothing visible in that list. Through
+/// [`edited_brush`], so a bound paint keeps its binding when the colour is the
+/// one it already draws.
+pub fn set_top_paint_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    top: impl Fn(Option<&Brush>) -> Brush,
+    src: &mut IdSource,
+) -> Transaction {
+    fn retop<T: Clone + PartialEq>(
+        own: &[Keyed<T>],
+        visible: impl Fn(&T) -> bool,
+        brush: impl Fn(&mut T) -> &mut crate::BrushSource,
+        rebrush: impl Fn(Option<&crate::BrushSource>) -> crate::BrushSource,
+        fresh_item: impl Fn(crate::BrushSource) -> T,
+    ) -> Vec<T> {
+        let mut values: Vec<T> = own.iter().map(|k| k.value.clone()).collect();
+        match values.iter_mut().rev().find(|v| visible(v)) {
+            Some(v) => {
+                let next = rebrush(Some(&*brush(v)));
+                *brush(v) = next;
+            }
+            None => values.push(fresh_item(rebrush(None))),
+        }
+        values
+    }
+    let mut ops = Vec::new();
+    let mut fresh = crate::item::PastTheEnd::default();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        let rebrush = |b: Option<&crate::BrushSource>| match b {
+            Some(b) => edited_brush(doc, id, b, |drawn| top(Some(drawn))),
+            None => top(None).into(),
+        };
+        match target {
+            PaintTarget::Fill => {
+                let own = &node.paint().fills;
+                let values = retop(
+                    own,
+                    |f: &Fill| f.visible,
+                    |f| &mut f.brush,
+                    rebrush,
+                    |brush| Fill {
+                        brush,
+                        visible: true,
+                    },
+                );
+                if own.len() != values.len() || own.iter().zip(&values).any(|(o, v)| o.value != *v)
+                {
+                    ops.push(Operation::SetFills {
+                        id,
+                        fills: crate::item::rekey_by_position(own, values, &mut fresh, src),
+                    });
+                }
+            }
+            PaintTarget::Stroke => {
+                let own = &node.paint().strokes;
+                let values = retop(
+                    own,
+                    |s: &Stroke| s.visible,
+                    |s| &mut s.brush,
+                    rebrush,
+                    |brush| Stroke {
+                        brush,
+                        ..Stroke::default()
+                    },
+                );
+                if own.len() != values.len() || own.iter().zip(&values).any(|(o, v)| o.value != *v)
+                {
+                    ops.push(Operation::SetStrokes {
+                        id,
+                        strokes: crate::item::rekey_by_position(own, values, &mut fresh, src),
+                    });
+                }
+            }
+        }
+    }
+    Transaction(ops)
+}
+
 /// Bind rectangle `id`'s corners to `vars` — `None` leaving a corner as it is
 /// (§15 D1039). The bound corners' literals are written **0**, so a rectangle
 /// bound to a variable compares equal to its instance's copy bound to the same

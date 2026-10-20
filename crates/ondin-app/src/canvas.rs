@@ -42,8 +42,8 @@ use ondin_render::{RenderOverrides, VelloGpuRenderer};
 
 /// The offscreen texture the Vello canvas renders into, exposed to egui.
 struct CanvasTexture {
-    /// Owned to keep the GPU texture alive for as long as `view` is registered.
-    #[allow(dead_code)]
+    /// Kept alive for as long as `view` is registered, and the eyedropper's
+    /// readback copies out of it.
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     size: (u32, u32),
@@ -65,6 +65,102 @@ struct Gpu {
     render_state: RenderState,
     vello: VelloGpuRenderer,
     target: Option<CanvasTexture>,
+    /// The eyedropper's copy of the pixels round its hotspot, in flight.
+    readback: Option<Readback>,
+}
+
+/// How many device pixels the eyedropper's loupe shows on a side; odd, so one
+/// of them is the hotspot.
+pub(crate) const LOUPE_SIDE: u32 = 11;
+
+/// What a [`Sample`] was read against. A sample whose key still matches is
+/// what the canvas shows now, so it is neither read again nor stale for a pick.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct SampleKey {
+    /// The hotspot, in canvas device pixels.
+    pub at: (u32, u32),
+    pub revision: u64,
+    pub center: Point,
+    pub zoom: f64,
+    pub size: (u32, u32),
+    /// A click's own number, 0 for the hover. **A pick always reads afresh**:
+    /// uncommitted changes — typing, a preview, a decode landing — move pixels
+    /// without moving the revision, so a hover sample may be stale, and a stale
+    /// loupe is a look where a stale pick is a wrong write.
+    pub pick: u64,
+}
+
+/// The canvas's rendered pixels round the eyedropper's hotspot (the design's
+/// rule 2): composited over the canvas ground and opaque, overlays never in it,
+/// since egui paints those over this texture.
+pub(crate) struct Sample {
+    pub key: SampleKey,
+    /// [`LOUPE_SIDE`]² pixels, row-major, sRGB; `None` past the canvas's edge.
+    pub pixels: Vec<Option<[u8; 3]>>,
+}
+
+impl Sample {
+    /// The hotspot's colour.
+    pub fn center(&self) -> Option<[u8; 3]> {
+        self.pixels[(LOUPE_SIDE * LOUPE_SIDE / 2) as usize]
+    }
+}
+
+/// A copy of the texture round a hotspot, waiting on the GPU.
+struct Readback {
+    buf: wgpu::Buffer,
+    key: SampleKey,
+    /// The copied region's corner and size in device pixels — the loupe clipped
+    /// to the texture.
+    origin: (u32, u32),
+    extent: (u32, u32),
+    bytes_per_row: u32,
+    /// 0 while mapping, 1 once mapped, 2 if mapping failed.
+    state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+}
+
+/// The texture region the loupe round `at` covers, clipped to `size`: its
+/// corner and extent.
+fn loupe_region(at: (u32, u32), size: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+    let half = LOUPE_SIDE / 2;
+    let x0 = at.0.saturating_sub(half);
+    let y0 = at.1.saturating_sub(half);
+    let x1 = (at.0 + half + 1).min(size.0);
+    let y1 = (at.1 + half + 1).min(size.1);
+    ((x0, y0), (x1.saturating_sub(x0), y1.saturating_sub(y0)))
+}
+
+/// Lay a region's straight-alpha RGBA out as a loupe round `at`, compositing
+/// each pixel over `ground`. `pixel(x, y)` reads the region at offset `(x, y)`.
+fn loupe_pixels(
+    at: (u32, u32),
+    origin: (u32, u32),
+    extent: (u32, u32),
+    ground: [u8; 3],
+    pixel: impl Fn(u32, u32) -> [u8; 4],
+) -> Vec<Option<[u8; 3]>> {
+    let half = (LOUPE_SIDE / 2) as i64;
+    let mut out = Vec::with_capacity((LOUPE_SIDE * LOUPE_SIDE) as usize);
+    for dy in -half..=half {
+        for dx in -half..=half {
+            let x = at.0 as i64 + dx - origin.0 as i64;
+            let y = at.1 as i64 + dy - origin.1 as i64;
+            if x < 0 || y < 0 || x >= extent.0 as i64 || y >= extent.1 as i64 {
+                out.push(None);
+                continue;
+            }
+            let [r, g, b, a] = pixel(x as u32, y as u32);
+            let over = |c: u8, bg: u8| {
+                ((c as u32 * a as u32 + bg as u32 * (255 - a as u32) + 127) / 255) as u8
+            };
+            out.push(Some([
+                over(r, ground[0]),
+                over(g, ground[1]),
+                over(b, ground[2]),
+            ]));
+        }
+    }
+    out
 }
 
 pub struct CanvasRenderer {
@@ -81,6 +177,8 @@ pub struct CanvasRenderer {
     /// and no panel reads it. The layers panel's thumbnails will want the same
     /// pixels, and when they do they should ask this rather than decode again.
     images: ondin_render::ImageStore,
+    /// The eyedropper's last sample, kept until a newer one arrives.
+    sample: Option<Sample>,
 }
 
 impl CanvasRenderer {
@@ -91,12 +189,14 @@ impl CanvasRenderer {
                 render_state,
                 vello,
                 target: None,
+                readback: None,
             }),
             // **The interactive store**, the one caller that may answer a moving
             // adjustment with a reduced picture. Every other holder of one —
             // `ondin export --png` above all — takes `ImageStore::new`, which
             // never previews.
             images: ondin_render::ImageStore::interactive(),
+            sample: None,
         }
     }
 
@@ -113,6 +213,7 @@ impl CanvasRenderer {
         Self {
             gpu: None,
             images: ondin_render::ImageStore::interactive(),
+            sample: None,
         }
     }
 
@@ -182,6 +283,166 @@ impl CanvasRenderer {
             .ok()?;
         Some(target.id)
     }
+
+    /// The eyedropper's latest sample, whatever it was read against.
+    pub(crate) fn sample(&self) -> Option<&Sample> {
+        self.sample.as_ref()
+    }
+
+    /// Read the pixels round `key.at` off what [`Self::render`] just drew, and
+    /// collect a read that has landed. Returns true while one is in flight, so
+    /// the caller asks for the frame that will collect it.
+    ///
+    /// **Asynchronous on the GPU**: the copy is mapped without waiting, and a
+    /// later call picks it up, so armed frames never stall on the device. A
+    /// key that matches the last sample is not read again, which is what keeps a
+    /// still pointer from repainting forever. Headless there is no texture, so
+    /// the same region is drawn on the CPU and lands at once.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn request_sample(
+        &mut self,
+        key: SampleKey,
+        doc: &Document,
+        res: &Resolved,
+        camera: &Camera,
+        ground: Color,
+    ) -> bool {
+        let [gr, gg, gb, _] = ground.to_rgba8().to_u8_array();
+        let ground = [gr, gg, gb];
+        let fresh = self.sample.as_ref().is_some_and(|s| s.key == key);
+        let Some(gpu) = self.gpu.as_mut() else {
+            if !fresh {
+                let (origin, extent) = loupe_region(key.at, key.size);
+                self.sample = Some(Sample {
+                    key,
+                    pixels: cpu_region(doc, res, camera, key, origin, extent, ground, &self.images),
+                });
+            }
+            return false;
+        };
+        if let Some(rb) = &gpu.readback {
+            let _ = gpu.render_state.device.poll(wgpu::PollType::Poll);
+            match rb.state.load(std::sync::atomic::Ordering::Acquire) {
+                0 => return true,
+                1 => {
+                    let rb = gpu.readback.take().expect("checked above");
+                    let data = rb.buf.slice(..).get_mapped_range();
+                    let pixels = loupe_pixels(rb.key.at, rb.origin, rb.extent, ground, |x, y| {
+                        let i = (y * rb.bytes_per_row + x * 4) as usize;
+                        [data[i], data[i + 1], data[i + 2], data[i + 3]]
+                    });
+                    drop(data);
+                    rb.buf.unmap();
+                    self.sample = Some(Sample {
+                        key: rb.key,
+                        pixels,
+                    });
+                }
+                _ => gpu.readback = None,
+            }
+        }
+        if self.sample.as_ref().is_some_and(|s| s.key == key) {
+            return false;
+        }
+        let Some(target) = gpu.target.as_ref().filter(|t| t.size == key.size) else {
+            return false;
+        };
+        let (origin, extent) = loupe_region(key.at, key.size);
+        if extent.0 == 0 || extent.1 == 0 {
+            return false;
+        }
+        // `copy_texture_to_buffer` wants rows on a 256-byte boundary.
+        let bytes_per_row = (extent.0 * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let device = &gpu.render_state.device;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ondin-eyedropper"),
+            size: (bytes_per_row * extent.1) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc = device.create_command_encoder(&Default::default());
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: origin.0,
+                    y: origin.1,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(extent.1),
+                },
+            },
+            wgpu::Extent3d {
+                width: extent.0,
+                height: extent.1,
+                depth_or_array_layers: 1,
+            },
+        );
+        gpu.render_state.queue.submit([enc.finish()]);
+        let state = std::sync::Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let flag = state.clone();
+        buf.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            flag.store(
+                if r.is_ok() { 1 } else { 2 },
+                std::sync::atomic::Ordering::Release,
+            );
+        });
+        gpu.readback = Some(Readback {
+            buf,
+            key,
+            origin,
+            extent,
+            bytes_per_row,
+            state,
+        });
+        true
+    }
+}
+
+/// The loupe's region drawn on the CPU — the headless canvas's sample, which has
+/// no texture to read. The same viewport mapping as the canvas, cut to `origin`
+/// and `extent`, so its device pixels are the texture's.
+#[allow(clippy::too_many_arguments)]
+fn cpu_region(
+    doc: &Document,
+    res: &Resolved,
+    camera: &Camera,
+    key: SampleKey,
+    origin: (u32, u32),
+    extent: (u32, u32),
+    ground: [u8; 3],
+    images: &ondin_render::ImageStore,
+) -> Vec<Option<[u8; 3]>> {
+    if extent.0 == 0 || extent.1 == 0 {
+        return vec![None; (LOUPE_SIDE * LOUPE_SIDE) as usize];
+    }
+    let view = camera.viewport(key.size).view;
+    let per_px = 1.0 / camera.zoom;
+    let x0 = view.x0 + origin.0 as f64 * per_px;
+    let y0 = view.y0 + origin.1 as f64 * per_px;
+    let vp = ondin_render::Viewport {
+        view: KRect::new(
+            x0,
+            y0,
+            x0 + extent.0 as f64 * per_px,
+            y0 + extent.1 as f64 * per_px,
+        ),
+        pixel_size: extent,
+    };
+    let (rgba, w, _) = ondin_render::VelloCpuRenderer::new().render_to_rgba(doc, res, &vp, images);
+    loupe_pixels(key.at, origin, extent, ground, |x, y| {
+        let i = ((y * w + x) * 4) as usize;
+        [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]
+    })
 }
 
 impl Gpu {
@@ -988,6 +1249,12 @@ impl OndinApp {
         // the frame.
         if self.context_menu.is_none() {
             match self.mode {
+                // A picker opened over a text session can pick too.
+                Mode::TextInsert if self.dropper_armed().is_some() => {
+                    if !self.gesture_cancelled {
+                        self.dropper_input(ui, &resp, rect, ppp);
+                    }
+                }
                 Mode::TextInsert => self.text_mode_input(ui, &resp, rect, ppp),
                 Mode::Normal => self.normal_mode_input(ui, &resp, rect, ppp),
             }
@@ -1234,6 +1501,10 @@ impl OndinApp {
             (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed))
         } else if armed {
             (egui::CursorIcon::Grab, Some(Bitmap::HandOpen))
+        } else if self.dropper_armed().is_some() {
+            // **The loupe is the cursor** (the design's rule 6): its ringed
+            // middle pixel is the hotspot, and nothing else marks the pointer.
+            (egui::CursorIcon::None, None)
         } else if self.text.is_some()
             && (resp.dragged() || pointer.is_some_and(|p| self.over_edited_text(p, rect, ppp)))
         {
@@ -1373,6 +1644,10 @@ impl OndinApp {
                 // `crop_hover` — the same drawing the select tool gives the same
                 // drag, and the honest one: what a crop handle moves is the
                 // layer's own edge.
+                //
+                // The eyedropper's loupe arm above answers first; this is its
+                // shape in case it does not.
+                Tool::Eyedropper => (egui::CursorIcon::None, None),
                 Tool::ImageEdit => match self.drag {
                     Drag::CropPan { .. } => (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed)),
                     _ => match self.crop_hover(resp, rect, ppp) {
@@ -1675,6 +1950,13 @@ impl OndinApp {
         // gesture — including the pen's, which otherwise swallows the press.
         let panning_armed =
             space || self.tool == Tool::Hand || resp.dragged_by(egui::PointerButton::Middle);
+
+        // An armed eyedropper owns every press an armed pan does not, guides and
+        // handles included: they are chrome its sample never sees.
+        if self.dropper_armed().is_some() && !panning_armed && !matches!(self.drag, Drag::Pan) {
+            self.dropper_input(ui, resp, rect, ppp);
+            return;
+        }
 
         // Rulers and guides, ahead of the tools. They are chrome drawn over the
         // artwork, so a press that lands on one belongs to it — with two
@@ -4429,7 +4711,13 @@ impl OndinApp {
             }
             // Tools that do not create by dragging a box (`drags_a_box`), so a
             // create gesture cannot have started with one armed.
-            Tool::Pen | Tool::Node | Tool::ImageEdit | Tool::Select | Tool::Scale | Tool::Hand => {
+            Tool::Pen
+            | Tool::Node
+            | Tool::ImageEdit
+            | Tool::Select
+            | Tool::Scale
+            | Tool::Hand
+            | Tool::Eyedropper => {
                 return None;
             }
         })
@@ -8665,7 +8953,7 @@ impl OndinApp {
         ppp: f32,
         resp: &egui::Response,
     ) -> Option<NodeId> {
-        if !self.tool.selects() {
+        if !self.selecting() {
             return None;
         }
         let p = resp.hover_pos()?;
@@ -11543,6 +11831,11 @@ impl OndinApp {
         if self.canvas.images().wants_frame() {
             ui.ctx().request_repaint();
         }
+        // The eyedropper reads what was just drawn, and asks for the frame that
+        // collects its readback.
+        if self.dropper_frame(ui, resp, rect, ppp) {
+            ui.ctx().request_repaint();
+        }
 
         // The pixel grid, the faintest layer there is: over the artwork, so a
         // shape's edge can be read against a pixel boundary, and under every
@@ -12221,7 +12514,7 @@ impl OndinApp {
         // *about* a layer rather than while editing one. The gesture check covers
         // moving; the selection check covers the layer you already have in hand,
         // which has the Transform panel's toggle if you want the handle back.
-        if !self.drag.is_none() || !self.tool.selects() {
+        if !self.drag.is_none() || !self.selecting() {
             return;
         }
         let Some(p) = resp.hover_pos() else { return };

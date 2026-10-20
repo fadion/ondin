@@ -10,7 +10,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Prototyping.**
 - **Plugins.**
 - **Multiplayer** — kept possible by the model (`architecture.md` §12), not built.
-- **Eyedropper and comment tools.**
+- **A comment tool.**
 - **A unit system** — a screen tool's units are all px at 1x; density belongs to export (§15 D358).
 
 ## Canvas and interaction

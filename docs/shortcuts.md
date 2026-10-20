@@ -99,6 +99,7 @@ Single key, `plain && !shift`, Normal mode only.
 | `P` | Pen — **or arms the pen bias** inside an active point edit | ✅ (§15 D125) |
 | `A` | Node | ✅ Illustrator/Sketch direct-selection letter (Figma's `A` is Frame). **No lock check in the key's arm, and none wanted**: a locked layer can join the selection from the layers panel, so the refusal is in `canvas::edited_path` — the tool arms and finds no subject, as `A` over a rectangle does (§15 D321) |
 | `T` | Text — **click** plants an auto-width node, **drag** draws a fixed box | ✅ (§15 D170) |
+| `I` | Eyedropper — one shot; a second `I` hands back to the tool it was armed from (`choose_tool`) | ✅ Figma |
 
 **`C` is unbound** (§15 D268): Crop's letter until image editing replaced the crop tool, which has
 neither rail slot nor letter. It is the letter a comment tool would want.
@@ -299,7 +300,8 @@ the centre · `Alt` **draw** about the press point · `Ctrl`+side-drag skew · `
 skew snap · `Ctrl`+click deep select · `Alt`+`Shift`+click key layer · `Ctrl`/`Alt`+wheel zoom ·
 `Shift`+wheel horizontal scroll · `Shift` pen constrain · `Ctrl` pen/node curvature · `Alt` hover
 measure (`measure.rs`; the overlay is in `canvas.rs`) · middle-mouse pan in **both** modes (Space
-is not the alias in a text session, where it is a character).
+is not the alias in a text session, where it is a character) · `Alt`+click eyedropper onto the
+top stroke · `Shift`+click eyedropper stays armed.
 
 - **`Space` held mid-draw repositions the uncommitted shape** (Figma, Adobe): `Drag::Create`
   carries the previous pointer, so the shape moves by the delta while Space was held.
@@ -406,7 +408,9 @@ combinations asserts the two **partition** the space.
 order is the whole content; re-derive it from the code rather than editing this sentence:
 
 present mode → a bindable field's menu / `--` list / mode menu → a style card's menu, picker, name
-or edit (`escape_styles`) → the detached colour picker → the insert picker (`kit_picker`) → the
+or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the
+rail tool, which hands back to the tool it was armed from) → the detached colour picker → the
+insert picker (`kit_picker`) → the
 variables browser (inner rungs first) → a text session → the pen → **a gesture in flight**
 (`cancel_gesture`) → **a chrome field that just lost focus** (`chrome_focus`) → pen bias armed over
 an edit → the point selection → the pivot handle → the entered group (selects it) → a tool that is

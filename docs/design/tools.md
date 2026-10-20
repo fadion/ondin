@@ -16,6 +16,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, present mode.
+- **Eyedropper** (`I`, or a picker's pick button): picks a colour off the rendered canvas onto the selection or into one picker slot (below).
 - **Paint editing**: stacked fills and strokes (§6.3), solid or linear/radial gradient, in a detached picker; stroke options, per-corner radius, polygon sides, star points and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
@@ -41,6 +42,7 @@ convention; the alternative is finishing a wrong edit and undoing it).
 - The cancel shares a rung with Escape: `OndinApp::cancel_gesture` serves both. With nothing in flight it is a strict no-op, so right-click-to-remove-a-gradient-stop still works. Cancelling cannot end the press (§15 D31).
 - "Is anything in flight" cannot be asked of egui's `dragged_id` (a fast right-click has already cleared it, §15 D168); `cancel_gesture` asks `InFlight::any`, exhaustive by construction.
 - A cancel must shut every window the gesture opened: the two-digit opacity window's clock is a separate field, so `cancel_gesture` clears `opacity_entry`.
+- An armed eyedropper is a gesture a right-click calls off: the press runs `disarm_dropper`, setting `gesture_cancelled` if it disarmed (no menu opens, nothing is selected), then `cancel_gesture` as ever, so anything else in flight goes with the same press.
 
 **The cancel happens on the press and the menu opens on the release** (`context-menus.md` §0 R1);
 only one of the two pays out (a cancel on the release would let the gesture run on under the menu; a
@@ -99,7 +101,7 @@ and the second leaves present mode.
 - the context menu's arm at the top of the frame returns;
 - the top-bar dropdowns have a `dispatch` arm on `Action::Escape if open_menu != TopMenu::None`;
 - the three modals are gated out of `input::resolve` and answer `should_close()`;
-- the colour picker is `escape`'s second rung, in an `else if` chain that pays out one rung;
+- the colour picker is a rung of `escape`'s `else if` chain, which pays out one rung (an armed pick button is the rung above it);
 - the five inspector and Export popovers: an empty-bodied arm in `update`, gated by `a_popover_owns_escape`; they close themselves later in the frame.
 
 That gate is for `Escape` only, and counts only popovers actually drawn: each open popover's handler
@@ -194,12 +196,38 @@ over `Tool` is an exhaustive `match` (the cursor, `create_tx`), a `matches!` all
 **Arming a create tool clears the selection** (`OndinApp::choose_tool`). The set is `drags_a_box`:
 Frame, Rect, Ellipse, Polygon, Star, Line, Text, Image. Left out: Select and Scale (operate on the
 selection), Hand (a pan keeps it), Node and ImageEdit (entered *from* a selected layer), Pen (places
-anchors, never drags a box). `place_image_action` clears it too.
+anchors, never drags a box), Eyedropper (picks onto the selection). `place_image_action` clears it too.
 
 **A tool switch abandons the drag in flight.** `choose_tool` clears `self.drag` and `self.alt_clone`
 and calls `clear_gesture_preview`. It does not call `clear_preview` (which would discard a live text
 session's content) nor `cancel_gesture` (which needs an `&egui::Context` and covers states a tool
 switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three fields are a hand-kept list.
+
+### The eyedropper (`eyedropper.rs`)
+
+**It samples what is seen**: the rendered canvas texture's pixel under the hotspot, composited
+over the canvas ground and opaque, so a translucent layer gives the blended colour. egui paints the
+overlays (selection, handles, guides, rulers, pixel grid) over that texture, so they are never
+sampled. The texture holds sRGB bytes, the document's space (invariant 7), so nothing is converted.
+
+**Two doors**, and `OndinApp::dropper_armed` says which is armed; a picker's pick button outranks
+the rail tool, as the narrower ask.
+
+| Door | Arms | Writes | Afterwards |
+| --- | --- | --- | --- |
+| Rail tool `Tool::Eyedropper` (`I`) | remembers the tool it was armed from (`dropper_return`); keeps the selection; disarms a picker's pick button | `ondin_core::set_top_paint_all`: every paint target's top **visible** fill (last in the list, which is paint order), or a new fill where none is visible; `Alt` the top stroke, adding a default one. Through `edited_brush`, so a binding survives an unchanged colour; opacity kept (`paint::alpha_of`, so a gradient's or picture's carries to the solid). Nothing selected: the hex goes to the clipboard and the status reads *Copied 6D8CD9 · nothing selected* | one shot: hands back to `dropper_return`; `Shift` keeps it armed |
+| A picker's pick button (`Picker::picking`, at the start of `hex_row`) | toggles on the button | that picker's slot only, through `write_slot_rgb`, the hex field's door (§9.3) | picker stays open, disarmed |
+
+- **One click, one transaction, one undo step.** A click never changes the selection.
+- **No canvas preview.** Hovering writes nothing and installs no `RenderOverrides`: a preview would change the pixels the next sample reads. From a picker, the hovered colour shows in its plane, hue and hex (`Picker::preview`), with a dim *was XXXXXX* beside the hex.
+- **The readback** (`CanvasRenderer::request_sample`): after the render, the `LOUPE_SIDE`² (11×11) device-pixel region round the hotspot is copied out of the canvas texture into a mapped buffer, without waiting, and collected a frame later. A `SampleKey` (hotspot, session revision, camera centre and zoom, canvas pixel size, `pick`) that matches the last sample is not read again, which keeps a still pointer from repainting forever. Headless, `cpu_region` draws the same region with `vello_cpu` and it lands at once; the tests use that arm.
+- **A pick always reads afresh.** Uncommitted changes (typing in a text session, a preview, a decode landing, the previewed ground) move pixels without moving the revision, so a key can match pixels that have changed. Hover keys carry `pick` 0; each click mints its own number (`OndinApp::dropper_picks`, in `dropper_input`), so its key matches no earlier sample and the canvas is read again. A stale loupe is only a look; a stale pick is a wrong write. The accepted cost: under a still pointer the hover loupe can stay stale until the pointer moves. Pinned by `a_pick_reads_afresh_when_pixels_moved_under_a_still_pointer`.
+- **Pick timing.** A click records a `PendingPick` with that key; `OndinApp::dropper_frame` (run in `draw_canvas` after the render) lands it when a sample with that key arrives.
+- **Input.** In `normal_mode_input` the dropper takes every press an armed pan does not (Space, Hand and middle-drag still pan), ahead of guides, handles and tools: they are chrome its sample never sees. It also routes in `TextInsert`, so a picker opened over a text session can pick. While a dropper is armed the canvas does not answer as Select (`OndinApp::selecting`): a picker's pick button leaves the tool on Select, and without this the hover outline, spacing bands and guide grabs kept answering.
+- **The rest of the window is inert while armed** (`OndinApp::gate_dropper_input`, from `raw_input_hook`). egui gets the pointer only over the canvas, and over the picker when it is the one picking. Elsewhere it is told the pointer is gone and gets no press or wheel, so no panel hovers, takes a click or scrolls; `dropper_pointer` keeps the position for the dropper's cursor. A press egui already has finishes untouched, so a pan dragged off the canvas still ends; disarming hands the pointer back where it is. The canvas is told apart from the panels by `canvas_rect`, since all of them share egui's background layer.
+- **Ways out.** `Escape` is one rung (`disarm_dropper`, `shortcuts.md` §11): it disarms a picker's button and leaves the picker open, or hands the rail tool back. A right-click disarms and spends the click (above). A second `I` is `choose_tool`'s toggle arm.
+- **The loupe is the cursor.** Over the canvas the cursor is `CursorIcon::None`; the loupe draws the region at 8pt a pixel, centred on the hotspot, the centre pixel ringed, with a hex chip below (above near the window's bottom). Its edge is two rims, dark outside light, under a soft shadow, so one of the pair contrasts with any ground. Off the canvas there is no loupe: the pointer is the eyedropper bitmap (`cursor::Bitmap::Eyedropper`, the rail glyph mirrored to aim from its tip like the pen's) with an *Off canvas* chip under it. Over the picker window neither is drawn, so the picker keeps its own pointer.
+- **The picker's preview is the latest sample**, not the one for the pixel under the pointer: each pixel of movement starts a readback that lands a frame later, and waiting for the matching one put the slot's own colour back for that frame.
 
 ### Skew
 
@@ -289,3 +317,4 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 - **Predicate negatives.** `drags_a_box` decides whether arming a tool deletes the selection. When a predicate gains a second consumer, re-check its negative members.
 - **Middle-button pan over the origin fields.** It is still swallowed by their `Area` (unverified).
 - **Menu placement order.** `menu_place` must clamp after rounding; reversing the order cuts off a menu's last column.
+- **The eyedropper's repaint guard is unpinned.** `request_sample`'s GPU arm skipping a key that matches the last sample is all that stops a still, armed pointer repainting every frame; headless the CPU arm answers `false` whatever the key, so `the_hover_sample_is_keyed_to_the_pointer` does not catch its removal.

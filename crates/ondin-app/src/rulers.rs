@@ -1433,7 +1433,7 @@ impl OndinApp {
         // The guide *lines* only answer the tools that manipulate what is already
         // there. They lie over the artwork, and a pen or shape tool aimed at the
         // artwork under one should draw there rather than pick up the marker.
-        if !self.tool.selects() {
+        if !self.selecting() {
             return false;
         }
         // Selecting on the press rather than on the release, because the press

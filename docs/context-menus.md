@@ -20,7 +20,8 @@ variable*).
 ## 0. The interaction rules
 
 - **R1** — The right-button press cancels a gesture in flight; the **release** opens the menu. A
-  press that cancelled spends the click, so no menu opens. The menu opens at the press position.
+  press that cancelled spends the click, so no menu opens. An armed eyedropper counts as a gesture:
+  the press disarms it. The menu opens at the press position.
 - **R2** — A menu is claimed per region: the canvas, a layers row, the layers panel's background,
   and an inspector field (§6.7). Widgets that already use the secondary button keep it (gradient
   stop bar, ruler).

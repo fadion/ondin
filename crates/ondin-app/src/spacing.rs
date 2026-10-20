@@ -555,7 +555,7 @@ impl OndinApp {
         // tool a band drawn strong would promise a drag the press turns into a
         // shape. Here, so the drawing, the cursor, the guide gate and the press
         // all read the one answer — `draw_hover_outline`'s precedent.
-        if !self.tool.selects() || self.editing_in_place() || !self.shown_visible(id) {
+        if !self.selecting() || self.editing_in_place() || !self.shown_visible(id) {
             return None;
         }
         let (doc, res, ov) = self.session.render_inputs();

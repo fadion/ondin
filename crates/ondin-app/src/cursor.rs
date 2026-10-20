@@ -190,6 +190,9 @@ pub enum Bitmap {
     /// what this must not be confused with, since that one is already in use eight
     /// lines away for "click to edit the text under the pointer".
     TextOnPath,
+    /// An armed eyedropper off the canvas, where there is nothing to sample and
+    /// the loupe gives way to a pointer saying the tool is still in hand.
+    Eyedropper,
 }
 
 impl Bitmap {
@@ -200,7 +203,7 @@ impl Bitmap {
     /// answers were read by nothing** (§15 D682, `[S17-L3-06]`).
     /// [`Cursors::image`] routes `Crosshair`, `Rotate`, `Loaded` and `TextOnPath`
     /// to functions that pass their own [`Hotspot`], so only the `other =>
-    /// rasterize(…)` arm ever asked — and `other` is exactly the five variants
+    /// rasterize(…)` arm ever asked — and `other` is exactly the six variants
     /// below that have a glyph. `Loaded` and `TextOnPath` said *"Read by nothing"*
     /// in their own arms; `Crosshair` and `Rotate` instead carried a **reason** for
     /// a value nothing read (*"a crosshair points at its own centre — which is why
@@ -223,6 +226,9 @@ impl Bitmap {
             // A pen draws from its nib, and the click has to land exactly where
             // the anchor point will appear.
             Self::Pen => Some((theme::icon::PEN_NIB, Hotspot::Nib)),
+            // The dropper samples from its tip, which Phosphor draws at the
+            // bottom-left as it does the nib's — so it is mirrored the same way.
+            Self::Eyedropper => Some((theme::icon::EYEDROPPER, Hotspot::Nib)),
             // The rail button's own glyph, so the tool and its pointer are one
             // drawing — the same bargain the hands and the pen make.
             Self::Scale => Some((theme::icon::RESIZE, Hotspot::Middle)),
@@ -309,6 +315,7 @@ pub struct Cursors {
     rotate: [Slot; Turn::STEPS as usize],
     discard: Slot,
     text_on_path: Slot,
+    eyedropper: Slot,
     /// One per count the cursor has actually been loaded with. A map rather than
     /// an array because [`Remaining`] spans a hundred values and a session
     /// normally touches a handful of them, counting down.
@@ -335,6 +342,7 @@ impl Cursors {
             Bitmap::Rotate(t) => &mut self.rotate[t.index()],
             Bitmap::Discard => &mut self.discard,
             Bitmap::TextOnPath => &mut self.text_on_path,
+            Bitmap::Eyedropper => &mut self.eyedropper,
             Bitmap::Loaded(n) => self.loaded.entry(n).or_default(),
         };
         slot.get_or_insert_with(|| match which {
@@ -1046,6 +1054,7 @@ mod tests {
             ("discard", Bitmap::Discard),
             ("text-on-path", Bitmap::TextOnPath),
             ("loaded", Bitmap::Loaded(Remaining(3))),
+            ("eyedropper", Bitmap::Eyedropper),
         ] {
             let img = cursors.image(&ctx, which).expect(name);
             let expected = usize::from(img.size[0]) * usize::from(img.size[1]) * 4;

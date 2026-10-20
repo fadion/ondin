@@ -50,6 +50,7 @@ mod canvas;
 mod chrome;
 mod cursor;
 mod expr;
+mod eyedropper;
 mod fonts;
 mod grid;
 mod input;

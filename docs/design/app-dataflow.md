@@ -69,6 +69,15 @@ input event (winit/egui)
 
 It keeps no colour of its own: it reads its target brush through `display_node` each frame and writes each edit to the slot. It keeps only intent the document cannot hold: selected gradient stop, the hue behind a grey, a half-typed hex. Its window opens beside the field it edits every time (`Picker::spawn`; `placed` forces `current_pos` on the first frame; `default_size` height zero so the first-frame estimate is not clamped). A picker requested by a header `+` has no row yet: parked in `OndinApp::pending_picker` and claimed by the created row next frame. Retargeting keeps its position.
 
+The hex row opens with a pick button (`Picker::picking`), the eyedropper's door into this one slot
+(§9.4). Only the Solid and gradient faces draw the row, so `picker_body` disarms the button whenever
+the Variables face or an Image brush is showing: a face with no button cannot stay armed. While it is armed the hovered colour
+stands in for the edited stop's in the plane, hue and hex (`Picker::preview`, with a dim *was
+XXXXXX*), for the eye only: nothing previews on the canvas, because the next sample would read it. A
+pick writes through `OndinApp::write_slot_rgb`, the hex field's door: the RGB is set and that paint's
+or stop's alpha kept; over a *Mixed* row (`SelectionAll`) each paint keeps its own opacity (§15
+D540). One transaction.
+
 ### Input routing (`input.rs`)
 
 - Every keystroke resolves against an explicit `Mode` (normal / text-insert; command, §13, is a third arm) and against whether a chrome widget owns the keyboard. No key handling happens elsewhere, so the keymap is one function.

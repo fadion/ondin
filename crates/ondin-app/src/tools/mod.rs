@@ -81,6 +81,10 @@ pub enum Tool {
     /// announces it is a tool that already has all four of the things above.
     Node,
     Text,
+    /// Picks a colour off the rendered canvas onto the selection
+    /// (`crate::eyedropper`). One shot: a pick hands back to the tool it was
+    /// armed from (`OndinApp::dropper_return`), unless Shift held it.
+    Eyedropper,
     /// Places images the cursor is **loaded** with — and disarms itself when it
     /// runs out, which no other tool on the rail does.
     ///
@@ -185,7 +189,8 @@ impl Tool {
     /// a horizontal default would be a rule invented here. Both are one arm away.
     /// The rest — Select, Scale, Pen, Node, ImageEdit, Hand — are not creation tools
     /// at all, and the middle four never reach the click routing anyway, having
-    /// claimed the pointer earlier in `canvas::normal_mode_input`.
+    /// claimed the pointer earlier in `canvas::normal_mode_input`. The Eyedropper
+    /// claims it there too.
     pub fn click_makes(self) -> Option<ClickCreate> {
         match self {
             Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => {
@@ -194,9 +199,13 @@ impl Tool {
             Tool::Image => Some(ClickCreate::FittedImage),
             Tool::Text => Some(ClickCreate::TextNode),
             Tool::Frame | Tool::Line => None,
-            Tool::Select | Tool::Scale | Tool::Pen | Tool::Node | Tool::ImageEdit | Tool::Hand => {
-                None
-            }
+            Tool::Select
+            | Tool::Scale
+            | Tool::Pen
+            | Tool::Node
+            | Tool::ImageEdit
+            | Tool::Hand
+            | Tool::Eyedropper => None,
         }
     }
 

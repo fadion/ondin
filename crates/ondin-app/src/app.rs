@@ -885,6 +885,16 @@ pub struct OndinApp {
     /// size the fit rule needs. A file that would not decode never becomes an
     /// entry, so nothing in this list can fail to place.
     pub(crate) pending_images: Vec<LoadedImage>,
+    /// The tool the rail's eyedropper hands back to after a pick, `Escape` or a
+    /// second `I` — the one it was armed from.
+    pub(crate) dropper_return: Tool,
+    /// An eyedropper click waiting for the sample under it (`crate::eyedropper`).
+    pub(crate) dropper_pick: Option<crate::eyedropper::PendingPick>,
+    /// Numbers each eyedropper click, so its sample key is its own (`SampleKey::pick`).
+    pub(crate) dropper_picks: u64,
+    /// Where the pointer is while an armed eyedropper hides it from egui
+    /// (`OndinApp::gate_dropper_input`): off the canvas, egui is told it is gone.
+    pub(crate) dropper_pointer: Option<egui::Pos2>,
     /// The text node currently being edited in-canvas.
     pub(crate) text: Option<TextSession>,
     /// Points selected inside a path, for the node tool — a third kind of
@@ -2365,6 +2375,10 @@ impl OndinApp {
             pen: None,
             pen_bias: false,
             pending_images: Vec::new(),
+            dropper_return: Tool::Select,
+            dropper_pick: None,
+            dropper_picks: 0,
+            dropper_pointer: None,
             text: None,
             points: PointSet::default(),
             collapsed: HashSet::new(),
@@ -2558,6 +2572,12 @@ impl eframe::App for OndinApp {
         // process and then stops it regardless — is launched only once nothing
         // is left to write (§15 D970).
         self.updater.on_exit();
+    }
+
+    /// An armed eyedropper keeps the panels from seeing the pointer
+    /// (`OndinApp::gate_dropper_input`).
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.gate_dropper_input(ctx, raw_input);
     }
 
     /// The frame body: everything the app draws and decides, once per pass.
@@ -2887,6 +2907,12 @@ impl eframe::App for OndinApp {
         // just a position.
         if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
             self.secondary_press = ctx.pointer_interact_pos();
+            // An armed eyedropper is a gesture a right-click calls off, and the
+            // click is spent on it: no menu, no selection. Anything else in
+            // flight is cancelled by the same press.
+            if self.disarm_dropper() {
+                self.gesture_cancelled = true;
+            }
             self.cancel_gesture(&ctx);
         }
 
@@ -3834,6 +3860,10 @@ impl OndinApp {
         } else if self.escape_styles() {
             // A style card's menu, its picker, a new style's name, an edit of
             // a style (§15 D1063) — one a press, before the picker below.
+        } else if self.disarm_dropper() {
+            // An armed eyedropper, above the picker it may be picking for: the
+            // first press disarms the pick button and the next closes the picker.
+            // The rail's hands back to the tool it came from.
         } else if self.picker.take().is_some() {
             // The picker floats over the canvas and owns no gesture, so it is
             // the outermost thing Escape can dismiss.
@@ -4091,6 +4121,22 @@ impl OndinApp {
     /// app's own idiom for leaving a state before entering another, and what
     /// Escape's new first rung is for.
     pub(crate) fn choose_tool(&mut self, tool: Tool) {
+        // **`I` toggles the eyedropper**, back to the tool it was armed from, and
+        // arming it remembers that tool. The rail's dropper outranks a picker's
+        // pick button only by replacing it.
+        let tool = match tool {
+            Tool::Eyedropper if self.tool == Tool::Eyedropper => self.dropper_return,
+            Tool::Eyedropper => {
+                self.dropper_return = self.tool;
+                if let Some(p) = &mut self.picker {
+                    p.picking = false;
+                    p.preview = None;
+                }
+                tool
+            }
+            _ => tool,
+        };
+        self.dropper_pick = None;
         self.finish_text_first();
         // 🚨 **A tool switch abandons the drag in flight** (§15 D724,
         // `[S12.4-L1-07]`). This cleared five pieces of gesture state by name —
@@ -10194,7 +10240,11 @@ impl OndinApp {
             // the crop tool did and is half of why *Crop* and the bounding box
             // ended up meaning different things.
             E::Sep,
-            E::Btn(icon::EYEDROPPER, None, "Eyedropper (soon)"),
+            E::Btn(
+                icon::EYEDROPPER,
+                Some(Tool::Eyedropper),
+                "Eyedropper — pick a colour onto the selection (I)",
+            ),
             E::Btn(icon::CHAT, None, "Comment (soon)"),
         ];
         egui::Panel::left("rail")

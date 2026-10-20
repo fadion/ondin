@@ -1192,3 +1192,36 @@ fn pasting_the_properties_a_layer_already_has_is_not_an_edit() {
     f.commit(tx);
     assert_eq!(f.doc.get(b).unwrap().opacity(), 1.0);
 }
+
+/// **The eyedropper's write reaches each layer's top *visible* fill**, past a
+/// hidden one above it, and gives a layer with none a fill of its own — in one
+/// transaction, the other fills untouched.
+/// flip: `set_top_paint_all` taking the last fill whatever its visibility → fails
+/// at `a`'s hidden fill staying green.
+#[test]
+fn the_top_paint_is_the_top_visible_one_and_an_empty_list_gains_one() {
+    let mut f = Fixture::new();
+    let a = f.add(f.artboard, rect());
+    let b = f.add(f.artboard, rect());
+    let hidden = Fill {
+        visible: false,
+        ..solid_fill(GREEN)
+    };
+    f.paint(a, vec![solid_fill(RED), hidden.clone()], vec![]);
+    let tx = build::set_top_paint_all(
+        &f.doc,
+        &[a, b],
+        build::PaintTarget::Fill,
+        |_| Brush::Solid(BLUE),
+        &mut f.ids,
+    );
+    assert_eq!(tx.0.len(), 2, "one write per layer: {tx:?}");
+    f.commit(tx);
+    let fills = |id| values(&f.doc.get(id).unwrap().paint().fills);
+    assert_eq!(
+        fills(a),
+        vec![solid_fill(BLUE), hidden],
+        "a: the visible one"
+    );
+    assert_eq!(fills(b), vec![solid_fill(BLUE)], "b: a fill of its own");
+}

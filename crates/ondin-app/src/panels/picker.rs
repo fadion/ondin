@@ -81,6 +81,15 @@ pub struct Picker {
     /// Whether the current variable's row has been scrolled into view since the
     /// picker opened on this slot (E1: *"scrolled into view on open"*).
     pub(crate) scrolled: bool,
+    /// The hex row's pick button is armed: a canvas click picks into this slot
+    /// (`crate::eyedropper`).
+    pub(crate) picking: bool,
+    /// The colour under the eyedropper while it is over the canvas — shown in the
+    /// plane, the hue and the hex, and written nowhere.
+    pub(crate) preview: Option<[u8; 3]>,
+    /// The edited colour's hex while a preview stands in for it, for the hex
+    /// row's *was* label.
+    was: Option<String>,
 }
 impl Picker {
     pub fn new(node: NodeId, slot: PaintSlot, spawn: egui::Pos2) -> Self {
@@ -95,6 +104,9 @@ impl Picker {
             browse: false,
             search: String::new(),
             scrolled: false,
+            picking: false,
+            preview: None,
+            was: None,
         }
     }
     /// Retarget an already-open picker, keeping its position on screen.
@@ -111,6 +123,8 @@ impl Picker {
             self.browse = false;
             self.search.clear();
             self.scrolled = false;
+            self.picking = false;
+            self.preview = None;
         }
     }
 }
@@ -155,7 +169,8 @@ const TRACK_H: f32 = 9.0;
 const STOP_BAR_H: f32 = 11.0;
 /// Corner radius of the document-palette chips along the bottom of the card.
 const SWATCH_RADIUS: f32 = 5.0;
-/// The picker window's name, which is also its `Area` id and so its layer's.
+/// The picker window's name, which `picker_window` also makes its `Area` id and
+/// so its layer's.
 ///
 /// Named because a *second* popup has to recognise a click that landed in it: the
 /// typography popup can open this picker from a decoration's swatch, and would
@@ -165,7 +180,7 @@ const SWATCH_RADIUS: f32 = 5.0;
 const WINDOW_NAME: &str = "colour-picker";
 
 /// The layer the picker draws into.
-pub(super) fn layer_id() -> egui::Id {
+pub(crate) fn layer_id() -> egui::Id {
     egui::Id::new(WINDOW_NAME)
 }
 
@@ -192,6 +207,9 @@ pub(super) fn layer_id() -> egui::Id {
 /// running tally of these and the two checks that find them.
 fn picker_window() -> egui::Window<'static> {
     egui::Window::new(WINDOW_NAME)
+        // Set, not derived: egui hashes the title as an `Option`, so the id a
+        // bare `Window::new` takes is not `Id::new(WINDOW_NAME)`.
+        .id(layer_id())
         .title_bar(false)
         .resizable(false)
         // min == max pins the width; the height still follows the face.
@@ -356,6 +374,29 @@ impl OndinApp {
             self.picker = None;
             return;
         };
+        // **The eyedropper's hovered colour stands in for the edited stop's**, for
+        // the eye only: nothing is written until the click (the design's rule 4).
+        let preview = self
+            .picker
+            .as_ref()
+            .filter(|p| p.picking)
+            .and_then(|p| p.preview.map(|rgb| (rgb, p.stop)));
+        let brush = match preview {
+            Some((rgb, stop)) if !matches!(brush, Brush::Image(_)) => {
+                let stops = paint::stops_of(&brush);
+                let was = hex_of(stops[stop.min(stops.len() - 1)].1);
+                if let Some(p) = &mut self.picker {
+                    p.was = Some(was);
+                }
+                with_stop_rgb(&brush, stop, rgb)
+            }
+            _ => {
+                if let Some(p) = &mut self.picker {
+                    p.was = None;
+                }
+                brush
+            }
+        };
         let box_size = self.local_box(node).unwrap_or(Size::new(100.0, 100.0));
         let mut close = false;
         let mut window = picker_window();
@@ -449,6 +490,14 @@ impl OndinApp {
         };
         let browse = self.picker.as_ref().is_some_and(|p| p.browse);
         let on_vars = key.is_some() && (bound.is_some() || browse);
+        // The pick button lives in the hex row, which neither the Variables face
+        // nor an image draws, so a face without it cannot stay armed.
+        if (on_vars || kind == PaintKind::Image)
+            && let Some(p) = &mut self.picker
+        {
+            p.picking = false;
+            p.preview = None;
+        }
         let tabs = if key.is_some() { 4 } else { 3 };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = TAB_GAP;
@@ -979,6 +1028,17 @@ impl OndinApp {
         let single = stops.len() == 1;
         field_row(ui, egui::vec2(width, ROW_H), |ui| {
             ui.spacing_mut().item_spacing.x = 9.0;
+            // The eyedropper's door into this one slot (the design's P1).
+            let picking = self.picker.as_ref().is_some_and(|p| p.picking);
+            let pick = icon_button(ui, icon::EYEDROPPER, 20.0, 14.0, picking, true)
+                .on_hover_text("Pick a colour from the canvas");
+            if pick.clicked()
+                && let Some(p) = &mut self.picker
+            {
+                p.picking = !p.picking;
+                p.preview = None;
+            }
+            let was = self.picker.as_ref().and_then(|p| p.was.clone());
             let mut text = self
                 .picker
                 .as_ref()
@@ -991,6 +1051,13 @@ impl OndinApp {
                     .char_limit(ui::HEX_CHAR_LIMIT)
                     .font(egui::FontId::proportional(11.5)),
             );
+            if let Some(was) = &was {
+                ui.label(
+                    egui::RichText::new(format!("was {was}"))
+                        .size(10.5)
+                        .color(theme::color::text_a(97)),
+                );
+            }
             ui::select_all_on_focus(ui, &resp, &text);
             if (resp.has_focus() || resp.changed())
                 && let Some(p) = &mut self.picker
@@ -1076,20 +1143,13 @@ impl OndinApp {
                     // gradient chosen in the picker is a gradient the user asked
                     // every one of them to have"* — and they have no separate
                     // opacity field. The hex field does.
-                    if let PaintSlot::SelectionAll(target) = slot {
-                        let tx = self.edit_paints_all(target, move |b| {
-                            Brush::Solid(rgb.with_alpha(paint::alpha_of(b)))
-                        });
-                        self.commit_edit(tx);
-                        if let Some(p) = &mut self.picker {
-                            p.hex = None;
-                        }
+                    self.write_slot_rgb(node, slot, rgb);
+                    if let Some(p) = &mut self.picker {
+                        p.hex = None;
+                    }
+                    if matches!(slot, PaintSlot::SelectionAll(_)) {
                         return;
                     }
-                    let a = current.components[3];
-                    let mut next = stops.clone();
-                    next[index].1 = rgb.with_alpha(a);
-                    self.write_slot(node, slot, paint::with_stops(brush, next));
                 }
                 if let Some(p) = &mut self.picker {
                     p.hex = None;
@@ -1149,6 +1209,35 @@ impl OndinApp {
                 self.valve_slot(&r, node, slot, next);
             });
         });
+    }
+    /// Give `slot`'s edited colour this RGB and keep its alpha — what typing a hex
+    /// does, and what the eyedropper does (its rule 3). One transaction.
+    ///
+    /// ⚠️ **Over a selection, each paint keeps its own opacity** (§15 D540): this
+    /// owns the colour and the `%` beside it owns the number, and over a set that
+    /// disagrees there is no one number to send with the colour. The plane and the
+    /// strips send a whole brush on purpose; the hex does not.
+    pub(crate) fn write_slot_rgb(&mut self, node: NodeId, slot: PaintSlot, rgb: Color) {
+        if let PaintSlot::SelectionAll(target) = slot {
+            let tx = self.edit_paints_all(target, move |b| {
+                Brush::Solid(rgb.with_alpha(paint::alpha_of(b)))
+            });
+            self.commit_edit(tx);
+            return;
+        }
+        let Some(brush) = self.slot_brush(node, slot) else {
+            return;
+        };
+        let stops = paint::stops_of(&brush);
+        let index = self
+            .picker
+            .as_ref()
+            .filter(|p| p.node == node && p.slot == slot)
+            .map_or(0, |p| p.stop)
+            .min(stops.len() - 1);
+        let mut next = stops.clone();
+        next[index].1 = rgb.with_alpha(stops[index].1.components[3]);
+        self.write_slot(node, slot, paint::with_stops(&brush, next));
     }
     /// The colours already in this document, most-used first. A real palette
     /// beats a decorative one: it is how a second shape gets the exact fill the
@@ -1541,6 +1630,15 @@ mod tests {
             }
         }
     }
+}
+
+/// `brush` with stop `stop`'s colour (clamped to the last) made `rgb`, its alpha
+/// kept — the eyedropper's preview of a pick.
+fn with_stop_rgb(brush: &Brush, stop: usize, [r, g, b]: [u8; 3]) -> Brush {
+    let mut stops = paint::stops_of(brush);
+    let i = stop.min(stops.len() - 1);
+    stops[i].1 = Color::from_rgba8(r, g, b, 255).with_alpha(stops[i].1.components[3]);
+    paint::with_stops(brush, stops)
 }
 
 /// The HSV to draw the handle at: the picker's remembered intent while the slot

@@ -73,8 +73,8 @@ pub use build::{
     kept_size_vars, kept_stroke_widths, local_for_world, move_by_world, outermost, paint_at,
     paint_targets, place_at_world, recolor, repaint, reparent_preserving_world, retarget_fills_all,
     retarget_strokes_all, set_boolean_op, set_brush_at_all, set_corner_radius_all, set_fills_all,
-    set_opacity_all, set_strokes_all, shared_corner_radius, shared_fills, shared_over_fills,
-    shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
+    set_opacity_all, set_strokes_all, set_top_paint_all, shared_corner_radius, shared_fills,
+    shared_over_fills, shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
 };
 pub use container::{AutoMargins, Insets, LengthPct};
 pub use document::{DEFAULT_CANVAS_BACKGROUND, Document, remap_subtree, reserve_existing_ids};

@@ -309,9 +309,13 @@ impl OndinApp {
         b.inner_w = w - 2.0 * PAD;
 
         // Who reads what, once a frame: the usage counts and *In selection*.
+        // Never a vault node, which is never selected (§15 D1012): a kit's
+        // frozen mains read its variables and styles by rule.
         let mut users: BTreeMap<VarId, Vec<NodeId>> = BTreeMap::new();
         for v in table.iter() {
-            users.insert(v.id, var::users(doc, v.id));
+            let mut who = var::users(doc, v.id);
+            who.retain(|u| !doc.in_vault(*u));
+            users.insert(v.id, who);
         }
         let picked: Option<HashSet<VarId>> = b.in_selection.then(|| {
             let ids = ondin_core::subtree_nodes(doc, self.session.selection.ids());
@@ -324,7 +328,9 @@ impl OndinApp {
         // And the styles' (G8, §15 D1063), for the *Styles* tab.
         let mut style_users: BTreeMap<StyleId, Vec<NodeId>> = BTreeMap::new();
         for s in doc.styles().iter() {
-            style_users.insert(s.id, sty::users(doc, s.id));
+            let mut who = sty::users(doc, s.id);
+            who.retain(|u| !doc.in_vault(*u));
+            style_users.insert(s.id, who);
         }
         let style_picked: Option<HashSet<StyleId>> = b.in_selection.then(|| {
             let ids = ondin_core::subtree_nodes(doc, self.session.selection.ids());
@@ -672,7 +678,7 @@ impl OndinApp {
                             }
                             // The last mode cannot go while there are variables:
                             // every variable has a value in every mode.
-                            let last = table.modes().len() == 1 && table.iter().next().is_some();
+                            let last = table.modes().len() == 1 && table.local().next().is_some();
                             let del = ui::menu_row(
                                 ui,
                                 ui::MenuRow::new(icon::TRASH, "Delete mode…")
@@ -700,8 +706,7 @@ impl OndinApp {
                                 }));
                                 close = true;
                             }
-                            let members: Vec<&Variable> =
-                                table.iter().filter(|v| in_group(&v.name, path)).collect();
+                            let members = group_members(table, path);
                             let mut who: Vec<NodeId> = members
                                 .iter()
                                 .flat_map(|v| users[&v.id].iter().copied())
@@ -1315,6 +1320,13 @@ fn name_refusal(
     taken.then(|| format!("{name} already exists."))
 }
 
+/// The document's own variables under group `path` — what its menu deletes and
+/// selects the users of. A kit's group of the same path lists apart, and its
+/// rows are inert (§15 D1065).
+fn group_members<'a>(table: &'a ondin_core::Variables, path: &str) -> Vec<&'a Variable> {
+    table.local().filter(|v| in_group(&v.name, path)).collect()
+}
+
 /// A typed cell: `--name` aliases another variable of the kind, a colour takes
 /// a hex (its alpha too, eight digits), a number takes an expression, and a
 /// string takes the text as typed, spaces and all (§15 D1069).
@@ -1328,7 +1340,13 @@ fn parse_cell(
     let text = text.trim();
     if let Some(name) = text.strip_prefix("--") {
         let name = name.trim();
-        let Some(target) = table.by_name(name) else {
+        // The cell's own target first: an alias of a kit's variable reads
+        // `--name` unqualified, and the document may have its own of that name.
+        let current = match v.cells.get(&mode) {
+            Some(Cell::Alias(t)) => table.get(*t).filter(|t| t.name == name),
+            _ => None,
+        };
+        let Some(target) = current.or_else(|| table.by_name(name)) else {
             return Err(format!("No variable is named {name}."));
         };
         if target.kind != v.kind {
@@ -2187,7 +2205,16 @@ fn var_row(
                         .map(|c| cell_text(table, c))
                         .unwrap_or_default(),
                 });
+                let has_next = next.is_some();
                 acts.push(Act::Cell(v.id, m.id, text.clone(), next));
+                // Scrolled so the next column is wholly on show: a field off
+                // the clip is never drawn nor focused, and the keys typed for
+                // it would reach the canvas's shortcuts.
+                if has_next {
+                    let j = i + 1;
+                    let lo = MODE_W * j.saturating_sub(MAX_COLS - 1) as f32;
+                    b.scroll_x = b.scroll_x.clamp(lo, MODE_W * j as f32);
+                }
             } else if ui::defocus_commits(&field) {
                 acts.push(Act::Cell(v.id, m.id, text.clone(), None));
             }
@@ -3537,6 +3564,61 @@ mod tests {
         ctx.run_ui(input, |_| draw(app, ctx)).shapes
     }
 
+    /// **`Tab` into a column scrolled out of view scrolls it on show**, so its
+    /// field is drawn and focused rather than leaving the keys to the canvas.
+    ///
+    /// flip: the `Tab` branch's scroll removed → fails *"the fourth column on
+    /// show"*, `scroll_x` still 0.
+    #[test]
+    fn tab_into_a_hidden_column_scrolls_it_on_show() {
+        let (ctx, mut app) = app();
+        crate::theme::install(&ctx);
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Number));
+        for _ in 0..4 {
+            app.var_act(Act::NewMode);
+        }
+        let v = the_only_var(&app);
+        let modes: Vec<ModeId> = app
+            .session
+            .doc
+            .variables()
+            .modes()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(modes.len(), 5, "fixture: five modes");
+        let b = app.var_browser.as_mut().unwrap();
+        b.edit = Some(Edit::Cell {
+            var: v.id,
+            mode: modes[2],
+            text: "7".into(),
+        });
+        b.edit_focus = true;
+        let draw: fn(&mut OndinApp, &egui::Context) = |a, c| a.var_browser_ui(c);
+        for _ in 0..3 {
+            pass(&ctx, &mut app, vec![], draw);
+        }
+        let tab = |pressed| egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        pass(&ctx, &mut app, vec![tab(true), tab(false)], draw);
+        for _ in 0..3 {
+            pass(&ctx, &mut app, vec![], draw);
+        }
+        let b = app.var_browser.as_ref().unwrap();
+        assert!(
+            matches!(&b.edit, Some(Edit::Cell { mode, .. }) if *mode == modes[3]),
+            "fixture: the edit moved on, {:?}",
+            b.edit.is_some()
+        );
+        assert_eq!(b.scroll_x, MODE_W, "the fourth column on show");
+    }
+
     /// **Renaming a mode moves nothing below the header** (§15 D1083): the
     /// variable rows sit where they sat. Reported as the table shifting up a
     /// point or two while the mode's field was open.
@@ -3780,6 +3862,88 @@ mod tests {
         ]);
         assert!(app.session.commit(tx), "the fixture commits");
         (light, night, surface, brand, accent, rect)
+    }
+
+    /// **A document group's menu reaches the document's own variables only**:
+    /// a kit's group of the same path is inert, so *Delete group* and *Select*
+    /// leave it and its readers alone (§15 D1065).
+    ///
+    /// flip: `group_members` walking `table.iter()` → fails *"the kit's
+    /// brand/primary is not a member"*.
+    #[test]
+    fn a_document_groups_members_are_the_documents_own() {
+        let (_ctx, mut app) = app();
+        let (light, _, _, brand, _, _) = with_a_kit(&mut app);
+        let own = app.session.ids.mint_var();
+        let kit_brand = app.session.doc.variables().get(brand).unwrap().clone();
+        let tx = Transaction(vec![
+            Operation::SetVariable {
+                var: Variable {
+                    name: "brand/primary".into(),
+                    ..kit_brand
+                },
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: own,
+                    name: "brand/accent".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(Color::WHITE))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]);
+        assert!(app.session.commit(tx));
+        let members: Vec<VarId> = group_members(app.session.doc.variables(), "brand")
+            .iter()
+            .map(|v| v.id)
+            .collect();
+        assert_eq!(
+            members,
+            vec![own],
+            "the kit's brand/primary is not a member"
+        );
+    }
+
+    /// **Re-typing an alias of a kit's variable keeps it**, though the document
+    /// has its own variable of that name: `--brand` reads unqualified, and the
+    /// cell's own target comes first.
+    ///
+    /// flip: `parse_cell` resolving `--name` by `by_name` alone → fails *"the
+    /// alias still names the kit's brand"*.
+    #[test]
+    fn re_typing_a_kit_alias_keeps_its_target() {
+        let (_ctx, mut app) = app();
+        let (light, _, surface, brand, _, _) = with_a_kit(&mut app);
+        let own = app.session.ids.mint_var();
+        let tx = Transaction(vec![
+            Operation::AddVariable {
+                var: Variable {
+                    id: own,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(Color::BLACK))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetVariableCell {
+                id: surface,
+                mode: light,
+                cell: Cell::Alias(brand),
+            },
+        ]);
+        assert!(app.session.commit(tx), "the fixture commits");
+        let table = app.session.doc.variables();
+        let v = table.get(surface).unwrap();
+        let text = cell_text(table, &v.cells[&light]);
+        assert_eq!(text, "--brand");
+        assert_eq!(
+            parse_cell(table, v, light, &text),
+            Ok(Cell::Alias(brand)),
+            "the alias still names the kit's brand"
+        );
     }
 
     /// **A kit's variables list last, under the kit, inert — and the kit's header

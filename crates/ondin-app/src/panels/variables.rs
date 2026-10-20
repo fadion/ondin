@@ -1051,19 +1051,19 @@ impl OndinApp {
                 let taken: Vec<&str> = table.modes().iter().map(|m| m.name.as_str()).collect();
                 let name = free_name(&taken, "Mode", table.modes().len() + 1);
                 let id = self.session.ids.mint_mode();
-                let op = match table.default_mode() {
+                let ops = match table.default_mode() {
                     Some(first) => var::copy_mode_ops(doc, first, id, &name, table.modes().len()),
-                    None => Some(Operation::AddMode {
+                    None => vec![Operation::AddMode {
                         mode: Mode {
                             id,
                             name: name.clone(),
                         },
                         index: 0,
                         cells: vec![],
-                    }),
+                    }],
                 };
-                if let Some(op) = op
-                    && self.commit_edit(Transaction(vec![op]))
+                if !ops.is_empty()
+                    && self.commit_edit(Transaction(ops))
                     && let Some(b) = self.var_browser.as_mut()
                 {
                     b.edit = Some(Edit::Mode {
@@ -1085,8 +1085,9 @@ impl OndinApp {
                     stem
                 };
                 let id = self.session.ids.mint_mode();
-                if let Some(op) = var::copy_mode_ops(doc, from, id, &name, index + 1) {
-                    self.commit_edit(Transaction(vec![op]));
+                let ops = var::copy_mode_ops(doc, from, id, &name, index + 1);
+                if !ops.is_empty() {
+                    self.commit_edit(Transaction(ops));
                 }
             }
             Act::Name(id, text) => {
@@ -1113,13 +1114,10 @@ impl OndinApp {
                 } else if taken {
                     self.var_refuse(format!("{text} already exists."));
                 } else {
-                    let changed = table.mode(id).is_some_and(|m| m.name != text);
+                    let ops = var::rename_mode_ops(doc, id, &text);
                     self.var_edit_done();
-                    if changed {
-                        self.commit_edit(Transaction(vec![Operation::SetModeName {
-                            id,
-                            name: text,
-                        }]));
+                    if !ops.is_empty() {
+                        self.commit_edit(Transaction(ops));
                     }
                 }
             }

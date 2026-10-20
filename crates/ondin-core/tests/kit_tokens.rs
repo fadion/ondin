@@ -834,6 +834,37 @@ fn renaming_a_document_mode_dirties_what_reads_a_kit_column() {
     assert_eq!(drawn(&d, inst), Brush::Solid(WHITE), "now the kit's first");
 }
 
+/// **Renaming or duplicating a document mode keeps the kit column it reads**:
+/// *Night* reads the kit's *Night* by name; renamed *Evening*, or copied as
+/// *Night copy*, it is pinned to it by a mapping entry, so the instance still
+/// draws navy rather than the kit's first mode.
+///
+/// flip: `keep_kit_columns` writing nothing → fails *"the rename keeps navy"*.
+#[test]
+fn renaming_or_duplicating_a_mode_keeps_its_kit_column() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Day", "Night"]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    d.apply(&Transaction(vec![Operation::SetMode {
+        id: inst,
+        mode: Some(modes[1]),
+    }]))
+    .unwrap();
+    assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "Night reads Night");
+    let copy = ids.mint_mode();
+    let ops = ondin_core::variable::copy_mode_ops(&d, modes[1], copy, "Night copy", 2);
+    d.apply(&Transaction(ops)).unwrap();
+    let ops = ondin_core::variable::rename_mode_ops(&d, modes[1], "Evening");
+    d.apply(&Transaction(ops)).unwrap();
+    assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "the rename keeps navy");
+    d.apply(&Transaction(vec![Operation::SetMode {
+        id: inst,
+        mode: Some(copy),
+    }]))
+    .unwrap();
+    assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "and so does the copy");
+}
+
 /// **A kit taking a third kit's update that changes nothing it reads has no
 /// variable change to publish**: the held copy's origin version alone moved.
 ///

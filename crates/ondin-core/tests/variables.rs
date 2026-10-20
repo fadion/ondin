@@ -827,9 +827,9 @@ fn copying_a_mode_copies_its_column() {
         }]))
         .unwrap();
     let dusk = f.ids.mint_mode();
-    let op = ondin_core::variable::copy_mode_ops(&f.doc, f.dark, dusk, "Dusk", 2)
-        .expect("Dark is a mode");
-    f.doc.apply(&Transaction(vec![op])).unwrap();
+    let ops = ondin_core::variable::copy_mode_ops(&f.doc, f.dark, dusk, "Dusk", 2);
+    assert!(!ops.is_empty(), "Dark is a mode");
+    f.doc.apply(&Transaction(ops)).unwrap();
     let t = f.doc.variables();
     assert_eq!(t.modes()[2].id, dusk, "at the index asked");
     for v in [f.brand, f.radius, alias] {
@@ -837,7 +837,7 @@ fn copying_a_mode_copies_its_column() {
         assert_eq!(cells[&dusk], cells[&f.dark], "{v:?}'s Dusk is its Dark");
     }
     let nowhere = f.ids.mint_mode();
-    assert!(ondin_core::variable::copy_mode_ops(&f.doc, nowhere, dusk, "x", 0).is_none());
+    assert!(ondin_core::variable::copy_mode_ops(&f.doc, nowhere, dusk, "x", 0).is_empty());
 }
 
 /// Deleting a mode returns its frames to *Inherit*; renaming a group moves its

@@ -1394,28 +1394,88 @@ pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
 
 /// A copy of mode `from` with its every cell, added at `index` of the list —
 /// *Duplicate mode* (after its source) and *New mode* (which copies the first
-/// mode and goes last, D1038 G). `None` when `from` is not a mode.
+/// mode and goes last, D1038 G) — reading every kit's column `from` reads, a
+/// mapping entry written where the copy's name would match another. Empty when
+/// `from` is not a mode.
 pub fn copy_mode_ops(
     doc: &crate::Document,
     from: ModeId,
     id: ModeId,
     name: &str,
     index: usize,
-) -> Option<crate::Operation> {
+) -> Vec<crate::Operation> {
     let t = doc.variables();
-    t.mode(from)?;
+    if t.mode(from).is_none() {
+        return Vec::new();
+    }
     let cells = t
         .iter()
         .filter_map(|v| v.cells.get(&from).map(|c| (v.id, c.clone())))
         .collect();
-    Some(crate::Operation::AddMode {
+    let mut ops = vec![crate::Operation::AddMode {
         mode: Mode {
             id,
             name: name.into(),
         },
         index,
         cells,
-    })
+    }];
+    ops.extend(keep_kit_columns(t, id, name, |kit| {
+        t.kit_mode(kit, Some(from))
+    }));
+    ops
+}
+
+/// Rename document mode `mode` to `name`, every kit's column it reads kept: a
+/// kit mode matched by the old name, or a first mode the new name would trade
+/// for one of its own, is written as a mapping entry — a rename relabels the
+/// mode, it does not repoint what its layers draw.
+pub fn rename_mode_ops(doc: &crate::Document, mode: ModeId, name: &str) -> Vec<crate::Operation> {
+    let t = doc.variables();
+    if t.mode(mode).is_none_or(|m| m.name == name) {
+        return Vec::new();
+    }
+    let mut ops = vec![crate::Operation::SetModeName {
+        id: mode,
+        name: name.into(),
+    }];
+    ops.extend(keep_kit_columns(t, mode, name, |kit| {
+        t.kit_mode(kit, Some(mode))
+    }));
+    ops
+}
+
+/// `SetKitModes` giving document mode `mode`, named `name`, a mapping entry to
+/// `reads(kit)` in every kit where the name alone would map it elsewhere.
+fn keep_kit_columns(
+    t: &Variables,
+    mode: ModeId,
+    name: &str,
+    reads: impl Fn(&str) -> Option<ModeId>,
+) -> Vec<crate::Operation> {
+    let mut ops = Vec::new();
+    for (kit, km) in &t.kits {
+        let Some(want) = reads(kit) else { continue };
+        if km.map.get(&mode) == Some(&want) {
+            continue;
+        }
+        let by_name = km
+            .modes
+            .iter()
+            .find(|x| x.name == name)
+            .or(km.modes.first())
+            .map(|x| x.id);
+        if by_name == Some(want) && !km.map.contains_key(&mode) {
+            continue;
+        }
+        let mut next = km.clone();
+        next.map.insert(mode, want);
+        ops.push(crate::Operation::SetKitModes {
+            kit: kit.clone(),
+            modes: Some(next),
+        });
+    }
+    ops
 }
 
 /// The group a variable's name puts it in — everything before its last `/` —

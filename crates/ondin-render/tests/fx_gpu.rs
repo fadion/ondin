@@ -107,9 +107,16 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     fx: FxPipelines,
+    /// Held for the test's life, as `gpu_effects.rs` holds it: the tests take
+    /// the adapter one at a time.
+    _one_at_a_time: std::sync::MutexGuard<'static, ()>,
 }
 
+/// The lock every test here holds while it has a device.
+static ADAPTER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn gpu() -> Option<Gpu> {
+    let one_at_a_time = ADAPTER.lock().unwrap_or_else(|e| e.into_inner());
     let instance = wgpu::Instance::default();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -117,7 +124,12 @@ fn gpu() -> Option<Gpu> {
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
     let fx = FxPipelines::new(&device);
-    Some(Gpu { device, queue, fx })
+    Some(Gpu {
+        device,
+        queue,
+        fx,
+        _one_at_a_time: one_at_a_time,
+    })
 }
 
 /// The fixture as a texture the passes can read.

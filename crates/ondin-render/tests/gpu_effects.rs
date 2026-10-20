@@ -71,9 +71,53 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: VelloGpuRenderer,
+    /// Held for the test's life: the tests take the adapter one at a time.
+    /// Run in parallel, devices made side by side hung the suite intermittently
+    /// (two runs in five), and the gate's spelling is the plain `--ignored`.
+    _one_at_a_time: Serial,
+}
+
+/// The lock every test here holds while it has a device.
+static ADAPTER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+thread_local! {
+    /// This thread's hold on [`ADAPTER`] and how many devices share it — a test
+    /// that makes a second device to compare against must not wait on itself.
+    static HELD: std::cell::RefCell<(usize, Option<std::sync::MutexGuard<'static, ()>>)> =
+        const { std::cell::RefCell::new((0, None)) };
+}
+
+/// One device's share of this thread's hold on [`ADAPTER`].
+struct Serial;
+
+impl Serial {
+    fn take() -> Self {
+        HELD.with(|h| {
+            let mut h = h.borrow_mut();
+            if h.0 == 0 {
+                // A test that panicked holding it poisons nothing worth refusing.
+                h.1 = Some(ADAPTER.lock().unwrap_or_else(|e| e.into_inner()));
+            }
+            h.0 += 1;
+        });
+        Serial
+    }
+}
+
+impl Drop for Serial {
+    fn drop(&mut self) {
+        HELD.with(|h| {
+            let mut h = h.borrow_mut();
+            h.0 -= 1;
+            if h.0 == 0 {
+                h.1 = None;
+            }
+        });
+    }
 }
 
 fn gpu() -> Option<Gpu> {
+    let one_at_a_time = Serial::take();
     let instance = wgpu::Instance::default();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -85,6 +129,7 @@ fn gpu() -> Option<Gpu> {
         device,
         queue,
         renderer,
+        _one_at_a_time: one_at_a_time,
     })
 }
 

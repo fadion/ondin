@@ -38,6 +38,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D55** The pivot is baked by the gesture that reads it, never composed into a layer's world transform.
 - **D5** The inspector shows X/Y and rotation in world space, projected back through `build::place_at_world`. W/H are geometry edits, not scale.
 - **D321** A locked group locks everything inside it, through one query, `query::is_effectively_locked`. A lock guards canvas accidents, not deliberate panel edits. **D746** Bulk selection never reaches a locked layer (`may_select_in_bulk`).
+- **A selection holding a locked layer is not dragged on the canvas**: no handle arms, no move starts, no spacing band is offered. The handles stay drawn and the size badge's padlock says why; the keyboard nudge does not ask.
 - **D113** A multi-selection can have a key layer (Alt+Shift+click). With none, align uses the union and boolean uses its own base operand.
 
 ## Layout
@@ -68,6 +69,10 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D1039** Bindings are sidecars beside the literal, not a `Literal | Bound` enum. A write over a bound field detaches it at the commit; deleting a used variable detaches its users to the resolved value.
 - **D1062** A styled layer holds a linked copy written by `style::settle`. The slots are fills, strokes, effects, text and layout.
 - **D1064** A kit carries the variables and styles its mains read into the consumer's own tables, with an origin and a per-kit mode mapping. One planner, `tokens::plan`, serves insert, update and carrying paste.
+- **A mode renamed or duplicated keeps the kit columns it reads**: the browser's doors write a mapping entry where the new name would match another kit mode (`variable::rename_mode_ops`, `copy_mode_ops`). A kit's variable may alias any kit's, never the document's own.
+- **Bound texts are re-measured rather than traced**: every bound text's layout memo is dropped on each `Resolved::update`, so a commit re-laying a chain re-measures every bound text in it (21 ms at 200 bound labels).
+- **A colour cell's preview patches every bound node each frame**, not only the variable's readers (3.7 ms a frame at 200 content-bound texts).
+- **A text style made over a live selection takes the layer's character defaults**, not the selection's shown attributes (`style::value_drawn`).
 
 ## Text and fonts
 

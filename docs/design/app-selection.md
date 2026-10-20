@@ -42,8 +42,15 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - **Open**: `canvas::frame_label_at` reads no lock, so a locked frame is selectable by its name tag.
   Adding a lock term costs the canvas's only route to *Unlock* (the tag's layer menu); the alternative
   is to declare the tag a second deliberate exception. Undecided.
-- The lock is enforced at **selection time only** — `delete_selection`, `nudge`, restacks and aligns do
-  not read it — so every selecting door must carry the filter (`Selection::set_one` filters nothing).
+- **A selection holding an effectively locked layer is not dragged** (`canvas::selection_locked`): it
+  arms no resize, skew or rotate handle (`Handles::armed` answers `locked`, so the cursor agrees),
+  no line endpoint, rail handle or pivot marker (`grab_line_end`, `grab_rail_handle`, `on_pivot`
+  answer `None`), `begin_select_drag` starts no move (the press still selects), and it offers no
+  spacing band (`spacing_subject` drops a locked selected container as `spacing_hover` drops a
+  hovered one). The handles are still drawn; the size badge's padlock labels the refusal.
+- Otherwise the lock is enforced at **selection time only** — `delete_selection`, the keyboard
+  nudge, restacks and aligns do not read it — so every selecting door must carry the filter
+  (`Selection::set_one` filters nothing).
 
 ### Double-click (`canvas::double_click_pick`)
 

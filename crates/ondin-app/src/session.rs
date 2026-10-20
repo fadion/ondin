@@ -1798,10 +1798,20 @@ fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Vec<String>
     if asked {
         return Vec::new();
     }
+    // A swap's rewrite of the copy it swaps is the swap the user picked, not a
+    // detach: a copy following an unstyled main now has no style to keep.
+    let swapped: Vec<NodeId> = tx.0[..user.min(tx.0.len())]
+        .iter()
+        .filter_map(|op| match op {
+            Operation::SetSwap { id, .. } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    let swapped = ondin_core::subtree_nodes(doc, &swapped);
     let mut names: Vec<String> = tx.0[user.min(tx.0.len())..]
         .iter()
         .filter_map(|op| match binds_slot(op) {
-            Some((id, slot, None)) => doc.get(id)?.styles().get(slot),
+            Some((id, slot, None)) if !swapped.contains(&id) => doc.get(id)?.styles().get(slot),
             _ => None,
         })
         .filter_map(|s| doc.styles().get(s).map(|s| s.name.clone()))
@@ -3248,5 +3258,54 @@ mod tests {
         assert!(s.commit(Transaction(vec![Operation::DeleteNode { id: b }])));
         s.selection.retain_existing(&s.doc.clone());
         assert_eq!(s.selection.key(), None);
+    }
+
+    /// **A swap's rewrite of a styled copy is not a detach the status names**:
+    /// the copy follows an unstyled main now; a commit's own `None` write past
+    /// the edit on a layer the edit did not swap still is.
+    ///
+    /// flip: `styles_detached`' swapped-subtree filter removed → fails *"the
+    /// swap names nothing"*.
+    #[test]
+    fn a_swap_to_an_unstyled_main_names_no_detached_style() {
+        let mut s = EditorSession::new();
+        let (a, b) = (add_rect(&mut s), add_rect(&mut s));
+        let style = s.ids.mint_style();
+        assert!(s.commit(Transaction(vec![
+            Operation::AddStyle {
+                style: ondin_core::style::Style {
+                    id: style,
+                    name: "Brand".into(),
+                    value: ondin_core::style::StyleValue::Fills(vec![]),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::SetFills {
+                id: a,
+                fills: vec![]
+            },
+            Operation::SetFills {
+                id: b,
+                fills: vec![]
+            },
+            Operation::SetFillStyle {
+                id: a,
+                style: Some(style),
+            },
+            Operation::SetFillStyle {
+                id: b,
+                style: Some(style),
+            },
+        ])));
+        let cut = |id| Operation::SetFillStyle { id, style: None };
+        let swap = Operation::SetSwap { id: a, swap: None };
+        let tx = Transaction(vec![swap.clone(), cut(a)]);
+        assert!(
+            styles_detached(&s.doc, &tx, 1).is_empty(),
+            "the swap names nothing"
+        );
+        let tx = Transaction(vec![swap, cut(b)]);
+        assert_eq!(styles_detached(&s.doc, &tx, 1), vec!["Brand".to_string()]);
     }
 }

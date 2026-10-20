@@ -8944,10 +8944,11 @@ fn properties_landing(
     (rebound, detached)
 }
 
-/// The colour variables `tx`'s fill and stroke writes take off the layers they
-/// write — a target's own bound paint replaced by the pasted one. A paint's
-/// binding is no binding pass's (§15 D1079), so the commit cannot name these;
-/// a stroke's bound width is, and is left to it (§15 D1073).
+/// The variables `tx`'s fill, stroke and opacity writes take off the layers
+/// they write — a target's own bound paint, stroke width or opacity replaced by
+/// the pasted one. The commit's passes cannot name these: a paint's binding is
+/// no pass's (§15 D1079), a width written unbound is not one the stroke-width
+/// pass judges, and an opacity binding the edit writes is taken as asked.
 fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<String> {
     use ondin_core::BrushSource;
     let t = doc.variables();
@@ -8970,12 +8971,19 @@ fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<Strin
                     n.paint()
                         .strokes
                         .iter()
-                        .filter_map(|s| s.brush.var())
+                        .flat_map(|s| s.brush.var().into_iter().chain(s.width_var))
                         .collect(),
                     strokes
                         .iter()
-                        .filter_map(|s| BrushSource::var(&s.brush))
+                        .flat_map(|s| BrushSource::var(&s.brush).into_iter().chain(s.width_var))
                         .collect(),
+                ),
+                None => continue,
+            },
+            Operation::SetOpacityVar { id, var } => match doc.get(*id) {
+                Some(n) => (
+                    n.opacity_var().into_iter().collect(),
+                    var.iter().copied().collect(),
                 ),
                 None => continue,
             },
@@ -14675,6 +14683,87 @@ mod paste_properties_report_tests {
 
     fn bound(var: VarId) -> BrushSource {
         BrushSource::Bound { var, alpha: 1.0 }
+    }
+
+    /// **A paste over a bound stroke width or a bound opacity names the binding
+    /// it takes away**, as it names a bound paint: a stroke written unbound
+    /// over `w`, an opacity rebound from `x` to `y`.
+    ///
+    /// flips: `paints_overwritten`'s `SetOpacityVar` arm removed, or its strokes
+    /// read without `width_var` → fails *"names w and x"*.
+    #[test]
+    fn a_paste_names_a_bound_width_and_opacity_it_takes_away() {
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let mut ids = ondin_core::IdSource::new(0x7A);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (rect, mode) = (ids.mint(), ids.mint_mode());
+        let [w, x, y] = [(); 3].map(|_| ids.mint_var());
+        let number = |id, name: &str| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(2.0))].into(),
+                origin: None,
+                forked: None,
+            },
+        };
+        let stroke = |width_var| {
+            ondin_core::keyed_by_position([ondin_core::Stroke {
+                width: 2.0,
+                width_var,
+                ..Default::default()
+            }])
+        };
+        doc.apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            number(w, "w"),
+            number(x, "x"),
+            number(y, "y"),
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetStrokes {
+                id: rect,
+                strokes: stroke(Some(w)),
+            },
+            Operation::SetOpacityVar {
+                id: rect,
+                var: Some(x),
+            },
+        ]))
+        .unwrap();
+        let tx = Transaction(vec![
+            Operation::SetStrokes {
+                id: rect,
+                strokes: stroke(None),
+            },
+            Operation::SetOpacityVar {
+                id: rect,
+                var: Some(y),
+            },
+        ]);
+        assert_eq!(
+            crate::app::paints_overwritten(&doc, &tx),
+            vec!["w".to_string(), "x".to_string()],
+            "names w and x"
+        );
     }
 
     /// **A paste into another document says what it rebound and what it

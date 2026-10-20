@@ -13077,8 +13077,38 @@ impl OndinApp {
                 // item ids (§15 D980) — this wrote the anchor's whole list over
                 // every target, ids and all. As drawn, so a bound row keeps its
                 // binding through a `%` (§15 D1039).
+                //
+                // **A `%`-only change is a change of each target's own colour**:
+                // the row shows the anchor's, and a layer bound to the same
+                // variable in another mode draws another, which taking the
+                // anchor's finished brush would detach to the anchor's colour.
                 let ids = self.session.selection.ids();
-                ondin_core::edit_brush_at_all(&self.session.doc, ids, target, i, |_| brush.clone())
+                let doc = &self.session.doc;
+                let committed = ids.first().and_then(|at| {
+                    let paint = doc.get(*at)?.paint();
+                    let b = match target {
+                        PaintTarget::Fill => &paint.fills.get(i)?.brush,
+                        PaintTarget::Stroke => &paint.strokes.get(i)?.brush,
+                    };
+                    Some(doc.resolve_brush(*at, b).into_owned())
+                });
+                let rgb = |c: &ondin_core::peniko::Color| {
+                    let [r, g, b, _] = c.to_rgba8().to_u8_array();
+                    [r, g, b]
+                };
+                let alpha_only = match (&committed, &brush) {
+                    (Some(Brush::Solid(was)), Brush::Solid(now)) => rgb(was) == rgb(now),
+                    _ => false,
+                };
+                ondin_core::edit_brush_at_all(doc, ids, target, i, |drawn| match drawn {
+                    Brush::Solid(c) if alpha_only => {
+                        let Brush::Solid(now) = &brush else {
+                            unreachable!()
+                        };
+                        Brush::Solid(c.with_alpha(now.components[3]))
+                    }
+                    _ => brush.clone(),
+                })
             }
             // Every paint in scope takes this brush, and keeps its place in its own
             // list. The whole brush, gradient and all: this is the picker's write,
@@ -19588,8 +19618,9 @@ mod scale_row_tests {
 }
 
 #[cfg(test)]
-mod effect_number_tests {
-    //! The effect popover's number field over several layers (§15 D1074).
+mod several_layer_binding_tests {
+    //! Bound fields written over several layers at once: the effect popover's
+    //! numbers (§15 D1074) and a shared paint row (§15 D1039).
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::item::Keyed;
@@ -19707,6 +19738,115 @@ mod effect_number_tests {
             },
         );
         out
+    }
+
+    /// **A `%` change on a shared row of layers bound to one colour keeps every
+    /// binding**, the layer in another mode included: each keeps its own colour
+    /// at the new alpha rather than taking the anchor's.
+    ///
+    /// flip: the `Selection` arm handing every target the anchor's brush →
+    /// fails *"the Dark layer keeps its binding"*.
+    #[test]
+    fn a_percent_on_a_shared_bound_row_keeps_each_layers_binding() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xE8);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (light, dark, brand) = (ids.mint_mode(), ids.mint_mode(), ids.mint_var());
+        let [fa, fb, a, b] = [(); 4].map(|_| ids.mint());
+        let white = ondin_core::peniko::Color::WHITE;
+        let black = ondin_core::peniko::Color::BLACK;
+        let mode = |id, name: &str, index| Operation::AddMode {
+            mode: Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        };
+        let frame = |id, mode| {
+            [
+                Operation::CreateNode {
+                    id,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(50.0, 50.0),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetMode {
+                    id,
+                    mode: Some(mode),
+                },
+            ]
+        };
+        let rect = |id, parent| {
+            [
+                Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(10.0, 10.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetFills {
+                    id,
+                    fills: ondin_core::keyed_by_position([ondin_core::Fill {
+                        brush: ondin_core::BrushSource::Bound {
+                            var: brand,
+                            alpha: 1.0,
+                        },
+                        visible: true,
+                    }]),
+                },
+            ]
+        };
+        let mut ops = vec![
+            mode(light, "Light", 0),
+            mode(dark, "Dark", 1),
+            Operation::AddVariable {
+                var: Variable {
+                    id: brand,
+                    name: "brand".into(),
+                    kind: VarKind::Color,
+                    cells: [(light, Cell::Color(white)), (dark, Cell::Color(black))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ];
+        ops.extend(frame(fa, light));
+        ops.extend(frame(fb, dark));
+        ops.extend(rect(a, fa));
+        ops.extend(rect(b, fb));
+        doc.apply(&Transaction(ops)).unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![a, b]);
+        let tx = app.slot_transaction(
+            a,
+            PaintSlot::Selection(PaintTarget::Fill, 0),
+            Brush::Solid(white.with_alpha(0.5)),
+        );
+        assert!(app.session.commit(tx));
+        let brush = |id: NodeId| {
+            app.session.doc.get(id).unwrap().paint().fills[0]
+                .brush
+                .clone()
+        };
+        let bound = ondin_core::BrushSource::Bound {
+            var: brand,
+            alpha: 0.5,
+        };
+        assert_eq!(brush(a), bound, "the anchor keeps its binding");
+        assert_eq!(brush(b), bound, "the Dark layer keeps its binding");
     }
 
     fn x_var(app: &OndinApp, id: NodeId) -> Option<ondin_core::VarId> {

@@ -388,9 +388,22 @@ pub(crate) fn hit(
     order.sort_by_key(|i| bands[*i].kind.priority());
     order.into_iter().find(|i| {
         let b = &bands[*i];
+        // A gap band runs the tracks' whole run, so a grid item spanning the
+        // gap lies across it: the item, laid over the band on both sides of
+        // the point, takes the press. (A gap's thin strip reaching into an item
+        // beside it does not — P4's zero-gap pick.)
+        let spans = || {
+            children.iter().any(|(c, _)| {
+                c.contains(p)
+                    && match b.kind.horizontal() {
+                        true => c.x0 < b.rect.x0 && c.x1 > b.rect.x1,
+                        false => c.y0 < b.rect.y0 && c.y1 > b.rect.y1,
+                    }
+            })
+        };
         let yields = match b.kind {
             BandKind::Padding(_) => on_child,
-            _ => on_pinned,
+            _ => on_pinned || spans(),
         };
         if yields {
             return false;
@@ -716,7 +729,11 @@ impl OndinApp {
         else {
             return None;
         };
-        let node_world = self.session.preview_world_transform(*id)?;
+        // In the committed frame the anchor was taken in, never the preview's:
+        // a hugging container its parent aligns to the end or the centre moves
+        // its origin as the drag widens it, and the pointer's local x would
+        // grow with it — the value creeping on with the hand still.
+        let node_world = self.session.resolved.world_transform(*id)?;
         let doc = &self.session.doc;
         let node = doc.get(*id)?;
         let literal = node.display()?.clone();
@@ -1795,6 +1812,148 @@ mod canvas_tests {
         assert_eq!(&spacing(&app, row)[..2], &[18.0, 6.0]);
     }
 
+    /// Whether, with nothing selected, the pointer on world `at` offers a band.
+    fn hover_offers(ctx: &egui::Context, app: &mut OndinApp, at: Point) -> bool {
+        app.session.selection.set(Vec::new());
+        frame(ctx, app, Vec::new(), Default::default());
+        let screen = app.to_screen(at, RECT, 1.0);
+        app.spacing_at(screen, RECT, 1.0).is_some()
+    }
+
+    /// **A hovered container offers its bands only where a press would take it**
+    /// (D1089): not inside a group, not as an instance, not locked — each a
+    /// press the group, the instance or nothing takes. The control, the row
+    /// alone, offers the gap.
+    ///
+    /// flips: `spacing_hover`'s `group_chain` or `instance_root` term removed →
+    /// fails at *"grouped"* or *"an instance"*. Its `is_effectively_locked` term
+    /// removed stays green: `hit_test` already passes over a locked layer, so
+    /// that term is a second defence.
+    #[test]
+    fn a_hovered_container_in_a_group_an_instance_or_locked_offers_no_band() {
+        let ctx = egui::Context::default();
+        let gap = Point::new(65.0, 35.0);
+        let (mut app, _) = app_with_a_row(&ctx);
+        assert!(
+            hover_offers(&ctx, &mut app, gap),
+            "the control offers the gap"
+        );
+
+        let (mut app, row) = app_with_a_row(&ctx);
+        let group = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: row,
+                new_parent: group,
+                index: 0,
+            },
+        ])));
+        assert!(!hover_offers(&ctx, &mut app, gap), "grouped");
+
+        let (mut app, row) = app_with_a_row(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: row,
+                    component: true,
+                }]))
+        );
+        let place = ondin_core::Placement {
+            nodes: app.session.doc.capture_subtree(row).unwrap(),
+            parent: app.session.doc.root(),
+            index: None,
+        };
+        let (mut tx, made) = ondin_core::insert_subtrees(
+            &app.session.doc,
+            &mut app.session.ids,
+            &[place],
+            Default::default(),
+        );
+        tx.0.push(Operation::SetTransform {
+            id: made[0],
+            transform: Affine::translate((0.0, 300.0)),
+        });
+        assert!(app.session.commit(tx));
+        assert!(
+            hover_offers(&ctx, &mut app, gap),
+            "the fixture: the main still offers"
+        );
+        assert!(
+            !hover_offers(&ctx, &mut app, Point::new(65.0, 335.0)),
+            "an instance"
+        );
+
+        let (mut app, row) = app_with_a_row(&ctx);
+        assert!(app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: row,
+            locked: true,
+        }])));
+        assert!(!hover_offers(&ctx, &mut app, gap), "locked");
+    }
+
+    /// **A grid item spanning a gap takes a press on it**: the first item, 210
+    /// wide across both columns, lies over the column gap at x 120–130, and a
+    /// drag there selects and moves the item rather than writing the gap.
+    ///
+    /// flip: `hit`'s spanning-item yield removed → fails *"the gap stays"*, 18.
+    #[test]
+    fn a_grid_item_spanning_a_gap_takes_the_press() {
+        use ondin_core::container::{
+            Grid, GridLines, GridPlacement, Track, TrackBreadth as B, TrackSize as S,
+        };
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let px = |v| Track::Size(S::Breadth(B::Px(v)));
+        restyle(&mut app, row, |d| {
+            *d = Display::Grid(Grid {
+                columns: vec![px(100.0), px(100.0)],
+                rows: vec![px(50.0), px(50.0)],
+                column_gap: 10.0,
+                row_gap: 6.0,
+                padding: [20.0; 4],
+                ..Default::default()
+            });
+        });
+        let first = app.session.doc.get(row).unwrap().children()[0];
+        let mut item = *app.session.doc.get(first).unwrap().item();
+        item.grid_column = GridLines {
+            start: GridPlacement::Auto,
+            end: GridPlacement::Span(2),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetLayoutItem { id: first, item },
+            Operation::SetGeometry {
+                id: first,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(210.0, 30.0)),
+            },
+        ])));
+        frame(&ctx, &mut app, Vec::new(), Default::default());
+        let laid = app.session.resolved.world_bounds(first).unwrap();
+        assert!(
+            laid.x0 < 120.0 && laid.x1 > 130.0,
+            "the fixture: the item spans the gap, {laid:?}"
+        );
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(125.0, 35.0),
+            Point::new(141.0, 35.0),
+            none,
+            false,
+        );
+        assert_eq!(spacing(&app, row)[0], 10.0, "the gap stays");
+    }
+
     /// **A layout-styled container's drag detaches the style and says so**
     /// (B3, §15 D1075): the row made the user of a layout style, its gap
     /// dragged to 18 — the style cut, the gap written, the floating status
@@ -1969,6 +2128,77 @@ mod canvas_tests {
             true,
         );
         assert_eq!(width(&app), 196.0, "the preview grows by both gaps");
+    }
+
+    /// **A hugging container its parent aligns to the end drags at half rate
+    /// and stands still with the hand**: the row, hugging, the only item of a
+    /// 600-wide row justified to the end, its gap dragged 16 — 18, previewed and
+    /// committed, though each frame's widening moves its origin left.
+    ///
+    /// flip: `band_drag_tx` measuring in `preview_world_transform` → fails
+    /// *"half rate in an end-aligned parent"*, 48.
+    #[test]
+    fn an_end_aligned_hugging_container_drags_at_half_rate() {
+        use ondin_core::container::{Dimension, JustifyContent};
+        let ctx = egui::Context::default();
+        let (mut app, row) = app_with_a_row(&ctx);
+        let outer = app.session.ids.mint();
+        let root = app.session.doc.root();
+        let mut item = *app.session.doc.get(row).unwrap().item();
+        item.width = Dimension::FitContent;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: outer,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(600.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: outer,
+                display: Some(Display::Flex(Flex {
+                    justify_content: JustifyContent::End,
+                    align_items: AlignItems::Start,
+                    ..Default::default()
+                })),
+            },
+            Operation::Reparent {
+                id: row,
+                new_parent: outer,
+                index: 0,
+            },
+            Operation::SetLayoutItem { id: row, item },
+        ])));
+        app.session.camera.center = Point::new(400.0, 100.0);
+        app.session.selection.set_one(row);
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new(), Default::default());
+        }
+        let x0 = app
+            .session
+            .resolved
+            .world_transform(row)
+            .unwrap()
+            .translation()
+            .x;
+        assert_eq!(x0, 420.0, "the fixture: 180 wide at the end of 600");
+        let none = Default::default();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(x0 + 65.0, 35.0),
+            Point::new(x0 + 81.0, 35.0),
+            none,
+            false,
+        );
+        assert_eq!(
+            spacing(&app, row)[0],
+            18.0,
+            "half rate in an end-aligned parent"
+        );
     }
 
     /// **A rotated container's bands pick where they are drawn** (8): the row

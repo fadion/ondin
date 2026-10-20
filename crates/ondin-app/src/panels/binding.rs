@@ -2224,6 +2224,86 @@ mod tests {
         );
     }
 
+    /// **The arrows scroll the `--` list to the row they light** (§15 D1084):
+    /// thirteen numbers, nine `ArrowDown`s — the lit row, past the eighth, is
+    /// drawn inside the list's clip.
+    ///
+    /// flip: `var_complete_ui`'s `scroll_to_me` removed → fails *"the lit row
+    /// is on show"*.
+    #[test]
+    fn the_arrows_scroll_the_list_to_the_lit_row() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        let mode = app.session.doc.variables().modes()[0].id;
+        let ops: Vec<Operation> = (1..=12)
+            .map(|i| Operation::AddVariable {
+                var: Variable {
+                    id: app.session.ids.mint_var(),
+                    name: format!("n/{i:02}"),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(i as f64))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            })
+            .collect();
+        assert!(app.commit_edit(Transaction(ops)));
+        let under = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(80.0, 20.0));
+        app.open_complete(&ctx, FieldKey::Radius { id: rect }, under);
+        let down = |pressed| egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let mut shapes = Vec::new();
+        // Time moves on each frame: the scroll to a row is animated.
+        let mut time = 0.0;
+        for events in std::iter::once(vec![])
+            .chain((0..9).map(|_| vec![down(true), down(false)]))
+            .chain((0..4).map(|_| vec![]))
+        {
+            time += 0.5;
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1200.0, 800.0),
+                        )),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| app.var_complete_ui(&ctx),
+                )
+                .shapes;
+        }
+        let lit = app
+            .var_complete
+            .as_ref()
+            .expect("the list is open")
+            .highlight;
+        let name = matches(app.session.doc.variables(), VarKind::Number, "")[lit]
+            .name
+            .clone();
+        assert!(lit >= 8, "the fixture: past the eighth row, {lit}");
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        let on_show = shapes
+            .iter()
+            .any(|c| find(&c.shape, &name).is_some_and(|p| c.clip_rect.contains(p)));
+        assert!(on_show, "the lit row is on show: {name}");
+    }
+
     /// **Every kind of field draws as before once extracted** — the value
     /// `field_value` files is the one the field draws in the unit its binding
     /// reads: opacity 30% as 30, a stroke's width, an effect's blur, a corner, a

@@ -865,14 +865,14 @@ impl Operation {
             | Operation::CloseVault { .. }
             // Provenance is a label on a node, never ink (§15 D1016).
             | Operation::SetOrigin { .. }
-            // A name is a row in the browser, and a new variable is read by
-            // nothing yet. A removed one was read by nothing either — the commit
-            // refuses a removal while anything is bound to it, and the detaches
-            // beside it are the ink.
+            // A variable's name is a row in the browser, and a new variable is
+            // read by nothing yet. A removed one was read by nothing either — the
+            // commit refuses a removal while anything is bound to it, and the
+            // detaches beside it are the ink. (A mode's name is not: a kit's
+            // column is matched to a document mode by name.)
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
-            | Operation::SetModeName { .. }
             // A style's table and a layer's binding to one draw nothing of
             // themselves: what a styled layer draws is its own list, which the
             // commit rewrites beside these by `SetFills` and its kin (§15 D1062).
@@ -952,9 +952,11 @@ impl Operation {
             // first — the default every unset frame reads in (D1038 (a)).
             | Operation::SetVariableCell { .. }
             // A kit's variable rewritten, and a kit's modes or mapping — which
-            // column every layer bound to it reads (§15 D1064).
+            // column every layer bound to it reads (§15 D1064). A document mode's
+            // name is a mapping too: an unmapped kit mode is matched by it.
             | Operation::SetVariable { .. }
             | Operation::SetKitModes { .. }
+            | Operation::SetModeName { .. }
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetMode { .. }
@@ -1663,53 +1665,11 @@ mod changes_ink_tests {
     use super::*;
     use crate::id::IdSource;
 
-    /// **Exactly seventeen operations change nothing drawn**, and the set is what the
-    /// inspector's chrome hide turns on (§15 D128): an edit with no visible result
-    /// has nothing to get the selection box out of the way *for*, and an edit whose
-    /// only result *is* chrome would have that result taken away by hiding it.
-    ///
-    /// Pinned as a list rather than left to `changes_ink`'s own `match`, because the
-    /// `match` is wildcard-free — so a new operation stops the build there and the
-    /// author has to choose an arm, but nothing stops them choosing the *wrong* one.
-    /// This is where the choice is checked against what the seventeen have in common.
-    ///
-    /// They are the seventeen of `RenderOverrides::absorb`'s chrome no-op arm; its
-    /// image arm is two more, which change ink (§15 D659). If the chrome arm and
-    /// this list ever disagree, one of them is wrong.
-    ///
-    /// ⚠️ **This said "nine" and listed nine while the `match` held ten**, having
-    /// missed `SetExports` when that op arrived — the exact drift the paragraph
-    /// above claims the test exists to catch, sitting inside the test that claims
-    /// it. Nothing failed, because a count in a doc comment and a list in a
-    /// fixture are both prose as far as every gate is concerned. Recount both
-    /// against the `match` when an operation is added; the compiler will not.
-    /// **It went to eleven with `SetLayoutGrids`**, and the recount was done by
-    /// running this test with a deliberately wrong count in it — which the
-    /// fixture below now makes possible, since it asserts its own length.
-    ///
-    /// ⚠️ **And then the prose said "ten" twice while the sentence between them
-    /// said "the same eleven"**, until 2026-09-06 — so this comment held both
-    /// answers at once, two lines apart, and the fixture that asserts its own
-    /// length could not see it, because the number it asserts against is the
-    /// fixture's and not the prose's. **A count written in prose beside a count
-    /// the code checks is not covered by the code checking it.**
-    ///
-    /// **Thirteen with `SetComponent` and `SetLink`** (§15 D978), 2026-10-04 — prose
-    /// and fixture recounted together, the fixture's assertion moved first.
-    /// **Sixteen with `SetVariantSet`, `SetVariant` and `SetProperties`** (§15
-    /// D982), 2026-10-05, the same way. **Seventeen with `SetSwap`** (§15 D983),
-    /// 2026-10-06, the fixture's assertion moved first again. **Twenty-four with
-    /// the styles' seven** (§15 D1062), 2026-10-15 — found missing by
-    /// `arch-scribe` after the commit that added them, the assertion moved first.
-    /// **Twenty-five with `SetStyleOrigin`** (§15 D1064), the same day; that
-    /// entry's `SetVariable` and `SetKitModes` change ink, as `SetVariableCell`
-    /// does, and are asserted with the visible ones below. **Twenty-six with
-    /// `SetTypeStyle`** (§15 D1067), the same day, the assertion moved after the
-    /// gates' run found it red. **Twenty-seven with `SetLayoutStyle`** (§15
-    /// D1075), 2026-10-16 — the same way, the gates' run finding it red first.
-    /// ⚠️ **Not the whole of `changes_ink`'s `false` arm**: the vault's two,
-    /// `SetOrigin` and the variables' four answer `false` there and are not
-    /// listed here — older gaps, not this list's subject.
+    /// **The operations that change nothing drawn are `changes_ink`'s whole
+    /// `false` arm**, the set the inspector's chrome hide turns on (§15 D128).
+    /// Pinned as a list because the `match` is wildcard-free: a new operation
+    /// must choose an arm, and this checks it chose the right one. The fixture
+    /// asserts its own length; recount it against the arm when one is added.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
@@ -1791,16 +1751,28 @@ mod changes_ink_tests {
                 id: style,
                 origin: None,
             },
+            Operation::OpenVault { id },
+            Operation::CloseVault { id },
+            Operation::SetOrigin { id, origin: None },
+            Operation::AddVariable {
+                var: crate::variable::Variable {
+                    id: crate::variable::VarId(id),
+                    name: "v".into(),
+                    kind: crate::variable::VarKind::Color,
+                    cells: Default::default(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+            Operation::RemoveVariable {
+                id: crate::variable::VarId(id),
+            },
+            Operation::SetVariableName {
+                id: crate::variable::VarId(id),
+                name: "w".into(),
+            },
         ];
-        // ⚠️ **The fixture asserts its own length**, which is the only thing that
-        // makes the count in this test's doc comment checkable by anything but a
-        // reader — and that comment has been wrong once, by exactly this
-        // mechanism.
-        assert_eq!(
-            invisible.len(),
-            27,
-            "the chrome list is twenty-seven operations"
-        );
+        assert_eq!(invisible.len(), 33, "the whole false arm");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),
@@ -1851,6 +1823,11 @@ mod changes_ink_tests {
             Operation::SetKitModes {
                 kit: "0".repeat(32),
                 modes: None,
+            },
+            // A document mode's name is the kit mapping's fallback match.
+            Operation::SetModeName {
+                id: crate::variable::ModeId(id),
+                name: "m".into(),
             },
         ];
         for op in &visible {

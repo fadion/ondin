@@ -1363,6 +1363,11 @@ impl Document {
                     .find(|m| m.id == *id)
                     .ok_or(OpError::NoSuchMode(*id))?;
                 let old = std::mem::replace(&mut m.name, name.clone());
+                // A kit's column is matched to a document mode by name, so a
+                // rename can move what every kit-bound layer reads.
+                if !self.variables.kits.is_empty() {
+                    dirty.0.extend(self.bound_nodes());
+                }
                 Ok(Operation::SetModeName { id: *id, name: old })
             }
             // Written on any node, so `reset::state_ops` can state every node's

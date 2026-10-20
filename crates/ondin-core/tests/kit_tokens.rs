@@ -758,6 +758,33 @@ fn kit_a(k: &Kit) -> (Document, IdSource, NodeId) {
     (a, ids, card)
 }
 
+/// **Renaming a document mode dirties every kit-bound layer**: an unmapped kit
+/// mode is matched by the document mode's name, so the rename can move which
+/// column a layer reads, and `Resolved::update` returns early on an empty set.
+///
+/// flip: `SetModeName`'s `bound_nodes` dirtying removed → fails *"the instance
+/// is dirtied"*.
+#[test]
+fn renaming_a_document_mode_dirties_what_reads_a_kit_column() {
+    let k = kit();
+    let (mut d, mut ids, modes) = consumer(&["Day", "Night"]);
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    d.apply(&Transaction(vec![Operation::SetMode {
+        id: inst,
+        mode: Some(modes[1]),
+    }]))
+    .unwrap();
+    assert_eq!(drawn(&d, inst), Brush::Solid(NAVY), "Night reads Night");
+    let rename = Transaction(vec![Operation::SetModeName {
+        id: modes[1],
+        name: "Evening".into(),
+    }]);
+    assert!(rename.changes_ink(), "a rename can change what is drawn");
+    let out = d.apply(&rename).unwrap();
+    assert!(out.dirty.0.contains(&inst), "the instance is dirtied");
+    assert_eq!(drawn(&d, inst), Brush::Solid(WHITE), "now the kit's first");
+}
+
 /// **A kit taking a third kit's update that changes nothing it reads has no
 /// variable change to publish**: the held copy's origin version alone moved.
 ///

@@ -1670,26 +1670,12 @@ impl RenderOverrides {
             // a drag — and when something does, the fix is a preview table on the
             // overrides, the shape `canvas_background` already has here.
             //
-            // ⚠️ **This arm is why `absorb`'s no-ops are thirteen and not
-            // eleven, and the design said eleven for months** (§15 D659,
-            // `[S19.2-L2-04]`). §5.3b read *"those two lists are **the same eleven
-            // operations**"* and §5.7 *"if the two lists ever disagree, one of
-            // them is wrong"* — and a review pass certified the agreement by
-            // hand-counting the arm above and stopping short of this one.
-            // `changes_ink`'s eleven are a **subset**. That matters
-            // beyond tidiness: `EditorSession::has_gesture_preview` is
-            // `!overrides.is_empty() && …`, so every transaction absorbed here is
-            // invisible to `cancel_gesture`'s gate, and `[A1-L2-02]`'s repair list
-            // has to be derived from *this* function rather than from the design.
-            // `overrides.rs · every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
-            // is the sibling of `op.rs`'s eleven-item fixture. (Both counts are
-            // two higher since `SetComponent` and `SetLink` joined the chrome arm,
-            // §15 D978, three higher again with the variant ops, §15 D982, and one
-            // higher with `SetSwap`, §15 D983: nineteen no-ops here, seventeen of
-            // them `changes_ink`'s — and six more in the variables table's arm
-            // below, four of them `changes_ink`'s `false`: seven since §15 D1039,
-            // until `SetVariableCell` took an arm of its own, §15 D1056. The
-            // fixture lists all three groups.)
+            // ⚠️ `changes_ink`'s `false` arm is therefore a **subset** of
+            // `absorb`'s no-ops, not the same list (§15 D659). Every transaction
+            // absorbed as nothing is invisible to `has_gesture_preview` and so to
+            // `cancel_gesture`'s gate; `overrides.rs ·
+            // every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
+            // pins the relationship.
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
             // **A cell's new value previews on everything that reads it** (§15
             // D1056, D1037's premise (vi)): the colour popup drags a variable's

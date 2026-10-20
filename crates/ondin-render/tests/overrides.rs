@@ -2450,59 +2450,13 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
     assert_preview_matches_commit(&f.doc, &tx, "dropping a copy of a shadowed stroked rect");
 }
 
-/// **`absorb` treats thirteen operations as a no-op, not eleven** — §15 D659,
-/// `[S19.2-L2-04]`. (Fifteen and thirteen since `SetComponent` and `SetLink`
-/// joined the chrome arm, §15 D978, eighteen and sixteen since the three
-/// variant ops did, §15 D982, and nineteen and seventeen since `SetSwap`, §15
-/// D983 — which the first build added to `op.rs`' list and not to this one,
-/// `arch-scribe`'s find; and twenty-six no-ops since the variables table's seven,
-/// §15 D1039, four of them `changes_ink`'s `false` and three its `true`, left
-/// out by that build too and added before its commit; thirty-three since the
-/// styles' seven, §15 D1062, all `false` — missed by their build and added by
-/// the commit after it; one more since, `SetTypeStyle` (§15 D1067), added by its
-/// own build and its count by the gates' run; and one more, `SetLayoutStyle` (§15
-/// D1075), missed by its build and found by `arch-scribe`. The paragraphs below keep the counts of the finding they
-/// record.)
-///
-/// 🚨 **The design said the two lists were the same eleven, and a review pass
-/// certified that they were.** `op::changes_ink` answers `false` for eleven
-/// chrome-and-bookkeeping operations, pinned by
-/// `op::changes_ink_tests::only_the_chrome_operations_change_no_ink`, which
-/// asserts its own length. `RenderOverrides::absorb` holds those same eleven in
-/// one arm **and a second no-op arm further down the same `match`**, behind a
-/// long comment: `AddImage | RemoveImage`. `[A7-L8-04]` hand-counted the first
-/// arm, stopped there, and on that basis certified `architecture.md` §5.3b's
-/// *"those two lists are the same eleven operations"* as correct.
-/// `[A6-L8-02]`'s shape — a check's own baseline carrying the thing it checks
-/// for.
-///
-/// ⚠️ **This paragraph gave the distance as *"nineteen lines below it, behind a
-/// sixteen-line comment"* until `arch-scribe` counted, and both figures were
-/// wrong — in the file as it was *and* as it now is.** The eleven-arm ends at
-/// `renderer.rs:909`; the image arm is at `:937`, and the comment between them
-/// grew by the D659 note this very fix added. **A distance in lines is the one
-/// measurement a comment inserted between the two sites invalidates**, and here
-/// the comment that invalidated it was the fix's own. Dropped rather than
-/// updated: a number that is wrong the moment somebody writes a paragraph is not
-/// worth maintaining.
-///
-/// **Why it is worth a test rather than only a corrected sentence.**
-/// `EditorSession::has_gesture_preview` is `!self.overrides.is_empty() && …`, so
-/// *every* transaction `absorb` no-ops is invisible to `cancel_gesture`'s gate.
-/// Anyone repairing `[A1-L2-02]` from the design's list repairs the wrong list.
-///
-/// **The relationship is the assertion, not the count.** `changes_ink`'s eleven
-/// are a strict **subset** of `absorb`'s no-ops; the two extras are the image
-/// operations, and they are there for a reason the comment on the arm gives
-/// plainly — *"it is here because `RenderOverrides` has no image table to patch"*
-/// — rather than because they are invisible. So this asserts both halves: all
-/// thirteen absorb to an empty preview, and exactly two of the thirteen change
-/// ink.
-///
-/// ⚠️ **What this cannot do is prove there is no fourteenth.** That needs a value
-/// of every `Operation` variant, which is the `op.rs` fixture's job and is why
-/// this is a *sibling* of that test rather than a replacement. What it does catch
-/// is the two lists drifting apart again, which is how they got here.
+/// **`absorb`'s no-ops absorb to an empty preview, and not all of them are
+/// `changes_ink`'s `false`** (§15 D659): the image pair and the variables
+/// table's ink list are no-ops here only because no override carries an image
+/// or the table. It matters because `EditorSession::has_gesture_preview` reads
+/// an empty preview as no gesture. A sibling of `op.rs`'s
+/// `only_the_chrome_operations_change_no_ink`, which pins the `false` arm whole;
+/// the fixture asserts its own lengths.
 #[test]
 fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     let f = fixture();
@@ -2511,9 +2465,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     let guide = ondin_core::guide::GuideId(ids.mint());
     let pic = ondin_core::ImageId("pic".into());
 
-    // The seventeen `changes_ink` answers `false` for, in `op.rs`'s own order —
-    // eleven until `SetComponent` and `SetLink` (§15 D978), thirteen until the
-    // three variant ops (§15 D982), sixteen until `SetSwap` (§15 D983).
+    // The chrome `changes_ink` answers `false` for, in `op.rs`'s own order.
     let chrome = [
         Operation::SetName {
             id,
@@ -2575,12 +2527,10 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     ];
 
     // And the variables table's (§15 D1039): no override carries the table, so
-    // these eight are no-ops here — four of them draw nothing, and a mode coming
-    // or going changes what every bound layer draws. **Seven until
-    // `SetVariableCell` left the list** (§15 D1056): a cell's edit now previews
-    // on what reads it, so it is no longer absorbed as nothing
-    // (`a_variable_cell_previews_on_what_reads_it`). **Eight with §15 D1064's
-    // `SetVariable` and `SetKitModes`**, both ink, as a mode's coming is.
+    // these are no-ops here — a variable's own rows draw nothing, and a mode
+    // coming, going or renamed, a kit's variable and a kit's modes change which
+    // column bound layers read. A cell's edit previews on its readers instead
+    // (`a_variable_cell_previews_on_what_reads_it`).
     let (var, mode) = (ids.mint_var(), ids.mint_mode());
     let table_chrome = [
         Operation::AddVariable {
@@ -2598,12 +2548,12 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             id: var,
             name: "w".into(),
         },
+    ];
+    let table_ink = [
         Operation::SetModeName {
             id: mode,
             name: "m".into(),
         },
-    ];
-    let table_ink = [
         Operation::AddMode {
             mode: ondin_core::Mode {
                 id: mode,
@@ -2630,11 +2580,9 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             modes: None,
         },
     ];
-    // And the styles' ops (§15 D1062; `SetStyleOrigin`, D1064; `SetTypeStyle`,
-    // D1067): a style draws through the lists its users hold, which a preview
-    // carries as `SetFills` and its kin, so the table and the bindings are
-    // absorbed as nothing — and draw nothing. The first seven were missed by the
-    // build that added them; `arch-scribe`'s find.
+    // And the styles' ops (§15 D1062): a style draws through the lists its users
+    // hold, which a preview carries as `SetFills` and its kin, so the table and
+    // the bindings are absorbed as nothing — and draw nothing.
     let style = ids.mint_style();
     let styles = [
         Operation::AddStyle {
@@ -2660,8 +2608,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         Operation::SetEffectsStyle { id, style: None },
         Operation::SetTypeStyle { id, style: None },
         // A layout style's binding (§15 D1075): its values are `SetDisplay` and
-        // `SetSpacingVars`, written beside it. Missed by its build, `arch-scribe`'s
-        // find.
+        // `SetSpacingVars`, written beside it.
         Operation::SetLayoutStyle { id, style: None },
         // A kit's style's version (§15 D1064).
         Operation::SetStyleOrigin {
@@ -2670,9 +2617,6 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         },
     ];
 
-    // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
-    // the only thing that makes the counts in the comment above checkable by
-    // anything but a reader, and those counts have been wrong before.
     assert_eq!(styles.len(), 10, "and the styles' ten");
     assert_eq!(chrome.len(), 17, "the chrome list is seventeen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
@@ -2699,10 +2643,9 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         );
     }
 
-    // The half the design got wrong: every chrome no-op is `changes_ink`'s
-    // `false`, and not every no-op is — the image pair and four of the table's
-    // eight change ink. (Nor is every `false` a no-op: `absorb` refuses the
-    // vault's two and `SetOrigin`, which this does not list.)
+    // Every chrome no-op is `changes_ink`'s `false`, and not every no-op is —
+    // the image pair and the table's ink list change ink. (Nor is every `false`
+    // a no-op: `absorb` refuses the vault's two and `SetOrigin`.)
     for op in chrome
         .iter()
         .chain(table_chrome.iter())

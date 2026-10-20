@@ -11931,22 +11931,39 @@ impl OndinApp {
             Some(n) => n.effects().to_vec(),
             None => return,
         };
+        let anchor_list = effects.clone();
         let Some(entry) = effects.get_mut(index) else {
             return;
         };
         edit(&mut entry.kind);
-        self.edit_valve(
-            resp,
-            Transaction(
-                subjects
-                    .iter()
-                    .map(|id| Operation::SetEffects {
-                        id: *id,
-                        effects: effects.clone(),
-                    })
-                    .collect(),
-            ),
-        );
+        let tx = self.effects_tx(subjects, &anchor_list, &effects, |_, _| {});
+        self.edit_valve(resp, tx);
+    }
+
+    /// `SetEffects` writing `edited` — an edit of `anchor`'s list, the first
+    /// subject's as the panel shows it — onto every subject, retargeted onto
+    /// each one's own item ids as [`Self::write_effects`] does, then `spare`d
+    /// against that subject's own list.
+    fn effects_tx(
+        &mut self,
+        subjects: &[NodeId],
+        anchor: &[Keyed<Effect>],
+        edited: &[Keyed<Effect>],
+        spare: impl Fn(NodeId, &mut Vec<Keyed<Effect>>),
+    ) -> Transaction {
+        let session = &mut self.session;
+        Transaction(
+            subjects
+                .iter()
+                .map(|id| {
+                    let own = session.doc.get(*id).map(|n| n.effects()).unwrap_or(&[]);
+                    let mut effects =
+                        ondin_core::item::retarget(anchor, own, edited, &mut session.ids);
+                    spare(*id, &mut effects);
+                    Operation::SetEffects { id: *id, effects }
+                })
+                .collect(),
+        )
     }
     /// One of effect `index`'s numbers in the popover — `slot` an `EffectVars`
     /// place, `value` the literal, `prefix` the field's word — `size` big.
@@ -12020,21 +12037,49 @@ impl OndinApp {
             Scrub::whole(0.5).range(range),
             |d| d.custom_formatter(ui::number(2)),
         );
+        // Nothing moved from what is committed — a focus and a leave — writes
+        // nothing, or every bound layer would detach, and another mode's take the
+        // anchor's number. (Against the committed number, not `drawn`: on a
+        // scrub's release frame the field reads its own preview.) Moved, a layer
+        // already drawing the number keeps its binding, as `weight_all_tx`
+        // keeps a stroke's.
+        let committed = anchor.and_then(|a| {
+            let n = self.session.doc.get(a)?;
+            let fx = self.session.doc.resolved_effects(a, n.effects());
+            fx.get(index)?.numbers()[slot]
+        });
         if let Some(a) = anchor
-            && let Some(mut effects) = self.session.display_node(a).map(|n| n.effects().to_vec())
-            && let Some(entry) = effects.get_mut(index)
+            && let Some(anchor_list) = self.session.display_node(a).map(|n| n.effects().to_vec())
+            && anchor_list.get(index).is_some()
         {
-            entry.value.set_number(slot, v);
-            entry.vars[slot] = None;
-            let tx = Transaction(
-                subjects
+            let tx = if Some(v) == committed {
+                Transaction::default()
+            } else {
+                let mut edited = anchor_list.clone();
+                edited[index].value.set_number(slot, v);
+                edited[index].vars[slot] = None;
+                let doc = &self.session.doc;
+                let keep: Vec<(NodeId, ondin_core::VarId, f64)> = subjects
                     .iter()
-                    .map(|id| Operation::SetEffects {
-                        id: *id,
-                        effects: effects.clone(),
+                    .filter_map(|id| {
+                        let own = doc.get(*id)?.effects().get(index)?;
+                        let var = own.vars[slot]?;
+                        let shown = doc
+                            .resolved_effects(*id, std::slice::from_ref(own))
+                            .first()
+                            .and_then(|e| e.numbers()[slot]);
+                        (shown == Some(v)).then_some((*id, var, own.numbers()[slot]?))
                     })
-                    .collect(),
-            );
+                    .collect();
+                self.effects_tx(subjects, &anchor_list, &edited, |id, list| {
+                    if let Some((_, var, literal)) = keep.iter().find(|k| k.0 == id)
+                        && let Some(e) = list.get_mut(index)
+                    {
+                        e.value.set_number(slot, *literal);
+                        e.vars[slot] = Some(*var);
+                    }
+                })
+            };
             self.edit_valve(&resp, tx);
         }
         if let Some(k) = key {
@@ -19538,6 +19583,229 @@ mod scale_row_tests {
             Some(400.0),
             "the second layer's distance from the anchor doubles as well — a set \
              scaling in place would leave it at 200"
+        );
+    }
+}
+
+#[cfg(test)]
+mod effect_number_tests {
+    //! The effect popover's number field over several layers (§15 D1074).
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::item::Keyed;
+    use ondin_core::kurbo::Size;
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+
+    /// Two rects, each a drop shadow under its own item id, both shadows' X
+    /// bound to `x/md` (6), both selected. Answers the rects and the variable.
+    fn bound_pair(ctx: &egui::Context) -> (OndinApp, Vec<NodeId>, ondin_core::VarId) {
+        crate::theme::install(ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(0xE7);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let (mode, var) = (ids.mint_mode(), ids.mint_var());
+        doc.apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "x/md".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(6.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .unwrap();
+        let mut made = Vec::new();
+        for i in 0..2 {
+            let (id, item) = (ids.mint(), ids.mint_item());
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id,
+                    parent: root,
+                    index: i,
+                    kind: NodeKind::Rect {
+                        size: Size::new(40.0, 40.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetEffects {
+                    id,
+                    effects: vec![Keyed::new(
+                        item,
+                        Effect::new(EffectKind::DropShadow(ondin_core::Shadow::default())),
+                    )],
+                },
+            ]))
+            .unwrap();
+            let bind = ondin_core::bind_effect_ops(&doc, id, item, ondin_core::EFFECT_X, var);
+            doc.apply(&Transaction(bind)).unwrap();
+            made.push(id);
+        }
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(made.clone());
+        (app, made, var)
+    }
+
+    /// One frame of the X field over `subjects`, focused or not, `typed` put in
+    /// its edit buffer first. Answers the field's id.
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        subjects: &[NodeId],
+        focus: Option<(egui::Id, bool)>,
+        typed: Option<&str>,
+    ) -> egui::Id {
+        if let Some((id, on)) = focus {
+            ctx.memory_mut(|m| {
+                if on {
+                    m.request_focus(id)
+                } else {
+                    m.surrender_focus(id)
+                }
+            });
+            if let Some(t) = typed {
+                ctx.data_mut(|d| d.insert_temp(id, t.to_string()));
+            }
+        }
+        let mut out = egui::Id::NULL;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(320.0, 200.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                out = app
+                    .effect_number_field(
+                        ui,
+                        subjects,
+                        0,
+                        ondin_core::EFFECT_X,
+                        "X",
+                        egui::vec2(80.0, 24.0),
+                        0.0,
+                        -1e4..=1e4,
+                    )
+                    .expect("the plain field over several layers")
+                    .id;
+            },
+        );
+        out
+    }
+
+    fn x_var(app: &OndinApp, id: NodeId) -> Option<ondin_core::VarId> {
+        app.session.doc.get(id).unwrap().effects()[0].vars[ondin_core::EFFECT_X]
+    }
+
+    /// **A focus and a leave over several bound layers writes nothing**: no undo
+    /// step, and both layers stay bound — the second under a frame in another
+    /// mode, where it draws 10 against the anchor's 6.
+    ///
+    /// flip: `effect_number_field` building its transaction when the number
+    /// equals the committed one → fails *"no step spent"*, the second layer
+    /// detached at the anchor's 6. (In one mode the per-layer spare alone keeps
+    /// the write a no-op.)
+    #[test]
+    fn a_focus_and_a_leave_keeps_every_layers_binding() {
+        let ctx = egui::Context::default();
+        let (mut app, ids, var) = bound_pair(&ctx);
+        let (dusk, frame_id) = (app.session.ids.mint_mode(), app.session.ids.mint());
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: dusk,
+                    name: "Dusk".into(),
+                },
+                index: 1,
+                cells: vec![(var, Cell::Number(10.0))],
+            },
+            Operation::CreateNode {
+                id: frame_id,
+                parent: root,
+                index: 2,
+                kind: NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetMode {
+                id: frame_id,
+                mode: Some(dusk),
+            },
+            Operation::Reparent {
+                id: ids[1],
+                new_parent: frame_id,
+                index: 0,
+            },
+        ])));
+        app.session.selection.set(ids.clone());
+        let depth0 = app.session.history.undo_depth();
+        let id = frame(&ctx, &mut app, &ids, None, None);
+        for _ in 0..2 {
+            frame(&ctx, &mut app, &ids, Some((id, true)), None);
+        }
+        for _ in 0..2 {
+            frame(&ctx, &mut app, &ids, Some((id, false)), None);
+        }
+        assert_eq!(app.session.history.undo_depth(), depth0, "no step spent");
+        assert_eq!(
+            (x_var(&app, ids[0]), x_var(&app, ids[1])),
+            (Some(var), Some(var)),
+            "both stay bound"
+        );
+    }
+
+    /// **A number written over several layers keeps each layer's own item id**,
+    /// as `write_effects` does, rather than handing every layer the first one's.
+    ///
+    /// flip: `effects_tx` writing `edited` verbatim → fails *"the second layer
+    /// keeps its own id"*.
+    #[test]
+    fn a_number_written_over_several_layers_keeps_their_item_ids() {
+        let ctx = egui::Context::default();
+        let (mut app, ids, _) = bound_pair(&ctx);
+        let items: Vec<ondin_core::ItemId> = ids
+            .iter()
+            .map(|id| app.session.doc.get(*id).unwrap().effects()[0].id)
+            .collect();
+        assert_ne!(items[0], items[1], "fixture: distinct item ids");
+        let id = frame(&ctx, &mut app, &ids, None, None);
+        for _ in 0..2 {
+            frame(&ctx, &mut app, &ids, Some((id, true)), Some("9"));
+        }
+        for _ in 0..2 {
+            frame(&ctx, &mut app, &ids, Some((id, false)), None);
+        }
+        let x = |n: NodeId| {
+            app.session.doc.get(n).unwrap().effects()[0].numbers()[ondin_core::EFFECT_X]
+        };
+        assert_eq!(
+            (x(ids[0]), x(ids[1])),
+            (Some(9.0), Some(9.0)),
+            "fixture: written"
+        );
+        assert_eq!(
+            app.session.doc.get(ids[1]).unwrap().effects()[0].id,
+            items[1],
+            "the second layer keeps its own id"
         );
     }
 }

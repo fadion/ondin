@@ -446,6 +446,77 @@ fn a_bound_stroke_width_exports_at_its_number() {
     );
 }
 
+/// **A bound fill and a bound visibility export as drawn in the mode in
+/// force**: the artboard set to mode B, the rect's fill bound to a colour blue
+/// in B, then its visibility to a boolean false in B — blue, then absent.
+///
+/// flips: `emit_shape` reading the stored brush → fails *"B's blue"*;
+/// `emit_node` reading `node.visible()` → fails *"hidden by its variable"*.
+#[test]
+fn a_bound_fill_and_visibility_export_in_the_mode_in_force() {
+    use ondin_core::{Cell, Mode, VarKind, Variable};
+    let mut f = common::fixture();
+    let mut ids = ondin_core::IdSource::new(0xB2);
+    let (a, b, colour, shown) = (
+        ids.mint_mode(),
+        ids.mint_mode(),
+        ids.mint_var(),
+        ids.mint_var(),
+    );
+    let red = ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255);
+    let blue = ondin_core::peniko::Color::from_rgba8(0, 0, 255, 255);
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    let var =
+        |id, name: &str, kind, cells: [(ondin_core::ModeId, Cell); 2]| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind,
+                cells: cells.into(),
+                origin: None,
+                forked: None,
+            },
+        };
+    f.doc
+        .apply(&Transaction(vec![
+            mode(a, "A", 0),
+            mode(b, "B", 1),
+            var(
+                colour,
+                "c",
+                VarKind::Color,
+                [(a, Cell::Color(red)), (b, Cell::Color(blue))],
+            ),
+            var(
+                shown,
+                "s",
+                VarKind::Boolean,
+                [(a, Cell::Boolean(true)), (b, Cell::Boolean(false))],
+            ),
+            Operation::SetMode {
+                id: f.artboard,
+                mode: Some(b),
+            },
+        ]))
+        .unwrap();
+    let tx =
+        ondin_core::bind_brush_at_all(&f.doc, &[f.rect], ondin_core::PaintTarget::Fill, 0, colour);
+    f.doc.apply(&tx).unwrap();
+    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    assert!(out.contains("fill=\"#0000ff\""), "B's blue:\n{out}");
+    let bind = ondin_core::bind_visible_ops(&f.doc, f.rect, shown);
+    f.doc.apply(&Transaction(bind)).unwrap();
+    let out = svg(&f.doc, &Resolved::rebuild(&f.doc), None);
+    assert!(!out.contains("#0000ff"), "hidden by its variable:\n{out}");
+}
+
 /// SVG has no stroke alignment, so an aligned stroke has to be *built*: the
 /// stroke is drawn at double width and clipped to the side it belongs on. Both
 /// halves have to be present or the export silently loses the effect.

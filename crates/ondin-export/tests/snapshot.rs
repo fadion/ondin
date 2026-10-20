@@ -623,3 +623,116 @@ fn a_rotated_layers_numbers_are_written_at_four_places() {
         }
     }
 }
+
+/// **The snapshot reports a bound field's drawn value, in the mode in force**
+/// (D1037 premise (v)): the artboard set to mode B, the rect's fill, corners
+/// and visibility and the text's content each bound — the rect blue, its
+/// corners 12, the text *Beta*; then the rect hidden by its variable.
+///
+/// flips: `node_snapshot` reading the stored brush → fails *"B's blue"*;
+/// reading `node.visible()` → fails *"hidden by its variable"*.
+#[test]
+fn a_bound_field_reports_its_drawn_value() {
+    use ondin_core::{Cell, Mode, Operation, Transaction, VarKind, Variable};
+    let mut f = common::fixture();
+    let mut ids = ondin_core::IdSource::new(0xB1);
+    let (a, b) = (ids.mint_mode(), ids.mint_mode());
+    let [colour, radius, label, shown] = [(); 4].map(|_| ids.mint_var());
+    let var =
+        |id, name: &str, kind, cells: [(ondin_core::ModeId, Cell); 2]| Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind,
+                cells: cells.into(),
+                origin: None,
+                forked: None,
+            },
+        };
+    let red = ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255);
+    let blue = ondin_core::peniko::Color::from_rgba8(0, 0, 255, 255);
+    let mode = |id, name: &str, index| Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells: vec![],
+    };
+    f.doc
+        .apply(&Transaction(vec![
+            mode(a, "A", 0),
+            mode(b, "B", 1),
+            var(
+                colour,
+                "c",
+                VarKind::Color,
+                [(a, Cell::Color(red)), (b, Cell::Color(blue))],
+            ),
+            var(
+                radius,
+                "r",
+                VarKind::Number,
+                [(a, Cell::Number(4.0)), (b, Cell::Number(12.0))],
+            ),
+            var(
+                label,
+                "l",
+                VarKind::String,
+                [
+                    (a, Cell::String("Alpha".into())),
+                    (b, Cell::String("Beta".into())),
+                ],
+            ),
+            var(
+                shown,
+                "s",
+                VarKind::Boolean,
+                [(a, Cell::Boolean(true)), (b, Cell::Boolean(false))],
+            ),
+            Operation::SetMode {
+                id: f.artboard,
+                mode: Some(b),
+            },
+        ]))
+        .unwrap();
+    let mut ops =
+        ondin_core::bind_brush_at_all(&f.doc, &[f.rect], ondin_core::PaintTarget::Fill, 0, colour)
+            .0;
+    ops.extend(ondin_core::bind_corners_ops(
+        &f.doc,
+        f.rect,
+        [Some(radius); 4],
+    ));
+    ops.extend(ondin_core::bind_text_ops(
+        &f.doc,
+        f.text,
+        [Some(label), None],
+    ));
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let snap = snapshot(&f.doc, &res);
+    let node = |id| snap.nodes.iter().find(|n| n.id == wire(id)).unwrap();
+    let rect = node(f.rect);
+    assert!(
+        matches!(&rect.fills[0], PaintSummary::Solid { color, .. } if color == "#0000ff"),
+        "B's blue: {:?}",
+        rect.fills[0]
+    );
+    assert!(matches!(
+        rect.geometry,
+        Geometry::Rect { corner_radii, .. } if corner_radii.top_left == 12.0
+    ));
+    assert!(matches!(
+        &node(f.text).geometry,
+        Geometry::Text { content, .. } if content == "Beta"
+    ));
+    assert!(rect.visible, "the fixture: shown before its binding");
+
+    let bind = ondin_core::bind_visible_ops(&f.doc, f.rect, shown);
+    f.doc.apply(&Transaction(bind)).unwrap();
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let snap = snapshot(&f.doc, &res);
+    let rect = snap.nodes.iter().find(|n| n.id == wire(f.rect)).unwrap();
+    assert!(!rect.visible, "hidden by its variable");
+}

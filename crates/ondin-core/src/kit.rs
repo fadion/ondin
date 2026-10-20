@@ -584,12 +584,21 @@ pub fn changes(doc: &Document) -> Changes {
         .filter(|t| !tops_now.contains(t))
         .collect();
     out.renamed = before.is_some_and(|b| b.name() != doc.meta().name.as_deref());
+    // A third kit's origin version alone is no change the mains read, as
+    // `reach` holds for nodes: accepting its update rewrites every held copy.
     let tables = |p: Option<&Published>| {
         p.map(|p| {
-            (
+            let (mut vars, mut styles) = (
                 p.document().variables().clone(),
                 p.document().styles().clone(),
-            )
+            );
+            for o in vars.vars.values_mut().filter_map(|v| v.origin.as_mut()) {
+                o.version = 0;
+            }
+            for o in styles.styles.values_mut().filter_map(|s| s.origin.as_mut()) {
+                o.version = 0;
+            }
+            (vars, styles)
         })
         .unwrap_or_default()
     };
@@ -1338,6 +1347,15 @@ pub fn update_all(
     update_in_order(doc, ids, &order)
 }
 
+/// `from`'s entries appended to `to`, each once, in the order first met.
+fn push_new<T: PartialEq + Copy>(to: &mut Vec<T>, from: &[T]) {
+    for x in from {
+        if !to.contains(x) {
+            to.push(*x);
+        }
+    }
+}
+
 /// [`update_all`] for `kits` in the order given.
 fn update_in_order(
     doc: &Document,
@@ -1428,10 +1446,12 @@ fn update_in_order(
         for op in tokens.ops.iter().cloned() {
             b.push(op)?;
         }
-        vars_changed.extend(tokens.changed_vars.iter().copied());
-        vars_removed.extend(tokens.removed_vars.iter().copied());
-        styles_changed.extend(tokens.changed_styles.iter().copied());
-        styles_removed.extend(tokens.removed_styles.iter().copied());
+        // Once each: one kit's plan can add a variable another kit's sync
+        // then rewrites, and the summary lists one row per entry.
+        push_new(&mut vars_changed, &tokens.changed_vars);
+        push_new(&mut vars_removed, &tokens.removed_vars);
+        push_new(&mut styles_changed, &tokens.changed_styles);
+        push_new(&mut styles_removed, &tokens.removed_styles);
         b.tokens = tokens;
         let mut tops: Vec<NodeId> = b
             .scratch

@@ -758,6 +758,33 @@ fn kit_a(k: &Kit) -> (Document, IdSource, NodeId) {
     (a, ids, card)
 }
 
+/// **A kit taking a third kit's update that changes nothing it reads has no
+/// variable change to publish**: the held copy's origin version alone moved.
+///
+/// flip: `kit::changes` comparing the tables with their versions → fails *"no
+/// change to publish"*.
+#[test]
+fn a_third_kits_version_alone_is_no_change_to_publish() {
+    let mut k = kit();
+    let (mut a, mut aids, _) = kit_a(&k);
+    assert!(!kit::changes(&a).tokens, "published as it is");
+    k.doc
+        .apply(&Transaction(vec![Operation::SetVariableCell {
+            id: k.spare,
+            mode: k.day,
+            cell: Cell::Number(5.0),
+        }]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    let u = kit::update(&a, &mut aids, L_ID, version(&k), published(&k)).unwrap();
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&a, &mut tx, &mut aids);
+    a.apply(&tx).unwrap();
+    let held = a.variables().iter().next().unwrap();
+    assert_eq!(held.origin.as_ref().unwrap().version, 2, "the sync ran");
+    assert!(!kit::changes(&a).tokens, "no change to publish");
+}
+
 /// 🚨 **A kit instance pasted back into its own kit reads the kit's own
 /// variables** (D1023's own-kit arm made for the tables, `arch-scribe`'s reading
 /// of the first build): L holds no copy of its own `brand`, and the pasted Icon's

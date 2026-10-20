@@ -57,7 +57,9 @@ jobs:
           # across the Release's assets, so a Linux client could be handed the
           # Windows package. Naming the channel puts it in every file name.
           # **A channel is app identity: renaming one orphans every install.**
-          - os: ubuntu-latest
+          # Pinned: 26.04's rpm 6 builds v6 packages, whose signature rpm 4
+          # clients (RHEL 8–10, older Fedora) cannot verify.
+          - os: ubuntu-24.04
             target: linux-x86_64
             channel: linux-x64
           - os: windows-latest

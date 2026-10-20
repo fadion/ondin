@@ -53,7 +53,9 @@ concurrency:
 jobs:
   publish:
     name: Build and publish the package repositories
-    runs-on: ubuntu-latest
+    # Pinned: rpm 6 (Ubuntu 26.04) signs into a header tag rpm 4 clients and
+    # build-rpm-repo.sh's signature check do not read.
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

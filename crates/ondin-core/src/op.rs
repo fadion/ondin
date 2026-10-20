@@ -808,10 +808,10 @@ impl Operation {
     /// every op of that arm answers `false` here. The lists part in both
     /// directions, each for a stated reason: `absorb` no-ops the image pair, which
     /// changes ink with no override to carry it (§15 D659), and the variables
-    /// table's seven operations, which have none either (§15 D1039) — three of
-    /// those seven change ink, and four draw nothing and are `false` here, too —
-    /// and this answers `false` for the vault's
-    /// two and `SetOrigin`, which `absorb` *refuses* (§15 D1012, D1016).
+    /// table's operations, which have none either (§15 D1039) — the modes', a
+    /// mode's name, a kit's variable and a kit's modes change ink, a variable's
+    /// own rows do not — and this answers `false` for the vault's two and
+    /// `SetOrigin`, which `absorb` *refuses* (§15 D1012, D1016).
     /// `overrides.rs` · `every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
     /// pins the no-op side.
     ///

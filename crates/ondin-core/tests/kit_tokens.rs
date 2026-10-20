@@ -2117,3 +2117,78 @@ fn make_local_forks_a_style_with_its_variables_remapped() {
         "no override on the instance"
     );
 }
+
+/// **An update whose publish reads none of a kit's variables drops the kit's
+/// record**, so a later publish reading them again is inserted, not refused
+/// `Modes` for good with no update to offer.
+///
+/// flip: `plan`'s mode-less record kept (the `filter` in its final loop
+/// removed) → fails *"the record goes"*. `held`'s filter is a second defence,
+/// for a mode-less record a file carries; removing it alone stays green.
+#[test]
+fn a_kit_whose_variables_went_unread_is_inserted_again_when_they_return() {
+    let mut k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    let white = || {
+        keyed_by_position([Fill {
+            brush: WHITE.into(),
+            visible: true,
+        }])
+    };
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetFills {
+                id: k.dot,
+                fills: white(),
+            },
+            Operation::SetFills {
+                id: k.badge,
+                fills: white(),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 2), Some(2));
+    accept(&mut d, &mut ids, &k);
+    assert!(!d.variables().kits().contains_key(L_ID), "the record goes");
+    k.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: k.badge,
+            fills: bound(k.brand),
+        }]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 3), Some(3));
+    let inst = insert(&mut d, &mut ids, &k, k.badge);
+    assert_eq!(drawn(&d, inst), Brush::Solid(WHITE), "brand's Day value");
+}
+
+/// **A kit variable whose kit holds no mode is refused** at the load and the
+/// commit: it has no column to read.
+///
+/// flip: `check_table`'s mode-less arm removed → the commit is accepted.
+#[test]
+fn a_kit_variable_under_a_mode_less_record_is_refused() {
+    let k = kit();
+    let (mut d, mut ids, _) = consumer(&[]);
+    insert(&mut d, &mut ids, &k, k.badge);
+    // Cell-less as well, so no other rule refuses it first.
+    let held = Variable {
+        cells: Default::default(),
+        ..d.variables().iter().next().unwrap().clone()
+    };
+    let r = d.apply(&Transaction(vec![
+        Operation::SetKitModes {
+            kit: L_ID.into(),
+            modes: Some(KitModes {
+                name: None,
+                modes: vec![],
+                map: Default::default(),
+            }),
+        },
+        Operation::SetVariable { var: held },
+    ]));
+    assert!(
+        matches!(r, Err(OpError::Variables(VarRule::NoKit(_)))),
+        "{r:?}"
+    );
+}

@@ -461,7 +461,9 @@ pub(crate) fn plan<'a>(
             }
             continue;
         }
-        let held = t.kits().get(kit);
+        // A held record with no modes holds nothing to keep — the last publish
+        // read none of the kit's variables — and is minted afresh.
+        let held = t.kits().get(kit).filter(|h| !h.modes.is_empty());
         // A held record **covering** the source's modes takes its variables: a
         // consumer holding a third kit at a newer version — a mode more — than
         // the kit that carries it is the ordinary case, as a main held at any
@@ -518,7 +520,7 @@ pub(crate) fn plan<'a>(
                 plan.modes.insert(*sid, m.id);
             }
         }
-        if held != Some(&record) {
+        if t.kits().get(kit) != Some(&record) {
             changed_records.push(kit.clone());
         }
         records.insert(kit.clone(), record);
@@ -781,11 +783,13 @@ pub(crate) fn plan<'a>(
                 ),
         );
     }
+    // A record left with no modes — an update whose publish reads none of the
+    // kit's variables — goes, rather than staying to refuse every later insert.
     for kit in changed_records {
-        ops.push(Operation::SetKitModes {
-            modes: records.remove(&kit),
-            kit,
-        });
+        let modes = records.remove(&kit).filter(|r| !r.modes.is_empty());
+        if modes.is_some() || t.kits().contains_key(&kit) {
+            ops.push(Operation::SetKitModes { modes, kit });
+        }
     }
     ops.append(&mut plan.ops);
     plan.ops = ops;

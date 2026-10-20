@@ -1545,9 +1545,11 @@ pub(crate) fn check_table(t: &Variables) -> Result<(), VarRule> {
         }
         let columns: Vec<ModeId> = match v.kit() {
             None => t.modes.iter().map(|m| m.id).collect(),
+            // A kit with no modes has no column to read: every read would
+            // fall back to transparent or 0.
             Some(kit) => match t.kits.get(kit) {
-                Some(km) => km.modes.iter().map(|m| m.id).collect(),
-                None => return Err(VarRule::NoKit(v.id)),
+                Some(km) if !km.modes.is_empty() => km.modes.iter().map(|m| m.id).collect(),
+                _ => return Err(VarRule::NoKit(v.id)),
             },
         };
         for m in &columns {

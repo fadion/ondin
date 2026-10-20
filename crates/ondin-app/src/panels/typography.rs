@@ -1902,6 +1902,11 @@ impl OndinApp {
         let mixed = subject.line_height_mixed();
         let font_size = subject.font_size();
         let (unit_label, tooltip) = match current {
+            // A number typed over layers that disagree is px for them all.
+            _ if mixed => (
+                "px",
+                "Mixed — a number typed sets every layer in px; click to move each to the first layer's next unit",
+            ),
             None => ("auto", "The font's own line height — click for %"),
             Some(Length::Em(_)) => ("%", "Percent of the font size — click for px"),
             Some(Length::Px(_)) => ("px", "Absolute — click for auto"),
@@ -1921,7 +1926,7 @@ impl OndinApp {
         let (mut shown, scrub, typed) = match current {
             // Over several layers that disagree, a number typed is px for them
             // all, whatever the first layer holds — click order decides nothing.
-            None if mixed => (
+            _ if mixed => (
                 resolved.unwrap_or(0.0),
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
                 expr::Unit::Px,
@@ -1999,9 +2004,9 @@ impl OndinApp {
             return;
         }
         let next = match current {
+            _ if mixed => Some(Length::Px(shown)),
             Some(Length::Em(_)) => Some(Length::Em(shown / 100.0)),
             Some(Length::Px(_)) => Some(Length::Px(shown)),
-            None if mixed => Some(Length::Px(shown)),
             None => None,
         };
         let Some(next) = next else { return };
@@ -10848,9 +10853,9 @@ mod several_layer_tests {
     }
 
     /// **A Mixed line height takes a typed px on every layer, whatever the
-    /// first holds** — here Auto — and a click in and out writes nothing.
+    /// first holds** — Auto, then % — and a click in and out writes nothing.
     ///
-    /// flips: the `None if mixed` arms removed → fails *"every layer at 30px"*
+    /// flips: the `_ if mixed` arms removed → fails *"every layer at 30px"*
     /// (Auto takes no typing); the Mixed field's moved gate removed → fails
     /// *"a click in and out writes nothing"*.
     #[test]
@@ -10917,10 +10922,6 @@ mod several_layer_tests {
         frame(&mut app, Vec::new());
         assert_eq!(heights(&app), before, "a click in and out writes nothing");
 
-        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut app, vec![click(true)]);
-        frame(&mut app, vec![click(false)]);
-        frame(&mut app, Vec::new());
         let key = |key, pressed| egui::Event::Key {
             key,
             physical_key: None,
@@ -10928,30 +10929,49 @@ mod several_layer_tests {
             repeat: false,
             modifiers: Default::default(),
         };
-        frame(
-            &mut app,
-            vec![
-                key(egui::Key::A, true),
-                egui::Event::Key {
+        let type_in = |app: &mut OndinApp, text: &str| {
+            frame(app, vec![egui::Event::PointerMoved(at)]);
+            frame(app, vec![click(true)]);
+            frame(app, vec![click(false)]);
+            frame(app, Vec::new());
+            frame(
+                app,
+                vec![egui::Event::Key {
                     key: egui::Key::A,
                     physical_key: None,
                     pressed: true,
                     repeat: false,
                     modifiers: egui::Modifiers::COMMAND,
-                },
-            ],
-        );
-        frame(&mut app, vec![egui::Event::Text("30".into())]);
-        frame(
-            &mut app,
-            vec![key(egui::Key::Enter, true), key(egui::Key::Enter, false)],
-        );
-        frame(&mut app, Vec::new());
-        frame(&mut app, Vec::new());
+                }],
+            );
+            frame(app, vec![egui::Event::Text(text.into())]);
+            frame(
+                app,
+                vec![key(egui::Key::Enter, true), key(egui::Key::Enter, false)],
+            );
+            frame(app, Vec::new());
+            frame(app, Vec::new());
+        };
+        type_in(&mut app, "30");
         assert_eq!(
             heights(&app),
             [Some(Length::Px(30.0)); 3],
             "every layer at 30px"
+        );
+
+        // The first layer in %: the typed number is px all the same.
+        let mut first = style(&app, texts[0]);
+        first.line_height = Some(Length::Em(1.5));
+        app.commit_edit(Transaction(vec![Operation::SetTextStyle {
+            id: texts[0],
+            style: first,
+            spans: None,
+        }]));
+        type_in(&mut app, "40");
+        assert_eq!(
+            heights(&app),
+            [Some(Length::Px(40.0)); 3],
+            "px over a first layer in %"
         );
     }
 

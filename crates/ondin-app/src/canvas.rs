@@ -643,6 +643,10 @@ struct Handles {
     /// these corners come from already reflects the gesture, and scaling relative
     /// to a box that is itself being scaled compounds every frame.
     corners: [(Handle, egui::Pos2); 4],
+    /// The selection holds a locked layer: the handles are drawn and arm
+    /// nothing — the size badge's padlock is the label on that refusal (§15
+    /// D348). `armed` answers it, so the cursor and the press agree.
+    locked: bool,
 }
 
 /// Which pivot marker to draw — and the whole of the difference between "you can
@@ -790,6 +794,9 @@ impl Handles {
     /// keep asking this one function the same question (see
     /// [`OndinApp::begin_select_drag`] on why they must).
     fn armed(&self, screen: egui::Pos2, skewing: bool) -> Option<Armed> {
+        if self.locked {
+            return None;
+        }
         if let Some(h) = self.grab(screen) {
             return Some(Armed::Resize(h));
         }
@@ -2325,6 +2332,11 @@ impl OndinApp {
                     } else {
                         self.session.selection.set_one(top);
                     }
+                }
+                // A selection holding a locked layer is not dragged about
+                // (§15 D323); the press still selected.
+                if self.selection_locked() {
+                    return;
                 }
                 self.drag = Drag::Move { anchor: world };
             }
@@ -11312,7 +11324,20 @@ impl OndinApp {
             pivot: world * local_pivot.unwrap_or_else(|| box_.center()),
             world,
             corners: Handle::CORNERS.map(|h| (h, self.to_screen(at(h), rect, ppp))),
+            locked: self.selection_locked(),
         })
+    }
+
+    /// Whether the selection holds an effectively locked layer — what refuses
+    /// its handles, a move of it and its spacing bands (§15 D323, D348). The
+    /// keyboard nudge does not ask (§15 D746).
+    pub(crate) fn selection_locked(&self) -> bool {
+        let doc = &self.session.doc;
+        self.session
+            .selection
+            .ids()
+            .iter()
+            .any(|id| ondin_core::is_effectively_locked(doc, *id))
     }
 
     /// Where the pivot marker sits on screen, and whether the pointer is on it.
@@ -14148,6 +14173,7 @@ mod tests {
                 let p = world * Point::new(local.width() * ux, local.height() * uy);
                 (h, egui::pos2(p.x as f32, p.y as f32))
             }),
+            locked: false,
         }
     }
 

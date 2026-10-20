@@ -536,8 +536,9 @@ impl OndinApp {
     /// the pointer.
     pub(crate) fn spacing_subject(&self, pointer: Option<Point>) -> Option<Subject> {
         let ids = self.session.selection.ids();
+        // A locked container offers no band, selected as hovered (§15 D323).
         let selected = match ids {
-            [id] => Some(*id),
+            [id] if !ondin_core::is_effectively_locked(&self.session.doc, *id) => Some(*id),
             _ => None,
         };
         // A container that is one of several selected keeps D1078's rule, no
@@ -1810,6 +1811,54 @@ mod canvas_tests {
             false,
         );
         assert_eq!(&spacing(&app, row)[..2], &[18.0, 6.0]);
+    }
+
+    /// **A selected, then locked, layer is not dragged about** (§15 D323, D348):
+    /// its gap, its right side and its body each dragged, and nothing commits.
+    /// The control, the same three on the row unlocked, each commits.
+    ///
+    /// flips: `Handles::armed`'s lock answer removed → fails *"the side"*;
+    /// `spacing_subject` keeping a locked selection → fails *"the gap"*; the
+    /// move's `selection_locked` refusal removed → fails *"the gap"* too, the
+    /// refused band's press falling through to a move.
+    #[test]
+    fn a_selected_locked_layer_takes_no_drag() {
+        let ctx = egui::Context::default();
+        let none = Default::default();
+        let drags = [
+            ("the gap", Point::new(65.0, 35.0), Point::new(81.0, 35.0)),
+            (
+                "the side",
+                Point::new(400.0, 100.0),
+                Point::new(450.0, 100.0),
+            ),
+            (
+                "the body",
+                Point::new(250.0, 150.0),
+                Point::new(290.0, 170.0),
+            ),
+        ];
+        for (what, from, to) in drags {
+            let (mut app, row) = app_with_a_row(&ctx);
+            let depth = app.session.history.undo_depth();
+            drag(&ctx, &mut app, from, to, none, false);
+            assert_eq!(
+                app.session.history.undo_depth(),
+                depth + 1,
+                "the fixture: {what} drags unlocked"
+            );
+            let (mut app, row2) = app_with_a_row(&ctx);
+            assert_eq!(row, row2);
+            assert!(app.session.commit(Transaction(vec![Operation::SetLocked {
+                id: row,
+                locked: true,
+            }])));
+            app.session.selection.set_one(row);
+            frame(&ctx, &mut app, Vec::new(), Default::default());
+            let depth = app.session.history.undo_depth();
+            drag(&ctx, &mut app, from, to, none, false);
+            assert_eq!(app.session.history.undo_depth(), depth, "{what}");
+        }
     }
 
     /// Whether, with nothing selected, the pointer on world `at` offers a band.

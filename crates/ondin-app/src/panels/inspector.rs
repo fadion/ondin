@@ -7647,6 +7647,8 @@ impl OndinApp {
         // The width the stroke draws, a bound one's number and not its 0 — the
         // scale a fresh pattern is sized at (§15 D1073's amendment, reading (d)).
         let drawn_width = self.drawn_stroke_width(scope, s);
+        // The row's style lock, as the effect popover carries it.
+        let locked = !ui.is_enabled();
         let menu = egui::Area::new(egui::Id::new(("stroke-menu", index)))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
@@ -7656,6 +7658,9 @@ impl OndinApp {
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
             .show(&ctx, |ui| {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                    if locked {
+                        super::styles::lock(ui);
+                    }
                     let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
                     ui.set_width(inner);
                     // Named rather than repeated: this card, the type popup, the
@@ -10566,8 +10571,7 @@ impl OndinApp {
                     let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
                     ui.set_width(inner);
                     if locked {
-                        ui.disable();
-                        ui.set_opacity(super::styles::GREYED);
+                        super::styles::lock(ui);
                     }
                     // **Stated here, before the first control** — §15 D195's rule:
                     // egui advances past a widget by the spacing in effect when
@@ -12312,6 +12316,10 @@ impl OndinApp {
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.order >= egui::Order::Foreground);
         let anchor = Self::popover_anchor(&ctx, head.rect, MENU_W);
+        // The row's style lock, carried into the popover as the image card
+        // carries it (§15 D1080): a style landing while it is open — an undone
+        // *Detach* — must not leave it writing, which would cut the style.
+        let locked = !ui.is_enabled();
         let menu = egui::Area::new(egui::Id::new(("effect-menu", index)))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
@@ -12321,6 +12329,9 @@ impl OndinApp {
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
             .show(&ctx, |ui| {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
+                    if locked {
+                        super::styles::lock(ui);
+                    }
                     let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
                     ui.set_width(inner);
                     ui.spacing_mut().item_spacing.y = ui::POPOVER_SECTION_GAP;

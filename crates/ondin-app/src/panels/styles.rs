@@ -31,7 +31,14 @@ const MENU_W: f32 = 210.0;
 const PICKER_W: f32 = 256.0;
 const ROW_H: f32 = 26.0;
 /// Greyed rows' opacity under a read-only capsule (F3).
-pub(crate) const GREYED: f32 = 0.42;
+const GREYED: f32 = 0.42;
+
+/// The read-only lock on `ui`: inert and greyed (D1038 (1), F3). An `Area`
+/// opened from a locked row inherits neither, so a popover takes it itself.
+pub(crate) fn lock(ui: &mut egui::Ui) {
+    ui.disable();
+    ui.set_opacity(GREYED);
+}
 
 /// How a card's targets stand towards styles in one slot.
 #[derive(Clone, Debug, PartialEq)]
@@ -607,8 +614,7 @@ impl OndinApp {
                     // Greyed and inert — the inspector's read-only door (D1038
                     // (1)); a bound variable inside still draws its chip.
                     ui.scope(|ui| {
-                        ui.disable();
-                        ui.set_opacity(GREYED);
+                        lock(ui);
                         body(app, ui);
                     });
                     footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
@@ -620,8 +626,7 @@ impl OndinApp {
             // not detach (D1038 (1)); the `⋯` detaches or applies to them all.
             StyleShown::Partial => {
                 ui.scope(|ui| {
-                    ui.disable();
-                    ui.set_opacity(GREYED);
+                    lock(ui);
                     body(app, ui);
                 });
                 footer(ui, icon::LOCK_SIMPLE, "Read-only — Detach to edit");
@@ -1948,5 +1953,96 @@ mod tests {
         tall(&mut app, vec![]);
         assert_eq!(fill_style(&app, a), Some(s), "the style stays");
         assert_eq!(mode(&app), before, "and the picture keeps its mode");
+    }
+
+    /// **The effect popover left open when a style lands is read-only** (§15
+    /// D1080's lock, at the popover's `Area`): typing into its X field writes
+    /// nothing, and the style stays.
+    ///
+    /// flip: `effect_menu_popup`'s `if locked { lock(ui) }` taken out → fails
+    /// *"the style stays"*, the typed X having cut it.
+    #[test]
+    fn the_effect_popover_is_read_only_under_a_styled_effects_card() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        let item = app.session.ids.mint_item();
+        assert!(app.session.commit(Transaction(vec![Operation::SetEffects {
+            id: a,
+            effects: vec![Keyed::new(
+                item,
+                ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
+                    ondin_core::Shadow::default()
+                )),
+            )],
+        }])));
+        app.create_style(StyleSlot::Effects, &[a]);
+        app.style_naming = None;
+        let s = app.session.doc.get(a).unwrap().styles().effects;
+        assert!(s.is_some(), "the fixture: styled");
+        app.style_open.insert(StyleSlot::Effects);
+        app.effect_menu = Some((a, 0));
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = tall_frame(&ctx, &mut app);
+        }
+        // The popover hangs left of the inspector, whose Transform card has an
+        // X of its own: the leftmost.
+        fn all_at(shape: &egui::Shape, s: &str, out: &mut Vec<egui::Pos2>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    out.push(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|x| all_at(x, s, out)),
+                _ => {}
+            }
+        }
+        let mut xs = Vec::new();
+        shapes.iter().for_each(|c| all_at(&c.shape, "X", &mut xs));
+        // On the number beside the prefix.
+        let at = xs
+            .into_iter()
+            .min_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("the popover's X field is drawn")
+            + egui::vec2(24.0, 0.0);
+        let tall = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 2400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |_| {
+                app.inspector_panel(&ctx);
+                app.style_popups_ui(&ctx);
+            });
+        };
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        tall(&mut app, vec![egui::Event::PointerMoved(at)]);
+        tall(&mut app, vec![button(true)]);
+        tall(&mut app, vec![button(false)]);
+        tall(&mut app, vec![]);
+        tall(&mut app, vec![egui::Event::Text("9".into())]);
+        let enter = |pressed| egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        tall(&mut app, vec![enter(true), enter(false)]);
+        tall(&mut app, vec![]);
+        tall(&mut app, vec![]);
+        assert_eq!(
+            app.session.doc.get(a).unwrap().styles().effects,
+            s,
+            "the style stays"
+        );
     }
 }

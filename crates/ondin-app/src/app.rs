@@ -3116,6 +3116,30 @@ impl OndinApp {
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
+        // **A picker on a slot a style has just landed on closes** (§15 D1080):
+        // an undone *Detach* brings the style back under an open picker, whose
+        // `Area` the card's read-only lock never reaches, and its next write would
+        // cut the style again. Under the style's *Edit* a write is the style's.
+        if self.session.style_edit.is_none()
+            && let Some(p) = &self.picker
+        {
+            use ondin_core::style::StyleSlot;
+            let slot = match p.slot {
+                PaintSlot::Fill(_) => Some(StyleSlot::Fills),
+                PaintSlot::Stroke(_) => Some(StyleSlot::Strokes),
+                PaintSlot::Effect(_) => Some(StyleSlot::Effects),
+                _ => None,
+            };
+            let styled = slot.is_some_and(|s| {
+                self.session
+                    .doc
+                    .get(p.node)
+                    .is_some_and(|n| n.styles().get(s).is_some())
+            });
+            if styled {
+                self.picker = None;
+            }
+        }
         // **An undone cut owes its paste nothing** (§15 D1003 (1)): the move a cut
         // keeps is a claim about links *that cut* took, and once the history is
         // undone past it they are back. Kept live, it outlived the undo, and a

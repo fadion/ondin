@@ -2434,8 +2434,7 @@ impl OndinApp {
         let held = |app: &mut Self, ui: &mut egui::Ui, f: &dyn Fn(&mut Self, &mut egui::Ui)| {
             if locked {
                 ui.scope(|ui| {
-                    ui.disable();
-                    ui.set_opacity(0.42);
+                    super::styles::lock(ui);
                     f(app, ui);
                 });
             } else {

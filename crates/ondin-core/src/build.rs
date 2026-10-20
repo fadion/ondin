@@ -4228,10 +4228,16 @@ pub fn detach_size_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Oper
 /// The bindings layer `id` keeps when its size is written `written` —
 /// [`keep_size_bindings`]' judgement, axis by axis (§15 D1061): a bound axis
 /// written what it draws, or its own literal, keeps its variable; any other comes
-/// back `None`. **Shared with the preview** (`absorb`'s `SetGeometry` arm), so a
-/// resize draws a bound axis where the commit will put it — D1058's lesson for
-/// gaps, taken before it could be learned again.
-pub fn kept_size_vars(doc: &Document, id: NodeId, written: kurbo::Size) -> crate::SizeVars {
+/// back `None`. "What it draws" is its variable's number and, given `res`, the
+/// used size a layout's shrink or min/max squeezed it to — what a writer of the
+/// other axis carries forward (D874). **Shared with the preview** (`absorb`'s
+/// `SetGeometry` arm), so a resize draws a bound axis where the commit puts it.
+pub fn kept_size_vars(
+    doc: &Document,
+    res: Option<&crate::resolve::Resolved>,
+    id: NodeId,
+    written: kurbo::Size,
+) -> crate::SizeVars {
     let Some(node) = doc.get(id) else {
         return Default::default();
     };
@@ -4243,12 +4249,17 @@ pub fn kept_size_vars(doc: &Document, id: NodeId, written: kurbo::Size) -> crate
         .size_drawn_in(doc.variables(), id, node.kind(), bound)
         .box_size()
         .unwrap_or(literal);
-    let (l, d, w) = (
+    let used = res
+        .and_then(|r| r.used_kind(doc, id))
+        .and_then(NodeKind::box_size)
+        .unwrap_or(drawn);
+    let (l, d, u, w) = (
         [literal.width, literal.height],
         [drawn.width, drawn.height],
+        [used.width, used.height],
         [written.width, written.height],
     );
-    std::array::from_fn(|k| bound[k].filter(|_| w[k] == d[k] || w[k] == l[k]))
+    std::array::from_fn(|k| bound[k].filter(|_| w[k] == d[k] || w[k] == l[k] || w[k] == u[k]))
 }
 
 /// **A size written over a bound axis detaches it** (D1038 (2), §15 D1061) —
@@ -4272,7 +4283,8 @@ pub fn kept_size_vars(doc: &Document, id: NodeId, written: kurbo::Size) -> crate
 /// **And an axis an edit makes computed is detached** — the ruling's *only a
 /// hand-set size is bindable*, kept as true after the edit as at the bind: a
 /// keyword set to `%` or `fit-content`, a pin at the second end, growth, a basis
-/// or a stretch, a reparent into a layout. Asked of the tree the transaction
+/// or a stretch, a reparent into a layout, a layer shown or unmasked into the
+/// flow, a bound layer pasted into a layout. Asked of the tree the transaction
 /// leaves ([`size_axes_authored`] on a scratch copy), and only when the
 /// transaction touches the layout of a bound layer or its parent, so an
 /// ordinary commit pays nothing. The literal it detaches to is the size drawn
@@ -4280,8 +4292,13 @@ pub fn kept_size_vars(doc: &Document, id: NodeId, written: kurbo::Size) -> crate
 /// again.
 ///
 /// A transaction that sets a layer's size bindings itself — a bind, a detach,
-/// a reset — is left to say what it means.
-pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+/// a reset — is left to say what it means. `res` is the layout `doc` was
+/// resolved to, for [`kept_size_vars`]' used size.
+pub fn keep_size_bindings(
+    doc: &Document,
+    res: Option<&crate::resolve::Resolved>,
+    mut tx: Transaction,
+) -> Transaction {
     let sets_vars: FxHashSet<NodeId> =
         tx.0.iter()
             .filter_map(|op| match op {
@@ -4312,7 +4329,7 @@ pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
             continue;
         };
         let v = vars.entry(*id).or_insert(node.size_vars());
-        let kept = kept_size_vars(doc, *id, *size);
+        let kept = kept_size_vars(doc, res, *id, *size);
         if v[0].is_some() {
             if kept[0].is_some() {
                 size.width = literal.width;
@@ -4328,38 +4345,57 @@ pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
             }
         }
     }
-    // The layout half: a bound layer whose own layout fields, insets, parent or
-    // parent's layout the transaction writes.
+    // The layout half: a bound layer whose own layout fields, insets, parent,
+    // parent's layout or place in the flow the transaction writes — and a bound
+    // layer it brings in, judged by the bindings it arrives with.
     let mut touched: Vec<NodeId> = Vec::new();
+    let mut arrived: FxHashMap<NodeId, crate::SizeVars> = FxHashMap::default();
     for op in &tx.0 {
         match op {
             Operation::SetLayoutItem { id, .. }
             | Operation::SetInsets { id, .. }
-            | Operation::Reparent { id, .. } => touched.push(*id),
+            | Operation::Reparent { id, .. }
+            | Operation::SetVisible { id, .. }
+            | Operation::SetVisibleVar { id, .. }
+            | Operation::SetMask { id, .. } => touched.push(*id),
             Operation::SetDisplay { id, .. } => {
                 if let Some(n) = doc.get(*id) {
                     touched.extend(n.children().iter().copied());
+                }
+            }
+            Operation::InsertSubtree { nodes, .. } => {
+                for n in nodes {
+                    if !sets_vars.contains(&n.id) && n.size_vars.iter().any(Option::is_some) {
+                        arrived.insert(n.id, n.size_vars);
+                    }
                 }
             }
             _ => {}
         }
     }
     touched.retain(|id| bound(*id));
+    touched.extend(arrived.keys().copied());
     touched.sort();
     touched.dedup();
     let mut extra: Vec<Operation> = Vec::new();
     if !touched.is_empty() {
         let mut after = doc.clone();
-        if after.apply(&tx).is_ok() {
+        // Unchecked: a link the commit's later passes cut (a member moved out
+        // of its instance) fails `component::check` until they run.
+        if after.apply_unchecked(&tx).is_ok() {
             let view = crate::resolve::DocView(&after);
             for id in touched {
                 // Gone by the end of the edit: nothing to detach, and a write
                 // to it would fail the commit (`arch-scribe`'s reading).
-                let (Some(node), Some(kept)) = (doc.get(id), after.get(id)) else {
+                let Some(kept) = after.get(id) else {
+                    continue;
+                };
+                let before = doc.get(id).map(|n| n.size_vars());
+                let Some(start) = before.or_else(|| arrived.get(&id).copied()) else {
                     continue;
                 };
                 let authored = size_axes_authored(&view, id);
-                let v = vars.entry(id).or_insert(node.size_vars());
+                let v = vars.entry(id).or_insert(start);
                 let which = [
                     v[0].is_some() && !authored[0],
                     v[1].is_some() && !authored[1],
@@ -4367,10 +4403,14 @@ pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
                 if !which.iter().any(|w| *w) {
                     continue;
                 }
-                let drawn = doc
-                    .resolved_kind(id)
-                    .and_then(|k| k.box_size())
-                    .unwrap_or_default();
+                // What it drew before the edit, or, brought in, what it draws
+                // where it came from — its variables' numbers.
+                let drawn = match before {
+                    Some(_) => doc.resolved_kind(id),
+                    None => after.resolved_kind(id),
+                }
+                .and_then(|k| k.box_size())
+                .unwrap_or_default();
                 let Some(mut s) = kept.kind().box_size() else {
                     continue;
                 };
@@ -4394,7 +4434,11 @@ pub fn keep_size_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     ids.sort();
     for id in ids {
         let v = vars[&id];
-        if doc.get(id).is_some_and(|n| n.size_vars() != v) {
+        let had = doc
+            .get(id)
+            .map(|n| n.size_vars())
+            .or_else(|| arrived.get(&id).copied());
+        if had.is_some_and(|had| had != v) {
             tx.0.push(Operation::SetSizeVars { id, vars: v });
         }
     }
@@ -6887,8 +6931,10 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     // bindings** (§15 D1069): typing into a bound text leaves it bound until
     // `keep_text_bindings` detaches it, and a text's size is its string's.
     let mut after = doc.clone();
-    let kept = keep_text_bindings(doc, keep_size_bindings(doc, tx.clone()));
-    if after.apply(&kept).is_err() {
+    // Unchecked, as `keep_size_bindings`' scratch is: a member moved out of
+    // its instance fails `component::check` until the commit cuts its link.
+    let kept = keep_text_bindings(doc, keep_size_bindings(doc, Some(res), tx.clone()));
+    if after.apply_unchecked(&kept).is_err() {
         return tx;
     }
     let mut ids: Vec<(NodeId, (Option<Affine>, bool))> = placed.into_iter().collect();

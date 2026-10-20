@@ -1280,7 +1280,7 @@ impl RenderOverrides {
                         .get(*id)
                         .is_some_and(|n| n.size_vars().iter().any(Option::is_some))
                 {
-                    let kept = ondin_core::build::kept_size_vars(doc, *id, written);
+                    let kept = ondin_core::build::kept_size_vars(doc, Some(res), *id, written);
                     patched = doc.size_drawn_in(doc.variables(), *id, &patched, kept);
                 }
                 self.set_kind(doc, res, *id, patched);

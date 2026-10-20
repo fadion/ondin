@@ -341,10 +341,18 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                 if writes_spans(op) && !same_content(doc, src, m) {
                     continue;
                 }
+                // A copy whose content is bound otherwise than its source's
+                // holds its own content, and the source's literal and spans
+                // would index a string they were not written for.
+                if writes_content(op) && !same_content_binding(doc, src, m) {
+                    continue;
+                }
                 let Some(cur) = doc.peek(&probe) else {
                     continue; // a copy of another kind cannot take this edit
                 };
-                if let Some(follow) = follow(&new, &old, &cur, m) {
+                if let Some(follow) = follow(&new, &old, &cur, m)
+                    .and_then(|f| keep_own_bound_geometry(doc, src, m, f))
+                {
                     out.push(follow.clone());
                     queue.push((m, follow, cur));
                 }
@@ -386,7 +394,7 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // bindings the transaction already states is left as stated, so only what
     // the style wrote is judged — before the copies follow, so they follow it.
     if relayout {
-        *tx = crate::build::keep_size_bindings(doc, std::mem::take(tx));
+        *tx = crate::build::keep_size_bindings(doc, None, std::mem::take(tx));
     }
     // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
     // back, has its children and fields rewritten in place here — the one place
@@ -422,14 +430,53 @@ pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource)
     // item onto a copy bound to a style of its own, a swap's or a structural
     // pass's copy of a styled node, put back to its style (§15 D1062).
     let restyled = crate::style::settle(doc, tx, user);
-    let relayout = restyled
-        .iter()
-        .any(|op| matches!(op, Operation::SetDisplay { .. }));
     tx.0.extend(restyled);
-    // And the size pass over a copy's layout put back, the first call's reason.
-    if relayout {
-        *tx = crate::build::keep_size_bindings(doc, std::mem::take(tx));
+    // And the size pass again, over what the passes above wrote: a copy holding
+    // its own size binding takes the main's layout write (growth, a stretch)
+    // through a follow, and the axis it makes computed detaches as the main's
+    // did. A node whose bindings the transaction states is left as stated.
+    *tx = crate::build::keep_size_bindings(doc, None, std::mem::take(tx));
+    // And a copy holding its own gap or padding binding loses its layout to a
+    // follow: the binding is inert there, and cleared as the main's was.
+    let inert = inert_spacing(doc, tx);
+    tx.0.extend(inert);
+}
+
+/// A `SetSpacingVars` clearing every node `tx` takes the layout from while it
+/// holds a spacing binding the transaction does not set.
+fn inert_spacing(doc: &Document, tx: &Transaction) -> Vec<Operation> {
+    let sets: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetSpacingVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    // The display each node is left with, the last write winning.
+    let mut left: FxHashMap<NodeId, bool> = FxHashMap::default();
+    for op in &tx.0 {
+        if let Operation::SetDisplay { id, display } = op {
+            left.insert(*id, display.is_none());
+        }
     }
+    let mut ids: Vec<NodeId> = left
+        .into_iter()
+        .filter(|(id, none)| {
+            *none
+                && !sets.contains(id)
+                && doc
+                    .get(*id)
+                    .is_some_and(|n| n.spacing_vars().iter().any(Option::is_some))
+        })
+        .map(|(id, _)| id)
+        .collect();
+    ids.sort();
+    ids.into_iter()
+        .map(|id| Operation::SetSpacingVars {
+            id,
+            vars: Default::default(),
+        })
+        .collect()
 }
 
 /// The nodes `tx` takes away from the source they follow: everything under a
@@ -1123,6 +1170,78 @@ pub(crate) fn linked_to_main(doc: &Document, id: NodeId) -> bool {
         .and_then(|n| n.link)
         .and_then(|s| doc.get(s))
         .is_some_and(|s| s.component)
+}
+
+/// `follow` with the size axes and corners copy `m` binds otherwise than `src`
+/// kept at `m`'s own literal, or `None` when nothing else is left to follow. A
+/// binding of the copy's own is an override, and its canonical literal 0 would
+/// otherwise read as the main's old value and take the new one — a copy that
+/// previews at its main's size and stores a literal it never draws.
+fn keep_own_bound_geometry(
+    doc: &Document,
+    src: NodeId,
+    m: NodeId,
+    follow: Operation,
+) -> Option<Operation> {
+    use crate::GeometryPatch as G;
+    let Operation::SetGeometry { id, geometry } = &follow else {
+        return Some(follow);
+    };
+    let (Some(s), Some(c)) = (doc.get(src), doc.get(m)) else {
+        return Some(follow);
+    };
+    let geometry = match *geometry {
+        G::Size(mut size) if s.size_vars() != c.size_vars() => {
+            let own = c.kind().box_size()?;
+            let (sv, cv) = (s.size_vars(), c.size_vars());
+            if sv[0] != cv[0] {
+                size.width = own.width;
+            }
+            if sv[1] != cv[1] {
+                size.height = own.height;
+            }
+            (size != own).then_some(G::Size(size))?
+        }
+        G::CornerRadius(_) | G::CornerRadii(_) if s.corner_vars() != c.corner_vars() => {
+            let NodeKind::Rect {
+                corner_radii: own, ..
+            } = c.kind()
+            else {
+                return Some(follow);
+            };
+            let mut r = match *geometry {
+                G::CornerRadius(x) => kurbo::RoundedRectRadii::from_single_radius(x),
+                G::CornerRadii(r) => r,
+                _ => unreachable!(),
+            };
+            let (sv, cv) = (s.corner_vars(), c.corner_vars());
+            let slots = [
+                (&mut r.top_left, own.top_left),
+                (&mut r.top_right, own.top_right),
+                (&mut r.bottom_right, own.bottom_right),
+                (&mut r.bottom_left, own.bottom_left),
+            ];
+            for (k, (slot, mine)) in slots.into_iter().enumerate() {
+                if sv[k] != cv[k] {
+                    *slot = mine;
+                }
+            }
+            (r != *own).then_some(G::CornerRadii(r))?
+        }
+        _ => return Some(follow),
+    };
+    Some(Operation::SetGeometry { id: *id, geometry })
+}
+
+/// Whether the operation writes a text's content or the spans indexing it.
+fn writes_content(op: &Operation) -> bool {
+    writes_spans(op) || matches!(op, Operation::SetText { .. })
+}
+
+/// Whether `a` and `b` bind their content to the same variable, or neither does.
+fn same_content_binding(doc: &Document, a: NodeId, b: NodeId) -> bool {
+    let var = |id: NodeId| doc.get(id).map(|n| n.text_vars()[0]);
+    var(a) == var(b)
 }
 
 fn same_content(doc: &Document, a: NodeId, b: NodeId) -> bool {

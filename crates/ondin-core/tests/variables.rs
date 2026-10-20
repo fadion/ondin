@@ -1573,6 +1573,7 @@ fn a_size_written_over_a_bound_axis_detaches_it() {
     let write = |doc: &Document, s: Size| {
         ondin_core::keep_size_bindings(
             doc,
+            None,
             Transaction(vec![Operation::SetGeometry {
                 id: f.rect,
                 geometry: ondin_core::GeometryPatch::Size(s),
@@ -1621,6 +1622,7 @@ fn an_axis_made_computed_detaches_and_a_computed_axis_does_not_bind() {
     };
     let tx = ondin_core::keep_size_bindings(
         &f.doc,
+        None,
         Transaction(vec![Operation::SetLayoutItem {
             id: f.rect,
             item: grow,
@@ -1699,4 +1701,319 @@ fn size_bindings_detach_to_what_they_draw_round_trip_and_fit_their_kind() {
             .is_err(),
         "the commit refuses one"
     );
+}
+
+/// A second frame, a flex column stretching its items' widths, 200 wide.
+fn column(f: &mut F) -> NodeId {
+    let col = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: col,
+                parent: f.root,
+                index: 1,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 200.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: col,
+                display: Some(Display::Flex(Flex {
+                    direction: ondin_core::container::FlexDirection::Column,
+                    ..Flex::default()
+                })),
+            },
+        ]))
+        .unwrap();
+    col
+}
+
+/// The commit door's size and visibility passes, then what the components owe,
+/// applied — `EditorSession::commit_inner`'s order for these fields.
+fn commit_sized(f: &mut F, tx: Transaction) {
+    let res = Resolved::rebuild(&f.doc);
+    let tx = ondin_core::keep_visible_bindings(&f.doc, tx);
+    let mut tx = ondin_core::keep_size_bindings(&f.doc, Some(&res), tx);
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    f.doc.apply(&tx).unwrap();
+}
+
+/// The frame made a component and one instance of it, and the instance's copy
+/// of the rect.
+fn instance_of_frame(f: &mut F) -> (NodeId, NodeId) {
+    f.doc
+        .apply(&Transaction(vec![Operation::SetComponent {
+            id: f.frame,
+            component: true,
+        }]))
+        .unwrap();
+    let place = Placement {
+        nodes: f.doc.capture_subtree(f.frame).unwrap(),
+        parent: f.root,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+    f.doc.apply(&tx).unwrap();
+    (made[0], f.doc.get(made[0]).unwrap().children()[0])
+}
+
+/// **A copy's own width binding detaches when its main's edit makes the axis
+/// computed** (§15 D1061): the main's growth reaches the copy by a follow, after
+/// the door's size pass, and the size pass runs again over the follows.
+///
+/// flip: `owed`'s size pass after the follows removed → fails *"the copy's
+/// width detaches"*.
+#[test]
+fn a_copys_own_width_binding_detaches_when_its_mains_growth_follows() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    flex_frame(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let (_, copy) = instance_of_frame(&mut f);
+    let own = f.radius;
+    let ops = ondin_core::bind_size_ops(&f.doc, copy, [Some(own), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(copy).unwrap().size_vars(), [Some(own), None]);
+    let grow = ondin_core::container::LayoutItem {
+        grow: 1.0,
+        align_self: Some(ondin_core::container::AlignItems::Start),
+        ..*f.doc.get(f.rect).unwrap().item()
+    };
+    let tx = Transaction(vec![Operation::SetLayoutItem {
+        id: f.rect,
+        item: grow,
+    }]);
+    commit_sized(&mut f, tx);
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [None, None]);
+    assert_eq!(f.doc.get(copy).unwrap().item().grow, 1.0, "growth followed");
+    assert_eq!(
+        f.doc.get(copy).unwrap().size_vars(),
+        [None, None],
+        "the copy's width detaches"
+    );
+}
+
+/// **A bound width pasted into a layout that stretches it detaches**, as the
+/// same layer moved there does (§15 D1061): the layer an `InsertSubtree` brings
+/// in is judged by the bindings it arrives with.
+///
+/// flip: the `InsertSubtree` arm of `keep_size_bindings`' layout half removed →
+/// fails *"the pasted width detaches"*.
+#[test]
+fn a_bound_width_pasted_into_a_stretching_column_detaches() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let col = column(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let place = Placement {
+        nodes: f.doc.capture_subtree(f.rect).unwrap(),
+        parent: col,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+    commit_sized(&mut f, tx);
+    assert_eq!(
+        f.doc.get(made[0]).unwrap().size_vars(),
+        [None, None],
+        "the pasted width detaches"
+    );
+    assert_eq!(stored_size(&f.doc, made[0]).width, 60.0, "to what it drew");
+}
+
+/// **A hidden bound layer shown into a stretching layout detaches its width**
+/// (§15 D1061): hidden it was out of flow and its width its own.
+///
+/// flip: `SetVisible` out of `keep_size_bindings`' triggers → fails *"shown,
+/// the width detaches"*.
+#[test]
+fn a_hidden_bound_layer_shown_into_a_stretching_column_detaches() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let col = column(&mut f);
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::Reparent {
+                id: f.rect,
+                new_parent: col,
+                index: 0,
+            },
+            Operation::SetVisible {
+                id: f.rect,
+                visible: false,
+            },
+        ]))
+        .unwrap();
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.rect).unwrap().size_vars(), [Some(w), None]);
+    let tx = Transaction(vec![Operation::SetVisible {
+        id: f.rect,
+        visible: true,
+    }]);
+    commit_sized(&mut f, tx);
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().size_vars(),
+        [None, None],
+        "shown, the width detaches"
+    );
+}
+
+/// **An instance member moved out into a stretching layout detaches its bound
+/// width**, as any layer does: the size pass reads the tree the edit leaves
+/// before the commit cuts the member's link.
+///
+/// flip: `keep_size_bindings`' scratch back to the checked `apply` alone stays
+/// green — `owed`'s second size pass, run once the link is cut, catches it;
+/// with that pass removed too → fails *"moved out, the width detaches"*.
+#[test]
+fn an_instance_member_moved_into_a_stretching_column_detaches_its_width() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let col = column(&mut f);
+    let (_, copy) = instance_of_frame(&mut f);
+    let ops = ondin_core::bind_size_ops(&f.doc, copy, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    commit_sized(
+        &mut f,
+        Transaction(vec![Operation::Reparent {
+            id: copy,
+            new_parent: col,
+            index: 0,
+        }]),
+    );
+    assert_eq!(f.doc.get(copy).unwrap().link(), None, "its link is cut");
+    assert_eq!(
+        f.doc.get(copy).unwrap().size_vars(),
+        [None, None],
+        "moved out, the width detaches"
+    );
+}
+
+/// **A height written beside the width a layout squeezes keeps the width
+/// bound** (§15 D1061): the H field and a top or bottom handle carry the used
+/// width forward, which is what the axis draws.
+///
+/// flip: `kept_size_vars`' used-size arm removed → fails *"the squeezed width
+/// stays bound"*.
+#[test]
+fn a_height_written_beside_a_squeezed_bound_width_keeps_it() {
+    let mut f = fixture();
+    let w = width_var(&mut f);
+    let second = flex_frame(&mut f);
+    // 60 + 5 + 40 in a row 100 wide, nothing kept from shrinking.
+    let loose = |doc: &Document, id: NodeId| ondin_core::container::LayoutItem {
+        min_width: ondin_core::container::Dimension::Px(0.0),
+        ..*doc.get(id).unwrap().item()
+    };
+    let (a, b) = (loose(&f.doc, f.rect), loose(&f.doc, second));
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetLayoutItem {
+                id: f.rect,
+                item: a,
+            },
+            Operation::SetLayoutItem {
+                id: second,
+                item: b,
+            },
+        ]))
+        .unwrap();
+    let ops = ondin_core::bind_size_ops(&f.doc, f.rect, [Some(w), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&f.doc);
+    let used = res.used_kind(&f.doc, f.rect).unwrap().box_size().unwrap();
+    assert!(
+        used.width < 60.0,
+        "the fixture squeezes the width: {used:?}"
+    );
+    let tx = Transaction(vec![Operation::SetGeometry {
+        id: f.rect,
+        geometry: ondin_core::GeometryPatch::Size(Size::new(used.width, 30.0)),
+    }]);
+    commit_sized(&mut f, tx);
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().size_vars(),
+        [Some(w), None],
+        "the squeezed width stays bound"
+    );
+    assert_eq!(stored_size(&f.doc, f.rect), Size::new(0.0, 30.0));
+}
+
+/// **A copy holding its own gap binding loses it with the layout its main's
+/// edit takes away**, and the variable can then be deleted (§15 D1058): the
+/// follow lands after the door's spacing pass, and `owed` clears what it left
+/// inert.
+///
+/// flip: `owed`'s `inert_spacing` removed → fails *"the copy's gap binding
+/// goes"*.
+#[test]
+fn a_copys_own_gap_binding_goes_with_the_layout_its_main_loses() {
+    let mut f = fixture();
+    flex_frame(&mut f);
+    let ops = ondin_core::bind_spacing_ops(
+        &f.doc,
+        f.frame,
+        [Some(f.radius), None, None, None, None, None],
+    );
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let (inst, _) = instance_of_frame(&mut f);
+    let own = width_var(&mut f);
+    let ops = ondin_core::bind_spacing_ops(&f.doc, inst, [Some(own), None, None, None, None, None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let tx = ondin_core::keep_spacing_bindings(
+        &f.doc,
+        Transaction(vec![Operation::SetDisplay {
+            id: f.frame,
+            display: None,
+        }]),
+    );
+    commit_sized(&mut f, tx);
+    assert!(
+        f.doc.get(inst).unwrap().display().is_none(),
+        "the layout followed"
+    );
+    assert_eq!(
+        f.doc.get(inst).unwrap().spacing_vars(),
+        [None; 6],
+        "the copy's gap binding goes"
+    );
+    let remove = ondin_core::variable::remove_ops(&f.doc, &[own]);
+    f.doc
+        .apply(&Transaction(remove))
+        .expect("the variable deletes");
+}
+
+/// **Deleting a variable a layout-less node's spacing still names clears it**,
+/// rather than leaving the binding dangling and the delete refused — the state
+/// a file can carry.
+///
+/// flip: `remove_ops`' layout-less spacing arm removed → the delete is refused
+/// `BadBinding`.
+#[test]
+fn deleting_a_variable_clears_an_inert_spacing_binding() {
+    let mut f = fixture();
+    flex_frame(&mut f);
+    let ops = ondin_core::bind_spacing_ops(
+        &f.doc,
+        f.frame,
+        [Some(f.radius), None, None, None, None, None],
+    );
+    f.doc.apply(&Transaction(ops)).unwrap();
+    // Taken away raw, past the door's pass: the binding stays, inert.
+    f.doc
+        .apply(&Transaction(vec![Operation::SetDisplay {
+            id: f.frame,
+            display: None,
+        }]))
+        .unwrap();
+    assert!(f.doc.get(f.frame).unwrap().spacing_vars()[0].is_some());
+    let remove = ondin_core::variable::remove_ops(&f.doc, &[f.radius]);
+    f.doc
+        .apply(&Transaction(remove))
+        .expect("the variable deletes");
+    assert_eq!(f.doc.get(f.frame).unwrap().spacing_vars(), [None; 6]);
 }

@@ -677,3 +677,127 @@ fn a_copys_family_binding_goes_with_its_mains_text_style() {
         "the copy draws the style's family"
     );
 }
+
+/// **A main's span edit does not follow onto a copy bound to its own string**
+/// (§15 D1069 (2)): the main's edit detaches the main and writes spans, and a
+/// copy whose content binding is its own keeps none, so no byte range indexes
+/// a string whose length is the mode's — here a multi-byte one.
+///
+/// flip: `propagate`'s content-binding skip removed → fails *"the copy took no
+/// spans"*; with `text_drawn_in`'s span clear removed too, `Resolved::rebuild`
+/// panics *"not a char boundary"* before it.
+#[test]
+fn a_mains_span_edit_skips_a_copy_bound_to_its_own_string() {
+    let mut f = fixture();
+    let ru = f.ids.mint_var();
+    let (light, dark) = {
+        let m = f.doc.variables().modes();
+        (m[0].id, m[1].id)
+    };
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                ru,
+                "copy/ru",
+                VarKind::String,
+                [
+                    (light, Cell::String("Привет".into())),
+                    (dark, Cell::String("Пока".into())),
+                ],
+            ),
+        }]))
+        .unwrap();
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(f.label), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetComponent {
+            id: f.frame,
+            component: true,
+        }]))
+        .unwrap();
+    let place = ondin_core::Placement {
+        nodes: f.doc.capture_subtree(f.frame).unwrap(),
+        parent: f.root,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&f.doc, &mut f.ids, &[place], Default::default());
+    f.doc.apply(&tx).unwrap();
+    let copy = f.doc.get(made[0]).unwrap().children()[0];
+    let ops = ondin_core::bind_text_ops(&f.doc, copy, [Some(ru), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let NodeKind::Text { style, .. } = f.doc.get(f.text).unwrap().kind() else {
+        unreachable!()
+    };
+    let mut spans = CharSpans::default();
+    spans.set(1..2, CharAttr::Weight(700), style);
+    let mut tx = ondin_core::keep_text_bindings(
+        &f.doc,
+        Transaction(vec![Operation::SetTextSpans { id: f.text, spans }]),
+    );
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(stored(&f.doc, f.text).2, [None, None], "the main detached");
+    let NodeKind::Text { spans, .. } = f.doc.get(copy).unwrap().kind() else {
+        unreachable!()
+    };
+    assert!(spans.is_empty(), "the copy took no spans");
+    assert_eq!(
+        (used(&f.doc, copy).0, stored(&f.doc, copy).2[0]),
+        ("Привет".to_string(), Some(ru)),
+        "the copy keeps its own string"
+    );
+}
+
+/// A bound content holding spans by a door the commit's passes miss draws
+/// without them, rather than letting a byte range cut a multi-byte string.
+///
+/// flip: `text_drawn_in`'s span clear removed → `Resolved::rebuild` panics.
+#[test]
+fn a_bound_content_draws_without_spans_it_should_not_hold() {
+    let mut f = fixture();
+    let light = f.doc.variables().modes()[0].id;
+    let ru = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                ru,
+                "copy/ru",
+                VarKind::String,
+                [
+                    (light, Cell::String("Привет".into())),
+                    (f.dark, Cell::String("Пока".into())),
+                ],
+            ),
+        }]))
+        .unwrap();
+    // In a layout, so `Resolved` shapes the text.
+    f.doc
+        .apply(&Transaction(vec![Operation::SetDisplay {
+            id: f.frame,
+            display: Some(ondin_core::container::Display::Flex(Default::default())),
+        }]))
+        .unwrap();
+    let ops = ondin_core::bind_text_ops(&f.doc, f.text, [Some(ru), None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let NodeKind::Text { style, .. } = f.doc.get(f.text).unwrap().kind() else {
+        unreachable!()
+    };
+    let mut spans = CharSpans::default();
+    spans.set(1..2, CharAttr::Weight(700), style);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetText {
+            id: f.text,
+            content: "Hello world".into(),
+            spans,
+            para_spans: Default::default(),
+        }]))
+        .unwrap();
+    let NodeKind::Text { spans, .. } = f.doc.get(f.text).unwrap().kind() else {
+        unreachable!()
+    };
+    assert!(
+        !spans.is_empty() && stored(&f.doc, f.text).2[0] == Some(ru),
+        "still bound, with spans"
+    );
+    assert_eq!(used(&f.doc, f.text).0, "Привет");
+}

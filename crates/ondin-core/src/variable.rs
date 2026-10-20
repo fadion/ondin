@@ -1006,6 +1006,13 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                     }
                 }
                 d.set_spacing(s);
+            } else if n.display.is_none() {
+                // Inert with no layout: a rebind has nothing to fall back to.
+                for slot in &mut n.spacing_vars {
+                    if let Some(v) = *slot {
+                        *slot = rebind(v);
+                    }
+                }
             }
             // A width's or a height's binding the same way, axis by axis, its
             // fallback the twin's drawn size (§15 D1061).
@@ -1260,6 +1267,16 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 id,
                 display: Some(display),
             });
+            ops.push(O::SetSpacingVars { id, vars: kept });
+        } else if n.display.is_none() && n.spacing_vars.iter().flatten().any(|v| vars.contains(v)) {
+            // Inert on a node with no layout, and nothing to detach it to: the
+            // binding goes, or the removal would leave it dangling.
+            let mut kept = n.spacing_vars;
+            for slot in &mut kept {
+                if slot.is_some_and(|v| vars.contains(&v)) {
+                    *slot = None;
+                }
+            }
             ops.push(O::SetSpacingVars { id, vars: kept });
         }
         if let Some(size) = n.kind.box_size()

@@ -1309,7 +1309,7 @@ impl EditorSession {
         // And a width or a height written over a bound axis, or made computed by
         // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
         // item are among the layout writes it reads.
-        let tx = ondin_core::build::keep_size_bindings(&self.doc, tx);
+        let tx = ondin_core::build::keep_size_bindings(&self.doc, Some(&self.resolved), tx);
         // And a text's content or family written over its binding (§15 D1069)
         // — before `propagate`, whose `style::settle` writes a newly applied
         // text style's family after this has detached the binding it replaces.

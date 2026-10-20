@@ -828,9 +828,10 @@ impl Document {
     /// `Text`. `vars` is named rather than read off the node so a preview can
     /// resolve a binding it has not committed, as [`Self::size_drawn_in`]'s is.
     ///
-    /// The bound content's spans are not touched: the binding verb cleared them
-    /// and `crate::build::keep_text_bindings` detaches any edit that writes
-    /// some, so there are none to index the string.
+    /// A bound content draws with no spans: a byte range cannot index a string
+    /// whose length is the mode's, and one that lands inside a character panics
+    /// the shaper. The binding verb and the commit's passes keep spans off a
+    /// bound content; this is the second defence, for a door they miss.
     pub fn text_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -842,7 +843,14 @@ impl Document {
         if vars.iter().all(Option::is_none) {
             return out;
         }
-        let NodeKind::Text { content, style, .. } = &mut out else {
+        let NodeKind::Text {
+            content,
+            style,
+            spans,
+            para_spans,
+            ..
+        } = &mut out
+        else {
             return out;
         };
         let read = |v: Option<crate::variable::VarId>| {
@@ -853,6 +861,8 @@ impl Document {
         };
         if let Some(s) = read(vars[0]) {
             *content = s;
+            *spans = Default::default();
+            *para_spans = Default::default();
         }
         if let Some(s) = read(vars[1]) {
             style.font_family = s;

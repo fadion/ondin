@@ -4685,7 +4685,7 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
         let previewed = record(&doc, &res, &overrides);
         let mut committed_doc = doc.clone();
         committed_doc
-            .apply(&ondin_core::keep_size_bindings(&doc, tx))
+            .apply(&ondin_core::keep_size_bindings(&doc, Some(&res), tx))
             .expect("transaction applies");
         let committed_res = Resolved::rebuild(&committed_doc);
         let committed = record(&committed_doc, &committed_res, &RenderOverrides::default());
@@ -4712,6 +4712,137 @@ fn a_bound_size_previews_where_the_commit_draws_it() {
     check(
         Transaction(ondin_core::bind_corners_ops(&doc, rect, [Some(w); 4])),
         "a corner binding on a bound size",
+    );
+}
+
+/// **A copy holding its own size or corner binding previews its main's resize
+/// as the commit draws it — at its own variable** (§15 D1061, D1041): the main's
+/// edit follows onto the copy's other axis and corners only, so neither the
+/// preview nor the commit takes the override for the main's old value.
+///
+/// flip: `propagate::keep_own_bound_geometry` removed → fails *"the main
+/// resized: the copy keeps its own width binding"* — the commit's second size
+/// pass detaches the copy at the main's size, so preview and commit agree there.
+#[test]
+fn a_copy_bound_on_its_own_previews_its_mains_resize_as_committed() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xD1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (main, rect, mode, w, own) = (
+        ids.mint(),
+        ids.mint(),
+        ids.mint_mode(),
+        ids.mint_var(),
+        ids.mint_var(),
+    );
+    let number = |id, name: &str, x: f64| Operation::AddVariable {
+        var: Variable {
+            id,
+            name: name.into(),
+            kind: VarKind::Number,
+            cells: [(mode, Cell::Number(x))].into(),
+            origin: None,
+            forked: None,
+        },
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: main,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(200.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::CreateNode {
+            id: rect,
+            parent: main,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(2.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        number(w, "size/w", 60.0),
+        number(own, "size/own", 30.0),
+        Operation::SetComponent {
+            id: main,
+            component: true,
+        },
+    ]))
+    .unwrap();
+    let ops = ondin_core::bind_size_ops(&doc, rect, [Some(w), None]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let ops = ondin_core::bind_corners_ops(&doc, rect, [Some(w); 4]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let place = ondin_core::Placement {
+        nodes: doc.capture_subtree(main).unwrap(),
+        parent: root,
+        index: None,
+    };
+    let (tx, made) = ondin_core::insert_subtrees(&doc, &mut ids, &[place], Default::default());
+    doc.apply(&tx).unwrap();
+    let copy = doc.get(made[0]).unwrap().children()[0];
+    let ops = ondin_core::bind_size_ops(&doc, copy, [Some(own), None]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let ops = ondin_core::bind_corners_ops(&doc, copy, [Some(own); 4]);
+    doc.apply(&Transaction(ops)).unwrap();
+    let check = |tx: Transaction, what: &str| {
+        let res = Resolved::rebuild(&doc);
+        let follows = Transaction(ondin_core::propagate::propagate(&doc, &tx));
+        let overrides =
+            RenderOverrides::from_transaction_following(&doc, &res, &tx, &follows, None)
+                .unwrap_or_else(|| panic!("{what}: not representable"));
+        let previewed = record(&doc, &res, &overrides);
+        let mut ids = IdSource::new(0xD2);
+        let tx = ondin_core::keep_corner_bindings(&doc, tx);
+        let mut tx = ondin_core::keep_size_bindings(&doc, Some(&res), tx);
+        ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+        let mut committed_doc = doc.clone();
+        committed_doc.apply(&tx).expect("transaction applies");
+        let n = committed_doc.get(copy).unwrap();
+        assert_eq!(
+            (n.size_vars()[0], n.corner_vars()),
+            (Some(own), [Some(own); 4]),
+            "{what}: the copy keeps its own width binding"
+        );
+        let committed_res = Resolved::rebuild(&committed_doc);
+        let committed = record(&committed_doc, &committed_res, &RenderOverrides::default());
+        assert_eq!(previewed, committed, "{what}: preview diverged from commit");
+    };
+    check(
+        Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(90.0, 50.0)),
+        }]),
+        "the main resized",
+    );
+    check(
+        Transaction(vec![Operation::SetGeometry {
+            id: rect,
+            geometry: ondin_core::GeometryPatch::CornerRadius(9.0),
+        }]),
+        "the main's corners written",
     );
 }
 

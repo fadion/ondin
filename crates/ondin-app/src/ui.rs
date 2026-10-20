@@ -2680,39 +2680,6 @@ pub fn badge_field(
     resp
 }
 
-/// A bare [`egui::DragValue`] carrying the two decisions every numeric field in
-/// this app makes, for the fields that cannot go through [`value_field`].
-///
-/// The two are `clamp_existing_to_range(false)` — §15 **D425**, argued at length
-/// in [`value_field_f64`]; D475 is the precedent for making it where it is
-/// *inert* — and [`crate::expr::eval`] as the parser. Chain
-/// `suffix`/`speed`/`range`/`max_decimals` onto the result as usual; a caller
-/// that sets its own `custom_parser` afterwards still wins.
-///
-/// ⚠️ **This exists because the decision was being made at one call site and
-/// nowhere else** (§15 D552, `[S23.1-L1-01]`). `value_field_f64` spelled the
-/// opt-out by hand for its 82 fields and was, until D552, **the only place in the
-/// app it was made** — [`bare_drag_value`] put the parser on its four and left
-/// the clamp alone — and the picker's gradient popover draws two plain
-/// `DragValue`s that go through neither. One of the two had
-/// `.range(0.0..=100.0)` over a value the
-/// document can legitimately hold outside it, which is the whole of D425's bug at
-/// a third door: the field painted `100` for a radial centre stored at `1.5`, and
-/// a bare click moved the gradient 50 units into an undo step.
-///
-/// ⚠️ **And the field beside it was safe by accident, which is the reason to make
-/// this a constructor rather than to add one line.** The angle field's producer
-/// ends `to_degrees().rem_euclid(360.0)`, so its value cannot leave
-/// `0.0..=360.0` and the clamp can never bite. The difference between the two
-/// fields in one popover was that one producer normalises and the other does not
-/// — a property of code two files away, holding a widget's behaviour up. The
-/// next field added here inherits the decision instead.
-pub fn plain_drag_value<T: egui::emath::Numeric>(value: &mut T) -> egui::DragValue<'_> {
-    egui::DragValue::new(value)
-        .clamp_existing_to_range(false)
-        .custom_parser(crate::expr::eval)
-}
-
 #[allow(clippy::too_many_arguments)]
 fn value_field_f64(
     ui: &mut egui::Ui,

@@ -11719,14 +11719,13 @@ mod skip_ink_tests {
     /// behaviour it states, and what it can no longer do is stand in for a
     /// single-mutation guard.
     ///
-    /// 🚨 **`ui.rs` makes that call at four production sites and they are not
+    /// 🚨 **`ui.rs` makes that call at three production sites and they are not
     /// interchangeable — a re-run spent on the wrong one came back green and was
     /// nearly written up as "the flip does not bite".** The one this test turns
     /// on is `value_field_f64`'s. `badge_field`'s is **inert**, and says so on
     /// its own line: *"both production callers pass an unranged `Scrub`, so
     /// there is nothing to clamp against"* — removing it changes nothing while
-    /// that stays true. `plain_drag_value`'s and `bare_drag_value`'s (§15 D552)
-    /// are the other two. **The confusable pair is `badge_field`'s and this
+    /// that stays true. `bare_drag_value`'s (§15 D552) is the third. **The confusable pair is `badge_field`'s and this
     /// one's, which are byte-identical** — same indentation, same chained call,
     /// no semicolon — so naming the mutation as *"removing
     /// `.clamp_existing_to_range(false)`"* does not identify it; naming the

@@ -630,51 +630,38 @@ impl OndinApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 7.0;
             self.preview_chip(ui, brush);
-            let size = egui::vec2(ui.available_width(), ROW_H);
-            field_row(ui, size, |ui| {
-                ui.spacing_mut().item_spacing.x = 7.0;
-                ui.label(theme::icon_text(
-                    icon::ARROW_CLOCKWISE,
-                    14.0,
-                    theme::text::FAINT,
-                ));
-                let mut deg = paint::linear_angle(brush).unwrap_or(0.0);
-                let resp = ui.add(
-                    // The two plain `DragValue`s in this popover are the only
-                    // numeric fields the app draws without going through
-                    // `ui::value_field` or `ui::bare_drag_value`, so they take
-                    // the app's two field-wide decisions from
-                    // `ui::plain_drag_value` rather than inherit them (§15 D552).
-                    // This one is safe from the clamp for a reason and the CX/CY
-                    // pair below was not: `paint::linear_angle` ends
-                    // `rem_euclid(360.0)`, so its value cannot leave the range.
-                    ui::plain_drag_value(&mut deg)
-                        .suffix("°")
-                        .speed(ui::scrub(0.5))
-                        .max_decimals(0)
-                        .range(0.0..=360.0),
-                );
-                let next = paint::with_linear_angle(brush, deg % 360.0, box_size);
-                self.valve_slot(&resp, node, slot, next);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    if icon_button(ui, icon::ARROWS_CLOCKWISE, 18.0, 14.0, false, true)
-                        .on_hover_text("Reverse the stops")
-                        .clicked()
-                    {
-                        let next = paint::reverse_stops(brush);
-                        self.write_slot(node, slot, next);
-                    }
-                    if icon_button(ui, icon::FLIP_HORIZONTAL, 18.0, 14.0, false, true)
-                        .on_hover_text("Flip 180°")
-                        .clicked()
-                    {
-                        let deg = paint::linear_angle(brush).unwrap_or(0.0);
-                        let next = paint::with_linear_angle(brush, (deg + 180.0) % 360.0, box_size);
-                        self.write_slot(node, slot, next);
-                    }
-                });
-            });
+            // The two buttons are square, the size of the inspector's per-corner
+            // radius button; the angle takes what is left after the chip.
+            let unit = ui::CONTROL_H;
+            let col = ui.available_width() - 2.0 * (unit + 7.0);
+            let mut deg = paint::linear_angle(brush).unwrap_or(0.0);
+            // `paint::linear_angle` ends `rem_euclid(360.0)`, so the range never
+            // meets a stored value it would have to clamp.
+            let resp = ui::value_field(
+                ui,
+                egui::vec2(col, ROW_H),
+                ui::Prefix::Icon(icon::ARROW_CLOCKWISE),
+                &mut deg,
+                ui::Scrub::whole(0.5).range(0.0..=360.0),
+                |d| d.suffix("°").max_decimals(0),
+            );
+            let next = paint::with_linear_angle(brush, deg % 360.0, box_size);
+            self.valve_slot(&resp, node, slot, next);
+            if ui::field_button(ui, icon::FLIP_HORIZONTAL, unit, 15.0, ui::FieldButton::Off)
+                .on_hover_text("Flip 180°")
+                .clicked()
+            {
+                let deg = paint::linear_angle(brush).unwrap_or(0.0);
+                let next = paint::with_linear_angle(brush, (deg + 180.0) % 360.0, box_size);
+                self.write_slot(node, slot, next);
+            }
+            if ui::field_button(ui, icon::ARROWS_CLOCKWISE, unit, 15.0, ui::FieldButton::Off)
+                .on_hover_text("Reverse the stops")
+                .clicked()
+            {
+                let next = paint::reverse_stops(brush);
+                self.write_slot(node, slot, next);
+            }
         });
     }
     /// Preview chip with a draggable centre handle, plus CX/CY fields.
@@ -711,46 +698,21 @@ impl OndinApp {
             let fw = (ui.available_width() - 7.0) / 2.0;
             for (label, value, is_x) in [("CX", cx0, true), ("CY", cy0, false)] {
                 let mut pct = value * 100.0;
-                let resp = field_row(ui, egui::vec2(fw, ROW_H), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(
-                        egui::RichText::new(label)
-                            .size(10.0)
-                            .color(theme::text::FAINT),
-                    );
-                    ui.add(
-                        // ⚠️ **`ui::plain_drag_value` for the reason the angle
-                        // field above gives, and this is the field that earned
-                        // it** (§15 D552, `[S23.1-L1-01]`). A radial centre is
-                        // `paint::radial_centre`'s `c.x / w` and is not clamped
-                        // — SVG allows a centre outside the shape, and a
-                        // highlight off one edge is why anyone writes one. With
-                        // egui's default this field painted `100` for a stored
-                        // `1.5` and then `mark_changed`, so a bare click through
-                        // it moved the gradient 50 units and spent an undo step.
-                        // The `range` still bounds what a scrub or a keystroke
-                        // may *produce*, which is the `clamp` two lines below.
-                        ui::plain_drag_value(&mut pct)
-                            .suffix("%")
-                            .speed(ui::scrub(0.5))
-                            .max_decimals(0)
-                            .range(0.0..=100.0),
-                    )
-                });
-                // ⚠️ **Not `.clamp(0.0, 1.0)`, which was the *second* half of
-                // `[S23.1-L1-01]` and the half its fix sketch did not name**
-                // (§15 D552). With the field no longer rewriting a stored `150`
-                // to `100`, this line rewrote `1.5` to `1.0` instead — and
-                // `valve_slot` commits whatever `next` holds on the valve's
-                // `engaged → !engaged` transition, whether the user moved
-                // anything or not. So the fix that stopped the *field* lying
-                // still moved the gradient, and the galley was the only thing
-                // that got better.
-                //
-                // **Redundant as well as harmful**: `.range(0.0..=100.0)` above
-                // bounds what a drag or a keystroke may reach, which is exactly
-                // what `clamp_existing_to_range(false)` leaves in place (D425).
-                // The clamp only ever fired on a value the document already held.
+                // A radial centre is `paint::radial_centre`'s `c.x / w` and is not
+                // clamped — SVG allows a centre outside the shape — so the range
+                // bounds only what a scrub or a keystroke may produce:
+                // `ui::value_field` never rewrites a stored value to fit it.
+                let resp = ui::value_field(
+                    ui,
+                    egui::vec2(fw, ROW_H),
+                    ui::Prefix::Text(label),
+                    &mut pct,
+                    ui::Scrub::whole(0.5).range(0.0..=100.0),
+                    |d| d.suffix("%").max_decimals(0),
+                );
+                // ⚠️ Not clamped to `0..=1` here: `valve_slot` commits `next` when
+                // the valve lets go, whether anything moved or not, so a clamp
+                // would move a stored off-shape centre on a bare click.
                 let f = pct / 100.0;
                 let next = if is_x {
                     paint::with_radial_centre(brush, f, cy0, box_size)
@@ -2238,17 +2200,11 @@ mod radial_centre_tests {
     //!
     //! SVG allows a radial gradient centred outside the shape it paints, and a
     //! highlight sitting off one edge is the reason anyone writes one. The picker's
-    //! CX/CY fields are `pct = centre * 100.0` handed to a `DragValue` with
-    //! `.range(0.0..=100.0)`, and egui's `clamp_existing_to_range` defaults to
-    //! `true` and is applied every frame — so the field painted `100` for a centre
-    //! stored at `1.5`, marked its response changed, and `valve_slot` committed the
-    //! rewrite on the next `engaged` transition. One bare click through the field
-    //! moved the gradient 50 units and spent an undo step.
-    //!
-    //! This is the same door as `ui::value_field_f64`'s (§15 D425) at the two
-    //! numeric fields in the app that go through neither `value_field` nor
-    //! `bare_drag_value`. It is fixed by `ui::plain_drag_value`, which carries the
-    //! decision so the next field added here inherits it.
+    //! CX/CY fields are `pct = centre * 100.0` in a `ui::value_field` ranged
+    //! `0..=100`. egui's `clamp_existing_to_range` defaults to `true` and is
+    //! applied every frame, which would paint `100` for a centre stored at `1.5`,
+    //! mark the response changed, and have `valve_slot` commit the rewrite on a
+    //! bare click; `value_field_f64` turns it off (§15 D425).
     //!
     //! (Plain backticks, not `[links]` — §15 D319's convention.)
 
@@ -2403,14 +2359,17 @@ mod radial_centre_tests {
         }
     }
 
-    /// The number drawn in the row labelled `label`, which is the galley after it.
+    /// The number drawn in the field labelled `label`: `ui::value_field` paints
+    /// its number, then its `%`, then the prefix back into its strip, so it is
+    /// the galley two before the label.
     fn field_reads(drawn: &[String], label: &str) -> String {
         let at = drawn
             .iter()
             .position(|t| t == label)
             .unwrap_or_else(|| panic!("no `{label}` row in the frame: {drawn:?}"));
+        assert_eq!(drawn.get(at.wrapping_sub(1)).map(String::as_str), Some("%"));
         drawn
-            .get(at + 1)
+            .get(at.wrapping_sub(2))
             .unwrap_or_else(|| panic!("`{label}` drew no number: {drawn:?}"))
             .clone()
     }
@@ -2430,25 +2389,10 @@ mod radial_centre_tests {
     /// altogether would pass — and the picker's own `pointer_slot` tests are the
     /// evidence that committing is wanted.
     ///
-    /// ⚠️ **Flip-check, run: `ui::plain_drag_value` reverted to
-    /// `egui::DragValue::new` at the CX/CY site.** Fails on the **galley**
-    /// assertion, `"100"` where `"150"` was, which is the reported symptom — and
-    /// not on the centre assertion, which was the predicted site. The reason is
-    /// worth keeping: the galley is wrong on the *first* frame the panel draws,
-    /// before any event, so it bites two assertions earlier than the commit does.
-    /// Re-run with the galley assertion relaxed, **the centre assertion bites too**,
-    /// at `(1.0, 0.5)` — `[S23.1-L1-01]`'s own measured number.
-    ///
-    /// 🚨 **And the first version of that flip is what found the second half of the
-    /// bug, which the finding's fix sketch does not name.** With
-    /// `plain_drag_value` in place the galley read `150` and the centre *still*
-    /// came back `(1.0, 0.5)`: `radial_controls` had a **second** clamp,
-    /// `let f = (pct / 100.0).clamp(0.0, 1.0)`, and `valve_slot` commits whatever
-    /// `next` holds on the valve transition whether the user moved anything or not.
-    /// So the one-line fix `[S14.4-L1-02]` established — the fix sketch's whole
-    /// content — makes the *field* honest and leaves the *document* being rewritten,
-    /// with the galley the only thing that got better. **Both clamps had to go**,
-    /// and only running the flip said so.
+    /// flip: `.clamp_existing_to_range(true)` added in the CX/CY field's `build` →
+    /// fails at the galley, `"100"` where `"150"` was: it is wrong on the first
+    /// frame, before any event. A `clamp(0.0, 1.0)` on `pct / 100.0` in
+    /// `radial_controls` fails at the centre instead, `(1.0, 0.5)`.
     ///
     /// ⚠️ **A flip that does *not* bite here, which says where the teeth are:**
     /// `.range(0.0..=100.0)` deleted from the field. This test stays green, because
@@ -2520,28 +2464,16 @@ mod radial_centre_tests {
         );
     }
 
-    /// **The range still bounds what a keystroke may reach**, which is the half of
-    /// §15 D552 that the removed `.clamp(0.0, 1.0)` looked like it was doing.
+    /// **The range still bounds what a keystroke may reach**: `500` typed into
+    /// the CX field lands at `100`, so leaving a stored off-shape centre alone
+    /// did not open the field to typing one.
     ///
-    /// ⚠️ **This exists because the fix deleted a clamp, and a deleted bound has
-    /// to be shown to have been redundant rather than argued to be.** D425's
-    /// paragraph says `.range(…)` *"bounds what a gesture or a keystroke can
-    /// reach; it does not rewrite what the document already holds"* — so typing
-    /// `500` into a field ranged `0..=100` must still land at `100`. Measured here
-    /// rather than taken from that paragraph, because the paragraph is about
-    /// `value_field_f64` and this field goes through `ui::plain_drag_value`.
+    /// flip: the CX/CY field's `Scrub` without `.range(0.0..=100.0)` → fails at
+    /// `5.0`, and leaves the test above green.
     ///
-    /// ⚠️ **Flip-check, run: `.range(0.0..=100.0)` deleted from the CX/CY field.**
-    /// Fails here with `5.0` — a radial centre five times the shape's width, typed
-    /// straight through into the document — and **leaves the test above green**,
-    /// which is what says the two assertions are about different halves and
-    /// neither is a restatement of the other.
-    ///
-    /// **What is *not* asserted, deliberately:** the drag path. A `DragValue`'s
-    /// drag is `Scrub::settle`'s business at every other field in the app and
-    /// egui's own at this one, and driving a synthetic drag through a popover that
-    /// also drags its preview chip is a fixture with two answers. The keystroke is
-    /// the road a user takes to a number like 500.
+    /// Not asserted: the drag path, which is `Scrub::settle`'s at every
+    /// `ui::value_field`; a synthetic drag through a popover that also drags its
+    /// preview chip is a fixture with two answers.
     #[test]
     fn a_number_typed_past_the_fields_range_is_still_bounded_by_it() {
         let ctx = egui::Context::default();

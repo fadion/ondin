@@ -2248,9 +2248,12 @@ impl OndinApp {
             // states that persist. Dimming in particular must lose — a locked or hidden
             // group still takes children, so a host that stayed at 40% would be the
             // panel declining to answer.
+            // The name takes its glyph's ink when selected: blue, or white beside a
+            // component's hexagon.
             let name_col = match (drop_host, selected, dimmed) {
                 (true, ..) => color::SELECT,
-                (_, true, _) => color::TEXT,
+                (_, true, _) if hexagon.is_some() => color::TEXT,
+                (_, true, _) => color::SELECT,
                 (_, false, true) => theme::color::text_a(102),
                 (_, false, false) => theme::text::MUTED,
             };

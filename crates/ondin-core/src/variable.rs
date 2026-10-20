@@ -1810,6 +1810,82 @@ mod tests {
         assert_eq!(check_table(&t), Err(VarRule::WrongKind(brand)));
     }
 
+    /// A cell in a mode the variable has no column for is refused.
+    ///
+    /// flip: `check_table`'s `StrayCell` arm removed → the table is accepted.
+    #[test]
+    fn a_stray_cell_is_refused() {
+        let (mut t, ..) = table();
+        let gone = ModeId(id(9));
+        let brand = VarId(id(3));
+        t.vars
+            .get_mut(&brand)
+            .unwrap()
+            .cells
+            .insert(gone, Cell::Color(Color::WHITE));
+        assert_eq!(check_table(&t), Err(VarRule::StrayCell(brand, gone)));
+    }
+
+    /// **Names are unique within the document's own and within each kit's**,
+    /// never across them (§15 D1064): two of the document's own named alike are
+    /// refused, a kit's `accent` beside the document's is not, and two of one
+    /// kit's named alike are.
+    ///
+    /// flips: `DuplicateName` disabled → fails *"two of the document's own"*;
+    /// the key's kit dropped → fails *"a kit's namesake is its own"*.
+    #[test]
+    fn names_are_unique_per_namespace() {
+        let (mut t, light, dark, _, accent) = table();
+        let mut twin = t.vars[&accent].clone();
+        twin.id = VarId(id(5));
+        twin.cells = [
+            (light, Cell::Color(Color::WHITE)),
+            (dark, Cell::Color(Color::WHITE)),
+        ]
+        .into();
+        t.vars.insert(twin.id, twin.clone());
+        assert_eq!(
+            check_table(&t),
+            Err(VarRule::DuplicateName("accent".into())),
+            "two of the document's own"
+        );
+        let kit = "5eed0000000000000000000000000011".to_string();
+        let day = ModeId(id(6));
+        t.kits.insert(
+            kit.clone(),
+            KitModes {
+                name: None,
+                modes: vec![KitMode {
+                    id: day,
+                    name: "Day".into(),
+                    from: day,
+                }],
+                map: Default::default(),
+            },
+        );
+        let of_kit = |v: &mut Variable, var: u64| {
+            v.id = VarId(id(var));
+            v.cells = [(day, Cell::Color(Color::WHITE))].into();
+            v.origin = Some(VarOrigin {
+                kit: kit.clone(),
+                var: v.id,
+                version: 1,
+            });
+        };
+        let mut kits = twin.clone();
+        of_kit(&mut kits, 5);
+        t.vars.insert(kits.id, kits.clone());
+        assert_eq!(check_table(&t), Ok(()), "a kit's namesake is its own");
+        let mut second = kits;
+        of_kit(&mut second, 8);
+        t.vars.insert(second.id, second);
+        assert_eq!(
+            check_table(&t),
+            Err(VarRule::DuplicateName("accent".into())),
+            "two of one kit's"
+        );
+    }
+
     /// A literal saves as the brush alone — a file with no bindings is the bytes
     /// it was — and a binding as `{"var": …}`, its `%` left out at 1; all read back.
     #[test]

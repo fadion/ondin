@@ -481,6 +481,39 @@ fn a_paste_keeps_rebinds_or_detaches() {
         Default::default(),
     );
     bare.clone().apply(&tx).expect("a detached paste lands");
+
+    // A document whose `brand/500` is a number: a namesake of another kind is
+    // none (D1038's *"the same name and type"*) — detached, not rebound to it.
+    // flip: `rebind`'s by-name kind check dropped → fails *"a number is no
+    // namesake"*. (Its keep arm's check needs the copy's own id held at
+    // another kind, which no fixture here builds.)
+    let mut numbered = Document::new(ids.mint());
+    let (m, number) = (ids.mint_mode(), ids.mint_var());
+    numbered
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: mode(m, "Default"),
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: number,
+                    name: "brand/500".into(),
+                    kind: VarKind::Number,
+                    cells: [(m, Cell::Number(4.0))].into(),
+                    origin: None,
+                    forked: None,
+                },
+            },
+        ]))
+        .unwrap();
+    let landed = ondin_core::variable::land(&numbered, &carried, copy[0].clone());
+    assert_eq!(
+        landed[0].paint().fills[0].brush,
+        BrushSource::Literal(Brush::Solid(NAVY)),
+        "a number is no namesake"
+    );
 }
 
 /// **A property paste follows a paste's rule** (§15 D1047): copied off a fill
@@ -746,6 +779,65 @@ fn deleting_a_variable_detaches_its_fields_and_its_aliases() {
     );
     f.doc.apply(&out.inverse).unwrap();
     assert_eq!(f.doc, before);
+}
+
+/// **A deleted variable's users detach to what they drew in the mode in force
+/// at each**, not the default's: under a frame set to Dark, navy and 12.
+///
+/// flip: `remove_ops` resolving in the default mode → fails *"Dark's navy"*.
+#[test]
+fn deleting_a_variable_detaches_each_user_in_its_own_mode() {
+    let mut f = fixture();
+    bind_fill(&mut f.doc, f.rect, f.brand, 1.0);
+    let ops = ondin_core::bind_corners_ops(&f.doc, f.rect, [Some(f.radius), None, None, None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    let tx = Transaction(ondin_core::variable::remove_ops(
+        &f.doc,
+        &[f.brand, f.radius],
+    ));
+    f.doc.apply(&tx).expect("detach, then remove");
+    assert_eq!(drawn(&f.doc, f.rect), Brush::Solid(NAVY), "Dark's navy");
+    assert!(matches!(
+        f.doc.get(f.rect).unwrap().kind(),
+        NodeKind::Rect { corner_radii, .. } if corner_radii.top_left == 12.0
+    ));
+}
+
+/// **A duplicated mode copies its source's column cell for cell**, an alias
+/// staying an alias, at the index asked; a mode that is not there copies
+/// nothing.
+#[test]
+fn copying_a_mode_copies_its_column() {
+    let mut f = fixture();
+    let alias = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                alias,
+                "button/bg",
+                VarKind::Color,
+                [(f.light, Cell::Color(RED)), (f.dark, Cell::Alias(f.brand))],
+            ),
+        }]))
+        .unwrap();
+    let dusk = f.ids.mint_mode();
+    let op = ondin_core::variable::copy_mode_ops(&f.doc, f.dark, dusk, "Dusk", 2)
+        .expect("Dark is a mode");
+    f.doc.apply(&Transaction(vec![op])).unwrap();
+    let t = f.doc.variables();
+    assert_eq!(t.modes()[2].id, dusk, "at the index asked");
+    for v in [f.brand, f.radius, alias] {
+        let cells = &t.get(v).unwrap().cells;
+        assert_eq!(cells[&dusk], cells[&f.dark], "{v:?}'s Dusk is its Dark");
+    }
+    let nowhere = f.ids.mint_mode();
+    assert!(ondin_core::variable::copy_mode_ops(&f.doc, nowhere, dusk, "x", 0).is_none());
 }
 
 /// Deleting a mode returns its frames to *Inherit*; renaming a group moves its

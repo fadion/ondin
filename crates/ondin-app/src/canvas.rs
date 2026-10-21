@@ -193,7 +193,6 @@ impl CanvasRenderer {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     /// The decode cache, for the one caller that puts something into it: an
     /// image being picked is decoded before the tool is armed, so a file that
     /// cannot be drawn never becomes a placement.

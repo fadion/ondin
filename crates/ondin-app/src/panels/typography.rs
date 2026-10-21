@@ -1,77 +1,45 @@
 //! The Type panel and the typography popup (§9.2).
 //!
-//! **The panel is the four things a designer reaches for every minute** — family,
-//! variant, size, line height, letter spacing, and the two alignments — and the
-//! popup is strictly *overflow*. No control appears in both: a duplicated control
-//! has to show "mixed" twice, which is two chances to disagree, and it makes the
-//! question "which one of these is the real setting" answerable only by trying it.
+//! The panel holds the controls a designer reaches for constantly — family,
+//! variant, size, line height, letter spacing, the two alignments — and the popup
+//! is strictly overflow. No control appears in both: a duplicate would have to show
+//! "mixed" twice and leaves "which one is the real setting" unanswerable.
 //!
-//! **The popup's tabs are scopes** ([`TypeTab`]) — Character, Paragraph, Box —
-//! labelled with the scope word, because the label is what tells the user what a
-//! change will hit when the selection is partial. There is no fourth: the axes,
-//! the OpenType features and the language used to have a `Font` tab of their own
-//! on the grounds that they are *generated from the family*, which is a fact about
-//! how they are built and not about what they do. All of it is character-scoped,
-//! so the strip named three scopes and one implementation detail. See [`TypeTab`].
+//! The popup's tabs are scopes ([`TypeTab`]) — Character, Paragraph, Box — labelled
+//! with the scope word because that tells the user what a change hits when the
+//! selection is partial. The axes, features and language are character-scoped, so
+//! they live under Character.
 //!
 //! ## Scope, and where a write goes
 //!
-//! A character attribute has two possible targets and [`TypeSubject::range`] is
-//! what decides between them:
+//! [`TypeSubject::range`] decides a character attribute's target:
 //!
-//! - **A live editing session with a selection** — the range is that selection,
-//!   the control can read *mixed*, and the write goes into the session's own spans
-//!   (`TextEdit::style_selection`), which previews itself and commits once when
-//!   the session ends (§9.3: one editing session is one undo step).
-//! - **Anything else** — the range is the whole node, and the write sets the
-//!   node's *default* and drops the overrides of that one attribute. Setting a
-//!   default while leaving the spans alone is how "make it all 24pt" leaves a
+//! - **A live editing session with a selection** — the range is that selection, the
+//!   control can read *mixed*, and the write goes into the session's own spans
+//!   (`TextEdit::style_selection`), previewed and committed once when the session
+//!   ends (§9.3).
+//! - **Anything else** — the range is the whole node, and the write sets the node's
+//!   default and drops that attribute's overrides, so "make it all 24pt" leaves no
 //!   16pt run behind.
 //!
-//! **Seven paragraph attributes have the same two targets** — the spacing, the
-//! first-line indent, `hanging`, the two block indents, the list marker and its
-//! nesting level — reached through
-//! [`TypeSubject::para_range`] rather than `range`, because the two scopes do not
-//! agree about what a selection *is*:
+//! Seven paragraph attributes (the spacing, first-line indent, `hanging`, the two
+//! block indents, the list marker and its nesting level) have the same two targets
+//! through [`TypeSubject::para_range`], because the scopes disagree about what a
+//! selection is:
 //!
 //! - A paragraph attribute cannot apply to half a paragraph, so the range is the
-//!   selection **snapped outward to hard breaks** (`text::paragraph_bounds`).
-//! - **A bare caret is partial here**, where for a character attribute it is not.
-//!   A caret with nothing selected has no characters to restyle, so the character
-//!   scope falls to its *"anything else"* arm above and writes the **node's
-//!   defaults** over the whole range — but a caret is unambiguously *inside* one
-//!   paragraph, which is the case this whole feature is for. So an open session
-//!   always writes a paragraph span and the node's paragraph *defaults* are
-//!   reachable only with the layer selected and no session running: while you are
-//!   editing you are editing paragraphs.
-//!
-//!   ⚠️ **That sentence used to read *"hence `TextEdit::pending`, which holds the
-//!   attribute for the next one typed"*, and it named a mechanism the app never
-//!   runs** (§15 D733, `[S6.2-L3-08]`). `TextEdit::style_selection` is
-//!   `pending`'s only door, it has exactly **one** production caller — the
-//!   `subject.partial` arm of `apply_char_attrs` — and `TypeSubject::read` sets
-//!   `partial` **only** for `Some((sel, _)) if !sel.is_empty()`. So
-//!   `style_selection` is never called with an empty range and its
-//!   `if range.is_empty()` arm is dead in production. The feature is real, has two
-//!   core tests and `architecture.md` §5.4's boundary-rule bullet behind it — **not
-//!   §15 D217, which is the clipboard entry and *depends* on the feature rather
-//!   than deciding it** — and describes nothing this panel does —
-//!   which is worse than an absent feature, because **a reader of this doc goes
-//!   looking for a mechanism that is not wired up.**
-//!
-//!   ⚠️ **The hinge is already asserted and no new test was written.**
-//!   `bare_caret_readout_tests::shown_size` guards its own fixture with
-//!   *"a bare caret is not partial — that is the designed half"*, which is
-//!   exactly the condition that makes `pending` unreachable. So the code was
-//!   pinned and only the prose had drifted — **a test can hold a fact firmly
-//!   while a doc three thousand lines away denies it, and nothing compares
-//!   them.**
+//!   selection snapped outward to hard breaks (`text::paragraph_bounds`).
+//! - A bare caret is partial here, where for a character attribute it is not: a
+//!   caret is inside one paragraph, so an open session always writes a paragraph
+//!   span, and the node's paragraph defaults are reachable only with the layer
+//!   selected and no session running. A character write at a bare caret falls to
+//!   the node's defaults (no pending-style mechanism is wired up).
 //!
 //! The rest of the paragraph scope, and all of the block scope, has one target
 //! either way — `Alignment`, `Justify` and the base direction are one value per
-//! `Layout` and no span type carries them (§15 D77). The two sections of the
-//! Paragraph tab that edit them say so on hover, because a control that quietly
-//! ignores the selection reads as broken rather than as limited.
+//! `Layout` and no span type carries them. The Paragraph tab sections that edit
+//! them say so on hover, because a control that quietly ignores the selection
+//! reads as broken.
 
 use super::component::{OverrideMark, mark_num};
 use super::inspector::tip_unless_marked;
@@ -114,70 +82,32 @@ pub(crate) struct TypeSubject {
     /// The paint the text itself is drawn in — the node's first visible fill, or
     /// `None` where it has no visible fill at all.
     ///
-    /// **Carried so a decoration's "inherit" state can be *drawn* rather than
-    /// merely named.** `Decoration::color` is `None` by default, meaning "the
-    /// text's own", and a swatch showing grey for that is a claim about a colour
-    /// the panel would not know. With this it shows the real one, and adopting it
-    /// explicitly starts from the paint that was already on screen instead of
-    /// from an arbitrary black.
-    ///
-    /// **The whole brush, not a colour, because the renderer inherits the whole
-    /// brush.** `scene.rs` gives an uncoloured decoration `inks.first()` — the
-    /// gradient included — so flattening a gradient fill to black here (which is
-    /// what this field used to do) made the panel claim a flat black underline
-    /// where the canvas drew a gradient one, with nothing on the row to show the
-    /// difference. [`TypeSubject::text_color`] is the collapse, kept for the
-    /// controls that genuinely need one colour and stated in one place.
+    /// Carried so a decoration's inherit state can be drawn: `Decoration::color`
+    /// `None` means "the text's own". It is the whole brush because the renderer
+    /// inherits the whole brush, gradient included; [`TypeSubject::text_color`] is
+    /// the collapse for controls that need one colour.
     pub text_paint: Option<Brush>,
-    /// What the shaped layout's first line actually measures, in px — so the line
-    /// height field can *show* what `Auto` is worth and seed from it rather than
-    /// from a round number (§15 D162). `None` for a node with nothing laid out.
+    /// What the shaped layout's first line measures, in px, so the line height
+    /// field can show what `Auto` is worth and seed from it. `None` for a node
+    /// with nothing laid out.
     pub line_height: Option<f64>,
-    /// What the face's own underline and strikethrough thicknesses are worth, in
-    /// px — [`Self::line_height`]'s field one along, and read for the same reason
-    /// (§15 D570).
-    ///
-    /// `TextLayout::decoration_sizes`, so the decoration's thickness chip can seed
-    /// what the font was drawing instead of seeding **zero**, which erased the line.
+    /// The face's own underline and strikethrough thicknesses in px
+    /// (`TextLayout::decoration_sizes`), so the thickness chip seeds what the font
+    /// was drawing instead of zero, which erased the line.
     pub decoration_sizes: Option<(f64, f64)>,
     /// The bytes a character control acts on — see the module docs.
     pub range: Range<usize>,
     /// Where [`Self::shown`] resolves an attribute when the range disagrees with
-    /// itself: the byte whose style a character control should be **describing**.
+    /// itself: the byte whose style a character control describes.
     ///
-    /// 🚨 **`None` means "the node's defaults", and it is a real answer rather
-    /// than a missing one** (§15 D589, `[S6.2-L1-06]`). For a selection this is
-    /// `range.start` and always was. For a **bare caret** it is the byte to the
-    /// caret's *left*, because that is what typing there inherits: `Spans::edited`
-    /// maps a span whose `end == at` to `at + inserted` and a span whose
-    /// `start == at` to `at + inserted` as well, so an insertion joins the run
-    /// that ends at the caret and never the one that begins there. A caret at byte
-    /// 0 has no run to its left, and its `None` is what says so.
-    ///
-    /// It used to be `range.start`, which for a bare caret is **byte 0** whatever
-    /// the caret is doing. Measured on `"hello world"` with `Size(40)` over the
-    /// first five bytes and a node default of 16: caret at the end, the Size field
-    /// read **40**, `mixed` was structurally `false`, and the next keystroke came
-    /// out at **16**. The field named a size the very next character contradicted
-    /// — and a scrub started from it would have flattened the whole node to 40,
-    /// which nobody asked for.
-    ///
-    /// ⚠️ **The write is unchanged and must be**: §9.4 and §15 D164 settle that a
-    /// bare caret's character write sets the node's *default* and drops that
-    /// attribute's overrides. This is the readout only, which the design has no
-    /// passage on.
+    /// `None` means the node's defaults. For a selection it is `range.start`; for
+    /// a bare caret it is the byte to the caret's left, because an insertion joins
+    /// the run that ends at the caret. Byte 0 has no run to its left. This is the
+    /// readout only: a bare caret's character write still sets the node's default.
     pub resolve_at: Option<usize>,
-    /// Whether a live session has a **non-empty selection**. **The only case in
-    /// which a *character* control can read mixed.**
-    ///
-    /// 🚨 **This said "a sub-range rather than the whole node" and that is not
-    /// what `read` computes** (§15 D636). It is `!sel.is_empty()`, so a
-    /// **select-all is partial** — which is the case a designer meets first, and
-    /// the one `[S6.2-L1-05]` measured. The two states that are *not* partial are
-    /// the bare caret and no session at all, and for both of those `shown`
-    /// describes the run a keystroke will join (§15 D589) rather than a range that
-    /// could disagree with itself. The old sentence made a select-all sound
-    /// exempt from `mixed`, which would have made that finding unreproducible.
+    /// Whether a live session has a non-empty selection (select-all included) —
+    /// the only case in which a character control can read mixed. A bare caret and
+    /// no session are not partial; `shown` then describes the run a keystroke joins.
     pub partial: bool,
     /// The node's per-paragraph overrides — the live session's own while one is
     /// open, for the same reason `spans` is: the document's copy is a commit behind.
@@ -192,20 +122,17 @@ pub(crate) struct TypeSubject {
     /// and false for an empty node, where there is no paragraph to tell apart from
     /// the node itself.
     pub para_partial: bool,
-    /// **The other selected text layers** a several-layer Type card writes
-    /// beside `id` (§15 D1077) — each its own whole-node subject, never partial,
-    /// since a live session is one layer's. Empty on a single layer's card.
+    /// The other selected text layers a several-layer Type card writes beside `id`
+    /// — each a whole-node, never-partial subject. Empty on a single layer's card.
     ///
-    /// [`Self::mixed`] reads them, so a field over layers that disagree says
-    /// *Mixed*, and [`char_attrs_tx`] writes each its own defaults with the one
-    /// attribute changed, so the layers keep everything the edit does not name.
+    /// [`Self::mixed`] reads them, and [`char_attrs_tx`] writes each its own
+    /// defaults with only the one attribute changed.
     pub others: Vec<TypeSubject>,
 }
 
 impl TypeSubject {
-    /// The panel's subject for `id`, or `None` if it is not a text node.
-    ///
-    /// Read through the **preview**, so every control tracks a live drag (§9.3).
+    /// The panel's subject for `id`, or `None` if it is not a text node, read
+    /// through the preview so every control tracks a live drag.
     pub(crate) fn of(app: &OndinApp, id: NodeId) -> Option<Self> {
         Self::read(app, id, app.session.display_node(id)?)
     }
@@ -217,23 +144,20 @@ impl TypeSubject {
     }
 
     fn read(app: &OndinApp, id: NodeId, node: crate::session::DisplayNode<'_>) -> Option<Self> {
-        // The resolved kind (§15 D1069): a bound family is already the drawn one
-        // here, so the several-layer card compares and shows what each layer
-        // draws with no reading of its own (§15 D1077).
+        // The resolved kind: a bound family is already the drawn one.
         let kind = node.kind().clone();
-        // The *first* visible fill, matching the renderer: a decoration takes the
-        // bottom of the fill stack and is not repeated per fill.
+        // The first visible fill, matching the renderer.
         let text_paint = node
             .paint()
             .fills
             .iter()
             .find(|f| f.visible)
-            // As drawn: a bound fill is its variable's colour (§15 D1039).
+            // As drawn: a bound fill is its variable's colour.
             .map(|f| app.session.doc.resolve_brush(id, &f.brush).into_owned());
         let parts = TextRef::of(&kind)?;
         let len = parts.content.len();
-        // A live session's selection is the range, and its *own* spans are the
-        // truth — the document's copy is a commit behind while the session runs.
+        // A live session's selection and own spans win: the document's copy is a
+        // commit behind.
         let live = app.text.as_ref().filter(|s| s.id == id);
         let (range, spans, partial, resolve_at) =
             match live.map(|s| (s.editor.selected_range(), s.editor.spans())) {
@@ -241,23 +165,17 @@ impl TypeSubject {
                     let at = sel.start;
                     (sel, spans.clone(), true, Some(at))
                 }
-                // The bare caret. `sel.start == sel.end` is the caret byte, and the
-                // readout describes the run to its **left** — see `resolve_at`.
+                // The bare caret: the readout describes the run to its left.
                 Some((sel, spans)) => (0..len, spans.clone(), false, sel.start.checked_sub(1)),
                 None => (0..len, parts.spans.clone(), false, Some(0)),
             };
-        // **The paragraph scope asks a different question of the same selection, and
-        // asks it of the *editor's* content.** A live session's string is a commit
-        // ahead of the document's, so snapping against `len` here would name the
-        // wrong paragraph the moment anything had been typed.
+        // The paragraph range comes from the editor's content, which is a commit
+        // ahead of the document's string.
         let (para_range, para_spans, para_partial) = match live {
             Some(s) => {
                 let range = s.editor.paragraph_range();
-                // **Partial whenever there is a paragraph to name**, which for a
-                // select-all is every paragraph and still a span write — the same
-                // bargain the character scope makes, and it is what keeps the
-                // *defaults* out of a session's reach. Empty only for an empty node,
-                // where there is no paragraph to tell apart from the node itself.
+                // Partial whenever there is a paragraph to name, which keeps the
+                // defaults out of a session's reach; empty only for an empty node.
                 let partial = !range.is_empty();
                 (range, s.editor.para_spans().clone(), partial)
             }
@@ -271,16 +189,13 @@ impl TypeSubject {
             block: *parts.block,
             sizing: *parts.sizing,
             text_paint,
-            // From the *preview* layout, so the readout tracks a live edit rather
-            // than the last commit — the same source every other measured thing in
-            // this panel reads. Zero for a node with no line to measure.
+            // From the preview layout, so the readout tracks a live edit.
             line_height: app
                 .session
                 .preview_text_layout(id)
                 .map(|l| l.line_height)
                 .filter(|h| *h > 0.0),
-            // The same layout, and `None` for a node with nothing shaped — which
-            // the thickness chip reads as "nothing resolved" and falls back on.
+            // `None` for a node with nothing shaped; the thickness chip falls back.
             decoration_sizes: app
                 .session
                 .preview_text_layout(id)
@@ -295,10 +210,9 @@ impl TypeSubject {
         })
     }
 
-    /// The subject of a **several-layer** Type card (§15 D1077): the first text
-    /// layer of `ids`, the rest as [`Self::others`]. `None` under two text layers
-    /// — a single layer's card is [`Self::of`]'s — or while a live session runs,
-    /// whose selection is one layer's.
+    /// The subject of a several-layer Type card: the first text layer of `ids`,
+    /// the rest as [`Self::others`]. `None` under two text layers or while a live
+    /// session runs, whose selection is one layer's.
     pub(crate) fn several(app: &OndinApp, ids: &[NodeId]) -> Option<Self> {
         if ids.len() < 2 || app.text.is_some() {
             return None;
@@ -316,15 +230,9 @@ impl TypeSubject {
             .collect()
     }
 
-    /// The one colour the text's paint collapses to, for the controls that can
-    /// only hold one — a hex field, an opacity, the colour a decoration adopts.
-    ///
-    /// **The first stop, and black only where there is no fill.** Both halves
-    /// match something that already exists rather than being chosen here: the
-    /// first stop is [`OndinApp::write_char_slot`]'s stated collapse for
-    /// this very slot, and black is what `scene.rs` paints a decoration on a
-    /// fill-less node with, so the swatch and the canvas agree in both cases. It
-    /// used to be black for a *gradient* too, which agreed with neither.
+    /// The one colour the text's paint collapses to, for controls that hold only
+    /// one: the first stop, and black where there is no fill. Both match
+    /// [`OndinApp::write_char_slot`]'s collapse and what `scene.rs` paints.
     pub fn text_color(&self) -> Color {
         match &self.text_paint {
             Some(brush) => super::paint::stops_of(brush)
@@ -335,12 +243,8 @@ impl TypeSubject {
     }
 
     /// The stops to *draw* the inherited paint with, or `None` when it is a plain
-    /// colour that [`Self::text_color`] already covers.
-    ///
-    /// This is what puts the difference on screen: a decoration inheriting a
-    /// gradient gets the ramp in its swatch, where before it got a black chip
-    /// indistinguishable from black text. Through `picker::ramp`, so the chip is
-    /// built exactly the way every other gradient chip in the app is.
+    /// colour that [`Self::text_color`] already covers, built through
+    /// `picker::ramp` like every other gradient chip.
     fn text_ramp(&self) -> Option<Vec<(f32, egui::Color32)>> {
         let brush = self.text_paint.as_ref()?;
         if matches!(brush, Brush::Solid(_)) {
@@ -352,13 +256,9 @@ impl TypeSubject {
     /// The single value of one character attribute over the subject's range, or
     /// `None` when the range disagrees with itself.
     ///
-    /// **Two zeroes in different units are one value here** (§15 D799,
-    /// `[S6.1-L1-03]`). `Spans::shared_in` compares structurally and has to:
-    /// `Em(0.0)` and `Px(0.0)` are different values to the *model*, and §15 D537
-    /// exists to keep them so, because that difference is where a user's choice
-    /// of unit lives when the amount is zero. But they are the same **ink**, so
-    /// text whose letter spacing is zero throughout was reading *Mixed* —
-    /// reliably, for anyone who sets the unit before the number.
+    /// Two zeroes in different units are one value here: `Spans::shared_in`
+    /// compares structurally (`Em(0.0)` and `Px(0.0)` differ in the model), but
+    /// they are the same ink and must not read *Mixed*.
     fn shared(&self, kind: CharAttrKind) -> Option<CharAttr> {
         let direct = self.spans.shared_in(&self.style, kind, self.range.clone());
         direct.or_else(|| {
@@ -374,14 +274,10 @@ impl TypeSubject {
         })
     }
 
-    /// The value to *show* for an attribute: the shared one, or — where the range
+    /// The value to show for an attribute: the shared one, or — where the range
     /// disagrees with itself — the value at [`Self::resolve_at`], so a field still
-    /// has digits in it and a drag has somewhere to start from. Callers pair this
-    /// with [`Self::shared`] to decide whether to say "mixed".
-    ///
-    /// **The resolve point is not `range.start`** (§15 D589) — see `resolve_at`
-    /// for why a bare caret describes the byte to its left and why byte 0 is the
-    /// one case with no byte to describe.
+    /// has digits and a drag has somewhere to start. Callers pair this with
+    /// [`Self::shared`] to decide whether to say "mixed".
     fn shown(&self, kind: CharAttrKind) -> CharAttr {
         self.shared(kind).unwrap_or_else(|| match self.resolve_at {
             Some(at) => self.spans.resolve(&self.style, at).get(kind),
@@ -390,8 +286,8 @@ impl TypeSubject {
     }
 
     /// Whether a control may not name one value: a partial range that disagrees
-    /// with itself, or — on a several-layer card — layers that disagree (§15
-    /// D1077), two zeroes in different units agreeing as [`Self::shared`]'s do.
+    /// with itself, or — on a several-layer card — layers that disagree (two
+    /// zeroes in different units agree, as in [`Self::shared`]).
     fn mixed(&self, kind: CharAttrKind) -> bool {
         (self.partial && self.shared(kind).is_none())
             || self.others.iter().any(|o| {
@@ -402,39 +298,18 @@ impl TypeSubject {
 
     /// Whether the range disagrees with itself about one attribute.
     ///
-    /// **Not the same question as [`Self::mixed`]**, and the difference is what a
-    /// reset button has to know. `mixed` is about what a control may *say*, and
-    /// over the whole node it is false by design however ragged the spans are:
-    /// a whole-node write flattens them, so [`Self::shown`] is showing the value
-    /// the next write will produce and is not lying about it.
-    ///
-    /// A reset asks something else — *is there anything here to put back* — and
-    /// answering that from `shown` reads byte 0 and calls it the node. That was a
-    /// reported bug: a red underline colour living in a span that did not reach
-    /// byte 0 left the reset dimmed and inert with the red plainly on screen.
+    /// Not [`Self::mixed`], which is false over the whole node however ragged the
+    /// spans (a whole-node write flattens them). A reset asks whether there is
+    /// anything to put back, and answering that from `shown` reads byte 0 only.
     fn ragged(&self, kind: CharAttrKind) -> bool {
         self.shared(kind).is_none()
     }
 
-    /// Whether the range disagrees about **one OpenType tag** (§15 D752).
+    /// Whether the range disagrees about one OpenType tag.
     ///
-    /// 🚨 **Per tag, not per attribute, and the difference is the whole readout.**
-    /// [`Self::mixed`] answers about `CharAttrKind::Features` as a *list*, so it
-    /// is true the moment any one tag differs anywhere — which would dim all
-    /// forty rows because one of them disagreed. `CharSpans::values_in` hands back
-    /// every distinct list the range holds, so the value each list gives *this*
-    /// tag can be compared directly, and only the rows that actually disagree say
-    /// so.
-    ///
-    /// **Absent is `0`, exactly as the row reads it.** A tag missing from a list
-    /// means *whatever the font does by default*, and the switch draws that as
-    /// off; treating absence and an explicit `0` as different here would mark a
-    /// row mixed that reads identically in both runs.
-    ///
-    /// ⚠️ **Only a partial selection can be mixed**, which is [`Self::mixed`]'s
-    /// rule and holds for the same reason: a whole-node write flattens the spans,
-    /// so what the row shows is what the next write will produce and is not a lie
-    /// about it.
+    /// Per tag, not per list: [`Self::mixed`] on `Features` is true once any tag
+    /// differs, which would dim every row. An absent tag is `0`, as the row reads
+    /// it. Only a partial selection can be mixed, as in [`Self::mixed`].
     fn feature_mixed(&self, tag: Tag) -> bool {
         if !self.partial {
             return false;
@@ -458,12 +333,8 @@ impl TypeSubject {
     }
 
     /// Whether the line height field may not name one value: [`Self::mixed`],
-    /// and — **on a several-layer card all on Auto** (§15 D1077's amendment) —
-    /// layers whose
-    /// laid lines differ. Auto is one stored value, so `mixed` reads three Auto
-    /// layers as agreeing, but the field's digits are what Auto is *worth*, in
-    /// px, and those were the first layer's alone: 24 at 20pt shown over a 38px
-    /// line at 32pt.
+    /// and — on a several-layer card all on Auto — layers whose laid lines differ,
+    /// since Auto is one stored value but the field shows what it is worth in px.
     fn line_height_mixed(&self) -> bool {
         if self.mixed(CharAttrKind::LineHeight) {
             return true;
@@ -493,9 +364,8 @@ impl TypeSubject {
 
     // --- the paragraph scope, mirroring the four above ---------------------
 
-    /// [`Self::shared`] for the paragraph scope, including its zero rule — D537
-    /// kept the unit on four `ParaAttr` lengths too, so the readout was wrong in
-    /// the same way on all four (§15 D799).
+    /// [`Self::shared`] for the paragraph scope, including its zero rule over the
+    /// four `ParaAttr` lengths.
     fn para_shared(&self, kind: ParaAttrKind) -> Option<ParaAttr> {
         let direct = self
             .para_spans
@@ -520,21 +390,12 @@ impl TypeSubject {
     }
 
     /// Whether the range disagrees with itself about one attribute — [`Self::ragged`]
-    /// for the paragraph scope, and the same distinction from [`Self::para_mixed`].
+    /// for the paragraph scope.
     ///
-    /// **What the hanging pair's click has to know.** Its "did anything change?" test
-    /// is a value comparison against [`Self::shown_paragraph`], which over a
-    /// non-partial range reads the *first* paragraph — so with the layer selected, a
-    /// hanging override on the second paragraph and none on the first, the pair drew
-    /// "first-line" lit and clicking it wrote nothing while the second paragraph
-    /// plainly hung. That is the reported bug `ragged` was added for in the other
-    /// scope, arriving here through the same door: `mixed` is about what a control may
-    /// *say*, this is about whether there is anything to flatten.
-    ///
-    /// The four length fields do not need it — a drag changes the number, so their
-    /// test fires whatever the range holds. Typing the value already shown into a
-    /// ragged field is the one gap left, and it is a much smaller one than a lit
-    /// button that does nothing.
+    /// The hanging pair's click needs it: its "did anything change?" test compares
+    /// against [`Self::shown_paragraph`], which over a non-partial range reads the
+    /// first paragraph, so a hanging override on a later paragraph made the click
+    /// write nothing. The four length fields do not need it.
     fn para_ragged(&self, kind: ParaAttrKind) -> bool {
         self.para_shared(kind).is_none()
     }
@@ -542,22 +403,11 @@ impl TypeSubject {
     /// The paragraph style the tab's spannable controls **show**: the node's
     /// defaults with the current paragraph's overrides applied.
     ///
-    /// **Not what the node-level controls write from.** `justify_last` and
-    /// `direction` build their transaction from `self.paragraph`, because writing a
-    /// resolved value back would silently promote one paragraph's indent to the
-    /// node's default — a control changing something it does not name.
-    ///
-    /// Over a range that disagrees this resolves at the range's *start*, which is
-    /// [`Self::shown`]'s bargain in the other scope: a field still has digits in it
-    /// and a drag has somewhere to start from, and [`Self::para_mixed`] is what
-    /// stops it claiming the number is *the* value.
-    ///
-    /// **With no session open the range is the whole node, so this reads the first
-    /// paragraph** — not the defaults. Deliberate, and the same convention the
-    /// character fields follow: `para_mixed` is false there however ragged the spans
-    /// are, because the next write flattens them, so the number shown is the one that
-    /// write will produce. [`Self::para_ragged`] is the question that is *not*
-    /// answered by this, and the hanging pair needs it.
+    /// Not what the node-level controls write from: `justify_last` and `direction`
+    /// build from `self.paragraph`, since writing a resolved value back would
+    /// promote one paragraph's indent to the node's default. It resolves at the
+    /// range's start; with no session open that is the first paragraph, as the
+    /// character fields do. [`Self::para_ragged`] answers what this does not.
     fn shown_paragraph(&self) -> ParagraphStyle {
         self.para_spans
             .resolve(&self.paragraph, self.para_range.start)
@@ -580,140 +430,64 @@ macro_rules! attr {
 /// here divides up.
 const ROW_H: f32 = ui::CONTROL_H;
 const GAP: f32 = ui::CARD_COL_GAP;
-/// The cell height that makes a [`ui::segmented`] track paint [`ROW_H`] tall — so
-/// the two alignment tracks are the same height as the fields above them and the
-/// button beside them. The track adds its own 2pt of padding above and below.
+/// The cell height that makes a [`ui::segmented`] track paint [`ROW_H`] tall; the
+/// track adds its own 2pt of padding above and below.
 const SEG_CELL_H: f32 = ui::SEGMENT_CELL_H;
 
-/// What one cell of an alignment track comes out at on a 284pt card: the design's
-/// module, near enough, and reached from the *columns* rather than pinned. Used
-/// only to state the tolerance a test holds the row to — see
-/// `OndinApp::type_alignment_row` for why the grid is what is pinned instead.
+/// What one alignment-track cell comes out at on a 284pt card; only states the
+/// tolerance a test holds the row to.
 #[cfg(test)]
 const SEG_CELL: f32 = 28.0;
 
 /// How wide a `ui::segmented` track of `n` cells is, given the cell width: the
-/// cells, a 2pt gap between each pair, and the recessed track's own 2pt padding
-/// plus 1pt hairline at each end. The inverse of what `segmented` does to a width
-/// it is handed — **six**, not four, since the track gained the design's border
-/// (§15 D386) and the cells give it up on both sides.
+/// cells, a 2pt gap between each pair, and 3pt of padding plus hairline at each end.
 #[cfg(test)]
 fn seg_cell_of(track: f32, n: usize) -> f32 {
     (track - 6.0 - 2.0 * (n as f32 - 1.0)) / n as f32
 }
-/// Height of one row in the family list. Fixed, because `ScrollArea::show_rows`
-/// virtualizes by dividing the scroll offset by it — it is what lets the list
-/// build twenty widgets instead of nineteen hundred. Tall enough for a 15pt
-/// preview of the name plus a little air.
+/// Height of one row in the family list. Fixed because `ScrollArea::show_rows`
+/// virtualizes by dividing the scroll offset by it.
 const FAMILY_ROW_H: f32 = 24.0;
 
-/// Room a family row keeps at its right edge for the loading dot (§15 D353).
-///
-/// **Reserved on every row, lit or not.** The alternative — taking the room only
-/// while a row is loading — reflows the name at the exact moment its face
-/// arrives, so a list settling after a scroll twitches once per row. The dot is
-/// the smaller change of the two, and it is the one the eye is being pointed at.
+/// Room a family row keeps at its right edge for the loading dot, reserved on every
+/// row so the name does not reflow when its face arrives.
 const LOADING_DOT_SLOT: f32 = 14.0;
-/// The dot itself, and the beat it breathes on.
-///
-/// **A pulse rather than a spinner**, because there are up to twenty of these on
-/// screen at once during a scroll and twenty spinners is a fairground. A dot that
-/// breathes reads as *pending* at a glance and disappears into the row when it is
-/// not there.
+/// The loading dot's radius; it pulses rather than spins, as many are on screen.
 const LOADING_DOT_R: f32 = 2.5;
-/// Seconds for one full breath. Slow enough to read as waiting rather than as an
-/// alarm; egui's own `Spinner` turns at about this rate.
+/// Seconds for one full breath of the loading dot.
 const LOADING_DOT_PERIOD: f64 = 1.2;
 
-/// Popup geometry, from `design/Editor.dc.html`.
-///
-/// **One card, 272 wide, and every tab draws into the same box.** The mockup lays
-/// the three tabs out side by side so all their states can be seen at once; in the
-/// app it is one card that swaps its contents, which is why the width is pinned
-/// rather than derived — the tabs do not need the same room and a card that
-/// resized itself would jump every time one was picked. The same reason the
-/// picker's width is pinned.
+/// Popup geometry. One card, and every tab draws into the same box, so the width
+/// is pinned rather than derived: a card that resized itself would jump on each
+/// tab change.
 const MENU_W: f32 = crate::app::POPOVER_W;
 const MENU_PAD: f32 = 11.0;
-/// The room inside the padding **and the border**, which everything below divides
-/// up — `MENU_W` is the width the card paints, not the room in it (§15 D307).
+/// The room inside the padding and the border, which everything below divides up.
 const MENU_INNER: f32 = crate::ui::menu_inner_w(MENU_W, MENU_PAD);
-/// A field, and the side of the square buttons that sit beside one.
-///
-/// ⚠️ **It was 26, and the sentence that stood here — *shorter than the card's 28px
-/// fields, which is what keeps a popup of nine sections from towering over the
-/// panel it belongs to* — is the argument that was overruled** (§15 D386). The
-/// popup hangs beside the card it opened from, at the same width, so two points
-/// shorter reads as a wobble rather than as a decision. It is [`ui::CONTROL_H`],
-/// like every other control in the chrome.
+/// A field, and the side of the square buttons that sit beside one — the same
+/// height as the card the popup hangs beside.
 const CELL: f32 = ui::CONTROL_H;
 /// A segmented cell. The track it sits in paints 2px larger on every side.
 const SEG_H: f32 = ui::SEGMENT_CELL_H;
-/// The gutter turning a list marker on opens, when the paragraph has none.
-///
-/// **In px, and only ever written once** — see [`OndinApp::list_section`]. A marker
-/// is right-aligned on the paragraph's start edge, so with no indent it draws outside
-/// the box; 24 is a little wider than `10.` at the panel's own default 16pt type,
-/// which is the case where a too-narrow gutter would show first.
+/// The gutter turning a list marker on opens, when the paragraph has none, in px
+/// (see [`OndinApp::list_section`]). A marker is right-aligned on the paragraph's
+/// start edge, so with no indent it draws outside the box.
 const DEFAULT_LIST_GUTTER: f64 = 24.0;
-/// What the Paragraph tab's two node-level sections say on hover.
-///
-/// **Because a control that quietly ignores the selection reads as broken.** The
-/// five controls above them take the paragraphs the selection touches; these two
-/// cannot, and the reason is parley's rather than a shortcut here — `Layout::align`
-/// takes one `Alignment` for the whole layout and the bidi base direction is one
-/// value with it (§15 D77). Saying so costs a hover and buys the difference between
-/// a limit and a bug.
+/// What the Paragraph tab's two node-level sections say on hover: `Layout::align`
+/// and the base direction are one value for the whole layout, and a control that
+/// quietly ignores the selection reads as broken.
 const WHOLE_LAYER: &str = "The whole text layer — alignment and direction cannot vary by paragraph";
 
-/// Between one section and the next — **10, and it is now one number for every
-/// popover in the app** (`ui::POPOVER_SECTION_GAP`).
-///
-/// **This was 15, and the 15 was asked for.** The mock draws each tab as its own
-/// card with three or four sections; the real Character tab has seven, and at 10
-/// against an in-section gap of 5 the ratio is 2:1, which read as one long list
-/// rather than as sections — reported as "a bit too tight", with 5 more asked for
-/// by name. It went back to 10 on 2026-08-21, by the same person and against a
-/// wider view: by then five popovers each carried their own number (15 here, 11 in
-/// the export card, 10 in the stroke card and the picker), and *"section gap on
-/// the popovers should be 10 on all of them"*. Consistency across five cards
-/// outranks the ratio inside one of them, which is this project's usual answer
-/// (§15 D275). Kept as a named alias rather than replaced everywhere, so what the
-/// Character tab spends is still readable as a decision that was made about *it*.
+/// Between one section and the next; one number for every popover in the app.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
-/// Between a section's label and its controls.
-///
-/// ⚠️ **Its second job is gone.** It used to hold two controls of one section to
-/// each other as well — the mock draws every section as a `column` at 5, label
-/// included — and that put two stacked fields 5 apart inside a popover hanging off
-/// a card whose own rows sit at 9. The Transform card is the baseline now, on both
-/// axes and in every panel, so control-to-control is [`ui::CARD_ROW_GAP`] and this
-/// holds only the label (§15 D386). [`ui::labelled`] is what keeps the two apart.
+/// Between a section's label and its controls; control-to-control is
+/// [`ui::CARD_ROW_GAP`].
 const LABEL_GAP: f32 = ui::SECTION_LABEL_GAP;
-/// Between two controls side by side in a row.
-///
-/// **[`GAP`], the Type panel's own, not the 6 the design's popup mock uses.** The
-/// popup and the card it hangs from are read one after the other and their fields
-/// are the same fields; a one-point difference between them is not a distinction,
-/// it is a wobble. Reported after the first pass, and the mock's 6 was never a
-/// decision — the card behind it was drawn at 7 in the same file.
-///
-/// ⚠️ **The paragraph that used to stand here is wrong now, and worth stating so
-/// rather than deleting.** It said the popup takes the design's *vertical*
-/// compression whole — 5 down against the card's 9 — while matching the card
-/// exactly across, and called "one axis compressed and one matched" the rule. The
-/// argument for it was the mock. The instruction that replaced it was explicitly
-/// not the mock: the Transform card's X↔Y and X/Y↔W/H gaps are the baseline every
-/// panel and popover follows, so both axes are matched now and the popup is taller
-/// for it (§15 D386). [`CELL`]'s 26 against [`ROW_H`]'s 28 is the remaining
-/// compression and is untouched — it is a height, not a gap.
+/// Between two controls side by side in a row — the Type panel's own [`GAP`], so the
+/// popup and the card it hangs from agree on both axes.
 const COL_GAP: f32 = GAP;
-/// How tall a list inside the popup may grow before it scrolls.
-///
-/// The same number for the axes and for the features, and the popup is the
-/// reason: both are font-dependent and either can be long, so two lists with
-/// their own limits would make the card's height a function of which family is
-/// selected.
+/// How tall a list inside the popup may grow before it scrolls — one limit for the
+/// axes and the features, so the card's height does not depend on the family.
 const LIST_MAX_H: f32 = 104.0;
 /// The numeric field on an axis row. Wide enough for the tag prefix and four
 /// digits, which covers every registered axis's range.
@@ -732,33 +506,14 @@ const TAB_STRIP_H: f32 = SEG_H + 4.0;
 /// How close to the window's edge the card is allowed to come.
 const SCREEN_MARGIN: f32 = 12.0;
 
-/// Whether a click on a family row is an **edit** — `None` for a re-pick of the
-/// family the subject is already in (§15 D467).
+/// Whether a click on a family row is an edit — `None` for a re-pick of the family
+/// the subject is already in.
 ///
-/// ⚠️ **Because picking a family clears every variable-axis setting and every
-/// OpenType feature on the layer**, and that clearing is right for a *change* and
-/// destructive for a *re-pick*. `[S6.2-L1-02]`: a text layer in Inter with
-/// `wght 620`, `opsz 28`, `tnum 1` and `ss01 1`; open the dropdown to check what
-/// family it is in, click the row the list draws as **selected**, and — measured
-/// headless — `variations [opsz 28, wght 620] → []`,
-/// `features [ss01 1, tnum 1] → []`, `undo_depth 0 → 1`, the family unchanged.
-/// No confirmation, and nothing on screen distinguishes that click from the no-op
-/// the user meant it to be.
-///
-/// ⚠️ **`apply_char_attrs`' equality guard cannot save it, and fires exactly as
-/// designed.** `char_attrs_tx` reports a change because clearing two non-empty
-/// vectors *is* one. This is not the no-op family (`[S14.1-L1-01]`) and no guard
-/// at the commit can see it: the write really does change something.
-///
-/// ⚠️ **`mixed` is why this is three arguments rather than a `!=`.** `current` is
-/// `attr!(subject, Family, Family)`, one member's family over a disagreeing
-/// selection — so re-picking *that* family is a real edit, the one that makes the
-/// selection agree, and the clearing is right for every layer it moves. The row's
-/// own label reads the same fact to print the word *"Mixed"*.
-///
-/// `family_row` returns `clicked()` for any row and gates nothing: `selected`
-/// decides only the ground it paints. That is deliberate — the list is drawn by
-/// hand for `show_rows` — so the decision has to live here.
+/// Picking a family clears every variable-axis setting and OpenType feature, which
+/// is destructive for a re-pick, and `apply_char_attrs`' equality guard cannot
+/// catch it because the write really changes something. `mixed` is why this takes
+/// three arguments: over a disagreeing selection, re-picking the shown family makes
+/// the selection agree. `family_row` gates nothing, so the decision lives here.
 fn family_actually_changed(chosen: Option<String>, current: &str, mixed: bool) -> Option<String> {
     chosen.filter(|f| mixed || f != current)
 }
@@ -785,9 +540,8 @@ fn length_words(l: &Length) -> String {
 }
 
 impl OndinApp {
-    /// One text style field's override mark on text `id` (§15 D981): compared on
-    /// the node's own style, the one `reset::overrides` compares — not a run's,
-    /// which is the content's unit and *Reset* on the layer.
+    /// One text style field's override mark on text `id`, compared on the node's
+    /// own style (the one `reset::overrides` compares), not a run's.
     fn style_mark<V: PartialEq + Clone>(
         &self,
         id: NodeId,
@@ -816,14 +570,10 @@ impl OndinApp {
         )
     }
 
-    /// The family's override mark on text `id` (§15 D981) — **the binding with
-    /// the literal** (§15 D1069), W's and H's rule (D1061): a bound family's
-    /// literal is empty on both sides, so a copy bound apart from its main, or
-    /// bound on one side only, differs by its binding alone, and the reset writes
-    /// the main's binding beside its literal, which `keep_text_bindings` leaves
-    /// as stated. Through [`Self::style_mark`] alone, a copy detached from a
-    /// bound main was marked *Reset to main ·* nothing, and the ↺ set it in no
-    /// family at all.
+    /// The family's override mark on text `id`, comparing the binding with the
+    /// literal: a bound family's literal is empty on both sides, so a copy bound
+    /// apart from its main differs by its binding alone, and the reset writes the
+    /// main's binding beside its literal.
     fn family_mark(&self, id: NodeId) -> Option<OverrideMark> {
         let doc = &self.session.doc;
         let resets = self.resets_of(id);
@@ -871,13 +621,9 @@ impl OndinApp {
         })
     }
 
-    /// The *Content* row's override mark on text `id` (§15 D1070's amendment) —
-    /// [`Self::family_mark`]'s rule for the other half of `TextVars`: **the
-    /// binding with the literal**, so a copy bound apart from its main, or bound
-    /// on one side only, differs by its binding alone (a bound literal is empty on
-    /// both sides). The reset is the main's `SetText` — its spans with it — and
-    /// its content binding beside the copy's own family binding, which
-    /// `keep_text_bindings` leaves as stated.
+    /// The *Content* row's override mark on text `id` — [`Self::family_mark`]'s
+    /// binding-with-the-literal rule for the other half of `TextVars`. The reset is
+    /// the main's `SetText` (its spans with it) and its content binding.
     fn content_mark(&self, id: NodeId) -> Option<OverrideMark> {
         let doc = &self.session.doc;
         let resets = self.resets_of(id);
@@ -927,9 +673,8 @@ impl OndinApp {
         })
     }
 
-    /// One paragraph style field's override mark on text `id` (§15 D981), the
-    /// paragraph twin of [`Self::style_mark`]: the node's own paragraph, never a
-    /// span's.
+    /// One paragraph style field's override mark on text `id`, the paragraph twin
+    /// of [`Self::style_mark`].
     fn para_mark<V: PartialEq + Clone>(
         &self,
         id: NodeId,
@@ -958,7 +703,7 @@ impl OndinApp {
         )
     }
 
-    /// One text box field's override mark on text `id` (§15 D981).
+    /// One text box field's override mark on text `id`.
     fn block_mark<V: PartialEq + Clone>(
         &self,
         id: NodeId,
@@ -983,15 +728,10 @@ impl OndinApp {
         )
     }
 
-    /// The Sizing section's override mark on text `id` (§15 D981): compared on
-    /// the **mode** — auto width, auto height, fixed — and reset to the main's
-    /// whole sizing, its width with it. The width an auto-height box carries, and
-    /// a fixed box's two sides, are the Transform card's W and H, marked there
-    /// where the modes agree (`OndinApp::transform_marks`, since `[X9.1-L1-02]` —
-    /// before it no field marked them); comparing them here as well would mark
-    /// one difference twice. An instance root's sizing is compared as any copy's
-    /// — a size is no placement (`propagate::is_placement`) — so its mode is
-    /// marked here too.
+    /// The Sizing section's override mark on text `id`: compared on the mode (auto
+    /// width, auto height, fixed) and reset to the main's whole sizing. The widths
+    /// and heights are marked on the Transform card (`OndinApp::transform_marks`);
+    /// comparing them here would mark one difference twice.
     fn sizing_mark(&self, id: NodeId) -> Option<OverrideMark> {
         // The sizing as the mark compares it: equal when the modes are.
         #[derive(Clone)]
@@ -1024,17 +764,12 @@ impl OndinApp {
         )
     }
 
-    /// The Type card's override marks for text `id` (§15 D981): the five style
-    /// fields, the paragraph's alignment and the box's vertical alignment.
+    /// The Type card's override marks for text `id`: the five style fields, the
+    /// paragraph's alignment and the box's vertical alignment.
     ///
-    /// **On a text-styled layer the five style fields carry no mark** (§15
-    /// D1068's amendment): their values are the style's, so a copy whose differs
-    /// from its main's is on another style, or on one where its main has none —
-    /// which the card's own mark says and resets (F9). A field's ↺ wrote the
-    /// main's value into the copy's whole `SetTextStyle`, and the commit's
-    /// `style::settle` read that as a door writing over the style and detached
-    /// it — the inspector detaching against D1038 (1). Reachable while the rows
-    /// are live over a session's selection, which is when they are drawn.
+    /// On a text-styled layer the five style fields carry no mark: their values are
+    /// the style's, the card's own mark says and resets a difference, and a field's
+    /// reset would write the whole `SetTextStyle` and make `style::settle` detach it.
     fn type_marks(&self, id: NodeId) -> TypeMarks {
         let styled = self
             .session
@@ -1060,10 +795,8 @@ impl OndinApp {
             family: self.family_mark(id),
             content: self.content_mark(id),
             // The face: weight, italic and the axes they drive
-            // (`AXES_DRIVEN_ELSEWHERE`), as one. Not the whole `variations`
-            // (`[X9.2-L1-03]`): `opsz` and the listed axes are Optical size's and
-            // Axes' to mark, and comparing them here marked one difference twice,
-            // with a face ↺ that reset those sections' axes as well as its own.
+            // (`AXES_DRIVEN_ELSEWHERE`), as one; `opsz` and the listed axes are
+            // marked by their own sections.
             variant: self.style_mark(
                 id,
                 |s| AxesOf {
@@ -1149,26 +882,18 @@ impl OndinApp {
     /// The Type panel: family, variant and size, the two `Length` fields, and the
     /// alignment row with the popup's button on the end.
     pub(crate) fn inspector_type(&mut self, ui: &mut egui::Ui, subject: TypeSubject) {
-        // **The button's own rect has to reach the popup.** The click that opens
-        // the popup is a click *outside* it — the popup does not exist yet when it
-        // happens — so the dismiss test below has to know which rect to forgive,
-        // or the popup opens and closes on the same frame (D82). Carried out of
-        // the panel closure as a plain local, since `panel` hands the closure
-        // `&mut Self` and nothing else.
+        // The button's rect reaches the popup so the dismiss test can forgive the
+        // click that opens it, or it would open and close on the same frame.
         let mut menu_button: Option<egui::Rect> = None;
-        // **Over several text layers** (§15 D1077) the card is the style card over
-        // all of them — F10's capsules and the `⋯`'s counted rows, as the paint
-        // cards draw them — with the five character fields and the alignment
-        // tracks writing every layer, and no override marks, no *Content* row
-        // and no popup: each of those is one layer's.
+        // Over several text layers the card writes every layer, with no override
+        // marks, no *Content* row and no popup: each of those is one layer's.
         let several = !subject.others.is_empty();
         let marks = match several {
             false => self.type_marks(subject.id),
             true => TypeMarks::default(),
         };
-        // A style slot since step 6 (§15 D1068): the `⋯`, and the capsule over a
-        // styled layer — whose rows stay live over a session's selection, since
-        // what they write there is spans, which keep the style (§15 D1067).
+        // Rows stay live over a session's selection: what they write there is
+        // spans, which keep the style.
         let targets = subject.ids();
         let live = subject.partial;
         self.style_card_live(
@@ -1198,9 +923,8 @@ impl OndinApp {
                     );
                 });
             },
-            // The content, the paragraph and the box — no text style holds them
-            // (§15 D1067, D1069), so they stay live on a styled layer, the popup's
-            // opener with them.
+            // The content, the paragraph and the box: no text style holds them, so
+            // they stay live on a styled layer.
             |app, ui| {
                 if !several {
                     app.type_content_row(ui, &subject, &marks.content);
@@ -1211,27 +935,16 @@ impl OndinApp {
         self.type_menu_popup(ui, &subject, menu_button);
     }
 
-    /// The *Content* row (§15 D1070, on D1069's ruling): the text itself, one line, and the door to
-    /// binding it to a string variable — the session's chrome, D1038 drawing no
-    /// content field and the maintainer accepting this one without a design.
+    /// The *Content* row: the text itself, one line, and the door to binding it to
+    /// a string variable.
     ///
-    /// **Bound, it is the chip**, the number fields' own drawing
-    /// (`bound_field_ui`): `Backspace` detaches, a key typed starts the text
-    /// that replaces it, the right-click is the field menu. **Unbound, it is a
-    /// field**: `--` typed opens the list, `Enter` or a click away writes the
-    /// text, `Escape` abandons. The write is the one edit the typing made — the
-    /// common head and tail kept — so the spans over the rest are re-based as a
-    /// canvas edit re-bases them, not dropped.
-    ///
-    /// **Read-only over a text of several lines, and while the canvas edits this
-    /// layer**: a one-line field cannot hold a line break, and a live session is
-    /// the text's truth until it ends (§9.3). The field menu still binds there.
-    ///
-    /// **An instance's content is marked as the other fields are** (§15 D1070's
-    /// amendment): `mark` is [`Self::content_mark`]'s, on the chip as the number
-    /// fields carry it and, unbound, on the badge — the glyph at full ink with
-    /// the dot after it, ↺ in its place while the pointer is on the row, its
-    /// click the reset.
+    /// Bound, it is the chip (`bound_field_ui`): `Backspace` detaches, a key typed
+    /// starts the replacing text. Unbound, it is a field: `--` opens the variable
+    /// list, `Enter` or a click away writes, `Escape` abandons. The write is the one
+    /// edit the typing made (common head and tail kept), so spans over the rest are
+    /// re-based. Read-only over several lines and while the canvas edits this
+    /// layer; the field menu still binds there. `mark` is [`Self::content_mark`]'s,
+    /// on the chip or, unbound, on the badge (↺ while the pointer is on the row).
     fn type_content_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -1308,15 +1021,13 @@ impl OndinApp {
             ui.max_rect()
         });
         let Some(field) = field else { return };
-        // The ↺ is the user's last act and wins over the field's own typing
-        // (`[X6-L1-02]`'s rule on the Properties card's Text row).
+        // The ↺ is the user's last act and wins over the field's own typing.
         if reset_hit {
             ui.data_mut(|d| d.remove::<String>(edit_id));
             self.reset_marked(true, mark);
             return;
         }
-        // A disabled field reports no hover, so the reason hangs off a sense of
-        // its own beside it (`inspector::menu_action`'s lesson).
+        // A disabled field reports no hover, so the reason hangs off its own sense.
         let hover = ui.interact(row, edit_id.with("hover"), egui::Sense::click());
         if read_only {
             let why = if live {
@@ -1333,8 +1044,7 @@ impl OndinApp {
         }
         if field.has_focus() {
             ui.data_mut(|d| d.insert_temp(edit_id, text.clone()));
-            // `--` hands the text to the retype buffer, which draws the list's
-            // refused tail and binds (`field_doors`' door for a number field).
+            // `--` hands the text to the retype buffer, which binds.
             self.bind_typing(ui.ctx(), key, &text, field.rect);
             if text.starts_with("--") {
                 self.var_retype = Some(super::binding::Retype {
@@ -1380,35 +1090,22 @@ impl OndinApp {
 
     // --- main panel -------------------------------------------------------
 
-    /// The family dropdown — **virtualized, and every row set in its own face**
-    /// (§9.2).
+    /// The family dropdown — virtualized, with every row set in its own face (§9.2).
     ///
-    /// Two things about the list are load-bearing rather than decorative:
-    ///
-    /// - **Only the rows in view are built.** With the system fonts and the whole
-    ///   Google Fonts catalog the list is ~1900 families, and a widget per family
-    ///   cost about a second of layout, id hashing and glyph rasterization every
-    ///   time the list opened — for the twenty rows a scroll area then showed.
-    ///   `show_rows` needs a fixed row height, which is why [`FAMILY_ROW_H`] is a
-    ///   constant and the rows are drawn by hand rather than by `selectable_label`.
-    /// - **Drawing a row asks for that family's regular face**, so scrolling the
-    ///   list warms exactly the files picking a family needs. The row is where the
-    ///   prefetch comes from; the preview is what makes it worth doing anyway.
+    /// Only the rows in view are built (the catalog is ~1900 families), which is why
+    /// [`FAMILY_ROW_H`] is a constant and rows are drawn by hand. Drawing a row asks
+    /// for that family's regular face, so scrolling prefetches what picking needs.
     fn type_family_row(
         &mut self,
         ui: &mut egui::Ui,
         subject: &TypeSubject,
         mark: Option<&OverrideMark>,
     ) {
-        // **Bound to a string variable, the row is the chip** (§15 D1069) — the
-        // number fields' drawing, its badge the row's glyph — unless a session's
-        // selection is what the row edits, where it writes runs over the bound
-        // default, as it does under a text style (§15 D1067).
+        // Bound to a string variable, the row is the chip, unless a session's
+        // selection is what the row edits (it then writes runs over the default).
         let key = super::binding::FieldKey::Family { id: subject.id };
-        // **Over several layers the row is the picker whatever is bound** (§15
-        // D1077): one layer's chip cannot stand for the rest, so a bound family
-        // reads as drawn and a pick writes over it — detaching it, as typing over
-        // a chip does (§15 D1041), and the floating status says so (§15 D1071).
+        // Over several layers the row is the picker whatever is bound: a pick
+        // writes over the binding, detaching it.
         let several = !subject.others.is_empty();
         if !subject.partial
             && !several
@@ -1425,17 +1122,9 @@ impl OndinApp {
         let shown = attr!(subject, Family, Family);
         let mixed = subject.mixed(CharAttrKind::Family);
         let current = shown.clone();
-        // **Three states, and the third one is a warning** (§15 D227). A family whose
-        // bytes are still coming says so with an ellipsis — text on canvas is in the
-        // fallback face until they land, and without that the wait reads as the pick
-        // not having taken — and a family that can never be had wears its glyph in
-        // `WARN`, the way a layers row whose picture cannot be drawn does (§15 D179).
-        //
-        // **The middle state is what made this buildable at all.** Asked of
-        // `is_family_available` alone, "still downloading" and "nobody has this font"
-        // are the same answer, so the warning would have accused a font that was on
-        // its way — which is why §5.4a carried this as a gap rather than a promise.
-        // `family_status` is the distinction.
+        // Three states: a family still downloading gets an ellipsis (the canvas
+        // is in the fallback face until it lands), and one that can never be had
+        // wears its glyph in `WARN`. `family_status` tells the last two apart.
         let status = (!mixed).then(|| self.fonts.family_status(&shown));
         let label = if mixed {
             "Mixed".to_string()
@@ -1444,9 +1133,8 @@ impl OndinApp {
         } else {
             shown
         };
-        // Only the glyph. The family's *name* is the identity this row exists to
-        // report, and dimming or annotating it would read as the pick not having
-        // taken — which is the same mistake the ellipsis above was added to avoid.
+        // Only the glyph is tinted: dimming the name would read as the pick not
+        // having taken.
         let head = match status {
             Some(crate::fonts::FamilyStatus::Missing) => {
                 ui::glyph_and_text_tinted(icon::TEXT_AA, &label, theme::color::WARN)
@@ -1457,42 +1145,24 @@ impl OndinApp {
         let mut reset = false;
         let mut menu_at: Option<(egui::Pos2, egui::Rect)> = None;
         let width = ui.available_width();
-        // **A combo paints exactly `interact_size.y`, so the row states it** — and
-        // in a `scope`, or the height would leak into the fields below. Left to the
-        // theme this one came out 24px under the 28px fields beside it; the measured
-        // symptom was 24 / 26 / 28 down a single card (§15 D85).
+        // A combo paints exactly `interact_size.y`, so the row states it, in a
+        // `scope` so the height does not leak into the fields below.
         ui.scope(|ui| {
             ui.spacing_mut().interact_size.y = ROW_H;
             ui.spacing_mut().button_padding.y = 0.0;
             let combo = egui::ComboBox::from_id_salt("font-family")
                 .icon(ui::combo_chevron)
                 .width(width)
-                // **This combo's popup is one you are meant to click into** (the
-                // swap picker's and two of `variants.rs`'s popups are too), and
-                // egui's default does not allow it: `PopupCloseBehavior` for a
-                // `ComboBox` is `CloseOnClick`, which is a click *anywhere, inside or
-                // outside*. So clicking the search field this list exists to be
-                // filtered by dismissed the list. Reported.
-                //
-                // The rest of the app's combos are lists of rows and want the
-                // default. The cost here is that picking a row no longer closes the
-                // popup either — nothing does, since every click is now "inside" —
-                // which is what the explicit `ui.close()` below is for, and it makes
-                // the row the only thing that dismisses this list.
+                // The popup holds a search field, so a click inside must not dismiss
+                // it; the explicit `ui.close()` below is then what a row pick uses.
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .selected_text(head)
                 .show_ui(ui, |ui| {
-                    // The list is its own rhythm: rows draw at `FAMILY_ROW_H` by hand,
-                    // and the search field must not inherit a 28px control height.
+                    // Rows draw at `FAMILY_ROW_H` by hand; the search field must not
+                    // inherit a 28px control height.
                     ui::menu_rows(ui);
-                    // egui's default text-edit margin is 4x2, which next to 24px rows
-                    // reads as a cramped afterthought rather than the field you type
-                    // into first. The gap below it is tightened at the same time: the
-                    // theme's 6px item spacing was set for stacked panel rows, and
-                    // here it separates a field from a list that belongs to it.
                     ui.spacing_mut().item_spacing.y = 3.0;
-                    // An instance's overridden family (§15 D981), first. This list
-                    // closes only by hand (`close_behavior` above).
+                    // An instance's overridden family, first.
                     if let Some(m) = mark
                         && super::component::menu_reset_row(ui, m)
                     {
@@ -1514,8 +1184,6 @@ impl OndinApp {
                             for name in names {
                                 if self.family_row(ui, &name, &current) {
                                     chosen = Some(name);
-                                    // The popup's own `Area` is `closable`, so this
-                                    // reaches it from inside the scroll area.
                                     ui.close();
                                 }
                             }
@@ -1526,9 +1194,8 @@ impl OndinApp {
             if mark.is_some() {
                 super::component::combo_dot(ui.painter(), combo.rect);
             }
-            // The door to a binding (§15 D1069): the field menu, as the eye's is —
-            // a picker takes no `--`. Not over a session's selection, whose family
-            // is a run's, nor under a text style, whose family is the style's.
+            // The door to a binding is the field menu (a picker takes no `--`), not
+            // over a session's selection nor under a text style.
             if combo.secondary_clicked()
                 && !subject.partial
                 && !several
@@ -1536,12 +1203,8 @@ impl OndinApp {
             {
                 menu_at = Some((at, combo.rect));
             }
-            // **The sentence hangs off the combo's own head response**, which is the
-            // one place it fires: a tooltip on the wrapping `ui.scope` is silently
-            // dead, the scope's response being a placeholder over the rect rather
-            // than a registered widget (`inspector::menu_action`). A colour on its
-            // own says *something* is wrong and never says what, and a tooltip is the
-            // only text this row has room for.
+            // The tooltip must hang off the combo's own response; one on the wrapping
+            // `ui.scope` never fires.
             if status == Some(crate::fonts::FamilyStatus::Missing) {
                 combo.on_hover_text(
                     "This font is not installed and cannot be downloaded — \
@@ -1564,12 +1227,8 @@ impl OndinApp {
         }
         if let Some(family) = family_actually_changed(chosen, &current, mixed) {
             self.fonts.ensure_loaded(&family);
-            // **The axis and feature settings go with the family.** They are named
-            // by tag, and a tag means something different in the next typeface —
-            // `wdth 75` on a family with no width axis is silently nothing, and
-            // `ss01` is a different alternate everywhere. Carrying them over is
-            // how a font swap comes out looking wrong in a way nothing on screen
-            // explains.
+            // Axis and feature settings are named by tag, which means something
+            // different in the next typeface, so they go with the family.
             self.apply_char_attrs(
                 subject,
                 vec![
@@ -1581,14 +1240,10 @@ impl OndinApp {
         }
     }
 
-    /// One row of the family list: the name, set in the family it names.
-    ///
-    /// See [`family_actually_changed`], which decides whether a click on this row
-    /// is an edit at all.
-    ///
-    /// Returns whether it was clicked. Falls back to the UI font when there is no
-    /// truthful preview to draw — the bytes have not arrived, or the family is a
-    /// symbol font whose Latin name would come out as a row of empty boxes.
+    /// One row of the family list: the name, set in the family it names, falling
+    /// back to the UI font when there is no truthful preview (bytes not arrived, or
+    /// a symbol font). Returns whether it was clicked; [`family_actually_changed`]
+    /// decides whether that is an edit.
     fn family_row(&mut self, ui: &mut egui::Ui, family: &str, current: &str) -> bool {
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), FAMILY_ROW_H),
@@ -1608,16 +1263,10 @@ impl OndinApp {
         } else {
             theme::text::STRONG
         };
-        // **The dot's room is reserved on every row, lit or not** (§15 D353), so a
-        // name never reflows at the moment its face arrives — a list of 1,976 rows
-        // twitching as downloads land is worse than the uncertainty the dot is
-        // there to remove.
         let text = rect
             .shrink2(egui::vec2(7.0, 0.0))
             .with_max_x(rect.right() - LOADING_DOT_SLOT);
-        // Asked for on every row that draws, not only on the ones that miss: it
-        // is also the LRU touch that keeps a family on screen from being evicted
-        // while it is being looked at.
+        // Also the LRU touch that keeps an on-screen family from being evicted.
         self.fonts.touch(family);
         if !self.previews.paint(ui, text, family, ink) {
             self.fonts.ensure_preview(family);
@@ -1629,9 +1278,7 @@ impl OndinApp {
                 theme::text::MUTED,
             );
         }
-        // **After the name, and asked *after* `ensure_preview`**: that call is what
-        // puts the face in flight, so on the first frame a row appears the dot
-        // would otherwise be a frame late.
+        // Asked after `ensure_preview`, which is what puts the face in flight.
         if self.fonts.is_loading(family) {
             paint_loading_dot(
                 ui,
@@ -1641,12 +1288,9 @@ impl OndinApp {
         resp.clicked()
     }
 
-    /// The variant dropdown: the family's named instances, or its faces.
-    ///
-    /// **Plus a `Custom` row, shown only when the current settings match no
-    /// variant** — the same shape as the stroke panel's `DashStyle::Custom`, and
-    /// classified from the values rather than stored beside them, so a hand-tuned
-    /// axis cannot leave the field claiming "Bold".
+    /// The variant dropdown: the family's named instances, or its faces, plus an
+    /// inert `Custom` row when the settings match no variant — classified from the
+    /// values, so a hand-tuned axis cannot leave the field claiming "Bold".
     fn type_variant_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1662,12 +1306,8 @@ impl OndinApp {
         let current = variants
             .iter()
             .position(|v| matches_variant(v, weight, italic, &coords));
-        // **Over several layers the face is compared whole** (§15 D1077's
-        // amendment): weight
-        // and italic agreeing is not enough where the axes the faces set do not,
-        // so each layer's face is classified as the first one's is, and a layer
-        // on another face — or on none — makes the field *Mixed*, no row lit and
-        // no *Custom* claimed.
+        // Over several layers the face is compared whole: each layer is classified
+        // as the first is, and a layer on another face makes the field *Mixed*.
         let faces_differ = faces_disagree(&variants, subject);
         let current = current.filter(|_| !faces_differ);
         let label = if faces_differ
@@ -1681,11 +1321,8 @@ impl OndinApp {
                 None => "Custom".to_string(),
             }
         };
-        // A family with no faces to choose between has nothing to offer here, so
-        // the slot falls back to the bold/italic pair — which is still the fastest
-        // way to ask for those two and is what every keyboard shortcut means. So
-        // does a several-layer card over families that disagree (§15 D1077): one
-        // family's faces would name nothing in the others'.
+        // A family with one face, or families that disagree across layers, fall
+        // back to the bold/italic pair.
         if variants.len() < 2 || subject.mixed(CharAttrKind::Family) {
             self.type_weight_toggles(ui, subject, size);
             return;
@@ -1693,9 +1330,7 @@ impl OndinApp {
         let mut pick: Option<usize> = None;
         let mut reset = false;
         ui.scope(|ui| {
-            // The combo paints its border *inside* its rect, so its height is `size.y`
-            // whole — subtracting the hairline (right for content inside a `field_row`)
-            // left it 2px short of the fields beside it (§15 D85).
+            // The combo paints its border inside its rect, so its height is `size.y` whole.
             ui.spacing_mut().interact_size.y = size.y;
             ui.spacing_mut().button_padding.y = 0.0;
             let face = egui::ComboBox::from_id_salt("font-variant")
@@ -1705,7 +1340,7 @@ impl OndinApp {
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
-                    // An instance's overridden face (§15 D981), first.
+                    // An instance's overridden face, first.
                     if let Some(m) = mark {
                         reset = super::component::menu_reset_row(ui, m);
                     }
@@ -1714,9 +1349,7 @@ impl OndinApp {
                             pick = Some(i);
                         }
                     }
-                    // Shown, and inert: it is a readout of "none of the above",
-                    // not a thing to choose. Picking it could only mean "leave the
-                    // axes as they are", which is what not opening the list does.
+                    // Inert: a readout of "none of the above", not a choice.
                     if current.is_none() && !faces_differ {
                         ui.add_enabled(false, egui::Button::new("Custom"));
                     }
@@ -1753,19 +1386,17 @@ impl OndinApp {
                     CharAttr::Variations(merged),
                 ]
             };
-            // Each layer's own axes merged (§15 D1077): one coordinate list
-            // written to all would carry the first layer's optical size and
-            // hand-set axes onto the rest.
+            // Each layer's own axes merged, so the first layer's hand-set axes do
+            // not land on the rest.
             self.apply_char_attrs_each(subject, |m| attrs(&attr!(m, Variations, Variations)));
         }
     }
 
     /// The bold/italic pair, for a family that offers no variant list.
     ///
-    /// Each button carries an instance's override mark on its own value (§15
-    /// D981) — the weight on Bold, the slant on Italic, compared on the node's
-    /// own style as the variant dropdown's mark is — and a click on a marked one
-    /// is its reset (`ui::field_button_marked`).
+    /// Each button carries an instance's override mark on its own value (weight on
+    /// Bold, slant on Italic), and a click on a marked one is its reset
+    /// (`ui::field_button_marked`).
     fn type_weight_toggles(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, size: egui::Vec2) {
         let weight = attr!(subject, Weight, Weight);
         let italic = attr!(subject, Italic, Italic);
@@ -1785,7 +1416,7 @@ impl OndinApp {
                 false => "upright".to_owned(),
             },
         );
-        // One layer's override marks cannot speak for several (§15 D1077).
+        // One layer's override marks cannot speak for several.
         let (bold_mark, italic_mark) = match subject.others.is_empty() {
             true => (bold_mark, italic_mark),
             false => (None, None),
@@ -1824,19 +1455,11 @@ impl OndinApp {
         });
     }
 
-    /// Size: `T` prefix, px only, no unit toggle.
+    /// Size: `T` prefix, px only, no unit toggle (a size in ems would be relative
+    /// to itself).
     ///
-    /// **No `Length` here on purpose.** A font size in ems would be a size
-    /// relative to itself; px is the only unit it can have, so offering a suffix
-    /// to click would be offering a state that cannot exist.
-    ///
-    /// Returns the field's own `Response`, as `multi_number` and `scale_row` do
-    /// and for the same reason: the widget's rect is not predictable from
-    /// outside, so a test that wants to click into it has to draw it once to
-    /// find where it is. Nothing in production reads the value.
-    ///
-    /// `mark` is an instance's override mark (§15 D981); the second return value
-    /// is whether its ↺ was clicked.
+    /// Returns the field's own `Response` so a test can find its rect; the second
+    /// value is whether the instance override mark's ↺ was clicked.
     fn type_size_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1863,11 +1486,9 @@ impl OndinApp {
 
     /// Line height: `Auto`, a percentage of the font size, or absolute px.
     ///
-    /// **Three states on one field**, cycled by the unit suffix. Auto is
-    /// `MetricsRelative(1.0)` — the font's own line height, CSS `normal` — and is
-    /// a genuinely different value rather than a collapsed control, which is why
-    /// it lives on the suffix beside the other two units rather than in a fourth
-    /// widget.
+    /// Three states on one field, cycled by the unit suffix. Auto is the font's own
+    /// line height (CSS `normal`), a distinct value that lives on the suffix beside
+    /// the other two units.
     fn type_line_height_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1896,12 +1517,8 @@ impl OndinApp {
             clickable: true,
             tooltip,
         });
-        // **In Auto the digits show what Auto is worth right now**, in px, and the
-        // suffix is what says it is automatic — the field's own three-state idiom,
-        // so the number needs no decoration to be read as derived. It printed the
-        // word "Auto" over an unscrubbable zero until 2026-08-04, which said the
-        // state twice and the value never (§15 D162). Only a node with nothing laid
-        // out falls back to that.
+        // In Auto the digits show what Auto is worth in px and the suffix says it is
+        // automatic; only a node with nothing laid out falls back to the word "Auto".
         let resolved = subject.line_height;
         let (mut shown, scrub, typed) = match current {
             // Over several layers that disagree, a number typed is px for them
@@ -1911,9 +1528,8 @@ impl OndinApp {
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
                 expr::Unit::Px,
             ),
-            // Auto shows px and cannot be typed into — a zero-width scrub range,
-            // and the write below is gated on `current` being `Some` — so its unit
-            // is the honest one rather than a reachable one.
+            // Auto shows px and cannot be typed into: a zero-width scrub range, and
+            // the write below is gated on `current` being `Some`.
             None => (
                 resolved.unwrap_or(0.0),
                 Scrub::whole(1.0).range(0.0..=0.0),
@@ -1924,11 +1540,8 @@ impl OndinApp {
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.pct),
                 expr::Unit::Pct,
             ),
-            // ⚠️ **Derived, like every other `Length` face in this panel.** This
-            // is the field `MAX_LINE_HEIGHT_PX` was actually named for, and even
-            // here the two ends did not describe one quantity: 1000% against
-            // 10 000px is 125× apart at 8pt. The sign rule always agreed (both
-            // floored at zero); the magnitudes never did. See [`Bounds`].
+            // The px bound is derived from the font size, like every other
+            // `Length` face here. See [`Bounds`].
             Some(Length::Px(v)) => (
                 v,
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
@@ -1943,8 +1556,7 @@ impl OndinApp {
             mark.map(OverrideMark::field),
             &mut shown,
             scrub,
-            // Its own parser, for [`length_field`]'s reason: px and % on one
-            // field, so the one it is not showing is refused (§15 D359).
+            // Its own parser: px and % share one field, so the unit not shown is refused.
             |d| {
                 let d = d
                     .custom_formatter(ui::number(2))
@@ -1959,15 +1571,13 @@ impl OndinApp {
                 d
             },
         );
-        // An instance's overridden line height, put back (§15 D981) — and the valve
-        // below still told, with the number unmoved, since it owns the latch.
+        // The reset, with the valve below still told since it owns the latch.
         if hit && let Some(m) = mark {
             self.commit_reset(m.tx.clone());
         }
         let unit_clicked = unit.is_some_and(|u| u.clicked());
         if unit_clicked {
-            // The first layer's next state, and every layer into it from its
-            // own value, size and laid line (§15 D1077).
+            // The first layer's next state, and every layer into it from its own value.
             let like = next_line_height(current, font_size, resolved);
             self.apply_char_attrs_each(subject, |m| {
                 let own = match m.shown(CharAttrKind::LineHeight) {
@@ -1990,9 +1600,8 @@ impl OndinApp {
             None => None,
         };
         let Some(next) = next else { return };
-        // A Mixed field writes once its number has moved: seeded from the first
-        // layer, a click in and out would otherwise put that layer's value on
-        // every other.
+        // A Mixed field writes only once its number has moved, or a click in and out
+        // would put the first layer's value on every other.
         if mixed {
             let key = resp.id.with("line-height-moved");
             if resp.changed() {
@@ -2010,9 +1619,8 @@ impl OndinApp {
 
     /// Letter spacing: `%` by default, with a `px` alternative.
     ///
-    /// **`%` is the default because tracking has to scale with size**, or a type
-    /// token cannot carry it: the same style used at 12pt and 48pt wants the same
-    /// *proportional* tracking, and a stored px value is wrong at one of the two.
+    /// `%` is the default because tracking has to scale with size: one style used
+    /// at 12pt and 48pt wants the same proportional tracking.
     fn type_letter_spacing_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -2034,10 +1642,7 @@ impl OndinApp {
 
     /// Horizontal and vertical alignment, and the button that opens the popup.
     ///
-    /// **Both alignments live here and nowhere else.** They are the controls a
-    /// designer reaches for without thinking, and putting either in the popup
-    /// would put a daily control two clicks away to make room for ones that are
-    /// consulted monthly.
+    /// Both alignments live here and nowhere else; they are daily controls.
     ///
     /// Returns the popup button's rect, which [`Self::type_menu_popup`] needs in
     /// order not to dismiss itself on the click that opened it.
@@ -2048,33 +1653,19 @@ impl OndinApp {
         marks: [&Option<OverrideMark>; 2],
     ) -> Option<egui::Rect> {
         let [align_mark, valign_mark] = marks;
-        // **The row is on the *column* grid of the fields above it, not on its own
-        // module.** Two passes got this wrong in opposite directions. First the
-        // horizontal set took the row's remainder while the vertical set was pinned
-        // at 22 a cell: 37 wide against 20, two alignment controls side by side
-        // drawn to two different sizes. Then both were pinned at the design's 28,
-        // which made the cells equal and left the tracks off the grid — measured
-        // and reported, the horizontal track ended 2pt short of the field above it
-        // and the vertical track started 3pt left of the field above *that*.
-        //
-        // Those two goals do not both fit: four cells across a half-card and three
-        // across the rest is not an equal division at any card width. The grid
-        // wins, because the row is read against the two rows of paired fields
-        // directly above it, and a 1pt difference between the two tracks' cells is
-        // not something the eye can see where a 2pt step in a column edge is.
+        // The row is on the column grid of the fields above it, not on its own
+        // module: four cells across a half-card and three across the rest cannot
+        // be equal, and the grid is what the eye reads against.
         let full = ui.available_width();
-        // The same `half` the field rows use, so the first track's right edge lands
-        // on the first field's — and the second track therefore starts on the
-        // second field's left edge, since both gaps are the card's own.
+        // The same `half` the field rows use, so the tracks land on their edges.
         let horizontal_w = (full - GAP) / 2.0;
         // The remainder, which puts the popup button's right edge on the margin.
         let vertical_w = full - horizontal_w - ROW_H - GAP * 2.0;
         let gap = GAP;
         let mut button = None;
-        // **Over several layers** (§15 D1077) a track lights only the cell they
-        // all agree on, a pick writes each its own paragraph or box with the one
-        // field changed, in one transaction, and there is no popup — its tabs are
-        // one layer's — so the tracks take the button's room.
+        // Over several layers a track lights only the cell they all agree on, a pick
+        // writes each its own paragraph or box in one transaction, and there is no
+        // popup, so the tracks take the button's room.
         let members: Vec<&TypeSubject> = std::iter::once(subject).chain(&subject.others).collect();
         let several = members.len() > 1;
         let vertical_w = if several {
@@ -2089,7 +1680,6 @@ impl OndinApp {
                 true => align.cell(),
                 false => TextAlign::OFFERED.len(),
             };
-            // An instance's overridden alignments (§15 D981), on their lit cells.
             let (pick, reset) = ui::segmented_marked(
                 ui,
                 horizontal_w,
@@ -2138,10 +1728,8 @@ impl OndinApp {
             };
             let enabled = members.iter().all(|m| m.sizing.height_is_authored());
             let resp = ui.scope(|ui| {
-                // **Dimmed where there is no free space to distribute.** An
-                // auto-height box is exactly as tall as its text, so all three
-                // cells are the same drawing — the same per-kind gate the stroke
-                // panel puts on `Join`.
+                // Dimmed where there is no free space: an auto-height box is as tall
+                // as its text.
                 if !enabled {
                     ui.disable();
                 }
@@ -2185,11 +1773,8 @@ impl OndinApp {
                     self.commit_block(subject.id, next);
                 }
             });
-            // Through a claimant of its own: a `Ui::scope`'s response is a
-            // placeholder rather than a registered widget and never reports a
-            // hover, and `on_hover_text` is gated on `Response::enabled()`, which
-            // is false inside a disabled scope. Hung on the scope it showed
-            // nothing, silently (`inspector::menu_action` is the pattern).
+            // Through a claimant of its own: a `Ui::scope`'s response never reports
+            // a hover, and `on_hover_text` is gated on `Response::enabled()`.
             if !enabled {
                 ui.interact(
                     resp.response.rect,
@@ -2220,15 +1805,10 @@ impl OndinApp {
 
     // --- the popup --------------------------------------------------------
 
-    /// The three-tab overflow panel.
+    /// The three-tab overflow panel, an `Area` rather than inline rows so it does
+    /// not push every panel below it down the page.
     ///
-    /// An `Area` rather than rows in the card, for the same reason the stroke
-    /// options are one: the card is 296px wide and this is up to nine controls,
-    /// so opening it inline would push every panel below it down the page every
-    /// time it was consulted.
-    ///
-    /// `head` is the rect of the button that opens it — see the dismiss test at
-    /// the bottom for why the popup cannot do without it.
+    /// `head` is the rect of the button that opens it, which the dismiss test needs.
     fn type_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -2236,22 +1816,17 @@ impl OndinApp {
         head: Option<egui::Rect>,
     ) {
         let Some(tab) = self.type_menu else { return };
-        // **The popup belongs to the button that opens it, so it goes away when
-        // that button does.** A collapsed Type panel draws no button, and a
-        // popover with no opener is a panel quietly editing something the card no
-        // longer shows — the same rule the detached picker follows when its target
-        // stops being selected.
+        // The popup goes away with its button: a collapsed Type panel draws none,
+        // and a popover with no opener would edit something the card no longer shows.
         let Some(head) = head else {
             self.type_menu = None;
             return;
         };
         let ctx = ui.ctx().clone();
         let mut close = false;
-        // **The Character tab is the text style's** (§15 D1067, D1068): on a styled
-        // layer, outside a selection and outside the style's own *Edit*, it is as
-        // read-only as the card's rows — its writes set the node's defaults, which
-        // would detach the style from inside the inspector (D1038 (1)). Paragraph
-        // and Box stay live: no text style holds them.
+        // On a styled layer, outside a selection and outside the style's own *Edit*,
+        // the Character tab is read-only: its writes set the node's defaults, which
+        // would detach the style. Paragraph and Box stay live.
         let char_locked = !subject.partial
             && self
                 .session
@@ -2259,37 +1834,17 @@ impl OndinApp {
                 .get(subject.id)
                 .and_then(|n| n.styles().text)
                 .is_some_and(|s| self.session.style_edit != Some(s));
-        // Clear of the inspector, to its left, aligned with the row that opened it
-        // — see `OndinApp::popover_anchor` for why it is not under the button.
         let anchor = OndinApp::popover_anchor(&ctx, head, MENU_W);
-        // Whether the pointer is over an overlay rather than over the page — the
-        // combo lists inside this popup are their own `Area`s at the same order,
-        // so a click in one is a click that misses `menu.contains_pointer()`. Read
-        // as a question about layer order rather than about popups, exactly as the
-        // stroke menu does it.
+        // Whether the pointer is over an overlay: the combo lists inside this popup
+        // are their own `Area`s, so a click in one misses `menu.contains_pointer()`.
         let over_overlay = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.order >= egui::Order::Foreground);
-        // `content_rect`, as the picker's placement reads it — the window minus
-        // whatever the platform has taken off it.
         let screen = ctx.input(|i| i.content_rect());
-        // **The tallest the tab body may become, which is the window less the
-        // chrome around it.** With a variable font, a decoration showing its four
-        // controls and `opsz` on Manual the Character tab measures a little over
-        // 700pt — which is what folding the Font tab into it bought, and is taller
-        // than the anchor leaves below a Type panel sitting anywhere but the top of
-        // the inspector. The design draws one long card and says nothing about the
-        // case, so the card scrolls: invisible whenever it fits, which is every
-        // other tab and most fonts (§15 D104).
-        //
-        // **The border is in the subtraction too**, since 2026-08-23 — the same two
-        // points the widths lost (§15 D307), on the axis nobody was looking at. A
-        // `Frame`'s stroke grows its outer rect on *both* axes, so a budget that
-        // counted only the padding let the tallest card stand 2pt past the margin it
-        // was computed to respect. Spelled out rather than routed through
-        // `ui::menu_inner_w`: that one is about a width the design names, and this is
-        // a height taken from whatever the screen has left.
+        // The tallest the tab body may become: the window less the chrome around it.
+        // A long Character tab scrolls. The border is in the subtraction because a
+        // `Frame`'s stroke grows its outer rect on both axes.
         let body_max_h = (screen.height()
             - SCREEN_MARGIN * 2.0
             - crate::ui::MENU_BORDER * 2.0
@@ -2300,8 +1855,7 @@ impl OndinApp {
         let menu = egui::Area::new(egui::Id::new("type-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            // The anchor is where the card *wants* to be; this is what keeps it on
-            // screen when the button it hangs from is near the bottom.
+            // Keeps the card on screen when its button is near the bottom.
             .constrain_to(screen.shrink(SCREEN_MARGIN))
             .show(&ctx, |ui| {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
@@ -2325,29 +1879,9 @@ impl OndinApp {
                             close = true;
                         }
                     });
-                    // No line of hint text under the tabs. There was one, spelling
-                    // out the scope the abbreviated label could not — and the
-                    // labels are whole words now, so it would be the same sentence
-                    // twice.
-                    //
-                    // The tab strip stays outside the scroll: it is how you leave a
-                    // tab, and a tab you have scrolled to the bottom of is exactly
-                    // where you need it.
-                    //
-                    // **The body is given an explicit rect, not the room the `Area`
-                    // has.** A `ScrollArea` takes its outer size from
-                    // `available_rect_before_wrap()`, and inside an `Area` that is
-                    // the area's own size *from the previous frame* — so the height
-                    // ratcheted downwards and never came back: open on Character
-                    // and the card is tall, switch to Box and it shrinks to fit,
-                    // switch back and Character is now stuck at Box's height,
-                    // Paragraph shrinks it again, and so on. Reported exactly that
-                    // way. Pinning `max_rect` breaks the feedback loop — the cap is
-                    // the same number every frame whatever the last tab did — and
-                    // `auto_shrink` on the y axis is then free to do the part that
-                    // *is* wanted, which is a short tab drawing a short card
-                    // (§15 D106). The same trap `inspector_ui` documents, and the
-                    // same fix.
+                    // The tab strip stays outside the scroll. The body gets an explicit
+                    // rect: a `ScrollArea` inside an `Area` sizes from the area's size
+                    // last frame, so the height would ratchet down on each tab switch.
                     let body = egui::Rect::from_min_size(
                         ui.cursor().min,
                         egui::vec2(MENU_INNER, body_max_h),
@@ -2381,47 +1915,32 @@ impl OndinApp {
             })
             .response;
         let on_head = ctx.pointer_interact_pos().is_some_and(|p| head.contains(p));
-        // **The picker this popup opens is a third thing to forgive.** It is an
-        // `egui::Window` at `Order::Middle`, so it is neither the popup's rect nor
-        // an overlay above it — a click in it satisfies every term of the dismissal
-        // and would close the popup the picker belongs to, taking the picker with
-        // it (see the orphan rule in `picker_ui`). Asked by layer *identity* rather
-        // than by rect, because the window's rect is not known here: `picker_ui`
-        // runs after the inspector, so this frame's rect does not exist yet and
-        // last frame's would be a frame stale on the first click.
+        // The picker this popup opens is an `egui::Window` at `Order::Middle`, neither
+        // the popup's rect nor an overlay, so a click in it must not dismiss the popup.
+        // Asked by layer identity because `picker_ui` runs after the inspector.
         let on_picker = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.id == super::picker::layer_id());
-        // The sixth term, recorded every frame rather than only on the release —
-        // never from inside the short-circuiting `&&`.
+        // Recorded every frame, never from inside a short-circuiting `&&`.
         let press_away = super::press_began_away(&ctx, menu.layer_id.id, menu.rect, head);
         if close
             || dismissed_by_click(ClickAway {
-                // **The primary button only.** Right-click is spent on cancelling
-                // a gesture everywhere in this app, and a scrub started in the
-                // popup is cancelled with the pointer wherever it has been dragged
-                // to — usually out over the canvas. Read as `any_click`, that
-                // cancel was also a click on the page, so cancelling a drag closed
-                // the popup you were dragging in. Reported exactly that way, along
-                // with the tell: cancelling *inside* the popup worked, because
-                // there the click landed on `on_menu`.
+                // Primary button only: a right-click cancels a gesture, possibly
+                // with the pointer out over the canvas, and must not close the popup.
                 clicked: ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)),
                 over_overlay,
                 on_menu: menu.contains_pointer(),
                 on_head,
                 on_picker,
-                // Something is still being dragged, or a cancel is waiting for its
-                // button to come up — `gesture_cancelled` is cleared at the end of
-                // the frame the release arrives in, so it is still true here.
+                // A drag, or a cancel waiting for its button to come up.
                 in_gesture: ctx.dragged_id().is_some() || self.gesture_cancelled,
                 press_away,
             })
         {
             self.type_menu = None;
         }
-        // Heard: the router may spend next frame's `Escape` on this popover
-        // (§15 D847 — see `OndinApp::popover_heard`).
+        // The router may spend next frame's `Escape` on this popover.
         self.popover_heard = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.type_menu = None;
@@ -2430,21 +1949,14 @@ impl OndinApp {
 
     // --- tab 1: Character -------------------------------------------------
 
-    /// Case, the one decoration, the two spacings — and everything the *family*
+    /// Case, the one decoration, the two spacings — and everything the family
     /// offers: the optical-size mode, the language, the variable axes and the
     /// OpenType features.
     ///
-    /// **The lower half builds itself from the font.** Which axes exist, their
-    /// ranges and which features are available are the typeface's decisions; a
-    /// hardcoded list is wrong the first time a family ships a `GRAD`, and a
-    /// switch for a feature the face does not have is a control that shapes to
-    /// nothing. The generated sections come last, after the ones that are always
-    /// there, so choosing a different family does not move the top of the tab.
-    ///
-    /// `locked` greys the sections **a text style holds** (§15 D1068's amendment)
-    /// and leaves Colour and Language live: `style::type_part` clears both, so
-    /// their writes keep the style (§15 D1067) and locking them would make the
-    /// card wider than its slot again (`arch-scribe`'s read of the Language row).
+    /// The lower half builds itself from the font, and comes last so choosing a
+    /// different family does not move the top of the tab. `locked` greys the
+    /// sections a text style holds and leaves Colour and Language live, whose
+    /// writes keep the style (`style::type_part` clears both).
     fn type_character_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, locked: bool) {
         let held = |app: &mut Self, ui: &mut egui::Ui, f: &dyn Fn(&mut Self, &mut egui::Ui)| {
             if locked {
@@ -2476,19 +1988,11 @@ impl OndinApp {
         });
     }
 
-    /// The text's own colour, over whatever range a character control acts on
-    /// (§15 D154).
+    /// The text's own colour, over whatever range a character control acts on.
     ///
-    /// **First in the tab, because it is the attribute a selection is most often
-    /// made to change**, and because the two rows below it — Case and Decoration —
-    /// both describe ink that inherits from here. Reading downwards then goes from
-    /// what the letters are drawn in to what is done to them.
-    ///
-    /// **Absence means the layer's fill stack**, which is what keeps the Fill panel
-    /// meaningful for text and needs no migration: a document with no run colours is
-    /// a document where every run inherits, exactly as before. It is also why the
-    /// swatch can show a *gradient* while the slot itself holds only one colour — a
-    /// run cannot be filled with a ramp (D154), but it can inherit a layer that is.
+    /// First in the tab because a selection is most often made to change it. Absence
+    /// means the layer's fill stack, so the swatch can show a gradient while the
+    /// slot holds one colour: a run cannot be filled with a ramp but can inherit one.
     fn color_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let mark = self.style_mark(
             subject.id,
@@ -2502,11 +2006,8 @@ impl OndinApp {
         self.reset_marked(hit, &mark);
     }
 
-    /// **Case is a display transform, and small caps is not here.** Real drawn
-    /// small capitals are a *feature* (`smcp`, in the OpenType list at the bottom
-    /// of this same tab); a case transform is a pre-shaping substitution.
-    /// Offering them side by side would suggest they are two ways of asking for
-    /// one thing.
+    /// Case is a display transform; small caps is not here because drawn small
+    /// capitals are the `smcp` OpenType feature, a different thing.
     fn case_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let case = attr!(subject, Case, Case);
         let mixed = subject.mixed(CharAttrKind::Case);
@@ -2542,30 +2043,20 @@ impl OndinApp {
     /// The decoration, and everything under it: thickness, offset, line style and
     /// colour, shown only when there is one.
     ///
-    /// **One of three, though the model can hold both.** `TextStyle` carries an
-    /// underline and a strikethrough independently and the renderer draws
-    /// whichever are set; the control offers a choice between them. That is a
-    /// deliberate narrowing, not a limitation leaking through: a line under *and*
-    /// through the same run is a mistake far more often than a request, and
-    /// supporting the pair costs two toggles, two collapsible blocks of four
-    /// controls each, and a reader who has to check both to know what is on. One
-    /// track says the whole state at a glance. Picking a decoration clears the
-    /// other and **carries the tuning across**, so switching between them is a
-    /// change of which line, not a reset of how it is drawn.
+    /// One of three, though the model can hold both an underline and a
+    /// strikethrough: both at once is rarely a request, and one track shows the
+    /// whole state. Picking a decoration clears the other and carries the tuning
+    /// across.
     ///
-    /// **Each of the three numbers has a `None` state meaning "the font
-    /// decides"** — the same "absence is a state" pattern as `Option<Pivot>`, and
-    /// what keeps the value correct across a font swap: a stored 1.2px underline
-    /// is wrong the moment the family changes, where the face's own `post` entry
-    /// is right in both.
+    /// Each of the three numbers has a `None` state meaning "the font decides",
+    /// which stays correct across a font swap.
     fn decoration_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let under = decoration_of(subject, CharAttrKind::Underline);
         let strike = decoration_of(subject, CharAttrKind::Strikethrough);
         let mixed =
             subject.mixed(CharAttrKind::Underline) || subject.mixed(CharAttrKind::Strikethrough);
         let current = decoration_cell(under, strike);
-        // Both lines and everything under them — thickness, offset, style,
-        // skip-ink and colour all live in the `Decoration`.
+        // Both lines and everything in the `Decoration` under them.
         let mark = self.style_mark(
             subject.id,
             |s| (s.underline, s.strikethrough),
@@ -2599,8 +2090,7 @@ impl OndinApp {
                 self.apply_char_attrs(subject, decoration_write(i, carried));
                 return;
             }
-            // Mixed has no one decoration to detail, and showing the first run's
-            // would be a claim the next edit would make true of all of them.
+            // Mixed has no one decoration to detail.
             let Some(d) = under.or(strike).filter(|_| !mixed) else {
                 return;
             };
@@ -2619,13 +2109,10 @@ impl OndinApp {
                     Prefix::Icon(icon::LINE_VERTICAL),
                     d.thickness,
                     font_size,
-                    // **Unsigned**: a negative thickness has no meaning (§15 D546).
+                    // Unsigned: a negative thickness has no meaning.
                     Bounds::DECORATION_THICKNESS,
                     // What the face is drawing, so leaving *Font* changes the unit
-                    // and not the line (§15 D570). Filtered above zero because a
-                    // seed of zero is the bug this closes — a face that reports no
-                    // thickness has nothing to offer and falls back to the old
-                    // behaviour rather than pretending to.
+                    // and not the line; a zero seed would erase it.
                     subject
                         .decoration_sizes
                         .map(|(u, s)| if under.is_some() { u } else { s })
@@ -2637,24 +2124,17 @@ impl OndinApp {
                     d.thickness = next;
                     self.decoration_write(&e, subject, decoration_attr(kind, Some(d)));
                 }
-                // **An arrow that points, rather than one that spans.** The offset
-                // is positive-*up*, so pushing an underline clear of the descenders
-                // means typing a negative number — and a symmetric double-headed
-                // arrow (which is also line height's prefix, two fields away) said
-                // "vertical" while saying nothing about which way. One glyph is the
-                // whole hint; the tooltip carries the rest.
+                // An arrow that points: the offset is positive-up, so clearing the
+                // descenders takes a negative number.
                 let e = optional_length_field(
                     ui,
                     egui::vec2(half, CELL),
                     Prefix::Icon(icon::ARROW_UP),
                     d.offset,
                     font_size,
-                    // **Signed** — this is the field whose range the thickness
-                    // once inherited, sign and all (§15 D546).
+                    // Signed.
                     Bounds::DECORATION_OFFSET,
-                    // Nothing to seed from — the face's own offset is on the same
-                    // metrics, but its sign is parley's and this field's is not
-                    // (§15 D151, D570).
+                    // Nothing to seed from: the face's offset sign is parley's, not ours.
                     None,
                     "Offset from the baseline, positive upwards — so a lower line is \
                      a negative number. The font's own unless set",
@@ -2673,22 +2153,10 @@ impl OndinApp {
             // than pictures, and four words in 250px is the width at which a
             // segmented control starts abbreviating.
             //
-            // **Beside it, on an underline only, the skip-ink toggle** (§15 D357).
-            // It belongs on this row because it answers the same question the line
-            // style does — what the band *looks like* — and not the two rows above,
-            // which are where the band is and how thick. `Decoration::skip_ink` is
-            // read for underlines and never for a strikethrough (a `line-through` is
-            // meant to cross the letters, css-text-decor-4), so the button is absent
-            // rather than disabled on one and the dropdown takes the whole width back:
-            // a control that cannot do anything is worse than no control, and the
-            // model field it would write is one nothing reads.
-            //
-            // **Lit is the default state here**, which is unusual for this chrome and
-            // is the honest reading: the button says what the line is doing, as
-            // `TEXT_BOLD` does, and skipping is on unless it is switched off. The
-            // alternative — lighting the button for the *non*-default — would mean a
-            // dark toggle beside a broken line and a lit one beside a continuous
-            // rule, which is the state backwards.
+            // Beside it, on an underline only, the skip-ink toggle: `skip_ink` is never
+            // read for a strikethrough, so the button is absent there and the dropdown
+            // takes the width back. Lit is the default state, saying what the line
+            // is doing.
             let skips = under.is_some();
             let style_w = if skips {
                 MENU_INNER - COL_GAP - CELL
@@ -2738,29 +2206,18 @@ impl OndinApp {
 
     /// The decoration's colour: a swatch, its hex, its opacity, and a reset.
     ///
-    /// **Absence means the text's own colour**, which is what makes it the
-    /// default — recolour the text and the decoration follows. The field draws
-    /// that state with the *resolved* colour ([`TypeSubject::text_color`]) rather
-    /// than a placeholder grey, because a grey chip would be a claim about a
-    /// colour the panel does not know; and the reset button is what tells the two
-    /// states apart, present only while the colour is this decoration's own.
+    /// Absence means the text's own colour, so recolouring the text moves the
+    /// decoration; the field draws that state with the resolved colour
+    /// ([`TypeSubject::text_color`]) and the reset button shows only while the
+    /// colour is the decoration's own.
     ///
-    /// The hex is buffered like the paint rows', and for the same reason: half of
-    /// `9184D9` is itself a legal colour, so parsing per keystroke would recolour
-    /// the line four times on the way and leave four undo steps behind. The
-    /// opacity goes through the drag valve, so a scrub is one step.
-    ///
-    /// **The swatch opens the detached picker**, as every other swatch in the app
-    /// does, through a `PaintSlot` of its own
-    /// ([`crate::panels::paint::PaintSlot::TextDecoration`]). It
-    /// was a bare preview in the first pass, on the grounds that the picker is
-    /// written against a paint list and a decoration is not one — which is true of
-    /// `slot_transaction` and of nothing else, so the fix was one diverted write
-    /// rather than a second colour panel.
+    /// The hex is buffered like the paint rows' (half of `9184D9` is a legal colour,
+    /// so per-keystroke parsing would leave several undo steps); the opacity goes
+    /// through the drag valve. The swatch opens the detached picker through a
+    /// `PaintSlot` of its own ([`crate::panels::paint::PaintSlot::TextDecoration`]).
     fn char_color_row(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, slot: CharSlot) {
         let kind = slot.kind();
-        // The colour stored *in this slot*, or `None` for the inherited state. Both
-        // slots have one, which is what lets one row drive both.
+        // The colour stored in this slot, or `None` for the inherited state.
         let own = match slot {
             CharSlot::Color => attr!(subject, Color, Color),
             CharSlot::Decoration(side) => decoration_of(subject, side.kind()).and_then(|d| d.color),
@@ -2770,20 +2227,14 @@ impl OndinApp {
             .as_ref()
             .is_some_and(|p| p.node == subject.id && p.slot == slot.paint_slot());
         let shown = own.unwrap_or_else(|| subject.text_color());
-        // The inherited paint's ramp, and only while it is being inherited: once the
-        // slot has a colour of its own, the node's gradient has nothing to do with
-        // what is drawn. The same question for both slots — a decoration inherits the
-        // run's ink and a run inherits the node's fill, and `text_paint` is where that
-        // chain bottoms out.
+        // The inherited paint's ramp, only while it is being inherited.
         let ramp = own.is_none().then(|| subject.text_ramp()).flatten();
-        // Committed at once — a hex is finished when it loses focus, and a reset
-        // is a click.
+        // Committed at once.
         let mut now: Option<Option<Color>> = None;
         // Valved — a scrub is one undo step, not one per frame.
         let mut opacity: Option<(egui::Response, f64)> = None;
         let mut open = false;
-        // Where the row lands, so the picker opens beside it rather than beside
-        // the whole popup.
+        // The picker opens beside this row, not the whole popup.
         let anchor = ui.cursor().min;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -2822,18 +2273,8 @@ impl OndinApp {
                     if resp.gained_focus() || resp.changed() {
                         self.char_hex = Some((slot, text.clone()));
                     }
-                    // Dropping the buffer here is what strips a typed or pasted
-                    // `#`: the field falls back to `hex_of`, which never writes one.
-                    // 🚨 **`Escape` drops the buffer and writes nothing** (§15
-                    // D841). This read `if let Some(…) = parse_hex(&text)` with
-                    // no `Escape` clause, so the key that cancels everywhere
-                    // else committed the typed colour — `[X6-L1-02]`'s second
-                    // site, and the same input §15 D808 records as the bug.
-                    //
-                    // ⚠️ **The clear is outside the guard and the write inside
-                    // it.** Both have to happen on `Escape` except the write: a
-                    // cancelled edit that kept its buffer would leave the
-                    // abandoned text in the field.
+                    // Dropping the buffer strips a typed `#`. `Escape` drops it and
+                    // writes nothing: the clear is outside the guard, the write inside.
                     if resp.lost_focus() {
                         self.char_hex = None;
                         if let Some([r, g, b]) =
@@ -2858,9 +2299,8 @@ impl OndinApp {
                     });
                 },
             );
-            // Live whenever there is *anything* to put back: this slot's own colour,
-            // or a range that disagrees about it at all — see `TypeSubject::ragged`
-            // for the bug the second term fixes.
+            // Live whenever there is anything to put back: this slot's own colour, or
+            // a range that disagrees about it (`TypeSubject::ragged`).
             if reset_slot(ui, own.is_some() || subject.ragged(kind), slot.reset_tip()) {
                 now = Some(None);
             }
@@ -2870,12 +2310,9 @@ impl OndinApp {
                 self.apply_char_attrs(subject, vec![attr]);
             }
         } else if let Some((resp, pct)) = opacity
-            // **Only while the field is actually being used.** The valve gates on
-            // the response, so an idle frame writes nothing either way — but it
-            // would still *build* a transaction from a frame-start snapshot every
-            // frame, and this row runs before the axes and the OpenType list. One
-            // stale `SetTextStyle` reaching the valve on a frame where something
-            // else had already committed would undo it.
+            // Only while the field is in use: an idle frame would otherwise build a
+            // transaction from a frame-start snapshot, and a stale `SetTextStyle`
+            // reaching the valve after another commit would undo it.
             //
             // valve-gate-not-a-commit: the commit is `char_valve`'s, on its own
             // engagement latch; this only decides whether to reach it.
@@ -2884,17 +2321,14 @@ impl OndinApp {
                 || resp.changed()
                 || resp.lost_focus())
         {
-            // Fading an inherited colour adopts it: the alpha has to live somewhere,
-            // and the only place either slot has for it is its own `color`.
+            // Fading an inherited colour adopts it: the alpha lives in the slot's `color`.
             let faded = Some(shown.with_alpha((pct / 100.0) as f32));
             if let Some(attr) = char_color_attr(subject, slot, faded) {
                 self.char_valve(&resp, subject, attr);
             }
         }
-        // **Opening the picker adopts the colour first.** The picker writes one
-        // colour into the slot, so a slot still inheriting has nothing for it to
-        // point at — and the value it adopts is the one already on screen, so the
-        // click changes what is *editable* and not what is drawn.
+        // Opening the picker adopts the colour already on screen first, since the
+        // picker needs a colour in the slot to point at.
         if open {
             if own.is_none()
                 && let Some(attr) = char_color_attr(subject, slot, Some(shown))
@@ -2907,11 +2341,8 @@ impl OndinApp {
 
     /// Word spacing and baseline shift, side by side.
     ///
-    /// Baseline shift is signed and is a *draw* offset — it moves the run without
-    /// changing the line box, which is what keeps neighbouring baselines aligned.
-    ///
-    /// Two fields with prefixes of their own, so each carries its own mark (§15
-    /// D981), as the card's letter spacing does, rather than the section's label.
+    /// Baseline shift is signed and a draw offset: it moves the run without changing
+    /// the line box. Each field carries its own mark rather than the section's label.
     fn spacing_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let word = self.style_mark(
             subject.id,
@@ -2953,9 +2384,8 @@ impl OndinApp {
         });
     }
 
-    /// `opsz`, above the axis list and with a mode of its own — **the one axis
-    /// that has one**. Auto writes no coordinate at all, so the shaper takes the
-    /// font size; Manual pins a value.
+    /// `opsz`, above the axis list and with a mode of its own. Auto writes no
+    /// coordinate, so the shaper takes the font size; Manual pins a value.
     fn optical_size_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -2967,9 +2397,8 @@ impl OndinApp {
             return;
         };
         let auto = !coords.iter().any(|a| a.tag == OPSZ);
-        // The one coordinate, absent for Auto. The Axes section's mark compares
-        // the rest, so a difference shows on the section that draws it. The reset
-        // rebuilds the list in the main's order (`axes_reset`, `[X9.2-L1-01]`).
+        // The one coordinate, absent for Auto; the Axes section's mark compares the
+        // rest. The reset rebuilds the list in the main's order (`axes_reset`).
         let mark = self.style_mark(
             subject.id,
             |s| AxesOf {
@@ -2992,12 +2421,8 @@ impl OndinApp {
                 let mut next: Vec<AxisSetting> =
                     coords.iter().copied().filter(|a| a.tag != OPSZ).collect();
                 if i == 1 {
-                    // Manual starts from what Auto was giving, so the switch
-                    // itself changes nothing on screen.
-                    // `FontAxis::clamp`, not `f64::clamp`, and the difference is
-                    // a panic: an `fvar` axis record whose ends are reversed is
-                    // something a font can simply contain, and `f64::clamp`
-                    // asserts on the ordering in release as well as in debug.
+                    // Manual starts from what Auto was giving. `FontAxis::clamp`, not
+                    // `f64::clamp`, which panics on a font's reversed `fvar` ends.
                     next.push(AxisSetting::new(OPSZ, opsz.clamp(subject.font_size())));
                 }
                 self.apply_char_attrs(subject, vec![CharAttr::Variations(next)]);
@@ -3006,10 +2431,7 @@ impl OndinApp {
             if auto {
                 return;
             }
-            // A slider and its readout, with no name and no reset. The section
-            // label already names the axis, and **Auto is the reset** — a button
-            // beside it meaning "the font's default" would be a second way to
-            // spell the cell directly above.
+            // No name and no reset: the section label names the axis and Auto is the reset.
             self.opsz_row(ui, subject, opsz, coords);
         });
         self.reset_marked(hit, &mark);
@@ -3017,25 +2439,14 @@ impl OndinApp {
 
     /// The list marker: a dropdown of `None` plus the eight kinds.
     ///
-    /// **A `ComboBox` rather than a segmented track**, which is what the rest of this
-    /// tab uses — nine cells will not fit the card's width, and the shape of the
-    /// choice is the *same* as Language's, `None` plus a list of named options. The
-    /// panel already answers that shape one way, and consistency of interaction beats
-    /// matching the section above it.
+    /// A `ComboBox` rather than a segmented track: nine cells will not fit, and the
+    /// choice has Language's shape, `None` plus named options.
     ///
-    /// **Turning a marker on also opens a gutter for it, once.** The marker is
-    /// right-aligned on the paragraph's own start edge (`ParagraphStyle::marker`), so
-    /// at `indent_start` 0 it draws at a negative x — outside the box, which is the
-    /// honest reading of "no gutter" and a poor first impression. A default is written
-    /// only when the value is still zero, so a user who chose their own indent, or who
-    /// deliberately zeroed it, is not overruled.
+    /// Turning a marker on also opens a gutter for it, once: the marker is
+    /// right-aligned on the paragraph's start edge, so at `indent_start` 0 it draws
+    /// outside the box. A default is written only while the value is still zero.
     ///
-    /// **The nesting level sits under the dropdown, and only where there is a list.**
-    /// `ParagraphStyle::level` indents any paragraph, marker or not — deliberately, so
-    /// the field is never inert — but the level of a paragraph that is not an item is
-    /// not a thing anyone comes to this card to set, and the row would be dead weight
-    /// on every text node that is not a list. Reached only through an item, it also
-    /// needs no gutter default of its own: the pick above has already written one.
+    /// The nesting level sits under the dropdown, only where there is a list.
     fn list_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, shown: &ParagraphStyle) {
         let current = shown.marker;
         let mixed = subject.para_mixed(ParaAttrKind::Marker);
@@ -3046,8 +2457,7 @@ impl OndinApp {
         };
         let mut pick: Option<Option<ListMarker>> = None;
         let mut nest: Option<(egui::Response, u8)> = None;
-        // The marker and its level. The gutter a pick opens is the Spacing &
-        // indent section's start indent, and marked there.
+        // The marker and its level; the gutter a pick opens is marked by Spacing & indent.
         let mark = self.para_mark(
             subject.id,
             |p| (p.marker, p.level),
@@ -3059,7 +2469,7 @@ impl OndinApp {
         );
         let (_, hit) = section_marked(ui, "List", mark.as_ref(), |ui| {
             ui.scope(|ui| {
-                // `CELL` whole: a combo strokes inside its own rect (§15 D85).
+                // `CELL` whole: a combo strokes inside its own rect.
                 ui.spacing_mut().interact_size.y = CELL;
                 ui.spacing_mut().button_padding.y = 0.0;
                 egui::ComboBox::from_id_salt("type-list-marker")
@@ -3097,17 +2507,11 @@ impl OndinApp {
                 let resp = value_field(
                     ui,
                     egui::vec2(MENU_INNER, CELL),
-                    // **A word, where every other field in this popup has a glyph.**
-                    // Phosphor's nesting glyphs are trees and file hierarchies, which
-                    // is the layers panel's language rather than this one's, and the
-                    // three glyphs that would read as "indent" are all spoken for by
-                    // the controls in the section above — the first-line pair and the
-                    // two block indents. A fourth arrow-against-an-edge here would be
-                    // the fifth member of a set of four.
+                    // A word: the nesting glyphs are the layers panel's language and
+                    // every "indent" glyph is taken by the section above.
                     Prefix::Text("Level"),
                     &mut level,
-                    // Slow: nine values over the whole range, so a scrub that means to
-                    // go in one step does not go in three. Typing is unaffected.
+                    // Slow: nine values over the whole range.
                     Scrub::whole(0.05).range(0.0..=f64::from(MAX_LIST_LEVEL)),
                     |d| mixed_text(d.max_decimals(0), level_mixed),
                 )
@@ -3122,21 +2526,17 @@ impl OndinApp {
             self.reset_marked(hit, &mark);
             return;
         }
-        // **Or the frame the scrub ended on**, which carries no new value and is the
-        // one the valve commits on — the same rule the `Length` fields state at
-        // [`length_field`]'s return, and for the same reason. Without it the last drag
-        // of this field stayed in the preview.
+        // Or the frame the scrub ended on, which carries no new value and is the one
+        // the valve commits on.
         if let Some((resp, level)) = nest.filter(|(r, l)| *l != shown.level || r.drag_stopped()) {
-            // Through the valve, like the four `Length` fields above it and for D108's
-            // reason: a scrub previews and commits once, rather than once per frame.
+            // Through the valve: a scrub previews and commits once.
             self.valve_paragraph(&resp, subject, ParaAttr::Level(level));
         }
         let Some(next) = pick else {
             return;
         };
-        // `para_ragged` for the same reason the hanging pair needs it (§15 D164):
-        // over a non-partial range `shown` reads the *first* paragraph, so picking the
-        // value it already shows must still write when another paragraph disagrees.
+        // `para_ragged`: over a non-partial range `shown` reads the first paragraph,
+        // so picking the shown value must still write when another disagrees.
         if !subject.para_ragged(ParaAttrKind::Marker) && current == next {
             return;
         }
@@ -3149,25 +2549,8 @@ impl OndinApp {
             CharAttr::Locale(v) => v,
             _ => None,
         };
-        // **The friendly name closed as well as open** (§15 D704,
-        // `[S6.3-L3-08]`). This was `current` verbatim, so the control
-        // disagreed with itself between its two states: the list offered
-        // *Chinese (Simplified)* and, once picked, the field read `zh-Hans`;
-        // *German* became `de`. `LANGUAGES` is a `(tag, name)` table whose
-        // stated job — *"languages worth offering by name"* — is exactly this
-        // mapping, and it was honoured on one side of the control only. It was
-        // also the one control in this file showing the user a raw wire value;
-        // the two combos beside it, `enum_combo` and `feature_choice_row`, both
-        // resolve their closed text through the same table their list uses.
-        // 🚨 `feature_values`, which is the second of those, states the rule
-        // in as many words: *"The list and the closed dropdown are two readings
-        // of the same mapping."* So this was a rule written down in one place
-        // and broken in the one beside it, which is the shape to look for.
-        //
-        // ⚠️ **An unlisted tag falls back to itself rather than to *None*.** A
-        // document can carry a locale this table does not offer — an imported
-        // `xml:lang`, or a file written against a longer list — and that is a
-        // real setting the panel must not describe as absent.
+        // The closed field shows the friendly name from `LANGUAGES`, as the list does;
+        // an unlisted tag (an imported `xml:lang`) falls back to itself, not *None*.
         let label = match current.as_deref() {
             None => "None".to_string(),
             Some(tag) => LANGUAGES
@@ -3190,7 +2573,7 @@ impl OndinApp {
         );
         let (_, hit) = section_marked(ui, "Language", mark.as_ref(), |ui| {
             ui.scope(|ui| {
-                // `CELL` whole: a combo strokes inside its own rect (§15 D85).
+                // `CELL` whole: a combo strokes inside its own rect.
                 ui.spacing_mut().interact_size.y = CELL;
                 ui.spacing_mut().button_padding.y = 0.0;
                 egui::ComboBox::from_id_salt("type-language")
@@ -3235,9 +2618,8 @@ impl OndinApp {
         if listed.is_empty() {
             return;
         }
-        // The coordinates this list draws: not `opsz`, which is Optical size's,
-        // and not the axes the variant drives, which are the card's face mark.
-        // Reset in the main's order (`axes_reset`, `[X9.2-L1-01]`).
+        // The coordinates this list draws: not `opsz` (Optical size's) nor the axes
+        // the variant drives. Reset in the main's order (`axes_reset`).
         let own = |t: Tag| t != OPSZ && !AXES_DRIVEN_ELSEWHERE.contains(&t);
         let mark = self.style_mark(
             subject.id,
@@ -3274,32 +2656,17 @@ impl OndinApp {
     /// The face's OpenType features as switches, named, described on hover, and
     /// curated — over a search field.
     ///
-    /// **Nearly all of them are switches; a `cvXX` the font declares more than one
-    /// named value for is not**, and draws a [`feature_choice_row`] instead. That
-    /// is the only row here that is not a toggle, and `values.len()` — the count
-    /// out of the font's own `FeatureParams` — is the whole of what decides it.
+    /// Nearly all are switches; a `cvXX` the font declares more than one named
+    /// value for draws a [`feature_choice_row`] instead (`values.len()` decides).
     ///
-    /// **Tabular figures (`tnum`) is the single highest-value feature in the
-    /// list** — it is the difference between a column of numbers lining up and
-    /// not — so the well-known tags sort to the top rather than being buried in
-    /// `ss01`–`ss20` alphabetical order.
+    /// The well-known tags (`tnum` first) sort to the top rather than into
+    /// `ss01`–`ss20` order. The list leaves out the tags that are required or
+    /// applied per script by the shaper (`aalt`, `ccmp`, `locl`, ...), since a switch
+    /// for them only mis-shapes text; [`REGISTRY`] carries the verdict per tag and
+    /// *Show all features* restores the rest. The model still carries any tag.
     ///
-    /// **What the list leaves out is the reason it is readable at all.** A face
-    /// with a full `GSUB`/`GPOS` offers `aalt`, `ccmp`, `locl`, `mark`, `mkmk`,
-    /// `numr`, `dnom` and friends beside its stylistic sets, and every one of
-    /// those is either required, applied per script by the shaper, or applied as
-    /// a corollary of another feature — so a switch for it does not offer a
-    /// choice, it offers a way to mis-shape text. [`REGISTRY`] carries the
-    /// registry's own verdict per tag and *Show all features* is the way back to
-    /// the full list; nothing about the **model** changes either way, since
-    /// `CharAttr::Features` still carries any tag and a document that has one set
-    /// keeps it.
-    ///
-    /// The search field is unconditional. It used to appear only past ten
-    /// features, on the reasoning that below that it was more chrome than the list
-    /// it filtered; but the section's *height* is already fixed by the scroll area
-    /// under it, so the only thing the threshold bought was a card whose layout
-    /// depended on which family happened to be selected.
+    /// The search field is unconditional so the card's layout does not depend on the
+    /// family.
     fn features_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -3309,40 +2676,22 @@ impl OndinApp {
         if available.is_empty() {
             return;
         }
-        // **Over a selection whose runs disagree, each row reads per tag** (§15
-        // D752, closing the half of `[S6.2-L1-05]` that §15 D636 left open): `set`
-        // resolves at the first run, so a row whose tag the runs disagree about
-        // draws `ui::switch_row_mixed`'s word rather than the first run's knob, and
-        // a toggle over a range writes that one tag into each run's own list
-        // rather than the first run's whole list over all of them
-        // (`write_feature_tag`; a whole-node write flattens, by design). Both
-        // halves were the maintainer's ruling. This comment said both were still
-        // open until 2026-10-06, a month after they were fixed.
+        // Over a selection whose runs disagree each row reads per tag: `set` resolves
+        // at the first run, so a disagreeing tag draws `ui::switch_row_mixed`, and a
+        // toggle writes that one tag into each run's list (`write_feature_tag`).
         let set = attr!(subject, Features, Features);
         let mut ordered: Vec<(Tag, FeatureLabel)> = available
             .iter()
             .map(|f| (f.tag, feature_label(f)))
             .collect();
         ordered.sort_by_key(|(tag, _)| (feature_rank(*tag), tag.to_string()));
-        // **A withheld feature the document has an opinion about is shown anyway**,
-        // whichever way that opinion goes: a switch nobody can see is a state
-        // nobody can undo. So the curation hides tags this text does not mention,
-        // and a file that arrives with `locl 0` in it — or one written before the
-        // list was curated — still shows the row it would take to change.
+        // A withheld feature the document sets is shown anyway: a switch nobody can
+        // see is a state nobody can undo.
         let shown = |tag: &Tag, l: &FeatureLabel| l.offered || set.iter().any(|f| f.tag == *tag);
-        // ⚠️ **The hidden count is *not* taken here** (§15 D691). It used to be,
-        // and it was wrong by however many withheld features the search box was
-        // excluding: two filters decide what the list contains and only one of
-        // them is knowable at this point, because the needle is not read until
-        // the field below has been drawn. It is counted next to the loop it has
-        // to agree with instead.
-        // **One writer for both kinds of row.** A switch and a choice row produce
-        // the same thing — a tag and the value to write — and two `Option`s would
-        // be two `apply_char_attrs` calls off one `set` clone in a frame where both
-        // fired, which silently drops the first.
+        // One writer for both kinds of row: two `Option`s would make two
+        // `apply_char_attrs` calls off one `set` clone, dropping the first.
         let mut written: Option<(Tag, u16)> = None;
-        // The whole list: a feature set on the main and cleared here is as much
-        // a difference as one set here alone.
+        // The whole list.
         let mark = self.style_mark(
             subject.id,
             |s| s.features.clone(),
@@ -3361,11 +2710,8 @@ impl OndinApp {
                     SEARCH_ICON_PT,
                     theme::text::FAINT,
                 ));
-                // **The room left, spelled out.** A `TextEdit` that asks for more
-                // than its row has grows the row, and the row is what pins the
-                // card's width — so this is the field's content box minus the
-                // magnifier and the gap after it, not a round number that happened
-                // to fit at the width the popup used to be.
+                // The room left: a `TextEdit` asking for more than its row grows the
+                // row, which pins the card's width.
                 ui.add(
                     egui::TextEdit::singleline(&mut self.feature_filter)
                         .frame(egui::Frame::NONE)
@@ -3376,21 +2722,14 @@ impl OndinApp {
                 );
             });
             let needle = self.feature_filter.to_lowercase();
-            // **The search test, written once** (§15 D691), because the row loop
-            // and the reveal's count have to answer it the same way — and the
-            // whole of `[S6.3-L1-07]` is that they did not. The list applies
-            // *both* this and `shown`; the count applied only `shown`, so with a
-            // needle typed the collapsed reveal offered "(43 more)" and the click
-            // added nothing, every one of the 43 being filtered out. That is the
-            // "control that cannot change anything" state [`features_reveal`]
-            // exists to suppress, reached by the door it does not test for.
+            // The search test, written once: the row loop and the reveal's count must
+            // answer it the same way, or the reveal offers rows the needle filters out.
             let matches = |tag: &Tag, l: &FeatureLabel| {
                 needle.is_empty()
                     || l.name.to_lowercase().contains(&needle)
                     || tag.to_string().contains(&needle)
             };
-            // Exactly the rows a click on *Show all features* would add: withheld
-            // by the curation, and surviving the needle.
+            // Exactly the rows *Show all features* would add: withheld, and matching.
             let hidden = ordered
                 .iter()
                 .filter(|(t, l)| !shown(t, l) && matches(t, l))
@@ -3415,24 +2754,15 @@ impl OndinApp {
                             }
                             continue;
                         }
-                        // 🚨 **The mixed readout, per tag** (§15 D752). `value`
-                        // above resolves at `range.start` — the *first run* — so
-                        // over a selection whose runs disagree this row used to
-                        // draw the first run's answer as though it were the
-                        // selection's, which is the one thing `mixed_text`'s doc
-                        // says a control must not do: *"showing one of the several
-                        // values reads as a claim that it is **the** value — which
-                        // the next drag would then make true for all of them."*
+                        // `value` resolves at the first run, so a disagreeing tag
+                        // must draw the mixed readout instead.
                         let mixed = subject.feature_mixed(*tag);
                         let row = if mixed {
                             ui::switch_row_mixed(ui, &label.name, FEATURE_ROW_H)
                         } else {
                             ui::switch_row(ui, &label.name, value > 0, FEATURE_ROW_H)
                         };
-                        // **The tooltip says what a click will do, because a mixed
-                        // row is the one place the answer is not obvious.** On an
-                        // ordinary row the switch's position says it; here there is
-                        // no position, so the sentence carries it.
+                        // A mixed row has no position, so the tooltip says what a click does.
                         let row = if mixed {
                             row.on_hover_text(format!(
                                 "{}\n\nMixed — some of the selection has this on. \
@@ -3443,28 +2773,15 @@ impl OndinApp {
                             row.on_hover_text(label.hover.as_str())
                         };
                         if row.clicked() {
-                            // Written as an explicit `0` rather than removed, because
-                            // the two are not the same request: absent means "whatever
-                            // the font does by default", where `liga 0` means "off" —
-                            // and most faces have ligatures on by default.
-                            //
-                            // ⚠️ **A mixed row turns the feature *on*** rather than
-                            // toggling off the first run's value: `value` is run 1's
-                            // and a click on a row that shows no position has to mean
-                            // something the user can predict from the row alone. The
-                            // tooltip says which.
+                            // An explicit `0`, not a removal: absent means the font's
+                            // default (ligatures are usually on), `liga 0` means off.
+                            // A mixed row turns the feature on, not off by run 1's value.
                             written = Some((*tag, if mixed { 1 } else { u16::from(value == 0) }));
                         }
                     }
                 });
-            // **The reveal, under the list rather than beside the search.** It
-            // changes what the list *contains*, which is the scroll area's
-            // business, and putting it in the field row would have it read as a
-            // filter — the one thing it is not.
-            //
-            // Absent when the face has nothing withheld, because then it is a
-            // control that cannot change anything — see [`features_reveal`], which
-            // owns that question and is where the reported disappearance was.
+            // The reveal sits under the list, not beside the search, so it does not read
+            // as a filter; absent when nothing is withheld ([`features_reveal`]).
             if let Some(text) = features_reveal(self.show_all_features, hidden)
                 && ui
                     .add(
@@ -3474,24 +2791,8 @@ impl OndinApp {
                                 .color(theme::text::FAINT),
                         )
                         .sense(egui::Sense::click())
-                        // **A clickable label is not text.** egui's `Label` is
-                        // selectable by default, which is what put an I-beam over a
-                        // control that toggles the list — reported here first, and
-                        // later reported again about every card eyebrow, which is
-                        // why the app now turns the whole style off
-                        // (`theme::install_style_into`). This is therefore no longer
-                        // load-bearing and is kept as a local statement of what the
-                        // row is: not text, whatever the style says.
-                        //
-                        // ⚠️ **And it *is* the fix now, because the `PointingHand`
-                        // that used to sit under this line is gone.** The app shows
-                        // the arrow over chrome everywhere (§9.2); the cursor
-                        // changes only where the change means something. Measured
-                        // when this row was written and still true: a selectable
-                        // label reports `CursorIcon::Text` and `selectable(false)`
-                        // reports `Default` — so the I-beam this row was reported
-                        // for stays fixed by the call above, and the hand it also
-                        // acquired was the part that broke the rule.
+                        // A clickable label is not text: a selectable `Label` reports
+                        // the I-beam cursor.
                         .selectable(false),
                     )
                     .on_hover_text(
@@ -3510,32 +2811,13 @@ impl OndinApp {
         }
     }
 
-    /// Set one OpenType tag across the selection, leaving every **other** tag in
-    /// each run exactly as it was (§15 D752, `[S6.2-L1-05]`).
+    /// Set one OpenType tag across the selection, leaving every other tag in each
+    /// run as it was.
     ///
-    /// 🚨 **This used to be four lines and they flattened the selection.** It read
-    /// `set.clone()` — the list `attr!` resolves at `range.start`, i.e. the *first
-    /// run* — edited the one tag into it and applied that list to everything. So
-    /// toggling `liga` over a range whose second half had `tnum` on wrote the
-    /// first run's list over both, and the `tnum` was gone with nothing said. The
-    /// maintainer's ruling: *"Write only the tag you named and leave each run's
-    /// other features alone."*
-    ///
-    /// **Two arms, because a partial selection and a whole node are different
-    /// questions rather than two spellings of one.** Over a *selection* the runs
-    /// are real and each keeps its own list, which is what
-    /// `EditorSession::style_selection_per_run` is for. Over a **whole node**
-    /// there is nothing to preserve: a whole-node write flattens the spans by
-    /// design, and `TypeSubject::mixed` is false there for exactly that reason —
-    /// what the row shows is what the write will produce, so it is not lying.
-    /// Routing the whole-node case through the per-run path would be a change to
-    /// D130's rule rather than to this bug.
-    ///
-    /// ⚠️ **The merge is here rather than in core** — `style_selection_per_run`
-    /// takes a closure over each run's own value and knows nothing about
-    /// OpenType. A tag is absent-means-default, so a run that does not name the
-    /// tag gains it and a run that does has its value replaced; both are the same
-    /// two lines and neither disturbs a neighbouring tag.
+    /// Two arms: over a selection each run keeps its own list
+    /// (`EditorSession::style_selection_per_run`); over a whole node a write
+    /// flattens the spans by design. The merge lives here because core knows nothing
+    /// about OpenType: a run naming the tag has its value replaced, otherwise gains it.
     fn write_feature_tag(&mut self, subject: &TypeSubject, tag: Tag, value: u16) {
         let merge = move |list: &[FeatureSetting]| {
             let mut next = list.to_vec();
@@ -3565,11 +2847,8 @@ impl OndinApp {
     /// One row of the axis list: the axis's name and its value on one line, its
     /// slider under them.
     ///
-    /// **The name and the value share a line because the slider needs the whole
-    /// width.** A 250px row split between a label, a field, a reset and a slider
-    /// leaves the slider about 90px, which for a `wght` axis of 100–900 is under
-    /// nine pixels per hundred units — a control you cannot aim. Two lines cost
-    /// height in a list that scrolls anyway.
+    /// The name and the value share a line because the slider needs the whole width
+    /// to be aimable; the list scrolls anyway.
     fn axis_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -3582,8 +2861,7 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.y = LABEL_GAP;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
-                // A fixed column, so the fields line up down a list of axes whose
-                // names are all different lengths.
+                // A fixed column, so the fields line up.
                 ui.allocate_ui_with_layout(
                     egui::vec2(width - AXIS_FIELD_W - CELL - COL_GAP * 2.0, CELL),
                     egui::Layout::left_to_right(egui::Align::Center),
@@ -3604,9 +2882,8 @@ impl OndinApp {
                 );
                 self.axis_field(ui, subject, axis, coords, AXIS_FIELD_W, true);
             });
-            // `true`, the same as the field above it — the reset slot is on this
-            // row, so "back to the font's own value" has to mean *no coordinate*
-            // whichever of the two controls arrives at it (§15 D569).
+            // `true` as for the field above: the reset means no coordinate whichever
+            // control arrives at it.
             self.axis_slider(ui, subject, axis, coords, width, true);
         });
     }
@@ -3622,9 +2899,8 @@ impl OndinApp {
     ) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = COL_GAP;
-            // `false` for `opsz`, where an absent coordinate is the **Auto** state
-            // and dropping one at the default would silently change the mode —
-            // `write_axis`'s own rule, now reaching the valve too.
+            // `false` for `opsz`: an absent coordinate is the Auto state, so dropping
+            // one at the default would change the mode.
             self.axis_slider(
                 ui,
                 subject,
@@ -3650,52 +2926,16 @@ impl OndinApp {
     ) {
         let current = axis_value(axis, coords);
         let mut value = current;
-        // **A dash where the selection disagrees**, which is this panel's own word
-        // for it and was the one section that did not use it (§15 D636,
-        // `[S6.2-L1-05]`). `subject.mixed` *was* asked **zero** times across
-        // `axes_section` and `features_section` — this call is the first;
-        // `ragged` is asked once, one line below, and its answer spent on the
-        // reset button, so the code had the question right there and put the
-        // answer somewhere else. Over a selection whose first word is `wght 300`
-        // and whose second is `wght 800`, the field read **300** with no mark,
-        // which is `mixed_text`'s own objection: *"showing one of the several
-        // values reads as a claim that it is **the** value — which the next drag
-        // would then make true for all of them"*.
-        //
-        // 🚨 **This is a fifth caller of a *departure* from §15 D130, and the
-        // departure is the panel's rather than this line's.** D130 is *Resolved*
-        // and says a control spells the word **"Mixed"** wherever five letters
-        // fit, with the dash confined to *"exactly two"* places — a segmented cell
-        // and a 16px swatch. `mixed_text` paints a dash into a `DragValue`'s
-        // digits, and it had **four** callers before this one — Size, the list
-        // *Level*, `length_char_field` (three fields) and `length_field` (five) —
-        // plus the line-height field's hand-rolled copy. So the Type panel already
-        // spells mixed differently from the inspector, which says the word at
-        // three sites. **The dash is chosen here anyway, on D130's own argument
-        // against itself**: *"The alternative is one field spelling the state
-        // differently from the three beside it."* Matching D130's letter on this
-        // one field would do exactly that, nine times over.
-        //
-        // ⚠️ **The panel-wide question is one ruling and is not taken here**:
-        // either D130's *"exactly two"* is amended to name `mixed_text`, or the
-        // Type panel's ten fields learn the word — and that second one carries
-        // D130's own recorded trap, since egui appends a `suffix` *after* a custom
-        // formatter and `"Mixed%"` is what the paint row already had to be fixed
-        // for. **Do not cite this comment as the argument for a sixth dash.**
-        //
-        // ⚠️ **The slider below keeps its knob and that is deliberate**, the same
-        // fork `multi_number` makes: a control has to operate from something real
-        // even while the field beside it is *saying* it does not know, and a
-        // knob has nowhere to be that means "mixed". What the dash buys is that
-        // the *number* stops making a claim; the drag is relative either way.
+        // A dash where the selection disagrees, as the other Type panel fields do
+        // (`mixed_text`). The slider below keeps its knob: a knob has nowhere to mean
+        // "mixed", and the drag is relative either way.
         let mixed = subject.mixed(CharAttrKind::Variations);
         let resp = value_field(
             ui,
             egui::vec2(width, CELL),
             Prefix::Text(axis_prefix(axis.tag)),
             &mut value,
-            // Tenths, matching the quantum `AxisSetting` stores at: a slider that
-            // produced sixteen digits would fill the file with them.
+            // Tenths, matching the quantum `AxisSetting` stores at.
             Scrub::fine(0.5, 1).range(axis.min..=axis.max),
             |d| mixed_text(d.custom_formatter(ui::number(1)), mixed),
         );
@@ -3706,25 +2946,13 @@ impl OndinApp {
                 "Back to the font's default",
             )
         {
-            // **The reset is a click, so it takes the immediate write and not the
-            // valve** — there is no drag for a falling edge to wait on, and a valve
-            // handed a click would hold the edit until the *next* frame the field
-            // happens to be engaged on. The same fork `decoration_write` and
-            // `paragraph_length` already make.
+            // The reset is a click, so it takes the immediate write, not the valve.
             self.write_axis(subject, axis, coords, current, axis.default, resettable);
             return;
         }
-        // **Valved, exactly as `axis_slider` below is** (§15 D569). The prefix strip
-        // is a scrub, and routed through the immediate `write_axis` it committed one
-        // undo step *per frame* of it — five frames of a `wght` drag gave
-        // `undo_depth 0 → 5` and five values the user never stopped on. §9.3's *"one
-        // gesture = one transaction = one undo step"*, and §15 D108's bug, still live
-        // on the one control the paragraph fields' fix never reached.
-        //
-        // ⚠️ **`write_axis`'s own `value == current` guard could never absorb it**,
-        // which is why nothing here looked wrong: `apply_char_attrs` is the *click*
-        // path and sets no preview, so `current` is the last committed value on
-        // every frame of the drag and the two are unequal every time.
+        // Valved like `axis_slider`: the prefix strip is a scrub, and `write_axis`'s
+        // `value == current` guard cannot absorb it (`apply_char_attrs` sets no
+        // preview), so it would commit one undo step per frame.
         self.axis_valve(&resp, subject, axis, coords, value, resettable);
     }
 
@@ -3740,11 +2968,9 @@ impl OndinApp {
         let current = axis_value(axis, coords);
         let mut value = current;
         let resp = ui::slider(ui, width, &mut value, axis.min..=axis.max);
-        // **Valved, so a sweep across the rail is one undo step**, and handed over
-        // on every frame rather than only when the value moved. `current` is read
-        // through the preview, so during a drag it already *is* `value` — a
-        // `value != current` guard here would be false on the release frame and the
-        // commit would never arrive, which is the same trap `char_valve` documents.
+        // Valved so a sweep is one undo step, and handed over every frame: `current`
+        // reads through the preview, so a `value != current` guard would be false on
+        // the release frame and the commit would never arrive.
         self.axis_valve(&resp, subject, axis, coords, value, clear_at_default);
     }
 
@@ -3771,14 +2997,9 @@ impl OndinApp {
     /// The same write, routed through the drag valve: a preview while the control
     /// is under the hand, one commit when it is let go.
     ///
-    /// `clear_at_default` means what it means in [`Self::write_axis`], and it is
-    /// here for the reason it is there — an absent coordinate is not the same
-    /// document as a coordinate that happens to equal the font's own value, and for
-    /// `opsz` it is a different *mode*. ⚠️ **It was missing, and that was visible
-    /// as a disagreement between two controls for the same number** (§15 D569):
-    /// sliding `wght` exactly onto 400 stored `wght=400` while typing 400 into the
-    /// field beside it dropped the coordinate, so the same axis at the same value
-    /// saved two different files depending on which control set it.
+    /// `clear_at_default` means what it means in [`Self::write_axis`]: an absent
+    /// coordinate differs from one equal to the font's value (for `opsz` it is a
+    /// different mode), and both controls must save the same file for the same number.
     fn axis_valve(
         &mut self,
         resp: &egui::Response,
@@ -3797,25 +3018,19 @@ impl OndinApp {
     /// Spacing, the three indents and which lines the first-line one reaches, the
     /// last line of a justified paragraph, and the base direction.
     ///
-    /// **Horizontal alignment is not here** — it is inline in the main panel, and
-    /// nothing appears in both places. **Nor are the three wrapping controls**,
-    /// which moved to the Box tab: where a line may break is a question about the
-    /// box the text is being fitted into, and every one of them is inert when the
-    /// box is auto-width.
+    /// Horizontal alignment is inline in the main panel, and the wrapping controls
+    /// are on the Box tab, where line breaking is a question about the box.
     ///
-    /// **Two scopes in one tab, and the split is not arbitrary.** The first section
-    /// acts on the paragraphs the selection touches and can read *mixed*; the two
-    /// below it act on the whole layer, because `Justify` and the base direction are
-    /// one value per `Layout` (§15 D77). Hence the two locals: `shown` is what the
-    /// spannable controls display, `p` is the node's own defaults, and a node-level
-    /// control that built its transaction from `shown` would promote one paragraph's
-    /// indent to the node's default without saying so.
+    /// Two scopes in one tab: the first section acts on the paragraphs the selection
+    /// touches and can read *mixed*; the two below act on the whole layer, since
+    /// `Justify` and the base direction are one value per `Layout`. `shown` is what
+    /// the spannable controls display and `p` the node's own defaults; building a
+    /// node-level transaction from `shown` would promote one paragraph's indent.
     fn type_paragraph_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         let shown = subject.shown_paragraph();
         let font_size = subject.font_size();
-        // The section's five values as one: its fields have prefixes and no
-        // labels, and its two buttons are one value between them.
+        // The section's five values as one mark.
         let spacing_mark = self.para_mark(
             subject.id,
             |p| (p.spacing, p.indent, p.hanging, p.indent_start, p.indent_end),
@@ -3843,9 +3058,8 @@ impl OndinApp {
             let half = (MENU_INNER - COL_GAP) / 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
-                // Paragraph spacing is **absolute by default**: it belongs to the
-                // layout's spacing scale, not to the type, so a 24px gap stays
-                // 24px when the type size is tuned.
+                // Paragraph spacing is absolute by default: it belongs to the
+                // layout's scale, not the type size.
                 let e = length_field(
                     ui,
                     egui::vec2(half, CELL),
@@ -3869,10 +3083,7 @@ impl OndinApp {
                     subject.para_mixed(ParaAttrKind::Indent),
                     font_size,
                     Bounds::INDENT,
-                    // **The tooltip follows the state, because the field does.**
-                    // One value, two meanings, and the only other thing that says
-                    // which is the prefix glyph flipping between two icons that
-                    // are near-mirrors of each other.
+                    // The tooltip follows the state: one value, two meanings.
                     if shown.hanging {
                         "Hanging indent — how far the continuation lines come in"
                     } else {
@@ -3881,16 +3092,9 @@ impl OndinApp {
                 );
                 self.paragraph_length(subject, &e, ParaAttr::Indent);
             });
-            // **Which lines the indent reaches — one value, two buttons.** It is
-            // not a pair of independent toggles: an indent is either on the first
-            // line of each paragraph or on the ones after it, never both and never
-            // neither, so the two press as a segmented control would while keeping
-            // the 26×26 square the rest of the popup is built from.
-            //
-            // (There was a third button here, CSS `each-line`, and it is gone: with
-            // it off the indent reached only the first line of the whole *layout*,
-            // so a three-paragraph node indented one line and left two flush. See
-            // `ParagraphStyle::indent`.)
+            // Which lines the indent reaches: one value, two buttons that press as a
+            // segmented control would (the first line or the ones after it, never
+            // both). See `ParagraphStyle::indent`.
             let hanging_mixed = subject.para_mixed(ParaAttrKind::Hanging);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -3906,11 +3110,8 @@ impl OndinApp {
                         "Hanging — indent the continuation lines instead",
                     ),
                 ] {
-                    // **Neither lit when the range disagrees**, which is this pair's
-                    // whole mixed state: there is no third square to light and a
-                    // dash cannot be drawn on a glyph, so "not one of the two" is
-                    // what says the selection has both in it. A press then makes it
-                    // uniform, as a drag on a mixed field does.
+                    // Neither lit when the range disagrees: that is this pair's whole
+                    // mixed state, and a press then makes it uniform.
                     if field_button(
                         ui,
                         glyph,
@@ -3926,10 +3127,8 @@ impl OndinApp {
                     }
                 }
             });
-            // **The two block indents, below the first-line pair they qualify.** They
-            // hold every line of the paragraph where the field above holds one, which
-            // is why they are arrows against an edge rather than a third and fourth
-            // text glyph — see `icon::ARROW_LINE_LEFT`.
+            // The two block indents hold every line, hence arrows against an edge
+            // (`icon::ARROW_LINE_LEFT`).
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
                 let e = length_field(
@@ -3951,9 +3150,8 @@ impl OndinApp {
                     subject.para_mixed(ParaAttrKind::IndentEnd),
                     font_size,
                     Bounds::INDENT,
-                    // Says what it does *and* where it does nothing: an auto-width
-                    // node has no wrap width for an end indent to narrow (§15 D163),
-                    // and "inert" is indistinguishable from "broken" unnamed.
+                    // Names where it does nothing: an auto-width node has no wrap
+                    // width for an end indent to narrow.
                     if matches!(subject.sizing, TextSizing::Auto) {
                         "Indent from the end edge — needs a box to measure from"
                     } else {
@@ -3970,8 +3168,7 @@ impl OndinApp {
 
         self.list_section(ui, subject, &shown);
 
-        // **Only under Justify**, because it only means anything there: a
-        // left-aligned paragraph's last line is already at the start.
+        // Only under Justify, where it means anything.
         if p.align == TextAlign::Justify {
             let mark = self.para_mark(
                 subject.id,
@@ -4045,8 +3242,7 @@ impl OndinApp {
     /// Route one of the four spannable `Length` fields: a unit click commits now, a
     /// scrub goes through the valve.
     ///
-    /// One helper rather than four copies of the same eight lines, and `into` is what
-    /// lets it be one: the four differ only in which [`ParaAttr`] they build.
+    /// `into` builds the [`ParaAttr`], the only thing the four fields differ in.
     fn paragraph_length(
         &mut self,
         subject: &TypeSubject,
@@ -4068,18 +3264,13 @@ impl OndinApp {
     /// Put `id`'s box into the panel's sizing cell `i` — auto width, auto height,
     /// fixed.
     ///
-    /// **A method rather than the body of the segmented control**, because the
-    /// context menu is a second door onto the same three states
-    /// (`context-menus.md` §5.6) and §8's rule is that a row and the control it
-    /// duplicates must be the same verb. What it carries that a call site would
-    /// have to remember: the switch **adopts the shaped size**, so changing mode
-    /// does not move the text, and it goes through `text_session_restyled` so a
-    /// live editor re-shapes rather than drawing to the old width.
+    /// A method because the context menu is a second door onto the same three
+    /// states (`context-menus.md` §5.6). The switch adopts the shaped size so a mode
+    /// change does not move the text, and goes through `text_session_restyled` so a
+    /// live editor re-shapes.
     ///
-    /// Reads the **preview** layout, unlike most verbs: the size being adopted is
-    /// the one on screen, and during a live text session that is the uncommitted
-    /// one. Adopting the committed size instead would snap the box back to what it
-    /// measured before the last keystroke.
+    /// Reads the preview layout: the size adopted is the one on screen, not the
+    /// committed one from before the last keystroke.
     pub(crate) fn set_text_sizing(&mut self, id: NodeId, i: usize) {
         let Some(sizing) = self.session.display_node(id).and_then(|n| match n.kind() {
             ondin_core::NodeKind::Text { sizing, .. } => Some(*sizing),
@@ -4105,11 +3296,11 @@ impl OndinApp {
     /// The box itself: how it is sized, what it is measured to, what happens to
     /// text that does not fit, and where lines may break.
     ///
-    /// **Vertical alignment is not here** — it is inline in the main panel.
+    /// Vertical alignment is inline in the main panel, not here.
     fn type_block_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let b = subject.block;
-        // Each section here is one value, so one mark each (§15 D981); a reset
-        // ends the tab's frame, so no section below acts on the `b` it replaced.
+        // One mark per section; a reset ends the tab's frame so no later section
+        // acts on the `b` it replaced.
         let mark = self.sizing_mark(subject.id);
         let (_, hit) = section_marked(ui, "Sizing", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
@@ -4190,9 +3381,7 @@ impl OndinApp {
             return;
         }
 
-        // **Directly under Overflow because neither means much alone.** An
-        // ellipsis needs somewhere to stop, and a line limit with nothing to say
-        // about the overflow just cuts the text off.
+        // Directly under Overflow: an ellipsis needs somewhere to stop.
         let mark = self.block_mark(
             subject.id,
             |b| b.max_lines,
@@ -4251,28 +3440,17 @@ impl OndinApp {
 
     /// The three wrapping controls, stacked, each with its own label.
     ///
-    /// **Three segmented tracks rather than three dropdowns.** Every option is
-    /// one or two words and there are eight of them altogether; a dropdown hides
-    /// seven of those behind a click each and says nothing about what the
-    /// alternatives are, which for controls consulted this rarely is exactly the
-    /// wrong trade. The tracks also make the gate below visible — a whole row of
-    /// dimmed cells reads as "this does not apply", where a dimmed dropdown just
-    /// reads as broken.
+    /// Three segmented tracks rather than dropdowns, so the alternatives are visible
+    /// and a dimmed row reads as "does not apply".
     ///
-    /// **Word break and Long words dim under `NoWrap`.** That mode reaches parley
-    /// as `TextWrapMode(NoWrap)` and suppresses line breaking outright, so both of
-    /// them are rules about breaks that cannot happen. Dimmed and **not reset**,
-    /// the same rule the stroke panel's Join follows: a stored `word_break`
-    /// survives a trip through `NoWrap` and back. The gate stops there — hard
-    /// breaks still break under `NoWrap`, so the paragraph spacing and indent
-    /// controls in the tab beside this one go on working and must not be caught by
-    /// the same condition.
+    /// Word break and Long words dim under `NoWrap`, which suppresses line breaking
+    /// outright. They are dimmed, not reset: a stored `word_break` survives a trip
+    /// through `NoWrap`. The gate stops there, since hard breaks still break.
     fn wrap_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         let wraps = p.wrap != WrapMode::NoWrap;
-        // One mark per label (§15 D981). The two inside the gate dim with it, and
-        // a dimmed label takes no click: under `NoWrap` their reset is the card
-        // header's.
+        // One mark per label. The two inside the gate dim with it and take no click:
+        // under `NoWrap` their reset is the card header's.
         let wrap_mark = self.para_mark(
             subject.id,
             |p| p.wrap,
@@ -4311,12 +3489,8 @@ impl OndinApp {
                 if !wraps {
                     ui.disable();
                 }
-                // **Two sections in one scope, so the scope's own pitch is the
-                // *section* gap** — the two are labelled blocks like any other and
-                // only share a parent because they share one dimming rule. Written
-                // flat at [`LABEL_GAP`] they had 5 between one section's control
-                // and the next section's label, which is the gap that belongs
-                // between a label and the thing it names (§15 D386).
+                // Two sections share this scope only for the dimming rule, so its
+                // pitch is [`SECTION_GAP`], not [`LABEL_GAP`].
                 ui.spacing_mut().item_spacing.y = SECTION_GAP;
                 let (_, hit) = section_marked(ui, "Word break", break_mark.as_ref(), |ui| {
                     let current = WordBreak::ALL
@@ -4365,9 +3539,7 @@ impl OndinApp {
                     inner_hit = Some(&long_mark);
                 }
             });
-            // A claimant of its own, for the reason `type_alignment_row` spells
-            // out: a scope's response never hovers, and a disabled one could not
-            // fire `on_hover_text` even if it did.
+            // A claimant of its own: a scope's response never hovers.
             if !wraps {
                 ui.interact(
                     gated.response.rect,
@@ -4384,24 +3556,14 @@ impl OndinApp {
         }
     }
 
-    /// **Optical margins: place each line by its ink rather than by its advance**
-    /// (§15 D830).
+    /// Optical margins: place each line by its ink rather than by its advance.
     ///
-    /// **Not inside `wrap_section`'s gate, and that is the point.** Everything in
-    /// that scope is dimmed under `NoWrap` because it states a rule about breaks
-    /// that cannot happen; this one is most useful on exactly the node that never
-    /// wraps — a single-line label, which is the case `roadmap.md` raised it for.
-    /// A gate copied from the neighbour would have dimmed the control precisely
-    /// where it earns its keep.
-    ///
-    /// **One switch and no preview text.** The effect is a fraction of the font
-    /// size — measured 0.98% to 10.06% of it on the default face — so a sample
-    /// string in a 264px popup would show nothing a reader could trust. The
-    /// canvas is where it is visible, and the tooltip says what to look at.
+    /// Not inside `wrap_section`'s gate: it is most useful on a node that never
+    /// wraps, such as a single-line label. One switch and no preview text, since the
+    /// effect is a small fraction of the font size and shows on the canvas.
     fn optical_margin_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
-        // A switch row's mark (§15 D981): the dot after its own label and no ↺ —
-        // a switch has two values, so its toggle is the reset.
+        // A switch row's mark is the dot after its label and no ↺: its toggle is the reset.
         let mark = self.para_mark(
             subject.id,
             |p| p.optical_margins,
@@ -4441,9 +3603,7 @@ impl OndinApp {
     // --- writing ----------------------------------------------------------
 
     /// One `Length` character attribute as a field with a `%`/`px` suffix, with
-    /// an instance's override mark (§15 D981). (Its unmarked twin,
-    /// `length_char_field`, lost its last caller when the popup's two fields took
-    /// marks too, and went.)
+    /// an instance's override mark.
     #[allow(clippy::too_many_arguments)]
     fn length_char_field_marked(
         &mut self,
@@ -4487,8 +3647,7 @@ impl OndinApp {
             mark.map(OverrideMark::field),
             &mut shown,
             scrub,
-            // Its own parser, for [`length_field`]'s reason: two units on one
-            // field, so the one it is not showing is refused (§15 D359).
+            // Its own parser: two units share one field, so the unit not shown is refused.
             |d| {
                 let d = d
                     .custom_formatter(ui::number(2))
@@ -4496,15 +3655,8 @@ impl OndinApp {
                 mixed_text(d, mixed)
             },
         );
-        // 🚨 **The field had no hover text at all until §15 D765**, on the same
-        // argument `length_field` makes for having one: *"the field is labelled by
-        // a 14pt glyph and nothing else, so the tooltip is the whole of what says
-        // which number this is"*. Three fields here wear that argument and none of
-        // them had the tooltip — and two of the three, word spacing and baseline
-        // shift, sit **side by side in one row** behind two icons a reader has to
-        // already know. The chip had its own text the whole time, which is the
-        // shape `[S6.2-L3-09]`'s third divergence was about from the other side.
-        // A marked field's tip names the main's value instead; two would stack.
+        // The glyph prefix alone does not say which number this is, so the tooltip
+        // does; a marked field's tip names the main's value instead.
         let resp = match mark {
             None => resp.on_hover_text(tooltip),
             Some(m) => {
@@ -4515,8 +3667,7 @@ impl OndinApp {
             }
         };
         if unit.is_some_and(|u| u.clicked()) {
-            // Every layer into the first one's other unit, each at its own size
-            // (§15 D1077).
+            // Every layer into the first one's other unit, each at its own size.
             let to = current.unit().other();
             self.apply_char_attrs_each(subject, |m| {
                 let own = char_length(&m.shown(kind)).unwrap_or(Length::ZERO);
@@ -4534,10 +3685,8 @@ impl OndinApp {
     /// Write a decoration's thickness or offset, through the valve unless the edit
     /// was a unit click.
     ///
-    /// The same fork [`Self::paragraph_length`] makes for the paragraph fields, and
-    /// it exists here for the same two reasons: a scrub must preview and commit once
-    /// rather than commit per frame, and a unit click has no drag for a valve to
-    /// wait on.
+    /// The same fork [`Self::paragraph_length`] makes: a scrub previews and commits
+    /// once, and a unit click has no drag for a valve to wait on.
     fn decoration_write(&mut self, e: &OptionalLengthEdit, subject: &TypeSubject, attr: CharAttr) {
         if e.immediate {
             self.apply_char_attrs(subject, vec![attr]);
@@ -4550,62 +3699,29 @@ impl OndinApp {
     /// while a live editing session owns the range — straight into that session.
     ///
     /// The session is its own preview (it re-shapes and the canvas draws from the
-    /// editor), so a valve there would be a second preview of the same edit; and
-    /// the commit is owed at the end of the session rather than at the end of the
-    /// drag, because one editing session is one undo step (§9.3).
+    /// editor), so a valve there would be a second preview; the commit is owed at
+    /// the end of the session, because one editing session is one undo step (§9.3).
     ///
-    /// ⚠️ **The third valve D316 never reached, found by writing a doc comment
-    /// about the second** (§15 D523). This committed on `drag_stopped() ||
-    /// lost_focus() || changed()`, so typing `40` into the Type panel's size
-    /// field left **two** entries in the history — and, worse than the multi
-    /// card's version, *wrote the intermediate values to the document*: measured
-    /// frame by frame, the keystrokes committed `4` and then `40`, so a size
-    /// typed as `100` puts a one-point line through the artwork on its way. The
-    /// engagement latch is D316's, spelled here for the same reason it is
-    /// spelled in `multi_valve`.
-    ///
-    /// 🚨 **There were three arms and there are two** (§15 D812, ruled by the
-    /// maintainer; the body carries the full account at the site of the
-    /// deletion). This paragraph described the third in the present tense for
-    /// as long as it did not exist — *"a `changed()` frame on a control that was
-    /// never engaged commits at once"*, *"whether anything reaches this arm is
-    /// open"*, *"deleting the arm breaks no test today"* — and all three
-    /// sentences were false at `HEAD`: there is no third arm, the question was
-    /// ruled on, and deleting or restoring it now breaks two tests (§15 D840).
-    ///
-    /// ⚠️ **The commit that removed the arm rewrote the comment *inside* the
-    /// function and not the doc above it**, which is the shape worth naming:
-    /// the body and the doc of one function drifted apart in one edit, and the
-    /// doc is the half a reader meets first. A reader repairing the code to
-    /// match this would have restored the arm.
+    /// Outside a session it is an engagement-latched valve: it previews while the
+    /// control is engaged and commits once on the falling edge, so typing `40`
+    /// does not commit `4` on its way. There is no arm that commits on a bare
+    /// `changed()`. (§15 D316, D812)
     fn char_valve(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: CharAttr) {
         if subject.partial {
             self.arm_session_scrub(resp, subject.id);
             if resp.changed() {
                 self.apply_char_attrs(subject, vec![attr]);
-                // **Armed here, because nothing downstream will.** A partial subject
-                // previews through the live text session and commits nothing until
-                // the session ends (§9.3), so there is no `commit_edit` on this path
-                // — and the selection outline would sit over the very text being
-                // recoloured (§15 D128).
+                // Armed here because nothing downstream will: a partial subject
+                // commits no `commit_edit` until the session ends.
                 self.note_live_edit(resp.dragged());
             }
             return;
         }
-        // **Built unconditionally, and the valve is spelled out rather than
-        // borrowed.** `edit_valve` would do, but only given a transaction — and the
-        // guard that used to sit here withheld one on exactly the frame that
-        // matters. `char_attrs_tx` compares its result against `subject`, and
-        // `subject` is read through the *preview*: during a drag that is the value
-        // on screen, so on the release frame the two are equal, the tx came back
-        // `None`, and the commit never happened. The edit lived in the preview and
-        // nowhere else, until the next commit anywhere cleared it and the control
-        // snapped back to the last committed value. Reported as "I can slide a
-        // slider and it will reset immediately to the value it had" (§15 D109).
-        // **Read before the `gesture_cancelled` bail**, which is §15 D317's
-        // ordering: a cancelled frame has to spend the transition, or the frame
-        // after it finds `was_engaged` without `engaged`, the `Escape` long gone
-        // from `input`, and commits the edit the cancel threw away.
+        // The transaction is built unconditionally: `subject` reads through the
+        // preview, so on the release frame the equality guard would say "no change"
+        // and the commit would never happen. The engagement is read before the
+        // `gesture_cancelled` bail so a cancelled frame spends the transition, or the
+        // next frame commits the edit the cancel threw away.
         let engaged = resp.dragged() || resp.has_focus();
         let was_engaged = resp.ctx.data_mut(|d| {
             let id = resp.id.with("char-valve-engaged");
@@ -4616,24 +3732,10 @@ impl OndinApp {
         if self.gesture_cancelled {
             return;
         }
-        // The edit this control has in flight, remembered across the frames
-        // between the last keystroke and the frame the valve commits on.
-        // `changes` is `char_attrs_tx`'s own answer to *"is this different from
-        // the subject"*, so it is what decides whether there is an edit worth
-        // holding.
-        //
-        // ⚠️ **This is insurance rather than the load-bearing line here, and the
-        // flip says so** (§15 D523). In `multi_valve` the equivalent memory is
-        // what makes the falling-edge commit work at all: a `DragValue` there
-        // writes its parsed edit string back one frame *after* it surrenders
-        // focus, so the committing frame carries no number and dropping the
-        // memory leaves the typed value on the floor — measured, red. Flipped
-        // the same way here, **nothing goes red**: the size field's widget has
-        // written 40 back by the frame the commit lands on, so the held value is
-        // never the one used. Why the two differ has not been established, which
-        // is the argument for keeping this rather than against it — the valve
-        // must not depend on which frame egui happens to choose, and this valve
-        // has *seven* call sites of which the tests drive one.
+        // The edit in flight, remembered between the last keystroke and the
+        // committing frame. Insurance rather than load-bearing: no test goes red
+        // without it, but the valve must not depend on which frame egui writes the
+        // typed value back.
 
         let pending_key = resp.id.with("char-valve-pending");
         let (tx, changes) = char_attrs_tx(subject, vec![attr.clone()]);
@@ -4651,64 +3753,32 @@ impl OndinApp {
                 None => tx,
             }
         };
-        // Every frame, as `edit_valve` does it: a drag's hold has no deadline until
-        // the button comes up, and noting only on the committing frame would leave
-        // the box over the artwork for the whole scrub (§15 D128).
+        // Every frame, as `edit_valve` does, or the box stays over the artwork for
+        // the whole scrub.
         self.note_edit(Some(resp), &tx);
         if engaged {
             self.session.set_preview(&tx);
         } else if was_engaged {
-            // `Escape` abandons a typed value; every other way out of the field
-            // confirms it. egui hands back what was typed and merely surrenders
-            // focus, so without this the key that cancels everywhere else would
-            // apply the edit.
+            // `Escape` abandons a typed value; egui merely surrenders focus.
             if !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.commit_edit(tx.clone());
-                // As in `apply_char_attrs`: the transaction carries the cleared list, so
-                // the editor adopts it instead of putting its own back (§15 D164).
+                // As in `apply_char_attrs`: the editor adopts the cleared list.
                 self.text_session_restyled_after(&tx);
             }
             self.session.clear_gesture_preview();
             resp.ctx
                 .data_mut(|d| d.insert_temp::<Option<CharAttr>>(pending_key, None));
         }
-        // 🚨 **There was a third arm and it is gone** (§15 D812, ruled by the
-        // maintainer). `else if resp.changed() && !resp.lost_focus()` committed
-        // outright, on the reasoning that this valve — unlike the app's other two —
-        // serves controls with **no engagement to latch**, and that without it a
-        // click on the picker's hue strip would commit nothing, ever.
-        //
-        // **Both halves turned out to be false, eleven days after the arm was
-        // kept and within hours of each other.**
-        // §15 D802 wrote the test D523 asked for: `picker::pointer_slot` answers a
-        // click through `write_slot` before it could reach `valve_slot`, so the raw
-        // sensed regions never enter this valve at all — a drag enters it as the
-        // engaged arm and its release as the falling edge, which are the two arms
-        // every other valve has, and `changed()` is never true on those frames.
-        // §15 D803 then found the one thing that *did* reach it, and it was a
-        // hazard: egui's per-frame clamp of a stored value outside a **ranged**
-        // field marks a control holding no focus as `changed()`, so the arm fired
-        // on a field nobody had touched, committed it and spent an undo step. That
-        // is `[S6.2-L1-01]`.
-        //
-        // ⚠️ **What decided it was the asymmetry, not the count.** All seven call
-        // sites are engagement-bearing — `ui::value_field`, `ui::bare_drag_value`,
-        // the axis field and slider, the length fields — and **both** of this app's
-        // `DragValue` helpers now opt out of egui's clamp (§15 D425, D552), so the
-        // arm had no live user of any kind. If some unmeasured caller did need it,
-        // its symptom is *"this control commits nothing"*, which is loud and gets
-        // reported; the symptom of keeping it is *"a field nobody touched spent an
-        // undo step"*, which is silent. D425's one line is no longer the only thing
-        // standing between that bug and the document.
+        // No third arm commits on a bare `changed()`: every caller is
+        // engagement-bearing, and egui's clamp of an out-of-range stored value
+        // marks an untouched field `changed()`, which would spend an undo step.
     }
 
-    /// Remember what a **session-scoped** scrub is about to overwrite, on the frame
-    /// its drag begins.
+    /// Remember what a session-scoped scrub is about to overwrite, on the frame its
+    /// drag begins.
     ///
-    /// The write goes into the editor rather than into a preview, so this snapshot is
-    /// the only thing `cancel_gesture` can wind a right-click back to — see
-    /// [`InFlight::session_scrub`]. Taken on `drag_started` alone: taking it every
-    /// frame would snapshot the value the drag had already reached.
+    /// The write goes into the editor, so this snapshot is all `cancel_gesture` can
+    /// wind back to — see [`InFlight::session_scrub`]. Taken on `drag_started` alone.
     ///
     /// [`InFlight::session_scrub`]: crate::app::InFlight::session_scrub
     fn arm_session_scrub(&mut self, resp: &egui::Response, id: NodeId) {
@@ -4723,15 +3793,10 @@ impl OndinApp {
 
     /// Apply one of `docs/shortcuts.md` §10's styling chords to the live session.
     ///
-    /// **Every one of these goes through the same `apply_char_attrs` /
-    /// `commit_paragraph` the panel's own controls use**, so a chord and a click
-    /// produce byte-identical edits — including the scope rule, where a chord
-    /// with a selection styles the selection and one on a bare caret sets the
-    /// node's defaults. Duplicating that logic here is how the two would come to
-    /// disagree about a mixed run.
-    ///
-    /// Silent with no session open: [`Action::TextStyle`] is only resolved in
-    /// `Mode::TextInsert`, so this is belt and braces rather than a live path.
+    /// Every chord goes through the same `apply_char_attrs` / `commit_paragraph` the
+    /// panel's controls use, so a chord and a click produce identical edits,
+    /// including the scope rule. Silent with no session open: [`Action::TextStyle`]
+    /// is only resolved in `Mode::TextInsert`.
     ///
     /// [`Action::TextStyle`]: crate::input::Action::TextStyle
     pub(crate) fn text_chord(&mut self, chord: TextChord) {
@@ -4742,13 +3807,8 @@ impl OndinApp {
             return;
         };
         match chord {
-            // **Exclusive with strikethrough**, which is the whole reason this is
-            // not a one-line `Underline(Some(_))`. The 2026-07-31 redesign offers
-            // one decoration rather than two independent ones, so turning
-            // underline on has to turn strikethrough off — and the *colour and
-            // thickness carry over*, exactly as clicking the segmented track
-            // does, because switching which line is drawn is not a reset of how
-            // it is drawn.
+            // Exclusive with strikethrough, with the colour and thickness carried
+            // over, as clicking the segmented track does.
             TextChord::Underline => {
                 let under = decoration_of(&subject, CharAttrKind::Underline);
                 let strike = decoration_of(&subject, CharAttrKind::Strikethrough);
@@ -4773,37 +3833,10 @@ impl OndinApp {
                     CharAttr::LetterSpacing(l) => l,
                     _ => Length::ZERO,
                 };
-                // **A held key stops where the field stops** (§15 D817, ruled by
-                // the maintainer). `TextStyle::set` canonicalizes `letter_spacing`
-                // without bounding it, so before this a held `Alt`+`→` walked
-                // tracking past `MAX_TRACKING_PCT` and out of what the field can be
-                // scrubbed to — where the `Size` arm four lines up stops at its
-                // ends and says so.
-                //
-                // ⚠️ **Here and not at `TextStyle::set`, which is where `Size`'s
-                // bound lives**, and the difference is deliberate. These caps are
-                // on the *controls*: any finite value is a legal attribute, a file
-                // may hold one, and the field **shows** an out-of-range stored
-                // value instead of rewriting it — which is **§15 D425**'s
-                // decision, not D475's. (D475 is this panel's *test* of it, and
-                // says in its own body that D425 carries the argument and it
-                // deliberately does not restate it. Citing D475 for the behaviour
-                // is the substitution `CLAUDE.md` records happening at seven
-                // sites, and this comment made it an eighth.) A bound in
-                // the model would make that unreachable for tracking and would be
-                // this panel refusing a document it is able to display. So the two
-                // chords agree about *behaviour* — held keys stop at the field's
-                // ends — and deliberately not about where the bound is written.
-                //
-                // **Both faces are read off the field's own [`Bounds`]** (§15
-                // D865) — the `%` one as an em multiple, the px one derived at the
-                // current font size — so the chord and the scrub cannot come to
-                // disagree about the cap in either unit. They used to spell it
-                // from the constants, agreeing by value.
-                // ⚠️ **[`stepped_into`] and not `clamp`**, which is the whole of
-                // §15 D840: a bare clamp here honoured D817 and broke D425, by
-                // rewriting a stored out-of-range value the paragraph above says
-                // this panel deliberately shows rather than rewrites.
+                // A held key stops where the field stops, read off the field's own
+                // [`Bounds`]. The cap is on the control, not the model (a file may
+                // hold an out-of-range value the field shows rather than rewrites),
+                // hence [`stepped_into`] and not `clamp` (§15 D425).
                 let next = match (
                     current,
                     step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX),
@@ -4814,20 +3847,16 @@ impl OndinApp {
                     (Length::Px(c), Length::Px(v)) => {
                         Length::Px(stepped_into(c, v, Bounds::TRACKING.px(subject.font_size())))
                     }
-                    // `step_length` returns the unit it was handed, so a mixed
-                    // pair cannot arise; taking the step unbounded is the honest
-                    // answer if it ever does, since the bound would be in the
-                    // wrong unit.
+                    // `step_length` keeps the unit, so a mixed pair cannot arise;
+                    // the bound would be in the wrong unit if it did.
                     (_, stepped) => stepped,
                 }
                 .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(next)]);
             }
             TextChord::Leading(step) => {
-                // **Auto seeds from what Auto is currently worth**, in px, rather
-                // than from a round number — the same rule the field follows
-                // (§15 D162). Stepping from a nominal 0 would collapse the lines
-                // on the first press and read as the key being broken.
+                // Auto seeds from what Auto is currently worth in px, as the field
+                // does, not from a nominal 0.
                 let current = match subject.shown(CharAttrKind::LineHeight) {
                     CharAttr::LineHeight(v) => v,
                     _ => None,
@@ -4835,16 +3864,8 @@ impl OndinApp {
                 let from = current
                     .or_else(|| subject.line_height.map(Length::Px))
                     .unwrap_or(Length::Em(1.0));
-                // 🚨 **The identical defect §15 D817 fixed three arms up, left
-                // standing here** (§15 D840). This arm ended in `step_length`
-                // with no range expression at all, and `Length::canonical`
-                // rounds and normalises `-0.0` without bounding — so a held
-                // `Alt`+`↓` walked line height **negative**, straight out of the
-                // field's `0..=1000%` and into `parley_line_height`. D817's own
-                // entry is about the tracking arm and this one was never read
-                // beside it; the fix that closes both is one predicate, which is
-                // the argument for [`stepped_into`] existing rather than each
-                // arm carrying its own bound.
+                // [`stepped_into`] bounds the step as in the tracking arm;
+                // `Length::canonical` does not bound, so a held key would go negative.
                 let next = match (
                     from,
                     step_length(from, step, LEADING_STEP_EM, LEADING_STEP_PX),
@@ -4862,11 +3883,8 @@ impl OndinApp {
                 .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LineHeight(Some(next))]);
             }
-            // Node-level, so this is a paragraph-style commit rather than a span
-            // — see [`TextChord::Align`]. Nothing to do when it is already set:
-            // an alignment chord pressed twice must not leave a second undo step
-            // saying nothing, which is the rule the segmented track states as
-            // `!= align`.
+            // Node-level, so a paragraph-style commit rather than a span (see
+            // [`TextChord::Align`]); a no-op press leaves no undo step.
             TextChord::Align(align) => {
                 if subject.paragraph.align == align {
                     return;
@@ -4891,28 +3909,22 @@ impl OndinApp {
             self.preview_session();
             return;
         }
-        // Here the equality *is* the right question: this path is for clicks, there
-        // is no preview in play, and a click that changes nothing must not leave an
-        // undo step behind.
+        // Here equality is the right question: this path is for clicks with no
+        // preview in play, and a no-op click must leave no undo step.
         let (tx, changes) = char_attrs_tx(subject, attrs);
         if changes {
             self.commit_edit(tx.clone());
-            // `_after`, not the plain re-style: this transaction *clears* the
-            // attribute's spans over the whole node, and a session sitting on a bare
-            // caret reaches here — so the editor has to adopt the cleared list rather
-            // than win with its own (§15 D164).
+            // `_after`: this transaction clears the attribute's spans over the whole
+            // node, and a session on a bare caret reaches here, so the editor must
+            // adopt the cleared list.
             self.text_session_restyled_after(&tx);
         }
     }
 
-    /// [`Self::apply_char_attrs`] with **each layer's own attributes** — `each`
-    /// asked once per layer of a several-layer subject (§15 D1077), for the
-    /// writes whose value depends on the layer: a unit click converting each
-    /// layer's own amount at its own size, a variant merged into each layer's own
-    /// axes. One layer's answer written to all would carry the first layer's
-    /// amount onto the rest — read in the first cut (`arch-scribe`), where 120% at
-    /// 12pt clicked to px would have made a 48pt layer's lines 14.4px; measured for
-    /// tracking by `a_unit_click_converts_each_layer_at_its_own_size`.
+    /// [`Self::apply_char_attrs`] with each layer's own attributes — `each` is asked
+    /// once per layer of a several-layer subject, for writes whose value depends on
+    /// the layer (a unit click converting each amount at its own size, a variant
+    /// merged into each layer's own axes).
     fn apply_char_attrs_each(
         &mut self,
         subject: &TypeSubject,
@@ -4937,15 +3949,12 @@ impl OndinApp {
     /// The colour the detached picker should show for a decoration: its own if it
     /// has one, otherwise the text's, which is what the decoration is drawn in.
     ///
-    /// `None` when there is no decoration to colour — which is also how the
-    /// picker learns to close itself, since `slot_brush` returning `None` is
-    /// already the signal that a slot has stopped existing.
+    /// `None` when there is no decoration to colour, which is how the picker learns
+    /// to close itself.
     pub(crate) fn char_slot_color(&self, id: NodeId, slot: CharSlot) -> Option<Color> {
         let subject = TypeSubject::of(self, id)?;
         match slot {
-            // Its own colour if it has one, otherwise the text's — which is what the
-            // run is actually drawn in, so the picker opens on the colour already on
-            // screen rather than on an arbitrary black.
+            // The picker opens on the colour already on screen.
             CharSlot::Color => Some(match attr!(subject, Color, Color) {
                 Some(c) => c,
                 None => subject.text_color(),
@@ -4959,28 +3968,14 @@ impl OndinApp {
 
     /// Write a colour the detached picker is editing back into a decoration.
     ///
-    /// **The paint slots whose write is not a document transaction.** Every other
-    /// slot ends in `slot_transaction`; a character attribute cannot, because while a
-    /// live editing session owns the range the write belongs in that session's spans
-    /// (§9.3). The three cases are already decided in one place each —
-    /// `apply_char_attrs` for a click, `char_valve` for a drag — so this routes there
-    /// rather than teaching the paint plumbing about text.
-    ///
-    /// **One route for both character-scoped slots**, which is what made the third
-    /// verb possible. With only a decoration to divert, each of `write_slot`,
-    /// `valve_slot` and `preview_slot` carried its own branch, and the third of them
-    /// simply declined — the press-preview gap §15 D129 left open. A run colour is
-    /// the second caller that branch was waiting for; hoisting it turned three
-    /// branches into one predicate ([`crate::panels::paint::PaintSlot::char_scoped`])
-    /// and one function, and
-    /// the gap closed as a side effect rather than as a fourth special case.
+    /// The paint slots whose write is not a document transaction: while a live
+    /// session owns the range the write belongs in its spans (§9.3). It routes to
+    /// `apply_char_attrs` for a click and `char_valve` for a drag, one route for both
+    /// character-scoped slots ([`crate::panels::paint::PaintSlot::char_scoped`]).
     ///
     /// Returns whether it had anything to write, which is `preview_slot`'s answer.
-    ///
-    /// A gradient collapses to its first stop. The picker shows its gradient tabs
-    /// *disabled* for these slots
-    /// ([`crate::panels::paint::PaintSlot::takes_gradients`]) so one cannot be
-    /// built here, and this is the belt to that brace rather than a second policy.
+    /// A gradient collapses to its first stop; the picker disables its gradient tabs
+    /// for these slots ([`crate::panels::paint::PaintSlot::takes_gradients`]).
     pub(crate) fn write_char_slot(
         &mut self,
         id: NodeId,
@@ -4988,21 +3983,10 @@ impl OndinApp {
         brush: &Brush,
         how: CharWrite<'_>,
     ) -> bool {
-        // **A commit reads the *committed* document; the other two verbs read the
-        // preview.** `TypeSubject::of` goes through `display_node`, which applies the
-        // render override — and the press frame of a click on the picker's plane has
-        // just put this very colour there (`CharWrite::Preview`). Comparing against it
-        // makes `apply_char_attrs` see no change and commit nothing, so the colour
-        // lives in the preview until something clears it: §15 D109's shape arriving by
-        // the route D129's own fix opened.
-        //
-        // **Reading committed truth, not clearing the preview** — which is what this
-        // tried first and is a worse bug than the one it fixed. `clear_preview` also
-        // drops `session_preview`, and a preview may belong to a **live text
-        // session** rather than to the gesture in hand, so clearing it took the
-        // uncommitted text off the canvas on every press: reported as the wheel and
-        // the strip going completely dead. The two verbs that *should* see the preview
-        // still do.
+        // A commit reads the committed document, the other two verbs the preview: the
+        // press frame has just put this colour in the preview, so comparing against it
+        // would make `apply_char_attrs` see no change. Clearing the preview instead
+        // would drop a live text session's `session_preview` too.
         let subject = match how {
             CharWrite::Commit => TypeSubject::committed(self, id),
             CharWrite::Valve(_) | CharWrite::Preview => TypeSubject::of(self, id),
@@ -5016,46 +4000,22 @@ impl OndinApp {
         let Some(attr) = char_color_attr(&subject, slot, Some(color)) else {
             return false;
         };
-        // **A live selection collapses the three verbs into one.** Nothing a session
-        // styles reaches history until the session ends (§9.3), so "show this colour"
-        // and "commit it" are the same write — into the editor's own spans — and
-        // there is no undo step for a repeat to leave behind.
-        //
-        // Spelling that out here is what fixes a picker that did **nothing at all**
-        // over a text selection. Two gates conspired: `Preview` declined a partial
-        // subject, so the press showed nothing, and `char_valve`'s partial branch
-        // gates on `resp.changed()` — which a `DragValue` reports and a raw sensed
-        // region like the picker's wheel or its opacity strip never does. Press, drag
-        // and release therefore all fell through. Reported as the picker's UI being
-        // frozen with only the close button alive, which is exactly how it looked.
-        //
-        // `char_valve` is deliberately left alone: its `changed()` gate is right for
-        // the popup's *own* fields, which do report it, and it is D109's code.
+        // A live selection collapses the three verbs into one: nothing a session
+        // styles reaches history until it ends (§9.3), so "show" and "commit" are the
+        // same write into the editor's spans. `char_valve`'s `changed()` gate would
+        // miss the picker's raw sensed regions, so it is not used here.
         if subject.partial {
-            // **The gate the valve was providing, and dropping it was a bug.**
-            // `valve_slot` is called *unconditionally, every frame* by several of the
-            // picker's controls — the hue slider, the alpha strip, the hex row — on
-            // the understanding that the valve itself decides whether anything is
-            // happening. Writing on every call therefore had each of them stamp its
-            // own frame-start value into the editor every frame, overwriting whatever
-            // the control actually under the pointer had just written. The colour
-            // landed and was undone in the same frame, which is why the picker looked
-            // frozen rather than wrong.
+            // The gate the valve would provide: `valve_slot` is called every frame by
+            // several picker controls, and writing on every call would overwrite the
+            // control under the pointer. The test includes the pointer terms because a
+            // raw sensed region reports neither `changed` nor `lost_focus`.
             //
-            // `Commit` and `Preview` need no gate: their callers reach them only on a
-            // click and on a press respectively. `Valve` takes the same test
-            // `char_valve` applies, and it has to include the pointer terms — a raw
-            // sensed region reports neither `changed` nor `lost_focus`.
-            //
-            // valve-gate-not-a-commit: `inspector::interacting` again, on the
-            // partial-subject path where the write goes into the live editing
-            // session rather than through a valve at all.
+            // valve-gate-not-a-commit: the write goes into the live session, not a valve.
             if let CharWrite::Valve(resp) = how {
                 if !(resp.dragged() || resp.drag_stopped() || resp.changed() || resp.lost_focus()) {
                     return false;
                 }
-                // The selection chrome owes the same retreat every other live edit
-                // gets (§15 D128); `dragged()` holds it while the button is down.
+                // The selection chrome retreats as for every live edit.
                 self.note_live_edit(resp.dragged());
             }
             self.apply_char_attrs(&subject, vec![attr]);
@@ -5064,15 +4024,9 @@ impl OndinApp {
         match how {
             CharWrite::Commit => self.apply_char_attrs(&subject, vec![attr]),
             CharWrite::Valve(resp) => self.char_valve(resp, &subject, attr),
-            // **Preview only, and deliberately not through `char_valve`.** The valve
-            // clears its own preview by committing on release; a press that never
-            // becomes a drag has no such frame, so routing this through the valve
-            // would leave a stale preview on every press-and-release of the popup's
-            // *other* valved controls — which is why D129's gap was left open rather
-            // than papered over.
-            //
-            // A live selection never reaches here — it is answered above, where the
-            // three verbs are one write.
+            // Preview only, not through `char_valve`: a press that never becomes a
+            // drag has no release frame to clear the preview. A live selection never
+            // reaches here.
             CharWrite::Preview => {
                 let (tx, _) = char_attrs_tx(&subject, vec![attr]);
                 self.session.set_preview(&tx);
@@ -5097,10 +4051,9 @@ impl OndinApp {
     /// click rather than a drag, and for the unit chips, which change the value
     /// with no drag for a valve to wait on.
     ///
-    /// [`apply_char_attrs`]'s twin, and the same two targets: a live session that
-    /// owns *some* of the paragraphs gets it in its own `ParaSpans`, which previews
-    /// itself and commits once when the session ends (§9.3); anything else sets the
-    /// node's defaults and drops the overrides of that attribute.
+    /// [`apply_char_attrs`]'s twin, with the same two targets: a live session gets it
+    /// in its own `ParaSpans` (committed once when it ends, §9.3); anything else
+    /// sets the node's defaults and drops that attribute's overrides.
     ///
     /// [`apply_char_attrs`]: Self::apply_char_attrs
     fn apply_para_attrs(&mut self, subject: &TypeSubject, attrs: Vec<ParaAttr>) {
@@ -5113,8 +4066,7 @@ impl OndinApp {
             self.preview_session();
             return;
         }
-        // As in `apply_char_attrs`: this path is for clicks with no preview in play,
-        // so a click that changes nothing must not leave an undo step behind.
+        // As in `apply_char_attrs`: a no-op click must leave no undo step.
         let (tx, changes) = para_attrs_tx(subject, attrs);
         if changes {
             self.commit_edit(tx);
@@ -5125,21 +4077,15 @@ impl OndinApp {
     /// A spannable paragraph write through the drag valve: previewed while the
     /// control is under the hand, committed once when it is released.
     ///
-    /// **The transaction is built unconditionally** — D109's lesson, and it applies
-    /// here for the same reason it does in `char_valve`: `para_attrs_tx` compares its
-    /// result against `subject`, `subject` is read through the *preview*, so on the
-    /// release frame of a drag the two are equal. A guard on "did anything change"
-    /// therefore withholds the commit on exactly the frame that owes one, and the
-    /// edit lives in the preview until something else clears it.
+    /// The transaction is built unconditionally, as in `char_valve`: `subject` reads
+    /// through the preview, so on a drag's release frame a "did anything change"
+    /// guard would withhold the commit that is owed.
     fn valve_paragraph(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: ParaAttr) {
         if subject.para_partial {
             self.arm_session_scrub(resp, subject.id);
             if resp.changed() {
                 self.apply_para_attrs(subject, vec![attr]);
-                // The chrome hide, armed here because nothing downstream will: a
-                // partial write previews through the live session and commits
-                // nothing until it ends, so there is no `commit_edit` on this path
-                // (§15 D128).
+                // Armed here because no `commit_edit` is on this path.
                 self.note_live_edit(resp.dragged());
             }
             return;
@@ -5155,13 +4101,9 @@ impl OndinApp {
         }
     }
 
-    /// [`Self::commit_block`] for **box trim**, the one block edit whose only visible
-    /// result is the selection box itself.
-    ///
-    /// §15 D78 guarantees that trimming never moves the ink, so what it moves is the
-    /// box the selection outline draws — and the chrome hide would take away the only
-    /// thing there was to see (§15 D128). The exception reads here, at the edit it is
-    /// about, rather than as a flag threaded through the shared committer.
+    /// [`Self::commit_block`] for box trim, whose only visible result is the
+    /// selection box itself: trimming never moves the ink, so the chrome hide would
+    /// remove the only thing to see.
     fn commit_trim(&mut self, id: NodeId, block: BlockStyle) {
         if self.commit_chrome_edit(Transaction(vec![Operation::SetBlockStyle { id, block }])) {
             self.text_session_restyled();
@@ -5173,33 +4115,19 @@ impl OndinApp {
 
 /// One labelled block of the popup: a small-caps eyebrow, then its controls.
 ///
-/// **Three gaps, three numbers.** The popup's own `item_spacing.y` separates one
-/// section from the next ([`SECTION_GAP`]); [`ui::labelled`] then holds the label
-/// to its control at [`LABEL_GAP`] and two controls of one section to each other
-/// at [`ui::CARD_ROW_GAP`] — the Transform card's own row pitch, which is the
-/// baseline for every panel and popover (§15 D386).
-///
-/// It was one number for the last two of those, and that is what put two stacked
-/// fields 5 apart in a popover hanging off a card that stacks its own at 9. One
-/// number for all three is worse still and was the state before that: the label
-/// floats equidistant between its own control and the section above, which is the
-/// reading that makes a nine-section card look like eighteen loose rows.
+/// Three gaps: the popup's `item_spacing.y` separates sections ([`SECTION_GAP`]);
+/// [`ui::labelled`] holds the label to its control at [`LABEL_GAP`] and two controls
+/// of one section at [`ui::CARD_ROW_GAP`].
 fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui::labelled(ui, label, add)
 }
 
-/// A [`section`] whose fields an instance overrides (§15 D981): the mark on the
-/// **section's label**, as 4C has row-labelled controls carry it — the label at
-/// full brightness with the dot after it, ↺ under the pointer, and a click on it
-/// the reset, which the second return value reports. Unmarked, exactly
-/// [`section`].
+/// A [`section`] whose fields an instance overrides: the mark sits on the section's
+/// label (full brightness with a dot, ↺ under the pointer), and a click on it is the
+/// reset, which the second return value reports. Unmarked, exactly [`section`].
 ///
-/// One mark per section rather than per control: a section is the unit the
-/// popup names, every control in one writes the fields its mark compares, and
-/// the controls inside — tracks, combos, sliders, the OpenType list — are of
-/// many kinds, most with no label of their own to carry a dot. The exceptions
-/// carry their own: the two prefixed spacing fields, and the switch row under
-/// *Margins*.
+/// One mark per section, since most controls inside have no label to carry a dot;
+/// the two prefixed spacing fields and the *Margins* switch row carry their own.
 fn section_marked<R>(
     ui: &mut egui::Ui,
     label: &str,
@@ -5236,17 +4164,8 @@ fn section_marked<R>(
 /// The square button at the end of a row that puts a value back to the font's
 /// own. Returns whether it was pressed.
 ///
-/// **Always drawn, dimmed when there is nothing to put back.** The handoff asked
-/// for it "shown only when the axis is off default", and the first pass did that —
-/// allocating the square either way so the field beside it would not change width.
-/// Which left a 28pt hole at the end of the row, reported as the colour field not
-/// filling its container, and it was: an empty slot at the end of a row reads as
-/// the row stopping short, not as an absent button.
-///
-/// So the third state does the work instead, as it does on a [`ui::FieldButton`]
-/// everywhere else in the chrome: the ground and the glyph say "nothing to undo"
-/// while the geometry never moves. `Disabled` also refuses the hover, so it does
-/// not invite the click it would ignore.
+/// Always drawn, dimmed when there is nothing to put back: an empty slot would read
+/// as the row stopping short. `Disabled` also refuses the hover.
 fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
     let resp = field_button(
         ui,
@@ -5264,26 +4183,12 @@ fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
 /// The transaction that sets character attributes over the *whole* node: a new
 /// default per attribute, plus the spans with that attribute's overrides dropped.
 ///
-/// **Both halves, always.** Setting the default alone is how "make it all 24pt"
-/// leaves a 16pt run behind — the span was there, it was not the default, and
-/// nothing asked it to go.
+/// Both halves, always: setting the default alone leaves an override span behind.
 ///
-/// A free function rather than a method, because it touches nothing but its
-/// arguments and because the panel's most easily-broken write is the one that
-/// clears a value rather than sets one: it is the case where "the new style equals
-/// the old" is *nearly* true, and a guard that catches a no-op edit is one line
-/// away from swallowing a real one.
-///
-/// **The transaction always comes back; the equality is reported beside it.** It
-/// used to be an `Option`, and every caller read the `None` as "nothing to do" —
-/// which is only true for a *click*. `subject` is read through the render
-/// override, so during a drag it holds the previewed value; on the release frame
-/// the new style therefore equals it, and a valve given `None` never commits. The
-/// two callers want different answers to the same comparison, so it is theirs to
-/// make (§15 D109).
-///
-/// **A several-layer subject writes every layer** (§15 D1077): each its own
-/// defaults with `attrs` set, in one transaction, the equality any layer's.
+/// The transaction always comes back, with the equality reported beside it:
+/// `subject` reads through the preview, so on a drag's release frame the new style
+/// equals it and a valve given `None` would never commit. A several-layer subject
+/// writes every layer, each its own defaults with `attrs` set, in one transaction.
 fn char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
     let (mut tx, mut changes) = one_char_attrs_tx(subject, attrs.clone());
     for other in &subject.others {
@@ -5309,9 +4214,7 @@ fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transactio
             Operation::SetTextStyle {
                 id: subject.id,
                 style,
-                // The list below is what the document's own re-statement would
-                // produce and then some — it also clears the range — so this asks
-                // for the re-statement and lets the next op overwrite it (§15 D163).
+                // The next op overwrites the re-statement this asks for.
                 spans: None,
             },
             Operation::SetTextSpans {
@@ -5326,10 +4229,9 @@ fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transactio
 /// The whole-node write for a spannable paragraph attribute: set the **defaults**
 /// and drop the overrides of that one attribute over the range.
 ///
-/// [`char_attrs_tx`]'s twin, down to the order of the two operations — the style op
-/// re-states the span list against the new defaults (`Document::op_set_paragraph_style`)
-/// and the spans op then installs the list computed here, which was normalized
-/// against those same new defaults. Also returns whether anything changed, which
+/// [`char_attrs_tx`]'s twin, down to the order of the two operations: the style op
+/// re-states the span list (`Document::op_set_paragraph_style`), then the spans op
+/// installs the list computed here. Also returns whether anything changed, which
 /// only the click path may act on.
 fn para_attrs_tx(subject: &TypeSubject, attrs: Vec<ParaAttr>) -> (Transaction, bool) {
     let mut paragraph = subject.paragraph.clone();
@@ -5371,10 +4273,9 @@ fn opsz_of(coords: &[AxisSetting]) -> Option<f64> {
     coords.iter().find(|a| a.tag == OPSZ).map(|a| a.value)
 }
 
-/// What a `variations` mark compares — `shown`, the coordinates its section
-/// draws — carrying the `whole` list it was read from, so the mark's `put` can
-/// rebuild the copy's list in the source's order (`[X9.2-L1-01]`). Equal when
-/// the shown parts are: the rest is the other sections' to mark.
+/// What a `variations` mark compares — `shown`, the coordinates its section draws —
+/// carrying the `whole` list so the mark's `put` can rebuild the copy's list in the
+/// source's order. Equal when the shown parts are.
 #[derive(Clone)]
 struct AxesOf<V> {
     shown: V,
@@ -5387,18 +4288,13 @@ impl<V: PartialEq> PartialEq for AxesOf<V> {
     }
 }
 
-/// `cur`'s coordinates with the ones `owned` picks reset to `src`'s, **in
-/// `src`'s order** — the copy's own value kept at each tag `owned` does not
-/// pick, and a tag only the copy has kept after them (`[X9.2-L1-01]`).
+/// `cur`'s coordinates with the ones `owned` picks reset to `src`'s, in `src`'s
+/// order — the copy's own value kept at each tag `owned` does not pick, and a tag
+/// only the copy has kept after them.
 ///
-/// The order is the whole point. `reset::overrides` and `propagate`'s merge
-/// compare `variations` as a list, in order, and `axis_coords_after` appends the
-/// axis it edits — so a reset that wrote the main's values where the copy
-/// happened to hold them (`retain` then `push`, as these marks did) left the
-/// same coordinates in another order: still one override, the section's dot gone
-/// and the face's lit instead, and every later main edit to `variations` no
-/// longer reaching the copy. Rebuilt in the source's order, a copy that differed
-/// only in the section's axes comes out equal to its source.
+/// The order matters: `reset::overrides` and `propagate`'s merge compare
+/// `variations` as an ordered list, so a copy that differed only in the section's
+/// axes must come out equal to its source.
 fn axes_reset(
     cur: &[AxisSetting],
     src: &[AxisSetting],
@@ -5419,11 +4315,9 @@ fn axes_reset(
 
 /// The attribute that puts `color` in `slot` — `None` meaning "inherit".
 ///
-/// **One builder for every write to a character-scoped slot**, so the row, the
-/// picker and the three slot verbs cannot disagree about what setting a colour
-/// means. `None` for a decoration slot with no decoration on it: there is nothing to
-/// colour, which is also how the picker learns to close itself when one is switched
-/// off underneath it.
+/// One builder for every write to a character-scoped slot, so the row, the picker
+/// and the slot verbs agree. `None` for a decoration slot with no decoration on it,
+/// which is also how the picker learns to close itself.
 fn char_color_attr(
     subject: &TypeSubject,
     slot: CharSlot,
@@ -5451,33 +4345,13 @@ fn decoration_of(subject: &TypeSubject, kind: CharAttrKind) -> Option<Decoration
 /// The glyphs the three decoration cells show: none, underline, strikethrough.
 const DECORATION_GLYPHS: [&str; 3] = [icon::MINUS, icon::TEXT_UNDERLINE, icon::TEXT_STRIKETHROUGH];
 
-/// The column a list inside the popup gives up to its scrollbar.
-///
-/// Taken out of the rows rather than laid over them: a bar drawn on top of a
-/// slider that reaches the same edge is a bar you cannot grab without moving the
-/// axis you were trying to scroll past.
+/// The column a list inside the popup gives up to its scrollbar, so the bar does
+/// not overlap a slider that reaches the same edge.
 const LIST_GUTTER: f32 = 10.0;
 
-/// Which of the Decoration strip's three cells is lit, and what picking cell `i`
-/// writes — the pair, because they are one rule read in two directions.
-///
-/// 🚨 **Lifted out of `decoration_section` so a test can reach it** (§15 D624,
-/// `[S6.2-L6-07]`, §15 D269's move). The review swapped the `(under, strike)` →
-/// cell mapping so the strip lights the wrong decoration, and the **whole
-/// workspace stayed green** — including `skip_ink_tests`, which is one of the few
-/// modules in this file that touches `decoration_section` at all and which reads
-/// `under.is_some()` rather than the cell, so *which* cell lights was unpinned
-/// even there.
-///
-/// **`carried` is the decoration's own styling, moved rather than re-made.**
-/// Switching from underline to strikethrough keeps the colour, thickness and
-/// style the user chose — the `unwrap_or_default()` only fires when there was
-/// nothing to carry.
-///
-/// The `None` arm is cell 0, *no decoration*, and it is the arm a wrong mapping
-/// reaches by accident: `_ =>` in the write half means anything not 1 or 2 clears
-/// both, so a read half that answered 1 where it means 2 still writes *something*
-/// and looks like it works.
+/// Which of the Decoration strip's three cells is lit, and (in [`decoration_write`])
+/// what picking cell `i` writes: one rule read in two directions, lifted out of
+/// `decoration_section` so a test can reach it. Cell 0 is no decoration.
 fn decoration_cell(under: Option<Decoration>, strike: Option<Decoration>) -> usize {
     match (under, strike) {
         (Some(_), _) => 1,
@@ -5486,7 +4360,8 @@ fn decoration_cell(under: Option<Decoration>, strike: Option<Decoration>) -> usi
     }
 }
 
-/// What picking cell `i` writes, given whatever styling was already there.
+/// What picking cell `i` writes. `carried` is the decoration's own styling, kept
+/// when switching between underline and strikethrough.
 fn decoration_write(i: usize, carried: Decoration) -> Vec<CharAttr> {
     match i {
         1 => vec![
@@ -5501,32 +4376,17 @@ fn decoration_write(i: usize, carried: Decoration) -> Vec<CharAttr> {
     }
 }
 
-/// Whether the **Bold** toggle is lit, and the weight a click on it writes.
+/// Whether the Bold toggle is lit, and the weight a click on it writes.
 ///
-/// 🚨 **Lifted for `[S6.2-L6-07]`'s second flip** (§15 D624): `weight >= 600`
-/// became `>= 100` — every face reading bold — with the whole workspace green.
-///
-/// **600 and not 700**, because the threshold is a *reading* of an arbitrary
-/// weight and the click is a *choice* between two: a 600 Semibold face should
-/// show the button lit, and turning the button on from anywhere below writes 700.
-/// ⚠️ **A mixed selection is never lit**, whatever its weights: the button is a
-/// claim about the whole subject, and lighting it would make the next click mean
-/// *un*-bold for runs that were never bold.
+/// The lit threshold is 600 (a reading of an arbitrary weight) while a click
+/// chooses between 400 and 700. A mixed selection is never lit, or the next click
+/// would un-bold runs that were never bold.
 fn bold_toggle(weight: u16, mixed: bool) -> (bool, u16) {
     let on = weight >= 600 && !mixed;
     (on, if on { 400 } else { 700 })
 }
 
 /// Whether a variant describes the current weight, slope and axis settings.
-///
-/// ⚠️ **This line was on `decoration_cell` for the length of one commit**, which
-/// is `CLAUDE.md`'s *"anchor above"* trap, instance **sixteen** — and committed by
-/// a session that had the rule in front of it and had already run the neighbour
-/// grep four times. The anchor was `fn matches_variant(…)`, the **item** line, so
-/// the block went in between this function and its own doc. The merged run was 30
-/// lines against the length ranking's 52-line floor, so that detector could not
-/// see it; what found it was running the neighbour check over *every* insertion
-/// site at the close of the session rather than over the ones that felt risky.
 fn matches_variant(v: &FontVariant, weight: u16, italic: bool, coords: &[AxisSetting]) -> bool {
     if v.weight != weight || v.italic != italic {
         return false;
@@ -5541,13 +4401,10 @@ fn matches_variant(v: &FontVariant, weight: u16, italic: bool, coords: &[AxisSet
     })
 }
 
-/// Whether a several-layer subject's layers sit on different faces of
-/// `variants` (§15 D1077's amendment) — each classified by [`matches_variant`]
-/// as the first
-/// layer is, a layer on no face differing from one on a face. False on a single
-/// layer. Two cuts of one weight and slope that differ by an axis they name
-/// (a condensed and a regular bold) are different faces here, which comparing
-/// weight and italic alone could not see.
+/// Whether a several-layer subject's layers sit on different faces of `variants`,
+/// each classified by [`matches_variant`] (a layer on no face differs from one on a
+/// face). False on a single layer. Two cuts of one weight and slope that differ by
+/// an axis they name are different faces.
 fn faces_disagree(variants: &[FontVariant], subject: &TypeSubject) -> bool {
     let face = |m: &TypeSubject| {
         variants.iter().position(|v| {
@@ -5566,9 +4423,8 @@ fn faces_disagree(variants: &[FontVariant], subject: &TypeSubject) -> bool {
 /// Replace a `DragValue`'s digits with a dash when the range disagrees with
 /// itself.
 ///
-/// **A dash, not a blank and not the first value.** Blank reads as a broken
-/// field, and showing one of the several values reads as a claim that it is *the*
-/// value — which the next drag would then make true for all of them.
+/// A dash, not a blank and not the first value: blank reads as broken, and one of
+/// several values reads as a claim that it is the value.
 fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
         return d.custom_formatter(|_, _| "–".into());
@@ -5577,18 +4433,11 @@ fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
 }
 
 /// What picking list marker `next` writes — the marker, and a gutter for it if the
-/// paragraph has none (§15 D804).
+/// paragraph has none.
 ///
-/// **Turning a marker on opens a gutter once.** A marker is right-aligned on the
-/// paragraph's start edge, so with no indent it draws outside the box — an honest
-/// reading of "no gutter" and a poor first impression. ⚠️ **Only where the indent
-/// resolves to zero**, so a paragraph that already has one keeps it, and turning a
-/// marker off never touches the indent at all: a gutter the user can see is theirs
-/// once it exists.
-///
-/// ⚠️ **The zero test is on the *resolved* value, which is why `font_size` is a
-/// parameter** and not a detail — an `Em(0.0)` indent is zero at every size, but so
-/// is `Px(0.0)`, and the field can hold either (§15 D537).
+/// A marker is right-aligned on the paragraph's start edge, so with no indent it
+/// draws outside the box. The gutter opens only where the indent resolves to zero
+/// (hence `font_size`), and turning a marker off never touches the indent.
 fn marker_attrs(next: Option<ListMarker>, indent_start: Length, font_size: f64) -> Vec<ParaAttr> {
     let mut attrs = vec![ParaAttr::Marker(next)];
     if next.is_some() && indent_start.resolve(font_size) == 0.0 {
@@ -5597,23 +4446,11 @@ fn marker_attrs(next: Option<ListMarker>, indent_start: Length, font_size: f64) 
     attrs
 }
 
-/// The variation coordinates after setting `axis` to `value` — the whole of what
-/// `clear_at_default` decides (§15 D804).
+/// The variation coordinates after setting `axis` to `value`.
 ///
-/// `clear_at_default` **drops** the coordinate rather than writing the font's own
-/// value into it, which is what "reset" means and what keeps the file from
-/// accumulating settings that say nothing. It is **off for `opsz`**, where the
-/// absence of a coordinate is the Auto state and dropping one would silently
-/// change the mode — so for that axis a default value is written out like any
-/// other.
-///
-/// 🚨 **This was the same eight lines in two places** — `OndinApp::write_axis`
-/// and `OndinApp::axis_valve` — and only the valve's copy was reached by a test
-/// (§15 D569). `roadmap.md` warned about exactly that shape: *"a grep for the
-/// name reads as though the decision were reached"*. It also listed this as a
-/// decision needing *"a live text session and a laid-out panel"*, which was true
-/// of its two callers and never of the rule: every operand here is a parameter,
-/// so the lift §15 D269 prescribes reaches it after all.
+/// `clear_at_default` drops the coordinate rather than writing the font's own value,
+/// which keeps the file free of settings that say nothing. It is off for `opsz`,
+/// where an absent coordinate is the Auto state.
 fn axis_coords_after(
     axis: &FontAxis,
     coords: &[AxisSetting],
@@ -5631,43 +4468,14 @@ fn axis_coords_after(
     next
 }
 
-/// The one value to show for a set of attribute values that are **all zero
-/// lengths**, whatever units they are in — or `None` when they are not (§15 D799).
+/// The one value to show for a set of attribute values that are all zero lengths
+/// in whatever units, or `None` when they are not.
 ///
-/// **This is the comparison on the *resolved* value that `Length::is_default_zero`
-/// says belongs at the reader.** `Length::resolve` turns a length into a number
-/// given a font size, and a zero is zero at every font size, so for this case
-/// "resolved" needs no size and cannot be wrong.
-///
-/// 🚨 **And that is exactly why it stops at zero.** The general resolved
-/// comparison — two lengths that resolve alike *at the current size* — was
-/// considered and not taken: `Em(0.02)` and `Px(0.32)` are the same ink at 16pt
-/// and different ink at 24, so a field would flip between a number and a dash as
-/// the user resized the text, and the unit chip would have to name one of two
-/// units the document actually holds. Zero is the only amount where the unit
-/// carries no information about the ink, which is the whole reason it was the
-/// only amount that read wrong. **Widening this is a decision, not an
-/// oversight.**
-///
-/// ⚠️ **It hands back the first value that cannot be the default.** The unit chip
-/// reads its suffix off whatever comes back, so returning `Px(0.0)` for a
-/// document the user had set to `%` flips the chip back to `px` under them —
-/// D537's own symptom arriving by a new road.
-///
-/// 🚨 **This paragraph used to say *"the first value, not the default"*, and
-/// that was a coincidence rather than a guarantee** (§15 D840). `values_in`
-/// answers in document order, and for every selection whose explicit run is not
-/// at the head the first value **is** the default — so the sentence described
-/// the one case it was not protecting. It is a rule now, and the body says how.
-///
-/// ⚠️ **This doc was stolen and put back on 2026-09-19** (§15 D804). Inserting
-/// `marker_attrs` above it, anchored on this `fn` line rather than on the line
-/// above the block, moved all of the above onto that function and left this one
-/// bare — `CLAUDE.md`'s insertion-anchor trap, done by a session that had spent
-/// the day on this class, and green through every gate. ⚠️ **The running count of
-/// this class lives in `CLAUDE.md` and deliberately not in a comment** (§15 D697);
-/// what caught this one was the neighbour grep run once more at the end, which is
-/// the argument for running it as a routine rather than on suspicion.
+/// It stops at zero because zero is the only amount where the unit carries no
+/// information about the ink (`Em(0.02)` and `Px(0.32)` are the same ink at 16pt
+/// and different at 24); widening it is a decision. It hands back the first value
+/// that cannot be the default, so the unit chip does not flip to `px` under a user
+/// who set `%`.
 fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> Option<A> {
     if !values
         .iter()
@@ -5675,23 +4483,10 @@ fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> O
     {
         return None;
     }
-    // 🚨 **The first value that *cannot* be the default, and only then the
-    // first** (§15 D840). `Spans::values_in` answers in **document** order, so
-    // "the first value" is the one at the start of the selection — and for any
-    // selection whose explicit run is not at the head, that is the node default.
-    // A layer with `%` typed over characters 4..8 and the default over 0..4 read
-    // back `px` for the whole word, and the same document with the run at the
-    // head read `%`: the unit chip flipped under the user on the strength of
-    // where they happened to start selecting.
-    //
-    // **`Length::ZERO` is `Px(0.0)` and is what every one of these six
-    // attributes defaults to**, so a `Px(0.0)` in this set *may* be nobody's
-    // choice while an `Em(0.0)` is always somebody's. That is what makes this a
-    // rule rather than a preference between two units. Where both are explicit —
-    // px typed on one run, `%` on another, both zero — the two are equally
-    // defensible and this is a tie-break; the alternative the review raised, the
-    // value at the caret, is the better answer to *that* case and needs a caret
-    // this function is not given.
+    // `Spans::values_in` answers in document order, so the first value may be the
+    // node default. `Length::ZERO` is `Px(0.0)`, every one of these attributes'
+    // default, so a `Px(0.0)` may be nobody's choice while an `Em(0.0)` always is;
+    // where both are explicit this is a tie-break.
     let pick = values
         .iter()
         .position(|v| length_of(v) != Some(Length::ZERO))
@@ -5728,30 +4523,23 @@ fn decoration_attr(kind: CharAttrKind, d: Option<Decoration>) -> CharAttr {
 
 /// What a [`length_field`] produced.
 ///
-/// **The response comes back too, because these fields owe a valve.** They used to
-/// return a bare `Option<Length>` and their callers committed it on the spot, which
-/// made them the only numeric controls in the panel that did not preview — one
-/// history entry per frame of a drag, and a commit built from a snapshot taken
-/// before the frame started. That was the reported bug: scrubbing either paragraph
-/// field did nothing at all (§15 D108).
+/// The response comes back too, because these fields owe a valve (preview, then
+/// one commit).
 struct LengthEdit {
     /// The value to write: on the frame it changed, and again on the frame a scrub
-    /// ended — see the note at [`length_field`]'s own return for why the second is
-    /// the one the valve needs.
+    /// ended, which is the one the valve commits on.
     next: Option<Length>,
-    /// Whether it must commit **now**. A unit toggle is a click: there is no drag
-    /// for a valve to wait on, and `edit_valve` would sit on it forever.
+    /// Whether it must commit now. A unit toggle is a click with no drag for a
+    /// valve to wait on.
     immediate: bool,
     resp: egui::Response,
 }
 
 /// A `Length` field with a clickable unit, for the paragraph scope.
 ///
-/// **`mixed` replaces the digits with a dash and nothing else** — the number under
-/// it is still `current`, so a scrub starts from the value at the range's start and
-/// makes the range uniform, which is what the character fields do
-/// ([`mixed_text`]). A unit click behaves the same way: it converts the value
-/// shown and writes it to every paragraph in the range.
+/// `mixed` replaces the digits with a dash and nothing else ([`mixed_text`]): a
+/// scrub starts from the value at the range's start and makes the range uniform,
+/// and a unit click converts the shown value for every paragraph in the range.
 #[allow(clippy::too_many_arguments)]
 fn length_field(
     ui: &mut egui::Ui,
@@ -5763,13 +4551,7 @@ fn length_field(
     bounds: Bounds,
     tooltip: &str,
 ) -> LengthEdit {
-    // ⚠️ **One range in, not two, and the px face is derived** — see [`Bounds`]
-    // for the class this closes. The four callers used to pass a `px_range` of
-    // `±MAX_LINE_HEIGHT_PX` beside a `pct_range` spelled from
-    // `MAX_TRACKING_PCT`, which are the same two numbers every other `Length`
-    // field in this file was passing and describe no quantity in common. **And a `Bounds` rather than a
-    // bare `%` range** (§15 D861): the range alone still let every caller spell
-    // tracking's cap by hand, and all four did.
+    // One [`Bounds`] in, with the px face derived from the font size.
     let (mut shown, scrub, typed) = match current {
         Length::Em(m) => (
             m * 100.0,
@@ -5794,13 +4576,9 @@ fn length_field(
         }),
         &mut shown,
         scrub,
-        // `mixed_text` last, so its dash wins over the number formatter rather than
-        // being replaced by it.
-        //
-        // **The parser goes on here rather than being the one every field gets**,
-        // which `value_field_f64` sets before calling this closure precisely so a
-        // caller can take it back: this is a field with two units, so a `px` typed
-        // into its `%` face is a rejection instead of a wrong number (§15 D359).
+        // `mixed_text` last, so its dash wins over the number formatter. The parser
+        // is replaced because two units share the field: a `px` typed into its `%`
+        // face is a rejection, not a wrong number.
         |d| {
             mixed_text(
                 d.custom_formatter(ui::number(2))
@@ -5809,9 +4587,7 @@ fn length_field(
             )
         },
     );
-    // The field is labelled by a 14pt glyph and nothing else, so the tooltip is
-    // the whole of what says which number this is. It was taken and dropped on the
-    // floor here, which is why the paragraph fields have never had one.
+    // The field is labelled by a glyph alone, so the tooltip says which number it is.
     let resp = resp.on_hover_text(tooltip.to_string());
     if unit_clicked {
         return LengthEdit {
@@ -5821,18 +4597,10 @@ fn length_field(
         };
     }
     LengthEdit {
-        // **A scrub reports on the frame it changes the value and again on the frame
-        // it ends**, and the second half is not redundant: the release is the frame
-        // `edit_valve` commits on, and it is the one frame a changed-only field has
-        // nothing to say, because `value_field` has already settled the number to
-        // whole units on every dragged frame. Gating on the change alone therefore
-        // withheld the value on exactly the frame that owed one, and the last drag of
-        // a paragraph field lived in the preview until the next commit anywhere
-        // cleared it — §15 D109's shape, one level up from where D109 was fixed.
-        //
-        // It costs nothing on a click: a stationary press-release is a click and
-        // never a drag, so `drag_stopped` does not fire and there is no identical
-        // transaction to commit. Both halves are pinned by
+        // A scrub reports on the frame it changes the value and again on the frame it
+        // ends: the release is the frame `edit_valve` commits on, and by then
+        // `value_field` has settled the number, so a changed-only gate would
+        // withhold it. A click is not a drag, so it reports nothing. Pinned by
         // `a_scrub_reports_its_value_on_the_release_frame_and_a_click_reports_nothing`.
         next: (shown != before || resp.drag_stopped()).then(|| match current {
             Length::Em(_) => Length::Em(shown / 100.0),
@@ -5845,12 +4613,10 @@ fn length_field(
 
 /// [`LengthEdit`] for a field whose absent state means "the font decides".
 struct OptionalLengthEdit {
-    /// The value to write. The outer `Option` is whether there is one at all — a
-    /// field showing "auto" has nothing to write and no drag that could produce
-    /// one — and the inner is the field's own absent state.
+    /// The value to write. The outer `Option` is whether there is one at all (a field
+    /// showing "auto" has nothing to write); the inner is the field's absent state.
     next: Option<Option<Length>>,
-    /// Whether it must commit **now**, for [`LengthEdit::immediate`]'s reason: a
-    /// unit click has no drag for the valve to wait on.
+    /// Whether it must commit now, as [`LengthEdit::immediate`].
     immediate: bool,
     resp: egui::Response,
 }
@@ -5858,69 +4624,17 @@ struct OptionalLengthEdit {
 /// A `Length` field whose absent state means "the font decides".
 ///
 /// The suffix cycles `auto → px → % → auto`, so the `None` state is one of the
-/// units rather than a separate switch — the same three-states-on-one-field shape
-/// as line height, and for the same reason: it is a value, not a collapsed
-/// control.
+/// units rather than a separate switch.
 ///
-/// **Reports on a frame the value changed, and again on the frame the drag ends**
-/// — [`length_field`]'s rule, adopted here by §15 D765. The gate this function
-/// *originally* had cost these two fields both halves of a valve: they committed on
-/// *every* changed frame of a drag, one undo step each, and then said nothing at all
-/// on the release frame — D108 and D109 respectively, on the two fields that were
-/// never moved onto the valve with the rest. The `drag_stopped` term is what stops
-/// that happening again, and it is why the rule is not a plain `shown != before`.
+/// Reports on a frame the value changed and again on the frame the drag ends
+/// ([`length_field`]'s rule), not on every frame. `bounds` is the caller's because
+/// the offset is signed (positive-up) and the thickness is not; the model clamps
+/// too (`typography::canonical_decoration`).
 ///
-/// 🚨 **It reported on *every* frame it had a value between then and D765, on an
-/// argument that cited a method which does not exist.** The sentence read *"the
-/// shape `OndinApp::char_length` uses for the other character-scope `Length`
-/// fields, and the house rule for anything that ends at a valve"* — there is no
-/// `char_length` anywhere in the tree, and the link reference under this doc
-/// pointed the name at the **type**, so `cargo doc` resolved it and the gate stayed
-/// green. **A citation that resolves to the wrong item is worse than one that
-/// dangles**, and this one was the whole of the argument for the divergence
-/// `[S6.2-L3-09]` was filed about.
-///
-/// ⚠️ **The two `char_valve` callers are *not* a third answer to this question.**
-/// `length_char_field_marked` and `type_line_height_field` hand `char_valve` a value
-/// unconditionally because that function takes a `CharAttr` rather than an
-/// `Option`, and its own doc records D109 being caused by a guard in that position.
-/// They have a different contract, not a different opinion.
-///
-/// ⚠️ **`bounds` is the caller's, because this one function serves a signed
-/// field and an unsigned one** (§15 D546, D861). It was a `signed: bool` over a
-/// range this function spelled from `MAX_TRACKING_PCT` itself, which made the
-/// sign the caller's and the *cap* tracking's. `[S6.3-L1-02]`: it chose a symmetric
-/// range for both, and the range was chosen for the **offset** — which is
-/// legitimately signed, positive-up, so pushing an underline clear of the
-/// descenders means typing a negative number. **Thickness inherited that sign
-/// for no reason but sharing the function**, so `−5 px` was accepted, shown and
-/// saved, and then rendered three different ways: the canvas floors it and drew
-/// nothing, the SVG writer emitted `text-decoration-thickness="-5px"` verbatim,
-/// and re-importing that file gave a third answer because `svg_in` reads no
-/// decoration thickness at all.
-///
-/// **The model clamps too** (`typography::canonical_decoration`), and that is
-/// the half that matters for files already saved; this half is what stops the
-/// field offering the value in the first place.
-///
-/// ⚠️ **`resolved` is what leaving "auto" seeds, and it is not decoration** (§15
-/// D570). `[S6.3-L1-01]`: the `None` arm used to seed `Px(0.0)` on the argument
-/// that *"the font's own value is not knowable here"*, which was true and is no
-/// longer — and the conclusion never followed from it anyway. **A zero thickness is
-/// not a thin line, it is no line**: `render::scene::decoration_path` and
-/// `core::text::crossings` each open by refusing a band of zero height, so one
-/// click on the *Font* chip — the click that means *"show me this in px"* — erased
-/// the underline, with `0.00 px` on screen and no way to guess what to type back.
-/// `next_line_height` had solved exactly this two fields away (§15 D162) and this
-/// one did not know.
-///
-/// `None` for a caller with nothing to seed from, which is still the **offset**
-/// field: the face's own offset is available on the same metrics, but the panel's
-/// offset is positive-*up* against parley's own convention (§15 D151) and getting
-/// that sign wrong silently moves every underline. Seeding zero there puts the band
-/// on the baseline, which is visible and recoverable; seeding zero on a thickness is
-/// not.
-///
+/// `resolved` is what leaving "auto" seeds: a zero thickness is no line, so the
+/// click that means "show this in px" must not erase the underline. `None` for a
+/// caller with nothing to seed from, the offset field, whose sign convention differs
+/// from parley's; seeding zero there only puts the band on the baseline.
 #[allow(clippy::too_many_arguments)]
 fn optional_length_field(
     ui: &mut egui::Ui,
@@ -5932,24 +4646,17 @@ fn optional_length_field(
     resolved: Option<f64>,
     tooltip: &str,
 ) -> OptionalLengthEdit {
-    // `length_field`'s `before`, for the release-frame rule at the foot of this
-    // function (§15 D765): the value as the field was handed it, so `shown != before`
-    // means *this frame moved it*.
     let (mut shown, scrub, unit, typed) = match current {
-        // The unit the "auto" face parses in is arbitrary and unreachable: its
-        // scrub range is zero-width and `next` is withheld while `current` is
-        // `None`, so nothing typed here can reach the document whatever it says.
+        // The "auto" face's parse unit is arbitrary: its scrub range is zero-width
+        // and `next` is withheld while `current` is `None`.
         None => (
             0.0,
             Scrub::whole(1.0).range(0.0..=0.0),
             "auto",
             expr::Unit::Px,
         ),
-        // ⚠️ **Derived from the `%` face below rather than hard-coded**, which is
-        // the whole of [`Bounds`]' argument: these two ends used to be
-        // `±10 000 px` against `±200 %`, so `Px(50)` at 16pt converted to
-        // `Em(3.125)` and came back as 32px — a measured loss on one click of the
-        // unit chip.
+        // Derived from the `%` face rather than hard-coded (see [`Bounds`]), so a
+        // unit click round-trips.
         Some(Length::Px(v)) => (
             v,
             Scrub::fine(0.1, 2).range(bounds.px(font_size)),
@@ -5971,31 +4678,13 @@ fn optional_length_field(
         Some(Suffix {
             text: unit,
             clickable: true,
-            // **What clicking does, not what the field is** — the third of the three
-            // divergences `[S6.2-L3-09]` measured across this file's three `Length`
-            // fields, and the last one still open (the `%` cap closed with
-            // [`Bounds`], and the release-frame rule is a ruling rather than a slip).
-            //
-            // 🚨 **This chip wore the *field's* label, and the field wore nothing.**
-            // A decoration's thickness chip hovered as *"Thickness — the font's own
-            // unless set"*, which describes the number beside it and says nothing
-            // about the click — on the one chip in this file whose click is
-            // dangerous enough to have earned a §15 entry of its own: D570, where it
-            // used to seed `Px(0.0)` and make the underline vanish. The two
-            // arguments are `length_field`'s comment below, from the other side —
-            // *"it was taken and dropped on the floor here"* — happening again, with
-            // the tooltip relocated onto the wrong control rather than lost.
-            //
-            // ⚠️ **Three faces, not two**, which is why this is not
-            // `length_field`'s literal string: `next_optional_length` cycles
-            // px → % → the font's own, so *"switch unit"* would be two-thirds true.
+            // What clicking does, not what the field is. Three faces, not two:
+            // `next_optional_length` cycles px → % → the font's own.
             tooltip: "Click to cycle: px, %, or the font's own",
         }),
         &mut shown,
         scrub,
-        // Its own parser for [`length_field`]'s reason — px and % on one field
-        // (§15 D359) — and on the "auto" face too, where it is inert but not worth
-        // a second spelling.
+        // Its own parser, as [`length_field`]'s; inert but harmless on the "auto" face.
         |d| {
             let d = d.custom_parser(move |t| expr::eval_in(t, typed));
             if current.is_none() {
@@ -6004,9 +4693,7 @@ fn optional_length_field(
             d.custom_formatter(ui::number(2))
         },
     );
-    // `length_field`'s line, for its stated reason: the field is labelled by a 14pt
-    // glyph and nothing else, so this is the whole of what says *which number* this
-    // is. It had been spent on the chip instead.
+    // The field is labelled by a glyph alone, so the tooltip says which number it is.
     let resp = resp.on_hover_text(tooltip.to_string());
     if unit_clicked {
         return OptionalLengthEdit {
@@ -6016,28 +4703,10 @@ fn optional_length_field(
         };
     }
     OptionalLengthEdit {
-        // Nothing to write while the field shows "auto": its scrub is clamped to a
-        // zero-width range, so there is no value the drag could have produced, and
-        // writing the state back would only give an unfocused field a way to commit
-        // an identical transaction.
-        //
-        // 🚨 **`length_field`'s release-frame rule, which this did not have** (§15
-        // D765). This read `current.is_some().then(…)` — a value on **every** frame
-        // the field is not `auto`, idle ones included — under a doc claiming that
-        // was *"the house rule for anything that ends at a valve"*. ⚠️ **That claim
-        // cited `OndinApp::char_length`, a method which does not exist anywhere in
-        // the tree**, and the link reference beside it redirected to the *type*, so
-        // `cargo doc` resolved it and the invented name never surfaced. It was the
-        // whole argument for the divergence.
-        //
-        // The rule that survives reading is `length_field`'s: report on a frame the
-        // value **changed**, and again on the frame the drag **ends**. The second
-        // half is the one D109 is about and is why this is not a plain
-        // `shown != before` — the release is the frame `edit_valve` commits on, and
-        // a changed-only gate withholds a value on exactly it.
-        //
-        // ⚠️ **The `current.is_some()` term stays and is a different question**:
-        // *is there a value at all*, against *has it anything to say this frame*.
+        // Nothing to write while the field shows "auto". Otherwise `length_field`'s
+        // rule: report when the value changed and on the frame the drag ends, which
+        // is the frame `edit_valve` commits on. `current.is_some()` asks whether
+        // there is a value at all, the rest whether it has anything to say.
         next: (current.is_some() && (shown != before || resp.drag_stopped())).then(|| {
             Some(match current {
                 Some(Length::Em(_)) => Length::Em(shown / 100.0),
@@ -6051,15 +4720,9 @@ fn optional_length_field(
 
 /// A combo over a small `Copy` enum, returning the pick when it changed.
 ///
-/// Read the enum's own variants and expose them verbatim, so a variant added to
-/// the model reaches the panel without a second list to keep in step. One caller
-/// today — the **line-style** picker in `decoration_section`.
-///
-/// ⚠️ **This is not what draws the wrapping controls**, and this comment said it
-/// was until 2026-09-06 (*"the three wrapping controls … are one function rather
-/// than three blocks that could drift"*). Those three live in `wrap_section` and
-/// are hand-painted segmented tracks, which a combo cannot be — so a reader
-/// adding a fourth wrapping control wants `segment_label` there, not this.
+/// Exposes the enum's own variants verbatim, so a variant added to the model
+/// reaches the panel. Used by the line-style picker; the wrapping controls are
+/// segmented tracks in `wrap_section`.
 fn enum_combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -6071,9 +4734,7 @@ fn enum_combo<T: Copy + PartialEq>(
 ) -> Option<T> {
     let mut pick = None;
     ui.scope(|ui| {
-        // The combo paints its border *inside* its rect, so its height is `size.y`
-        // whole — subtracting the hairline (right for content inside a `field_row`)
-        // left it 2px short of the fields beside it (§15 D85).
+        // The combo paints its border inside its rect, so its height is `size.y` whole.
         ui.spacing_mut().interact_size.y = size.y;
         ui.spacing_mut().button_padding.y = 0.0;
         egui::ComboBox::from_id_salt(salt)
@@ -6096,26 +4757,14 @@ fn enum_combo<T: Copy + PartialEq>(
 /// The next state of [`optional_length_field`]'s three-way unit cycle:
 /// auto → px → % → auto.
 ///
-/// **Leaving "the font decides" seeds what the font was deciding** —
-/// [`next_line_height`]'s rule, one field along and arrived at four months later
-/// (§15 D570). This arm used to seed `Px(0.0)` on the argument that *"the font's
-/// own value is not knowable here, and a made-up number would move the ink"*. The
-/// premise was true when it was written and is not now (`TextLayout::
-/// decoration_sizes`), and the conclusion never followed from it either: **zero
-/// moves the ink further than any guess could — it removes it.**
+/// Leaving "the font decides" seeds what the font was deciding
+/// ([`next_line_height`]'s rule), since a zero seed would remove the line.
+/// `resolved` is `None` for a caller with nothing measured (the offset field), and
+/// the zero fallback applies.
 ///
-/// `resolved` is `None` for a caller with nothing measured, and the zero fallback
-/// is then what it always was. The **offset** field is that caller today, for the
-/// reason [`optional_length_field`]'s own doc gives.
-///
-/// ⚠️ **The `Px` face is the seeded one and the cycle is not line height's.** These
-/// two run `auto → px → % → auto` where line height runs `auto → % → px → auto`, so
-/// the arm that reads `None` here produces a `Px` and the equivalent there produces
-/// an `Em`. A fix copied across without reading the cycle seeds the wrong unit and
-/// nothing says so — the number is still right.
-///
-/// A free function for [`next_line_height`]'s reason: it is the decision, and the
-/// field around it needs a `Ui`.
+/// The `Px` face is the seeded one here, where line height's cycle
+/// (`auto → % → px → auto`) seeds an `Em`. A free function because it is the
+/// decision and the field around it needs a `Ui`.
 fn next_optional_length(
     current: Option<Length>,
     font_size: f64,
@@ -6131,15 +4780,9 @@ fn next_optional_length(
 /// The next state of the line-height field's three-way unit cycle:
 /// auto → % → px → auto.
 ///
-/// **Leaving Auto seeds what Auto was worth**, `resolved` being the shaped first
-/// line's own height, so the click changes the *unit* and not the type. It seeded a
-/// round `120%` while the font's leading was unknowable in the panel, which moved
-/// the ink of anything whose face disagreed — Inter's is nearer 121%, and a display
-/// face can be anywhere from 100% to 150%. The round number is still the fallback
-/// for a node with nothing laid out.
-///
-/// A free function because it is the decision, and `OndinApp` cannot be built
-/// headlessly to test the method around it.
+/// Leaving Auto seeds what Auto was worth (`resolved` is the shaped first line's
+/// height), so the click changes the unit and not the type; `120%` is the fallback
+/// for a node with nothing laid out. A free function so it can be tested headlessly.
 fn next_line_height(
     current: Option<Length>,
     font_size: f64,
@@ -6147,8 +4790,7 @@ fn next_line_height(
 ) -> Option<Length> {
     match current {
         None => Some(Length::Em(match resolved {
-            // The multiple the face is actually giving, canonicalized like every
-            // other stored `Length` so the field and the file agree.
+            // The multiple the face is actually giving.
             Some(px) if font_size > 0.0 => (px / font_size).max(0.0),
             _ => 1.2,
         })),
@@ -6157,12 +4799,10 @@ fn next_line_height(
     }
 }
 
-/// One layer's line height `current` moved into the state `like` names — Auto,
-/// a multiple or px — keeping what it draws where the state allows: the
-/// several-layer card's unit click (§15 D1077), where `like` is the first
-/// layer's [`next_line_height`] and each other layer converts its own value at
-/// its own size. Auto into a state reads the laid line as [`next_line_height`]
-/// does, 1.2 of the size with nothing laid.
+/// One layer's line height `current` moved into the state `like` names (Auto, a
+/// multiple or px), keeping what it draws where the state allows: the several-layer
+/// card's unit click, where `like` is the first layer's [`next_line_height`]. Auto
+/// reads the laid line as [`next_line_height`] does, 1.2 of the size with nothing laid.
 fn line_height_as(
     current: Option<Length>,
     font_size: f64,
@@ -6180,9 +4820,8 @@ fn line_height_as(
 /// A short prefix for an axis field — the tag itself, which is what a type
 /// designer calls it and what the file records.
 fn axis_prefix(tag: Tag) -> &'static str {
-    // `Prefix::Text` wants a `'static str` and a tag is four bytes of anything,
-    // so the well-known ones get their name and the rest share a marker. Better
-    // than leaking a string per frame for a label the slider already names.
+    // `Prefix::Text` wants a `'static str`, so the well-known tags get a name and
+    // the rest share a marker rather than leaking a string per frame.
     match tag.as_str() {
         "opsz" => "OS",
         "wdth" => "WD",
@@ -6199,13 +4838,9 @@ fn axis_prefix(tag: Tag) -> &'static str {
 /// The sign convention of an axis that does not run the way a reader expects,
 /// for the axis row's hover — `None` for the ones that need no warning.
 ///
-/// **Only `slnt`, and it needs one badly.** `fvar` measures slant
-/// *counter-clockwise*, so the right-leaning oblique everybody means by "slant
-/// 10°" is `slnt −10`: a spec transcribed straight into this field leans the text
-/// the wrong way, and there is nothing else on the row to say so. The row already
-/// carries the axis's own name and tag on hover, which is where a rule this
-/// narrow belongs — it is a fact about the format, not about this control, and a
-/// permanent mark on the row would be noise for every other axis.
+/// Only `slnt`: `fvar` measures slant counter-clockwise, so a right-leaning
+/// oblique is `slnt −10`. It rides on the row's hover, being a fact about the
+/// format rather than the control.
 fn axis_sign_hint(tag: Tag) -> Option<&'static str> {
     match tag.as_str() {
         "slnt" => Some("counter-clockwise degrees, so a right-leaning oblique is negative"),
@@ -6215,10 +4850,8 @@ fn axis_sign_hint(tag: Tag) -> Option<&'static str> {
 
 /// Sort key for the feature list — the tags worth finding first.
 ///
-/// **The stylistic-set arm asks for a *number*, and that is a fix.** It used to
-/// be `t.starts_with("ss")`, which also caught `ssty` — math script-style
-/// alternates, a shaping mechanic — and filed it under stylistic sets;
-/// `typography::stylistic_set` answers the question the arm was asking.
+/// The stylistic-set arm asks `typography::stylistic_set` for a number, so `ssty`
+/// (a shaping mechanic) is not filed under stylistic sets.
 fn feature_rank(tag: Tag) -> u8 {
     match tag.as_str() {
         "tnum" | "pnum" | "lnum" | "onum" => 0,
@@ -6248,8 +4881,7 @@ struct Registered {
 
 /// The registry entry for `tag`, or `None` for a tag the registry does not have.
 ///
-/// `None` is the third tier and means *private tag*: four letters the font made
-/// up, which is then the only honest thing to show for it.
+/// `None` means a private tag: four letters the font made up.
 fn registered(tag: Tag) -> Option<Registered> {
     REGISTRY
         .iter()
@@ -6263,45 +4895,24 @@ fn registered(tag: Tag) -> Option<Registered> {
 
 /// `(tag, name, what it does, offered to the user)`.
 ///
-/// **The tags are registered, not invented by the font**, which is what makes a
-/// static table completable rather than a guess: the registry fixes both the tag
-/// and its meaning, so a font cannot make `ccmp` mean something else. All 124
-/// individually registered tags are here — OpenType 1.9.1, the `featurelist`
-/// index and the five `features_*` description pages — and that completeness is
-/// load-bearing: a tag *missing* from this table is reported to the user as
-/// private, so an omission is a wrong answer rather than a gap.
+/// The registry fixes both the tag and its meaning, so a static table is
+/// completable: every individually registered tag (OpenType 1.9.1) is here, and one
+/// missing would be reported to the user as private. `ss01`–`ss20` and `cv01`–`cv99`
+/// are font-defined ([`ondin_core::text::FaceFeature`]) and resolved by
+/// [`feature_label`] first.
 ///
-/// `ss01`–`ss20` and `cv01`–`cv99` are the registry's two **font-defined** ranges
-/// and are deliberately absent: the font names those itself, in a `FeatureParams`
-/// table ([`ondin_core::text::FaceFeature`]), and [`feature_label`] resolves them
-/// before consulting this table.
+/// Names are the registry's *Friendly name* in sentence case, like the font-supplied
+/// labels. `offered` follows the registry's UI suggestion: withheld are the
+/// required features (`ccmp`, `rvrn`), those a shaper applies per script (`init`,
+/// `medi`, `fina`, `isol`, `mark`, `mkmk`, `curs`, `dist`, `locl`, `rlig`, `rclt`)
+/// and corollaries (`numr`, `dnom` under `frac`). Four departures, each because the
+/// switch would be a lie:
 ///
-/// **Names are the registry's own *Friendly name*, lowered to sentence case.**
-/// The case is the only thing about them that is ours, and it is not gratuitous:
-/// the `ssXX`/`cvXX` labels beside them come out of a font's `name` table, where
-/// sentence case is what type designers write ("Open digits", "Alternate one").
-///
-/// **`offered` is the registry's answer too.** A tag is withheld when its own UI
-/// suggestion says control "should not generally be exposed to the user", which
-/// covers the required features (`ccmp`, `rvrn`), the ones a shaper applies per
-/// script (`init`, `medi`, `fina`, `isol`, `mark`, `mkmk`, `curs`, `dist`,
-/// `locl`, `rlig`, `rclt`) and the ones an application applies as a corollary of
-/// another (`numr` and `dnom` under `frac`). Four departures, each because the
-/// switch would be a lie rather than a mechanic:
-///
-/// - **The vertical-writing features** (`vert`, `vrt2`, `vrtr`, `valt`, `vhal`,
-///   `vpal`, `vchw`, `vkrn`, `vapk`, `vkna`) are "active by default in vertical
-///   writing mode", and this app has no vertical writing mode — so switching one
-///   on can only mis-shape horizontal text. The `init`/`medi` argument, one axis
-///   over.
-/// - **`aalt`** feeds a *glyph palette*: its UI suggestion is to indicate which
-///   glyphs have alternatives and let the user pick one. As a run-wide switch it
-///   means nothing.
-/// - **`ital`** is applied from the italic style, and the panel already has the
-///   control the registry asks for — two ways to say italic is two ways to
-///   disagree.
-/// - **`size`** carries a tracking curve rather than an on/off state; the `opsz`
-///   axis row is where optical size lives here.
+/// - The vertical-writing features (`vert`, `vrt2`, `vrtr`, `valt`, `vhal`, `vpal`,
+///   `vchw`, `vkrn`, `vapk`, `vkna`): there is no vertical writing mode.
+/// - `aalt` feeds a glyph palette and means nothing as a run-wide switch.
+/// - `ital` is applied from the italic style, which the panel already controls.
+/// - `size` carries a tracking curve; optical size lives on the `opsz` axis row.
 const REGISTRY: &[(&str, &str, &str, bool)] = &[
     // ---- Offered: the registry says a user may choose these ----------------
     // Figures and numbers, which is where the list's highest-value entries are.
@@ -6752,27 +5363,17 @@ const REGISTRY: &[(&str, &str, &str, bool)] = &[
 struct FeatureLabel {
     /// The row's label.
     name: String,
-    /// The row's hover: the name, the tag, and whatever else is known — the same
-    /// shape an axis row's hover has, and the only place the four-letter tag
-    /// appears now that the label is prose.
+    /// The row's hover: the name, the tag, and whatever else is known.
     hover: String,
     /// Whether it belongs in the list, or behind *Show all features*.
     offered: bool,
     /// What the feature's named values are called, in value order: index `k` is
-    /// `FeatureSetting::value = k + 1`. Empty for the on/off features, which is
-    /// nearly all of them.
-    ///
-    /// **Past one, the row is not a switch**: `values` is what a switch cannot
-    /// say, and the length is what decides which control the row draws.
+    /// `FeatureSetting::value = k + 1`. Empty for the on/off features. More than
+    /// one entry makes the row a dropdown rather than a switch.
     values: Vec<String>,
 }
 
-/// How lit the loading dot is at `t` seconds, on 0.0–1.0 (§15 D353).
-///
-/// **Split out from the painting** — `tools::resized_box`'s division, and here
-/// because a pulse is the one part of a drawing that a still frame cannot show:
-/// what has to be right is that it *moves*, and moves smoothly, which is a claim
-/// about a function of time rather than about any one frame's shapes.
+/// How lit the loading dot is at `t` seconds, on 0.0–1.0.
 ///
 /// A raised cosine rather than `sin`, so the breath starts at the trough: a dot
 /// that appears at full brightness and fades reads as something switching off.
@@ -6781,12 +5382,9 @@ fn loading_dot_phase(t: f64) -> f32 {
     ((1.0 - turns.cos()) * 0.5) as f32
 }
 
-/// The pulsing dot that says a family's face is still on its way (§15 D353).
+/// The pulsing dot that says a family's face is still on its way.
 ///
-/// **Never fully dark.** The floor is what keeps the dot a *thing on the row*
-/// rather than something that blinks in and out of existence twice a second —
-/// twenty of those in a scrolling list is a strobe. It breathes between a dim
-/// accent and a bright one.
+/// Never fully dark: a dot that blinks out would strobe across a scrolling list.
 fn paint_loading_dot(ui: &egui::Ui, centre: egui::Pos2) {
     let phase = loading_dot_phase(ui.input(|i| i.time));
     let alpha = (90.0 + 150.0 * phase) as u8;
@@ -6795,31 +5393,17 @@ fn paint_loading_dot(ui: &egui::Ui, centre: egui::Pos2) {
         LOADING_DOT_R,
         theme::color::ACCENT.gamma_multiply(alpha as f32 / 255.0),
     );
-    // **The animation's own clock.** The app repaints reactively, so without this
-    // the dot freezes at whatever phase the last input left it on — which looks
-    // like a static dot and says the opposite of what it is for. Bounded by the
-    // popup being open and by there being something in flight.
+    // The app repaints reactively; without this the dot freezes at its last phase.
     ui.ctx().request_repaint();
 }
 
 /// The *Show all features* / *Show fewer features* reveal: its text, or `None`
 /// where it would be a control that cannot change anything.
 ///
-/// **`hidden` is not a property of the face, and reading it as one is the bug this
-/// function exists to hold.** A withheld feature the document has an opinion about
-/// is shown anyway, so *touching* one — which writes it into the set, even to turn
-/// it off — moves it out of the hidden count. Gating the control on that count
-/// alone therefore made it vanish under the hand: switch the last hidden feature
-/// while the list was expanded and the way back disappeared with it. Reported as
-/// "sometimes the *Show fewer features* just disappears… on one font it was the
-/// last one, on another it was the second one" — which is the same bug twice, the
-/// ordinal being however many withheld features that face had.
-///
-/// So the two states ask different questions. **Expanded, the way back is
-/// unconditional**: the user is in a mode and must be able to leave it. Collapsed,
-/// the offer is only real if something is actually hidden — and if every withheld
-/// feature is set in the document, nothing is, because they are all on screen
-/// already.
+/// `hidden` is not a property of the face: touching a withheld feature moves it
+/// out of the hidden count, so expanded the way back is unconditional (the user
+/// must be able to leave the mode). Collapsed, the offer is real only if
+/// something is still hidden.
 fn features_reveal(show_all: bool, hidden: usize) -> Option<String> {
     match (show_all, hidden) {
         (true, _) => Some("Show fewer features".to_string()),
@@ -6828,31 +5412,14 @@ fn features_reveal(show_all: bool, hidden: usize) -> Option<String> {
     }
 }
 
-/// One row of the feature list for a feature that offers **more than one named
-/// value** — a `cvXX` whose `numNamedParameters` is past one, which the OpenType
-/// registry defines as a 1..n choice rather than an on/off feature. Returns the
-/// value to write when the user picked a different one.
+/// One row of the feature list for a feature that offers more than one named
+/// value (a `cvXX` choice). Returns the value to write when the user picked a
+/// different one.
 ///
-/// **A dropdown, and it takes the whole width under the name.** Measured, because
-/// the alternative was arithmetic away: the list is 240 wide, and the widest real
-/// pairing on hand — Charis SIL's `cv43` "Capital Eng" against its "Lowercase no
-/// descender" — wants 240.1 on one line with the label in its own column. That is
-/// not a near miss to shave a gap off; three faces is the whole evidence base, and
-/// the *next* face's names are not bounded by anything. So the name keeps the row
-/// it would have had as a switch, flush with every other label in the column, and
-/// the control goes under it with all 240 to spend. [`OndinApp::axis_row`] made
-/// the same trade for the same reason.
-///
-/// **A dropdown rather than a segmented track**, which is what the wrap controls
-/// use: a track is for a handful of one- or two-word options, and these are named
-/// by the *font* — "Straight with low hook" — with `numNamedParameters` free to
-/// declare dozens of them.
-///
-/// **`Off` is an item in the list rather than a switch beside it.** The model has
-/// one number for both questions (`FeatureSetting::value`: `0` off, `k` the k-th
-/// named value), so a switch *and* a dropdown would be two controls writing one
-/// field, and every pair of them in this app has eventually disagreed. It also
-/// means the row does not reflow when the feature is turned on.
+/// A dropdown under the name, taking the whole width, since font-supplied value
+/// names are unbounded. `Off` is an item in the list rather than a switch beside
+/// it: `FeatureSetting::value` is one number (`0` off, `k` the k-th named value),
+/// so two controls would write one field.
 fn feature_choice_row(
     ui: &mut egui::Ui,
     tag: Tag,
@@ -6861,19 +5428,10 @@ fn feature_choice_row(
 ) -> Option<u16> {
     let mut pick = None;
     ui.scope(|ui| {
-        // **Every gap in this row is allocated, and `item_spacing` is zero** (§15
-        // D195). Not style: a spacing set here is banked *after* the dropdown as well as
-        // before it — egui advances the cursor past a widget by the spacing in
-        // effect when the widget is placed, so it is paid on both sides and
-        // zeroing it afterwards is too late. Measured: with the tail held at 6,
-        // raising this row's spacing from 2 to 5 to 10 moved the gap *below* the
-        // dropdown to 13, 16, 21. So a spacing cannot express "tighter inside than
-        // outside" at all — it tightens both ends together, which is exactly how
-        // the first version came out 5 within against 6 between and was reported
-        // as "hard to understand where the row ends".
+        // Every gap is allocated and `item_spacing` is zero: egui pays a widget's
+        // spacing on both sides, so it cannot express "tighter inside than outside".
         ui.spacing_mut().item_spacing.y = 0.0;
-        // The name line, painted rather than a `Label` so it sits on the same
-        // baseline and the same left edge as the switch rows around it.
+        // Painted rather than a `Label`, to share the switch rows' baseline and left edge.
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), FEATURE_ROW_H),
             egui::Sense::empty(),
@@ -6887,7 +5445,7 @@ fn feature_choice_row(
         );
         resp.on_hover_text(label.hover.as_str());
         ui.allocate_space(egui::vec2(0.0, CHOICE_LABEL_GAP));
-        // `CELL` whole: a combo strokes inside its own rect (§15 D85).
+        // `CELL` whole: a combo strokes inside its own rect.
         ui.spacing_mut().interact_size.y = CELL;
         ui.spacing_mut().button_padding.y = 0.0;
         egui::ComboBox::from_id_salt(("type-feature-value", tag.to_string()))
@@ -6905,34 +5463,22 @@ fn feature_choice_row(
                     }
                 }
             });
-        // The other half of the same point: the row ends here, and the list's own
-        // point of spacing is not enough to say so under a 26px control.
         ui.allocate_space(egui::vec2(0.0, CHOICE_ROW_TAIL));
     });
     pick.filter(|p| *p != value)
 }
 
-/// The gap between an n-way row's name and the dropdown under it.
-///
-/// Deliberately smaller than [`CHOICE_ROW_TAIL`], and the pair is the whole of
-/// what makes a two-line row read as one row —
-/// `a_choice_row_groups_its_label_with_its_control` asserts the *measured* gaps
-/// rather than these two numbers, so the rule survives either being changed.
+/// The gap between an n-way row's name and the dropdown under it; smaller than
+/// [`CHOICE_ROW_TAIL`] so the two lines read as one row.
 const CHOICE_LABEL_GAP: f32 = 2.0;
 
-/// The gap under an n-way row's dropdown, before the next feature. The list adds
-/// its own point on top of this; nothing else does, since the row's own
-/// `item_spacing` is zero — see [`feature_choice_row`] for why that is load
-/// bearing rather than tidiness.
+/// The gap under an n-way row's dropdown, before the next feature.
 const CHOICE_ROW_TAIL: f32 = 6.0;
 
 /// The values a [`feature_choice_row`]'s list offers, as `(value, name)`.
 ///
-/// **The `+ 1` lives here and nowhere else.** The list and the closed dropdown are
-/// two readings of the same mapping — index `k` of the labels is the value `k + 1`,
-/// because the OpenType spec spends the `ParamUILabelNameID` ids in value order
-/// from one and `0` is off — and the way that breaks is not a crash: the row shows
-/// the name of a neighbouring value and the document gets the one you did not pick.
+/// The `+ 1` lives here and nowhere else: index `k` of the labels is the value
+/// `k + 1`, and `0` is off.
 fn feature_values(label: &FeatureLabel) -> impl Iterator<Item = (u16, &str)> {
     label
         .values
@@ -6943,12 +5489,8 @@ fn feature_values(label: &FeatureLabel) -> impl Iterator<Item = (u16, &str)> {
 
 /// What the closed dropdown of a [`feature_choice_row`] shows.
 ///
-/// **A value the face does not offer is shown as the number it is**, rather than
-/// clamped into the list or hidden behind "Off": a document written against a
-/// different face — or a later version of this one — can carry `cv43 7` where this
-/// face names three values, and the row that cannot say so is a row that silently
-/// misreports the file. It is the same reasoning as the withheld-but-set feature
-/// the list shows anyway.
+/// A value the face does not offer is shown as the number it is, not clamped or
+/// hidden behind "Off", so the row never misreports the file.
 fn feature_value_label(label: &FeatureLabel, value: u16) -> String {
     if value == 0 {
         return FEATURE_OFF.to_string();
@@ -6958,21 +5500,14 @@ fn feature_value_label(label: &FeatureLabel, value: u16) -> String {
         .map_or_else(|| format!("Value {value}"), |(_, name)| name.to_string())
 }
 
-/// The off state of a feature, in the one place both the item and the closed
-/// dropdown read it from.
+/// The off state of a feature, read by both the item and the closed dropdown.
 const FEATURE_OFF: &str = "Off";
 
-/// The three-tier answer to "what is this tag".
+/// The three-tier answer to "what is this tag", in order of authority:
 ///
-/// In order, because each tier is a different kind of authority:
-///
-/// 1. **`ssXX` / `cvXX` — the font's own strings**, which is the only case where
-///    the file is the authority, and the generic "Stylistic set 7" is a fallback
-///    rather than the answer: plenty of fonts document their `cvXX` set on a web
-///    page and leave `FeatureParams` NULL in the binary.
-/// 2. **A registered tag — [`REGISTRY`]**, where the *spec* is the authority.
-/// 3. **Anything else — the raw tag**, with no invented prose, because a private
-///    tag means whatever the foundry decided and nothing here can know.
+/// 1. `ssXX` / `cvXX`: the font's own strings, with "Stylistic set 7" as fallback.
+/// 2. A registered tag: [`REGISTRY`].
+/// 3. Anything else: the raw tag, with no invented prose.
 fn feature_label(f: &FaceFeature) -> FeatureLabel {
     let tag = f.tag;
     let font_defined = |generic: String| {
@@ -6999,12 +5534,8 @@ fn feature_label(f: &FaceFeature) -> FeatureLabel {
         hover.push_str(" — ");
         hover.push_str(&what);
     }
-    // **The generic label for a value the font declared and did not name is the
-    // panel's**, exactly as "Stylistic set 7" above it is: core reports what the
-    // font says and `None` where it says nothing. A font can declare a count and
-    // leave the whole `ParamUILabelNameID` range NULL, and the control still has
-    // to offer that many values — an unnamed one is "Alternate 2", not a gap in
-    // the list, because the *number* is what gets written to the document.
+    // A declared-but-unnamed value is "Alternate 2", not a gap: the number is what
+    // gets written to the document.
     let values = f
         .values
         .iter()
@@ -7028,18 +5559,14 @@ const ALIGN_GLYPHS: [&str; 4] = [
 ];
 
 /// The glyphs the three vertical-alignment cells show, in [`VerticalAlign::ALL`]
-/// order. **The layer-align glyphs, deliberately**: these push the *box's*
-/// contents to an edge, which is the same gesture the Align panel performs on
-/// layers, where the text-align set describes ragged lines.
+/// order. The layer-align glyphs, since these push the box's contents to an edge.
 const VALIGN_GLYPHS: [&str; 3] = [
     icon::ALIGN_TOP,
     icon::ALIGN_CENTER_VERTICAL,
     icon::ALIGN_BOTTOM,
 ];
 
-/// Languages worth offering by name. **A short list, not the whole of BCP-47**:
-/// the tag only changes shaping where a font has language-specific rules, and
-/// these are the ones that visibly do.
+/// Languages worth offering by name: a short list of those that visibly change shaping.
 const LANGUAGES: &[(&str, &str)] = &[
     ("en", "English"),
     ("de", "German"),
@@ -7069,28 +5596,10 @@ const LANGUAGES: &[(&str, &str)] = &[
 
 /// What a `Length` field accepts in each of its two units.
 ///
-/// The pair travels together because a field switches between them at a click, so
-/// a caller that named only one would have to remember which — and the two ends of
-/// the same control disagreeing about its limits is exactly the sort of thing that
-/// only shows up as a value that cannot be typed back.
-///
-/// ⚠️ **Only the `%` end is a number here; the `px` end is *derived* from it, and
-/// that is the whole fix for a class of nine** (§15 D425). Before this, every `Length` field
-/// in the panel took a hand-written px cap, and there was exactly one px cap in
-/// the file: `MAX_LINE_HEIGHT_PX`, named for line height and used as the bound
-/// for tracking, baseline shift, both decoration fields, the four paragraph
-/// fields and line height. Nothing had ever computed a px cap for any quantity
-/// but the one it is named after — so **no field's two ends bounded the same
-/// quantity**, and the click that converts between them destroyed values:
-/// measured, decoration thickness `Px(50)` at 16pt came back as 32px, and letter
-/// spacing `Px(-100)` at 16pt came back as −8px, a **625×** disagreement at 8pt
-/// between the two ends of one control.
-///
-/// The derivation is the only spelling under which a unit click cannot change
-/// the value: `px = pct/100 × font_size` is exactly what
-/// [`ondin_core::Length::in_unit`] computes, so a value legal at one end
-/// converts to a value legal at the other, by construction rather than by two
-/// constants happening to agree.
+/// Only the `%` end is a number; the `px` end is derived from it
+/// (`px = pct/100 × font_size`, exactly [`ondin_core::Length::in_unit`]), so a
+/// value legal at one end converts to a legal value at the other and a unit click
+/// cannot change it.
 #[derive(Clone)]
 struct Bounds {
     pct: std::ops::RangeInclusive<f64>,
@@ -7102,13 +5611,6 @@ impl Bounds {
         pct: MIN_TRACKING_PCT..=MAX_TRACKING_PCT,
     };
     /// Baseline shift, which runs both ways from zero.
-    ///
-    /// ⚠️ **The only difference from [`Self::TRACKING`] is the `%` floor**, and
-    /// it used to be less than that: both carried the same *symmetric* px range,
-    /// so letter spacing refused `−51%` and accepted `−10 000 px` — a doc saying
-    /// "runs both ways from zero" about a pair whose other half already did.
-    /// With the px end derived, the sign rule is stated once and holds in both
-    /// units.
     const SIGNED_TRACKING: Bounds = Bounds {
         pct: -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
     };
@@ -7116,14 +5618,11 @@ impl Bounds {
     const PARAGRAPH_SPACING: Bounds = Bounds {
         pct: 0.0..=MAX_PARAGRAPH_SPACING_PCT,
     };
-    /// The three indents — first-line (or hanging), start and end. **One bound
-    /// for three fields because they are one quantity**: each is how far a line's
-    /// edge comes in from the box's, and each runs both ways.
+    /// The three indents (first-line, start, end): one quantity, each running both ways.
     const INDENT: Bounds = Bounds {
         pct: -MAX_INDENT_PCT..=MAX_INDENT_PCT,
     };
-    /// A decoration's thickness. Unsigned — a negative thickness has no meaning
-    /// (§15 D546), and the model floors one anyway.
+    /// A decoration's thickness. Unsigned; the model floors a negative one anyway.
     const DECORATION_THICKNESS: Bounds = Bounds {
         pct: 0.0..=MAX_DECORATION_THICKNESS_PCT,
     };
@@ -7143,14 +5642,7 @@ impl Bounds {
     }
 
     /// The same range as an em multiple — what a `Length::Em` holds, where the
-    /// field shows it ×100.
-    ///
-    /// **For the chords** (§15 D865). `Alt`+`←`/`→` and `Alt`+`↑`/`↓` step a
-    /// `Length` in the unit it carries and stop where the field stops (§15
-    /// D817), and they spelled that stop from the `MIN_`/`MAX_` constants by
-    /// hand — the same numbers the field read through its `Bounds`, so the two
-    /// agreed by the values rather than by construction, which is the shape
-    /// §15 D861 took out of six fields.
+    /// field shows it ×100. The `Alt`+arrow chords stop at these ends.
     fn em(&self) -> std::ops::RangeInclusive<f64> {
         (self.pct.start() / 100.0)..=(self.pct.end() / 100.0)
     }
@@ -7159,11 +5651,8 @@ impl Bounds {
 /// A `%` field range expressed in px at `font_size` — the one derivation every
 /// `Length` field in this panel bounds its px face with.
 ///
-/// ⚠️ **The font size is floored at 1, and it is not defensive noise.** A
-/// multi-selection whose sizes disagree can report 0 (`TypeSubject::font_size`),
-/// and a range of `0.0..=0.0` is a field that cannot be typed into at all —
-/// which reads as a broken control rather than as a bound. One px of headroom is
-/// meaningless as a limit and keeps the field alive.
+/// The font size is floored at 1: a mixed selection can report 0
+/// (`TypeSubject::font_size`), and a `0.0..=0.0` range cannot be typed into.
 fn px_range_for(
     pct: std::ops::RangeInclusive<f64>,
     font_size: f64,
@@ -7175,28 +5664,18 @@ fn px_range_for(
 /// How much one press of `Ctrl+Shift+.` / `,` moves the font size
 /// (`docs/shortcuts.md` §10).
 ///
-/// Two, which is Illustrator's and InDesign's step — in this app's px rather
-/// than in their points, since px is the unit the size field itself shows and a
-/// chord that disagreed with the field beside it would be the worse surprise.
+/// Two px, matching the unit the size field shows.
 const FONT_SIZE_STEP: f64 = 2.0;
-/// One press of `Alt+←`/`→` on letter spacing, per unit.
-///
-/// `0.01em` is one whole unit of what the field displays — it shows an em ×100,
-/// so this is the `1%` step a designer would type. The px step is a tenth,
-/// because px tracking is a fine adjustment where em tracking is a coarse one.
+/// One press of `Alt+←`/`→` on letter spacing, per unit: `0.01em` is the `1%` the
+/// field displays; px tracking is the finer adjustment.
 const TRACKING_STEP_EM: f64 = 0.01;
 const TRACKING_STEP_PX: f64 = 0.1;
-/// One press of `Alt+↑`/`↓` on line height, per unit. A tenth of an em is a
-/// tenth of a line, and a px is a px.
+/// One press of `Alt+↑`/`↓` on line height, per unit.
 const LEADING_STEP_EM: f64 = 0.1;
 const LEADING_STEP_PX: f64 = 1.0;
 
-/// Step a [`Length`] **in whatever unit it already carries**.
-///
-/// A chord must not silently convert the value: a tracking of `2%` nudged up
-/// stays a percentage, and one of `0.4px` stays absolute. Converting would make
-/// the same key mean different things depending on a unit chip the user set
-/// deliberately, and would strand the value the next time the font size changed.
+/// Step a [`Length`] in whatever unit it already carries; a chord must not
+/// silently convert the value.
 fn step_length(current: Length, step: i8, em: f64, px: f64) -> Length {
     let d = f64::from(step);
     match current {
@@ -7206,54 +5685,19 @@ fn step_length(current: Length, step: i8, em: f64, px: f64) -> Length {
     .canonical()
 }
 
-/// A chord's stepped value, bounded by `range` **widened to admit `from`**.
+/// A chord's stepped value, bounded by `range` widened to admit `from`.
 ///
-/// 🚨 **Two decisions have to hold at once here and a bare `clamp` breaks one of
-/// them** (§15 D840). §15 D817 says a held key stops where the field stops;
-/// §15 D425 says a control **shows** a stored out-of-range value rather than
-/// rewriting it, which is why these caps sit on the chord and not in
-/// `TextStyle::set`. An unconditional `clamp` honours the first and violates the
-/// second: with a stored `Em(5.0)` — 500%, legal, and a file may hold one —
-/// `Alt`+`→` stepped to `5.0 + step` and then clamped to `MAX_TRACKING_PCT`,
-/// so **the increase key decreased tracking by 300 percentage points** in one
-/// press, and the value the user had was gone.
-///
-/// Widening the range by `from` gives both: inside the range this is exactly
-/// `clamp`, so a held key still stops at the field's ends; outside it, the step
-/// may move **toward** the range freely and is pinned at `from` going away from
-/// it. So the out-of-range value is never rewritten by a key that was asked to
-/// nudge it, and a user who holds the key in the sensible direction walks it
-/// back into range and then stops there.
-///
-/// ⚠️ **Not the same as "skip the clamp when out of range"**, which is the
-/// other obvious repair and is wrong in the away direction: it lets `Alt`+`→`
-/// on a stored 500% walk to 600% and further, which is a control with no cap at
-/// all for exactly the documents that most need one.
+/// A bare `clamp` would let the increase key decrease a stored out-of-range value
+/// (500% tracking snapping to the 200% cap). Widened, it is exactly `clamp` inside
+/// the range, moves freely toward it from outside, and is pinned at `from` going
+/// away. Skipping the clamp when out of range would leave no cap at all.
 fn stepped_into(from: f64, next: f64, range: std::ops::RangeInclusive<f64>) -> f64 {
     next.clamp(range.start().min(from), range.end().max(from))
 }
 
-/// Field bounds. Caps on the *controls*, not on the model — any finite value is a
-/// legal attribute and a file may hold one; what these bound is what can be typed
-/// or scrubbed, past which the number has stopped describing type.
-///
-/// ⚠️ **Every one is `%`, and there is deliberately no px constant any more.**
-/// There used to be one — `MAX_LINE_HEIGHT_PX = 10_000.0`, named for line height
-/// and used as the px cap of all *nine* `Length` fields in this panel, including
-/// six that measure nothing like a line height. Every px face is now derived
-/// from its own `%` face at the current font size ([`px_range_for`]), which is
-/// the only arrangement under which the unit chip cannot change the value it
-/// converts. If a px cap is wanted that is *not* the `%` cap in the other unit,
-/// it is a second quantity and wants naming as one.
-///
-/// ⚠️ **One constant per quantity, even where four of them hold the same number**
-/// (§15 D861). `MAX_TRACKING_PCT` used to be the cap of *six* fields that measure
-/// nothing like a tracking — paragraph spacing, the three indents, and a
-/// decoration's thickness and offset — so an edit to how far letter spacing may go
-/// moved all six, which is the class [`Bounds`] exists to close. The four below
-/// took tracking's 200% on the day they were split out, so the split changed no
-/// field's range; **the value of each is its own decision now**, and none of them
-/// has been made on its own merits yet.
+/// Field bounds, all `%`: caps on what can be typed or scrubbed, not on the model.
+/// The px face is derived ([`px_range_for`]). One constant per quantity, even where
+/// several hold the same number, so changing one field's cap moves only that field.
 const MIN_LINE_HEIGHT_PCT: f64 = 0.0;
 const MAX_LINE_HEIGHT_PCT: f64 = 1000.0;
 const MIN_TRACKING_PCT: f64 = -50.0;
@@ -7267,57 +5711,20 @@ const MAX_DECORATION_OFFSET_PCT: f64 = 200.0;
 mod tests {
     use super::*;
 
-    /// **The six decisions `[S6.2-L6-07]` broke without a single test noticing**
-    /// — five of them pinned here, the sixth in `wrap_gate_tests` (§15 D624, D804).
-    ///
-    /// 🚨 **37 of 38 production items in the panel's write half had zero test
-    /// callers** — `char_valve`, the panel's central write seam with fifteen
-    /// occurrences in production, among them — and the review flipped six
-    /// documented decisions **simultaneously** to **975 passed / 0 failed**. A
-    /// control flip (constant-folding `next_line_height`'s Auto seed) did bite at
-    /// its predicted assertion, so the harness is live and the six greens mean
-    /// *nothing reaches these decisions*.
-    ///
-    /// **Two of the three had to be lifted before a test could reach them at
-    /// all** (§15 D269's move): the `(under, strike)` → cell mapping out of
-    /// `decoration_section`, and the bold reading out of `type_weight_toggles`.
-    /// The third, `matches_variant`, was already free and simply had no caller.
-    ///
-    /// 🚨 **The other three were called out of reach and two of them were not**
-    /// (§15 D804). `list_section`'s gutter default, `wrap_section`'s
-    /// `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default` were named
-    /// as sitting inside `&mut self` bodies needing a live text session and a
-    /// laid-out panel — *a fixture rather than a lift*. That was true of the wrap
-    /// gate, which `wrap_gate_tests` drives with real pointer events. The other two
-    /// read nothing but their parameters: what needed the panel was their
-    /// **callers**, so `marker_attrs` and `axis_coords_after` lifted like the rest
-    /// and are pinned in this module. ⚠️ **`clear_at_default` was also the same
-    /// eight lines in two places**, only `axis_valve`'s copy covered (§15 D569),
-    /// which is what made a grep for the name read as coverage.
+    /// Decisions lifted out of `&mut self` bodies so tests can reach them.
     mod lifted_decisions {
         use super::*;
 
-        /// **Flip 6, the sharpest of the six.** The strip's read and write halves
-        /// are one rule, so they are asserted against each other: whatever cell a
-        /// state lights, picking that cell must produce that state again.
+        /// The decoration strip's read and write halves round-trip each cell.
         ///
-        /// ⚠️ **The round trip is what has teeth, not the literals.** A mapping
-        /// swapped in *both* halves would satisfy a table of expected numbers and
-        /// still light the wrong glyph — so cell 1's meaning is pinned to
-        /// `Underline` by name as well.
-        ///
-        /// **Flip-check, run**: swapping `(Some(_), _) => 1` and
-        /// `(None, Some(_)) => 2` fails at the underline round trip with cell 2
-        /// where 1 is wanted — the predicted site.
+        /// flip: swapping `(Some(_), _) => 1` and `(None, Some(_)) => 2` → fails at the underline round trip
         #[test]
         fn the_decoration_strip_reads_and_writes_the_same_three_cells() {
             let d = Decoration::default();
             assert_eq!(decoration_cell(None, None), 0, "neither is cell 0");
             assert_eq!(decoration_cell(Some(d), None), 1, "underline is cell 1");
             assert_eq!(decoration_cell(None, Some(d)), 2, "strikethrough is cell 2");
-            // ⚠️ Both at once is *underline*, which is the arm the model can reach
-            // through a paste and the panel cannot: the strip has three cells and
-            // no fourth, so it has to name one.
+            // Both at once is reachable through a paste; the strip has no fourth cell.
             assert_eq!(decoration_cell(Some(d), Some(d)), 1);
 
             for cell in [0usize, 1, 2] {
@@ -7330,12 +5737,8 @@ mod tests {
                     CharAttr::Strikethrough(s) => Some(*s),
                     _ => None,
                 });
-                // ⚠️ **Flattened, and the first draft was not.** `find_map` over
-                // `Underline(Option<Decoration>)` yields `Option<Option<_>>`, so
-                // the outer `is_some()` means *"the attribute was written"* — true
-                // for `Underline(None)` as well — and asserted nothing about
-                // whether a decoration is set. It failed on cell 0, which is the
-                // one arm where the two readings differ.
+                // Flatten: `find_map` yields `Option<Option<_>>`, whose outer `is_some()`
+                // only says the attribute was written.
                 let (under, strike) = (under.flatten(), strike.flatten());
                 assert_eq!(
                     under.is_some() || strike.is_some(),
@@ -7366,21 +5769,9 @@ mod tests {
             );
         }
 
-        /// **Flip 2.** `weight >= 600` became `>= 100` — every face reading bold —
-        /// with the whole workspace green.
+        /// The bold toggle lights from semibold up, writes the other end, and is never lit when mixed.
         ///
-        /// **Asserted at the boundary**, 599 against 600, because a threshold is
-        /// wrong only at its ends; and the *written* weight is asserted beside the
-        /// lit state, because they are one rule and a click that writes 700 from
-        /// an already-bold face is the failure a state-only test misses.
-        ///
-        /// ⚠️ **Mixed is never lit whatever its weight**, which is the arm that
-        /// makes the toggle a claim about the whole subject rather than about its
-        /// first run.
-        ///
-        /// **Flip-check, run**: `>= 600` → `>= 100` fails on the 400 case, lit
-        /// where it must not be — the predicted site. Dropping `&& !mixed` fails
-        /// the mixed case.
+        /// flip: `>= 600` → `>= 100` in `bold_toggle` → fails at the 400 case
         #[test]
         fn the_bold_toggle_lights_at_semibold_and_writes_the_other_end() {
             assert_eq!(bold_toggle(400, false), (false, 700), "regular offers bold");
@@ -7394,18 +5785,9 @@ mod tests {
             );
         }
 
-        /// **Flip 3.** The axis-agreement tolerance `< 0.05` became `< 1000.0`, so
-        /// every variant matched, with the whole workspace green.
+        /// A variant matches when weight and slope are equal and every axis it names agrees within tolerance; axes it does not name are free.
         ///
-        /// **Three separate rules in one predicate**, and each has its own case
-        /// here: weight and slope must be equal, an axis the variant *names* must
-        /// agree within tolerance, and an axis it does **not** name is the user's
-        /// business — a named instance says nothing about `opsz`, which is the
-        /// clause a naive "all coords equal" would break.
-        ///
-        /// **Flip-check, run**: widening the tolerance fails the `wght` 400-vs-700
-        /// case; narrowing it to `== 0.0` fails the within-tolerance case, which is
-        /// the other side and the one that says the tolerance is not decoration.
+        /// flip: widening the tolerance in `matches_variant` → fails at the `wght` 400-vs-700 case
         #[test]
         fn a_variant_matches_only_when_every_axis_it_names_agrees() {
             let wght = Tag::parse("wght").unwrap();
@@ -7444,8 +5826,7 @@ mod tests {
                 matches_variant(&bold, 700, false, &[at(wght, 700.0), at(opsz, 14.0)]),
                 "an axis the variant does not name is the user's business"
             );
-            // A static face names no axes, so nothing about the user's coords can
-            // disqualify it — only its weight and slope can.
+            // A static face names no axes, so only weight and slope can disqualify it.
             let static_bold = v(700, false, Vec::new());
             assert!(matches_variant(
                 &static_bold,
@@ -7455,23 +5836,9 @@ mod tests {
             ));
         }
 
-        /// **Flip 5, and the gutter is the second of three said to need a
-        /// fixture** (§15 D804).
+        /// A marker opens a gutter only over a zero indent (`Em(0.0)` counts as `Px(0.0)`), and turning it off leaves the indent alone.
         ///
-        /// ⚠️ **Turning a marker *off* must not touch the indent**, which is the
-        /// asymmetry the rule's own doc states and the one an "if the indent is
-        /// zero, set it" reading would lose. A gutter the user can see is theirs
-        /// once it exists.
-        ///
-        /// ⚠️ **The zero test is on the resolved value**, so an `Em(0.0)` indent
-        /// counts as no gutter exactly as `Px(0.0)` does — the two are different
-        /// values to the model and the same ink (§15 D537, D799), and a test that
-        /// only tried `Px` would pass against a predicate comparing variants.
-        ///
-        /// ⚠️ **Flipped**: dropping the `next.is_some() &&` writes a gutter when
-        /// the marker is turned off — red on the third assertion. Dropping the
-        /// `== 0.0` test writes one over an indent the user set — red on the
-        /// second. Neither is caught by the other.
+        /// flip: dropping `next.is_some() &&` in `marker_attrs` → fails at the marker-off assertion
         #[test]
         fn a_marker_opens_a_gutter_only_when_there_is_none() {
             let dot = Some(ListMarker::Disc);
@@ -7506,48 +5873,9 @@ mod tests {
             );
         }
 
-        /// **Flip 4, and it was said to be out of reach** (§15 D804).
+        /// A default axis value is dropped except on `opsz`, where absence means Auto; setting a present axis replaces it.
         ///
-        /// `roadmap.md` listed `write_axis`'s `clear_at_default` with two other
-        /// decisions as needing *"a live text session and a laid-out panel to
-        /// enter"* — *"a fixture rather than a lift"*. That was true of its
-        /// **callers** and never of the rule: every operand is a parameter, so
-        /// D269's move reaches it and this is the lift, not a fixture.
-        ///
-        /// 🚨 **It was also eight lines in two places**, `write_axis` and
-        /// `axis_valve`, of which only the valve's copy was covered (§15 D569) —
-        /// the exact shape the roadmap's own ⚠️ warns about, *"a grep for the
-        /// name reads as though the decision were reached"*. Both call
-        /// `axis_coords_after` now, so one assertion covers both arms.
-        ///
-        /// ⚠️ **`opsz` is the case the rule exists for and it is asserted first.**
-        /// For every other axis a value equal to the font's default is dropped,
-        /// because a stored coordinate that says what the font already says is
-        /// noise in the file. For `opsz` the *absence* of a coordinate is the Auto
-        /// state, so dropping one would silently change the mode rather than reset
-        /// a value — which is why the flag exists at all rather than the rule
-        /// being unconditional.
-        ///
-        /// ⚠️ **Flipped three ways, all run, and each lands on a different
-        /// assertion** — which is the argument for four of them rather than one.
-        ///
-        /// - Dropping the `clear_at_default &&` so the rule is unconditional:
-        ///   red on the **`opsz`** assertion, `[]` against a written coordinate.
-        ///   That is the only assertion that can see this flip, and it is the one
-        ///   saying the flag has a job at all.
-        /// - Dropping the `value == axis.default` so the flag alone decides: red
-        ///   on the **second** assertion, "any other value is written". ⚠️ The
-        ///   prediction said the first; the first is about a *default* value,
-        ///   which this flip still drops, so it stays green.
-        /// - Inverting the `!` so only defaults are kept: red on the **first**.
-        ///
-        /// So no two of the three share a site, and dropping any assertion here
-        /// would let one of the three through.
-        ///
-        /// ⚠️ **And the filter is asserted, not just the push.** Setting an axis
-        /// that is already present must *replace* it and not append a second
-        /// coordinate for the same tag, which no assertion about length alone
-        /// would catch if the filter also dropped a neighbour.
+        /// flip: dropping `clear_at_default &&` in `axis_coords_after` → fails at the `opsz` assertion
         #[test]
         fn a_default_axis_value_is_dropped_except_on_opsz() {
             let wght = Tag::parse("wght").unwrap();
@@ -7575,7 +5903,6 @@ mod tests {
                 "and any other value is written"
             );
 
-            // **The `opsz` case, and the reason the flag is a parameter.**
             let o = axis(opsz, 14.0);
             assert_eq!(
                 axis_coords_after(&o, &[], 14.0, false),
@@ -7585,7 +5912,6 @@ mod tests {
                  would change the mode rather than reset the value"
             );
 
-            // **Replacement, not accumulation.**
             let before = [at(wght, 100.0), at(opsz, 14.0)];
             let after = axis_coords_after(&w, &before, 700.0, true);
             assert_eq!(
@@ -7613,25 +5939,9 @@ mod tests {
         }
     }
 
-    /// **The *Show all features* reveal is a button, and a `Label` is text.**
-    /// Reported as a text cursor over it, and this is the reading that both
-    /// reproduces that and settles which call fixes it: hovering the same label
-    /// with `selectable(true)` and no hover cursor reports `CursorIcon::Text`;
-    /// with `selectable(false)` alone it reports `Default`, an arrow.
-    ///
-    /// ⚠️ **`selectable(false)` is now the whole fix, and the third case is why
-    /// that is a choice rather than a limitation.** The row also carried an
-    /// `on_hover_cursor(PointingHand)`, which works and outranks the label's own
-    /// whichever way `selectable` goes — and it has been removed, because the app
-    /// shows the arrow over chrome everywhere and changes the cursor only where the
-    /// change means something (§9.2). Keeping that case asserted is what stops the
-    /// arrow reading as an accident of egui to the next person here: the hand was
-    /// available, it was measured, and it was declined.
-    ///
-    /// **The pointer is aimed at the response's own rect from the frame before**,
-    /// because a `Ui` with no panel around it does not put the label where a guess
-    /// would: aiming at a fixed point reported `Default` for every configuration —
-    /// a probe that discriminated nothing (§15 D96).
+    /// The reveal label shows an arrow, not an I-beam, under `selectable(false)`;
+    /// a hover cursor would outrank it but the app keeps the arrow over chrome.
+    /// The pointer is aimed at the response's rect from the previous frame.
     #[test]
     fn the_features_reveal_asks_for_an_arrow_and_a_bare_label_asks_for_an_i_beam() {
         let hovered = |selectable: bool, hover_cursor: bool| {
@@ -7676,8 +5986,6 @@ mod tests {
             "and `selectable(false)` alone is the arrow the row now ships — this \
              is the production configuration"
         );
-        // The declined alternative, kept measured: the hand is reachable and beats
-        // the label's own cursor either way, so the arrow above is a decision.
         for selectable in [true, false] {
             assert_eq!(
                 hovered(selectable, true),
@@ -7698,11 +6006,7 @@ mod tests {
         }
     }
 
-    /// **The way out of a mode cannot be gated on the mode having anything left to
-    /// do.** Reported: toggling a feature sometimes made *Show fewer features*
-    /// disappear — because touching a withheld feature writes it into the set,
-    /// which makes it shown, which takes it out of the hidden count the control was
-    /// gated on. The ordinal differed per font because the count did.
+    /// The way back from *Show all* survives the last hidden feature being switched.
     #[test]
     fn the_way_back_from_show_all_survives_the_last_hidden_feature_being_switched() {
         assert_eq!(
@@ -7714,8 +6018,6 @@ mod tests {
             features_reveal(true, 3).as_deref(),
             Some("Show fewer features")
         );
-        // Collapsed, the offer has to be real: with every withheld feature set in
-        // the document they are all on screen already, so there is nothing to show.
         assert_eq!(features_reveal(false, 0), None);
         assert_eq!(
             features_reveal(false, 7).as_deref(),
@@ -7723,17 +6025,8 @@ mod tests {
         );
     }
 
-    /// **Clicking the font list's search field closed the font list.** Reported, and
-    /// the cause is egui's own default rather than anything here: a `ComboBox` gets
-    /// `PopupCloseBehavior::CloseOnClick`, and that is a click *anywhere, inside or
-    /// outside* the popup — so the field the list exists to be filtered by dismissed
-    /// it on the way in.
-    ///
-    /// The claim is about **egui's** popup behaviour rather than about this row, so
-    /// this drives the *shape* it uses — a combo whose popup
-    /// holds a text field above rows — and pins all three states: the symptom under
-    /// the default, the fix under `CloseOnClickOutside`, and that picking a row
-    /// still closes the popup, which after the fix only `ui.close()` does.
+    /// A combo with a search field above rows survives a click in the field under
+    /// `CloseOnClickOutside` (egui's default closes it) and still closes on a pick.
     #[test]
     fn a_combo_survives_a_click_in_its_search_field_but_not_a_pick() {
         // `true` when the popup was still drawing two frames after the click.
@@ -7775,11 +6068,7 @@ mod tests {
                                 .add(egui::TextEdit::singleline(&mut text).hint_text("Search…"))
                                 .rect
                                 .center();
-                            // **Inside a `ScrollArea`, as the real list is.** A
-                            // `ui.close()` has to reach the popup's `Area` from
-                            // in here, and a probe that skipped the scroll area
-                            // would be proving it for a shape the code does not
-                            // have.
+                            // Inside a `ScrollArea`, as the real list is: `ui.close()` must reach the `Area`.
                             egui::ScrollArea::vertical()
                                 .max_height(80.0)
                                 .show(ui, |ui| {
@@ -7821,8 +6110,7 @@ mod tests {
         );
     }
 
-    /// Charis SIL's `cv43`, which is the face this control was built against:
-    /// three named values, the longest of which is what settled the layout.
+    /// Charis SIL's `cv43`: three named values, the longest of which sets the layout.
     fn capital_eng() -> FeatureLabel {
         feature_label(&FaceFeature {
             tag: Tag::parse("cv43").unwrap(),
@@ -7836,11 +6124,7 @@ mod tests {
         })
     }
 
-    /// **The list and the closed dropdown are one mapping read two ways**, and the
-    /// way it breaks is silent: an off-by-one shows the name of a neighbouring
-    /// value and writes the one you did not pick. So the round trip is the
-    /// assertion, and the first value is pinned to `1` explicitly — `0` is off,
-    /// which is what an index would have collided with.
+    /// The list and the closed dropdown agree on value numbering; the first value is `1` because `0` is off.
     #[test]
     fn a_named_value_and_the_value_written_for_it_are_the_same_number() {
         let label = capital_eng();
@@ -7863,19 +6147,13 @@ mod tests {
         assert_eq!(feature_value_label(&label, 0), "Off");
     }
 
-    /// **A value the face does not offer keeps its number rather than being
-    /// clamped or hidden.** A document written against another face can carry
-    /// `cv43 7` where this one names three values, and the row that quietly showed
-    /// "Off" — or the third value — would be misreporting the file it is editing.
+    /// A value the face does not offer keeps its number rather than being clamped or hidden.
     #[test]
     fn a_value_past_the_end_is_shown_as_the_number_it_is() {
         assert_eq!(feature_value_label(&capital_eng(), 7), "Value 7");
     }
 
-    /// **A declared value the font did not name still gets a row**, because the
-    /// number is what reaches the document: `numNamedParameters` is the count, and
-    /// a NULL label id means the font declined to name that one, not that it does
-    /// not exist. The generic text is the panel's, like "Stylistic set 7" above it.
+    /// A declared value the font did not name still gets a row, labelled "Alternate n".
     #[test]
     fn an_unnamed_declared_value_is_offered_as_an_alternate() {
         let label = feature_label(&FaceFeature {
@@ -7890,11 +6168,7 @@ mod tests {
         );
     }
 
-    /// **One named value is still a switch.** Across the three faces that name any
-    /// value at all — Charis SIL, Andika, Gentium Plus, since no *installed* face
-    /// names one — 106 `cvXX` features name a value, and **97 of them name exactly
-    /// one** against 9 naming more. So the common case must not grow a dropdown
-    /// listing "Off" and one other thing.
+    /// One named value is still a switch, not a dropdown of "Off" and one other thing.
     #[test]
     fn one_named_value_does_not_make_a_choice_row() {
         let one = feature_label(&FaceFeature {
@@ -7907,16 +6181,9 @@ mod tests {
         assert!(feature_label(&face_feature("liga")).values.is_empty());
     }
 
-    /// **A two-line row in a list of one-line rows has to be tighter inside than
-    /// outside**, or it reads as a stray label above someone else's control.
-    /// Reported that way — "hard to understand where the row ends" — and the first
-    /// version had it exactly backwards: 5 within against the list's 1 between.
-    ///
-    /// Measured off the ink and the control rather than off the two constants,
-    /// which would be a tautology: the label's baseline, the dropdown's top and the
-    /// next row's label are three positions the user can actually see. The list's
-    /// own 1px spacing is set here because the row is only ever drawn inside it —
-    /// without that the outer gap under test is not the one on screen.
+    /// A choice row is tighter inside than outside, measured off the ink and the
+    /// control rather than the two constants; the list's 1px spacing is set because
+    /// the row is only drawn inside it.
     #[test]
     fn a_choice_row_groups_its_label_with_its_control() {
         let ctx = egui::Context::default();
@@ -7959,12 +6226,7 @@ mod tests {
             .expect("the dropdown paints a frame the width of the list");
         let inside = combo.top() - galley("Capital Eng").bottom();
         let below = galley("Small caps").top() - combo.bottom();
-        // **Half again, not merely more.** Measured, the version reported as
-        // unreadable is 9 inside against 10 below — it *satisfies* "outside is
-        // bigger" and still looks like two loose halves, because one point of
-        // difference is nothing at this size. That is not a hypothetical: the
-        // obvious assertion was written first and passed against it. The shipped
-        // pair measures 6 and 11.
+        // Half again, not merely more: one point of difference reads as two loose halves.
         assert!(
             below >= inside * 1.5,
             "the row's halves are {inside} apart and the next row is {below} away: \
@@ -7972,20 +6234,13 @@ mod tests {
         );
     }
 
-    /// **The n-way row is a row of the same list**, and the only way to know is to
-    /// measure both: its name has to sit at the left edge a switch row's does, in
-    /// the same size, or a column of a dozen features has one row that has slipped.
+    /// A choice row's name sits at a switch row's left edge in the same size, and its dropdown fits the list width.
     ///
-    /// The width assertion is the other half, and it is the one reading could not
-    /// settle: `ComboBox::width` is not documented as the *whole* widget's width,
-    /// so whether a full-width dropdown fits the 240 the list has is a question
-    /// about egui rather than about us. Flipping the call to `rect.width() + 1`
-    /// fails it, which is the check that it is asserting anything at all.
+    /// flip: `rect.width() + 1` in `feature_choice_row`'s combo width → fails at the fit assertion
     #[test]
     fn a_choice_row_lines_up_with_the_switch_rows_and_fits_the_list() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // One pass so the fonts exist; a galley cannot be laid out before that.
         let _ = ctx.run_ui(Default::default(), |_| {});
         let width = MENU_INNER - LIST_GUTTER;
         let mut used = 0.0;
@@ -8026,53 +6281,12 @@ mod tests {
         );
     }
 
-    /// **The table's completeness is what makes the third tier mean anything.**
-    /// `feature_label` reports a tag that misses `REGISTRY` as the font's own
-    /// private tag, so a dropped row is a wrong answer rather than a gap — and a
-    /// duplicated row is a silent one, since the lookup takes the first.
+    /// `REGISTRY` holds exactly the individually registered OpenType tags, each once; the set difference is the failure message.
     ///
-    /// 124 is the count of *individually* registered tags in OpenType 1.9.1: the
-    /// `featurelist` index has 126 entries, two of which are the `ss01`–`ss20` and
-    /// `cv01`–`cv99` ranges this table deliberately leaves to the font.
-    ///
-    /// ⚠️ **This asserted the table's *cardinality* until §15 D599, and a count
-    /// cannot see a substitution** — which in a table of 124 four-letter literals is
-    /// the likeliest edit there is. Measured: `("qwid", …)` retyped as
-    /// `("qwix", …)` left `cargo test -p ondin-app` at **970 passed / 0 failed**,
-    /// with `qwid` then reported to the user as the font's own private tag, hidden
-    /// behind *Show all features*, and carrying the raw four letters where a name and
-    /// a description belonged. The control — `kern` retyped as `kzrn` — went red, but
-    /// only in
-    /// `a_mechanic_is_withheld_a_stylistic_set_is_named_and_a_private_tag_is_neither`
-    /// below, whose `["tnum", "liga", "kern", "smcp"]` loop names **four** of the 124
-    /// by hand. So the machinery worked and the coverage was four. `[S6.3-L6-04]`.
-    ///
-    /// **The set, sorted, as a literal** is what closes it: a typo is a one-line diff
-    /// naming both strings, which is the failure message this table's own doc asks
-    /// for (*"a tag **missing** from this table is reported to the user as private,
-    /// so an omission is a wrong answer rather than a gap"*). The dedup and the
-    /// length assertions are kept — they are what says the list below is not being
-    /// satisfied by a duplicate — but they are no longer the only thing holding the
-    /// data.
-    ///
-    /// ⚠️ **This is `[A8-L6-04]`'s mechanism — "the test asserts a count" — at its
-    /// second site**, `theme.rs`'s icon catalogue being the first. Worth reading the
-    /// two together.
-    ///
-    /// Flip-check, run: `qwid` → `qwix` now fails here with
-    /// `gone: ["qwid"], arrived: ["qwix"]`. ⚠️ **That message is the second draft and
-    /// the first one is the lesson**: `assert_eq!(tags, EXPECTED)` is the same
-    /// assertion and it printed both 124-element lists, burying the one string that
-    /// moved in 248 that had not. **A set assertion needs the set *difference* in its
-    /// message, or it reports the haystack.** The control is that the unmodified
-    /// table passes, which it must, since the data was checked against the registered
-    /// list when it was written.
+    /// flip: retyping `qwid` as `qwix` in `REGISTRY` → fails at the set-difference assertion
     #[test]
     fn the_feature_registry_is_the_whole_registry_and_says_each_tag_once() {
-        /// Every tag the table must hold, sorted, so a substitution names both
-        /// strings. Not `REGISTRY`'s own order: the table is grouped by what the
-        /// features *do*, which is the right order to read it in and the wrong one
-        /// to diff it in.
+        /// Every tag the table must hold, sorted so a substitution names both strings.
         const EXPECTED: [&str; 124] = [
             "aalt", "abvf", "abvm", "abvs", "afrc", "akhn", "apkn", "blwf", "blwm", "blws", "c2pc",
             "c2sc", "calt", "case", "ccmp", "cfar", "chws", "cjct", "clig", "cpct", "cpsp", "cswh",
@@ -8093,9 +6307,7 @@ mod tests {
         let before = tags.len();
         tags.dedup();
         assert_eq!(before, tags.len(), "a tag is listed twice");
-        // **The two differences, not the two lists.** `assert_eq!(tags, EXPECTED)`
-        // is the same assertion and prints 124 strings twice, which buries the one
-        // that moved — measured under the flip below before this was written.
+        // The two differences, not the two lists: `assert_eq!` would bury the moved tag.
         let gone: Vec<&str> = EXPECTED
             .iter()
             .copied()
@@ -8118,9 +6330,7 @@ mod tests {
                 "{tag} is not a four-byte tag"
             );
             assert!(!name.is_empty(), "{tag} has no name");
-            // The two halves of the curation, each with its own rule: a feature
-            // offered to the user says what it does, and a withheld one carries
-            // no prose talking anyone into switching it (see `REGISTRY`).
+            // An offered feature says what it does; a withheld one carries no prose.
             assert_eq!(
                 *offered,
                 !what.is_empty(),
@@ -8134,21 +6344,15 @@ mod tests {
         }
     }
 
-    /// **Leaving Auto must not move the type.** The cycle's first step seeded a
-    /// round 120%, so clicking the unit on a face whose leading is anything else
-    /// re-spaced every line — the click says "show me this in percent", not "change
-    /// it". With the resolved height in hand the seed is the multiple the face was
-    /// already giving.
+    /// Leaving Auto seeds the multiple the face was already giving, so the unit click does not re-space the lines.
     #[test]
     fn leaving_auto_seeds_the_line_height_the_font_was_giving() {
         // 24.2 on a 20px face is 121%, which is about Inter's.
         let next = next_line_height(None, 20.0, Some(24.2));
         assert_eq!(next, Some(Length::Em(1.21)));
-        // Nothing laid out: the round number is still the fallback, since the
-        // alternative is seeding a zero.
+        // Nothing laid out: the round number is the fallback.
         assert_eq!(next_line_height(None, 20.0, None), Some(Length::Em(1.2)));
-        // A zero font size cannot be divided by, and the *state* is still what the
-        // click asked to change.
+        // A zero font size cannot be divided by.
         assert_eq!(
             next_line_height(None, 0.0, Some(24.2)),
             Some(Length::Em(1.2))
@@ -8164,45 +6368,12 @@ mod tests {
         );
     }
 
-    /// **A chord steps a `Length` in whatever unit it already carries** — the rule
-    /// `step_length`'s doc states in the imperative and nothing asserted
-    /// (§15 D718, `[S6.3-L6-05]`).
+    /// A chord steps a `Length` in the unit it carries, by the step constants' magnitudes.
     ///
-    /// The doc: *"A chord must not silently convert the value: a tracking of `2%`
-    /// nudged up stays a percentage, and one of `0.4px` stays absolute. Converting
-    /// would make the same key mean different things depending on a unit chip the
-    /// user set deliberately, and would strand the value the next time the font
-    /// size changed."*
-    ///
-    /// 🚨 **The finding's flip was predicted green and *was* green.** Rewriting the
-    /// `Em` arm as `Length::Px(v + d * em)` — precisely the silent conversion the
-    /// doc forbids, and the slip a careless edit makes — left the whole workspace
-    /// at exit 0, all 31 suites. One `Alt+→` on a `2%` tracking would have stored
-    /// `0.01px` and flipped the field's unit chip under the user's hand, with every
-    /// gate green.
-    ///
-    /// ⚠️ **`step_length` is the shape §15 D269 says to lift logic into** — free,
-    /// pure, `Copy` in and `Copy` out — and it had **zero** test callers, while
-    /// `next_line_height`, the same shape on the same type, has five in the test
-    /// directly above this one. *Being the ideal test subject is not the same as
-    /// being tested*, and the two tests sitting side by side is what makes that
-    /// legible. (It is the *tests* that are neighbours — the two functions are
-    /// nowhere near each other in this file.)
-    ///
-    /// The step sizes are asserted with the unit because they are the other half of
-    /// the same promise: `TRACKING_STEP_PX` is a tenth of `TRACKING_STEP_EM`'s
-    /// magnitude on purpose (px tracking is a fine adjustment, em a coarse one), so
-    /// a test that only checked the *unit* would pass against arms that swapped
-    /// their step constants.
-    ///
-    /// ⚠️ **Flip-check, run: the finding's own mutation, `Length::Em(v) =>
-    /// Length::Px(v + d * em)`.** Red here at the first assertion, `Px(0.03)`
-    /// against `Em(0.03)` — the same edit that was **exit 0 across the whole
-    /// workspace** before this test existed.
+    /// flip: `Length::Em(v) => Length::Px(v + d * em)` in `step_length` → fails at the first assertion
     #[test]
     fn a_chord_steps_a_length_without_changing_its_unit() {
-        // The doc's own two examples. `2%` is `Em(0.02)` — the field shows an em
-        // ×100 — so one step up is `Em(0.03)`.
+        // `2%` is `Em(0.02)`, since the field shows an em ×100.
         assert_eq!(
             step_length(Length::Em(0.02), 1, TRACKING_STEP_EM, TRACKING_STEP_PX),
             Length::Em(0.03),
@@ -8227,8 +6398,7 @@ mod tests {
              conversion comes through"
         );
 
-        // Leading's constants through the same function: the unit rule is the
-        // function's and the magnitudes are the caller's.
+        // Leading's constants: the unit rule is the function's, the magnitudes the caller's.
         assert_eq!(
             step_length(Length::Em(1.2), 1, LEADING_STEP_EM, LEADING_STEP_PX),
             Length::Em(1.3),
@@ -8250,41 +6420,20 @@ mod tests {
         }
     }
 
-    /// **Leaving *Font* on a decoration thickness must not erase the line** — the
-    /// test above, one field along and four months later (`[S6.3-L1-01]`, §15 D570).
+    /// Leaving *Font* on a decoration thickness seeds the face's own thickness in px, not a zero-height band.
+    /// The `None` fallback stays zero for the offset field, whose metric has the opposite sign. The cycle
+    /// here runs `auto → px → %`, unlike line height's.
     ///
-    /// The chip means *"show me this in px"*. It wrote `Px(0.0)`, and a zero-height
-    /// band is refused by `render::scene::decoration_path` and by
-    /// `core::text::crossings`, so the underline vanished with `0.00 px` on screen
-    /// and no number to guess back. The core half — that the seed draws ink and zero
-    /// does not — is `text::tests::the_seeded_thickness_draws_a_band_where_zero_draws_none`;
-    /// this is the panel's half.
-    ///
-    /// ⚠️ **The `None` fallback is still zero and that is deliberate, not an
-    /// oversight**: the *offset* field passes `None` and its face metric has the
-    /// opposite sign convention (§15 D151). Asserted so a later reader does not
-    /// "finish the job" by seeding an offset it has not checked the sign of.
-    ///
-    /// ⚠️ **And the cycle is not line height's.** These fields run `auto → px → %`
-    /// where line height runs `auto → % → px`, so the seeded unit here is `Px` and
-    /// there is `Em`. The two `1.3671875` assertions below are what pins that: a fix
-    /// transplanted from the twin without reading the cycle produces the right
-    /// number in the wrong unit, and at 20pt `Em(1.37)` is a 27px underline.
-    ///
-    /// **Flip run**, the seed put back to `Px(0.0)`: fails on the first assertion,
-    /// `Some(Px(0.0))` against `Some(Px(1.3671875))` — the predicted site.
+    /// flip: seeding `Px(0.0)` in `next_optional_length` → fails at the first assertion
     #[test]
     fn leaving_the_font_seeds_the_thickness_the_face_was_drawing() {
-        // Inter's underline size at 20pt, measured — `text::tests::
-        // a_shaped_node_reports_the_faces_own_decoration_thicknesses` is where that
-        // number comes from.
+        // Inter's underline size at 20pt.
         let inter = 1.367_187_5;
         assert_eq!(
             next_optional_length(None, 20.0, Some(inter)),
             Some(Length::Px(inter)),
             "leaving Font shows what the font was giving, in px — not zero"
         );
-        // Nothing measured: the old behaviour, kept for the offset field.
         assert_eq!(
             next_optional_length(None, 20.0, None),
             Some(Length::Px(0.0)),
@@ -8301,9 +6450,7 @@ mod tests {
         );
     }
 
-    /// The three tiers, one assertion each, and the middle one is the reported
-    /// problem: `aalt` / `ccmp` / `locl` are exactly the column of mechanics that
-    /// made the list unreadable.
+    /// The three label tiers: mechanics withheld, font-defined sets named, private tags neither.
     #[test]
     fn a_mechanic_is_withheld_a_stylistic_set_is_named_and_a_private_tag_is_neither() {
         for mechanic in [
@@ -8316,8 +6463,6 @@ mod tests {
             assert!(feature_label(&face_feature(offered)).offered, "{offered}");
         }
 
-        // A font's own name wins, and the generic is a fallback rather than the
-        // answer — plenty of faces leave `FeatureParams` NULL.
         let named = FaceFeature {
             name: Some("Open digits".to_string()),
             ..face_feature("ss01")
@@ -8329,7 +6474,6 @@ mod tests {
             "Character variant 14"
         );
 
-        // Tier three invents nothing: the four letters, and a hover saying why.
         let private = feature_label(&face_feature("Zork"));
         assert!(!private.offered);
         assert_eq!(private.name, "Zork");
@@ -8340,24 +6484,16 @@ mod tests {
         );
     }
 
-    /// `feature_rank`'s stylistic-set arm was `t.starts_with("ss")`, which filed
-    /// `ssty` — math script-style alternates, a shaping mechanic — under stylistic
-    /// sets, next to the sets a designer chooses between.
+    /// `ssty` (a shaping mechanic) is not ranked with the stylistic sets.
     #[test]
     fn the_sort_does_not_file_ssty_under_stylistic_sets() {
         let sets = feature_rank(Tag::parse("ss01").unwrap());
         assert_eq!(sets, 4);
         assert_ne!(feature_rank(Tag::parse("ssty").unwrap()), sets);
-        // And `cvXX` is its own tier, one below the sets.
         assert_eq!(feature_rank(Tag::parse("cv13").unwrap()), 5);
     }
 
-    /// The reported bug: the popup showed for a frame and vanished.
-    ///
-    /// **The opening click is a click outside the popup**, because the popup does
-    /// not exist when it happens — so on its first frame `clicked` is true and
-    /// `on_menu` is false. Forgiving the button's own rect is the whole fix, and
-    /// this case is the one a dismiss test forgets to write.
+    /// The opening click lands outside the not-yet-existing popup, so the button's own rect is forgiven.
     #[test]
     fn the_click_that_opens_the_popup_does_not_dismiss_it() {
         assert!(!dismissed_by_click(ClickAway {
@@ -8366,9 +6502,7 @@ mod tests {
         }));
     }
 
-    /// The other exemption, and a different miss: the popup's own combo lists are
-    /// separate `Area`s, so choosing a language is a click that lands on neither
-    /// the popup's rect nor the button's.
+    /// The popup's own combo lists are separate `Area`s, so a pick lands outside both rects.
     #[test]
     fn choosing_an_item_in_one_of_the_popups_own_lists_does_not_dismiss_it() {
         assert!(!dismissed_by_click(ClickAway {
@@ -8385,12 +6519,7 @@ mod tests {
         }));
     }
 
-    /// **The release that ends a drag is not a click away from anything.** A scrub
-    /// started in the popup is finished — or cancelled with a right-click — with
-    /// the pointer wherever it has been dragged to, which is usually out over the
-    /// canvas. Reported twice: reading the primary button alone was not enough,
-    /// because the *cancel* is the right-click while the left button is still down,
-    /// and the release that follows it is a primary event.
+    /// The release that ends or cancels a drag (a right-click cancel, then a primary release) is not a click away.
     #[test]
     fn ending_or_cancelling_a_drag_does_not_dismiss_the_popup() {
         assert!(!dismissed_by_click(ClickAway {
@@ -8399,10 +6528,7 @@ mod tests {
         }));
     }
 
-    /// The fifth exemption, and the other half of the fourth: `in_gesture` catches
-    /// a drag **in flight**, and on the frame it ends `ctx.dragged_id()` has
-    /// already gone back to `None` (measured). So the release that finishes a
-    /// scrub started on the card is caught by where the *press* was instead.
+    /// `in_gesture` misses the frame a drag ends, so the release is caught by where the press was.
     #[test]
     fn the_release_that_ends_a_scrub_started_on_the_card_does_not_dismiss_it() {
         assert!(!dismissed_by_click(ClickAway {
@@ -8411,11 +6537,7 @@ mod tests {
         }));
     }
 
-    /// The third exemption, and the one that made a control unusable rather than
-    /// merely awkward: the decoration swatch opens the detached colour picker,
-    /// which is an `egui::Window` **below** this popup in layer order — so it is
-    /// neither `on_menu` nor `over_overlay`, and the first click in it closed the
-    /// popup that owned it, which orphaned and closed the picker too.
+    /// The detached colour picker is a `Window` below the popup in layer order, so it needs its own exemption.
     #[test]
     fn a_click_in_the_picker_this_popup_opened_does_not_dismiss_it() {
         assert!(!dismissed_by_click(ClickAway {
@@ -8424,8 +6546,7 @@ mod tests {
         }));
     }
 
-    /// And the case the whole test exists to preserve: a click on the page really
-    /// does close it, so the exemptions above have not made it undismissable.
+    /// A click on the page still dismisses, so the exemptions leave it dismissable.
     #[test]
     fn a_click_on_the_page_dismisses_the_popup() {
         assert!(dismissed_by_click(away()));
@@ -8438,13 +6559,7 @@ mod tests {
         );
     }
 
-    /// **The button's rect has to reach the popup**, which the decision table
-    /// above cannot check: it would pass with `on_head` computed from nothing.
-    ///
-    /// So this asserts the seam instead — that the row *returns* a rect at all,
-    /// and that it is the popup's anchor. Driven through `run_ui` rather than by
-    /// calling the row directly, because the rect only exists once something has
-    /// laid the button out.
+    /// The alignment row returns a non-empty button rect, and the popup anchors to it.
     #[test]
     fn the_alignment_row_hands_back_the_rect_the_popup_anchors_to() {
         let ctx = egui::Context::default();
@@ -8452,8 +6567,6 @@ mod tests {
         let mut got: Option<egui::Rect> = None;
         let _ = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(268.0);
-            // A bare button in the same allocation the row makes, so the test
-            // measures the seam rather than reimplementing the row.
             let head = crate::ui::field_button(
                 ui,
                 crate::theme::icon::SLIDERS_HORIZONTAL,
@@ -8468,9 +6581,7 @@ mod tests {
             rect.width() > 0.0 && rect.height() > 0.0,
             "an empty rect would forgive every click, or none: {rect:?}"
         );
-        // The anchor the popup computes from it: right-aligned, just below. The
-        // real constant, not a copy of it — a copy is what let this go on
-        // asserting "276px" after the card was redrawn at 272.
+        // The anchor the popup computes: right-aligned, just below.
         let anchor = egui::pos2(rect.right() - MENU_W, rect.bottom() + 6.0);
         assert!(anchor.y > rect.top(), "the popup hangs below the button");
         assert!(
@@ -8479,24 +6590,9 @@ mod tests {
         );
     }
 
-    /// **The alignment row sits on the column grid of the fields above it.**
-    ///
-    /// Reported twice, from opposite directions. First "horizontal text align and
-    /// vertical text align have different per-button sizing" — 37 against 20,
-    /// because one took the row's remainder and the other was pinned at 22 a cell.
-    /// Then, once both were pinned at the design's 28: "the horizontal align
-    /// control is 2px narrower than the field above, while the vertical align
-    /// control is 3px to the left of the field's above left edge."
-    ///
-    /// So the thing to pin is the **grid**, not the cell: the first track's right
-    /// edge on the first field's, the second track's left edge on the second
-    /// field's, the button's right edge on the margin. Equal cells cannot also
-    /// hold — four across a half-card and three across the rest is not an equal
-    /// division — and the tolerance below is what is left of that goal: the two
-    /// cells still land within a point of each other and of the button.
-    ///
-    /// Measured off the **painted** rects, because the arithmetic is what is under
-    /// test and restating it would pass whatever it became.
+    /// The alignment row sits on the column grid of the fields above it: track and
+    /// button edges on the field edges and the margin, cells within a sanity bound
+    /// of the button. Measured off the painted rects.
     #[test]
     fn the_alignment_row_lines_up_with_the_field_columns_above_it() {
         // The Type card's content width: 284 wide, `ui::CARD_MARGIN_X` a side.
@@ -8505,8 +6601,7 @@ mod tests {
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // The column edges the paired field rows above produce: `inspector_type`
-        // gives each field `half` and separates them by `GAP`.
+        // `inspector_type` gives each paired field `half` and separates them by `GAP`.
         let half = (CARD_INNER - GAP) / 2.0;
         let field_a_right = half;
         let field_b_left = half + GAP;
@@ -8515,13 +6610,11 @@ mod tests {
         let mut cells: Vec<egui::Rect> = Vec::new();
         let out = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(CARD_INNER);
-            // The alignment row, by the same arithmetic the row itself uses.
             let horizontal_w = (CARD_INNER - GAP) / 2.0;
             let vertical_w = CARD_INNER - horizontal_w - ROW_H - GAP * 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                // Cell 0 selected in each, so `segmented` paints a rect for it —
-                // the resting cells draw only their glyph.
+                // Cell 0 selected, so `segmented` paints a rect; resting cells draw only a glyph.
                 segmented(ui, horizontal_w, SEG_CELL_H, 4, 0, |_, _, _, _| {});
                 segmented(ui, vertical_w, SEG_CELL_H, 3, 0, |_, _, _, _| {});
                 ui::field_button(
@@ -8535,14 +6628,11 @@ mod tests {
         });
         for c in &out.shapes {
             if let egui::Shape::Rect(r) = &c.shape {
-                // A raised cell is the track's `SEG_CELL_H` less the hairline it
-                // now gives up on each side (§15 D386) — 22 inside a 28pt track,
-                // which is the design's `1 + 2 + 22 + 2 + 1`.
+                // A raised cell is `SEG_CELL_H` less the hairline given up on each side.
                 if (r.rect.height() - (SEG_CELL_H - 2.0)).abs() < 0.5 {
                     cells.push(r.rect);
                 } else if (r.rect.height() - ROW_H).abs() < 0.5
-                    // The button paints a fill and a stroke over one rect, and so
-                    // does a track: ground, then hairline.
+                    // The button and a track each paint a fill and a stroke over one rect.
                     && !tracks.contains(&r.rect)
                 {
                     tracks.push(r.rect);
@@ -8570,7 +6660,6 @@ mod tests {
             "the row ends at {} on a {CARD_INNER}pt card",
             button.right()
         );
-        // What is left of "one module": within a point of each other and of 28.
         assert_eq!(cells.len(), 2, "one raised cell in each track: {cells:?}");
         for (i, (cell, n)) in [(cells[0], 4), (cells[1], 3)].iter().enumerate() {
             let derived = seg_cell_of(if i == 0 { h_track } else { v_track }.width(), *n);
@@ -8579,13 +6668,7 @@ mod tests {
                 "track {i}'s painted cell is {}pt where its width implies {derived}pt",
                 cell.width()
             );
-            // **Two points, not one and a half, since the track gained its
-            // hairline** (§15 D386): the border takes a point off each end of the
-            // track, so a three-cell strip's cells each lose two thirds of one and
-            // the wider of the two now sits 1.5 off the button rather than 0.83.
-            // The number is a *sanity* bound on the module — the assertion above
-            // is the one that pins the arithmetic — so it moves with the geometry
-            // rather than the geometry being bent to keep it.
+            // A sanity bound on the module; the assertion above pins the arithmetic.
             assert!(
                 (cell.width() - SEG_CELL).abs() < 2.0,
                 "track {i}'s cell came out {}pt, more than two points off the \
@@ -8595,23 +6678,10 @@ mod tests {
         }
     }
 
-    /// **The card's height does not ratchet down as tabs are visited.**
-    ///
-    /// Reported as: open on Character and the card is tall; switch to Box and it
-    /// shrinks to fit; switch back to Character and it *stays* at Box's height;
-    /// go to Paragraph and it shrinks again, and Character is now stuck at that.
-    /// "Some smallest-opened-height kind of memory."
-    ///
-    /// The memory is a feedback loop, not a cache. A `ScrollArea` takes its outer
-    /// size from `available_rect_before_wrap()`; inside an `Area` that is the
-    /// area's size *from the previous frame*; and the area's size is what the
-    /// scroll area produced. So each short tab teaches the loop a smaller number
-    /// and nothing ever teaches it a larger one. Pinning an explicit `max_rect`
-    /// cuts the loop.
-    ///
-    /// Driven through the same three phases the report describes — tall, short,
-    /// tall — because a single pass of each proves nothing: the first frame of any
-    /// `Area` has no previous size and so is always right.
+    /// The card's height does not ratchet down as tabs are visited. A `ScrollArea`
+    /// inside an `Area` sizes from the area's previous-frame size, so each short tab
+    /// shrinks it; pinning an explicit `max_rect` cuts the loop. Driven tall, short,
+    /// tall, since an `Area`'s first frame is always right.
     #[test]
     fn a_short_tab_does_not_shorten_the_card_for_the_next_tall_one() {
         const CAP: f32 = 400.0;
@@ -8619,8 +6689,7 @@ mod tests {
         const SHORT: usize = 3;
         const ROW: f32 = 20.0;
 
-        // One frame of a card whose body is `rows` tall, returning the height the
-        // body actually took. `pinned` is the fix under test.
+        // One frame of a card whose body is `rows` tall; returns the body's height.
         fn frame(ctx: &egui::Context, rows: usize, pinned: bool) -> f32 {
             let mut got = 0.0;
             let _ = ctx.run_ui(Default::default(), |ui| {
@@ -8663,8 +6732,7 @@ mod tests {
         for pinned in [false, true] {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
-            // Two frames per phase: the first settles the `Area`'s size, the
-            // second is what the user is looking at.
+            // Two frames per phase: the first settles the `Area`'s size.
             let mut tall_first = 0.0;
             for _ in 0..2 {
                 tall_first = frame(&ctx, TALL, pinned);
@@ -8689,8 +6757,7 @@ mod tests {
                      {tall_first} — the short tab in between shortened it"
                 );
             } else {
-                // The bug, kept as an assertion so the fix cannot be quietly
-                // reverted to "it was never broken".
+                // The unpinned form still ratchets; if not, egui changed.
                 assert!(
                     tall_again < tall_first - 1.0,
                     "expected the unpinned form to ratchet ({tall_first} → \
@@ -8701,21 +6768,9 @@ mod tests {
         }
     }
 
-    /// **The unit brightens on hover, and the colour it brightens to is the one
-    /// that gets drawn.**
-    ///
-    /// Reported as "doesn't have a hover color", and the hover was working the whole
-    /// time — `value_field_suffixed` computed it and passed it to
-    /// `Painter::galley`, whose colour argument is a **fallback**: the tessellator
-    /// substitutes it only where a section left `Color32::PLACEHOLDER`. The galley
-    /// was laid out with `.color(theme::text::FAINT)` baked in, so the fallback was
-    /// ignored and the ink never moved.
-    ///
-    /// **Both halves are asserted, because either alone passes while the control is
-    /// broken.** A probe that read `fallback_color` back said the hover worked; one
-    /// that read only the section colour would have missed that omitting the colour
-    /// makes `into_galley` substitute the style's own `text_color` — full-strength
-    /// white at rest, which was the second attempt.
+    /// The unit brightens on hover and the colour is the one drawn: `Painter::galley`'s
+    /// colour is a fallback used only where a section is `Color32::PLACEHOLDER`, so
+    /// both the baked and the fallback colour are asserted.
     #[test]
     fn hovering_the_unit_changes_the_colour_it_is_actually_drawn_in() {
         let ctx = egui::Context::default();
@@ -8734,8 +6789,7 @@ mod tests {
             };
             input.events = at.map(egui::Event::PointerMoved).into_iter().collect();
             let mut found = None;
-            // Twice: a widget's interaction state is last frame's, so the first pass
-            // is the one that registers the hover and the second is what it draws.
+            // Twice: interaction state is last frame's.
             for _ in 0..2 {
                 let mut v = 120.0_f64;
                 let out = ctx.run_ui(input.clone(), |ui| {
@@ -8765,8 +6819,7 @@ mod tests {
             found.expect("the unit is drawn")
         };
 
-        // The unit sits against the right edge: the field is 130 wide, its content
-        // box ends 9pt inside that, and the unit hangs 4pt further out.
+        // The unit sits against the field's right edge.
         let (rest_fallback, rest_baked) = ink(None);
         let (hot_fallback, hot_baked) = ink(Some(egui::pos2(W - 8.0, ROW_H / 2.0)));
 
@@ -8784,22 +6837,14 @@ mod tests {
         assert_eq!(rest_fallback, theme::text::FAINT, "at rest");
     }
 
-    /// **The hand-painted slider tracks the pointer and reaches both ends.**
-    ///
-    /// `ui::slider` replaced `egui::Slider` to get the design's 3pt rail and 11pt
-    /// knob, and in doing so took over the arithmetic egui was doing: the knob's
-    /// centre travels `half..width - half` so it cannot hang off the rail, which is
-    /// exactly the sort of inset that silently costs you the last few percent of
-    /// the range. So the ends are what is asserted, along with the middle.
+    /// The hand-painted slider reaches both ends of its range despite the knob inset, and the middle.
     #[test]
     fn the_slider_reaches_both_ends_of_its_range() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
         const W: f32 = 200.0;
-        // Press in the middle of the rail, drag to `x`, and read where it settled.
-        // The press has to land *on* the slider — one outside is not a grab, which
-        // is why it starts at the middle every time.
+        // Press in the middle of the rail (a press outside is not a grab), drag to `x`.
         let dragged_to = |x: f32| -> f64 {
             let mut value = 400.0_f64;
             let y = ui::SLIDER_H / 2.0;
@@ -8830,8 +6875,6 @@ mod tests {
             frame(input, &mut value);
             value
         };
-        // Hard against each end, and the middle. A knob inset from the rail's ends
-        // is the whole reason the travel is computed rather than assumed.
         assert_eq!(dragged_to(-40.0), 100.0, "dragged past the left end");
         assert_eq!(dragged_to(W + 40.0), 900.0, "dragged past the right end");
         let mid = dragged_to(W / 2.0);
@@ -8841,31 +6884,9 @@ mod tests {
         );
     }
 
-    /// **A scrub reports its value again on the frame it ends, and a bare click
-    /// reports nothing at all.**
-    ///
-    /// The release frame is the one the valve commits on (`edit_valve` acts on
-    /// `drag_stopped() || lost_focus() || changed()`), and it is the one frame a
-    /// *changed-only* field has nothing to say: `ui::value_field` settles the
-    /// number to whole units on every dragged frame, so by the time the button comes
-    /// up there is nothing left to round and nothing to report. The four paragraph
-    /// `Length` fields and the `Level` beside them gated on exactly that, so the last
-    /// drag of one never committed — it lived in the preview until the next commit
-    /// anywhere cleared it. That is §15 D109's shape, one level up from where D109
-    /// was fixed: the valve was made unconditional and the *field* in front of it
-    /// still had the guard.
-    ///
-    /// Measured rather than read, because reading is what got it wrong: before the
-    /// fix the release frame came back `next=None, drag_stopped=true`, and every
-    /// frame of a four-step scrub scored `commits=false`.
-    ///
-    /// **Both halves, because either alone passes for the wrong reason.** Reporting
-    /// the value unconditionally satisfies the release frame too — and would commit
-    /// an identical transaction after a bare click, which is what the fix was priced
-    /// at in `docs/roadmap.md` before anyone measured it. It turns out to cost nothing: a
-    /// stationary press-release is a click and never a drag, so `drag_stopped` never
-    /// fires and there is no junk undo step to trade for. The click half is what says
-    /// so, and it is the half that fails against the over-eager version.
+    /// A scrub reports its value again on the frame it ends (the frame the valve
+    /// commits on), and a bare click reports nothing; the click half fails against
+    /// an unconditional report.
     #[test]
     fn a_scrub_reports_its_value_on_the_release_frame_and_a_click_reports_nothing() {
         let ctx = egui::Context::default();
@@ -8898,8 +6919,7 @@ mod tests {
                 out = Some((e.next, e.resp.dragged(), e.resp.drag_stopped()));
             });
             let (next, dragged, drag_stopped) = out.unwrap();
-            // What the preview does: the panel reads its subject back through it, so
-            // the next frame's `current` is whatever this frame reported.
+            // The preview feeds each reported value back as the next frame's `current`.
             if let Some(n) = next {
                 *current = n;
             }
@@ -8912,16 +6932,12 @@ mod tests {
             pressed,
             modifiers: Default::default(),
         };
-        // `paragraph_length` → `valve_paragraph` → `edit_valve`, spelled out: the
-        // field has to report a value for the valve to be reached at all, and the
-        // valve commits on any frame that is not a dragged one.
+        // `edit_valve` commits on any frame that is not a dragged one and has a value.
         let commits = |(next, dragged, drag_stopped): (Option<Length>, bool, bool)| {
             next.is_some() && !dragged && drag_stopped
         };
 
-        // A real scrub: press, four frames of motion, release without moving —
-        // which is the release egui reports, and the one the value has nothing to
-        // add to.
+        // A real scrub: press, four frames of motion, release without moving.
         let start = at(W / 2.0);
         let mut current = Length::Px(10.0);
         frame(vec![egui::Event::PointerMoved(start)], &mut current);
@@ -8932,9 +6948,6 @@ mod tests {
                 &mut current,
             );
         }
-        // The fixture is in the state this test is about, or the test is about
-        // nothing: a scrub that never moved the number would satisfy every
-        // assertion below by never reaching them.
         assert_ne!(
             current,
             Length::Px(10.0),
@@ -8953,7 +6966,6 @@ mod tests {
         );
         assert!(commits(release), "so the last drag of a scrub commits");
 
-        // A bare click, which is the whole cost of the rule above.
         let mut clicked = Length::Px(10.0);
         for (tag, events) in [
             ("hover", vec![egui::Event::PointerMoved(start)]),
@@ -8968,30 +6980,9 @@ mod tests {
         assert_eq!(clicked, Length::Px(10.0), "a click moved the value");
     }
 
-    /// **The decoration fields now follow the same rule, and nothing pinned them
-    /// before** (§15 D765).
+    /// `optional_length_field` reports on a change and on the release, not on idle frames.
     ///
-    /// `optional_length_field` reported on **every** frame it held a value — idle
-    /// ones included — where `length_field` reports on a changed frame and again on
-    /// the release. The divergence was one of the three `[S6.2-L3-09]` measured,
-    /// and it was argued in that function's doc by a citation to
-    /// `OndinApp::char_length`, **a method that does not exist**: its link reference
-    /// redirected the name to the type, so `cargo doc` resolved it and nobody read
-    /// it back.
-    ///
-    /// ⚠️ **The load-bearing assertion is the idle frame.** The release and changed
-    /// frames report under *either* rule — the old every-frame gate is a superset —
-    /// so a test that only drove a scrub would be green for both. The frame that
-    /// tells them apart is a settled one with the value untouched.
-    ///
-    /// ⚠️ **And the release is asserted too**, because that is the half the gate
-    /// must not lose: it is the frame `edit_valve` commits on, and a plain
-    /// `shown != before` withholds a value there. §15 D109 is that bug.
-    ///
-    /// **Flip, run:** restoring `current.is_some().then(…)` fails at the idle-frame
-    /// assertion — predicted correctly. Dropping the `|| resp.drag_stopped()` term
-    /// fails at the release assertion, which is D109's shape and the reason both are
-    /// here.
+    /// flip: restoring `current.is_some().then(…)` in `optional_length_field` → fails at the idle-frame assertion
     #[test]
     fn a_decoration_field_reports_on_a_change_and_on_the_release_and_not_when_idle() {
         let ctx = egui::Context::default();
@@ -9040,8 +7031,7 @@ mod tests {
         let start = at(W / 2.0);
         let mut current = Some(Length::Px(4.0));
 
-        // 🚨 The frame that tells the two rules apart: settled, nothing touched, a
-        // value present. The old gate reported here; the rule reports nothing.
+        // The idle frame: settled, nothing touched, a value present.
         frame(vec![egui::Event::PointerMoved(start)], &mut current);
         let idle = frame(Vec::new(), &mut current);
         assert!(
@@ -9055,7 +7045,6 @@ mod tests {
             "and the idle frame left the value alone"
         );
 
-        // A scrub still reports on the frames that matter.
         frame(vec![button(start, true)], &mut current);
         for i in 1..=4 {
             frame(
@@ -9082,21 +7071,7 @@ mod tests {
         );
     }
 
-    /// **A field with a unit paints the width it was given, and the unit lands
-    /// inside it.**
-    ///
-    /// Reported as *"the %/px toggle is still outside the control"*, and it was
-    /// one bug wearing two faces. `field_frame` shrink-wraps its content; the
-    /// unit's strip was subtracted from the number's width and then *painted*
-    /// over, never allocated — so the frame came out `trail_w` short of the size
-    /// asked for while the unit was still placed against the full content box, and
-    /// landed astride the border it should have been inside. Measured before the
-    /// fix: a 130.5pt field painting 110.5, its `%` spanning 108.8–119.8 across a
-    /// border at 110.5. The second symptom was the same number — a row of two such
-    /// fields stopped 42pt short of the card ("line height and character spacing
-    /// should both fill the full width").
-    ///
-    /// Both halves are asserted, because fixing either alone still looks wrong.
+    /// A field with a unit paints the width it was given, with the unit inside its border.
     #[test]
     fn a_field_with_a_unit_fills_its_width_and_keeps_the_unit_inside() {
         let ctx = egui::Context::default();
@@ -9112,8 +7087,7 @@ mod tests {
                 ui.spacing_mut().item_spacing.x = GAP;
                 for (unit, prefix) in [
                     ("%", Prefix::Icon(icon::ARROWS_VERTICAL)),
-                    // The widest unit any field shows, and the one most likely to
-                    // push past the strip reserved for it.
+                    // The widest unit any field shows.
                     ("auto", Prefix::Icon(icon::TEXT_AA)),
                 ] {
                     let mut v = 120.0_f64;
@@ -9136,7 +7110,6 @@ mod tests {
         for c in &out.shapes {
             let r = c.shape.visual_bounding_rect();
             match &c.shape {
-                // The field's own recessed ground, at the row's full height.
                 egui::Shape::Rect(_) if (r.height() - ROW_H).abs() < 0.5 => frames.push(r),
                 egui::Shape::Text(t) if matches!(t.galley.job.text.as_str(), "%" | "auto") => {
                     units.push(r)
@@ -9159,16 +7132,14 @@ mod tests {
                 unit.right(),
                 frame.right()
             );
-            // The chip carries `SUFFIX_CHIP_PAD` of its own past the text, so the
-            // *text* sits a little further in than the chip's own 5pt.
+            // The chip carries `SUFFIX_CHIP_PAD` past the text.
             assert!(
                 (2.0..12.0).contains(&inset),
                 "field {i}'s unit is {inset}pt from the border — it should tuck \
                  against the right edge, not float in the middle"
             );
         }
-        // And the pair fills the row it was given, which is the same bug's other
-        // face: `half` is computed from `W`, so a frame that shrank left a gap.
+        // And the pair fills the row it was given.
         let right = frames[1].right() - frames[0].left();
         assert!(
             (right - W).abs() < 0.5,
@@ -9176,27 +7147,12 @@ mod tests {
         );
     }
 
-    /// **No ink lands right of the card's inner edge.**
-    ///
-    /// The popup's width is pinned so that switching tabs does not resize it, and
-    /// every one of its rows divides that width up by arithmetic — a field beside
-    /// a 26px button, a label column beside a field beside a button, a `TextEdit`
-    /// given whatever the magnifier leaves. Get one of those subtractions wrong
-    /// and nothing errors: the row's contents simply reach past its border.
-    ///
-    /// **Asserted on the shapes, not on any `Ui`'s rect**, and that distinction is
-    /// what makes the test worth having. The first version of it measured
-    /// `ui.min_rect()` inside the row and passed with the swatch inflated from 14px
-    /// to 120 and the hex field from 62 to 140: `allocate_ui_with_layout` bounds
-    /// `max_rect`, so `min_rect` reports the allocation back rather than what the
-    /// contents did with it, and a `TextEdit`'s `desired_width` is clamped to the
-    /// room available in the first place. Both readings are the *budget*. The ink
-    /// is the only thing that overflows, so the ink is what is measured.
+    /// No ink lands right of the card's inner edge. Asserted on the painted shapes,
+    /// since a `Ui`'s `min_rect` reports the allocation, not what the contents did.
     #[test]
     fn nothing_in_the_popup_paints_past_the_card() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // One pass to make the fonts available, since both rows measure galleys.
         let _ = ctx.run_ui(Default::default(), |_| {});
         let out = ctx.run_ui(Default::default(), |ui| {
             ui.set_width(MENU_INNER);
@@ -9279,9 +7235,7 @@ mod tests {
                 let _ = reset_slot(ui, true, "Back to the font's default");
             });
         });
-        // The rows are laid out from the origin, so the card's inner edge is
-        // `MENU_INNER` across. A half-point of tolerance for the hairlines, which
-        // egui strokes on the boundary rather than inside it.
+        // Half a point of tolerance for hairlines, which egui strokes on the boundary.
         let edge = MENU_INNER + 0.5;
         let over: Vec<f32> = out
             .shapes
@@ -9307,13 +7261,10 @@ mod tests {
             block: BlockStyle::default(),
             sizing: TextSizing::Auto,
             text_paint: Some(Brush::Solid(Color::BLACK)),
-            // Nothing shaped in a unit test, which is the `None` the field falls
-            // back on rather than a case these tests are avoiding.
             line_height: None,
             decoration_sizes: None,
             range: 0..8,
-            // Byte 0, which is what `read` gives a subject with no live session —
-            // these are whole-node fixtures.
+            // Byte 0, as `read` gives a subject with no live session.
             resolve_at: Some(0),
             partial: false,
             para_spans: ParaSpans::default(),
@@ -9323,13 +7274,8 @@ mod tests {
         }
     }
 
-    /// `subject_of` over **some** of a node's paragraphs — the state a live
-    /// session with the caret in one of them produces.
-    ///
-    /// `para_range` is the snapped range the panel would have read off the editor,
-    /// so a test states the paragraph it means rather than the selection that found
-    /// it: the snapping itself is core's and is tested there
-    /// (`a_paragraph_write_snaps_outward_to_whole_paragraphs`).
+    /// `subject_of` over some of a node's paragraphs, as a live session with the
+    /// caret in one produces; `para_range` is the already-snapped range.
     fn para_subject_of(
         paragraph: ParagraphStyle,
         para_spans: ParaSpans,
@@ -9344,16 +7290,13 @@ mod tests {
         }
     }
 
-    /// **A whole-node paragraph write sets the defaults *and* drops the overrides**,
-    /// which is the half a `SetParagraphStyle` alone would miss: an override left
-    /// behind is a paragraph that ignores the control, and it is the same shape
-    /// `char_attrs_tx` exists for.
+    /// A whole-node paragraph write sets the defaults and drops the overrides it replaces.
     #[test]
     fn a_whole_node_paragraph_write_flattens_the_overrides_it_replaces() {
         let defaults = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
         spans.set(0..4, ParaAttr::IndentStart(Length::Px(40.0)), &defaults);
-        // And one of a *different* attribute, which must survive.
+        // A different attribute must survive.
         spans.set(4..8, ParaAttr::Spacing(Length::Px(12.0)), &defaults);
         let subject = para_subject_of(defaults, spans, 0..8);
         assert!(!subject.para_partial, "the precondition: no live session");
@@ -9378,9 +7321,7 @@ mod tests {
         );
     }
 
-    /// A write that changes nothing reports so, because the click path commits only
-    /// when it does — an undo step for a click that moved nothing is the bug this
-    /// answers, and it is why `para_attrs_tx` returns the flag at all.
+    /// A write that changes nothing reports so, since the click path commits only when it does.
     #[test]
     fn a_paragraph_write_of_the_value_already_there_changes_nothing() {
         let defaults = ParagraphStyle {
@@ -9390,8 +7331,7 @@ mod tests {
         let subject = para_subject_of(defaults, ParaSpans::default(), 0..8);
         let (_, changes) = para_attrs_tx(&subject, vec![ParaAttr::Indent(Length::Px(20.0))]);
         assert!(!changes);
-        // And the canonicalization is in the path, so a value that only *looks*
-        // different does not count either (`Length::canonical`, four places).
+        // Canonicalization is in the path, so a value that only looks different is no change.
         let (_, changes) =
             para_attrs_tx(&subject, vec![ParaAttr::Indent(Length::Px(20.000000001))]);
         assert!(
@@ -9400,10 +7340,7 @@ mod tests {
         );
     }
 
-    /// **What the tab shows over a mixed range, and what it says about it.** The two
-    /// halves are separate on purpose: `shown_paragraph` gives the value at the
-    /// range's start so a field has digits and a drag has somewhere to start from,
-    /// and `para_mixed` is what stops the field claiming that number is *the* value.
+    /// Over a mixed range `shown_paragraph` gives the start's value and `para_mixed` says it is not the only one.
     #[test]
     fn a_paragraph_field_reads_mixed_over_paragraphs_that_disagree() {
         let defaults = ParagraphStyle::default();
@@ -9412,9 +7349,7 @@ mod tests {
         spans.set(4..8, ParaAttr::IndentStart(Length::Px(40.0)), &defaults);
 
         let both = para_subject_of(defaults.clone(), spans.clone(), 0..8);
-        // Over the whole node with no session, `partial` is false — so however
-        // ragged the spans are the field is not lying, because the next write
-        // flattens them. That is `ragged` versus `mixed` in the other scope.
+        // Over the whole node with no session `partial` is false: the next write flattens.
         assert!(!both.para_mixed(ParaAttrKind::IndentStart));
 
         let first = para_subject_of(defaults.clone(), spans.clone(), 0..4);
@@ -9426,8 +7361,7 @@ mod tests {
         assert!(!second.para_mixed(ParaAttrKind::IndentStart));
         assert_eq!(second.shown_paragraph().indent_start, Length::Px(40.0));
 
-        // A live selection reaching both is the mixed one, and it still shows the
-        // value at its start.
+        // A live selection reaching both is mixed and still shows the start's value.
         let mut across = para_subject_of(defaults, spans, 0..8);
         across.para_partial = true;
         assert!(across.para_mixed(ParaAttrKind::IndentStart));
@@ -9438,41 +7372,12 @@ mod tests {
         assert_eq!(across.shown_paragraph().indent_start, Length::ZERO);
     }
 
-    /// **A letter spacing of zero everywhere is not *Mixed*, whatever units the
-    /// zeroes are in** (§15 D799, `[S6.1-L1-03]`).
+    /// A letter spacing of zero everywhere is not *Mixed* whatever the zeroes' units, and
+    /// comes back in the unit the user chose so the chip does not flip. The first
+    /// assertion guards the fixture; both orderings of the explicit run are covered.
     ///
-    /// The reported move is the ordinary one for anyone who works in percent:
-    /// click the `%` chip before typing a number. That writes `Em(0.0)` over the
-    /// selection and leaves `Px(0.0)` — the default — everywhere else, and the
-    /// two are different values to `Spans::shared_in`, which compares
-    /// structurally and **must**: §15 D537 keeps that difference precisely
-    /// because it is where the unit choice lives at amount zero. So the field
-    /// went to a dash over text whose letter spacing is zero throughout.
-    ///
-    /// ⚠️ **The fixture guard is the first assertion, and it is not decoration.**
-    /// If `set` ever canonicalized `Em(0.0)` to `Px(0.0)` on the way in, the
-    /// spans would agree structurally, `shared_in` would answer on its own, and
-    /// every assertion below would pass **without `agreed_zero` existing**. That
-    /// is the vacuous version of this test and `assert_ne!` is what refuses it.
-    ///
-    /// ⚠️ **Flipped** by deleting `shared`'s `or_else(agreed_zero(…))` arm: red
-    /// on the `mixed` assertion, the predicted site.
-    ///
-    /// ⚠️ **And flipped a second way, which is why there are two assertions and
-    /// not one.** Returning a different one of the agreeing values — `.last()`
-    /// in place of the non-default pick — leaves the `mixed` assertion **green**
-    /// and fails the second at `Px(0.0)` against `Em(0.0)`. Nothing about the
-    /// dash-or-digits question can see that, and what it breaks is the unit
-    /// chip: it reads its suffix off this value, so a `%` document would flip to
-    /// `px` under the user. **A test that only asked "is it mixed" would have
-    /// shipped D537's own symptom by a new road.**
-    ///
-    /// 🚨 **And it shipped it anyway, because the fixture only ever put the
-    /// explicit run at the head** (§15 D840). Both flips above were run against
-    /// the one ordering document order answers correctly. Restoring
-    /// `values.into_iter().next()` is now red on the `4..8` case and **green on
-    /// the `0..4` case** — the two arms of one loop disagreeing, which is what
-    /// says the ordering is the subject rather than the units.
+    /// flip: deleting `shared`'s `or_else(agreed_zero(…))` arm → fails at the `mixed` assertion
+    /// flip: `.last()` in place of the non-default pick → fails at the `Px(0.0)` against `Em(0.0)` assertion
     #[test]
     fn a_zero_letter_spacing_in_two_units_is_not_mixed() {
         assert_ne!(
@@ -9482,12 +7387,6 @@ mod tests {
              compare equal this test proves nothing"
         );
 
-        // 🚨 **Both orderings** (§15 D840). The explicit run at the head was the
-        // only one covered, and it is the one case document order gets right:
-        // with the run at 4..8 the first value is the *default*, and this test
-        // reported `Px(0.0)` in its own words while claiming to prevent exactly
-        // that. One character of the fixture separated a passing test from the
-        // defect it was written to catch.
         for at in [0..4, 4..8] {
             let style = TextStyle::default();
             let mut spans = CharSpans::default();
@@ -9514,25 +7413,9 @@ mod tests {
         }
     }
 
-    /// **A real disagreement still reads *Mixed*** — the control for the test
-    /// above, and the reason it is a separate one.
+    /// A real disagreement still reads *Mixed*: two amounts, and a zero beside a number.
     ///
-    /// `agreed_zero` is reached only where `shared_in` has already answered
-    /// `None`, so the risk it introduces is that it says "agreed" too often. A
-    /// non-zero amount on one side is the case that must not collapse, and a
-    /// zero against a non-zero is the case that is genuinely mixed and shares a
-    /// zero with the test above — so it is the one an over-broad predicate would
-    /// swallow.
-    ///
-    /// ⚠️ **Flipped** by dropping `agreed_zero`'s `is_zero` test — accepting any
-    /// two lengths as agreed — and **the predicted site was wrong**. It is red on
-    /// the **first** assertion, two non-zero amounts, and it never reaches the
-    /// second. The prediction assumed a zero beside a number is the harder case
-    /// for an over-broad predicate to get right; it is not, because that
-    /// predicate stopped looking at amounts at all, and the first pair it meets
-    /// is the one that fails. **Both assertions are kept** — the first is what
-    /// this flip catches, and the second is the one that would survive a
-    /// predicate that checked *one* side for zero rather than all of them.
+    /// flip: dropping `agreed_zero`'s `is_zero` test → fails at the two-amounts assertion
     #[test]
     fn two_different_letter_spacings_still_read_mixed() {
         let style = TextStyle::default();
@@ -9559,17 +7442,13 @@ mod tests {
         );
     }
 
-    /// **The lit button that did nothing.** The hanging pair's click compares against
-    /// `shown_paragraph`, which over the whole node reads the *first* paragraph — so an
-    /// override on the second one left "first-line" lit, the guard saw no change and
-    /// wrote nothing while that paragraph plainly hung. `para_ragged` is the question
-    /// the guard actually needed; this pins the two apart, because they agree in every
-    /// case except the one that was broken.
+    /// The hanging pair's click guard asks `para_ragged`, not `shown_paragraph`
+    /// (the first paragraph), so an override on a later paragraph still flattens.
     #[test]
     fn the_hanging_pair_has_something_to_do_when_the_paragraphs_disagree() {
         let defaults = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
-        // Not the first paragraph — that is the whole point.
+        // Not the first paragraph.
         spans.set(4..8, ParaAttr::Hanging(true), &defaults);
         let subject = para_subject_of(defaults.clone(), spans, 0..8);
 
@@ -9586,7 +7465,7 @@ mod tests {
             subject.para_ragged(ParaAttrKind::Hanging),
             "but there *is* something to flatten, which is what the click must fire on"
         );
-        // And the write it fires does flatten: the override goes, the default stays.
+        // The write flattens: the override goes, the default stays.
         let (tx, changes) = para_attrs_tx(&subject, vec![ParaAttr::Hanging(false)]);
         assert!(
             changes,
@@ -9600,8 +7479,7 @@ mod tests {
             written.as_slice()
         );
 
-        // With nothing overridden the two questions agree again, and a click on the
-        // lit button must still commit nothing.
+        // With nothing overridden a click on the lit button commits nothing.
         let plain = para_subject_of(defaults, ParaSpans::default(), 0..8);
         assert!(!plain.para_ragged(ParaAttrKind::Hanging));
         let (_, changes) = para_attrs_tx(&plain, vec![ParaAttr::Hanging(false)]);
@@ -9625,14 +7503,8 @@ mod tests {
         )
     }
 
-    /// **Every character-scoped slot must round-trip through `char_scoped`, and no
-    /// other slot may claim to be one.**
-    ///
-    /// That predicate is what all three write verbs branch on (§15 D154), so a slot
-    /// it misses would be written as a document transaction — which for a character
-    /// attribute is an empty one, i.e. a control that silently does nothing. This is
-    /// the guard the old shape could not have: with the branch spelled out three
-    /// times, `preview_slot` disagreed with its siblings and that was D129's gap.
+    /// Every character-scoped slot round-trips through `char_scoped`, and no other slot claims to be one;
+    /// the three write verbs branch on it, so a miss would write an empty document transaction.
     #[test]
     fn every_character_scoped_slot_round_trips_and_no_other_claims_to_be_one() {
         use crate::panels::PaintSlot;
@@ -9661,10 +7533,7 @@ mod tests {
         }
     }
 
-    /// **One builder for every write to a character-scoped slot.** The row, the
-    /// picker and the three verbs all go through it, so "set this colour" cannot mean
-    /// two things — and `None` is the inherited state rather than a missing value,
-    /// which is what the reset button writes.
+    /// The one colour builder covers both slots; `None` is the inherited state the reset writes.
     #[test]
     fn the_colour_builder_covers_both_slots_and_the_inherited_state() {
         let subject = subject_of(TextStyle::default(), CharSpans::default());
@@ -9678,9 +7547,7 @@ mod tests {
             Some(CharAttr::Color(None)),
             "the reset writes the inherited state, not a missing attribute"
         );
-        // A decoration slot on text carrying no decoration has nothing to colour,
-        // which is also how the picker learns to close itself when one is switched
-        // off underneath it.
+        // A decoration slot on text with no decoration has nothing to colour.
         assert!(
             char_color_attr(
                 &subject,
@@ -9698,14 +7565,8 @@ mod tests {
         }
     }
 
-    /// **A gradient-filled text node has to show its decoration inheriting the
-    /// gradient.** `scene.rs` gives an uncoloured decoration `inks.first()`, so the
-    /// canvas draws that underline with the gradient; the panel flattened the same
-    /// fill to `Color::BLACK`, which put a flat black chip and `000000` on the row
-    /// with nothing to distinguish it from black text. The chip is now the ramp,
-    /// and the one colour the hex and the picker still need is the **first stop** —
-    /// the collapse `write_char_slot` already performs when the gradient is
-    /// adopted, so what the row promises is what clicking it produces.
+    /// A gradient-filled text node shows its decoration inheriting the ramp, not black;
+    /// the hex and picker collapse to the first stop, as `write_char_slot` does.
     #[test]
     fn a_gradient_text_fill_is_inherited_as_a_ramp_not_as_black() {
         use ondin_core::peniko::Gradient;
@@ -9729,14 +7590,11 @@ mod tests {
             "the collapse is the first stop, not black"
         );
 
-        // A solid fill keeps the single chip it always had — the ramp is the extra
-        // state, not a replacement.
         subject.text_paint = Some(Brush::Solid(last));
         assert!(subject.text_ramp().is_none());
         assert_eq!(subject.text_color(), last);
 
-        // And a node with no visible fill still lands on black, matching the
-        // stand-in `scene.rs` paints an unfilled node's decoration with.
+        // No visible fill lands on black, matching `scene.rs`'s stand-in.
         subject.text_paint = None;
         assert!(subject.text_ramp().is_none());
         assert_eq!(subject.text_color(), Color::BLACK);
@@ -9756,8 +7614,7 @@ mod tests {
                     };
                 }
                 Operation::SetTextSpans { spans, .. } => {
-                    // A span that still disagrees with the default about the
-                    // underline is exactly what "the red survived" looks like.
+                    // A span still disagreeing with the default is "the red survived".
                     overridden =
                         spans.shared_in(&TextStyle::default(), CharAttrKind::Underline, 0..8)
                             != Some(CharAttr::Underline(None));
@@ -9768,21 +7625,13 @@ mod tests {
         (default, overridden)
     }
 
-    /// **Clearing a decoration's colour has to clear it everywhere.** Reported as
-    /// "I set the underline's colour to red; clicking the reset button does
-    /// nothing", and the write is the half of that worth pinning: an edit whose
-    /// new value is *nearly* the old one is where `char_attrs_tx`'s no-op guard
-    /// earns its keep or swallows the edit.
-    ///
-    /// Both shapes the red can be in, because they take different routes out: the
-    /// node's own default (which `TextStyle::set` replaces) and a span override
-    /// (which only `CharSpans::clear` removes).
+    /// Clearing a decoration's colour clears it from both the node default
+    /// (`TextStyle::set`) and a span override (`CharSpans::clear`).
     #[test]
     fn clearing_an_underline_colour_clears_the_default_and_the_spans() {
         let mut styled = TextStyle::default();
         styled.set(CharAttr::Underline(Some(red())));
 
-        // Red as the node default.
         let subject = subject_of(styled.clone(), CharSpans::default());
         let (tx, changes) = char_attrs_tx(
             &subject,
@@ -9791,8 +7640,7 @@ mod tests {
         assert!(changes, "clearing a colour that is set is not a no-op");
         assert_eq!(underline_after(&tx), (None, false));
 
-        // Red as a span over part of the node, the default plain — the shape the
-        // panel cannot see through `shown()`, since that reads byte 0.
+        // Red as a span the panel cannot see through `shown()`, which reads byte 0.
         let mut spans = CharSpans::default();
         spans.set(
             4..8,
@@ -9811,14 +7659,8 @@ mod tests {
         assert_eq!(underline_after(&tx), (None, false));
     }
 
-    /// **And the half that was actually broken: whether the button is live.**
-    ///
-    /// The write above was correct all along. What failed was `d.color.is_some()`
-    /// as the enabled test — `d` is `shown()`, which over a whole node reads byte 0
-    /// — so a colour living in a span that did not reach byte 0 left the button
-    /// dimmed and inert with the red plainly on screen. `ragged` is the second
-    /// term, and this is the case that needs it: nothing about the *shown* value
-    /// distinguishes it from a decoration that never had a colour.
+    /// A colour in a span that misses byte 0 still lights the reset: `ragged` is
+    /// the second enabling term, since the shown value reads byte 0.
     #[test]
     fn a_colour_hiding_in_a_span_still_lights_the_reset() {
         let mut spans = CharSpans::default();
@@ -9841,20 +7683,14 @@ mod tests {
         );
     }
 
-    /// **A tab label that does not fit its cell simply paints over the next
-    /// one.** `ui::segment_label` centres a galley in a rect and clips nothing, so
-    /// spelling the tabs out — `Character` where the strip used to say `Char` —
-    /// is a change whose failure mode is invisible in the source and obvious on
-    /// screen. The widest of the three, measured against the cell arithmetic the
-    /// popup actually performs.
+    /// The widest tab label fits its cell, since `ui::segment_label` clips nothing.
     #[test]
     fn the_spelled_out_tab_labels_fit_their_cells() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // What `type_menu_popup` hands `segmented`, and what `segmented` then
-        // divides it into: 2px of track padding on each side, 2px between cells.
+        // `segmented` divides the track with 2px padding a side and 2px between cells.
         let track = MENU_INNER - CLOSE_BUTTON_W - COL_GAP;
         let cells = TypeTab::ALL.len() as f32;
         let cell_w = (track - 4.0 - 2.0 * (cells - 1.0)) / cells;
@@ -9874,10 +7710,7 @@ mod tests {
         }
     }
 
-    /// The same question of the two widest segmented tracks inside a tab, which
-    /// have no close button to give up and so get the full inner width. `By
-    /// script` and `Break word` are the labels the redesign introduced, and the
-    /// four-cell Case track is the tightest geometry in the popup.
+    /// The segmented tracks inside a tab (full inner width, no close button) fit their labels.
     #[test]
     fn the_segmented_labels_inside_a_tab_fit_their_cells() {
         let ctx = egui::Context::default();
@@ -9921,52 +7754,14 @@ mod tests {
         }
     }
 
-    /// Every `Length` field's two ends describe the **same quantity**, so the
-    /// unit chip cannot change the value it converts.
+    /// Every `Length` field's two ends bound the same quantity, so the unit chip
+    /// cannot change the value it converts. Driven through `Length::in_unit` at three
+    /// font sizes; scope is the ranges, not the fields' call sites.
     ///
-    /// ⚠️ **This is what the panel's own `Bounds` doc has always claimed and
-    /// what nothing checked.** That doc: *"the two ends of the same control
-    /// disagreeing about its limits is exactly the sort of thing that only shows
-    /// up as a value that cannot be typed back."* Every pair in the panel was
-    /// such a disagreement, because there was exactly one px cap in the file —
-    /// `MAX_LINE_HEIGHT_PX`, named for line height — and all nine fields used
-    /// it. Worst case **625× at 8pt**; two measured losses on one click:
-    /// decoration thickness `Px(50)` at 16pt came back 32px, letter spacing
-    /// `Px(-100)` at 16pt came back −8px.
-    ///
-    /// **Driven through the real conversion**, `Length::in_unit`, rather than by
-    /// comparing the two ranges as numbers: the arithmetic the field performs is
-    /// the thing that has to land inside the bound, and asserting on the
-    /// constants would pass against a derivation that used a different formula
-    /// from the one the chip uses.
-    ///
-    /// **Three font sizes, because the disagreement is a function of font size**
-    /// and a single size can be coincidentally fine — at 16pt line height's old
-    /// pair was only 62× apart, which still reads as "large" rather than as
-    /// "wrong".
-    ///
-    /// ⚠️ **The flip did not bite the first time, and that was a finding about
-    /// this test rather than about the code.** With `Bounds::px` replaced by a
-    /// hard-coded `-10_000.0..=10_000.0`, every assertion stayed green — because
-    /// the loop below builds its px face by calling `px_range_for` *directly*
-    /// and so never went through `Bounds::px` at all. The first block now asserts
-    /// that the `Bounds` faces **are** the shared derivation, which is what makes
-    /// the flip fail; without it this test was about arithmetic nobody uses.
-    ///
-    /// Flip-check, run (after that correction): the same one-line change fails on
-    /// `Bounds::TRACKING`'s px face at 8pt, printing both ranges.
-    ///
-    /// ⚠️ **Its honest scope**: this asserts the *ranges* are coherent and that
-    /// `Bounds` derives its own. It does not drive `length_field`,
-    /// `optional_length_field` or `type_line_height_field` — the first two derive
-    /// through `Bounds::px` (§15 D861), the third reads `Bounds::LINE_HEIGHT`
-    /// (§15 D865) — so a future field that hard-codes a px range again is not caught here.
-    /// The thing that would catch it is `px_range_for` being
-    /// the only way to build one, and it is not, because a `RangeInclusive` is a
-    /// literal anyone can write.
+    /// flip: hard-coding `Bounds::px` to `-10_000.0..=10_000.0` → fails at the `Bounds` derivation assertion
     #[test]
     fn both_ends_of_every_length_field_bound_the_same_quantity() {
-        // `Bounds` must have no px face of its own — see the ⚠️ above.
+        // `Bounds` must have no px face of its own.
         for (name, b) in [
             ("TRACKING", &Bounds::TRACKING),
             ("SIGNED_TRACKING", &Bounds::SIGNED_TRACKING),
@@ -9983,14 +7778,8 @@ mod tests {
                     "{name} @{font_size}pt must derive its px face, not carry one"
                 );
             }
-            // And the chords' em face is the `%` face over a hundred, which is
-            // the scale a `Length::Em` holds and the field shows ×100 (§15 D865).
-            // **Flip, run:** `em` returning the `%` range undivided fails here
-            // on `TRACKING` — predicted — and two tracking-chord tests fail with
-            // it. ⚠️ **No leading-chord test did** when this was written: the
-            // one there was pinned line height's floor, which is 0 in either
-            // scale. `a_held_leading_chord_stops_at_the_fields_ends` drives both
-            // ceilings now and fails under the same flip.
+            // The chords' em face is the `%` face over a hundred. Flip: `em` returning
+            // the `%` range undivided fails here on `TRACKING`.
             let em = b.em();
             assert_eq!(
                 (*em.start() * 100.0, *em.end() * 100.0),
@@ -9999,11 +7788,7 @@ mod tests {
             );
         }
 
-        // Every pct range the panel hands a `Length` field, with the name of the
-        // field or fields it belongs to. **Read off the `Bounds` the fields are
-        // handed**, not re-typed: this list used to spell four of them from
-        // `MAX_TRACKING_PCT` beside the fields spelling the same, and had the
-        // thickness signed when its field was not (§15 D861).
+        // Every pct range the panel hands a `Length` field, read off the `Bounds` itself.
         let ranges: Vec<(&str, std::ops::RangeInclusive<f64>)> = vec![
             ("letter/word spacing", Bounds::TRACKING.pct.clone()),
             ("baseline shift", Bounds::SIGNED_TRACKING.pct.clone()),
@@ -10024,7 +7809,6 @@ mod tests {
             for font_size in [8.0, 16.0, 72.0] {
                 let px = px_range_for(pct.clone(), font_size);
                 for end in [*pct.start(), *pct.end()] {
-                    // What the unit chip actually does to this value.
                     let converted = Length::Em(end / 100.0).in_unit(LengthUnit::Px, font_size);
                     let Length::Px(v) = converted else {
                         panic!("{name}: in_unit(Px) must answer in px")
@@ -10038,8 +7822,7 @@ mod tests {
                     );
                 }
 
-                // And the other direction: a px end converted to % has to land
-                // inside the % face, or the chip destroys the value coming back.
+                // The other direction: a px end converted to % must land inside the % face.
                 for end in [*px.start(), *px.end()] {
                     let converted = Length::Px(end).in_unit(LengthUnit::Em, font_size);
                     let Length::Em(m) = converted else {
@@ -10058,15 +7841,7 @@ mod tests {
         }
     }
 
-    /// ⚠️ **The px face never collapses to a point**, however small the reported
-    /// font size is.
-    ///
-    /// `TypeSubject::font_size` answers 0 for a multi-selection whose sizes
-    /// disagree, and a derived range of `0.0..=0.0` is a field that cannot be
-    /// typed into at all — which reads as a broken control rather than as a
-    /// bound, and is the one way this derivation could be worse than the
-    /// constants it replaced. `px_range_for` floors the size at 1 for that
-    /// reason and this is the assertion that says so.
+    /// The px face never collapses to a point, even at a reported font size of 0.
     #[test]
     fn a_derived_px_range_survives_a_font_size_of_zero() {
         let r = px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, 0.0);
@@ -10077,22 +7852,8 @@ mod tests {
         );
     }
 
-    /// **Each bound carries its field's sign rule**, now that the sign is the
-    /// bound's and not a flag beside it (§15 D861).
-    ///
-    /// The case this is for is `[S6.3-L1-02]`'s: a decoration's thickness once
-    /// inherited the offset's symmetric range, so `−5 px` was offered, saved and
-    /// drawn three different ways (§15 D546). Before D861 the floor was a
-    /// `signed: bool` at the call site; it is the constant's first number now,
-    /// and **nothing else in this panel pinned it** — making
-    /// `DECORATION_THICKNESS` symmetric left the other 77 tests in
-    /// `panels::typography` green.
-    ///
-    /// ⚠️ **Its honest scope is the constants, not the call sites.** Handing the
-    /// thickness field `Bounds::DECORATION_OFFSET` passes this; what catches that
-    /// is the name at the call, read. The model's own floor
-    /// (`typography::canonical_decoration`) is the second defence and is tested
-    /// where it lives.
+    /// Each bound carries its field's sign rule. Scope is the constants, not the
+    /// call sites; the model's own floor (`typography::canonical_decoration`) is the second defence.
     #[test]
     fn an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways() {
         for (name, b) in [
@@ -10118,27 +7879,10 @@ mod tests {
     }
 }
 
-/// **The egui behaviour `cancel_gesture` has to work around**, pinned because the
-/// workaround looks like belt-and-braces without it.
-///
-/// `Context::dragged_id` is the natural answer to "is a field being scrubbed", and it
-/// is the wrong one to ask on the frame a right-click arrives: egui clears `dragged`
-/// on the release of **any** button (`interaction.rs`, `PointerEvent::Released`, whose
-/// `button` is `_`), so a right-click short enough for its press and release to land
-/// in one rendered frame takes the drag away before the cancel can see it. At 60fps
-/// that is any click under ~16ms — reported from use as right-click resetting a value
-/// "almost always", failing at random, with no pattern in where or how.
-///
-/// The two rows below are the whole diagnosis: a press on its own leaves the drag
-/// alone, a press *and release* together do not. `cancel_gesture` therefore also asks
-/// two questions of its own state, which do not blink.
-///
-/// **This is the premise, not the fix**: it pins what egui reports for a press and
-/// for a press-and-release, which is what `cancel_gesture` is read against. The
-/// gate itself is pinned separately now, in
-/// `canvas::headless_app_tests::cancelling_needs_a_witness_and_our_two_do_not_blink`
-/// (§15 D303) — which asserts the two witnesses that *do not* blink arm it without
-/// egui's, since egui's is the one this module is about losing.
+/// The egui behaviour `cancel_gesture` works around: egui clears `dragged` on the
+/// release of any button, so a right-click whose press and release land in one frame
+/// takes the drag away before the cancel sees it. The gate itself is pinned in
+/// `canvas::headless_app_tests::cancelling_needs_a_witness_and_our_two_do_not_blink`.
 #[cfg(test)]
 mod cancel_gate {
     use eframe::egui;
@@ -10228,40 +7972,13 @@ mod cancel_gate {
 
 #[cfg(test)]
 mod loading_dot_tests {
-    //! The picker's "this row is still arriving" dot (§15 D353).
-    //!
-    //! **Reported from the machine**: *"Right now you load the font list, and
-    //! you're not sure if the font you're seeing is loaded yet or not."* A row
-    //! whose face has not arrived draws its name in the UI font, which is a real
-    //! signal and an unreadable one — plenty of families look like the UI font,
-    //! and a *failed* row looks identical to a *pending* one.
-    //!
-    //! What is pinned here is the pulse, as a function of time. The dot's
-    //! placement and its ink are one `circle_filled` and are better checked by
-    //! eye; whether it *moves*, and moves without a strobe, is arithmetic.
+    //! The loading dot's pulse, as a function of time; its placement and ink are checked by eye.
 
     use super::*;
 
-    /// **The dot breathes: it starts dark, reaches full, and comes back.**
+    /// The dot starts dark, reaches full at the half period, and returns: a pulse, not a fade-in.
     ///
-    /// ⚠️ Sampled at the trough, the crest and the return rather than at one
-    /// point, which is the caret-blink trap again: any monotonic ramp is "bright
-    /// at half a period", and a constant is "bright" everywhere. Only the round
-    /// trip separates a pulse from a fade-in.
-    ///
-    /// ⚠️ Flipped to plain `sin`, the obvious spelling. Predicted to fail on the
-    /// **first** assertion and it fails on the **second** — `sin(0)` really is 0,
-    /// so the dot does start dark; what breaks is that it peaks a *quarter* of the
-    /// way through and is back at zero by the half, so "it never reaches full
-    /// brightness" is what fires. The correction matters because it says which
-    /// assertion is load-bearing: the trough is satisfied by both shapes and the
-    /// **crest** is what picks the raised cosine out.
-    ///
-    /// ⚠️ `sin().abs()` — the fix somebody reaches for next, to stop the phase
-    /// going negative — passes both of those and fails the *seam* test below at
-    /// 0.0872 per frame, because folding the negative half doubles the rate. Three
-    /// spellings, three different assertions: worth knowing that no single one of
-    /// these tests pins the shape on its own.
+    /// flip: plain `sin` in `loading_dot_phase` → fails at the full-brightness assertion; `sin().abs()` passes here and fails the seam test
     #[test]
     fn the_dot_starts_dark_reaches_full_and_returns() {
         assert!(
@@ -10279,23 +7996,8 @@ mod loading_dot_tests {
         );
     }
 
-    /// **It is periodic and smooth** — no jump at the seam, and no frame-to-frame
-    /// step big enough to read as a flicker.
-    ///
-    /// The seam is the half worth asserting: a phase built from `t % PERIOD`
-    /// scaled linearly is also "dark at 0, full at half", and it snaps from full
-    /// back to dark at the period boundary. Sampling across the wrap is what tells
-    /// the two apart.
-    ///
-    /// ⚠️ **The bound is derived, not picked, and picking it got it wrong first.**
-    /// `phase(t) = (1 − cos(2πt/P))/2` differentiates to `(π/P)·sin(2πt/P)`, so the
-    /// steepest it can move is `π/P` per second and — by the mean value theorem —
-    /// no 1/60s step can exceed `(π/P)/60`. That is exact rather than generous.
-    /// This first said `3.0/P` as a round stand-in for π and failed at t=0.267
-    /// with a jump of 0.0426 against a bound of 0.0417: the *test* was wrong and
-    /// the pulse was fine, which is worth knowing before reading a failure here as
-    /// a flicker. Spelled from `LOADING_DOT_PERIOD` so slowing the pulse tightens
-    /// the bound with it.
+    /// The pulse is periodic with no jump at the wrap and no frame step big enough to flicker.
+    /// The bound `π/P` per second is the exact derivative maximum of the raised cosine.
     #[test]
     fn the_pulse_wraps_without_a_seam() {
         let step = 1.0 / 60.0;
@@ -10320,18 +8022,7 @@ mod loading_dot_tests {
         }
     }
 
-    /// **The row asks the service, and the service is now able to answer.**
-    ///
-    /// ⚠️ This is a note as much as a test. `family_row` needs a whole
-    /// `TypographyPanel` and is checked by eye; what can be said here is that the
-    /// predicate it reads — `FontService::is_loading` — is *truthful*, which it was
-    /// not until the same change added the dot. A preview the backlog pushed out
-    /// used to leave its family reporting `is_loading` for the rest of the session
-    /// (`fonts::tests::a_preview_dropped_by_the_backlog_can_be_asked_for_again`),
-    /// so a dot built on it would have pulsed for ever on exactly the rows a scroll
-    /// had given up on. **The bug was older than the dot and invisible until
-    /// something drew it** — which is the thing worth remembering about adding a
-    /// visible state to a value nothing was displaying.
+    /// `FontService::is_loading`, which `family_row` reads for the dot, is false for a family nothing is fetching.
     #[test]
     fn the_predicate_the_dot_reads_is_false_for_a_family_nothing_is_fetching() {
         let service = crate::fonts::FontService::inert();
@@ -10349,17 +8040,8 @@ mod loading_dot_tests {
 /// The panel tests' one text fixture: a headless app holding a single `Auto`
 /// text node of `content` in Inter at 20pt, selected, and its id.
 ///
-/// 🚨 **There were three, each called `app_with_text`, in three modules** (§15
-/// D849, `[X4-L3-02]`) — two of them 37 lines long and differing in one string
-/// literal, an `expect` message. §15 D803 is the entry about exactly this shape
-/// in exactly this file: a flip or a fixture change described as "in
-/// `app_with_text`" named three functions, and editing the wrong one is a silent
-/// no-op that reads as *"the test has no teeth"*. One function cannot be the
-/// wrong one. `wrap_gate_tests::app_wrapping` stays its own: it takes the
-/// paragraph's wrap and keeps the default style, and its coordinates were swept
-/// against that.
-///
-/// Plain backticks: this item is `cfg(test)` (§15 D319).
+/// `wrap_gate_tests::app_wrapping` stays its own: it takes the paragraph's wrap
+/// and keeps the default style.
 #[cfg(test)]
 fn app_with_text_of(content: &str) -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
     use ondin_core::{Document, Operation, Transaction};
@@ -10399,24 +8081,21 @@ fn app_with_text_of(content: &str) -> (egui::Context, crate::app::OndinApp, ondi
     (ctx, app, id)
 }
 
-/// `app_with_text_of("hello")` — the content two of the three old fixtures
-/// shared.
+/// `app_with_text_of("hello")`.
 #[cfg(test)]
 fn app_with_text() -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
     app_with_text_of("hello")
 }
 
-/// The Type card over several text layers (§15 D1077): what its fields read and
-/// what their writes reach.
+/// The Type card over several text layers: what its fields read and what their
+/// writes reach.
 #[cfg(test)]
 mod several_layer_tests {
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::{Document, IdSource};
 
-    /// Three text layers, selected: sizes 20, 20 and 32, weights 400, 700 and
-    /// 400 — so size disagrees across the three and agrees across the first two,
-    /// and the weight is what a size write must leave alone.
+    /// Three selected text layers: sizes 20, 20, 32; weights 400, 700, 400.
     fn three() -> (egui::Context, OndinApp, Vec<NodeId>) {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -10469,12 +8148,10 @@ mod several_layer_tests {
         }
     }
 
-    /// **The size reads *Mixed* where the layers disagree and not where they
-    /// agree**, while the family — the same on all three — never does.
+    /// Size reads Mixed where the layers disagree and not where they agree; the
+    /// shared family never does.
     ///
-    /// Flip: `mixed` without its `others` clause reads every several-layer field
-    /// as one value — the first assertion fails, the first layer's 20 standing
-    /// for the third layer's 32.
+    /// flip: `mixed` without its `others` clause → fails at the first size assertion.
     #[test]
     fn a_field_over_layers_that_disagree_reads_mixed() {
         let (_ctx, app, texts) = three();
@@ -10494,14 +8171,10 @@ mod several_layer_tests {
         );
     }
 
-    /// **Two layers of one weight on different faces disagree** (§15 D1077's
-    /// amendment): a
-    /// family with a regular and a condensed cut at 400, told apart by `wdth`
-    /// alone — one layer at `wdth 75`, the other at 100 — reads as two faces,
-    /// though weight and italic agree; both at 75, one face.
+    /// Two layers of one weight told apart only by `wdth` read as two faces;
+    /// both at the same `wdth`, one face.
     ///
-    /// Flip, run: `faces_disagree` answering false fails on *"regular and
-    /// condensed read as one face"*.
+    /// flip: `faces_disagree` answering false → fails at "regular and condensed".
     #[test]
     fn layers_on_different_faces_of_one_weight_disagree() {
         let (_ctx, mut app, texts) = three();
@@ -10536,15 +8209,10 @@ mod several_layer_tests {
         assert!(!faces_disagree(&variants, &both), "one face read as two");
     }
 
-    /// **Auto over lines of different heights reads mixed** (§15 D1077's
-    /// amendment): the
-    /// three layers all on Auto, laid at 24, 24 and 38px — the readout is what
-    /// Auto is worth, so the field may not name the first layer's 24. Laid
-    /// lines are set by hand here (nothing is shaped in a unit test), and an
-    /// agreeing pair reads one value.
+    /// Auto layers laid at different heights read mixed; an agreeing pair reads
+    /// one value. Laid lines are set by hand (nothing is shaped in a unit test).
     ///
-    /// Flip, run: `line_height_mixed` answering `self.mixed(..)` alone fails
-    /// on *"24 and 38 read as one line"*.
+    /// flip: `line_height_mixed` answering `self.mixed(..)` alone → fails at "24 and 38".
     #[test]
     fn auto_over_lines_of_different_heights_reads_mixed() {
         let (_ctx, app, texts) = three();
@@ -10562,12 +8230,9 @@ mod several_layer_tests {
         assert!(!all.line_height_mixed(), "24 and 24 read as mixed");
     }
 
-    /// **A write reaches every layer and leaves what it does not name**: a size
-    /// set over the three makes each 24 and keeps each its own weight.
+    /// A size write reaches every layer, keeps each its own weight, and undoes as one step.
     ///
-    /// Flip: `char_attrs_tx` returning `one_char_attrs_tx(subject, attrs)` alone
-    /// writes the first layer only — the second layer's size assertion fails at
-    /// 20.
+    /// flip: `char_attrs_tx` returning `one_char_attrs_tx(subject, attrs)` → fails at the second layer's size.
     #[test]
     fn a_write_reaches_every_layer_and_keeps_their_own_values() {
         let (_ctx, mut app, texts) = three();
@@ -10584,15 +8249,9 @@ mod several_layer_tests {
         assert_eq!(sizes, [20.0, 20.0, 32.0]);
     }
 
-    /// **A unit click converts each layer at its own size**: tracking of 10%
-    /// over layers of 20, 20 and 32 clicked to px is 2, 2 and 3.2 — each layer
-    /// drawing what it drew — where the first cut converted the first layer's
-    /// and wrote 2 to all three.
+    /// A tracking unit click converts each layer at its own size (10% over 20, 20, 32 → 2, 2, 3.2px).
     ///
-    /// Driven through the field: the suffix is the field's right end.
-    ///
-    /// Flip: the click converting at `subject.font_size()` instead of each
-    /// layer's own fails on the third layer, at 2.
+    /// flip: converting at `subject.font_size()` → fails on the third layer.
     #[test]
     fn a_unit_click_converts_each_layer_at_its_own_size() {
         let (ctx, mut app, texts) = three();
@@ -10641,12 +8300,9 @@ mod several_layer_tests {
         );
     }
 
-    /// **A variant picked over several layers keeps each layer's own other
-    /// axes** (§15 D1077): the first on `opsz 14`, the third on `wdth 75`, a
-    /// variant setting `GRAD 50` — each takes the grade beside its own axis.
+    /// A variant picked over several layers keeps each layer's own other axes.
     ///
-    /// flip: `apply_variant` merging into the first layer's coords for every
-    /// layer → fails at the second layer, given the first's `opsz`.
+    /// flip: `apply_variant` merging into the first layer's coords for every layer → fails at the second layer.
     #[test]
     fn a_variant_pick_keeps_each_layers_own_axes() {
         use ondin_core::typography::{AxisSetting, Tag};
@@ -10694,11 +8350,9 @@ mod several_layer_tests {
         assert!(texts.iter().all(|id| style(&app, *id).weight == 500));
     }
 
-    /// **The line height's unit click converts each layer at its own size**
-    /// (§15 D1077): 120% at 20, 20 and 32 into px is 24, 24 and 38.4.
+    /// The line-height unit click converts each layer at its own size (120% → 24, 24, 38.4px).
     ///
-    /// flip: the click converting at `subject.font_size()` → fails on the third
-    /// layer, 24.
+    /// flip: converting at `subject.font_size()` → fails on the third layer.
     #[test]
     fn a_line_height_unit_click_converts_each_layer_at_its_own_size() {
         let (ctx, mut app, texts) = three();
@@ -10754,12 +8408,9 @@ mod several_layer_tests {
         );
     }
 
-    /// **The vertical-alignment track writes every fixed-height box its own
-    /// block with the one field changed** (§15 D1077): *Bottom* picked over the
-    /// three, the third's overflow kept.
+    /// Picking Bottom over three fixed-height layers writes each its own block with only the alignment changed.
     ///
-    /// flip: the vertical track's several-layer arm switched off → fails at
-    /// the second layer, still `Top`.
+    /// flip: the vertical track's several-layer arm switched off → fails at the second layer.
     #[test]
     fn a_vertical_alignment_pick_writes_every_layer() {
         let (ctx, mut app, texts) = three();
@@ -10832,12 +8483,9 @@ mod several_layer_tests {
         );
     }
 
-    /// **A Mixed line height takes a typed px on every layer, whatever the
-    /// first holds** — Auto, then % — and a click in and out writes nothing.
+    /// A Mixed line height takes a typed px on every layer, and a click in and out writes nothing.
     ///
-    /// flips: the `_ if mixed` arms removed → fails *"every layer at 30px"*
-    /// (Auto takes no typing); the Mixed field's moved gate removed → fails
-    /// *"a click in and out writes nothing"*.
+    /// flips: the `_ if mixed` arms removed → fails "every layer at 30px"; the Mixed field's moved gate removed → fails "a click in and out writes nothing".
     #[test]
     fn a_mixed_line_height_over_auto_takes_a_typed_px() {
         let (ctx, mut app, texts) = three();
@@ -10955,10 +8603,7 @@ mod several_layer_tests {
         );
     }
 
-    /// **The line height's states, one layer at a time** — `line_height_as`
-    /// moving a layer into the state the first layer's click names, keeping
-    /// what it draws: 150% at 32 into px is 48, Auto over a 30px laid line
-    /// into a multiple is 1.5 at 20, and anything into Auto is Auto.
+    /// `line_height_as` moves each layer into the first layer's next state, keeping what it draws.
     #[test]
     fn a_line_height_moves_into_the_first_layers_next_state() {
         let px = Some(Length::Px(1.0));
@@ -10978,17 +8623,9 @@ mod several_layer_tests {
         );
     }
 
-    /// **The alignment tracks write every layer, each its own paragraph**: a
-    /// pick of *Center* over the three, one already centred, writes the other
-    /// two and leaves the centred one's spacing as it was.
+    /// Picking Center over three layers (one already centred) writes the other two and leaves the centred one's spacing.
     ///
-    /// Driven through the row with real pointer events, since the fan-out lives
-    /// in the row: the first frame lays it out and the second clicks the second
-    /// cell of the horizontal track.
-    ///
-    /// Flip: the row's several-layer arm switched off (`several && false`), so
-    /// the pick takes the single layer's `commit_paragraph` — the second layer's
-    /// assertion fails, still `Start`.
+    /// flip: the row's several-layer arm switched off → fails at the second layer, still `Start`.
     #[test]
     fn an_alignment_pick_writes_every_layer() {
         let (ctx, mut app, texts) = three();
@@ -11068,31 +8705,22 @@ mod several_layer_tests {
     }
 }
 
-/// The screen the panel tests lay a `Ui` out in, 400×600. Was declared three
-/// times with this value (and once, in `skip_ink_tests`, at 400×400, which keeps
-/// its own and is the only `AREA` left).
+/// The screen the panel tests lay a `Ui` out in, 400×600.
 #[cfg(test)]
 const TEST_AREA: egui::Rect = egui::Rect {
     min: egui::pos2(0.0, 0.0),
     max: egui::pos2(400.0, 600.0),
 };
 
-/// The Type panel's size field, driven through real pointer and key events
-/// (§15 D523).
-///
-/// **Events, not calls**, because everything here is about *when* the valve
-/// fires: which frame a `DragValue` reports `changed()` on, which frame it
-/// writes its parsed edit string back, and which of those the commit lands on.
-/// None of that is visible from `char_attrs_tx`.
+/// The Type panel's size field, driven through real pointer and key events:
+/// the tests pin which frame the valve commits on, which `char_attrs_tx` cannot show.
 #[cfg(test)]
 mod char_valve_tests {
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::NodeId;
 
-    /// One frame with the size field alone in a `Ui`, returning the rect it was
-    /// laid out in — found by drawing rather than guessed, since a `Ui` with no
-    /// panel around it does not put a widget where a guess would.
+    /// One frame with the size field alone in a `Ui`, returning the rect it was laid out in.
     fn frame(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -11158,24 +8786,9 @@ mod char_valve_tests {
         }
     }
 
-    /// **A typed font size is one undo step, and the sizes on the way to it
-    /// never reach the document** (§15 D523).
+    /// A typed font size is one undo step, and the sizes on the way to it never reach the document.
     ///
-    /// Measured before the fix, frame by frame: typing `40` over a 20pt node
-    /// committed on **both** keystroke frames, leaving `undo_depth` at 2 with
-    /// the document having been at `4` in between. That second half is what
-    /// makes this worse than `multi_valve`'s version of the same defect — a size
-    /// typed as `100` puts a one-point line through the artwork and then a
-    /// ten-point one, each of them a real committed state, each of them an
-    /// autosave and a crash-snapshot write.
-    ///
-    /// ⚠️ The assertion *during* typing is the one that says so, and it is
-    /// checked before the count. Flipped by restoring the old condition
-    /// (`drag_stopped() || lost_focus() || changed()`): red there, and **reading
-    /// 40, not 4** — the assertion runs after both keystrokes, so what it catches
-    /// is that the document has been written to at all, and the `4` that was
-    /// there a frame earlier is visible only frame by frame. The count assertion
-    /// three lines down is never reached.
+    /// flip: restoring `drag_stopped() || lost_focus() || changed()` → fails at the during-typing assertion, before the count.
     #[test]
     fn typing_a_font_size_is_one_step_and_writes_no_size_on_the_way() {
         let (ctx, mut app, id, at) = settled();
@@ -11224,13 +8837,9 @@ mod char_valve_tests {
         );
     }
 
-    /// **`Escape` abandons a typed size**, which this valve had no refusal for
-    /// at all — `edit_valve` has carried one since §15 D316 and `multi_valve`
-    /// since D519.
+    /// `Escape` abandons a typed size.
     ///
-    /// ⚠️ Flipped by dropping the `key_pressed(Escape)` arm: red at the size,
-    /// 40 for 20, and green at the count — abandoning and committing both spend
-    /// the engagement exactly once, so the count cannot tell them apart.
+    /// flip: dropping the `key_pressed(Escape)` arm → fails at the size (40 for 20); the count stays green.
     #[test]
     fn escape_abandons_a_typed_font_size() {
         let (ctx, mut app, id, at) = settled();
@@ -11261,35 +8870,14 @@ mod char_valve_tests {
         );
     }
 
-    // 🚨 **The third arm is gone and the question was answered** (§15 D812,
-    // ruled by the maintainer). This comment stood through the deletion saying
-    // *"the third arm … has no test here"* and *"what is owed is not a test but
-    // a question"* — both true when written, both false from the moment the arm
-    // was removed later in the same range (§15 D840).
-    //
-    // The history, because it is the useful half: §15 D523 kept the arm for the
-    // picker's raw sensed regions arriving through `CharWrite::Valve`, on the
-    // reasoning that *"without it a click on the hue strip would commit nothing,
-    // ever"*. §15 D802 measured that and found `picker::pointer_slot` answers
-    // through `write_slot` before it could reach `valve_slot`, so a click never
-    // entered `char_valve` at all. §15 D803 then found the one thing that did
-    // reach it and it was a hazard rather than a user. D812 deleted it.
-    //
-    // **The test is `valve_arm_tests::a_changed_frame_with_no_engagement_commits_nothing`**,
-    // about 1,600 lines below this in the same file — which is why a reader here
-    // would conclude there is none.
+    // The idle `changed()` frame is pinned by
+    // `valve_arm_tests::a_changed_frame_with_no_engagement_commits_nothing`.
 }
 
 #[cfg(test)]
 mod skip_ink_tests {
-    //! The skip-ink toggle beside the underline's line style (§15 D357).
-    //!
-    //! Driven through the real `decoration_section` on a headless app (§15 D303)
-    //! rather than through `char_attrs_tx`, because what is new here is the
-    //! *wiring*: the write itself is one field of a `Decoration` and could not go
-    //! wrong quietly, while "the button is there, it says which state it is in, and
-    //! clicking it reaches the document" is three things that can each be absent
-    //! with everything green.
+    //! The skip-ink toggle beside the underline's line style, driven through the
+    //! real `decoration_section` on a headless app: the wiring is what can go missing.
 
     use super::*;
     use crate::app::OndinApp;
@@ -11340,13 +8928,9 @@ mod skip_ink_tests {
         (ctx, app, id)
     }
 
-    /// **The Type card's override marks** (§15 D981). The text is put in a group
-    /// made a main and an instance of it placed; the copy's size and its paragraph
-    /// alignment are overridden. Size and alignment are marked and family, line
-    /// height and the vertical alignment are not, and the size's reset writes the
-    /// main's 20 into the copy's own style and changes nothing else in it. Flip:
-    /// `style_mark` comparing the whole style marks the family over the size and
-    /// fails *"the family follows"*.
+    /// On an instance with size and alignment overridden, only those two are marked, and the size's reset writes the main's 20 and nothing else.
+    ///
+    /// flip: `style_mark` comparing the whole style → fails at "the family follows".
     #[test]
     fn the_type_card_marks_an_instances_own_fields_and_no_others() {
         let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
@@ -11430,18 +9014,9 @@ mod skip_ink_tests {
         );
     }
 
-    /// **The Content row marks a copy's content, binding and all** (§15 D1070's
-    /// amendment): the text made a main and an instance placed, the copy's
-    /// content bound to a string variable the main's is not. The literal is no
-    /// guide — a bound literal is empty, and the reset's `SetText` is the main's
-    /// — so the mark is the binding's: *Reset to main ·* the main's own string,
-    /// and its reset leaves the copy unbound, drawing that string, unmarked.
+    /// The Content row marks a copy whose content is bound to a variable the main's is not; its reset leaves the copy unbound, drawing the main's string.
     ///
-    /// Flip, run: `content_mark` reading the copy's own binding in place of the
-    /// main's (`let var = own_var`) still marks it — the emptied literal differs
-    /// — but names the copy's variable and resets to it: fails the tip, *"Reset
-    /// to main · copy/cta"* against the main's string. (Predicted at *"the main's
-    /// string"*, the reset keeping the binding; the tip is read first.)
+    /// flip: `content_mark` reading the copy's own binding (`let var = own_var`) → fails at the tip "Reset to main · copy/cta".
     #[test]
     fn the_content_row_marks_a_copys_bound_content() {
         use ondin_core::variable::{Cell, Mode, VarKind, Variable};
@@ -11531,17 +9106,9 @@ mod skip_ink_tests {
         assert!(app.type_marks(copy).content.is_none(), "and unmarked");
     }
 
-    /// **A text-styled copy's style fields carry no mark** (§15 D1068's
-    /// amendment): the copy's size made 30 and that type made a text style the
-    /// copy is bound to, the main unstyled at 20. The size differs, and is the
-    /// style's: its ↺ wrote the main's 20 into the copy's `SetTextStyle`, which
-    /// the commit read as a door writing over the style and detached it. The
-    /// alignment, which no text style holds, keeps its mark.
+    /// A copy bound to a text style carries no mark on the style's fields; the alignment, which no text style holds, keeps its mark.
     ///
-    /// Flip, run: `type_marks` without its `styled` arm fails *"the size is the
-    /// style's"*. The defect itself is asserted last, on the mark the field
-    /// built before (`unstyled_marks`): its reset committed leaves the copy with
-    /// no text style.
+    /// flip: `type_marks` without its `styled` arm → fails at "the size is the style's".
     #[test]
     fn a_text_styled_copys_style_fields_carry_no_mark() {
         let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
@@ -11627,7 +9194,7 @@ mod skip_ink_tests {
             "the alignment is still the copy's own"
         );
 
-        // What the old ↺ did: the field's reset, built whatever the style.
+        // The reset built from `unstyled_marks`, whatever the style.
         let old = app.unstyled_marks(copy).size.expect("the size differs");
         assert!(app.session.commit(old.tx));
         assert_eq!(
@@ -11656,92 +9223,10 @@ mod skip_ink_tests {
         })
     }
 
-    /// **A stored typography value outside its field's range is shown, not
-    /// rewritten — on a frame with no events at all** (§15 D475).
+    /// A stored out-of-range tracking (`Em(3.0)` against a 200% cap) is shown, not rewritten, on a frame with no events; an in-range control proves the field still reports changes.
     ///
-    /// `[S6.2-L1-01]`: a text node whose letter spacing is `Em(3.0)` — 300%,
-    /// against `Bounds::TRACKING`'s 200% cap — selected, one frame of the panel
-    /// drawn with an **empty** `RawInput`, and it came back `Em(2.0)` with
-    /// `undo_depth 0 → 1` and `is_dirty()` true. At 16pt that is 48px of tracking
-    /// silently reflowed to 32px, with nobody touching anything.
-    ///
-    /// ⚠️ **The mechanism was closed before this test existed**, by
-    /// `ui::value_field_f64`'s `.clamp_existing_to_range(false)` — one line for
-    /// all 82 numeric fields, landed for a blur radius rather than for this. What
-    /// was missing is a test on **this** panel, which reaches the widget by three
-    /// different routes and is the panel the finding measured:
-    /// `length_char_field_marked` through `char_valve`, `type_line_height_field`, and
-    /// `axis_field`, which discards the `Response` entirely and writes through
-    /// `write_axis` whose only guard is `if value == current { return; }` — a
-    /// guard the clamp had just made false.
-    ///
-    /// ⚠️ **This panel has no second guard, and the widget's opt-out is the
-    /// whole of what stops a library default writing to the document here** —
-    /// where the passing control one function away, `paragraph_length`, routes
-    /// through `edit_valve` and its latch. That is exactly why it wants a test
-    /// of its own rather than inheriting `ui.rs`'s. 🚨 **The reason given here
-    /// was that `char_valve` is "still the pre-D316 shape … with no engagement
-    /// latch", and it has been false since §15 D523** gave the valve the latch;
-    /// the verdict survives the correction because the latch is not what would
-    /// absorb this. An idle egui-initiated rewrite is a `changed()` frame on a
-    /// control holding no focus, which was the valve's **third** arm — it
-    /// committed at once, having no engagement to wait on — so the opt-out was
-    /// then the only thing in the way (§9.2 said the same).
-    ///
-    /// 🚨 **That arm was deleted later in this same range (§15 D812), and it is
-    /// what this test now rests on** (§15 D840). With no third arm an idle
-    /// `changed()` frame commits nothing, so the panel has **two** independent
-    /// defences where it had one, and the opt-out is no longer *"the only thing
-    /// in the way"* — the sentence above is kept in the past tense because the
-    /// argument it carries is what the deletion replaced.
-    ///
-    /// ⚠️ **The in-range control is what keeps it honest**: without it, a field
-    /// that had stopped reporting *any* change would pass.
-    ///
-    /// 🚨 **Flip-check: it no longer bites, and that is the finding rather than
-    /// a failed experiment** (§15 D840). Removing
-    /// `.clamp_existing_to_range(false)` from `value_field_f64` used to fail the
-    /// first assertion with `Em(2.0)` where `Em(3.0)` was — the finding's own
-    /// numbers, re-measured 2026-09-19 under §15 D803. Re-run after D812
-    /// deleted the third arm, **this test stays green** while
-    /// `ui::tests::a_stored_value_outside_a_fields_range_is_shown_rather_than_rewritten`
-    /// and the inspector's grid-panel test go red. D425's line is still
-    /// guarded — but from `ui.rs` and the inspector, which is precisely the
-    /// inheritance §15 D475 exists to prevent.
-    ///
-    /// **Measured, both defences removed together**: with the opt-out gone *and*
-    /// the third arm restored, it fails at `Em(2.0)` against `Em(3.0)` exactly
-    /// as before. So neither single mutation can redden it, and the reason is
-    /// defence in depth rather than a vacuous assertion — **a flip that does not
-    /// bite because two things must fail at once is a different animal from one
-    /// that does not bite because nothing is being tested**, and the two are
-    /// indistinguishable without running the pair. This test is kept for the
-    /// behaviour it states, and what it can no longer do is stand in for a
-    /// single-mutation guard.
-    ///
-    /// 🚨 **`ui.rs` makes that call at three production sites and they are not
-    /// interchangeable — a re-run spent on the wrong one came back green and was
-    /// nearly written up as "the flip does not bite".** The one this test turns
-    /// on is `value_field_f64`'s. `badge_field`'s is **inert**, and says so on
-    /// its own line: *"both production callers pass an unranged `Scrub`, so
-    /// there is nothing to clamp against"* — removing it changes nothing while
-    /// that stays true. `bare_drag_value`'s (§15 D552) is the third. **The confusable pair is `badge_field`'s and this
-    /// one's, which are byte-identical** — same indentation, same chained call,
-    /// no semicolon — so naming the mutation as *"removing
-    /// `.clamp_existing_to_range(false)`"* does not identify it; naming the
-    /// **function** does (§15 D803).
-    ///
-    /// 🚨 **And the flip said which arm of `char_valve` did the damage, which is
-    /// how that arm came to be deleted.** Instrumented on the failing run, the
-    /// third arm fired — the `changed() && !lost_focus()` one D802 found the
-    /// picker cannot reach. So its only **known** user was this egui-initiated
-    /// rewrite, and it was the mechanism by which `[S6.2-L1-01]`'s clamp became
-    /// a committed document change and an undo step. This paragraph argued that
-    /// deleting it would be *"a second defence against the same bug rather than
-    /// tidying"*; §15 D812 deleted it, so the second defence is built and the
-    /// argument is spent. Written in the past tense for that reason — a case
-    /// made for a change that has since landed is history, not a proposal
-    /// (§15 D840).
+    /// Two defences hold it, so no single flip reddens it: `value_field_f64`'s
+    /// `.clamp_existing_to_range(false)` and `char_valve` committing nothing on an idle `changed()` frame.
     #[test]
     fn a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame() {
         fn tracking(app: &OndinApp, id: NodeId) -> Length {
@@ -11802,12 +9287,8 @@ mod skip_ink_tests {
 
     /// The smallest rectangle painted under `at`, with its fill — the button's own
     /// box and ground. The ground is what `FieldButton::On` changes and the only
-    /// thing on screen that says which state the toggle is in; the box is what says
-    /// the control fits, where the glyph's ink would fit inside an overflowing button.
-    ///
-    /// `button_face` paints the fill and then strokes the *same* rect, and `min_by`
-    /// keeps the first of two equal minima — the fill — which is why this can ask for
-    /// a colour and a rect in one call.
+    /// thing on screen that says which state the toggle is in. `min_by` keeps the
+    /// fill over the same-rect stroke `button_face` paints after it.
     fn button_box(out: &egui::FullOutput, at: egui::Pos2) -> Option<(egui::Rect, egui::Color32)> {
         out.shapes
             .iter()
@@ -11824,42 +9305,11 @@ mod skip_ink_tests {
         decoration_of(&subject, CharAttrKind::Underline).expect("still underlined")
     }
 
-    /// **The toggle is there for an underline, it is lit while skipping is on, and
-    /// clicking it reaches the document.**
+    /// The toggle is there for an underline, lit while skipping is on, drawn in a different ground when off, and clicking it reaches the document.
     ///
-    /// The lit assertion is the one worth explaining. Skip-ink defaults to *on*, so
-    /// this button is lit the first time anybody sees it — deliberately, since it
-    /// reports what the line is doing — and the failure that reading invites is a
-    /// toggle that draws the same ground in both states, which is a control that
-    /// silently does nothing you can see. Comparing the ground before and against
-    /// after is what says the state is drawn at all; the exact colours are
-    /// `button_face`'s and are not this test's business.
+    /// The grounds are sampled on the frame after each click with the pointer resting on the button: `frame` reads the subject before running the UI.
     ///
-    /// ⚠️ **The two grounds have to be read on frames that differ only in the
-    /// state**, which is `ctx.run_ui`'s own trap and cost this test its first
-    /// version: `frame` reads the subject *before* running the UI, so the frame the
-    /// click lands on still draws the value that was there when it started. Read
-    /// there, the two colours came back equal — `#212C46` twice — and the toggle
-    /// looked broken while the document had already changed. The ground is therefore
-    /// sampled on the frame *after* each click, and both samples have the pointer
-    /// resting on the button so the hover treatment is not the difference.
-    ///
-    /// ⚠️ Flip-checked by passing `FieldButton::Off` unconditionally: fails on the
-    /// two grounds being equal, which is where it was predicted. Flipped a second
-    /// way — writing `d.skip_ink = false` instead of negating it — leaves the first
-    /// click green, because the click under test is the one that turns it off; it is
-    /// the second click below that catches it, and that is the whole reason the
-    /// second click is here.
-    ///
-    /// ⚠️ **The box, not the glyph.** Flipped by leaving the dropdown at the full
-    /// `MENU_INNER` — forgetting to make room, the likeliest slip in a row that used
-    /// to hold one control — the button lands at `255..281` against an inner edge of
-    /// **248**, and the assertion bites. The glyph's own ink would have caught *that*
-    /// one too, since 33px of overflow is more than a 26pt box has slack in it; what
-    /// the box buys is the six-odd points either side of a 14pt picture, which is an
-    /// overflow the ink reading cannot see and the eye can. Worth saying because
-    /// `nothing_in_the_popup_paints_past_the_card` — the whole-card version of this
-    /// check — builds its rows by hand and never sees this one at all.
+    /// flips: `FieldButton::Off` passed unconditionally → fails at the two grounds being equal; `d.skip_ink = false` instead of negating → only the second click fails; the dropdown left at the full `MENU_INNER` → fails at the box inside the card.
     #[test]
     fn the_skip_ink_toggle_reports_its_state_and_writes_it() {
         let (ctx, mut app, id) = app_with(CharAttr::Underline(Some(Decoration::default())));
@@ -11895,8 +9345,7 @@ mod skip_ink_tests {
             "on and off have to look different or the toggle is invisible"
         );
 
-        // And back, which is what says this is a toggle rather than a switch that
-        // only goes one way — and is the assertion a `= false` write fails.
+        // And back: the assertion a `= false` write fails.
         let _ = frame(&ctx, &mut app, id, click(at));
         assert!(
             underline_of(&app, id).skip_ink,
@@ -11911,19 +9360,10 @@ mod skip_ink_tests {
         );
     }
 
-    /// **A strikethrough gets no toggle at all**, because `text::skip_ink` never
-    /// looks at its flag: css-text-decor-4 skips underlines and overlines and never
-    /// a `line-through`.
+    /// A strikethrough gets no skip-ink toggle, since `text::skip_ink` ignores the flag there.
+    /// The wavy prefix must be present, or the absence could be a section that bailed early.
     ///
-    /// The fixture check is the load-bearing half — an absent glyph is also what a
-    /// section that bailed out before the line-style row looks like, so the wavy
-    /// prefix beside the dropdown has to be *present* for the absence to mean
-    /// anything.
-    ///
-    /// ⚠️ Flip-checked by dropping the `under.is_some()` guard: fails on the toggle
-    /// being present, as predicted. The dropdown's own width is not asserted here —
-    /// `nothing_in_the_popup_paints_past_the_card` is where a row that overflowed
-    /// the card would be caught, and it would be caught for either kind.
+    /// flip: dropping the `under.is_some()` guard → fails at the toggle being present.
     #[test]
     fn a_strikethrough_is_offered_no_skip_ink_toggle() {
         let (ctx, mut app, id) = app_with(CharAttr::Strikethrough(Some(Decoration::default())));
@@ -11936,10 +9376,7 @@ mod skip_ink_tests {
                 _ => None,
             })
             .collect();
-        // `starts_with`, because the dropdown lays its prefix and its word out as one
-        // galley (`ui::glyph_and_text`) — which is worth knowing here: the toggle
-        // beside it is its own galley, so a whole-string match would have made the
-        // *absence* below unfalsifiable for the wrong reason.
+        // `starts_with`: the dropdown lays prefix and word out as one galley, the toggle is its own.
         assert!(
             glyphs.iter().any(|g| g.starts_with(icon::WAVE_SINE)),
             "the fixture has to reach the line-style row for its absence to mean \
@@ -11973,30 +9410,15 @@ mod skip_ink_tests {
 
 #[cfg(test)]
 mod family_repick_tests {
-    //! **Re-picking the family you are already in is a no-op, not a reset**
-    //! (§15 D467) — `[S6.2-L1-02]`.
+    //! Re-picking the family you are already in is a no-op, not a reset.
     //!
-    //! ⚠️ **Asserted on the predicate rather than by clicking the row**, and the
-    //! reason is worth stating: the family list lives inside a `ComboBox` popup
-    //! drawn by `show_rows`, so reaching a row means opening the popup and hunting
-    //! a coordinate inside a scroll area — which
-    //! `inspector::mixed_opacity_tests` shows is a hazard in its own right, the
-    //! first aim there landing on a destructive neighbour. The decision was
-    //! extracted into `family_actually_changed` so it could be asserted directly;
-    //! its one call site is a single line and was read.
-    //!
-    //! ⚠️ **The `mixed` arm is the case a bare `!=` gets wrong**, and it is why
-    //! the predicate takes three arguments. `current` over a disagreeing selection
-    //! is one member's family, so re-picking *that* family is the real edit that
-    //! makes the selection agree.
+    //! Asserted on `family_actually_changed` rather than by clicking a row inside
+    //! the `ComboBox` popup. Its `mixed` arm is the case a bare `!=` gets wrong:
+    //! over a disagreeing selection, re-picking one member's family is a real edit.
 
     use super::family_actually_changed;
 
-    /// ⚠️ **Flipped** by replacing the body with `chosen`: the first assertion
-    /// fails, `Some("Inter")` against `None`. Flipped the other way — `chosen
-    /// .filter(|f| f != current)`, the obvious spelling and the one that drops the
-    /// `mixed` term — the first three stay green and the fourth fails, which is
-    /// what says that term is carrying its own case rather than decorating.
+    /// flips: the body replaced with `chosen` → fails at the first assertion; `chosen.filter(|f| f != current)` (no `mixed` term) → only the fourth fails.
     #[test]
     fn a_repick_is_not_an_edit_and_a_mixed_repick_is() {
         let pick = |name: &str| Some(name.to_string());
@@ -12026,12 +9448,8 @@ mod family_repick_tests {
     }
 }
 
-/// The variable-axis **number field**, driven through real pointer events
-/// (`[S6.2-L1-04]`, §15 D569).
-///
-/// **Events, not calls**, for `char_valve_tests`' reason and one of its own: the
-/// defect is entirely about *how many* commits a gesture makes, which is invisible
-/// from any single call. Reading `undo_depth` after a frame is the only witness.
+/// The variable-axis number field, driven through real pointer events; `undo_depth`
+/// after a frame is the witness for how many commits a gesture makes.
 #[cfg(test)]
 mod axis_valve_tests {
     use super::*;
@@ -12051,9 +9469,7 @@ mod axis_valve_tests {
         }
     }
 
-    /// A selected text node whose `wght` coordinate is already `403` — off the
-    /// default, so the field has somewhere to scrub *from* and the `clear_at_default`
-    /// arm is not in play.
+    /// A selected text node whose `wght` coordinate is already off the default (`403`).
     fn app_with_wght(value: f64) -> (egui::Context, OndinApp, NodeId, Vec<AxisSetting>) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -12094,9 +9510,7 @@ mod axis_valve_tests {
         (ctx, app, id, coords)
     }
 
-    /// The node's stored `wght`, or `None` when there is no coordinate at all —
-    /// which is a different document from one holding the font's own value, and is
-    /// what the Auto/reset assertions are about.
+    /// The node's stored `wght`, or `None` when there is no coordinate at all.
     fn stored_wght(app: &OndinApp, id: NodeId) -> Option<f64> {
         let ondin_core::NodeKind::Text { style, .. } = app.session.doc.get(id)?.kind() else {
             panic!("a text node");
@@ -12117,8 +9531,7 @@ mod axis_valve_tests {
         }
     }
 
-    /// One frame with the axis field alone in a `Ui`, returning the rect it drew
-    /// in — found by drawing rather than guessed, `char_valve_tests`' rule.
+    /// One frame with the axis field alone in a `Ui`, returning the rect it drew in.
     fn frame(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -12127,11 +9540,7 @@ mod axis_valve_tests {
         events: Vec<egui::Event>,
     ) -> egui::Rect {
         let subject = TypeSubject::of(app, id).expect("a subject");
-        // Read the way the panel reads it — through `shown`, so during a drag it is
-        // the *preview*'s coordinate and not the last committed one. A test that
-        // took `style.variations` straight off the document would hand the field a
-        // stale `current` on every frame of the scrub and prove nothing about the
-        // valve.
+        // Read through `shown`, so during a drag it is the preview's coordinate, not the committed one.
         let coords = attr!(&subject, Variations, Variations);
         let mut out = egui::Rect::NOTHING;
         let _ = ctx.run_ui(
@@ -12158,27 +9567,13 @@ mod axis_valve_tests {
         out
     }
 
-    /// **A prefix-strip scrub is one undo step, not one per frame** — the finding's
-    /// own measurement, which read `undo_depth 0 → 1 → 2 → 3 → 4 → 5` over five
-    /// frames of pointer motion while the coordinate walked `403 → 406 → 409 → 412
-    /// → 415`.
+    /// A prefix-strip scrub on an axis field is one undo step, not one per frame; the coordinate moving at all is the in-run control.
     ///
-    /// §9.3's *"one gesture = one transaction = one undo step"*, and §15 D108's bug
-    /// — *"one history entry per frame of a drag"* — which was fixed for the
-    /// paragraph fields and never reached this one.
-    ///
-    /// **The in-run control is the coordinate moving at all.** Without it a field
-    /// that had stopped responding to the drag entirely would pass the undo-depth
-    /// assertion perfectly.
-    ///
-    /// **Flip run**, `axis_field`'s `axis_valve` call put back to the immediate
-    /// `self.write_axis(subject, axis, coords, current, value, resettable)`: fails
-    /// on *"a scrub is one undo step"* — see the recorded numbers in the assertion.
+    /// flip: `axis_field`'s `axis_valve` call put back to the immediate `self.write_axis(..)` → fails at "a scrub is one undo step".
     #[test]
     fn a_prefix_strip_scrub_on_an_axis_field_is_one_undo_step() {
         let (ctx, mut app, id, _) = app_with_wght(403.0);
-        // Two settling frames: a widget's interaction state is last frame's, so the
-        // first could not report a press it had not yet been drawn for.
+        // Two settling frames: interaction state is last frame's.
         let mut at = egui::Pos2::ZERO;
         for _ in 0..2 {
             at = frame(&ctx, &mut app, id, true, Vec::new()).center();
@@ -12221,22 +9616,9 @@ mod axis_valve_tests {
         );
     }
 
-    /// **Typing the font's own value into the field drops the coordinate, exactly
-    /// as the reset slot does** — the half of `clear_at_default` the valve had to
-    /// be given, and the one that is *not* reachable from the reset button.
+    /// Typing the font's own value drops the coordinate, as the reset slot does; the same run at 500 keeps it.
     ///
-    /// ⚠️ **This is what said the fix was incomplete.** Routing the field through
-    /// `axis_valve` moved the write off `write_axis`, and `axis_valve` pushed a
-    /// coordinate unconditionally — so a field that had always dropped `wght=400`
-    /// would have started storing it, silently, in the save format. The finding
-    /// warned about it and the warning is the reason this test exists.
-    ///
-    /// **The control is the same run at 500**, which must keep its coordinate: an
-    /// `axis_valve` that dropped *everything* would pass the assertion above.
-    ///
-    /// **Flip run**, `axis_valve`'s `clear_at_default` guard removed so it always
-    /// pushes: fails on *"typing the font's own value means no coordinate"* with
-    /// `Some(400.0)` against `None`, the control at 500 staying green.
+    /// flip: `axis_valve`'s `clear_at_default` guard removed → fails at "typing the font's own value means no coordinate" (`Some(400.0)`); the 500 control stays green.
     #[test]
     fn typing_the_default_into_the_field_drops_the_coordinate_too() {
         for (typed, want, name) in [
@@ -12248,8 +9630,7 @@ mod axis_valve_tests {
             for _ in 0..2 {
                 at = frame(&ctx, &mut app, id, true, Vec::new()).center();
             }
-            // Focus the field the way a hand does: click, release, then type over
-            // the selected digits and click away to confirm.
+            // Click, release, type over the selected digits, click away to confirm.
             frame(
                 &ctx,
                 &mut app,
@@ -12277,25 +9658,9 @@ mod axis_valve_tests {
         }
     }
 
-    /// **The reset slot still writes immediately, and still *drops* the
-    /// coordinate.**
+    /// The reset slot writes immediately and drops the coordinate rather than writing the default (`Some(400.0)`).
     ///
-    /// The two halves the fix had to keep. A click has no drag for a falling edge
-    /// to wait on, so routing the reset through the valve would hold the edit until
-    /// some later frame the field happened to be engaged on; and `write_axis`'s
-    /// `clear_at_default` is what makes "back to the font's default" mean *no
-    /// coordinate* rather than a coordinate that says the same thing — which is a
-    /// different file, and for `opsz` a different mode.
-    ///
-    /// ⚠️ **`Some(400.0)` is the failure to watch for here, not `None` vs some other
-    /// number**: it is what a valve without `clear_at_default` writes, and it looks
-    /// right everywhere except on disk.
-    ///
-    /// **Flip run**, the reset arm's `return` removed so the valve runs too: green.
-    /// A *finding*, not a failure — the frame the reset lands on is not an engaged
-    /// one, so `char_valve`'s falling edge never fires and the immediate write is
-    /// the only one either way. The `return` is insurance against a reset clicked
-    /// *during* a scrub, which is reachable and which this test does not stage.
+    /// Coverage gap: removing the reset arm's `return` stays green, since the reset frame is not engaged; the `return` guards a reset clicked during a scrub, which is not staged here.
     #[test]
     fn the_reset_slot_drops_the_coordinate_rather_than_writing_the_default() {
         let (ctx, mut app, id, _) = app_with_wght(403.0);
@@ -12309,8 +9674,7 @@ mod axis_valve_tests {
             "the fixture: there is a coordinate to drop"
         );
 
-        // The reset slot sits to the right of the 120pt field, inside the row's
-        // rect — found by walking the row rather than guessed at.
+        // The reset slot sits to the right of the 120pt field, inside the row's rect.
         let slot = egui::pos2(at.x + 76.0, at.y);
         frame(
             &ctx,
@@ -12331,34 +9695,9 @@ mod axis_valve_tests {
         );
     }
 
-    /// **An axis field over a selection whose runs disagree shows a dash**
-    /// (§15 D636, `[S6.2-L1-05]`).
+    /// An axis field over a selection whose runs disagree shows a dash; the agreeing half is the control.
     ///
-    /// `subject.mixed` was asked **zero** times across the whole of
-    /// `axes_section` and `features_section`; `ragged` was asked once and its
-    /// answer spent on the reset button one line above the readout. So the field
-    /// drew the *first run's* number with no mark, which is `mixed_text`'s own
-    /// objection — *"showing one of the several values reads as a claim that it is
-    /// the value"* — while `mixed_text`'s four other callers, about ten fields in
-    /// this same file, already used it. (⚠️ That dash is itself a departure from
-    /// §15 D130, which is recorded at `axis_field` and is a panel-wide ruling
-    /// rather than this field's.)
-    ///
-    /// 🚨 **`TypeSubject::partial`'s own doc is wrong, and it nearly cost this
-    /// test its fixture.** The field says *"whether `range` is a sub-range rather
-    /// than the whole node. **The only case in which a character control can read
-    /// mixed.**"* — so a select-all reads as `partial == false`, which is what the
-    /// finding's *select all* fixture was written against and what made me
-    /// predict the control below would be a whole-node selection. `read` sets it
-    /// from `!sel.is_empty()`: **any** non-empty selection is partial, a
-    /// select-all included, and only the *bare caret* and the no-session case are
-    /// not. The finding was right and the doc was not; the assertion that caught
-    /// it is `assert!(one_run.partial)` on the fixture rather than anything about
-    /// the claim. Corrected at the field.
-    ///
-    /// ⚠️ Flip-checked by dropping `mixed_text` from the formatter: red at the
-    /// dash. The agreeing half is the control and stays green under it, which is
-    /// what says the dash comes from `mixed` rather than from the field generally.
+    /// flip: dropping `mixed_text` from the formatter → fails at the dash.
     #[test]
     fn an_axis_field_over_two_disagreeing_runs_shows_a_dash() {
         let ctx = egui::Context::default();
@@ -12466,9 +9805,7 @@ mod axis_valve_tests {
             "and does not name the first run's weight, in {mixed:?}"
         );
 
-        // The control: a selection *inside* one run, where there is nothing to
-        // disagree about. Without it "shows a dash" would be satisfied by a field
-        // that dashes whenever anything is selected.
+        // The control: a selection inside one run, where nothing disagrees.
         {
             let editor = &mut app.text.as_mut().expect("a live session").editor;
             editor.select_all();
@@ -12496,29 +9833,15 @@ mod axis_valve_tests {
 
 #[cfg(test)]
 mod bare_caret_readout_tests {
-    //! **A bare caret's character fields describe the run typing will inherit**
-    //! (§15 D589, `[S6.2-L1-06]`).
-    //!
-    //! `TypeSubject::read` fell back to `0..len` for a caret with no selection —
-    //! which is right, and is what §9.4 and §15 D164 settle about the *write* —
-    //! and `shown` then resolved at `range.start`, i.e. **byte 0**, whatever the
-    //! caret was doing. `mixed` is structurally `false` over a whole-node range,
-    //! so nothing on the row said otherwise. The Size field read 40 with the caret
-    //! in 16pt text and the next keystroke came out 16.
-    //!
-    //! ⚠️ **The write is untouched.** A bare-caret character write still sets the
-    //! node's default and drops that attribute's overrides; only what the field
-    //! *shows* has moved.
-    //!
-    //! (Plain backticks per §15 D319 — `cargo doc` builds without the `test` cfg.)
+    //! A bare caret's character fields describe the run typing will inherit; the
+    //! write is untouched (it sets the node's default and drops that attribute's overrides).
 
     use super::*;
     use crate::app::OndinApp;
     use crate::theme;
     use ondin_core::{Document, NodeId, Operation, Transaction};
 
-    /// `"hello world"` with `Size(40)` over its first five bytes and a node
-    /// default of 16 — the fixture the finding measured.
+    /// `"hello world"` with `Size(40)` over its first five bytes and a node default of 16.
     fn app_with_ragged_text() -> (egui::Context, OndinApp, NodeId) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -12583,23 +9906,9 @@ mod bare_caret_readout_tests {
         }
     }
 
-    /// **The field shows what the next keystroke will produce.**
+    /// The field shows what the next keystroke will produce: inside the styled run, at its boundary (`Spans::edited` joins the run ending at the caret), past it, and at byte 0, where typing takes the node default.
     ///
-    /// The three carets are the three cases the resolve point has: inside the
-    /// styled run, at the boundary — where `Spans::edited` joins the run that
-    /// *ends* at the caret and never the one that begins there — and past it.
-    ///
-    /// ⚠️ **Byte 0 is its own case and is here as more than a bounds check.**
-    /// There is no run to the caret's left, and an insertion at 0 takes the node's
-    /// defaults: `map_start` shifts a span starting at 0 to the right rather than
-    /// growing it. So the honest answer at byte 0 is 16, the default, even though
-    /// byte 0 itself carries the 40pt span — which is the one caret where "the
-    /// value at the caret" and "the value typing inherits" disagree in the other
-    /// direction, and `resolve_at`'s `None` is what states it.
-    ///
-    /// **Flip run**, `resolve_at` put back to `Some(self.range.start)` for every
-    /// case: fails on the first assertion, *"the caret is in 16pt text"*, at 40
-    /// against 16 — which is the finding's own measurement.
+    /// flip: `resolve_at` returning `Some(self.range.start)` for every case → fails at "the caret is in 16pt text" (40 against 16).
     #[test]
     fn a_bare_caret_reads_the_run_typing_will_join() {
         let (_ctx, mut app, id) = app_with_ragged_text();
@@ -12629,14 +9938,7 @@ mod bare_caret_readout_tests {
         );
     }
 
-    /// **The control: a selection still reads its own start, and a node with no
-    /// session still reads byte 0.**
-    ///
-    /// Both were already right and both go through the changed line, so this is
-    /// where a fix that moved more than it meant to would show. The selection case
-    /// is the one that matters: `range.start` is the resolve point there *and* the
-    /// first byte of the write, and nothing about the caret's left-hand rule
-    /// applies to it.
+    /// Control: a selection still reads its own start, and a node with no session still reads byte 0.
     #[test]
     fn a_selection_and_an_unedited_node_are_unmoved() {
         let (_ctx, mut app, id) = app_with_ragged_text();
@@ -12649,9 +9951,7 @@ mod bare_caret_readout_tests {
             CharAttr::Size(v) if v == 40.0
         ));
 
-        // A selection over bytes 6..11, all of it 16pt, so `shared` answers and the
-        // resolve point is not even consulted — and one over 3..8, which is ragged
-        // and does consult it.
+        // 6..11 is all 16pt, so `shared` answers; 3..8 is ragged and consults the resolve point.
         app.begin_edit_text(Some(id), None);
         let editor = &mut app.text.as_mut().expect("a live session").editor;
         editor.select_all();
@@ -12684,57 +9984,20 @@ mod bare_caret_readout_tests {
 
 #[cfg(test)]
 mod type_popup_readout_tests {
-    //! **Two controls in the Character tab that told the user something the
-    //! panel's own tables contradict** — §15 D691 (`[S6.3-L1-07]`) and D704
-    //! (`[S6.3-L3-08]`).
+    //! Two Character-tab controls against the panel's own tables: the *Show all
+    //! features* offer counts only rows the click adds (the search needle applies),
+    //! and the Language field reads its name, not its tag. They share a headless
+    //! app with one text node.
     //!
-    //! They share a fixture rather than a subject: both need a headless app
-    //! holding one text node and a hand-built `available`, and duplicating
-    //! thirty lines of that to keep two names apart is the shape this codebase
-    //! keeps filing against itself.
-    //!
-    //! ## D691 — the *Show all features* offer counts the rows the click adds
-    //!
-    //! Two filters decide what the feature list contains — the curation
-    //! (`shown`) and the search box (`matches`) — and the count behind the
-    //! reveal applied only the first, because it was taken before the search
-    //! field had been drawn. So with a needle typed, the collapsed reveal
-    //! offered every withheld feature on the face and a click added none of
-    //! them: the exact "control that cannot change anything" state
-    //! `features_reveal` was written to suppress, reached by the one door it
-    //! does not ask about.
-    //!
-    //! ⚠️ **`features_section` is driven directly with a hand-built
-    //! `&[FaceFeature]`.** Its real caller reads `text::family_features`, which
-    //! is empty headlessly — no fonts are registered — so it returns at the
-    //! first line and the section never draws. The finding said as much and
-    //! this is the probe it asked for.
-    //!
-    //! ## D704 — the Language field reads its name, not its tag
-    //!
-    //! `LANGUAGES` is a `(tag, name)` table and the closed control used the
-    //! stored locale verbatim, so the two states of one combo disagreed:
-    //! *German* in the list, `de` in the field. That control needs no
-    //! `available`, only the app and the subject, which is the half of the
-    //! fixture it shares.
-    //!
-    //! (Plain backticks per §15 D319 — `cargo doc` builds without the `test` cfg.)
+    //! `features_section` is driven directly with a hand-built `&[FaceFeature]`,
+    //! since `text::family_features` is empty headlessly and the section would not draw.
 
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::NodeId;
 
-    /// A face offering `liga`, plus 43 withheld private features — the shape the
-    /// finding measured, whose reveal read "Show all features (43 more)".
-    ///
-    /// ⚠️ **`Zk01`..`Zk43` and not `cv01`..`cv43`**, which the first draft of
-    /// this fixture used and which is wrong in the way that matters:
-    /// `feature_label` routes a character variant through `font_defined`, so
-    /// every `cvNN` is **offered**. A face of 43 of them has nothing withheld,
-    /// `features_reveal(false, 0)` is `None`, and the probe reads exactly like
-    /// the fix working. A private four-letter tag is tier three —
-    /// `a_mechanic_is_withheld_a_stylistic_set_is_named_and_a_private_tag_is_neither`
-    /// pins that — and is the only shape here that is really withheld.
+    /// A face offering `liga`, plus 43 withheld private features (`Zk01`..`Zk43`;
+    /// `cvNN` tags would be offered, not withheld, via `font_defined`).
     fn a_face_with_43_withheld() -> Vec<FaceFeature> {
         let mut out = vec![FaceFeature {
             tag: Tag::parse("liga").unwrap(),
@@ -12787,21 +10050,10 @@ mod type_popup_readout_tests {
         })
     }
 
-    /// **With a needle that only an *offered* feature matches, the reveal is
-    /// absent** — because clicking it would add nothing.
+    /// With a needle only an offered feature matches, the reveal is absent, since clicking it would add nothing.
+    /// The first assertion is the control and fixture check: the reveal is drawn and sees 43 withheld features.
     ///
-    /// ⚠️ **The first assertion is the control and the fixture check in one.**
-    /// It says the section really does draw a reveal, and really does see 43
-    /// withheld features, before the interesting assertion claims it stops. A
-    /// green second assertion on its own is equally consistent with
-    /// `features_section` having returned at its `available.is_empty()` line
-    /// and drawn nothing whatever — which is exactly how this probe fails if
-    /// the fixture is wrong, so it has to be ruled out rather than assumed.
-    ///
-    /// ⚠️ **Flip:** counting `hidden` over `!shown(t, l)` alone — the shipped
-    /// spelling — fails the second assertion with
-    /// `left: Some("Show all features (43 more)"), right: None`, which is the
-    /// reported symptom verbatim.
+    /// flip: counting `hidden` over `!shown(t, l)` alone → fails the second assertion (`Some("Show all features (43 more)")`).
     #[test]
     fn a_needle_that_hides_every_withheld_feature_hides_the_offer() {
         let (ctx, mut app, id) = app_with_gypsy();
@@ -12813,8 +10065,7 @@ mod type_popup_readout_tests {
             "the fixture must reach the state: 43 withheld features and an offer to show them"
         );
 
-        // `liga` is offered, so it is on screen already and none of the 43
-        // survives the needle.
+        // `liga` is offered already, so none of the 43 survives the needle.
         app.feature_filter = "liga".into();
         assert_eq!(
             reveal(&ctx, &mut app, id, &available),
@@ -12823,23 +10074,9 @@ mod type_popup_readout_tests {
         );
     }
 
-    /// **The Language control reads the same closed as open** (§15 D704,
-    /// `[S6.3-L3-08]`).
+    /// The closed Language field reads the locale's name, as the open list does; an unlisted locale falls back to its tag, not to None.
     ///
-    /// The closed field used the stored locale verbatim, so picking *German*
-    /// from a list that says "German" left a field reading `de`, and *Chinese
-    /// (Simplified)* left `zh-Hans`. `LANGUAGES`' second column exists for
-    /// exactly this and was used on one side of the control only.
-    ///
-    /// ⚠️ **The third case is the one a lookup gets wrong**: a locale the table
-    /// does not offer is a real setting, and must fall back to the tag rather
-    /// than to *None*. A `.find(…).map(…).unwrap_or("None")` passes the first
-    /// two assertions and fails this one, which is why it is here.
-    ///
-    /// ⚠️ **Flip:** restoring `current.clone().unwrap_or_else(…)` fails the
-    /// second assertion — the field reads `de` where "German" is wanted — and
-    /// leaves the first and third green, `None` and an unlisted tag being the
-    /// two inputs the old spelling happened to get right.
+    /// flip: `current.clone().unwrap_or_else(…)` restored → fails at the second assertion ("German" wanted, `de` read).
     #[test]
     fn the_language_field_reads_its_name_rather_than_its_tag() {
         let (ctx, mut app, id) = app_with_gypsy();
@@ -12895,16 +10132,9 @@ mod type_popup_readout_tests {
         );
     }
 
-    /// **And a needle that *does* match withheld rows still offers them, at the
-    /// number it would really add.** The other side of the same rule: the
-    /// repair must narrow the count, not suppress the control.
+    /// A needle that matches withheld rows still offers them, at the number it would add.
     ///
-    /// ⚠️ **Flip:** the shipped `!shown(t, l)`-only count fails here with
-    /// `left: Some("Show all features (43 more)")` against a right of
-    /// `(4 more)` — which is the same defect as the test above reported as a
-    /// *wrong number* rather than as a dead control, and is why both are
-    /// asserted. A repair that simply hid the reveal whenever a needle was
-    /// typed would pass that one and fail this.
+    /// flip: the `!shown(t, l)`-only count → fails with "(43 more)" against "(4 more)".
     #[test]
     fn a_needle_that_matches_withheld_features_offers_exactly_those() {
         let (ctx, mut app, id) = app_with_gypsy();
@@ -12922,30 +10152,9 @@ mod type_popup_readout_tests {
 
 #[cfg(test)]
 mod feature_mixed_tests {
-    //! **The OpenType section over a selection whose runs disagree** — §15 D752,
-    //! `[S6.2-L1-05]`, both halves, on the maintainer's rulings.
-    //!
-    //! 🚨 **The section had the answer and spent it on the reset button.**
-    //! `subject.mixed(CharAttrKind::Features)` was called **zero** times across
-    //! the whole of `axes_section`, `features_section` and their rows, while
-    //! `subject.ragged` was called exactly once — one line above the readout, to
-    //! decide whether a reset was lit. So a selection half of which had `tnum` on
-    //! drew a column of dead switches, and toggling any one of them wrote the
-    //! *first run's whole list* over everything and dropped the rest.
-    //!
-    //! **The readout is the word "Mixed"**, which is §15 D130's rule rather than a
-    //! new invention — *"a control says Mixed; if it is too small to hold five
-    //! letters it says a dash, and there are exactly two"* — and the maintainer
-    //! ruled out the alternative independently: *"A three way switch would be
-    //! visually weird (thumb in the middle?)"*. **The write is per tag**: *"Write
-    //! only the tag you named and leave each run's other features alone."*
-    //!
-    //! ⚠️ **Per *tag*, not per attribute.** `mixed(Features)` is true the moment
-    //! any one tag disagrees anywhere, so a readout built on it would mark forty
-    //! rows because one of them differed. `TypeSubject::feature_mixed` asks about
-    //! one tag through `CharSpans::values_in`.
-    //!
-    //! (Plain backticks per §15 D319 — `cargo doc` builds without the `test` cfg.)
+    //! The OpenType section over a selection whose runs disagree: a feature row
+    //! reads "Mixed" and a toggle writes only the tag it names. Mixed is per tag,
+    //! not per attribute (`TypeSubject::feature_mixed`, through `CharSpans::values_in`).
 
     use super::*;
     use crate::app::OndinApp;
@@ -12956,9 +10165,8 @@ mod feature_mixed_tests {
         Tag::parse(s).expect("a four-byte tag")
     }
 
-    /// `"alpha bravo"`, with `liga 1` over the whole node, `tnum 1` added over
-    /// bytes 6..11 — so the two runs agree about `liga` and disagree about
-    /// `tnum`. The finding's fixture, one attribute simpler.
+    /// `"alpha bravo"` with `liga 1` over the whole node and `tnum 1` over bytes 6..11:
+    /// the runs agree about `liga` and disagree about `tnum`.
     fn app_with_two_feature_runs() -> (egui::Context, OndinApp, NodeId) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -13020,7 +10228,7 @@ mod feature_mixed_tests {
         (ctx, app, id)
     }
 
-    /// Open a session and select everything, which is what the finding does.
+    /// Open a session and select everything.
     fn select_all_in_a_session(app: &mut OndinApp, id: NodeId) {
         app.begin_edit_text(Some(id), None);
         app.text
@@ -13046,16 +10254,9 @@ mod feature_mixed_tests {
             .collect()
     }
 
-    /// **A tag the runs disagree about is mixed; one they agree about is not.**
+    /// A tag the runs disagree about is mixed; one they agree about is not (the `liga` half is the load-bearing control).
     ///
-    /// ⚠️ **The `liga` half is the control and it is load-bearing.** Without it
-    /// this passes against a `feature_mixed` that answered `subject.mixed(Features)`
-    /// — true for every tag the moment one of them disagrees — which is the
-    /// obvious wrong implementation and the one a reader would tidy this into.
-    ///
-    /// ⚠️ **Flip, run:** returning `self.mixed(CharAttrKind::Features)` from
-    /// `feature_mixed` fails at the `liga` assertion and leaves the `tnum` one
-    /// green, which is the whole distinction in one line.
+    /// flip: `feature_mixed` returning `self.mixed(CharAttrKind::Features)` → fails at the `liga` assertion; `tnum` stays green.
     #[test]
     fn a_tag_is_mixed_only_where_the_runs_disagree_about_that_tag() {
         let (_ctx, mut app, id) = app_with_two_feature_runs();
@@ -13081,27 +10282,9 @@ mod feature_mixed_tests {
         );
     }
 
-    /// **Toggling one tag leaves every other tag in every run alone.**
+    /// Toggling one tag leaves every other tag in every run alone; the `tnum` assertion comes first, `liga` changing is the control.
     ///
-    /// 🚨 **This is the failure the maintainer ruled on.** The old write cloned
-    /// the list `attr!` resolves at `range.start` — the first run's, which has no
-    /// `tnum` — edited `liga` into it and applied it to the whole selection. The
-    /// second run's `tnum` went with it, silently, one undo step.
-    ///
-    /// ⚠️ **The assertion order puts the loss first.** `tnum` surviving is what
-    /// the user loses; `liga` having actually changed is the control that says the
-    /// click did anything at all. A test asserting only the second passes against
-    /// the flattening version.
-    ///
-    /// ⚠️ **Flip, run — the site was right and the *value* is worse than
-    /// predicted.** Replacing `write_feature_tag`'s partial arm with the old
-    /// `apply_char_attrs(subject, vec![CharAttr::Features(merge(&set))])` fails at
-    /// the `tnum` assertion, and the reading is `left: [0]` where `[0, 0]` was
-    /// expected: flattening does not merely set both runs to the first one's list,
-    /// it **collapses the two runs into one**, because identical neighbouring
-    /// spans have no boundary left to keep them apart. So the shape the user loses
-    /// is not just a value — it is the fact that the second word was ever
-    /// different, and no undo-free edit can put that back.
+    /// flip: `write_feature_tag`'s partial arm replaced by `apply_char_attrs(subject, vec![CharAttr::Features(merge(&set))])` → fails at `tnum` (`[0]` for `[0, 0]`: the two runs collapse into one).
     #[test]
     fn toggling_one_feature_leaves_the_other_runs_features_alone() {
         let (_ctx, mut app, id) = app_with_two_feature_runs();
@@ -13114,9 +10297,7 @@ mod feature_mixed_tests {
             "fixture: the second run carries tnum and the first does not"
         );
 
-        // Turn `liga` off across the whole selection, then land the session on the
-        // document — the spans live in the editor until it closes, and `per_run`
-        // reads the node.
+        // Turn `liga` off across the selection, then land the session: spans live in the editor until it closes.
         app.write_feature_tag(&subject, tag("liga"), 0);
         app.finish_text_edit();
 
@@ -13135,63 +10316,23 @@ mod feature_mixed_tests {
 
 #[cfg(test)]
 mod valve_arm_tests {
-    //! **`char_valve` has two arms, not three** (§15 D812), and **a held
-    //! tracking chord stops where its field stops** (§15 D817).
+    //! `char_valve` has two arms, and a held tracking chord stops where its field stops.
     use super::*;
     use crate::app::OndinApp;
 
-    /// **A control reporting `changed()` while it holds no focus and is not
-    /// dragged commits nothing** — `char_valve` has two arms, not three
-    /// (§15 D812).
+    /// A control reporting `changed()` while unfocused and undragged commits nothing.
+    /// The fixture is a ranged `DragValue` without the app's `clamp_existing_to_range(false)`
+    /// opt-out, so egui's clamp reports a change; it asserts that state before the valve's answer.
     ///
-    /// 🚨 **This is `[S6.2-L1-01]` reproduced at the valve.** The deleted arm was
-    /// `else if resp.changed() && !resp.lost_focus()`, kept for *"a control with no
-    /// engagement to latch"*. §15 D802 found the controls it was kept for never
-    /// reach this valve; §15 D803 found the one thing that does, and it is a
-    /// hazard — egui's per-frame clamp of a stored value outside a **ranged**
-    /// field reports an untouched control as changed, so the arm committed an edit
-    /// nobody made and spent an undo step on it.
-    ///
-    /// ⚠️ **The fixture is a ranged `DragValue` *without* the app's opt-out**, and
-    /// that is the whole of what makes this reproducible. `ui::value_field_f64`
-    /// and `ui::bare_drag_value` both pass `clamp_existing_to_range(false)`
-    /// (§15 D425, D552), so no production control can get into this state today —
-    /// which is exactly why the arm's removal is a *second* defence rather than
-    /// tidying, and why the condition has to be built here by hand. A test that
-    /// drove a real field would assert nothing.
-    ///
-    /// ⚠️ **The response is the assertion's subject and the value is not.** What
-    /// is being pinned is that a frame reporting `changed()` with no engagement
-    /// does not reach a commit; whether egui chose to clamp on this particular
-    /// frame is egui's business, so the fixture asserts it reached the state
-    /// (`changed()` true, `has_focus()` false, `dragged()` false) before asserting
-    /// what the valve did about it.
-    ///
-    /// **Flip-check, run** by restoring the third arm: fails at *"no undo step"*
-    /// with **1 against 0**, the predicted site. ⚠️ The size assertion under it
-    /// was predicted to fail as well and never runs, the first `assert_eq!`
-    /// ending the test — *a prediction about a second assertion is a prediction
-    /// about an assertion that may not execute.*
+    /// flip: restoring the `else if resp.changed() && !resp.lost_focus()` arm → fails at "no undo step" (1 against 0).
     #[test]
     fn a_changed_frame_with_no_engagement_commits_nothing() {
         let (ctx, mut app, id) = app_with_text();
         let before = app.session.history.undo_depth();
 
-        // 20 is the fixture's font size; 5000 is outside the field's range, which
-        // is what makes egui rewrite it and call that a change.
-        //
-        // ⚠️ **The first draft used 999 and `MAX_FONT_SIZE` is 1000**, so the value
-        // was *in* range, nothing was rewritten, and the fixture assertion below
-        // failed with `changed=false` on every frame. That assertion is the only
-        // reason this test is not silently about nothing — which is exactly what
-        // it is there for.
+        // 5000 is outside the field's range, which makes egui rewrite it and call that a change.
         let mut out_of_range = 5000.0_f64;
-        // ⚠️ **Every frame, not the last one.** The rewrite happens on the frame
-        // egui first meets the stored value; by the frame after it the value is
-        // already in range and reports nothing. Reading only the final frame
-        // measured `changed=false` and the fixture never reached the state it
-        // names — which is the *"assert the fixture is in the state you think"*
-        // rule biting on its own first draft.
+        // Every frame is recorded: egui rewrites on the first frame it meets the value.
         let mut states = Vec::new();
         for _ in 0..3 {
             let subject = TypeSubject::of(&app, id).expect("a subject");
@@ -13201,8 +10342,7 @@ mod valve_arm_tests {
                     ..Default::default()
                 },
                 |ui| {
-                    // No `clamp_existing_to_range(false)`: egui's default, which is
-                    // what every field in the app opts out of.
+                    // No `clamp_existing_to_range(false)`: egui's default.
                     let resp = ui.add(egui::DragValue::new(&mut out_of_range).range(
                         ondin_core::typography::MIN_FONT_SIZE
                             ..=ondin_core::typography::MAX_FONT_SIZE,
@@ -13231,42 +10371,10 @@ mod valve_arm_tests {
         assert_eq!(size, 20.0, "and does not write its rewritten value either");
     }
 
-    /// **A held `Alt`+`→` stops at `MAX_TRACKING_PCT`, and `Alt`+`←` at the
-    /// min** — the tracking chord stops where its field stops (§15 D817).
+    /// A held `Alt`+`→` stops at `MAX_TRACKING_PCT` and `Alt`+`←` at the min, in px and em, with an ordinary-step control.
+    /// The bound sits at the chord arm, not in `TextStyle::set`, since a file may legally hold any finite value.
     ///
-    /// `TextStyle::set` canonicalizes `letter_spacing` without bounding it, so
-    /// before this the chord walked past the cap and out of what the field can be
-    /// scrubbed to, where the `Size` arm in the same `match` stops at its ends.
-    /// Nothing was *lost* — the field shows an out-of-range stored value rather
-    /// than rewriting it (§15 **D425**; D475 is this panel's test of that, and
-    /// citing it for the behaviour is the substitution `CLAUDE.md` records at
-    /// seven sites) — so what this fixes is the two chords disagreeing about
-    /// whether a held key has an end.
-    ///
-    /// ⚠️ **The bound is at the arm and not at `TextStyle::set`**, which is where
-    /// `Size`'s is, and that asymmetry is the decision rather than an oversight:
-    /// these caps are on the *controls*, a file may legally hold any finite
-    /// value, and a bound in the model would make D425's behaviour unreachable
-    /// for this attribute.
-    ///
-    /// ⚠️ **200 presses, not 2.** The step is `TRACKING_STEP_EM`, so a test that
-    /// pressed twice would be green against no clamp at all — it has to actually
-    /// reach the cap, which is what the *"the fixture must reach the state"*
-    /// assertion below demands before the interesting one runs.
-    ///
-    /// **Flip-check, run** by letting the chord's `Em` arm take the step
-    /// unbounded — the tracking arm of `OndinApp::text_chord`, its `(Em, Em)`
-    /// case returning the stepped value instead of `stepped_into` it: fails at
-    /// *"the em face stops at the same percentage"* with **`Em(4.0)`** against
-    /// `Em(2.0)` — 400%, twice the field's own maximum. (Re-run 2026-09-23. This
-    /// note said *"removing the `clamp` from the `Em` arm"* until then, which
-    /// named text §15 D840 had already replaced with `stepped_into` — a mutation
-    /// named by the text it removes stops naming a line when the text goes,
-    /// which is §15 D803's warning.) ⚠️ The predicted site was
-    /// the *first* cap assertion, and that one is the **px** arm, which the flip
-    /// does not touch: the two arms are two clamps, and a flip of one cannot be
-    /// caught by an assertion about the other. *The stored default being `Px` is
-    /// why the em face needs a fixture of its own at all.*
+    /// flip: the `(Em, Em)` arm of `OndinApp::text_chord` returning the stepped value instead of `stepped_into` → fails at "the em face stops at the same percentage" (`Em(4.0)` for `Em(2.0)`); the px assertions do not bite.
     #[test]
     fn a_held_tracking_chord_stops_at_the_fields_cap() {
         let (_ctx, mut app, id) = app_with_text();
@@ -13277,13 +10385,7 @@ mod valve_arm_tests {
              live session, so without this the test would be about nothing"
         );
 
-        // ⚠️ **Read through `TypeSubject`, not off the node.** With a live session
-        // the write can land in the editor rather than in the document
-        // (`apply_char_attrs`'s `partial` arm), so a probe reading
-        // `style.letter_spacing` measured `Px(0.0)` after four hundred presses and
-        // would have been green against a chord that did nothing. The subject is
-        // what the chord itself reads and what the field shows, which makes it the
-        // honest place to ask.
+        // Read through `TypeSubject`: with a live session the write can land in the editor, not the node.
         let tracking = |app: &OndinApp| {
             let subject = TypeSubject::of(app, id).expect("a subject");
             match subject.shown(CharAttrKind::LetterSpacing) {
@@ -13292,11 +10394,7 @@ mod valve_arm_tests {
             }
         };
 
-        // ⚠️ **The stored default is `Px(0.0)`, not `Em`**, which the first draft
-        // of this test assumed and which is why the px face is asserted first. The
-        // px cap is derived from the `%` one at the current font size through the
-        // same `px_range_for` the field uses — at the fixture's 20pt that is
-        // `-10..=40`.
+        // The stored default is `Px(0.0)`; the px cap derives from the `%` one via `px_range_for` (`-10..=40` at 20pt).
         let px_cap = px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, 20.0);
         assert!(
             matches!(tracking(&app), Length::Px(v) if v == 0.0),
@@ -13304,9 +10402,7 @@ mod valve_arm_tests {
             tracking(&app)
         );
 
-        // Far past the cap, in both directions, and the count is the point: the
-        // step is small, so a test that pressed twice would be green against no
-        // clamp at all.
+        // Far past the cap in both directions: the step is small.
         for _ in 0..400 {
             app.text_chord(TextChord::Tracking(1));
         }
@@ -13324,9 +10420,7 @@ mod valve_arm_tests {
             "and at the other end, which is not the negation of the first"
         );
 
-        // **The em face, which is the other arm of the clamp.** A unit click puts
-        // the same quantity in `%`, and the cap there is the constant itself
-        // rather than a derived number.
+        // The em face is the other arm of the clamp; its cap is the constant itself.
         let (_ctx, mut app, id) = app_with_text();
         app.begin_edit_text(Some(id), None);
         let subject = TypeSubject::of(&app, id).expect("a subject");
@@ -13344,12 +10438,7 @@ mod valve_arm_tests {
             Length::Em(MAX_TRACKING_PCT / 100.0),
             "the em face stops at the same percentage"
         );
-        // ⚠️ **The em *floor*, which nothing asserted** (§15 D840). Two arms with
-        // two ends each is four clamps and this test pinned one of them twice
-        // and another once; deleting half of D817's em clamp left the suite
-        // green. The floor is not the negation of the cap — `MIN_TRACKING_PCT`
-        // is −50 against a maximum of 200 — so an assertion that assumed
-        // symmetry would pass against the wrong number.
+        // The em floor is not the negation of the cap (−50 against 200).
         for _ in 0..800 {
             app.text_chord(TextChord::Tracking(-1));
         }
@@ -13359,9 +10448,7 @@ mod valve_arm_tests {
             "and at the em floor, which is not the negation of the em cap"
         );
 
-        // Control: one press from zero is an ordinary step and is not clamped to
-        // anything. Without this the test would pass against a chord that did
-        // nothing at all.
+        // Control: one press from zero is an ordinary step.
         let (_ctx, mut app, id) = app_with_text();
         app.begin_edit_text(Some(id), None);
         app.text_chord(TextChord::Tracking(1));
@@ -13372,27 +10459,9 @@ mod valve_arm_tests {
         );
     }
 
-    /// **A held leading chord stops where the field stops** (§15 D840).
+    /// A held leading chord stops at the field's floor and at its px and em ceilings; zero is one press from the seeded value.
     ///
-    /// 🚨 **The identical defect §15 D817 fixed for tracking, three arms up in
-    /// the same `match`, and it went unread beside it.** The `Leading` arm ended
-    /// in `step_length` with no range expression at all, so a held `Alt`+`↓`
-    /// walked line height **negative** — out of the field's `0..=1000%` and into
-    /// `parley_line_height` — and `Length::canonical` normalises `-0.0` without
-    /// bounding anything.
-    ///
-    /// ⚠️ **The floor is the interesting end.** The cap is 1000%, which takes a
-    /// great many presses to reach and is not where the damage was; zero is one
-    /// press away from the seeded value and is what a user holding the key
-    /// actually hits.
-    ///
-    /// Flip: `stepped_into` replaced by the bare `step_length` this arm used to
-    /// end in. Red at the floor, the predicted site, with a negative line height.
-    /// **And a second, run 2026-09-23** (§15 D865): `Bounds::em` returning the
-    /// `%` range undivided is red at the em ceiling, the predicted site, with
-    /// `Em(21.0)` against `Em(10.0)` — the chord walked to 2100%.
-    /// (Plain backticks — this is a `cfg(test)` module and `cargo doc` cannot
-    /// see it, so a link here is checked by nothing, §15 D319.)
+    /// flips: `stepped_into` replaced by the bare `step_length` → fails at the floor (negative line height); `Bounds::em` returning the `%` range undivided → fails at the em ceiling (`Em(21.0)` for `Em(10.0)`).
     #[test]
     fn a_held_leading_chord_stops_at_the_fields_ends() {
         let (_ctx, mut app, id) = app_with_text();
@@ -13419,8 +10488,7 @@ mod valve_arm_tests {
              {at_floor:?}"
         );
 
-        // Control: one press up from there is an ordinary step, so the floor is
-        // a clamp rather than the chord having stopped working.
+        // Control: one press up is an ordinary step, so the floor is a clamp.
         let before = leading(&app);
         app.text_chord(TextChord::Leading(1));
         assert_ne!(
@@ -13429,12 +10497,8 @@ mod valve_arm_tests {
             "control: the chord still moves away from the floor"
         );
 
-        // ⚠️ **And the ceiling, in both units, which nothing drove the chord to
-        // until 2026-09-23** (§15 D865). `em()` returning the `%` range undivided
-        // failed two tracking-chord tests and none here, because the floor is 0
-        // in either scale; the cap is where the two scales differ. From the
-        // floor, 400 presses of `LEADING_STEP_PX` pass the px cap at 20pt (1000%
-        // of 20 is 200).
+        // The ceiling in both units: the floor is 0 in either scale, the cap is where they differ.
+        // From the floor, 400 presses of `LEADING_STEP_PX` pass the px cap at 20pt (200).
         assert!(
             matches!(leading(&app), Some(Length::Px(_))),
             "the fixture must reach the state: the floor left line height in px, \
@@ -13466,34 +10530,10 @@ mod valve_arm_tests {
         );
     }
 
-    /// 🚨 **The increase key decreased tracking by 300 percentage points**
-    /// (§15 D840).
+    /// A chord does not rewrite a stored out-of-range tracking: `Alt`+`→` on a stored `Em(5.0)` leaves it, `Alt`+`←` walks it back toward the range.
+    /// The fixture writes through `apply_char_attrs`, since seeding with the chord would clamp.
     ///
-    /// §15 D817's clamp was unconditional, and §15 D425 says a control **shows**
-    /// a stored out-of-range value rather than rewriting it — which is the whole
-    /// reason these caps sit on the chord and not in `TextStyle::set`. So with a
-    /// stored `Em(5.0)` (500%, legal, and a file may hold one) a single
-    /// `Alt`+`→` stepped to `5.0 + step` and clamped to `MAX_TRACKING_PCT`: the
-    /// user asked for *more* and lost 300 percentage points in one press, with
-    /// no way back to the value they had.
-    ///
-    /// **Two flips, both run, and both land on the *second* assertion** — which
-    /// is not where this doc predicted either of them. The shipped
-    /// unconditional clamp gives `Em(2.0)` against `Em(5.0)`, the 300-point loss
-    /// itself; the obvious repair, skipping the clamp whenever the value starts
-    /// out of range, gives `Em(5.01)` — it lets the *away* direction run free,
-    /// so `Alt`+`→` on a stored 500% walks to 600% and beyond, a control with no
-    /// cap at all for exactly the documents that most need one. ⚠️ **The
-    /// prediction here was that the second repair would survive to the third
-    /// assertion**, and it does not: *"nothing moves"* is strict enough to catch
-    /// both wrong versions, at values 3.0 apart. The third assertion is
-    /// therefore not the discriminator it was written as — it covers the
-    /// return-to-range behaviour, which neither flip reaches.
-    ///
-    /// ⚠️ **The fixture writes through `apply_char_attrs`, not the chord**,
-    /// because the chord is the thing under test: seeding with it would clamp on
-    /// the way in and the fixture would never reach the state this is about.
-    /// Asserted, for that reason.
+    /// flips: an unconditional clamp → fails at the second assertion (`Em(2.0)` for `Em(5.0)`); skipping the clamp when the value starts out of range → also fails there (`Em(5.01)`). The third assertion is reached by neither.
     #[test]
     fn a_chord_does_not_rewrite_a_stored_out_of_range_tracking() {
         let (_ctx, mut app, id) = app_with_text();
@@ -13544,21 +10584,9 @@ mod valve_arm_tests {
         );
     }
 
-    /// **The leading chord does not rewrite a stored out-of-range line height
-    /// either** (§15 D840, `[X7-L6-02]`) — the tracking test above's twin, on the
-    /// arm beside it, in both units. A stored 1500% (`Em(15.0)`, legal, and a
-    /// file may hold one) is left alone by `Alt`+`↑` and walked back by
-    /// `Alt`+`↓`; so is a stored `Px(300.0)` at 20pt, against a 200 cap.
+    /// The tracking test's twin for the leading chord, in both units: a stored `Em(15.0)` or `Px(300.0)` at 20pt is left alone by `Alt`+`↑` and walked back by `Alt`+`↓`.
     ///
-    /// **Why it is owed**: `a_held_leading_chord_stops_at_the_fields_ends` starts
-    /// at the seeded value and never leaves the range, and inside the range
-    /// `stepped_into` *is* `clamp` — so a bare clamp on either leading arm, the
-    /// repair D840 rejected, left the whole app suite green.
-    ///
-    /// **Flip runs**: the `(Em, Em)` arm a bare `clamp` fails on *"the increase
-    /// key leaves a stored 1500%"* with `Em(10.0)`; the `(Px, Px)` arm a bare
-    /// `clamp` fails on *"and a stored 300px"* with `Px(200.0)` — each the
-    /// predicted site.
+    /// flips: a bare `clamp` on the `(Em, Em)` arm → fails at "the increase key leaves a stored 1500%"; on the `(Px, Px)` arm → fails at "and a stored 300px".
     #[test]
     fn a_chord_does_not_rewrite_a_stored_out_of_range_leading() {
         let (_ctx, mut app, id) = app_with_text();
@@ -13616,7 +10644,7 @@ mod valve_arm_tests {
 
 #[cfg(test)]
 mod wrap_gate_tests {
-    //! **Word break and Long words are dead under `NoWrap`** (§15 D804).
+    //! Word break and Long words are dead under `NoWrap`.
     use super::*;
     use crate::app::OndinApp;
     use crate::theme;
@@ -13692,49 +10720,17 @@ mod wrap_gate_tests {
         frame(ctx, app, id, Vec::new());
     }
 
-    /// Where the three strips sit with the section drawn at `MENU_INNER` in a
-    /// 400×600 area, measured by a 4pt sweep over x ∈ {40, 120, 200, 280},
-    /// y ∈ [0, 260]. Each is a cell that is *not* the current one, so a click
-    /// there has something to do.
-    ///
-    /// ⚠️ **The Wrap strip reads off-then-on, so its left cell is `NoWrap`** —
-    /// `WrapMode::ALL` puts *"the cell that does nothing"* first. Naming these the
-    /// other way round is what the first draft did, and the failure was the
-    /// honest one: a click on the cell already current changes nothing, and the
-    /// "the mode switched" assertion caught it.
+    /// Cells of the three strips with the section drawn at `MENU_INNER` in a 400×600 area, each not the current one.
+    /// The Wrap strip's left cell is `NoWrap` (`WrapMode::ALL` puts the inert cell first).
     const WRAP_OFF: egui::Pos2 = egui::pos2(120.0, 30.0);
     const WRAP_ON: egui::Pos2 = egui::pos2(200.0, 30.0);
     const WORD_BREAK_BREAK_ALL: egui::Pos2 = egui::pos2(120.0, 84.0);
     const LONG_WORDS_BREAK_WORD: egui::Pos2 = egui::pos2(120.0, 124.0);
 
-    /// **`NoWrap` makes Word break and Long words dead, and nothing else**
-    /// (§15 D804).
+    /// `NoWrap` dims Word break and Long words without resetting them, and nothing else.
+    /// Clicking the Wrap strip itself is the control: without it the "click did nothing" assertions pass against an empty `ui`.
     ///
-    /// The section's own doc states the rule and its boundary: both controls are
-    /// *"rules about breaks that cannot happen"* under `NoWrap`, dimmed and **not
-    /// reset**, while *"hard breaks still break … so the paragraph spacing and
-    /// indent controls in the tab beside this one go on working and must not be
-    /// caught by the same condition."* `roadmap.md` listed this among three
-    /// decisions reachable by no test, needing *"a live text session and a
-    /// laid-out panel"* — which is right, and is what this is.
-    ///
-    /// 🚨 **The control is the whole test.** Every assertion under `NoWrap` is
-    /// that a click changed *nothing*, which is exactly what a section that was
-    /// never drawn, or a coordinate that missed, also produces. So the same
-    /// fixture clicks the Wrap strip itself — the one control the gate must
-    /// **not** catch — and requires it to still work. Without that, this passes
-    /// against an empty `ui`.
-    ///
-    /// ⚠️ **Dimmed and not reset is asserted too.** The stored `word_break`
-    /// survives the trip: it is set under `Wrap`, the mode is switched to
-    /// `NoWrap`, and the value is still there. A gate that cleared the fields
-    /// instead of disabling them would satisfy every "the click did nothing"
-    /// assertion and still lose the user's setting.
-    ///
-    /// ⚠️ **Flipped**: removing the `if !wraps { ui.disable(); }` makes the two
-    /// `NoWrap` click assertions red — Word break first. Inverting it to
-    /// `if wraps` instead makes the **`Wrap`** half red, at the first assertion,
-    /// which is the half that proves the coordinates are live at all.
+    /// flips: removing `if !wraps { ui.disable(); }` → the two `NoWrap` click assertions fail, Word break first; inverting it to `if wraps` → the `Wrap` half fails at the first assertion.
     #[test]
     fn nowrap_kills_word_break_and_long_words_and_nothing_else() {
         // The positive half: with wrapping on, both strips take a click.
@@ -13753,7 +10749,7 @@ mod wrap_gate_tests {
             "and so does Long words"
         );
 
-        // **Dimmed, not reset**: switching to NoWrap keeps what was stored.
+        // Dimmed, not reset: switching to NoWrap keeps what was stored.
         click(&ctx, &mut app, id, WRAP_OFF);
         assert_eq!(para(&app, id).wrap, WrapMode::NoWrap, "the mode switched");
         assert_eq!(
@@ -13778,7 +10774,7 @@ mod wrap_gate_tests {
             "and neither does a Long words click"
         );
 
-        // 🚨 **The control.** The gate must stop at those two.
+        // Control: the gate must stop at those two.
         click(&ctx, &mut app, id, WRAP_ON);
         assert_eq!(
             para(&app, id).wrap,
@@ -13789,8 +10785,7 @@ mod wrap_gate_tests {
     }
 }
 
-/// The marks §15 D981 (e) left off the Type controls and 2026-10-06 put on: the
-/// bold/italic pair a family without variants shows, and the popup's sections.
+/// Override marks on the bold/italic pair a family without variants shows, and on the popup's sections.
 #[cfg(test)]
 mod instance_mark_tests {
     use super::*;
@@ -13888,8 +10883,7 @@ mod instance_mark_tests {
     }
 
     /// Every painted text with its rect and colour, and every override dot's
-    /// centre — the dots through the tests' one detector,
-    /// `ui::painted_override_dots` (`[X8.2-L3-01]`).
+    /// centre (via `ui::painted_override_dots`).
     #[allow(clippy::type_complexity)]
     fn painted(
         out: &egui::FullOutput,
@@ -13931,13 +10925,9 @@ mod instance_mark_tests {
         frame(ctx, app, id, vec![press(false)], &draw);
     }
 
-    /// **The bold/italic pair marks the slant an instance overrides, and a click
-    /// on the marked button is its reset.** The copy is italic where its main is
-    /// upright: one dot, at the Italic button's top right — right of its glyph,
-    /// so not Bold's — and a click on Italic writes the main's slant back, the
-    /// copy's style then equal to its main's, the slant being all that differed.
-    /// Flip: the Italic mark comparing the weight (`|s| s.weight`) leaves it
-    /// unmarked and fails *"one dot"* with none.
+    /// The bold/italic pair marks an overridden slant (one dot at Italic's top right), and a click on it writes the main's slant back.
+    ///
+    /// flip: the Italic mark comparing the weight (`|s| s.weight`) → fails at "one dot".
     #[test]
     fn the_weight_toggles_mark_the_slant_an_instance_overrides() {
         let (ctx, mut app, main, copy) = instance();
@@ -13965,12 +10955,9 @@ mod instance_mark_tests {
         );
     }
 
-    /// **A popup section carries its mark on its label, and a click on the label
-    /// is the reset.** The copy's case is upper where its main's is none. Drawn
-    /// with the Language section under it, which the copy does not override: one
-    /// dot, on *CASE*'s row, and *CASE* painted bright; a click on *CASE* puts the
-    /// main's case back. Flip: `section_marked` drawing the plain `section`
-    /// whatever its mark leaves no dot and fails *"one dot"* with none.
+    /// A popup section carries its mark on its label (one dot on *CASE*, Language not overridden), and a click on the label resets it.
+    ///
+    /// flip: `section_marked` drawing the plain `section` → fails at "one dot".
     #[test]
     fn a_popup_section_marks_its_own_fields_and_its_label_resets_them() {
         let (ctx, mut app, main, copy) = instance();
@@ -13991,8 +10978,7 @@ mod instance_mark_tests {
         assert_eq!(dots.len(), 1, "one dot: {dots:?}");
         let (case_at, case_ink) = ink("CASE");
         assert_eq!(case_ink, theme::text::STRONG, "Case is overridden");
-        // Language's label is egui's own, its ink in the galley rather than in
-        // `fallback_color`; that the one dot is Case's says Language follows.
+        // Language's ink is in the galley, not `fallback_color`; the one dot being Case's says Language follows.
         assert!(
             (dots[0].y - case_at.center().y).abs() < 8.0 && ink("LANGUAGE").0.top() > dots[0].y,
             "the dot is Case's: {dots:?} beside {case_at:?}"
@@ -14005,12 +10991,9 @@ mod instance_mark_tests {
         );
     }
 
-    /// **The Sizing section's mark compares the mode, not the width.** Main and
-    /// copy both auto-height at different widths: no mark — the width is the
-    /// Transform card's W. The copy fixed: a mark naming the main's *Auto H*,
-    /// whose reset writes the main's whole sizing. Flip: `Mode`'s equality
-    /// comparing the whole sizing marks the first case and fails *"the width is
-    /// W's"*.
+    /// The Sizing mark compares the mode, not the width: auto-height copies at different widths are unmarked; a fixed copy is marked *Auto H*, resetting the main's whole sizing.
+    ///
+    /// flip: `Mode`'s equality comparing the whole sizing → fails at "the width is W's".
     #[test]
     fn the_sizing_mark_compares_the_mode_and_not_the_width() {
         let (_ctx, mut app, main, copy) = instance();
@@ -14040,14 +11023,11 @@ mod instance_mark_tests {
         );
     }
 
-    // --- the popup's other resets, clicked through (`[X9.2-L6-05]`) ---------
+    // --- the popup's other resets, clicked through ---------
     //
-    // Each test below draws the real section over the copy, clicks the reset the
-    // user would click, and asserts the two things a reset owes: the copy equals
-    // its main in what the section covers, and `reset::overrides` has nothing
-    // left to say about it. The second is the assertion `[X9.2-L1-01]` failed: a
-    // reset that writes the main's values in another order leaves an override
-    // standing, and the copy stops following.
+    // Each test draws the real section over the copy, clicks its reset, and asserts
+    // the copy equals its main there and `reset::overrides` finds nothing left
+    // (a reset writing the main's values in another order leaves an override).
 
     /// A synthetic `fvar` axis, so the sections that need a font's axes draw
     /// without one loaded.
@@ -14115,13 +11095,9 @@ mod instance_mark_tests {
     const WGHT: Tag = Tag::new(*b"wght");
     const GRAD: Tag = Tag::new(*b"GRAD");
 
-    /// **The Optical size reset writes the main's coordinates in the main's
-    /// order, so nothing is left overridden and the copy follows again**
-    /// (`[X9.2-L1-01]`). The main is `[opsz 14, wght 700]`; the copy's own opsz
-    /// edit left it `[wght 700, opsz 20]` (`axis_coords_after` appends). A click on
-    /// *OPTICAL SIZE* puts the main's whole list back, and the main's next opsz
-    /// edit reaches the copy. Flip, run: the `put` back to `retain` + `push`
-    /// writes `[wght 700, opsz 14]` and fails *"the main's list, in its order"*.
+    /// The Optical size reset writes the main's coordinates in the main's order (`[opsz 14, wght 700]`, not the copy's appended `[wght 700, opsz 20]`), so the copy follows again.
+    ///
+    /// flip: the `put` back to `retain` + `push` → fails at "the main's list, in its order".
     #[test]
     fn the_optical_size_reset_keeps_the_mains_order_and_the_copy_follows_again() {
         let (ctx, mut app, main, copy) = instance();
@@ -14153,11 +11129,9 @@ mod instance_mark_tests {
         );
     }
 
-    /// **The Axes reset does the same for the axes it lists** (`[X9.2-L1-01]`):
-    /// main `[GRAD 50, wght 700]`, copy `[wght 700, GRAD 80]`; a click on *AXES*
-    /// leaves the copy equal to the main and nothing overridden. Flip, run: the
-    /// `put` back to `retain` + `extend` writes `[wght 700, GRAD 50]` and fails
-    /// *"the main's list, in its order"*.
+    /// The Axes reset does the same for the axes it lists.
+    ///
+    /// flip: the `put` back to `retain` + `extend` → fails at "the main's list, in its order".
     #[test]
     fn the_axes_reset_keeps_the_mains_order() {
         let (ctx, mut app, main, copy) = instance();
@@ -14181,14 +11155,9 @@ mod instance_mark_tests {
         assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 
-    /// **The face mark compares the face — weight, slant and the axes the
-    /// variant drives — and its reset leaves the other sections' axes alone**
-    /// (`[X9.2-L1-03]`). A copy differing only in `opsz` has no face mark: that
-    /// difference is Optical size's. A copy whose weight *and* `GRAD` differ: the
-    /// face reset writes the weight and the `wght` coordinate back and keeps the
-    /// copy's `GRAD 80`, which is the Axes section's to reset. Flip, run: the face
-    /// mark comparing the whole `variations` again fails *"opsz is Optical
-    /// size's"* with `Some("Reset to main · 400")`.
+    /// The face mark compares weight, slant and the axes the variant drives; its reset leaves the other sections' axes alone (a copy differing only in `opsz` has no face mark).
+    ///
+    /// flip: the face mark comparing the whole `variations` → fails at "opsz is Optical size's".
     #[test]
     fn the_face_mark_is_the_faces_and_leaves_the_other_axes() {
         let (_ctx, mut app, main, copy) = instance();
@@ -14225,12 +11194,9 @@ mod instance_mark_tests {
         );
     }
 
-    /// **A click on *Word break* resets the word break, and one on *Long words*
-    /// the long-word rule** — `wrap_section` routes each through `inner_hit`, and
-    /// a swap of the two would reset the field beside the one clicked. Both
-    /// overridden; the first click puts the word break back and leaves the copy's
-    /// long-word rule standing, the second finishes the job. Flip, run: the two
-    /// `inner_hit = Some(&…)` swapped fails *"Word break's, not Long words'"*.
+    /// A click on *Word break* resets only the word break, and one on *Long words* only the long-word rule.
+    ///
+    /// flip: the two `inner_hit = Some(&…)` swapped → fails at "Word break's, not Long words'".
     #[test]
     fn the_wrap_sections_inner_labels_reset_their_own_fields() {
         let (ctx, mut app, main, copy) = instance();
@@ -14266,10 +11232,9 @@ mod instance_mark_tests {
         assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 
-    /// **Spacing & indent resets its five values as one**: the copy's paragraph
-    /// spacing, start indent and hanging differ, a click on the label puts all
-    /// three back. Flip, run: the mark's `put` skipping `indent_start` fails the
-    /// paragraph equality with the copy's `indent_start: Px(12.0)` left.
+    /// Spacing & indent resets all its values as one.
+    ///
+    /// flip: the mark's `put` skipping `indent_start` → fails the paragraph equality (`indent_start: Px(12.0)` left).
     #[test]
     fn the_spacing_and_indent_label_resets_all_five() {
         let (ctx, mut app, main, copy) = instance();
@@ -14287,8 +11252,9 @@ mod instance_mark_tests {
         assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 
-    /// **List resets the marker and its level as one.** Flip, run: the mark's
-    /// `put` skipping `level` fails the paragraph equality with `level: 2` left.
+    /// List resets the marker and its level as one.
+    ///
+    /// flip: the mark's `put` skipping `level` → fails the paragraph equality (`level: 2` left).
     #[test]
     fn the_list_label_resets_the_marker_and_its_level() {
         let (ctx, mut app, main, copy) = instance();
@@ -14306,10 +11272,9 @@ mod instance_mark_tests {
         assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 
-    /// **The line height's ↺ is the prefix strip's press, and it commits the
-    /// main's value** before the valve is told — the copy's 30 px back to the
-    /// main's auto. Flip, run: dropping the field's `commit_reset` fails *"the
-    /// main's line height"* with `Some(Px(30.0))` left.
+    /// The line height's ↺ is the prefix strip's press and commits the main's value (auto) before the valve is told.
+    ///
+    /// flip: dropping the field's `commit_reset` → fails at "the main's line height" (`Some(Px(30.0))` left).
     #[test]
     fn the_line_height_prefix_resets_the_line_height() {
         let (ctx, mut app, main, copy) = instance();
@@ -14328,12 +11293,10 @@ mod instance_mark_tests {
         assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 
-    /// **The family dropdown's first row is the reset**: open the list, click
-    /// *Reset to main · Inter*, and the copy's family is the main's again. Flip,
-    /// run: the row's `commit_reset` dropped (the early `return` kept) fails *"the
-    /// main's family"*. The variant dropdown's reset row is not driven: it draws
-    /// only for a family with two faces or more, which needs a font the headless
-    /// app may not have.
+    /// The family dropdown's first row (*Reset to main · Inter*) puts the main's family back.
+    /// The variant dropdown's reset row is not driven: it needs a family with two faces, which the headless app may lack.
+    ///
+    /// flip: the row's `commit_reset` dropped (early `return` kept) → fails at "the main's family".
     #[test]
     fn the_family_dropdowns_reset_row_puts_the_family_back() {
         let (ctx, mut app, main, copy) = instance();

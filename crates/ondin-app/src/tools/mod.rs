@@ -643,43 +643,18 @@ pub fn resize_to_handle(
         //
         // The rule itself is [`resized_text_sizing`], because the inspector's W and
         // H fields are the same two gestures with the pointer typed in.
-        // **On a rail, a resize edits the rail** (§15 D405). It has to edit
-        // *something*: `TextSizing` is inert here, so the arm below would hand back
-        // a patch the layout ignores and the handles would drag with nothing
-        // moving — a dead control on a selected layer, which is worse than no
-        // handle at all. And it is the right thing rather than the available one:
-        // §5.6's rule is that this gesture edits **geometry** and never scale, and
-        // on a railed node the geometry *is* the rail. The type keeps its size and
-        // re-flows along the new curve, which is what a longer path means.
-        //
-        // ⚠️ **Solved against the type this transaction will *leave*, not the type
-        // it found** (§15 D604, `[S13.2-L1-03]`). Under the Scale tool
-        // `scale_scalars` below multiplies the font size by the same `s`, so a
-        // solve against the current kind converges on a box the document never
-        // ends up with. Measured before the fix, `BottomRight` to 2× on the same
-        // fixture the Select control uses: the held top-left corner slid
-        // `(9.58, 15.00)` out from under the pointer and the height overshot by
-        // 26%. The Select tool's control lands the anchor to the bit, which is
-        // what says the solve is right and the composition was wrong.
         NodeKind::Text {
             on_path: Some(rail),
             ..
-        } => {
-            let solve_against = kind_to_solve_against(
-                res.used_kind_of(node),
-                opts.scaling,
-                ratio(size.width, new_size.width),
-                ratio(size.height, new_size.height),
-            );
-            GeometryPatch::TextPath(Some(railed_resize(
-                solve_against.as_ref().unwrap_or(res.used_kind_of(node)),
-                rail,
-                Rect::from_origin_size(inset.to_point(), size),
-                Rect::from_origin_size(inset.to_point() + origin.to_vec2(), new_size),
-                // The corner this gesture promised to hold (§15 D789).
-                handle,
-            )))
-        }
+        } => railed_patch(
+            res.used_kind_of(node),
+            rail,
+            opts.scaling,
+            Rect::from_origin_size(inset.to_point(), size),
+            Rect::from_origin_size(inset.to_point() + origin.to_vec2(), new_size),
+            // The corner this gesture promised to hold (§15 D789).
+            handle,
+        ),
         NodeKind::Text { sizing, .. } => {
             let (_, holds_y) = handle.anchored(size.width, size.height);
             GeometryPatch::TextSizing(resized_text_sizing(
@@ -769,6 +744,42 @@ fn railed_box(kind: &NodeKind, rail: &ondin_core::kurbo::BezPath) -> Option<Rect
     let mut parts = ondin_core::TextParts::of(kind)?;
     parts.on_path = Some(rail.clone());
     Some(ondin_core::text::layout(parts.as_ref(&content)).bounds())
+}
+
+/// **On a rail, a resize edits the rail** — the patch both resize doors write
+/// ([`resize_to_handle`] and [`scale_geometry`]), from the box the node draws
+/// (`drawn`) to `want`, holding `hold`'s corner. It has to edit something:
+/// `TextSizing` is inert on a rail, and §5.6's rule is that this gesture edits
+/// geometry, which on a railed node *is* the rail. The type keeps its size and
+/// re-flows along the new curve.
+///
+/// ⚠️ **Solved against the type this transaction will leave**
+/// ([`kind_to_solve_against`]): under the Scale tool `scale_scalars` multiplies
+/// the font size by the same factor, and a solve against the current kind
+/// converges on a box the document never ends up with — the held corner slid
+/// out from under the pointer. `drawn` stays the unscaled box: only the kind
+/// the solve measures moves.
+fn railed_patch(
+    kind: &NodeKind,
+    rail: &ondin_core::kurbo::BezPath,
+    scaling: Scaling,
+    drawn: Rect,
+    want: Rect,
+    hold: Handle,
+) -> GeometryPatch {
+    let solve_against = kind_to_solve_against(
+        kind,
+        scaling,
+        ratio(drawn.width(), want.width()),
+        ratio(drawn.height(), want.height()),
+    );
+    GeometryPatch::TextPath(Some(railed_resize(
+        solve_against.as_ref().unwrap_or(kind),
+        rail,
+        drawn,
+        want,
+        hold,
+    )))
 }
 
 /// The rail a resize from `drawn` to `want` leaves a text node with, both boxes in
@@ -1637,27 +1648,11 @@ fn scale_geometry(
 ) {
     let Some(node) = doc.get(id) else { return };
     scale_scalars(doc, id, scaling, csx, csy, ops);
-    // ⚠️ **On a rail, a resize edits the rail — through this door too**
-    // (§15 D472). `[S13.2-L1-02]`: `resize_to_handle` has had this arm since D405
-    // and its doc explains the very failure the site without it produced —
-    // *"it has to edit **something**: `TextSizing` is inert here, so the arm
-    // below would hand back a patch the layout ignores and the handles would drag
-    // with nothing moving"*. On a rail `TextSizing` really is inert (the rail's
-    // length is the measure), so for `Auto` `scaled_text_sizing` answers `None`
-    // and the whole transaction for the child was a bare `SetTransform`.
-    //
-    // Measured on a group holding one railed `Auto` text plus an 80×40 rect,
-    // `BottomRight` to 2× on both axes: the rect doubled, the railed text did not
-    // move **at all**, and because its ribbon pins the group's width the **group**
-    // came out 171.88 wide against 323.76 asked — **47% short of the drag**, on
-    // the first frame, with no error and no report.
-    //
-    // **The two boxes come from the rail rather than from `Resolved`'s cached
-    // box**: [`railed_box`] measures the current rail through the same layout the
-    // canvas draws. (`scale_geometry` did not have a `Resolved` when this was
-    // written; it has one now for the used kind, §15 D874, and the reason to
-    // measure the rail directly stands.) `want` is that box scaled by the residual factors about its own
-    // origin, which is exactly what `scale_subtree` means by handing them down.
+    // On a rail a resize edits the rail through this door too ([`railed_patch`]);
+    // `TextSizing` is inert there, and without this arm the railed child of a
+    // scaled group did not move at all. `drawn` is measured off the rail
+    // ([`railed_box`]) and `want` is it scaled by the residual factors about its
+    // own origin, which is what `scale_subtree` means by handing them down.
     if let NodeKind::Text {
         on_path: Some(rail),
         ..
@@ -1668,27 +1663,17 @@ fn scale_geometry(
             drawn.origin(),
             Size::new(drawn.width() * csx, drawn.height() * csy),
         );
-        // The same correction as `resize_to_handle`'s rail arm, at the second door
-        // (§15 D604). `scale_scalars` ran a few lines above and has already queued
-        // the scaled type, so the solve below has to converge on it.
-        // ⚠️ **`drawn` stays the *unscaled* box** — it is where the node is now,
-        // and `want` is the target derived from it. Only the kind the solve
-        // *measures* moves.
-        let solve_against = kind_to_solve_against(res.used_kind_of(node), scaling, csx, csy);
         ops.push(Operation::SetGeometry {
             id,
-            geometry: GeometryPatch::TextPath(Some(railed_resize(
-                solve_against.as_ref().unwrap_or(res.used_kind_of(node)),
+            // Scaled about `drawn.origin()`, the corner `BottomRight` holds.
+            geometry: railed_patch(
+                res.used_kind_of(node),
                 rail,
+                scaling,
                 drawn,
                 want,
-                // **There is no handle here and the origin really is the anchor**
-                // (§15 D789): `want` is `drawn` scaled about `drawn.origin()`, which
-                // is what `scale_subtree` means by handing the factors down. That is
-                // the corner `BottomRight` holds, so naming it says what this site
-                // wants rather than borrowing a default.
                 Handle::BottomRight,
-            ))),
+            ),
         });
         return;
     }

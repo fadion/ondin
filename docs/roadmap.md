@@ -7,10 +7,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Now · Canvas and interaction
 
-- **The railed-text resize arms of `tools/mod.rs` measure different boxes** (§15 D472). Both call
-  `railed_resize` and `kind_to_solve_against`, but `resize_to_handle` takes `drawn` from
-  `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and
-  each restates the arm. One helper taking the drawn box, the wanted box and the held handle.
 
 ## Now · Tooling
 

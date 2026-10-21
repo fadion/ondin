@@ -39,9 +39,9 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
 - The frame edge (`canvas::frame_edge_at`) checks both lock and visibility.
 - **Exception**: a layers-panel row selects a locked layer (`layers::select_from_row` reads no lock);
   once selected, inspector rules apply (a lock stops dragging, not recolouring).
-- **Open**: `canvas::frame_label_at` reads no lock, so a locked frame is selectable by its name tag.
-  Adding a lock term costs the canvas's only route to *Unlock* (the tag's layer menu); the alternative
-  is to declare the tag a second deliberate exception. Undecided.
+- **Exception**: a frame's name tag selects a locked frame (`canvas::frame_label_at` reads no lock).
+  A name is not artwork, which is the panel row's argument too, and the tag's layer menu is the
+  canvas's only route to *Unlock*, the only one at all in present mode.
 - **A selection holding an effectively locked layer is not dragged** (`canvas::selection_locked`): it
   arms no resize, skew or rotate handle (`Handles::armed` answers `locked`, so the cursor agrees),
   no line endpoint, rail handle or pivot marker (`grab_line_end`, `grab_rail_handle`, `on_pivot`

@@ -7,71 +7,89 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Now · Canvas and interaction
 
-- **A locked frame is selectable by its name tag** (§15 D839). `canvas::frame_label_at` asks no lock,
-  so §9.4's "never selects a locked layer" is false there. D839 has two non-symmetric repairs; picking
-  one is the open part.
-- **A mask is kept off a rail by per-door guards** (§15 D456): `query::outline_at` and
-  `build::text_on_new_path` each refuse it. Replace with one question: is the consumed thing artwork?
-- **The railed-text resize rule lives in two arms of `tools/mod.rs`** (§15 D472) — `resize_to_handle`
-  via `anchored_box`, `scale_geometry` via `railed_box`. State it once.
+- **Comments still state the old locked-layer rule.** The name tag selecting a locked frame is now a
+  deliberate exception (`design/app-selection.md`, *Locked layers*), but `canvas::frame_edge_at`'s doc
+  and its test still say the canvas never selects a locked layer "by any gesture". Trim them to the
+  set-gesture rule.
+- **Three role refusals are written at two doors** (§15 D456): boolean operand, frame and mask are each
+  refused by `query::outline_at` (the mask through the shared `masked_away`) and again by
+  `build::text_on_new_path`'s own guards. Replace them with one question: is the consumed thing artwork?
+- **The railed-text resize arms of `tools/mod.rs` measure different boxes** (§15 D472). Both call
+  `railed_resize` and `kind_to_solve_against`, but `resize_to_handle` takes `drawn` from
+  `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and
+  each restates the arm. One helper taking the drawn box, the wanted box and the held handle.
 - **The guide commit table's Alt-drag-copy arm has no test** (§15 D474): `finish_guide_drag`'s
-  `(Some(id), false) if d.copying`. Add a fourth pair to `rulers::the_guide_commit_table_answers_each_of_its_arms`.
-- **GPU device lost while zooming a component-heavy file, cause unmeasured** (§15 D992). The fx
-  textures are pooled since (D1003 (7)); whether that cured it is unconfirmed. Wait for the
-  `GPU device lost (<reason>)` line in `ondin.log`, or for the crash to stop being seen.
-
-- **A context menu's Hide/Show and Lock/Unlock label reads the right-clicked layer alone**
-  (`layer_menu_state(id)`), while the action decides over the whole selection. So a panel
-  right-click on a hidden layer among visible ones reads *Show* and hides everything. Found from
-  reading the code while the context-menus spec was rewritten; not yet reproduced.
-- **Rename's menu row is live in present mode while its chord refuses.** One of the two is wrong.
+  `(Some(id), false) if d.copying`. Add a pair to `rulers::the_guide_commit_table_answers_each_of_its_arms`,
+  and correct its doc's arm count.
+- **A context menu's Hide/Show and Lock/Unlock label disagrees with the action.** The label reads the
+  right-clicked layer's own flag (`menu::layer_menu_state`); `toggle_hidden`/`toggle_locked` hide or
+  lock every member unless all already are (`set_switch`). With A and B visible and H hidden, a panel
+  right-click on H reads *Show* and hides A and B. The label should answer the action's rule over the
+  selection; `context-menus.md`'s *State* table changes with it.
+- **Rename's menu row is live in present mode.** `context-menus.md` now dims it there, as the chord
+  refuses (`rename_selection`); the row in `menu.rs` and the comment above it still don't.
 
 ## Now · Inspector
 
-- **The boolean row's *Flatten* gives one sentence for three refusals** (§15 D734). Show the `Err`
-  that `booleanable_selection` already computes instead of the fixed message.
+- **Ctrl+E's Flatten gives one sentence for three refusals** (§15 D734). `flatten_selection` posts a
+  fixed message; post the `Err` from `booleanable_selection`, as the boolean row's disabled hover
+  already does.
 
 ## Now · Keyboard
 
-- **"A value in flight carries its subject" is written twice** (§15 D470): `OpacityEntry` and
-  `InFlight::session_scrub` each restate it. One statement.
+- **"A value in flight carries its subject" is written three times** (§15 D470): the docs on
+  `InFlight::session_scrub` and `OpacityEntry::subject`, and the D470 regression test's doc. State it
+  once, on `InFlight`.
 
 ## Now · Text
 
 - **Whitespace-only text claims a min-content width its auto box lacks** (§15 D931): `"   "` reports
   min 8.89 against an auto box 0 wide, read by container layout (§15 D872). `text::content_widths`
   has no case for it.
-- *Watch*: if the canvas looks a frame stale during a text session, suspect `draw_canvas`'s
-  `request_repaint_after` for the caret blink (§15 D171).
 
 ## Now · Files, library and storage
 
 - **The two project cards hand-roll their footers** (§15 D719): `new_project_modal` and
-  `edit_project_modal` should call `settings::modal_footer`. Layout change only.
+  `edit_project_modal`. Edit fits `settings::modal_footer` as it is; New needs the commit label
+  ("Create project") as a parameter, with `dirty` read as "commit enabled".
 
 ## Now · Core, rendering and export
 
-- **Core's dependency gate is a denylist** (§15 D427, D775). Make `deps_forbidden.rs` an allowlist
-  against §3's permitted list.
-- **`op_set_effects` accepts an absurd finite blur** (§15 D454), e.g. `stdDeviation="1e30"`. Refuse at
-  the operation, promoting `inspector.rs`' `MAX_BLUR` into core.
+- **Core's dependency gate is a denylist** (§15 D427, D775). Make `deps_forbidden.rs`'s core row an
+  allowlist of `design/foundations.md` §3's permitted list, which matches the manifest. The other
+  crates have no permitted list and keep their denylists.
+- **An absurd finite blur reaches the model** (§15 D454), e.g. `stdDeviation="1e30"`:
+  `op_set_effects` checks finiteness only, and so does `svg_in::deviation_of`. Refuse at the
+  operation, promoting `inspector.rs`' `MAX_BLUR` into core, which covers MCP too.
 - **A descending gradient ramp on disk stays descending** (§15 D455): `io::load` does not run
-  `image::make_stops_monotonic`, so touching one colour commits a third picture.
-- **Rules stated in more than one place**: SVG filter regions in three writers (§15 D458); a mask
-  group's clip kept arm-for-arm in three functions (§15 D460); §6.4's two effect stages restated by
-  `effect::stack_escape` (§15 D473).
-- **A sweep gradient with a non-invertible transform exports `r="50"`** (§15 D762):
-  `svg::sweep_radius`'s `None` falls to `.unwrap_or(50.0)`.
+  `image::make_stops_monotonic`. Every drawing path sorts, so touching one colour commits a second
+  picture. `make_stops_monotonic`'s doc still describes a three-way split.
+- **Rules stated in more than one place**: SVG region writing in `svg::effect_def`, `adjust_def` and
+  the alpha `<mask>` (§15 D458); a mask group's clip arm-for-arm in `Resolved::mask_path`,
+  `resolve::mask_extent` and `query::mask_extent_local` (§15 D460); §6.4's two effect stages in
+  `effect::stack_escape`, `svg::effect_def` and `render::effects::run` (§15 D473).
+- **A sweep gradient exports `r="50"` when its radius is unknown** (§15 D762): `svg::sweep_radius`
+  answers `None` for a non-invertible transform or a missing frame, and the caller falls to
+  `.unwrap_or(50.0)`.
 - **A failed effect pass leaks that frame's atlas slots** (§15 D1003 (7)): a `render_to_texture` error
   in `VelloGpuRenderer::resolve_effects` returns before the slots are handed back.
-- **Loading a long chain of mains is super-linear** (§15 D416): 20,000 mains ≈200 s in debug vs ≈2 s
-  for 2,000; not in `component::reaches_itself`, cause not found.
 
 ## Now · Tooling
 
-- **Hand-written checks never controlled** (§15 D827, D828): `review/`'s census commands, and the
-  three greps standing in for `clippy::duplicated_attributes` (silent inside `impl` blocks). Run each
-  against a fixture that must match and one that must not.
+- **Hand-written checks never controlled** (§15 D827, D828): the census rows in the `codebase-review`
+  and `release-review` skills, and the three greps standing in for `clippy::duplicated_attributes`
+  (silent inside `impl` blocks), which are written down nowhere in the tree. Record the greps first,
+  then run each check against a fixture that must match and one that must not.
+
+## Now · Nested component properties
+
+- **A main that joins a set after a showing exists is not bound.** Only *Add variant* (`add_variant`)
+  extends a showing's bindings. A main reparented into the set, *Combine as variants* where only some
+  mains show, *Duplicate as component* on a variant, and a nested instance added later to one variant
+  at a shown path all leave the slot unbound; `variant::settle` merges showings but never binds by
+  name path.
+- **The group sub-heading in `variants::shown_groups`** uses plain 12 pt labels, not the mockup's
+  type. Read the design canvas's artboard before changing it.
 
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
@@ -108,25 +126,6 @@ pointer when the archived reasoning matters; otherwise drop it.
 **Cost:** roughly 5–6M subagent tokens; reading the tree alone is about 4.5M. Target: comments
 down to about 15–20% of the source, roughly 2.5–3.5 MB in place of 8.4 MB.
 
-## Next · Nested component properties
-
-- **The maintainer's look** at what D988 built; every call D988 marks as the session's stays open to it.
-- **A variant moved into a set after a showing exists is not bound** — only *Add variant*
-  (`add_variant`) extends the bindings.
-- **A nested instance added inside an instance** (not in a main) has no slot to show — partly a
-  question for the maintainer.
-- **The group sub-heading** uses plain labels, not the mockup's type.
-
-## Next · Styles and variables
-
-- **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)). Nothing to answer
-  yet: the only preset, `prefs::ExportPreset`, holds no bindable field.
-
-## Next · Polishing pass over accepted calls
-
-- **The maintainer's review of every call accepted wholesale** (§15's header, the blanket acceptance).
-  The maintainer's to run; an answer that overturns a call goes into its entry.
-
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).
@@ -137,6 +136,18 @@ down to about 15–20% of the source, roughly 2.5–3.5 MB in place of 8.4 MB.
 - **Kit verbs in the command palette** (§15 D1011 (5)) — waits on the palette.
 - **Team publishing of kits, and servers** — undesigned (§15 D1010).
 - **Binding the other users of an extracted value** after *Extract into variable…* (§15 D1037, D1038).
+- **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
+  with a bindable field. The only one, `prefs::ExportPreset`, has none.
+
+## Later · Rendering and performance
+
+- **GPU device lost while zooming a component-heavy file, cause unmeasured** (§15 D992). The fx
+  textures are pooled since (D1003 (7)); whether that cured it is unconfirmed. Trigger: the
+  `GPU device lost (<reason>)` line in `ondin.log`.
+- **Loading a long chain of mains is super-linear** (§15 D416): 20,000 mains ≈200 s in debug vs ≈2 s
+  for 2,000, measured through a fixture that also builds and saves. Not in `component::reaches_itself`
+  or `io::schema`'s integrity pass; `variant::check`, `kit::check`, `variable::check` and
+  `style::check` are unread.
 
 ## Later · Code export (HTML/CSS, React, Vue)
 

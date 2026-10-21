@@ -42,7 +42,7 @@ variable*).
 | | Canvas | Layers panel |
 |---|---|---|
 | Target | what a left-click there would select (§2) | the row under the pointer |
-| Reaches a locked or hidden layer | no — hit testing skips both | yes, the only door that does |
+| Reaches a locked or hidden layer | no — hit testing skips both; a locked frame's name tag is the exception | yes |
 | *Paste* row | **Paste here**, at the pointer | **Paste**, as a sibling above the row |
 | *Rename* | opens the panel's field | yes |
 
@@ -55,7 +55,8 @@ variable*).
 - **C2** — A hit inside the selection keeps the selection whole; a hit outside replaces it with
   the hit. Same in the panel. `Shift`/`Alt` are ignored.
 - **C3** — Empty canvas opens the canvas menu (§6.1) and does not clear the selection.
-- **C4** — A locked layer has no canvas menu; the panel menu carries the full set, *Unlock*
+- **C4** — A locked layer has no canvas menu, except a locked frame through its name tag
+  (`app-selection.md`, *Locked layers*). The panel menu and the tag's carry the full set, *Unlock*
   included (§5.9).
 - **C5** — A frame is right-clickable where it is left-clickable: its name tag, its edge
   (`FRAME_EDGE_PICK_PX`, world AABB), or anywhere while empty. An occupied frame's interior passes
@@ -176,7 +177,7 @@ and *Duplicate as component* draw the filled hexagon.
 |---|---|---|
 | Hide / Show | `Ctrl+Shift+H` | label from the right-clicked layer's own visibility; never dims |
 | Lock / Unlock | `Ctrl+Shift+L` | label from the right-clicked layer's **own** flag; never dims |
-| Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer; live on a lock |
+| Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave present mode to rename"* in present mode, where the panel that holds the field is hidden; live on a lock |
 
 ### Navigate
 

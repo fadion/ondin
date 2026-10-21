@@ -709,7 +709,10 @@ never raw fields) on every instance of the main.
   (`nested_variant_state`, `nested_variant_reset`).
 - Across a swap, a shown copy's variant values carry **by property name** (`carried_target`); booleans
   and text keep the rewrite's name-path carry.
-- Open items are in `roadmap.md`'s *Next · Nested component properties*.
+- Only a main's author shows nested properties. A nested instance added inside an instance, not in
+  its main, has no slot and shows nothing on the outer card; it is edited by selecting it. Promoting
+  it waits on pushing an instance's changes to its main (`roadmap.md`, *Later*).
+- Open items are in `roadmap.md`'s *Now · Nested component properties*.
 
 ### Traps
 

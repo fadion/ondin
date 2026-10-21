@@ -1,21 +1,17 @@
 //! Shared chrome widgets (§9.2).
 //!
 //! The small vocabulary every panel is built from — cards, eyebrows, icon
-//! buttons, fields, segmented controls, colour ramps — so the Nocturne design
-//! tokens in `theme.rs` are applied in one place rather than re-spelled per
-//! panel. egui types stay confined to `ondin-app`; nothing here knows about the
-//! document.
+//! buttons, fields, segmented controls, colour ramps. Nothing here knows about
+//! the document.
 
 use crate::theme::{self, color, icon};
 use eframe::egui;
 
 /// A rotated coordinate frame on the screen: an origin and an angle.
 ///
-/// Chrome that has to line up with a rotated layer — the size badge and the
-/// lock on it — is laid out in the layer's own frame and mapped out to the
-/// screen at the end, rather than each piece doing its own trigonometry. egui
-/// paints in screen coordinates and only `TextShape` can rotate itself, so
-/// everything else (the pill, the lock) is built as geometry through here.
+/// Chrome that lines up with a rotated layer (the size badge and its lock) is laid
+/// out in the layer's own frame and mapped to the screen here, because egui only
+/// rotates `TextShape`.
 #[derive(Clone, Copy)]
 pub struct Frame2 {
     pub origin: egui::Pos2,
@@ -43,28 +39,16 @@ impl Frame2 {
 
     /// A screen point, in this frame's coordinates.
     ///
-    /// **Measurement only, and only from tests, since §15 D327.** The size badge
-    /// used to be *placed* by measuring a layer's outline in a rotated frame and
-    /// hanging the pill under the resulting box; it now hangs off the outline's
-    /// lowest edge directly, so nothing in the chrome projects into a frame any
-    /// more — it only ever builds geometry out of one (`to_screen`,
-    /// `rounded_rect`). What still wants this is the badge tests, which measure the
-    /// outline in the badge's own frame to say that the frame is a whole number of
-    /// quarter turns off the shape's.
+    /// Measurement only, from the badge tests, which check the frame is a whole
+    /// number of quarter turns off the shape's.
     #[cfg(test)]
     pub fn to_local(self, screen: egui::Pos2) -> egui::Pos2 {
         let d = screen - self.origin;
         egui::pos2(d.dot(self.x), d.dot(self.y))
     }
 
-    /// The bounding box of `points` **measured in this frame** — an oriented
-    /// bounding box, expressed in frame coordinates.
-    ///
-    /// Test-only for `Frame2::to_local`'s reason, and worth one more sentence:
-    /// this is the very shape that could not hold a *sheared* outline, since no
-    /// rotation makes a parallelogram square-on and the box is therefore looser than
-    /// the shape at every non-zero lean. It measures a turned rectangle exactly,
-    /// which is all the tests ask of it.
+    /// The oriented bounding box of `points`, in frame coordinates. Exact for a
+    /// turned rectangle, loose for a sheared outline; test-only.
     #[cfg(test)]
     pub fn bounds_of(self, points: &[egui::Pos2]) -> egui::Rect {
         egui::Rect::from_points(&points.iter().map(|p| self.to_local(*p)).collect::<Vec<_>>())
@@ -73,14 +57,12 @@ impl Frame2 {
     /// A rounded rectangle of `size`, centred on the frame's origin, as screen
     /// points ready for `Shape::convex_polygon`.
     ///
-    /// A polygon rather than a `RectShape`, because egui's rect shapes are
-    /// axis-aligned and there is no way to turn one.
+    /// A polygon rather than a `RectShape`, which is axis-aligned.
     pub fn rounded_rect(self, size: egui::Vec2, radius: f32) -> Vec<egui::Pos2> {
         const STEPS: usize = 4;
         let (hw, hh) = (size.x * 0.5, size.y * 0.5);
         let r = radius.min(hw).min(hh).max(0.0);
-        // Corner centres, clockwise from the top-left, each with the quarter
-        // turn its arc sweeps through.
+        // Corner centres, clockwise from the top-left, with each arc's start angle.
         let corners = [
             (-hw + r, -hh + r, std::f32::consts::PI),
             (hw - r, -hh + r, -std::f32::consts::FRAC_PI_2),
@@ -106,8 +88,7 @@ pub fn panel_frame(fill: egui::Color32, mx: i8, my: i8) -> egui::Frame {
 }
 
 /// The floating ground a dropdown menu sits on: the card's fill and hairline
-/// with a deeper shadow, because a menu is above everything rather than in the
-/// column with the panels. `pad` is its inner margin.
+/// with a deeper shadow. `pad` is its inner margin.
 pub fn menu_frame(pad: f32) -> egui::Frame {
     egui::Frame::NONE
         .fill(color::CARD)
@@ -123,9 +104,8 @@ pub fn menu_frame(pad: f32) -> egui::Frame {
 }
 
 /// The "heard you, working on it" pulse, as an opacity `t` seconds after the
-/// click (§15 D1027, the maintainer's shape): down to 50% over [`PULSE_RAMP`],
-/// held for [`PULSE_HOLD`], back to whole, held, and again. It starts on a ramp
-/// rather than a step, so a load that lands in a frame or two barely flickers.
+/// click: down to 50% over [`PULSE_RAMP`], held for [`PULSE_HOLD`], back to
+/// whole, held, and again. It starts on a ramp so a quick load barely flickers.
 pub(crate) fn pulse_alpha(t: f32) -> f32 {
     let period = 2.0 * (PULSE_RAMP + PULSE_HOLD);
     let t = t.max(0.0) % period;
@@ -149,86 +129,48 @@ pub(crate) const PULSE_HOLD: f32 = 0.2;
 /// One row of a dropdown menu: an icon, a label, and a hover ground across the
 /// whole width.
 ///
-/// Hand-painted rather than `ui.selectable_label`, for the same reason the
-/// layer rows are: the design's row is a fixed 26px with the glyph on a
-/// baseline the label shares, and egui's button padding puts neither where the
-/// design has them.
+/// Hand-painted rather than `ui.selectable_label`: the design's row is a fixed
+/// 26px with the glyph and label on a shared baseline.
 ///
-/// **Returns the `Response`, not a `bool`.** It read `.clicked()` itself until the
-/// image popover wanted a row that says *why* it is unavailable: the row fills its
-/// whole scope and wins the hit test, so a tooltip hung on a wrapping `ui.scope`
-/// never fires while the row is live — and one hung *inside* a scope that has been
-/// `disable()`d never fires either, because a disabled `Ui` reports no hover. The
-/// only place a tooltip works in both states is on this response, so it has to come
-/// back out. Callers that want the old shape add `.clicked()`.
+/// Returns the `Response` because a tooltip works in both the live and disabled
+/// states only when hung on it: a wrapping `ui.scope` loses the hit test and a
+/// `disable()`d `Ui` reports no hover.
 pub fn menu_item(ui: &mut egui::Ui, glyph: &str, text: &str, height: f32) -> egui::Response {
     menu_row(ui, MenuRow::new(glyph, text), height)
 }
 
 /// One row of a menu, in the full shape a context menu needs
-/// (`docs/context-menus.md` §8) — everything [`menu_item`] draws, plus an accelerator,
-/// a checked state and a destructive tint.
+/// (`docs/context-menus.md` §8): [`menu_item`] plus an accelerator, a checked
+/// state and a destructive tint.
 ///
-/// **One row type for both surfaces rather than a second one for the new menu.**
-/// The top bar's dropdowns and the context menus are two renderings of one
-/// registry (`docs/context-menus.md` §1), and a row that is 26pt in one door and 24 in
-/// the other is the thing that makes two menus read as two apps. So `menu_item`
-/// is now this function with everything optional left off, and the built
-/// dropdowns are pixel-identical to what they were.
+/// One row type serves the top bar's dropdowns and the context menus, so the two
+/// surfaces cannot drift apart in size.
 #[derive(Clone, Copy)]
 pub struct MenuRow<'a> {
     pub glyph: &'a str,
     pub label: &'a str,
-    /// The chord this row would also answer to, right-aligned in
-    /// [`theme::text::FAINT`] — the export's `text 38%`, which is that constant
-    /// exactly. `None` for a row with no chord, and the column costs nothing when
-    /// every row in a menu leaves it empty.
+    /// The chord this row answers to, right-aligned in [`theme::text::FAINT`].
     pub accel: Option<&'a str>,
-    /// `Some` makes this a **checkable** row — *Clip content*, the four boolean
-    /// operations, the text sizing modes.
-    ///
-    /// **The glyph column carries the state; there is no separate tick column.**
-    /// [`menu_check`] reserves 13pt for a tick and has no glyph at all, which
-    /// works for the View menu because its rows are switches and nothing else.
-    /// A context menu's checkable rows are *also* the rows whose glyph is most
-    /// worth having — `layers::op_glyph`'s four boolean marks are the same
-    /// pictures the inspector's dropdown shows — and a row cannot afford both
-    /// columns at 210pt. So a checked row draws its own glyph in
-    /// [`color::ACCENT`], which is where `menu_check` puts its tick, and keeps
-    /// `menu_check`'s second signal too: the label goes full strength on and
-    /// muted off. Two channels for one bit, exactly as the View menu has.
+    /// `Some` makes this a checkable row. The glyph column carries the state (the
+    /// glyph turns [`color::ACCENT`], the label full strength) with no separate
+    /// tick column, as [`menu_check`] has.
     pub checked: Option<bool>,
-    /// A row that destroys something: [`theme::color::DANGER`] on the glyph and
-    /// the label, and the accelerator at a little over half of it, over the
-    /// **ordinary** neutral hover ground (`design/Editor.dc.html`). The ground
-    /// stays neutral on purpose — the row is already the only red thing in the
-    /// menu, and a red ground under the pointer reads as a warning about the
-    /// hover rather than about the click.
+    /// A row that destroys something: [`theme::color::DANGER`] on glyph and label
+    /// over the ordinary neutral hover ground, so the red reads as a warning about
+    /// the click rather than the hover.
     pub danger: bool,
-    /// A row that belongs to this target but cannot run now: dimmed, no hover
-    /// ground, and not clickable. **The caller still owes it a sentence saying
-    /// why** — and, because a row drawn this way is not a disabled `Ui` and not a
-    /// `scope`, that sentence can hang off the returned `Response` directly. See
-    /// `inspector::menu_action` for the two spellings that silently do not work.
+    /// A row that cannot run now: dimmed, no hover ground, not clickable. The
+    /// caller owes it a tooltip saying why, hung off the returned `Response` (see
+    /// `inspector::menu_action` for the spellings that do not work).
     pub enabled: bool,
-    /// Who decides whether this row wears the ground: the pointer, or the caller.
-    ///
-    /// `None` is the default and means *the pointer* — hover paints it, which is
-    /// what every dropdown in the app wants. `Some` is a **keyboard highlight**
-    /// (`docs/context-menus.md` §8): a context menu being driven by `↑`/`↓` passes
-    /// `Some(true)` on the highlighted row and `Some(false)` on every other, so
-    /// the pointer resting over a *different* row cannot paint a second ground.
-    /// One highlight, always, and by construction rather than by a rule at the
-    /// call site — the first pointer move clears the keyboard's and hands the
-    /// channel back.
-    ///
-    /// A highlighted row is drawn *identically* to a hovered one, ground and text
-    /// tiers alike. Two pictures for one state is how a menu comes to look like
-    /// two menus.
+    /// Who decides whether this row wears the ground. `None` means the pointer.
+    /// `Some` is a keyboard highlight (`docs/context-menus.md` §8): the driven menu
+    /// passes `Some(true)` on one row and `Some(false)` on the rest, so the pointer
+    /// cannot paint a second ground. A highlighted row draws identically to a
+    /// hovered one.
     pub highlight: Option<bool>,
-    /// Paint the **filled** hexagon ([`paint_hexagon_filled`]) in the glyph's
-    /// place, in the glyph's colour — a main's mark (§15 D981, D985), which the
-    /// bundled Regular font has no glyph for.
+    /// Paint the filled hexagon ([`paint_hexagon_filled`]) in the glyph's place, a
+    /// main's mark, which the bundled Regular font has no glyph for.
     pub filled_hexagon: bool,
 }
 
@@ -265,9 +207,8 @@ impl<'a> MenuRow<'a> {
         self.enabled = enabled;
         self
     }
-    /// Take the ground off the pointer and give it to the caller. See
-    /// [`Self::highlight`]; pass this on **every** row of a menu once any row has
-    /// it, or the pointer paints a second ground beside the keyboard's.
+    /// Give the ground to the caller (see [`Self::highlight`]); pass it on every
+    /// row of a menu once any row has it.
     pub fn highlight(mut self, on: bool) -> Self {
         self.highlight = Some(on);
         self
@@ -275,26 +216,9 @@ impl<'a> MenuRow<'a> {
 }
 
 pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Response {
-    // 🚨 **A dimmed row senses nothing, and this comment said it won the hit
-    // test** (§15 D688, `[S18.1-L3-08]`). It read *"`Sense::hover()` … it must
-    // still win the hit test so the tooltip explaining why has somewhere to
-    // hang"*, and a zero-sense widget does **not**: egui's `hit_test_on_close`
-    // filters candidates on `senses_click()` / `senses_drag()`, so such a widget is
-    // never in `hits.click` or `hits.drag` at all. `Sense::hover()` **is**
-    // `Sense::empty()` — `const HOVER = 0` — which is why the sentence could sit
-    // here being false with everything working.
-    //
-    // ⚠️ **What the tooltip actually rests on is a *conditional* guarantee.** egui
-    // grants hover to a non-interactive widget only while it sits **above** the top
-    // interactive widget under the pointer (`interaction.rs`'s
-    // `is_on_top_of_the_interactive_widget`). In a menu `Area` with nothing
-    // interactive beneath the row, that holds. It is exactly the condition
-    // `inspector::menu_action` breaks on purpose by putting a second claimant over
-    // the same rectangle — so the two are one rule read from opposite ends, and
-    // this one is the lucky end.
-    //
-    // Allocating nothing at all is still what leaves a dimmed row silently
-    // unexplainable, which is the trap `menu_action` documents.
+    // A dimmed row senses nothing and does not win the hit test. Its tooltip works
+    // only because egui grants hover to a non-interactive widget sitting above the
+    // top interactive one, which holds in a menu `Area` with nothing beneath the row.
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
         if row.enabled {
@@ -303,30 +227,18 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             egui::Sense::empty()
         },
     );
-    // The keyboard's answer wins over the pointer's when there is one, which is
-    // what keeps a menu to one highlight — see [`MenuRow::highlight`]. Still
-    // `&& enabled`, so a row that went dim under a stale highlight paints as the
-    // dim row it now is rather than as a live one.
+    // The keyboard's answer wins over the pointer's; `&& enabled` keeps a stale
+    // highlight off a row that went dim.
     let hovered = row.highlight.unwrap_or_else(|| resp.hovered()) && row.enabled;
     let on = row.checked == Some(true);
     let p = ui.painter();
     if hovered {
         p.rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(20));
     }
-    // Three tiers, and the third is **disabled** rather than off: an unavailable
-    // row is fainter than a resting one, which is fainter than one that is on or
-    // under the pointer.
-    //
-    // **A resting *unticked* row is deliberately the same as a plain action row**,
-    // which is why there is no arm for it. Off is not a state a menu row has to
-    // announce — clicking either one does something, and the row that has news is
-    // the one that is *on*. Two arms painting the same colours said the opposite,
-    // and read as an intent to differ that nobody had.
+    // Three tiers: disabled, resting, on or hovered. A resting unticked row is
+    // deliberately a plain action row, so it has no arm.
     let (glyph_col, label_col, accel_col) = match () {
-        // The whole triple moved down with `text::DISABLED` rather than just its
-        // glyph: the three keep their internal ladder (glyph brightest, then
-        // label, then accelerator), and putting the glyph on 79 while the label
-        // stayed on 80 would have collapsed the top two into one.
+        // The whole triple moves down together to keep the glyph/label/accel ladder.
         _ if !row.enabled => (
             theme::text::DISABLED,
             theme::color::text_a(65),
@@ -341,11 +253,8 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         _ if hovered => (color::TEXT, color::TEXT, theme::text::FAINT),
         _ => (theme::text::DIM, theme::text::MUTED, theme::text::FAINT),
     };
-    // **No glyph, no glyph column** (§15 D993): a row handed `""` sets its label
-    // at the row's own inset instead of leaving 24pt of blank where a glyph would
-    // go. Only the small inline popups do that — the instance card's resets, a
-    // variant value's menu — since a context menu's rows all carry one (`menu`'s
-    // registry test), so no menu mixes the two and a column of labels stays one x.
+    // No glyph, no glyph column: a row handed `""` sets its label at the row's own
+    // inset. Only the small inline popups do this; no menu mixes the two.
     let bare = row.glyph.is_empty() && !row.filled_hexagon;
     let glyph_at = egui::pos2(rect.left() + 8.0 + 7.5, rect.center().y);
     if row.filled_hexagon {
@@ -373,12 +282,9 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         }
         None => 0.0,
     };
-    // **Fitted to the row, cut with an ellipsis at its end** (`[X11.2-L1-04]`):
-    // *Reset ‹layer›* and *Reset ‹property›* are the first labels built from the
-    // user's text, and a long name ran past the row's edge and off the 210pt card
-    // over whatever lay beside it. Every other label is a `&'static str` sized by
-    // hand against the card and is never cut; the verb comes first, so the cut
-    // falls on the name, and the full label is the row's tooltip.
+    // Fitted to the row and cut with an ellipsis: labels built from the user's
+    // text (`Reset ‹layer›`) would otherwise run off the card. The verb comes
+    // first so the cut falls on the name; the full label is the tooltip.
     let mut job = egui::text::LayoutJob::single_section(
         row.label.to_owned(),
         egui::TextFormat::simple(egui::FontId::proportional(11.5), label_col),
@@ -406,57 +312,31 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
 }
 
 /// The air between a menu row's label and its accelerator, which a fitted label
-/// ([`menu_row`]) stops short of. **Small, and measured**: *Create component*'s
-/// label already sits under 6pt from its `Ctrl+Alt+K`, so 6 cut it — the
-/// registry's every fixed label is asserted whole at this value
+/// ([`menu_row`]) stops short of. Kept small so every fixed label stays whole
 /// (`a_long_reset_label_is_cut_inside_the_row_and_fixed_labels_are_whole`).
 const MENU_ACCEL_GAP: f32 = 2.0;
 
 /// The total height one separator occupies — the rule plus its air, both sides.
 ///
-/// **A constant because two places need it and only one of them draws it.**
-/// [`menu_sep`] allocates it; `menu::height` adds it up *before* the menu is shown,
-/// because `menu_place` has to flip and clamp against a size it does not yet have
-/// on screen. Those were two hand-copied `9.0`s a file apart until 2026-08-20, with
-/// nothing to keep them equal and no symptom if they drifted except a menu opened
-/// near an edge landing in the wrong place — which is the one state nobody
-/// exercises on purpose. `a_menus_computed_height_is_the_height_it_paints` is the
-/// other half of the guarantee.
+/// [`menu_sep`] allocates it and `menu::height` sums it before the menu is shown,
+/// so `menu_place` can flip and clamp; `a_menus_computed_height_is_the_height_it_paints`
+/// pins the two together.
 pub const MENU_SEP_H: f32 = 1.0 + SEP_AIR * 2.0;
 
-/// [`menu_frame`]'s border, on **every** side.
+/// [`menu_frame`]'s border, on every side.
 ///
-/// **Named because it is a size and was only ever treated as a colour.** A `Frame`'s
-/// stroke grows its outer rect, so a menu drawn in one paints `2 * MENU_BORDER`
-/// wider and taller than its content plus its margins — and `menu::height` did not
-/// count it, so `menu_place` flipped and clamped a menu against a box two points
-/// short on both axes and let it hang off the edge it exists to keep it inside
-/// (§15 D263). Nothing about the ink moved when that was fixed; only the number
-/// handed to the placer.
-///
-/// **Since 2026-08-23 the ink moves too** (§15 D307): a card's named width is the
-/// width it *paints*, so the border comes off the content rather than being added
-/// outside it. [`menu_inner_w`] is where that subtraction lives.
+/// A `Frame`'s stroke grows its outer rect, so a card paints `2 * MENU_BORDER`
+/// wider and taller than content plus margins; `menu::height` counts it, and a
+/// card's named width is the width it paints ([`menu_inner_w`]).
 pub const MENU_BORDER: f32 = 1.0;
 
 /// The width to give the `Ui` inside a [`menu_frame`] card that is to paint `card`
 /// points wide, with `pad` of inner margin.
 ///
-/// **A function because the same arithmetic was written at eight call sites and
-/// was wrong at all of them in the same direction.** Every popover in the app is
-/// `menu_frame(pad)` with `set_width(w - pad * 2.0)` inside it, so every one of
-/// them painted `w + 2` — the context menu 212 where `docs/context-menus.md` §8
-/// draws 210, the top bar's dropdowns 152 and 162 against 150 and 160, and every
-/// `POPOVER_W` card 274 against 272. The design's numbers are the **outer** card,
-/// measured off `design/Editor.dc.html`; the app's were the content box, and the
-/// two had been read as the same number since the first menu (§15 D307).
-///
-/// The point of it being one function rather than a corrected constant is that
-/// the placers read the same value: `menu_place`, [`OndinApp::popover_left`] and
-/// the right-aligning anchors are all handed the card's width, and they were each
-/// two points short of the card until the two meanings were made one. `menu::height`
-/// still adds [`MENU_BORDER`] itself, because a height is summed from its rows
-/// rather than named by the design.
+/// The design's widths are the outer card, so the border and padding come off the
+/// content here; `menu_place`, [`OndinApp::popover_left`] and the right-aligning
+/// anchors are all handed the same outer width. `menu::height` adds
+/// [`MENU_BORDER`] itself, because a height is summed from its rows.
 ///
 /// [`OndinApp::popover_left`]: crate::app::OndinApp::popover_left
 pub const fn menu_inner_w(card: f32, pad: f32) -> f32 {
@@ -464,57 +344,16 @@ pub const fn menu_inner_w(card: f32, pad: f32) -> f32 {
 }
 
 /// The air above and below a separator's rule.
-///
-/// **3, down from 4 on 2026-08-20** (§15 D263), as the second half of the compaction
-/// that took two points off every row (§15 D262). Asked for once the row change had
-/// been seen on screen.
-///
-/// **The smaller half, against the argument that sold it.** A primitive's menu spends
-/// 63pt on its 7 hairlines, which reads like more than two and a half rows — but what
-/// a separator can give up is the 2pt of air, so seven of them yield 14 where 21 rows
-/// at 2pt each yielded 42. *A term's total size is not the size of the cut it can
-/// stand.*
 const SEP_AIR: f32 = 3.0;
 
 /// The hairline between two groups of a menu (`docs/context-menus.md` §8).
 ///
-/// **1pt of `text_a(20)` with [`SEP_AIR`] either side** — the export's `text 8%`
-/// and `margin: 4px 0`, and *not* the `menu_frame` stroke value the spec first
-/// assumed; 20/255 is 7.8%, which is the same value the hover ground uses. Half
-/// a dozen groups separated by spacing alone read as one long list, which is the
-/// whole reason this exists.
+/// One point of `text_a(20)` with [`SEP_AIR`] either side, drawn at whole device
+/// pixels so it never lands on a half pixel. At fractional scales the rule is
+/// slightly heavier than a point rather than blurred.
 ///
-/// **The rule stays 1pt and only the air moved.** A hairline is the thing being
-/// seen; the air is what it costs, and a separator that reads as a *group* boundary
-/// needs to be visible rather than surrounded.
-///
-/// Drawn at whole device pixels, because a 1pt rule landing on a half pixel is
-/// the one width where the rounding shows as a colour change rather than a
-/// position change.
-///
-/// 🚨 **A *nominal* point snapped to whole device pixels, and this used to be one
-/// device pixel full stop** (§15 D721, `[S18.1-L3-04]`). The height was
-/// `1.0 / ppp` **points**, so the two sentences above — *"1pt of `text_a(20)`"*
-/// and *"the rule stays 1pt"* — were true only at 100%. Measured out of
-/// `FullOutput::shapes`: **1.0 pt at ppp 1.0, 0.667 at 1.5, 0.5 at 2.0.** This
-/// was the one hairline in the chrome denominated in device pixels; `MENU_BORDER`
-/// is a 1-*point* stroke around the very frame this sits in, 5pt away, and so are
-/// `field_frame`'s, `button_face`'s, `SEGMENT_BORDER` and `inspector::popup_rule`.
-/// At 200% a group rule was **half** the weight of its own card's border.
-///
-/// ⚠️ **The snapping was never the defect and is kept.** `round(ppp).max(1.0)`
-/// device pixels is what those two sentences mean *together* — a rule that is
-/// about a point, and never lands on a fraction of a pixel. At ppp 1.5 that is
-/// 1.333pt rather than 1.0; painting exactly 1.0pt there covers 1.5 device rows,
-/// which is precisely the smear the paragraph above exists to avoid. **A third of
-/// a point heavy and crisp beats exact and blurred**, and it errs toward the rule
-/// being seen, which is the whole reason a separator is here rather than more air.
-///
-/// ⚠️ **[`MENU_SEP_H`] does not move**, and must not: `menu::height` sums it before
-/// the menu is on screen so `menu_place` can flip and clamp. The rule growing to
-/// 1.333pt stays well inside the `1.0 + SEP_AIR * 2.0` already allocated —
-/// `the_rule_still_fits_the_height_the_menu_reserved_for_it` is the assertion that
-/// says so.
+/// [`MENU_SEP_H`] does not change with it; the rule stays inside the reserved
+/// height (`the_rule_still_fits_the_height_the_menu_reserved_for_it`).
 pub fn menu_sep(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), MENU_SEP_H),
@@ -537,35 +376,13 @@ pub fn menu_sep(ui: &mut egui::Ui) {
 /// Where a menu of `size` opened at `at` actually goes, so that all of it stays
 /// on screen (`docs/context-menus.md` §8).
 ///
-/// **`egui::Area::fixed_pos` does not flip and does not clamp**, so a menu opened
-/// near the bottom or the right of the viewport simply hangs off it, with the
-/// rows that matter most — Delete is last — the ones that go missing.
-///
-/// Flip first, then **round, then clamp**; and the order is the whole of the
-/// function. Flipping is what a menu near an edge wants (it opens up and to the
-/// left, hinged on the pointer, which is what every platform does); clamping is
-/// the answer for a menu *taller than the viewport*, where flipping only moves
-/// which end is lost.
-///
-/// 🚨 **Clamping comes last, and this doc said the opposite twice** (§15 D666,
-/// `[S18.1-L3-07]`) — *"flip first, then clamp, then round"* and *"**rounding
-/// comes last**"*, in a function whose own next sentence says the order is the
-/// whole of it. The code has always been `snap(pos).clamp(…)`.
-///
-/// **And the code is right, which is why this is a doc fix.** Rounding a
-/// *clamped* value can push it back out by up to half a pixel — and half a pixel
-/// past the right edge is a menu whose last column is cut, where half a pixel off
-/// the pixel grid is a hairline that looks soft. **The clamp has to have the last
-/// word**, because staying on screen is the thing this function exists for and
-/// crispness is the thing it does on the way. `a_menu_is_clamped_after_it_is_
-/// rounded_and_not_before` is what pins that, and it is the one input where the
-/// two orders differ.
+/// `egui::Area::fixed_pos` neither flips nor clamps. Flip first (a menu near an
+/// edge opens up and to the left), then round, then clamp: the clamp has the last
+/// word because rounding a clamped value can push it half a pixel off screen
+/// (`a_menu_is_clamped_after_it_is_rounded_and_not_before`).
 pub fn menu_place(ctx: &egui::Context, at: egui::Pos2, size: egui::Vec2) -> egui::Pos2 {
-    // `content_rect`, not `viewport_rect`: the difference is the strip an OS
-    // status bar or a notch may be covering, and a menu row hidden under one is
-    // hidden just as thoroughly as a row off the bottom edge. (It is also what
-    // egui 0.35 renamed `screen_rect` into, which is the name `docs/context-menus.md`
-    // §10 uses.)
+    // `content_rect`, not `viewport_rect`: it excludes the strip an OS status bar
+    // or notch may cover.
     let screen = ctx.content_rect();
     let mut pos = at;
     if pos.x + size.x > screen.right() {
@@ -586,11 +403,8 @@ pub fn menu_place(ctx: &egui::Context, at: egui::Pos2, size: egui::Vec2) -> egui
 /// screen, and above the field when below has no room — then clamped by
 /// [`menu_place`].
 ///
-/// ⚠️ **Not [`menu_place`] at the field's corner** (§15 D1084). That function
-/// places a menu at a *point* and flips it to the point's other side, which for
-/// a context menu is the pointer's left; for a list anchored on a field it put
-/// the list one list-width left of the field's left edge — in the inspector,
-/// out over the canvas and away from the field it belongs to.
+/// Not [`menu_place`] at the field's corner: that flips to the point's other side,
+/// which put a field's list one list-width left of the field.
 pub fn dropdown_place(
     ctx: &egui::Context,
     under: egui::Rect,
@@ -609,39 +423,22 @@ pub fn dropdown_place(
     menu_place(ctx, egui::pos2(x, y), size)
 }
 
-/// Height of a top-bar dropdown's head, and so of its hit target. The design's
-/// control height (its undo/redo squares are 26×26), which is also comfortably
-/// more than the 16pt glyph and 12pt caret inside it.
+/// Height of a top-bar dropdown's head, and so of its hit target: the design's
+/// control height.
 const HEAD_H: f32 = 26.0;
 
-/// Empty space a head keeps on each side of its content, so it occupies the same
-/// optical box an [`icon_button`] does.
-///
-/// `(HEAD_H - 16) / 2`: the top bar's icon buttons are 26pt boxes around 16pt
-/// glyphs, so five points of every one of them is already empty. A head used to
-/// allocate its galleys and nothing else, which meant that at the *same*
-/// `item_spacing` its mark sat five points closer to whatever was beside it than
-/// an icon button's glyph did. In a row that alternates the two — undo, redo, a
-/// rule, the View and Snap marks, the zoom readout — that reads as unequal
-/// spacing, and it is unequal: the gaps were identical and the *ink* was not
-/// (§15 D44). Padding the head is what makes the two kinds of control
-/// interchangeable in a cluster, and it widens the hit target the same way.
+/// Empty space a head keeps on each side of its content, `(HEAD_H - 16) / 2`, so
+/// it occupies the same optical box an [`icon_button`] does and the two space
+/// evenly in one cluster.
 pub(crate) const HEAD_PAD: f32 = 5.0;
 
 /// The head of a top-bar dropdown — a mark, `gap` points, then a caret —
-/// sensed as **one** rect. Lit like an [`icon_button`] under the pointer, and
-/// held lit while `open` says its menu is up (§15 D963).
+/// sensed as one rect. Lit like an [`icon_button`] under the pointer, and held
+/// lit while `open` says its menu is up.
 ///
-/// Hand-painted, rather than two `ui.label`s with their responses unioned. That
-/// is what this replaced, and it was clickable only in the empty band *above and
-/// below* the glyphs: the top bar centres its row, so the unioned rect was the
-/// bar's full height, but a `label` is a registered widget and wins the hit test
-/// over a rect that merely contains it. Every press that landed where the user
-/// was actually aiming — on the icon — went to the label and did nothing.
-///
-/// The same trap as §15 D35 wearing different clothes: two things claiming one
-/// region, and the one that looks clickable losing. The fix is the same in
-/// spirit — have only one claimant.
+/// Hand-painted rather than two unioned `ui.label`s: a label is a registered
+/// widget and wins the hit test over the rect that merely contains it, so presses
+/// on the icon would go to the label.
 pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) -> egui::Response {
     let lay = |ui: &egui::Ui, text: egui::RichText| {
         egui::WidgetText::from(text).into_galley(
@@ -664,23 +461,13 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
         ),
         egui::Sense::click(),
     );
-    // Vertically centred rather than baseline-aligned: the two are different
-    // sizes and different fonts, and centring is what makes a glyph and the
-    // caret beside it read as one control.
+    // Centred rather than baseline-aligned: different sizes and fonts.
     let p = ui.painter();
     let at = |g: &std::sync::Arc<egui::Galley>, x: f32| {
         egui::pos2(x, rect.center().y - g.size().y / 2.0)
     };
-    // **The hover is `icon_button`'s, exactly** (§15 D963): the `HOVER` ground
-    // on the same 5-point radius and both marks brightened to `TEXT`. These
-    // heads sit in one cluster with undo, redo and Settings, which are icon
-    // buttons, and every control in the app answers the pointer — so a head
-    // that lit nothing read as the one control in the bar that was not one.
-    // The whole rect lights, mark and caret together, because it is one target.
-    //
-    // **And it stays lit while its menu is `open`**, the maintainer's ruling:
-    // the menu hangs off the head, and a head that went dark the moment the
-    // pointer moved down into its own menu read as having let go of it.
+    // The hover is `icon_button`'s, exactly, and it stays lit while its menu is
+    // `open`.
     let lit = open || resp.hovered();
     if lit {
         p.rect_filled(rect, egui::CornerRadius::same(5), theme::color::HOVER);
@@ -698,14 +485,10 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
     resp
 }
 
-/// A dropdown row that carries a checkmark — the View and Snap menus'
-/// (`design/Editor.dc.html`, the `viewMenuOpen` / `snapMenuOpen` blocks).
+/// A dropdown row that carries a checkmark, as in the View and Snap menus.
 ///
-/// The tick keeps its 13pt column whether or not it is showing, so the labels
-/// stay in one line down the menu instead of shuffling left as things are
-/// switched off. Off is also a *dimmer label*, not just a missing tick: the
-/// design draws it at 72% against full strength, which is what lets the state be
-/// read at a glance rather than by inspecting each row for a glyph.
+/// The tick keeps its 13pt column whether or not it shows, so labels stay in one
+/// line. Off is also a dimmer label (72%), so the state reads at a glance.
 pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool {
     use menu_check_row::{GAP, PAD_X, TICK_W};
 
@@ -750,8 +533,7 @@ mod menu_check_row {
 }
 
 /// The painted width a dropdown of [`menu_check`] rows needs so its widest
-/// label fits — `floor` or more, the row's inset on the right as on the left
-/// (§15 D1032). *Show status messages* ran past the View menu's fixed 160.
+/// label fits — `floor` or more, the row's inset on the right as on the left.
 pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f32) -> f32 {
     use menu_check_row::{GAP, PAD_X, TICK_W};
     let widest = labels
@@ -785,93 +567,50 @@ pub const EYEBROW_PT: f32 = 9.5;
 
 /// An inspector card — a surface-filled rounded box with padding.
 ///
-/// The inspector's cards float free over the canvas (no backdrop pane), so this
-/// ground is the only thing separating a panel from the artwork behind it: it
-/// is opaque on purpose, and carries a hairline and a drop shadow so the edge
-/// reads against light and dark artwork alike.
+/// Cards float over the canvas with no backdrop pane, so the ground is opaque and
+/// carries a hairline and a drop shadow to read against any artwork.
 pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     card_at(ui, add).0
 }
 
-/// The horizontal inner margin of a [`card`], and the width of the action icon
-/// a [`section_head`] can carry. Both are needed outside this pair to work out
-/// which part of a card belongs to the `+` rather than to the header.
+/// The horizontal inner margin of a [`card`], and the width of the action icon a
+/// [`section_head`] can carry.
 pub const CARD_MARGIN_X: f32 = 14.0;
 pub const HEAD_ACTION_W: f32 = 20.0;
 
 /// Empty space around a header's action icon that presses to the icon rather
 /// than to the header behind it.
 ///
-/// **A hit target, not a margin** — the glyph and its 20pt box stay exactly
-/// where the design puts them, and only the sensed rect grows. A `+` sitting in
-/// a row that toggles the whole panel is a 20pt square inside a 284pt target for
-/// the opposite action, and missing it by two points collapses the panel you were
-/// about to add a fill to. Which is worse than it sounds: the panel then has to be
-/// re-opened before the fill can be seen.
-///
-/// The header gives up the same band ([`section_head`]) rather than both claiming
-/// it. Overlapping targets do not share a press — either they fight over it or
-/// both take it, which here would add a fill *and* collapse the panel.
+/// A hit target, not a margin: only the sensed rect grows. The header gives up
+/// the same band ([`section_head`]), since overlapping targets would both take
+/// the press.
 pub const HEAD_ACTION_PAD: f32 = 6.0;
 
-/// The pitch between rows inside a card, and the one number a multi-row entry in
-/// one measures itself against.
+/// The pitch between rows inside a card, which multi-row entries (image fill,
+/// stroke pairs, sides rows) measure themselves against.
 ///
-/// Named rather than left as a literal in [`card_at`] because it is no longer only
-/// the card's business. Four places read it, and each one used to be a number of
-/// its own or an inheritance from whatever card it landed in: the card body, an
-/// image fill's two lines, a stroke's pair — with twice it between one stroke and
-/// the next — and the sides rows inside an expanded stroke. Four literals is how
-/// those come to disagree, and the disagreement is exactly what was reported ("the
-/// stroke 2-row line is not the same as the image").
-///
-/// **Read it, never copy it into a test fixture.** A fixture with its own literal
-/// keeps agreeing with itself while the row moves, which is how one assertion spent
-/// a revision describing a 6 for a row that painted 9 (§15 D180).
+/// Read it, never copy it into a test fixture, or the fixture keeps agreeing with
+/// itself while the row moves.
 pub const CARD_ROW_GAP: f32 = 9.0;
 
-/// How tall a control is. **Everywhere** — a panel's fields, a popover's, the
-/// colour picker's rows, the buttons beside any of them.
-///
-/// ⚠️ **The popovers were 26 and had an argument for it**: "shorter than the card's
-/// 28px fields, which is what keeps a popup of nine sections from towering over the
-/// panel it belongs to". Three constants said so in three files, and the mock draws
-/// it that way. What it costs is a popover hanging *beside* the card it opened from,
-/// at the same width, whose every control is two points shorter than the control
-/// that opened it — which is not a distinction the reader can attribute to anything
-/// (§15 D386). A tall popover is a tall popover; it already scrolls.
+/// How tall a control is, everywhere: panel fields, popover fields, the colour
+/// picker's rows, the buttons beside them.
 ///
 /// A [`segmented`] track paints [`SEGMENT_CELL_H`] plus two points at each end, so
-/// that is the number to hand it rather than this one.
+/// hand it that number rather than this one.
 pub const CONTROL_H: f32 = 28.0;
 
 /// What to hand [`segmented`] so its track paints [`CONTROL_H`] tall.
 ///
-/// The track adds its own two points of padding above and below the cells; the
-/// hairline round it comes out of the cells rather than out of the track
-/// ([`SEGMENT_BORDER`]), so it does not enter here.
+/// The track adds two points of padding above and below; its hairline comes out
+/// of the cells ([`SEGMENT_BORDER`]).
 pub const SEGMENT_CELL_H: f32 = CONTROL_H - 4.0;
 
-/// The gap between two controls **side by side** in one row — [`CARD_ROW_GAP`]'s
-/// horizontal twin, and the other half of the rhythm the Transform card sets.
+/// The gap between two controls side by side in one row — [`CARD_ROW_GAP`]'s
+/// horizontal twin, set by the gap between the Transform card's X and Y.
 ///
-/// **Seven, because that is what sits between X and Y**, which is the row the eye
-/// measures every other row against: it is the first pair of fields in the panel
-/// and the one that is on screen for every selection. Nothing else gets a vote.
-///
-/// Named for [`CARD_ROW_GAP`]'s reason, and the same drift had already happened
-/// here. Fifteen rows spelled it `6.0` while twenty-four spelled it `7.0` — the
-/// Fill and Stroke cards sat directly under Transform with a point less air
-/// between their columns, and the stroke's four-control line, the image edit
-/// rows, the effect rows and the dash popover all followed the narrower one
-/// (§15 D386).
-///
-/// ⚠️ **It is spelled twice per row and both have to move together.** A row that
-/// splits the card writes the gap once as `item_spacing.x` and again inside its
-/// own width arithmetic — `(available_width() - GAP) / 2.0` — and changing only
-/// the spacing pushes the last control a point past the card, at which point
-/// `Ui::horizontal` wraps it onto a line of its own. So grep the constant, not the
-/// number, when retuning this.
+/// A row that splits the card writes it twice, as `item_spacing.x` and in its own
+/// width arithmetic; changing only one wraps the last control onto its own line.
 pub const CARD_COL_GAP: f32 = 7.0;
 
 /// [`card`], plus the card's outer rect — what a caller needs to make the whole
@@ -889,10 +628,7 @@ pub fn card_at<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> (R
         .corner_radius(egui::CornerRadius::same(5))
         .inner_margin(egui::Margin::symmetric(CARD_MARGIN_X as i8, 12))
         .show(ui, |ui| {
-            // Every card spans the column. A `Frame` shrink-wraps its contents,
-            // so without this a panel whose widest row is narrow — Align's six
-            // buttons, a collapsed Effects header — comes out visibly narrower
-            // than its neighbours instead of lining up with them.
+            // A `Frame` shrink-wraps, so every card is told to span the column.
             ui.set_min_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = CARD_ROW_GAP;
             add(ui)
@@ -907,20 +643,19 @@ pub struct HeadClicks {
     pub toggled: bool,
     /// The optional right-hand action icon (`+` on Fill and Stroke).
     pub acted: bool,
-    /// The card-level reset a header with overrides offers on hover (§15 D981).
+    /// The card-level reset a header with overrides offers on hover.
     pub reset: bool,
-    /// The box the action icon paints — not its padded hit target — for a `+`
-    /// that opens a menu rather than acting at once: the Properties card's (§15
-    /// D1005).
+    /// The box the action icon paints, not its padded hit target, for a `+` that
+    /// opens a menu.
     pub action_rect: Option<egui::Rect>,
-    /// The `⋯` of a style slot's card (D1038 F8, §15 D1063).
+    /// The `⋯` of a style slot's card.
     pub more: bool,
     /// The box the `⋯` paints, for its menu to hang from.
     pub more_rect: Option<egui::Rect>,
 }
 
-/// A card's overrides, for its header (§15 D981): a dot and `count` at rest, and on
-/// hover the count turned into a card-level reset named `reset` — *Reset effects*.
+/// A card's overrides, for its header: a dot and `count` at rest, and on hover a
+/// card-level reset named `reset` (*Reset effects*).
 #[derive(Clone, Copy)]
 pub struct HeadOverrides<'a> {
     pub count: usize,
@@ -929,14 +664,10 @@ pub struct HeadOverrides<'a> {
 
 /// The control on the right of a [`section_head`], if it has one.
 ///
-/// The two fields below are two independent questions, which is why there are three
-/// constructors rather than two variants. `active` says whether it *stays* on: the
-/// `+` on Fill and Stroke does something and returns to rest, while Transform's
-/// crosshair is a **toggle** — and a toggle that looked identical to a one-shot
-/// button would be a switch with no visible position, so the tint is not decoration.
-/// `enabled` says whether it can be pressed at all, independently, because a control
-/// with nothing to act on has to stay in place and say so rather than disappear and
-/// take its slot with it (§15 D134). So a one-shot can be inert
+/// `active` and `enabled` are independent: `active` says whether it stays on (a
+/// toggle such as Transform's crosshair, tinted so its position is visible);
+/// `enabled` says whether it can be pressed, because a control with nothing to act
+/// on stays in place rather than vanish. So a one-shot can be inert
 /// ([`HeadAction::inert`]) and so can a toggle.
 #[derive(Clone, Copy)]
 pub struct HeadAction {
@@ -960,12 +691,8 @@ impl HeadAction {
         }
     }
 
-    /// A one-shot action with nothing to act on: dimmed, inert, and still there.
-    ///
-    /// Present rather than absent, which is the rule the whole inspector follows —
-    /// a control that vanishes takes its space with it and moves everything beside
-    /// it, so walking from one layer to a selection makes the panel jump. The
-    /// tooltip is where the reason goes.
+    /// A one-shot action with nothing to act on: dimmed, inert, and still there so
+    /// the panel does not jump. The tooltip carries the reason.
     pub fn inert(glyph: &'static str, tooltip: &'static str) -> Self {
         Self {
             glyph,
@@ -989,17 +716,12 @@ impl HeadAction {
 /// A collapsible section header: caret + eyebrow, and an optional right-hand
 /// action icon. `open` picks the caret direction.
 ///
-/// **The whole row toggles.** The caret is a 12px glyph and the label is nine
-/// and a half points of small caps; together they cover about a third of a
-/// 284px card, and the two thirds beside them looked every bit as much like a
-/// header while doing nothing at all. What the row does *not* claim is the
-/// action icon's corner, which keeps its own press.
+/// The whole row toggles, except the action icon's corner, which keeps its own
+/// press.
 ///
-/// `sense` is false when the caller is going to sense something larger that
-/// contains this row — a collapsed panel makes its whole card the target. Two
-/// overlapping click targets is not a way of being generous: either they fight
-/// over the press, or both take it and the panel toggles twice back to where it
-/// started.
+/// `sense` is false when the caller senses something larger that contains this
+/// row (a collapsed panel makes its whole card the target); overlapping targets
+/// would toggle twice.
 pub fn section_head(
     ui: &mut egui::Ui,
     label: &str,
@@ -1010,10 +732,9 @@ pub fn section_head(
     section_head_badged(ui, label, open, action, None, sense)
 }
 
-/// [`section_head`] with an optional **badge** at the right-hand end, left of the
-/// action icon if there is one — a small accent chip naming a state the card is
-/// in, the mockup's *absolute* on the Position card (`design/Layout Cards.dc.html`,
-/// screen 07; §15 D890). Inert: the row still toggles through it.
+/// [`section_head`] with an optional badge at the right-hand end, left of the
+/// action icon: a small accent chip naming a state the card is in. Inert: the row
+/// still toggles through it.
 pub fn section_head_badged(
     ui: &mut egui::Ui,
     label: &str,
@@ -1026,12 +747,9 @@ pub fn section_head_badged(
 }
 
 /// The width a header's `⋯` takes from the toggle target beside it, past the
-/// action icon's own — its box and the gap to the `+` (D1038 F8).
+/// action icon's own: its box and the gap to the `+`.
 pub const HEAD_MORE_W: f32 = HEAD_ACTION_W + HEAD_MORE_GAP;
-/// The gap between a header's `+` and its `⋯` boxes. It was F8's 10, then 15
-/// at the maintainer's look (§15 D1086), but neither was ever laid out — the
-/// boxes sat touching and only the hit pads took the gap. Laid out since §15
-/// D1091 at what the maintainer saw plus the 5 asked for twice.
+/// The laid-out gap between a header's `+` and `⋯` boxes.
 const HEAD_MORE_GAP: f32 = 5.0;
 
 /// The chip a header's reset takes on hover: its height, and its padding either
@@ -1039,20 +757,17 @@ const HEAD_MORE_GAP: f32 = 5.0;
 const HEAD_RESET_H: f32 = 18.0;
 const HEAD_RESET_PAD: f32 = 6.0;
 
-/// [`section_head_badged`] with the card's **overrides** (§15 D981): after the
-/// label, a 4-pt neutral dot and the count; with the pointer over the header, the
-/// count becomes a chip — *↺ Reset effects* — whose click is [`HeadClicks::reset`].
+/// [`section_head_badged`] with the card's overrides: after the label, a 4-pt
+/// neutral dot and the count; with the pointer over the header, the count becomes
+/// a chip (*↺ Reset effects*) whose click is [`HeadClicks::reset`].
 ///
-/// **The chip's slot is reserved at rest**, sized to the chip, so hovering changes
-/// what is drawn and nothing about where anything is — the mockup's *nothing
-/// moves*. Its click is registered **after** the header's own toggle target, which
-/// covers it, so the later and smaller target takes the press and a reset does
-/// not also fold the card.
+/// The chip's slot is reserved at rest so hovering moves nothing. Its click is
+/// registered after the header's toggle target, so the later, smaller target takes
+/// the press.
 ///
-/// `more` puts a `⋯` at the right-hand end, **always last** (D1038 F8, §15
-/// D1063), the action icon moving in beside it — the style slots' menu. Its click
-/// is [`HeadClicks::more`]; a card whose `+` is hidden passes `action: None` and
-/// the `⋯` keeps its corner, so nothing moves.
+/// `more` puts a `⋯` last at the right-hand end, the action icon moving in beside
+/// it. Its click is [`HeadClicks::more`]; a card with no `+` passes `action: None`
+/// and the `⋯` keeps its corner.
 #[allow(clippy::too_many_arguments)]
 pub fn section_head_full(
     ui: &mut egui::Ui,
@@ -1069,8 +784,7 @@ pub fn section_head_full(
     let mut chip: Option<egui::Rect> = None;
     let row = ui
         .horizontal(|ui| {
-            // Scoped, so the 6px pitch applies between the caret and the label
-            // and not to the gap before the action icon's layout.
+            // Scoped so the 6px pitch stops before the action icon.
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.label(theme::icon_text(
@@ -1126,18 +840,12 @@ pub fn section_head_full(
                         .on_hover_text("Styles");
                         clicks.more = resp.clicked();
                         clicks.more_rect = Some(resp.rect - pad);
-                        // **The gap is laid out, not only padded** (§15 D1091):
-                        // the pads are hit targets past the boxes and allocate
-                        // nothing, so this had cancelled the item spacing and
-                        // put the `+`'s box against the `⋯`'s, its right pad
-                        // reaching over the `⋯`'s left side.
+                        // The pads allocate nothing, so the gap is laid out here.
                         ui.add_space(HEAD_MORE_GAP - ui.spacing().item_spacing.x);
                     }
                     if let Some(a) = action {
-                        // Rightwards the pad runs all the way out to the card's
-                        // edge: the icon already sits against the content margin,
-                        // so that band is the card's own padding and nothing else
-                        // wants it — or, beside a `⋯`, half the gap to it.
+                        // Rightwards the pad runs out to the card's edge (or, beside
+                        // a `⋯`, half the gap to it).
                         let pad = egui::Margin {
                             left: HEAD_ACTION_PAD as i8,
                             // The rest of the gap the `⋯`'s half left, so an odd
@@ -1161,8 +869,7 @@ pub fn section_head_full(
                         )
                         .on_hover_text(a.tooltip);
                         clicks.acted = resp.clicked() && a.enabled;
-                        // The box it paints, not its padded hit target, so a menu
-                        // hung from it sits where the ⋯ button's does.
+                        // The painted box, so a menu hung from it sits where the ⋯'s does.
                         clicks.action_rect = Some(resp.rect - pad);
                     }
                     if let Some(word) = badge {
@@ -1174,14 +881,11 @@ pub fn section_head_full(
         .response;
 
     if sense {
-        // `horizontal` shrink-wraps, so on a header with no action icon the row
-        // ends at the label. Stretch it to the card's own width: that empty
-        // space to the right is most of what there is to aim at.
+        // `horizontal` shrink-wraps; stretch the target to the card's width.
         let mut hit = row.rect;
         hit.max.x = hit.max.x.max(ui.max_rect().right());
         if action.is_some() {
-            // The pad the action took on its left comes off here, so the two
-            // targets meet rather than overlap ([`HEAD_ACTION_PAD`]).
+            // The action's left pad comes off so the targets meet, not overlap.
             hit.max.x -= HEAD_ACTION_W + HEAD_ACTION_PAD;
         }
         if more {
@@ -1201,11 +905,8 @@ pub fn section_head_full(
     if let (Some(o), Some(slot)) = (overrides, chip) {
         let mut over = row.rect;
         over.max.x = over.max.x.max(ui.max_rect().right());
-        // **Only where the header is its own target (`sense`).** A collapsed card
-        // is one whole-card target registered after this row, which would cover
-        // the chip and take its press — the card expanding, nothing reset — so a
-        // collapsed card keeps its dot and count and offers the reset once open.
-        // Found by `arch-scribe` reading `panel_badged`.
+        // Only where the header is its own target (`sense`): a collapsed card's
+        // whole-card target would cover the chip and take its press.
         let hovered = sense && ui.rect_contains_pointer(over);
         let p = ui.painter();
         if hovered {
@@ -1255,19 +956,15 @@ pub fn section_head_full(
     clicks
 }
 
-/// D981's override mark: a **4-pt neutral dot** centred at `at` — on a card
-/// header, beside an overridden field's label, and in a list item's trailing slot.
-/// Neutral because the accent means *selected* (D981: component-ness is shape,
-/// never hue).
+/// The override mark: a 4-pt neutral dot centred at `at`, on a card header, beside
+/// an overridden field's label, and in a list item's trailing slot. Neutral
+/// because the accent means selected.
 pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
     p.circle_filled(at, 2.0, theme::text::MUTED);
 }
 
-/// The centre of every override dot a frame painted — `override_dot`'s 2-pt
-/// muted circle, and the layers panel's row dot, which is the same circle. The
-/// tests' one detector (`[X8.2-L3-01]`): it was written three times, and one copy
-/// had drifted to counting any 2-pt circle. Plain backticks: this item is
-/// `cfg(test)`, which the doc gate cannot see (§15 D319).
+/// The centre of every override dot a frame painted: `override_dot`'s 2-pt muted
+/// circle, which is also the layers panel's row dot. The tests' one detector.
 #[cfg(test)]
 pub(crate) fn painted_override_dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
     fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
@@ -1286,8 +983,8 @@ pub(crate) fn painted_override_dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
     v
 }
 
-/// A [`section_head_badged`] badge: an 18-pt accent chip, the mockup's — accent
-/// 18% under 10-pt accent-100 text, 6 pt either side, a 4-pt corner.
+/// A [`section_head_badged`] badge: an 18-pt accent chip, accent 18% under 10-pt
+/// accent-100 text, 6 pt either side, a 4-pt corner.
 fn head_badge(ui: &mut egui::Ui, word: &str) {
     let galley = ui.painter().layout_no_wrap(
         word.to_owned(),
@@ -1307,26 +1004,15 @@ fn head_badge(ui: &mut egui::Ui, word: &str) {
     );
 }
 
-/// Horizontal inset between a [`field_frame`]'s hairline and its contents.
-///
-/// Needed by name outside `field_frame` so a control at the very edge of a field
-/// can work out how much empty ground lies between it and the border — see
-/// [`grip`], which claims that band as part of its hit target.
+/// Horizontal inset between a [`field_frame`]'s hairline and its contents; [`grip`]
+/// claims that band as part of its hit target.
 pub const FIELD_PAD_X: f32 = 9.0;
 
-/// Largest stroke weight — and largest per-side width, and largest dash length or
-/// spacing — the fields accept, in world units.
+/// Largest stroke weight, per-side width, and dash length or spacing the fields
+/// accept, in world units.
 ///
-/// **A cap on the field, not on the model.** Any positive width is a legal
-/// `Stroke::width` and a file may hold one; what this bounds is what can be *typed
-/// or scrubbed*, because past a few thousand the number has stopped describing a
-/// stroke. An artboard is a few hundred units across, so ten thousand is already
-/// far beyond any drawing and leaves the digits comfortable room in the narrowest
-/// field that carries them.
-///
-/// It is not a layout allowance. `value_field` no longer grows with its contents
-/// at any magnitude (see the prefix-atom note there) — this is about the number
-/// meaning something.
+/// A cap on what can be typed or scrubbed, not on the model, which allows any
+/// positive width.
 pub const MAX_STROKE_WIDTH: f64 = 10_000.0;
 
 /// The recessed ground a value field or list row sits on.
@@ -1338,32 +1024,23 @@ pub fn field_frame() -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(FIELD_PAD_X as i8, 0))
 }
 
-/// Vertical space [`field_frame`]'s hairline adds *outside* its content.
+/// Vertical space [`field_frame`]'s hairline adds outside its content.
 ///
 /// egui counts a `Frame`'s stroke width as margin, so a frame told to hold 28px
-/// of content paints 30. Everything that has to line up with a field row has to
-/// subtract this, and two visible bugs came of not doing so: a `ui.horizontal`
-/// asks for `interact_size.y` (24) and the first over-tall row grows the row's
-/// `max_rect` to 30, after which `Align::Center` centres every *later* column's
-/// 28 in that 30 and lands it 1px low — which is what put Y below X, H below W
-/// and border-radius below opacity. The same 2px is why a 28px [`field_button`],
-/// which allocates exactly what it asks for, read as shorter than the 28px field
-/// beside it: the two disagreed about whether the 28 was inside or outside the
-/// hairline.
+/// of content paints 30. Anything that must line up with a field row subtracts
+/// this: a `ui.horizontal` grown to 30 by the first over-tall row centres later
+/// columns 1px low, and a 28px [`field_button`] reads shorter than the field
+/// beside it.
 pub const FIELD_BORDER_H: f32 = 2.0;
 
 /// A field row of exactly `size`: the recessed ground, laid out left to right
 /// and vertically centred.
 ///
-/// Spelled once on purpose. `Frame::show` *inherits* its parent's layout, so a
-/// row built straight out of [`field_frame`] inside a panel column silently
-/// stacks its contents down the page instead of across.
+/// `Frame::show` inherits its parent's layout, so a row built straight out of
+/// [`field_frame`] in a panel column would stack its contents down the page.
 ///
-/// `size.y` is the height of the **painted ground**, hairline included — what
-/// the eye measures a field by, and what a sibling button has to match. The
-/// content inside it is shorter by [`FIELD_BORDER_H`]; anything the closure
-/// allocates at full `size.y` grows the frame back and reintroduces the
-/// misalignment that constant describes.
+/// `size.y` is the painted ground, hairline included. The content is shorter by
+/// [`FIELD_BORDER_H`]; allocating the full `size.y` inside grows the frame back.
 pub fn field_row<R>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -1412,24 +1089,12 @@ pub fn field_row_active<R>(
 /// A single-line **text** field on the same ground as [`value_field`]: the
 /// recessed plate, the hairline, and [`FIELD_PAD_X`] of air at each end.
 ///
-/// **Free text is the one field shape this module did not have**, and the
-/// dashboard needed three of them — a project's name, the library's base folder,
-/// the rename box on a card. Each had been spelled as a bare `ui.add(TextEdit…)`,
-/// which is a different control in three ways at once: egui's own frame instead of
-/// the app's, its `Margin::symmetric(4, 2)` instead of the field inset, and a
-/// **focus ring in `Visuals::selection.stroke`** that nothing else in the app
-/// draws. Reported as *"all textboxes have no padding… we don't use the blue
-/// outline on focus anywhere"*, which is one cause with two symptoms.
+/// A bare `ui.add(TextEdit…)` differs from the app's fields in its frame, its
+/// inset and a focus ring in `Visuals::selection.stroke` nothing else draws.
 ///
-/// ⚠️ **`Frame::NONE` is what turns egui's ring off, and it also throws the inset
-/// away.** Two things hang off supplying a frame at all: the focused stroke is the
-/// *frame*'s (`text_edit::builder` paints `Visuals::selection.stroke` in place of
-/// `bg_stroke` when the field has focus, and skips both when the caller gave it a
-/// frame), and so is the text inset — `let frame = frame.unwrap_or_else(|| …
-/// inner_margin(margin))`, so `TextEdit::margin` is read *only* when no frame was
-/// passed. `.frame(NONE).margin(m)` therefore drops `m` silently, which is a trap
-/// worth a helper on its own: the padding here is [`field_row`]'s plate, and any
-/// caller that wants its own must put it in the frame.
+/// `Frame::NONE` turns egui's ring off but also drops `TextEdit::margin`, which is
+/// read only when no frame was passed; the padding here is [`field_row`]'s plate,
+/// and a caller wanting its own must put it in the frame.
 ///
 /// `size.y` is the painted ground, hairline included — see [`field_row`].
 pub fn text_field(
@@ -1442,8 +1107,7 @@ pub fn text_field(
     field_row(ui, size, |ui| {
         ui.add(
             egui::TextEdit::singleline(text)
-                // No margin of its own: the inset is the plate's, and a `margin`
-                // call here would be read by nothing (see above).
+                // The inset is the plate's; a `margin` here would be ignored.
                 .frame(egui::Frame::NONE)
                 .desired_width(f32::INFINITY)
                 .font(egui::FontId::proportional(pt))
@@ -1452,15 +1116,12 @@ pub fn text_field(
     })
 }
 
-/// Inner padding of a dropdown's search field ([`search_field`]). Its own
-/// numbers rather than `button_padding`, which is 4x2 across the chrome and
-/// belongs to controls a third this width.
+/// Inner padding of a dropdown's search field ([`search_field`]), its own rather
+/// than `button_padding`, which suits controls a third this width.
 pub const SEARCH_PAD: egui::Margin = egui::Margin::symmetric(7, 5);
 
-/// The search field at the head of a dropdown list — the font family list's,
-/// which every list that filters as you type now shares (§15 D1085): the
-/// theme's borderless ground and [`SEARCH_PAD`] inside it. A bare `TextEdit`
-/// there had egui's 4x2 margin, and the text sat on the ground's edge.
+/// The search field at the head of a dropdown list that filters as you type: the
+/// theme's borderless ground and [`SEARCH_PAD`] inside it.
 ///
 /// `width` is the field's outer width; the padding comes out of it.
 pub fn search_field(
@@ -1482,12 +1143,8 @@ pub fn search_field(
 /// How far a value field's number travels per point of pointer movement,
 /// as a multiple of the rate the field asks for.
 ///
-/// **The one number to turn when scrubbing feels wrong**, which is the whole reason
-/// it is a scale rather than 22 edited literals: the rates the fields ask for are
-/// *relative* to each other and were each chosen against the quantity they edit —
-/// a line height wants 0.02 where a coordinate wants 0.5 — so the ratios have to
-/// survive any change of overall sensitivity. Scaling them together is the only way
-/// to retune the feel without re-deciding twenty-two of those judgements.
+/// The one number to turn when scrubbing feels wrong: the fields' rates are
+/// relative to the quantity each edits, so they scale together.
 pub const SCRUB_SCALE: f64 = 0.5;
 
 /// A field's drag speed: the rate it asks for, at the current [`SCRUB_SCALE`].
@@ -1497,38 +1154,23 @@ pub fn scrub(base: f64) -> f64 {
 
 /// How a [`value_field`] behaves under the hand.
 ///
-/// The speed and the whole-units rule travel together because [`value_field`] needs
-/// both: the speed to turn a drag on the *prefix* into a change in the number, and
-/// the rule to round the result. Left at the call site as a `DragValue::speed` plus
-/// a hand-written `if resp.dragged() { v = v.round() }`, the two were six copies of
-/// the same three lines and one field that had quietly missed them.
+/// The speed and the rounding rule travel together because [`value_field`] needs
+/// both: the speed to turn a drag on the prefix into a change in the number, and
+/// the rule to round the result.
 #[derive(Clone, Debug)]
 pub struct Scrub {
     speed: f64,
-    /// Decimal places a *drag* settles to. Typing is never rounded.
-    ///
-    /// **Stated rather than inferred, because two halves of the field would
-    /// otherwise disagree.** A `DragValue` rounds its own drag to a precision it
-    /// derives from the speed (`auto_decimals`), while the prefix strip's drag is
-    /// applied by [`value_field`] and would keep every digit the pointer produced —
-    /// so a 37px drag came out `109` on the digits and `109.25` on the label. One
-    /// number here settles both.
+    /// Decimal places a drag settles to. Typing is never rounded. Stated rather
+    /// than inferred so a `DragValue`'s own drag and the prefix strip's agree.
     decimals: u32,
     range: std::ops::RangeInclusive<f64>,
 }
 
 impl Scrub {
-    /// **Whole units under the hand, any number from the keyboard.**
+    /// Whole units under the hand, any number from the keyboard.
     ///
-    /// The default for anything measured in the document's own units — a position, a
-    /// size, an angle, a stroke weight. Dragging one through 1.7000000000000002 is a
-    /// value nobody asked for that then shows up in the saved file, and a coordinate
-    /// with three decimals is more precision than the number means. Typing is left
-    /// alone: a hairline, or 33.3%, is a real thing to want and the field is the only
-    /// way to ask for one.
-    ///
-    /// Rounding is keyed on the *drag*, never on focus — "round it unless it is being
-    /// typed into" would round a typed 1.5 away the moment the field lost focus.
+    /// The default for anything in the document's own units. Rounding is keyed on
+    /// the drag, never on focus, which would round a typed 1.5 away on blur.
     pub fn whole(base: f64) -> Self {
         Self {
             speed: scrub(base),
@@ -1537,9 +1179,8 @@ impl Scrub {
         }
     }
 
-    /// `decimals` places under the hand, for the few numbers where a fraction is the
-    /// point and whole units would be uselessly coarse — a line-height multiplier
-    /// over `0.5..=5.0` is the case this exists for. Typing is still unrestricted.
+    /// `decimals` places under the hand, for numbers where a fraction is the point
+    /// (a line-height multiplier). Typing is still unrestricted.
     pub fn fine(base: f64, decimals: u32) -> Self {
         Self {
             decimals,
@@ -1549,42 +1190,10 @@ impl Scrub {
 
     /// Clamp the value to `range`, both while dragging and when typed.
     ///
-    /// ⚠️ **An inverted range is put the right way round here rather than
-    /// panicking in [`Self::settle`]** (§15 D462). `f64::clamp`'s *"min > max, or
-    /// either was NaN"* is an unconditional assert in `core`, not a
-    /// `debug_assert!`, and a panic inside `eframe`'s update closure takes the
-    /// process down with everything since the last `.recovery/` snapshot.
-    ///
-    /// `[S18.1-L1-01]`: **this is the only one of the forty-one `Scrub::range`
-    /// call sites whose bound comes from the document.** `inspector.rs`'s *Scale*
-    /// field for an image fill in *Crop* builds `floor..=10_000.0` out of
-    /// `ImageRef::cover_scale`, which is `(fw / iw).max(fh / ih)` — frame world
-    /// units over picture **pixels**, with no cap — so a 16×16 icon on a
-    /// 1920×1080 rectangle gives a floor of **12 000** above a ceiling of 10 000.
-    /// Measured twice in debug: `settle` called directly with that range, and end
-    /// to end by driving a press and a 24pt `PointerMoved` through
-    /// [`value_field`]. The `.max(0.01)` on that floor already closes `clamp`'s
-    /// NaN half and left the ordering half wide open.
-    ///
-    /// ⚠️ **egui does not do this, which is why nothing upstream caught it.**
-    /// `DragValue`'s own `clamp_value_to_range` opens by **swapping** an inverted
-    /// pair, so the widget renders happily and only this app's re-clamp died —
-    /// two spellings of one rule, one of them fatal. Swapping here makes the two
-    /// agree.
-    ///
-    /// **The caller's own defect — a floor above its ceiling — is a separate
-    /// question and is not answered here.** What this settles is that a shared
-    /// widget must not panic on it. (It *was* answered, in the same commit, at
-    /// the one caller that has the defect: `inspector.rs`'s *Scale* field takes
-    /// its ceiling as `floor.max(10_000.0)` now. This function still makes no
-    /// claim about its callers.)
-    ///
-    /// ⚠️ **`NaN` is the other half of `clamp`'s contract and it is closed here
-    /// too**, by dropping the range rather than by swapping it: `f64::min`
-    /// answers the non-NaN operand, so a single `NaN` bound would silently become
-    /// a *both-ends-equal* range and pin the field to one number. No bound is the
-    /// honest reading of a bound nobody can compare, and it is what the widget
-    /// does with no `.range(…)` at all.
+    /// An inverted range is swapped, as `DragValue` does, because `f64::clamp`
+    /// asserts unconditionally on `min > max` and a panic in the update closure
+    /// loses everything since the last recovery snapshot. A NaN bound drops the
+    /// range instead, since `f64::min` would pin the field to one number.
     pub fn range(mut self, range: std::ops::RangeInclusive<f64>) -> Self {
         let (a, b) = (*range.start(), *range.end());
         self.range = if a.is_nan() || b.is_nan() {
@@ -1602,24 +1211,12 @@ impl Scrub {
     }
 }
 
-/// Format a field's number at **at most** `decimals` places, trailing zeros trimmed —
-/// so `160` stays `160` while `411.672736…` reads `411.67`.
+/// Format a field's number at most `decimals` places, trailing zeros trimmed, so
+/// `160` stays `160` while `411.672736…` reads `411.67`.
 ///
-/// **The precision of a value field must not depend on its drag speed.** Left to itself
-/// a `DragValue` derives one from the other:
-/// `auto_decimals = (aim_radius / speed).log10().ceil().clamp(0, 15)`. That is a
-/// reasonable guess for a field nobody has thought about, and wrong here twice over.
-/// It gave the geometry fields three decimals, which is more than a coordinate means;
-/// and on the pass a cursor wrap spends at zero speed ([`scrub_speed_for`]) it is
-/// `log10(∞)` — clamped to fifteen — so for exactly one frame the Transform panel read
-/// `411.672736201535258` (§15 D66). Nothing was wrong with the *value*; it was the
-/// formatter guessing from a speed that had been borrowed for something else.
-///
-/// Given to `DragValue::custom_formatter`, which is handed the derived range and is free
-/// to ignore it. That is what makes the display independent of the speed — and it trims,
-/// where `max_decimals` alone would leave `160.00` on the swallow pass and `160.0` on
-/// every other. A field that pins `max_decimals` needs none of this: its range is
-/// already fixed, so the clamp lands on the same number either way.
+/// Given to `DragValue::custom_formatter`, which ignores the range it is handed:
+/// a `DragValue` otherwise derives its precision from the drag speed, which is
+/// fifteen places on the zero-speed pass a cursor wrap spends ([`scrub_speed_for`]).
 pub fn number(decimals: usize) -> impl Fn(f64, std::ops::RangeInclusive<usize>) -> String {
     move |v, _| {
         let s = format!("{v:.decimals$}");
@@ -1629,8 +1226,7 @@ pub fn number(decimals: usize) -> impl Fn(f64, std::ops::RangeInclusive<usize>) 
         }) else {
             return s;
         };
-        // A value the rounding took to zero from below formats as `-0`, which reads as a
-        // different number than the zero it is.
+        // A value rounded to zero from below formats as `-0`.
         match trimmed {
             "-0" => "0".to_owned(),
             t => t.to_owned(),
@@ -1641,21 +1237,14 @@ pub fn number(decimals: usize) -> impl Fn(f64, std::ops::RangeInclusive<usize>) 
 // --- infinite scrub (cursor wrapping) --------------------------------------
 
 /// How close to the window's edge the pointer gets before a scrub wraps it to the
-/// other side.
-///
-/// Wide enough that a fast hand cannot clear it between two frames — past the edge
-/// the OS stops moving the cursor, motion stops being reported, and the drag simply
-/// stalls, which is the thing being fixed. Narrow enough that the teleport reads as
-/// happening *at* the edge.
+/// other side: wide enough that a fast hand cannot clear it between two frames,
+/// narrow enough that the teleport reads as happening at the edge.
 const WRAP_EDGE: f32 = 24.0;
 
-/// How many passes a requested teleport is waited for before giving up on it.
+/// How many passes a requested teleport is waited for before giving up.
 ///
-/// A platform that refuses `set_cursor_position` reports nothing back, so without a
-/// deadline one unanswered request would block every later wrap and the drag would be
-/// stuck at the edge for good. Giving up restores the plain stall instead, which is
-/// merely the old behaviour. Roughly a third of a second at 60fps — far longer than any
-/// real teleport takes, short enough not to feel like a hang.
+/// A platform that refuses `set_cursor_position` reports nothing back, so without
+/// a deadline one unanswered request would block every later wrap.
 const WRAP_GIVE_UP: u64 = 20;
 
 /// Where the state for [`wrap_scrub`] lives. One slot, because only one field can be
@@ -1673,45 +1262,29 @@ struct Wrap {
     distance: f32,
 }
 
-/// **This is the whole difficulty of cursor wrapping.** egui derives `drag_delta` from
-/// the difference between successive pointer positions (`Response::drag_delta` →
-/// `PointerState::delta`), so a teleport arrives indistinguishable from an enormously
-/// fast flick: one pass reports a delta about the width of the window, and applied to a
-/// value it sends the number flying — and, for a field that commits every pass, *stays*
-/// there. There is no hook for correcting egui's idea of the pointer after the fact, so
-/// the artefact is not removed; it is spent on a zero speed instead
-/// ([`scrub_speed_for`]), costing one pass of scrubbing per wrap and nothing else.
-///
-/// **Recognised by its size, not by its timing**, and the difference is the whole bug
-/// this once had. The first version assumed the teleport landed on the pass after the
-/// request. It does not: the request reaches the backend only after the frame body
-/// (`<OndinApp as eframe::App>::ui`) returns,
-/// winit then calls `set_cursor_position`, and the OS posts the resulting move whenever
-/// it gets round to it — while the hand carries on generating real events in between. So
-/// the artefact turned up several passes late, at full speed, and was committed.
-/// Its *size* is the reliable signal: the jump is most of the window wide and nothing a
-/// hand does in one pass comes close, so half the requested distance separates the two
-/// with room to spare.
+/// The teleport in flight, if one has been asked for.
 fn wrap_pending(ctx: &egui::Context) -> Option<Wrap> {
     ctx.data(|d| d.get_temp(wrap_id()))
 }
 
 /// Whether this pass's pointer delta is a teleport landing rather than the hand moving.
+///
+/// egui derives `drag_delta` from successive pointer positions, so a teleport
+/// arrives as one enormous flick that would send the number flying. It cannot be
+/// corrected after the fact, so it is spent on a zero speed ([`scrub_speed_for`]).
+/// It is recognised by size, not timing: the OS posts the move whenever it gets
+/// round to it, several passes after the request, while half the requested
+/// distance is far beyond anything a hand does in one pass.
 fn wrap_landed(ctx: &egui::Context, pending: Wrap) -> bool {
     let dx = ctx.input(|i| i.pointer.delta().x);
     dx.abs() >= pending.distance * 0.5
 }
 
-/// The speed a `DragValue` should be given this pass: its own, or zero if this is the
-/// pass a teleport landed on.
+/// [`scrub_speed_for`] as a bare number, for the prefix strip, which applies the
+/// speed itself so the strip and the number agree about a teleport pass.
 ///
-/// A pure read — clearing the pending wrap is left to [`wrap_scrub`], which runs only
-/// for the field actually being dragged. Every field in the frame passes through here,
-/// and one of them consuming the state would leave the dragged one at full speed.
-/// [`scrub_speed_for`] as a bare number, for the prefix strip — which applies the
-/// speed itself rather than handing it to a `DragValue`, and so needs the same
-/// zero-on-the-teleport-pass rule stated the same way. Two copies of the *rule*
-/// would be a way for the strip and the number to disagree about one frame of a drag.
+/// A pure read: clearing the pending wrap is left to [`wrap_scrub`], which runs
+/// only for the dragged field.
 fn scrub_speed_for_value(ctx: &egui::Context, speed: f64) -> f64 {
     match wrap_pending(ctx) {
         Some(p) if wrap_landed(ctx, p) => 0.0,
@@ -1719,14 +1292,12 @@ fn scrub_speed_for_value(ctx: &egui::Context, speed: f64) -> f64 {
     }
 }
 
+/// The `DragValue` with its speed zeroed on the pass a teleport landed on.
 fn scrub_speed_for<'a>(ctx: &egui::Context, value: egui::DragValue<'a>) -> egui::DragValue<'a> {
     match wrap_pending(ctx) {
         Some(p) if wrap_landed(ctx, p) => {
-            // Zero rather than skipping the widget: a `DragValue` at zero speed still
-            // *is* dragged, so the gesture survives the pass. Disabling it or leaving it
-            // out would end the drag, and `egui`'s own code reads
-            // `if delta_value != 0.0` before touching anything, so nothing is written and
-            // no precision is lost from its accumulator.
+            // Zero rather than skipping the widget: a zero-speed `DragValue` is
+            // still dragged, so the gesture survives and nothing is written.
             value.speed(0.0)
         }
         _ => value,
@@ -1736,52 +1307,34 @@ fn scrub_speed_for<'a>(ctx: &egui::Context, value: egui::DragValue<'a>) -> egui:
 /// Teleport the pointer to the far side of the window if a live scrub has run it into
 /// an edge, so the drag can carry on indefinitely.
 ///
-/// Figma, Blender ("continuous grab") and Photoshop's scrubby sliders all do this: the
-/// value a field can reach should be limited by how long you are willing to drag, not
-/// by how wide the monitor is. Ours stopped at the edge, which on a wide field like
-/// `X` is reached long before the number gets anywhere.
+/// Window-relative, because that is what `ViewportCommand::CursorPosition` takes
+/// and a cursor outside the window stops being reported.
 ///
-/// **Window-relative, not screen-relative**, because that is what
-/// `ViewportCommand::CursorPosition` takes and because a cursor placed outside the
-/// window would stop being reported to us at all. The window is normally the screen,
-/// so the two coincide in practice.
-///
-/// **The x axis only**, though `DragValue` reads `delta.x - delta.y` and so scrubs
-/// vertically too. Two reasons, and the first is a bug this had: a field sitting within
-/// a band of the window's *top* — which the inspector's first panel very nearly is —
-/// starts every drag already inside the trigger, so a purely horizontal drag would
-/// teleport vertically the instant it began. The second is that a scrub is a horizontal
-/// gesture; wrapping the axis nobody is dragging along is motion the hand did not ask
-/// for. A vertical scrub still stops at the edge, which is the state every field was
-/// in before this.
+/// The x axis only, though `DragValue` also scrubs vertically: a field near the
+/// window's top would start every drag inside the trigger and teleport
+/// vertically at once, and a scrub is a horizontal gesture.
 fn wrap_scrub(ctx: &egui::Context) {
     let pass = ctx.cumulative_pass_nr();
-    // A request already in flight. Nothing may be asked for until it lands: the pointer
-    // sits in the trigger band for however long the OS takes to answer, so an ungated
-    // wrap would fire again on every pass of that wait and the cursor would bounce
-    // between the two edges.
+    // A request in flight blocks new ones: the pointer sits in the trigger band
+    // until the OS answers, and an ungated wrap would bounce between the edges.
     if let Some(p) = wrap_pending(ctx) {
         if !wrap_landed(ctx, p) && pass <= p.asked_on + WRAP_GIVE_UP {
             return; // still waiting
         }
-        // Landed, or given up on. Cleared and then *fallen through* rather than costing
-        // a pass of its own: the far side is a whole band clear of the trigger, so on a
-        // landing pass the test below simply finds nothing to do — and on a give-up pass
-        // the pointer is still stuck at the edge and deserves the retry immediately.
+        // Landed or given up: cleared and fallen through, so a give-up pass retries
+        // at once and a landing pass finds the far side clear of the trigger.
         ctx.data_mut(|d| d.remove::<Wrap>(wrap_id()));
     }
     let Some(p) = ctx.input(|i| i.pointer.latest_pos()) else {
         return;
     };
-    // The *viewport*, not `content_rect`: this is a cursor position in the window's
-    // own coordinates, so it has to be the window's whole client area rather than the
-    // part of it that is safe to draw in.
+    // The viewport, not `content_rect`: a cursor position is in the window's own
+    // coordinates.
     let screen = ctx.viewport_rect();
-    // Landing one band *inside* the opposite trigger band, so carrying on in the same
-    // direction does not immediately wrap back.
+    // Landing one band inside the opposite trigger band, so carrying on does not
+    // wrap straight back.
     let inset = WRAP_EDGE * 2.0;
-    // A window too narrow to hold two bands and a gap has nowhere to wrap to; moving
-    // the pointer there would be a teleport into the band it came from.
+    // A window too narrow for two bands and a gap has nowhere to wrap to.
     if screen.width() < inset * 3.0 {
         return;
     }
@@ -1794,26 +1347,20 @@ fn wrap_scrub(ctx: &egui::Context) {
     };
     let to = egui::pos2(x, p.y);
     ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(to));
-    // The pass number and the distance are read *before* the `data_mut`, never inside
-    // it: every one of these accessors takes the context's own lock, and nesting two of
-    // them deadlocks (epaint's debug build says so after ten seconds; a release build
-    // would simply hang).
+    // Read before the `data_mut`, never inside it: nested context accessors deadlock.
     let pending = Wrap {
         asked_on: pass,
         distance: (to.x - p.x).abs(),
     };
     ctx.data_mut(|d| d.insert_temp(wrap_id(), pending));
-    // The teleport arrives as an event, and an event only wakes egui if something is
-    // already asking for a repaint. Mid-drag something is, but say so anyway.
+    // The teleport arrives as an event, which wakes egui only if a repaint is asked for.
     ctx.request_repaint();
 }
 
 /// What a [`value_field`] puts in front of its number.
 ///
-/// The design prefixes some fields with a word (`X`, `LH`) and others with a
-/// Phosphor glyph (a clock for rotation, a half-drop for opacity), both in the
-/// same 38%-of-text grey. One enum so a field cannot be given the wrong size or
-/// the wrong grey by being spelled out at the call site.
+/// A word (`X`, `LH`) or a Phosphor glyph, both in the same 38%-of-text grey. One
+/// enum so a call site cannot pick the wrong size or grey.
 #[derive(Clone, Copy)]
 pub enum Prefix {
     /// A short word — `X`, `W`, `LH`.
@@ -1821,62 +1368,38 @@ pub enum Prefix {
     /// A Phosphor glyph.
     Icon(&'static str),
     /// A CSS property's name — `flex-grow`, `min-width` — at the unit's size
-    /// rather than [`PREFIX_PT`]: a label a whole word long, which at the size of
-    /// `X` would take the field's width from the number it names (the layout cards,
-    /// §15 D878).
+    /// rather than [`PREFIX_PT`], so a whole word does not take the number's width.
     Label(&'static str),
 }
 
 /// Type size of a [`Prefix::Text`].
 ///
-/// **13, not the design's 10.5** (§15). The two kinds of prefix sit in one column
-/// of one panel — Transform has `X`/`Y`/`W`/`H` above a rotation clock and a skew
-/// angle — so they are read against each other, and against each other the design's
-/// sizes do not match: measured off the atlas, a capital at 10.5 inks 8pt tall where
-/// a 15pt Phosphor glyph inks 11. Reported as the letters looking slightly small,
-/// which is what they were.
-///
-/// A full match would want about 14.5, which is *larger* than the number the prefix
-/// labels — a label louder than its value. 13 inks 10pt: within a point of the
-/// glyphs above it and a half-point over the digits beside it, which is the gap
-/// worth having rather than the one nobody asked about.
+/// 13, not the design's 10.5: prefixes sit in one column with Phosphor glyphs, and
+/// at 10.5 a capital inks 8pt tall against the glyph's 11. 13 inks 10pt; matching
+/// fully would make the label louder than its value.
 const PREFIX_PT: f32 = 13.0;
-/// Type size of a [`Prefix::Icon`] — the design's, and unchanged.
+/// Type size of a [`Prefix::Icon`].
 const PREFIX_ICON_PT: f32 = 15.0;
-/// Space between a prefix and the number it labels (the design's field gap).
+/// Space between a prefix and the number it labels.
 const PREFIX_GAP: f32 = 7.0;
-/// How far past its own text a clickable [`Suffix`]'s hit box reaches on each
-/// side. Two characters of 11pt text is a small thing to aim at, and there is
-/// nothing else in that corner of the field to hit.
+/// How far past its own text a clickable [`Suffix`]'s hit box reaches on each side.
 const SUFFIX_HIT_PAD: f32 = 4.0;
-/// Type size of the unit itself — the design's, and smaller than [`PREFIX_PT`]
-/// on purpose. The two are not read against each other the way two *prefixes*
-/// down a column are: this one sits alone at the far end of a field, labelling
-/// a number it must not compete with.
+/// Type size of the unit itself, smaller than [`PREFIX_PT`] on purpose: it sits
+/// alone at the far end of a field and must not compete with the number.
 const SUFFIX_PT: f32 = 11.0;
-/// How far the chip hangs past the field's content box into its own padding.
-///
-/// The design's `margin-right:-4px` against `padding:0 9px` — so the chip's edge
-/// finishes 5pt inside the hairline where the digits finish 9. That gap is the
-/// whole difference between a unit that belongs to the field and a label parked
-/// near it, and it was the reported symptom: *"the %/px toggle is still outside
-/// the control"*.
+/// How far the chip hangs past the field's content box into its own padding, so
+/// the chip finishes inside the hairline and belongs to the field.
 const SUFFIX_BLEED: f32 = 4.0;
-/// The room a unit leaves its number before it is cut short with an ellipsis —
-/// four digits at the field's type size (§15 D1081).
+/// The room a unit leaves its number before it is cut short with an ellipsis:
+/// four digits at the field's type size.
 const UNIT_DIGITS_MIN: f32 = 28.0;
 
-/// [`value_field`]'s prefix strip for a field drawn in another face — a bound
-/// field's chip, its retype buffer, A4's *Mixed* capsule — so the prefix keeps
-/// its size and its place from field to field (§15 D1092): reserved at the
-/// cursor as [`value_field`] reserves it, the prefix's width and [`PREFIX_GAP`],
-/// and the row's item spacing zeroed after it so what follows starts where the
-/// digits would. Senses nothing; answers the strip and the prefix's run for the
-/// caller to paint, through [`paint_prefix`] at rest.
-///
-/// The bound faces had their own badge — 11.5-pt type or a 14-pt glyph centred
-/// in a 14-pt slot — so tabbing from `W 72` to a bound `W` shrank the letter
-/// and moved it.
+/// [`value_field`]'s prefix strip for a field drawn in another face (a bound
+/// field's chip, its retype buffer, the *Mixed* capsule), so the prefix keeps its
+/// size and place from field to field: reserved at the cursor as [`value_field`]
+/// reserves it, with the row's item spacing zeroed after it. Senses nothing;
+/// answers the strip and the prefix's run for the caller to paint, through
+/// [`paint_prefix`] at rest.
 pub fn prefix_strip(
     ui: &mut egui::Ui,
     prefix: Prefix,
@@ -1905,9 +1428,7 @@ pub fn paint_prefix(
 }
 
 impl Prefix {
-    /// The prefix as styled text. Both variants are the design's 38% grey; only the
-    /// size and the family differ, and the reason they differ by more than the
-    /// design says is [`PREFIX_PT`].
+    /// The prefix as styled text: the 38% grey, with size and family per variant.
     fn rich_text(self) -> egui::RichText {
         match self {
             Prefix::Text(t) => egui::RichText::new(t)
@@ -1920,9 +1441,8 @@ impl Prefix {
         }
     }
 
-    /// The prefix as a laid-out run, so a caller can measure it *before* placing
-    /// anything. [`value_field`] needs the width in advance: it reserves that much
-    /// space before the number and paints the prefix back into it afterwards.
+    /// The prefix as a laid-out run, so [`value_field`] can reserve its width
+    /// before the number and paint it back afterwards.
     fn galley(self, ui: &egui::Ui) -> std::sync::Arc<egui::Galley> {
         egui::WidgetText::from(self.rich_text()).into_galley(
             ui,
@@ -1937,19 +1457,11 @@ impl Prefix {
 /// `0.0` while `p` is clear of both bands, rising to ±`top` at the edge of
 /// `min..max`.
 ///
-/// Shared by the canvas (`canvas::autopan`) and the layers tree, so a drag that
-/// runs out of room scrolls the same way whichever one it is in.
+/// Shared by the canvas (`canvas::autopan`) and the layers tree.
 ///
-/// **Quadratic, not linear.** The band is the whole control surface for the speed,
-/// so the useful part of it is the slow end — a linear ramp is already at a third
-/// of full speed a third of the way in, which is too fast to place anything. `t²`
-/// keeps a creep available for most of the band and puts the fast scroll in the
-/// last few points, where the pointer is against the edge and cannot be pushed
-/// further anyway.
-///
-/// Beyond the edge it clamps rather than growing: a pointer 400px past the window
-/// is not a request to scroll forty times faster. A container narrower than two
-/// bands scrolls in neither direction rather than fighting itself.
+/// Quadratic, not linear, so a creep is available for most of the band and the
+/// fast scroll sits at the edge. Beyond the edge it clamps; a container narrower
+/// than two bands scrolls in neither direction.
 pub fn edge_scroll_speed(p: f32, min: f32, max: f32, band: f32, top: f32) -> f32 {
     if max - min < 2.0 * band {
         return 0.0;
@@ -1967,44 +1479,16 @@ pub fn edge_scroll_speed(p: f32, min: f32, max: f32, band: f32, top: f32) -> f32
 
 /// Size of the chevron every dropdown closes with.
 pub const COMBO_CHEVRON_PT: f32 = 13.0;
-/// Its ink: `text::DIM`, the same as the menu heads' caret. Dimmer than the value
-/// beside it, because the chevron says "there is a list here" once and the value
-/// is what gets read — and *one* dim for every caret in the app, so a dropdown and
-/// a menu head do not disagree about how loud "there is more here" should be.
+/// Its ink: `text::DIM`, the same as the menu heads' caret.
 pub const COMBO_CHEVRON: egui::Color32 = theme::text::DIM;
 
 /// Set up a dropdown's menu rows, inside a `ComboBox::show_ui` closure.
 ///
-/// **The row floor must clear the tallest a row can naturally be, and 22 did not.**
-/// egui 0.35 resolves a `Button`'s frame *per widget state* and computes its inner
-/// margin as `button_padding − bg_stroke.width` — then puts the stroke back for a
-/// hovered or selected row and leaves it out for a resting one
-/// (`Button::selectable` is `frame_when_inactive(selected)`). With the panels'
-/// `button_padding.y` of 0 that margin is −1, so measured: a resting row wants 21 and a
-/// hovered or selected one wants 23. A floor of 22 sits *between* them — it lifts the
-/// resting row to 22 and leaves the other at 23 — so the selected row in every dropdown
-/// was permanently a pixel taller than its neighbours, and rows below whichever row was
-/// hovered moved down by one. Reported as "the items in the boolean dropdown move when I
-/// hover… this happens in other dropdowns too".
-///
-/// A floor of 24 is above both, so every state clamps to it. That fixed the *vertical*
-/// shift and left a smaller horizontal one, because the margin falls short of the padding
-/// on **x** as well — 8 − 1 — and the framed branch adds that point back, so a hovered row
-/// wants two points more width than a resting one and the popup grows to the widest row it
-/// has. Reported as "there's still a little shift on hover, much less than before, but
-/// still there".
-///
-/// **So the border goes.** Zeroing `bg_stroke` on all four states makes the two branches
-/// geometrically identical on both axes — the margin *is* the padding, and the stroke put
-/// back is nothing — which is a stronger guarantee than clearing a floor, because it does
-/// not depend on where the natural height happens to fall. The fill is the hover cue on its
-/// own, which is what a menu row conventionally uses and what the font family list already
-/// does; asked for that way ("we can just remove the border in here… matching the font
-/// family dropdown"). The floor stays at 24 because the rows want the height regardless.
-///
-/// That font family list is the evidence for the diagnosis from the other side: it paints
-/// its rows by hand rather than through `selectable_label`, and it is the one dropdown that
-/// never shifted.
+/// egui 0.35 sizes a `Button`'s margin as `button_padding − bg_stroke.width` and
+/// puts the stroke back on a hovered or selected row, so a resting row is a pixel
+/// shorter and two points narrower than a hovered one and the rows shift on hover.
+/// Zeroing `bg_stroke` on all four states makes both branches identical on both
+/// axes; the fill is the hover cue. [`MENU_ROW_H`] is the height floor.
 pub fn menu_rows(ui: &mut egui::Ui) {
     ui.spacing_mut().interact_size.y = MENU_ROW_H;
     let w = &mut ui.visuals_mut().widgets;
@@ -2013,155 +1497,59 @@ pub fn menu_rows(ui: &mut egui::Ui) {
     }
 }
 
-/// Height of one row in a dropdown's menu — a **floor** over a natural 21, which
-/// is what makes it the height rather than a minimum nobody reaches.
+/// Height of one row in a dropdown's menu: a floor over the natural height.
 ///
-/// **22 since 2026-08-20, down from 24**, with [`MENU_ITEM_H`] taking the same two
-/// points off the menus that allocate exactly. Reported as "the layer menus have
-/// gotten a bit too tall… global for all menus".
-///
-/// **A floor only ever *raises*, so this number is only the height while it stays
-/// above the natural one** — and that is not automatic. A `selectable_label` is
-/// its 15pt row plus `button_padding.y` twice, which is **23** at the theme's 4:
-/// a floor of 22 there would be ignored outright and the compaction would be a
-/// constant that changed nothing. It works because every dropdown sets that
-/// padding to 0 or 2 before its rows are laid out — most before [`menu_rows`]
-/// runs, the sizing menu just after — putting the natural height at 15 or 19. *A new caller that leaves the theme's padding alone
-/// gets a 23pt row and no error*, which is what
-/// `a_menu_rows_height_does_not_depend_on_its_state` asserts against at both of
-/// the values in use.
-///
-/// **Both states still clamp to one number**, which is the guarantee [`menu_rows`]
-/// exists for: the stroke is zeroed, so a hovered row and a resting one have the
-/// same natural height, and the floor is above both.
+/// A floor only raises, so this is the height only while it stays above the
+/// natural one. A `selectable_label` is its 15pt row plus `button_padding.y`
+/// twice (23 at the theme's 4), which would ignore 22; every dropdown sets that
+/// padding to 0 or 2 before its rows are laid out, and a new caller that does not
+/// gets a 23pt row with no error (`a_menu_rows_height_does_not_depend_on_its_state`).
 pub const MENU_ROW_H: f32 = 22.0;
 
-/// Height of one row in a menu that allocates its rows **exactly** — the context
-/// menus (`docs/context-menus.md` §8) and the top bar's View and Snap menus.
+/// Height of one row in a menu that allocates its rows exactly: the context menus
+/// (`docs/context-menus.md` §8) and the top bar's View and Snap menus.
 ///
-/// **One constant where there were three copies of `26.0`**, which is the
-/// duplication `build::replace_with_path`'s own note warns about a level down: the
-/// number was in `menu.rs` and twice more in `app.rs`, and "compact every menu by
-/// two points" is exactly the edit that finds two of three.
-///
-/// Two points taller than a dropdown row ([`MENU_ROW_H`]) and deliberately so:
-/// these rows carry a glyph column *and* an accelerator column, where a dropdown
-/// row carries a glyph and a label. The gap was two before this change and is two
-/// after it, because what was asked for was the same amount off everything rather
-/// than a new relationship between the two surfaces.
-///
-/// 🚨 **The two constants are two *families* of row, and [`MENU_ROW_H`]'s warning
-/// does not apply to this one** (§15 D811). That one is a **floor** under a row
-/// egui sizes, so `button_padding` decides the natural height and a caller that
-/// leaves the theme's 4 alone silently gets 23; these rows are
-/// `allocate_exact_size`d by [`menu_row`] and [`menu_item`], which take the height
-/// as an **argument**, so the padding cannot reach them and the number is the
-/// height rather than a minimum. *The tell for which family a row is in is whether
-/// its height is an argument* — which is why a warning about "any new dropdown"
-/// cannot be applied without reading the callee, and why it is written here beside
-/// both constants rather than once over the pair. The Export panel's preset menu
-/// is the case that made this worth saying: it calls [`menu_rows`], never touches
-/// the padding, and is correct — where a warning phrased about dropdowns in
-/// general scores it as the failure case.
+/// Two points taller than a dropdown row ([`MENU_ROW_H`]) because these rows carry
+/// a glyph and an accelerator column. Unlike that floor, the height is an
+/// argument to [`menu_row`] and [`menu_item`], so `button_padding` cannot reach it
+/// and the number is the height.
 pub const MENU_ITEM_H: f32 = 24.0;
 
-/// The air between a button and the menu it opens — the top bar's View, Snap and
-/// zoom menus, and the inspector's popup menus that drop from a button (§15
-/// D996). `egui::Popup::menu` opens with none, so its menu touched the button;
-/// the maintainer named the top bar's as the one to match.
+/// The air between a button and the menu it opens (the top bar's menus and the
+/// inspector's popup menus), which `egui::Popup::menu` leaves at none.
 pub const MENU_GAP: f32 = 6.0;
 
 /// Like [`egui::Ui::add_enabled_ui`], but idempotent under a parent that is
 /// already disabled.
 ///
-/// **`add_enabled_ui` does not guard on the ambient state, and the fade is a
-/// multiply.** `Ui::disable` multiplies the painter's opacity by
-/// `Visuals::disabled_alpha` — 0.5 — every time it is called, so a disabled gate
-/// inside a disabled gate lands at 0.25. That is visible as *unevenness* rather
-/// than as a bug: the doubly-gated controls sit a shade fainter than the singly
-/// gated ones beside them, in one row, and it reads as a rendering fault.
-///
-/// The identity row is where this bit. `points_header` wraps the whole row in
-/// `add_enabled_ui(false)` to show the design's second row inert, and the row's
-/// four controls each gate themselves again — so in point-edit mode the boolean
-/// dropdown, *Mask* and *Ungroup* sat at 0.25 while ***Group*** beside them sat at
-/// 0.5. Group is the odd one out because it is the only one of the four whose own
-/// gate is *open* there: point editing implies exactly one selected `Path`, which
-/// `build::group` accepts, while `selected_boolean`, `booleanable_selection` and
-/// the container test behind `can_ungroup` all refuse it.
-///
-/// Note `Ui::add_enabled` — the *widget* form — already guards this way; it is
-/// only the scope form that does not, which is why the two read as one thing
-/// spelt twice.
+/// `Ui::disable` multiplies the painter's opacity by `Visuals::disabled_alpha`
+/// (0.5) every call, so a disabled gate inside a disabled gate lands at 0.25 and
+/// the doubly-gated controls in a row look fainter than singly-gated ones.
+/// `Ui::add_enabled`, the widget form, already guards this way.
 pub fn disable_unless<R>(
     ui: &mut egui::Ui,
     enabled: bool,
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
-    // Already disabled means already faded and already inert, so there is nothing
-    // a second gate can add — pass `true` and let the parent's state stand.
+    // Already disabled means already faded and inert; let the parent's state stand.
     ui.add_enabled_ui(enabled || !ui.is_enabled(), add)
 }
 
 /// The arrow at the closed end of a `ComboBox` — a Phosphor chevron, in place of
 /// egui's default.
 ///
-/// egui paints a filled triangle at `fg_stroke.color`, which is the *interaction*
-/// colour: it brightens on hover and goes full-strength white when the popup is
-/// open, so the loudest thing in a panel of dropdowns was their arrows. A glyph
-/// from the icon font at one fixed colour makes them chrome again, and matches
-/// every other caret the app draws (`menu_check`, the layers tree's disclosure).
+/// egui paints a filled triangle in the interaction colour, which brightens on
+/// hover and goes white when open. A glyph at one fixed colour makes the arrows
+/// chrome again and matches every other caret the app draws.
 ///
-/// Written to egui's `IconPainter` signature so it can be handed to
-/// `ComboBox::icon` directly; `_open` is deliberately unused — egui itself stopped
-/// flipping the arrow upwards for popups that open above (its own comment explains
-/// why it looked wrong), and a chevron that changed colour on open would be the
-/// same mistake in a different dimension.
+/// Written to egui's `IconPainter` signature for `ComboBox::icon`; `_open` is
+/// unused because the chevron does not flip or change colour on open.
 ///
-/// *Every new `ComboBox` owes this call.* There is no style hook for the combo
-/// icon — `Style` has no field for it — so it cannot be made the default, and a
-/// dropdown that forgets it silently draws egui's white triangle beside every one
-/// that did not forget. `combo_chevron_tests` pins the pair; it cannot pin the
-/// call site that does not exist yet.
-///
-/// ⚠️ **This sentence used to end *"next to seven that do not"*, and the number
-/// was the coverage claim** (§15 D665, `[S18.1-L3-09]`). It was seventeen when the
-/// review counted and had been for a long time — stale by a factor of two and a
-/// half, in the one sentence standing in for the gate the sentence itself says
-/// cannot exist. `[A8-L6-04]`'s class one level down: **a rule whose only
-/// enforcement is a figure in a comment.**
-///
-/// **The figure is gone rather than corrected**, because it rots on exactly the
-/// day somebody adds a dropdown — which is the day it is being read. The check is
-/// two greps over `crates/ondin-app/src`, and it is a thing somebody runs rather
-/// than a gate:
-///
-/// ```text
-/// ComboBox::from_id_salt      → every dropdown
-/// .icon(combo_chevron)        → every one that remembered
-/// ```
-///
-/// Run at the close of the fix phase's seventeenth session, 2026-09-09 over
-/// `crates/ondin-app/src`: **23 constructions, of which 19 take a chevron and
-/// four do not.** The four are `"probe"` combos inside `#[cfg(test)]` modules —
-/// `inspector.rs:12786`, `:12975`, `typography.rs:5589` and `ui.rs:8131` — where
-/// egui's own triangle is irrelevant. **So the rule holds at every production
-/// dropdown**, and the positive result is written down so the next reader
-/// compares rather than re-derives.
-///
-/// ⚠️ **Two traps in re-running it, and the recipe above walks into the first
-/// one — deliberately, because there is no spelling that does not.** Each of
-/// those two lines **matches itself**, so the greps return **24 and 20** and the
-/// true figures are **23 and 19**: subtract one from each. A check written down
-/// in the file it checks counts itself, and hiding the strings to avoid it would
-/// make the recipe unrunnable, which is worse.
-///
-/// ⚠️ **Second: two of the nineteen call this function unqualified**, from
-/// `combo_chevron_tests` in this very module, so grepping for `ui::combo_chevron`
-/// finds **17** and leaves a two-dropdown gap that reads like the rule being
-/// broken. That is session 14's `settings::card` shape for the third time on
-/// record: **a qualified-name grep undercounts by exactly the module that owns
-/// the function** — which is the likeliest interesting caller.
+/// Every new `ComboBox` owes this call: `Style` has no hook for the combo icon,
+/// and a dropdown that forgets it draws egui's white triangle. To audit, compare
+/// the count of `ComboBox::from_id_salt` with `.icon(combo_chevron)` over
+/// `crates/ondin-app/src`; each grep matches its own line here, and only the
+/// `"probe"` combos in `#[cfg(test)]` modules lack a chevron.
 pub fn combo_chevron(
     ui: &egui::Ui,
     rect: egui::Rect,
@@ -2180,8 +1568,8 @@ pub fn combo_chevron(
 /// One Phosphor glyph as widget text, for a control whose closed state is an icon
 /// and nothing else — the identity card's boolean dropdown.
 ///
-/// Full-strength ink, unlike [`glyph_and_text`]'s leading glyph: there is no label
-/// beside it for the eye to go to instead, so this *is* the value being shown.
+/// Full-strength ink, unlike [`glyph_and_text`]'s leading glyph, since there is no
+/// label beside it.
 pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
     let mut job = egui::text::LayoutJob::default();
     job.append(
@@ -2199,22 +1587,16 @@ pub fn glyph_only(glyph: &'static str) -> egui::WidgetText {
 
 /// A dimmed Phosphor glyph followed by a label, as one run of widget text.
 ///
-/// For the places a [`Prefix`] cannot reach: a `ComboBox`'s `selected_text` is a
-/// single `WidgetText`, so the design's icon-plus-word closed state has to be
-/// laid out as one job with two differently-styled sections rather than two
-/// widgets side by side.
+/// For where a [`Prefix`] cannot reach: a `ComboBox`'s `selected_text` is a single
+/// `WidgetText`, so the icon-plus-word state is one job with two styled sections.
 pub fn glyph_and_text(glyph: &str, text: &str) -> egui::WidgetText {
     glyph_and_text_tinted(glyph, text, theme::text::FAINT)
 }
 
-/// [`glyph_and_text`] with the **glyph** in a colour of the caller's choosing.
+/// [`glyph_and_text`] with the glyph in a colour of the caller's choosing.
 ///
-/// One caller, and it is a warning: the type family row wears `TEXT_AA` in
-/// [`theme::color::WARN`] when the family cannot be had at all (§15 D227). The
-/// precedent is a layers row whose picture cannot be drawn, which says so the same
-/// way (§15 D179) — and the *label* stays full strength either way, because the
-/// family's name is the identity the row is for and dimming it would read as the
-/// pick not having taken.
+/// The type family row wears `TEXT_AA` in [`theme::color::WARN`] when the family
+/// cannot be had; the label stays full strength since it is the row's identity.
 pub fn glyph_and_text_tinted(
     glyph: &str,
     text: &str,
@@ -2247,37 +1629,19 @@ pub fn glyph_and_text_tinted(
 /// A numeric field with a dimmed prefix: the design's 28px recessed row holding
 /// a small label or glyph (`X`, `W`, a rotation clock) and the value beside it.
 ///
-/// The prefix is painted by hand rather than through `DragValue::prefix`, which
-/// renders prefix and value as one run of text in one colour and one font — so
-/// it can neither dim only the prefix nor put an icon there. The `DragValue` is
-/// stripped of its own ground — the row *is* the field.
+/// The prefix is painted by hand because `DragValue::prefix` renders it in the
+/// number's colour and font, so it can neither dim only the prefix nor hold an
+/// icon. The `DragValue` is stripped of its own ground; the row is the field.
 ///
-/// **The whole row scrubs, the prefix included** — press anywhere on the ground,
-/// the `X` or the clock included, and the value follows the pointer. That is not a
-/// nicety: a field where the number scrubs and its own label does not means having
-/// to remember which apps start the drag on the icon and which on the digits, and
-/// the label is exactly where the hand goes, because it is what says *which* number
-/// this is.
+/// The whole row scrubs, the prefix included. The strip reserved for the prefix
+/// is outside the `DragValue`'s box, so a second claimant senses the drag there
+/// and applies it, which is why this function owns the number (`&mut`, [`Scrub`]).
+/// A click on the strip focuses the field.
 ///
-/// It is bought at the cost of this function owning the number rather than taking a
-/// finished `DragValue`. The strip reserved for the prefix is outside the
-/// `DragValue`'s box (see the padding note below for why it has to be), so the only
-/// way it can scrub is for a second claimant to sense the drag there and apply it —
-/// and to apply it, something has to be able to write to the value and know the
-/// speed. Hence `&mut f64` and [`Scrub`]. A click on the strip hands the field
-/// keyboard focus, so the two halves behave as one control in both gestures.
-///
-/// **Focus is drawn on the row, not inside it.** A `DragValue` being typed into
-/// is a `TextEdit`, and a focused `TextEdit` frames itself: a second rounded
-/// outline from the first digit to the right margin, nested inside the field's
-/// own. Two problems with letting it — it is a box inside a box, and the digits
-/// sit flush against its left edge with no padding at all, so the number reads
-/// as overlapping its border. Suppressing that frame and stroking the *row*
-/// instead keeps the value exactly where it sits at rest (no jump when the
-/// field takes focus) and gives it the field's full 9px margin to breathe in.
-/// `value` is generic over egui's `Numeric` so the `f32` fields (opacity) and the
-/// `f64` ones (everything else) read the same at the call site; internally it is all
-/// `f64`, which is what [`Scrub`] and `DragValue` both work in.
+/// Focus is drawn on the row, not inside it: a focused `TextEdit` frames itself,
+/// nesting a box in a box with the digits flush against its edge. Stroking the row
+/// instead keeps the value where it sits at rest. `value` is generic over egui's
+/// `Numeric` so `f32` and `f64` fields read alike; internally it is all `f64`.
 pub fn value_field<N: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2291,9 +1655,8 @@ pub fn value_field<N: egui::emath::Numeric>(
 
 /// A unit written at the right-hand end of a value field, in the prefix's grey.
 ///
-/// **Its own widget, not `DragValue::suffix`** — which renders the unit inside the
-/// number's own text run, in one colour and one font, so it can neither be dimmed
-/// nor clicked. That is the same reason [`Prefix`] exists at the other end.
+/// Its own widget, not `DragValue::suffix`, which sits in the number's text run
+/// and can be neither dimmed nor clicked.
 #[derive(Clone, Copy)]
 pub struct Suffix<'a> {
     pub text: &'a str,
@@ -2305,11 +1668,9 @@ pub struct Suffix<'a> {
 
 /// [`value_field`] with a unit at the right-hand end.
 ///
-/// The second return value is whether the suffix was clicked — which is a
-/// *different* kind of change from anything the field itself reports, because it
-/// converts the value rather than editing it. A caller must commit that directly
-/// rather than route it through the drag valve, which is waiting for a drag that
-/// will never come.
+/// The second return value is whether the suffix was clicked. That converts the
+/// value rather than editing it, so a caller commits it directly rather than
+/// through the drag valve.
 pub fn value_field_suffixed<N: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2326,9 +1687,8 @@ pub fn value_field_suffixed<N: egui::emath::Numeric>(
 /// [`value_field_suffixed`], handing back the clickable unit's own response rather
 /// than whether it was clicked — `None` when there is no unit or it is inert.
 ///
-/// For a caller that opens something *from* the unit: a popup anchored on the
-/// field's response opens under the prefix, the far end of the field from the thing
-/// that was clicked (§15 D907).
+/// For a caller that opens something from the unit: a popup anchored on the
+/// field's response would open at the far end of the field.
 pub fn value_field_unit<N: egui::emath::Numeric>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2358,43 +1718,26 @@ pub fn value_field_unit_marked<N: egui::emath::Numeric>(
 ) -> (egui::Response, Option<egui::Response>, bool) {
     let mut v = value.to_f64();
     let out = value_field_f64_marked(ui, size, prefix, suffix, None, mark, &mut v, scrub, build);
-    // Written back only on a real change, so a field whose type cannot hold its own
-    // displayed value exactly — an `f32` opacity — is not rewritten every frame with
-    // the round trip's error.
+    // Written back only on a real change, so an `f32` field is not rewritten every
+    // frame with the round trip's error.
     if v != value.to_f64() {
         *value = N::from_f64(v);
     }
     out
 }
 
-/// How much of a [`value_field_metered`] row's ground the bar covers, as a
-/// fraction of the field, and the colour it covers it in.
-///
-/// **16% of the accent, which is a wash rather than a fill.** The bar sits
-/// *under* the field's own label and value, so anything stronger competes with
-/// the digits it is behind; at this weight it reads as the field being partly
-/// full and the text goes on reading as text.
+/// The alpha of the accent a [`value_field_metered`] bar is painted in: 16%, a
+/// wash rather than a fill, because the bar sits under the field's label and value.
 const METER_ALPHA: u8 = 41;
 
 /// Width of the tick marking a metered field's zero, in points.
 ///
-/// **A hairline, and the same blue as the bar it is the origin of.** Its whole
-/// job is that a row at rest does not read as an empty box: with the bar growing
-/// from the centre, a neutral value draws nothing at all, and a field with
-/// nothing in it says "no control here" rather than "this control is at zero".
-/// One point of the field's own accent says both — where the middle is, and that
-/// something fills from it.
-///
-/// It is more visible than that alpha suggests, which is why it does not need a
-/// stronger one: over [`color::FIELD`] the wash resolves to about `rgb(62,66,76)`,
-/// where the field's own hairline border is `rgb(53,53,54)` on the same ground.
-/// The tick is the higher-contrast line of the two.
+/// A hairline in the bar's own blue, so a row at rest does not read as an empty
+/// box: with the bar growing from the centre, a neutral value draws nothing.
 const METER_TICK_W: f32 = 1.0;
 
-/// The accent wash a metered field's bar and its zero tick are both painted in.
-///
-/// One function rather than two literals so the tick cannot drift off the bar's
-/// colour — being the *same* blue is the point of it, not a coincidence.
+/// The accent wash a metered field's bar and its zero tick are both painted in,
+/// one function so the tick cannot drift off the bar's colour.
 fn meter_wash() -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(
         color::ACCENT_400.r(),
@@ -2404,36 +1747,20 @@ fn meter_wash() -> egui::Color32 {
     )
 }
 
-/// A [`value_field`] with a bar painted across its ground, **growing from the
-/// centre**.
+/// A [`value_field`] with a bar painted across its ground, growing from the
+/// centre, for the image adjustments, whose size and direction are judged by eye.
 ///
-/// For a value whose size and direction are judged by eye rather than read — the
-/// seven image adjustments, where what a card of seven rows has to answer at a
-/// glance is which of them are doing anything, which way, and roughly how much.
-/// A column of bare numbers answers that only one row at a time.
+/// `signed` is clamped to `-1..=1`. Zero is the middle of the field, a negative
+/// value fills left from it and a positive one fills right: these are offsets from
+/// a neutral zero, so a bar that drew −40 and +40 alike would contradict the sign.
 ///
-/// `signed` is clamped to `-1..=1`. Zero is the **middle** of the field, a
-/// negative value fills left from it and a positive one fills right.
+/// The bar is painted between the ground and the content, so it is threaded
+/// through the field: the ground is opaque, and a bar drawn after it tints the
+/// text. The shape is reserved inside the frame and filled once the ink box is
+/// known.
 ///
-/// **That is a correction, and it is the whole shape of the control.** This grew
-/// from the left at `|value|` first, on the argument that the sign is in the
-/// digits — where it is exact — and that a two-sided bar spends half the field's
-/// width encoding what one character already carries. The argument is true and
-/// the conclusion was wrong: these seven are *offsets from a neutral zero*, not
-/// quantities, so a bar that draws −40 and +40 identically is not compressing the
-/// sign, it is contradicting it. A single-direction bar can only be right for a
-/// value that has a bottom, and none of these do — their bottom is the middle.
-///
-/// **Painted between the ground and the content**, which is why it is threaded
-/// through the field rather than drawn by the caller: the field's ground is
-/// opaque, so a bar drawn before it is hidden and one drawn after it tints the
-/// text. The shape is reserved inside the frame — after its background, before
-/// its content — and filled in once the row's ink box is known.
-///
-/// The value itself is right-aligned rather than sitting beside the prefix, which
-/// every other field does: a number in the middle of a field the bar is also
-/// crossing reads as a label *on* the bar, and it lands in a different place in
-/// every row because the labels are different lengths.
+/// The value is right-aligned rather than beside the prefix, so it does not read
+/// as a label on the bar.
 pub fn value_field_metered(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2457,10 +1784,9 @@ pub fn value_field_metered(
     .0
 }
 
-/// An overridden field's mark (§15 D981): the field's label at full brightness
-/// with a 4-pt dot beside it, and — with the pointer on the field — the label's
-/// slot turned into ↺, whose click is the field's reset. `tip` is the hover text
-/// naming the main's value, *Reset to main · 168*.
+/// An overridden field's mark: the label at full brightness with a 4-pt dot beside
+/// it, and with the pointer on the field the label's slot turns into ↺, whose
+/// click is the reset. `tip` is the hover text naming the main's value.
 #[derive(Clone, Copy)]
 pub struct FieldMark<'a> {
     pub tip: &'a str,
@@ -2469,10 +1795,8 @@ pub struct FieldMark<'a> {
 /// [`value_field`] with an override mark, or without one when `mark` is `None`.
 /// The second return value is whether the ↺ was clicked.
 ///
-/// **The ↺ is the prefix strip's own press**, which until now only scrubbed: a
-/// click with no drag on the label slot, while the field is marked, is the reset.
-/// So nothing new is laid out and nothing moves — the mockup's *"swaps the mark
-/// for ↺ in the same box"*.
+/// The ↺ is the prefix strip's own press: a click with no drag on the label slot,
+/// while the field is marked, is the reset, so nothing new is laid out.
 pub fn value_field_marked(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -2487,24 +1811,22 @@ pub fn value_field_marked(
     (resp, reset)
 }
 
-/// Height of a [`badge_field`] — the size badge's own pill height, because it takes
-/// that badge's place (§15 D252).
+/// Height of a [`badge_field`], the size badge's own pill height.
 pub const BADGE_FIELD_H: f32 = 20.0;
 /// Type size inside a badge pill, and the gap between its label and its value.
 pub const BADGE_PT: f32 = 10.5;
 const BADGE_FIELD_GAP: f32 = 5.0;
 /// Padding inside a badge pill, matching `canvas::draw_size_badge`'s.
 const BADGE_FIELD_PAD_X: f32 = 7.0;
-/// How much of the badge's ink the label carries — the design's `opacity: .7`, as a
-/// multiplier rather than a second colour so the two can never drift apart.
+/// How much of the badge's ink the label carries, a multiplier rather than a
+/// second colour.
 const BADGE_LABEL_ALPHA: f32 = 0.7;
 
 /// Everything in a [`badge_field`] that is not the number: the padding either side,
 /// the label, and the gap between label and value.
 ///
-/// Exists so a caller can size its pill against the text it has to hold without
-/// restating this function's own layout — which is how the origin pills came to clip
-/// their value by less than a point (§15 D253).
+/// So a caller can size its pill against the text it holds without restating this
+/// function's layout.
 pub fn badge_field_chrome_w(ctx: &egui::Context, label: &str) -> f32 {
     let label_w = ctx.fonts_mut(|f| {
         f.layout_no_wrap(
@@ -2518,33 +1840,18 @@ pub fn badge_field_chrome_w(ctx: &egui::Context, label: &str) -> f32 {
     BADGE_FIELD_PAD_X * 2.0 + label_w + BADGE_FIELD_GAP
 }
 
-/// A numeric field drawn as a **canvas badge**: the size badge's pill, with a
-/// dimmed one-letter label and a value that scrubs, types and takes arithmetic
-/// (§15 D252).
+/// A numeric field drawn as a canvas badge: the size badge's pill, with a dimmed
+/// one-letter label and a value that scrubs, types and takes arithmetic.
 ///
-/// **The size badge's chrome exactly** — same ground, same ink, same height, same
-/// corner radius, same padding — because it appears in that badge's slot and
-/// swapping one for the other must not read as the canvas changing. The only thing
-/// that differs is that this one is a control, and the only thing that says so is
-/// the cursor.
+/// It matches the size badge's chrome exactly, since it appears in that badge's
+/// slot. It is upright where the badge follows the shape's angle, because an egui
+/// widget cannot be rotated; on an unrotated layer the placement is the same.
 ///
-/// **Upright, where the badge follows the shape's angle.** `canvas::badge_frame`
-/// lays the pill along the edge it hangs from and `canvas::badge_text_angle` flips
-/// it end-for-end so it reads the right way up (§15 D329); an egui widget cannot be
-/// rotated at all, and a tilted text field would be a poor one even if it could. So
-/// the fields take the badge's *position* and not its rotation, which on an
-/// unrotated layer — every layer, most of the time — is the same placement.
+/// The plumbing is [`value_field`]'s: the same [`Scrub`], the same [`crate::expr`]
+/// parser and the same second claimant that makes the label scrub.
 ///
-/// The plumbing is [`value_field`]'s, deliberately: the same [`Scrub`], the same
-/// [`crate::expr`] parser, and the same second-claimant trick that makes the label
-/// scrub as well as the digits. A field the user has to aim at the digits of is a
-/// field, and this one is 20 points tall.
-///
-/// `width` is the whole pill's, and it is the **caller's** rather than
-/// shrink-wrapped. A pill that resized as its value was scrubbed would slide out
-/// from under the pointer mid-drag, and two of them would stop being the same width
-/// the moment one read `100` — on the canvas, where nothing else lines them up, that
-/// reads as a wobble rather than as information.
+/// `width` is the whole pill's and the caller's, not shrink-wrapped, so a pill
+/// does not slide out from under the pointer mid-drag.
 pub fn badge_field(
     ui: &mut egui::Ui,
     label: &str,
@@ -2565,17 +1872,13 @@ pub fn badge_field(
         egui::TextStyle::Body,
     );
     let size = egui::vec2(width, BADGE_FIELD_H);
-    // Sensed as nothing: the two claimants below own everything that can be
-    // pressed, and a third over the same region is the trap `icon_button_padded`
-    // describes.
+    // Sensed as nothing: the two claimants below own every press (see `icon_button_padded`).
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::empty());
     ui.painter()
         .rect_filled(rect, egui::CornerRadius::same(4), theme::color::BADGE);
 
-    // **Through [`badge_field_chrome_w`] rather than from `lead` directly**, so that
-    // the room this leaves for the number and the room a caller sizes its pill
-    // against are one statement. They were two, and the pill came out a point
-    // narrower than the value it had to show (§15 D253).
+    // Through `badge_field_chrome_w`, so the number's room and a caller's pill
+    // sizing are one statement.
     let chrome = badge_field_chrome_w(ui.ctx(), label);
     let strip = egui::Rect::from_min_size(
         rect.min + egui::vec2(BADGE_FIELD_PAD_X, 0.0),
@@ -2588,10 +1891,7 @@ pub fn badge_field(
         .interact(
             strip,
             ui.auto_id_with("badge-label-scrub"),
-            // Not `click_and_drag()`, which carries `FOCUSABLE` — the same dead tab
-            // stop the inspector's prefix strip had, and this badge is a pair of
-            // fields the eye tabs between exactly as the Transform panel's are
-            // (§15 D290).
+            // Not `click_and_drag()`, which is `FOCUSABLE` and adds a dead tab stop.
             egui::Sense::CLICK | egui::Sense::DRAG,
         )
         .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
@@ -2610,11 +1910,9 @@ pub fn badge_field(
     );
     let mut resp = ui
         .scope_builder(egui::UiBuilder::new().max_rect(number), |ui| {
-            // The `DragValue`'s two faces both ground themselves; here the pill is
-            // the ground, so both go — see [`strip_drag_value_chrome`].
+            // The pill is the ground, so the `DragValue`'s own faces go.
             strip_drag_value_chrome(ui);
-            // Dark ink on a light pill, which is the badge's own inversion — the
-            // panel's text colour would be white on blue and unreadable.
+            // Dark ink on a light pill; the panel's text colour would be unreadable.
             ui.visuals_mut().override_text_color = Some(theme::color::BADGE_INK);
             ui.spacing_mut().button_padding = egui::Vec2::ZERO;
             ui.spacing_mut().item_spacing.x = 0.0;
@@ -2623,34 +1921,13 @@ pub fn badge_field(
                 egui::DragValue::new(value)
                     .speed(scrub.speed)
                     .range(scrub.range.clone())
-                    // ⚠️ **The same opt-out [`value_field_f64`] makes, and the
-                    // argument is written there** (§15 D475). This field is the
-                    // *other* numeric control in the file and it kept egui's
-                    // default: a stored value outside the range rewritten to the
-                    // nearest end on every frame, reported to the caller as a
-                    // user edit.
-                    //
-                    // **Inert today and one `.range(…)` from not being.** Both
-                    // production callers pass an unranged `Scrub`, so there is
-                    // nothing to clamp against — the pivot marker's own comment
-                    // three lines from the call argues for that deliberately. So
-                    // this is not a fix for a measured defect; it is the same
-                    // decision made in both places rather than in one, because
-                    // the day a caller gives this field a range is the day it
-                    // silently acquires `[S6.2-L1-01]`'s behaviour with nothing
-                    // anywhere to say so.
+                    // The same opt-out as `value_field_f64`: egui would otherwise
+                    // rewrite a stored out-of-range value every frame and report
+                    // it as a user edit. Inert while callers pass an unranged `Scrub`.
                     .clamp_existing_to_range(false)
                     .custom_parser(crate::expr::eval),
             );
-            // ⚠️ **`.update_while_editing(true)` used to sit here and is gone**
-            // (§15 D723, `[S18.1-L3-06]`). It is egui's own default — measured,
-            // `egui-0.35.0/src/widgets/drag_value.rs:81` — so it did nothing
-            // today, and it sat *after* `build`, so it would silently have
-            // overridden a caller that asked for `false` the day one wanted to.
-            // The other two helpers leave the default alone. **An override that
-            // is a no-op is the worst kind: nothing tests it and nothing
-            // announces it.** If this field ever needs the non-default, it wants
-            // saying here in as many words.
+            // `update_while_editing` is left at egui's default, as in the other helpers.
             ui.add_sized(number.size(), scrub_speed_for(ui.ctx(), dv))
         })
         .inner;
@@ -2670,9 +1947,8 @@ pub fn badge_field(
         lead,
         theme::color::BADGE_INK,
     );
-    // The strip's drag is reported as the field's own, so a caller's `dragged()` /
-    // `drag_stopped()` / `changed()` — and therefore the edit valve — cannot tell the
-    // two halves apart.
+    // The strip's drag is reported as the field's own, so the edit valve cannot tell
+    // the two halves apart.
     resp = resp.union(lead_resp);
     if nudged || *value != before {
         resp.mark_changed();
@@ -2714,17 +1990,10 @@ fn value_field_f64_marked(
     let mut reset = false;
     let scope = ui.scope(|ui| {
         field_row(ui, size, |ui| {
-            // Reserved here and filled at the bottom of this closure: this is the
-            // one point in the frame that is after its ground and before its
-            // content, and both of these have to be both.
-            //
-            // **Two slots rather than one `Shape::Vec`**, which would be the
-            // tidier spelling and is the wrong one: a `Vec` arrives in
-            // `FullOutput::shapes` as a single nested `ClippedShape`, so every
-            // probe that walks that list for a `Shape::Rect` would stop finding
-            // either of them. Flat is what keeps the bar measurable
-            // (`meter_tests`). The tick is reserved first so the bar paints over
-            // it rather than under.
+            // Reserved here (after the ground, before the content) and filled at the
+            // bottom. Two flat slots rather than one `Shape::Vec`, which would nest
+            // in `FullOutput::shapes` and hide the bar from `meter_tests`. The tick
+            // is reserved first so the bar paints over it.
             let meter_slots = meter.map(|_| {
                 (
                     ui.painter().add(egui::Shape::Noop),
@@ -2732,82 +2001,40 @@ fn value_field_f64_marked(
                 )
             });
             let lead = prefix.galley(ui);
-            // Rounded, because the space reserved for the prefix and the point the
-            // glyph is painted back at have to be the same number — a half-point
-            // apart reads as the glyph sitting slightly off its own gap.
+            // Rounded so the space reserved for the prefix and the point the glyph
+            // is painted back at are the same number.
             let inset = (lead.size().x + PREFIX_GAP).round();
 
-            // Both faces ground themselves and this row has already drawn its own
-            // — see [`strip_drag_value_chrome`], which holds the two egui facts
-            // this depends on and the reported bug behind the second.
+            // Both faces ground themselves and this row has drawn its own; see
+            // `strip_drag_value_chrome`.
             strip_drag_value_chrome(ui);
             // `DragValue` sizes its hit box from `interact_size`, set below to the
-            // room left after the prefix — the prefix is a claimant of its own now,
-            // not part of this widget's box. (This said the width was the *whole*
-            // field and that `button_padding.x` was the prefix's room, which the
-            // block beneath has since falsified in both halves.)
-            //
-            // Its *height* is the content box, not `size.y`: the hairline is
-            // already spoken for ([`FIELD_BORDER_H`]), and asking for the full
-            // row height here pushes the frame back out to `size.y + 2` — the
-            // over-allocation the constant exists to prevent, reintroduced from
-            // the inside.
+            // room left after the prefix, which is a claimant of its own. The height
+            // is the content box, not `size.y`: the hairline is already counted
+            // ([`FIELD_BORDER_H`]).
             let full = ui.available_width();
             let inner_h = size.y - FIELD_BORDER_H;
-            // **The prefix's width is space reserved beside the number, not padding
-            // wrapped around it.** That distinction was worth a reported bug.
+            // The prefix's width is space reserved beside the number, not padding:
+            // `button_padding` applies to both sides, which left dead space on the
+            // right and let the never-truncating resting face grow the field, the
+            // card and the inspector. So the padding is zero and the room is made by
+            // advancing the cursor; the field cannot grow far past
+            // [`MAX_STROKE_WIDTH`].
             //
-            // `button_padding` is a `Vec2`, so egui applies it to *both* sides
-            // (`Style::button_style` → `inner_margin: button_padding.into()`), and
-            // the inset used to live there. It bought the wanted inset on the left
-            // and an identical 22px of dead space on the right: 44 of this field's
-            // 68px content box was padding and the digits had 24. Past four of them
-            // the resting face — a `Button` with `TextWrapMode::Extend`, which never
-            // truncates — simply grew, and took the field, the card and the whole
-            // inspector's width with it. That is the stroke weight clipping off the
-            // edge of the app.
+            // Not a `DragValue::prefix` atom: atoms are laid out by the resting
+            // `Button` only, so the glyph would vanish on focus
+            // (`focusing_a_value_field_outlines_the_row_and_leaves_the_value_put`).
+            // The strip is outside the `DragValue`'s box, so the prefix scrubs as a
+            // second claimant.
             //
-            // So the padding goes to zero and the room is made by advancing the
-            // cursor instead: the digits get `full - inset` (~46px rather than 24)
-            // and the field cannot grow until far past what [`MAX_STROKE_WIDTH`]
-            // allows. `field_row`'s own `FIELD_PAD_X` is the breathing room at each
-            // end.
-            //
-            // **Not a prefix *atom*, though `DragValue::prefix` exists**: atoms are
-            // laid out by the resting `Button` only. The keyboard face is a bare
-            // `TextEdit` that never sees them, so the glyph vanished and the digits
-            // jumped left the moment the field took focus — which is exactly what
-            // `focusing_a_value_field_outlines_the_row_and_leaves_the_value_put`
-            // exists to catch. Painting the galley ourselves is what makes the
-            // prefix survive both faces.
-            //
-            // The strip is therefore outside the `DragValue`'s box, which is why the
-            // prefix has to scrub as a **second claimant** rather than for free — see
-            // this function's own doc.
-            // The unit's own strip at the far end, reserved the same way the
-            // prefix's is: measured first, subtracted from the number's room, and
-            // painted back afterwards. Same 38% grey, so the two ends of the field
-            // read as one pair of labels around one value.
+            // The unit's strip at the far end is reserved the same way, in the same grey.
             let trail = suffix.map(|s| {
-                // **Laid out in `PLACEHOLDER`, which is what defers the colour to
-                // paint time.** `Painter::galley`'s colour argument is a *fallback*:
-                // the tessellator substitutes it only where a section left that
-                // sentinel. This galley was built with `.color(theme::text::FAINT)`,
-                // so the hover colour was computed, handed over, and silently
-                // dropped — the unit never brightened. Reported as "doesn't have a
-                // hover color".
+                // Laid out in `PLACEHOLDER`, which defers the colour to paint time:
+                // `Painter::galley`'s colour is only a fallback for sections left at
+                // that sentinel, and an unset colour becomes the style's white.
                 //
-                // Omitting the colour is *not* the fix and was the second attempt:
-                // `into_galley` fills an unset colour with the style's own
-                // `text_color`, so the unit came out full-strength white at rest.
-                // The sentinel has to be asked for by name.
-                //
-                // **Cut to the room the digits leave, not extended past it**
-                // (§15 D1081). A long unit in a narrow field — `fit content` in
-                // the Transform card's H — asked for more than the field had,
-                // and the number's box below came out negative: egui panics on
-                // a negative desired size, so selecting a hugging column crashed
-                // the app.
+                // Cut to the room the digits leave: a long unit in a narrow field
+                // made the number's box negative, and egui panics on that.
                 let room = (full - inset - UNIT_DIGITS_MIN - PREFIX_GAP + SUFFIX_BLEED).max(0.0);
                 let galley = egui::WidgetText::from(
                     egui::RichText::new(s.text)
@@ -2822,63 +2049,39 @@ fn value_field_f64_marked(
                 );
                 (s, galley)
             });
-            // The room the unit takes out of the number's: its own text, less the
-            // part of it that hangs into the field's padding, plus the gap that
-            // separates it from the digits.
+            // The room the unit takes from the number: its text less the bleed, plus the gap.
             let trail_w = trail
                 .as_ref()
                 .map(|(_, g)| (g.size().x - SUFFIX_BLEED + PREFIX_GAP).round())
                 .unwrap_or(0.0);
 
             ui.spacing_mut().button_padding.x = 0.0;
-            // **Every gap in this row is measured by hand** — the prefix strip via
-            // `add_space(inset)`, the unit's via `trail_w` — so egui must not add
-            // one of its own between them. It did, once the unit's strip became a
-            // real allocation rather than paint: the frame came out exactly one
-            // `item_spacing.x` wider than the size asked for.
+            // Every gap in this row is measured by hand (`inset`, `trail_w`), so egui
+            // adds none: the frame would come out one `item_spacing.x` too wide.
             ui.spacing_mut().item_spacing.x = 0.0;
-            // Floored, though the unit is cut to fit: a field narrower than its
-            // own prefix would otherwise still ask egui for a negative box.
+            // Floored: a field narrower than its own prefix would ask for a negative box.
             let digits_w = (full - inset - trail_w).max(0.0);
             ui.spacing_mut().interact_size = egui::vec2(digits_w, inner_h);
 
-            // The prefix strip, sensed *before* the number is laid out so its drag is
-            // already in the value by the time the number renders — otherwise the
-            // digits would trail the pointer by a frame.
+            // The prefix strip is sensed before the number is laid out, so its drag is
+            // already in the value and the digits do not trail by a frame.
             //
-            // Its own id, not the `DragValue`'s. Re-registering the number's id over a
-            // wider rect would be the tidier trick and egui does keep only the last
-            // rect per id — but `Context::create_widget` is private, and `Ui::interact`
-            // sets `rect` as well as `interact_rect`, which trips the id-clash warning
-            // (§15 D65) and paints a red outline on every field in the app.
-            //
-            // **`auto_id_with`, not `id().with`.** `Ui::id` is the *containing* Ui's,
-            // which two fields in one `horizontal` share — so a salt hung off it gave
-            // both strips the same id and lit every field in the Transform and Stroke
-            // panels with egui's clash overlay, the strips inert behind it.
-            // `next_auto_id` is positional within the Ui, so it distinguishes them;
-            // the salt then keeps it clear of the `DragValue` that takes the same
-            // slot. `a_row_of_value_fields_has_no_id_clash` is the guard.
+            // Its own id, not the `DragValue`'s: re-registering that id over a wider
+            // rect trips egui's id-clash overlay. `auto_id_with`, not `id().with`,
+            // because `Ui::id` is shared by two fields in one `horizontal`
+            // (`a_row_of_value_fields_has_no_id_clash`).
             let strip = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(inset, inner_h));
             if let (Some((tick_slot, slot)), Some(frac)) = (meter_slots, meter) {
-                // **The field's *ink* box, which is neither the size asked for nor
-                // the content box.** `size.x` is the outer box and includes the
-                // hairline on each side ([`FIELD_BORDER_H`] is the same two points
-                // counted vertically); the cursor sits one `FIELD_PAD_X` inside
-                // that, since the frame's inner margin is what reserves the field's
-                // breathing room. So the bar starts a padding to the left of the
-                // first glyph and runs the content's width plus both paddings —
-                // drawn to the inside of the border, the way the design's
-                // `overflow: hidden` clips it.
+                // The field's ink box, neither the size asked for nor the content
+                // box: `size.x` includes the hairline, and the cursor sits one
+                // `FIELD_PAD_X` inside it. The bar starts a padding left of the first
+                // glyph and runs the content width plus both paddings, inside the border.
                 let ink = egui::Rect::from_min_size(
                     ui.cursor().min - egui::vec2(FIELD_PAD_X, 0.0),
                     egui::vec2(full + FIELD_PAD_X * 2.0, inner_h),
                 );
-                // **From the middle, in whichever direction the sign says.** The
-                // half-width is the whole travel of one side, so ±1 reaches an
-                // edge and 0 is a bar of no width at all — which is what an
-                // unadjusted row has to draw, since a control at rest showing a
-                // mark is one the eye has to check rather than skip.
+                // From the middle, in whichever direction the sign says: ±1 reaches
+                // an edge and 0 is a bar of no width.
                 let frac = frac.clamp(-1.0, 1.0);
                 let mid = ink.center().x;
                 let reach = mid + ink.width() / 2.0 * frac;
@@ -2886,15 +2089,9 @@ fn value_field_f64_marked(
                     egui::pos2(mid.min(reach), ink.top()),
                     egui::pos2(mid.max(reach), ink.bottom()),
                 );
-                // **Each pair of corners is rounded only when the bar reaches that
-                // end of the field.** The field is a 5pt round rect and the bar is
-                // inside it, so a bar that ran to an edge with square corners would
-                // paint into the two slivers the ground leaves for the card behind
-                // it. Rounding either pair unconditionally is the opposite error
-                // and shows at every value but the extreme: a capsule floating in
-                // the field rather than a fill running out of it. From the centre
-                // both ends are in play, where a left-anchored bar only ever had
-                // one.
+                // Each pair of corners is rounded only when the bar reaches that end:
+                // square corners at an edge would paint into the slivers the 5pt
+                // round ground leaves, and always-round shows a floating capsule.
                 let r = 5;
                 let end = |touching: bool| match touching {
                     true => r,
@@ -2906,17 +2103,9 @@ fn value_field_f64_marked(
                     ne: end(frac >= 1.0),
                     se: end(frac >= 1.0),
                 };
-                // **The zero tick, under the bar and always drawn.** Square, and
-                // the full height of the ink — which is already the field less its
-                // two hairlines, so it stops short of the border rather than
-                // meeting it. Always, rather than only at rest: it is the origin
-                // the bar grows from, so a row that hid it as soon as it had a
-                // value would take the reference away exactly when there is
-                // something to read against it.
-                //
-                // Painted *under* the bar rather than over, so that at any
-                // non-zero value the two overlap by half a point at the origin
-                // instead of the tick cutting a line through the fill.
+                // The zero tick: square, the ink's full height, always drawn as the
+                // bar's origin, and under the bar so it does not cut a line through
+                // the fill.
                 ui.painter().set(
                     tick_slot,
                     egui::epaint::RectShape::filled(
@@ -2936,23 +2125,12 @@ fn value_field_f64_marked(
             let lead_resp = ui.interact(
                 strip,
                 ui.auto_id_with("prefix-scrub"),
-                // **`CLICK | DRAG` spelled out, because `Sense::click_and_drag()`
-                // is `CLICK | DRAG | FOCUSABLE` and this strip must not be a tab
-                // stop.** It is a scrub handle with no keyboard face of its own —
-                // the digits beside it are the thing you type into — so focus on
-                // it lands nowhere visible. Tabbing across the Transform panel
-                // stopped on one of these before each field, so X → Y took two
-                // presses and the first went somewhere with nothing drawn on it
-                // (§15 D290).
+                // `CLICK | DRAG` spelled out: `click_and_drag()` is `FOCUSABLE`, and
+                // this scrub handle must not be a tab stop.
                 egui::Sense::CLICK | egui::Sense::DRAG,
             );
-            // The same cursor the number shows, so the strip advertises what it does
-            // instead of looking like a label that happens to be draggable — and,
-            // while the field is marked and the slot is its ↺, the **plain arrow**
-            // every other button in the chrome shows (§9.2, §15 D371): the click is
-            // what it is for, and the scrub arrows over a reset left no way to tell
-            // the two apart (§15 D995). A drag that starts there is still a scrub,
-            // and wears the scrub arrows once it is one.
+            // The number's cursor, except the plain arrow while the slot is a marked
+            // field's ↺; a drag that starts there is still a scrub.
             let cursor = match mark {
                 Some(_) if !lead_resp.dragged() => egui::CursorIcon::Default,
                 _ => egui::CursorIcon::ResizeHorizontal,
@@ -2971,26 +2149,17 @@ fn value_field_f64_marked(
             };
             let mut nudged = false;
             if lead_resp.dragged() {
-                // The pointer's own delta at the field's own speed, which is what
-                // `DragValue` does internally — and through `scrub_speed_for`, so a
-                // scrub that wraps the cursor round the screen edge does not jump.
+                // The pointer's delta at the field's speed, as `DragValue` does, via
+                // `scrub_speed_for_value` so a cursor wrap does not jump.
                 let speed = scrub_speed_for_value(ui.ctx(), scrub.speed);
                 *value = scrub.settle(*value + f64::from(lead_resp.drag_delta().x) * speed);
                 nudged = true;
                 wrap_scrub(ui.ctx());
             }
 
-            // `left_to_right` aligns *main*-axis content centred, which would
-            // float the number in the middle of that widened box; the design has
-            // it beside the prefix.
-            //
-            // **Except in a metered field, where it goes to the far end.** Two
-            // reasons, and the second is the one that decided it: a number sitting
-            // in the middle of a field the bar is also crossing reads as a label
-            // *on* the bar rather than as the field's value, and — since the
-            // prefix is a word of the model's rather than a glyph — it would land
-            // in a different place in all seven rows, so the card would have no
-            // column of numbers to read down at all.
+            // `left_to_right` would centre the number in the widened box; the design
+            // has it beside the prefix, except in a metered field, where it goes to
+            // the far end to form a column of numbers.
             let main = match meter.is_some() {
                 true => egui::Align::Max,
                 false => egui::Align::Min,
@@ -3000,33 +2169,13 @@ fn value_field_f64_marked(
                 egui::DragValue::new(value)
                     .speed(scrub.speed)
                     .range(scrub.range.clone())
-                    // ⚠️ **The range bounds what a *gesture or a keystroke* can
-                    // reach; it does not rewrite what the document already
-                    // holds.** egui's default is the other way round
-                    // (`clamp_existing_to_range` is `true`), applied
-                    // unconditionally on every frame — so a stored value outside
-                    // the range was silently rewritten to the nearest end, and
-                    // the `mark_changed` below then reported the widget's own
-                    // rewrite as a **user edit** and routed it through
-                    // `edit_valve` into a transaction. A blur radius of 1200 in
-                    // an imported document became 1000 on the frame the panel
-                    // first drew it, with nobody touching anything.
-                    //
-                    // **One line, for all 82 call sites.** None of them opts out
-                    // today (`grep clamp_existing_to_range` finds nothing outside
-                    // egui), so this is where the decision is made rather than a
-                    // default any of them chose. It is §5.3's *"clamped where the
-                    // outline is built … not on the way in"* applied to the
-                    // widget.
+                    // The range bounds what a gesture or keystroke can reach, not what
+                    // the document holds: egui's default rewrites a stored
+                    // out-of-range value every frame and `mark_changed` below would
+                    // report that as a user edit.
                     .clamp_existing_to_range(false)
-                    // **Before `build`, so a field can still take its parser
-                    // back.** [`crate::expr::eval`] is a superset of egui's
-                    // default — every plain number it used to take, plus the
-                    // arithmetic — so nothing needs to opt out today, and the
-                    // three fields that carried a `%`/`°`-trimming parser of
-                    // their own dropped it when this landed. A caller that sets
-                    // one after this wins, which is what keeps a future field
-                    // that parses something other than a number possible.
+                    // Set before `build`, so a caller's own parser wins;
+                    // `crate::expr::eval` is a superset of egui's default.
                     .custom_parser(crate::expr::eval),
             );
             let dv = scrub_speed_for(ui.ctx(), dv);
@@ -3041,33 +2190,28 @@ fn value_field_f64_marked(
             if resp.dragged() {
                 wrap_scrub(ui.ctx());
             }
-            // **Whole units under the hand, keyed on the drag.** One place rather
-            // than the six call sites that each had to remember it — and `settle`
-            // also re-clamps, since a rounded value can step outside a range whose
-            // bound is fractional.
+            // Rounding is keyed on the drag; `settle` also re-clamps, since a rounded
+            // value can step outside a fractional bound.
             if resp.dragged() || resp.drag_stopped() {
                 let settled = scrub.settle(*value);
                 if settled != *value {
                     *value = settled;
                 }
             }
-            // Report the strip's drag as the field's own, so a caller's `dragged()` /
-            // `drag_stopped()` / `changed()` — and so the edit valve (§9.3) — cannot
-            // tell the two halves apart.
+            // The strip's drag is reported as the field's own.
             resp = resp.union(lead_resp);
             if nudged || *value != before {
                 resp.mark_changed();
             }
-            // Back into the strip reserved above. After the value, so a focused
-            // field's selection block cannot land on top of the label.
+            // Painted after the value, so a focused field's selection block cannot
+            // land on top of the label.
             let at = egui::pos2(strip.left(), resp.rect.center().y - lead.size().y / 2.0);
             match mark {
                 None => {
                     ui.painter().galley(at, lead, theme::text::FAINT);
                 }
-                // **Overridden** (§15 D981): the label at full brightness and the
-                // dot at its top right — and, with the pointer anywhere on the
-                // field, ↺ in the label's place, the same box, so nothing moves.
+                // Overridden: the label at full brightness with a dot at its top
+                // right, and ↺ in the label's place while the pointer is on the field.
                 Some(_) if ui.rect_contains_pointer(strip.union(resp.rect)) => {
                     ui.painter().text(
                         strip.left_center() + egui::vec2(lead.size().x / 2.0, 0.0),
@@ -3086,32 +2230,17 @@ fn value_field_f64_marked(
 
             let mut unit = None;
             if let Some((s, galley)) = trail {
-                // **Allocated, not merely painted into.** `field_frame`
-                // shrink-wraps its content, so a strip that was subtracted from
-                // the number's width and then drawn over left the frame `trail_w`
-                // narrower than the size the caller asked for — a 130px field
-                // painting 110, and the unit sitting outside its own border
-                // because the *placement* still came from the full content box
-                // (§15 D105). Sensed as nothing: the chip below claims what is
-                // clickable, and two claimants over one region is the trap
-                // `icon_button_padded` describes.
+                // Allocated, not merely painted into: `field_frame` shrink-wraps, so
+                // an unallocated strip leaves the frame `trail_w` narrower than asked.
+                // Sensed as nothing; the unit below claims what is clickable.
                 ui.allocate_exact_size(egui::vec2(trail_w, inner_h), egui::Sense::empty());
                 let band = egui::Rect::from_min_size(
                     egui::pos2(full_rect_right(ui) - trail_w, resp.rect.top()),
                     egui::vec2(trail_w, inner_h),
                 );
-                // **The unit is text that lights up, not a chip.** It had a ground
-                // that appeared under it on hover, and the ground is what made the
-                // two labels look unequal: `%` and `px` do not fill a box the same
-                // way — one has a descender and the other does not — so a box drawn
-                // tightly around either put the ink visibly off its own centre, and
-                // the eye reads the *box* as the thing that should be centred.
-                // Without one there is nothing to be off-centre against, which is
-                // also why the one-point optical lift this used to carry is gone.
-                //
-                // It still hangs `SUFFIX_BLEED` past the content box into the
-                // field's own padding — the design's `margin-right:-4px` — so it
-                // finishes 5pt inside the hairline where the digits finish 9.
+                // The unit is text that lights up, not a chip: `%` and `px` do not
+                // fill a box alike, so a ground put the ink off its own centre. It
+                // hangs `SUFFIX_BLEED` past the content box into the field's padding.
                 let text_right = band.right() + SUFFIX_BLEED;
                 let hit_rect = egui::Rect::from_min_max(
                     egui::pos2(text_right - galley.size().x - SUFFIX_HIT_PAD, band.top()),
@@ -3119,40 +2248,14 @@ fn value_field_f64_marked(
                 );
                 let mut ink = theme::text::FAINT;
                 if s.clickable {
-                    // Sensed before it is painted, so the ink is this frame's answer
-                    // rather than last frame's. Its own id and its own rect: the
-                    // field keeps the rest of the row, which is what leaves two hover
-                    // states for the eye. The hit box is a little wider and the
-                    // field's full inner height, because two characters of 11pt text
-                    // is a small thing to aim at and there is nothing else in that
-                    // corner to hit.
-                    //
-                    // **`Sense::CLICK` without `FOCUSABLE`**, for the reason the
-                    // prefix strip above spells out: this sentence used to claim the
-                    // arrangement left "one focus target for typing" and
-                    // `Sense::click()` is `CLICK | FOCUSABLE`, so a suffixed field
-                    // was in fact three tab stops — strip, digits, unit (§15 D290).
+                    // Sensed before it is painted, so the ink is this frame's answer.
+                    // Its own id and rect, wider than the text and the field's full
+                    // inner height, since two characters are small to aim at.
+                    // `Sense::CLICK` without `FOCUSABLE`, to avoid an extra tab stop.
                     let hit =
                         ui.interact(hit_rect, ui.auto_id_with("unit-suffix"), egui::Sense::CLICK);
-                    // **No pointing hand.** The chrome never sets one: a design
-                    // tool's panels are all controls, so a cursor that changes on
-                    // every one of them says nothing and flickers constantly (§9.2).
-                    // The places the cursor *does* change still mean something —
-                    // `Grab` on a reorder grip, `ResizeHorizontal` on the layers
-                    // panel's drag edge (§15 D349), on this field's own scrub strip
-                    // and on a gradient stop's handle in the picker, and the drawn
-                    // bitmaps on the canvas.
-                    // Here the brightening text is the affordance.
-                    //
-                    // ⚠️ **The rule is "it has to mean something", not a count, and
-                    // the list above is an example rather than a census.** This
-                    // said "the two places" until 2026-08-25 and there were already
-                    // four, because a cursor can be claimed through *two* APIs and
-                    // grepping one of them finds neither scrub strip:
-                    //
-                    //     grep -rn "set_cursor_icon\|on_hover_cursor" crates/ondin-app/src
-                    //
-                    // Run that rather than trusting this sentence.
+                    // No pointing hand: the chrome never sets one (§9.2), and the
+                    // brightening text is the affordance.
                     let hit = if s.tooltip.is_empty() {
                         hit
                     } else {
@@ -3175,8 +2278,7 @@ fn value_field_f64_marked(
         })
     });
 
-    // Painted after the row, so it lands on top of the field's own hairline
-    // rather than under it.
+    // Painted after the row, on top of the field's own hairline.
     if scope.inner.0.has_focus() {
         ui.painter().rect_stroke(
             scope.response.rect,
@@ -3189,11 +2291,8 @@ fn value_field_f64_marked(
     (resp, unit, reset)
 }
 
-/// The right edge of the content box a field's row is laying out into.
-///
-/// `ui.cursor()` has already advanced past the number by the time the suffix is
-/// placed, and `max_rect` is the room the row was given — which is the edge the
-/// unit has to sit against, inside `field_frame`'s own padding.
+/// The right edge of the content box a field's row is laying out into, which the
+/// unit sits against; `ui.cursor()` has already advanced past the number.
 fn full_rect_right(ui: &egui::Ui) -> f32 {
     ui.max_rect().right()
 }
@@ -3219,9 +2318,7 @@ pub fn icon_button(
     )
 }
 
-/// [`icon_button`] on a box that need not be square — the Align row's buttons
-/// are 24×22 in the design, wider than they are tall so eight of them plus two
-/// rules fit the card without crowding.
+/// [`icon_button`] on a box that need not be square (the Align row's are 24×22).
 pub fn icon_button_sized(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -3241,15 +2338,12 @@ pub fn icon_button_sized(
     )
 }
 
-/// [`icon_button_sized`] whose **hit target** is `pad` larger than the box it
-/// paints, on each side. See [`HEAD_ACTION_PAD`] for why a header's `+` wants
-/// that and what the caller owes in return.
+/// [`icon_button_sized`] whose hit target is `pad` larger than the box it paints,
+/// on each side (see [`HEAD_ACTION_PAD`]).
 ///
-/// One widget, not two. The box is allocated without a sense and the press is
-/// read from the padded rect, because a clickable 20pt square inside a clickable
-/// 40pt one is the trap [`menu_head`] describes: the inner one wins the hit test
-/// wherever it lies, so the padding would be live everywhere *except* on the
-/// glyph.
+/// One widget, not two: the box is allocated without a sense and the press is
+/// read from the padded rect, since a clickable square inside a larger clickable
+/// one wins the hit test wherever it lies (see [`menu_head`]).
 pub fn icon_button_padded(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -3302,47 +2396,27 @@ pub fn icon_button_padded(
 
 /// What a [`field_button`] is saying about itself.
 ///
-/// **Three visual states, so not two `bool`s.** It was `(active, enabled)`, and the
-/// state that forced an enum is [`FieldButton::Set`] — a combination those two
-/// cannot express, because it is neither on nor off but *off while holding a
-/// value*.
+/// Three visual states rather than two `bool`s: [`FieldButton::Set`] is off while
+/// holding a value, which `(active, enabled)` cannot express.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum FieldButton {
-    /// Off, and there is nothing more to say: the field ground and a muted glyph.
+    /// Off: the field ground and a muted glyph.
     #[default]
     Off,
-    /// On — the accent wash and an accent border, the design's mark for a toggle
-    /// whose extra fields are showing. A lighter wash than [`icon_button`]'s
-    /// pressed state, because this one *stays* on.
+    /// On — the accent wash and an accent border, for a toggle whose extra fields
+    /// are showing. A lighter wash than [`icon_button`]'s pressed state, because
+    /// this one stays on.
     On,
-    /// **Off, but not at its default.** The ordinary ground and glyph with the *on*
-    /// border.
-    ///
-    /// What this buys is a control that can be collapsed without either throwing
-    /// its value away or lying about the state: the border says "there is a setting
-    /// in here", the fill says "and it is not open". The stroke panel's sides
-    /// selector is the case it was built for — closing that used to reset the
-    /// stroke to the whole outline, because with only two states the alternatives
-    /// were losing the setting or refusing to close.
+    /// Off, but not at its default: the ordinary ground and glyph with the on
+    /// border, so a control can collapse without discarding its value or lying
+    /// about the state (the stroke panel's sides selector).
     Set,
-    /// Nothing to do: a dimmed glyph and no hover feedback, so a button with no
-    /// effect says so rather than inviting a click. Callers must still ignore the
-    /// click; this only draws the state.
+    /// Nothing to do: a dimmed glyph and no hover feedback. Callers must still
+    /// ignore the click; this only draws the state.
     Disabled,
-    /// **[`FieldButton::On`] in red** — the confirming button of a card that
-    /// destroys something, on [`theme::color`]'s danger ramp instead of the accent.
-    ///
-    /// The card it exists for is *Delete project*, whose confirm read as an
-    /// ordinary [`FieldButton::Off`] button beside *Cancel* — two grey buttons, one
-    /// of which removes a project that has no trash to come back from. **The
-    /// accent's own weight is the point**: *Create project* and *Save changes* are
-    /// filled blue, so a filled red says "this is that button, and it is the other
-    /// kind of that".
-    ///
-    /// ⚠️ **Not the same red as a destructive *hover*.** `theme::color::DANGER` on
-    /// an otherwise ordinary button is what the dashboard's trash icon does — quiet
-    /// until aimed at. This one is loud at rest, which is the difference between a
-    /// control you might click and the button you came to the card to press.
+    /// [`FieldButton::On`] in red, on [`theme::color`]'s danger ramp: the
+    /// confirming button of a card that destroys something. Loud at rest, unlike
+    /// `theme::color::DANGER` on an ordinary button, which is quiet until aimed at.
     Danger,
 }
 
@@ -3368,46 +2442,27 @@ impl FieldButton {
 /// one has to match.
 pub const BUTTON_R: u8 = 5;
 
-/// How far a [`focus_ring`] sits outside the widget it marks, and the corner it
-/// takes: [`BUTTON_R`] plus that gap, so the ring stays concentric with the button
-/// inside it rather than looking tighter at the corners than along the edges.
+/// How far a [`focus_ring`] sits outside the widget it marks; the ring's corner is
+/// [`BUTTON_R`] plus this gap, to stay concentric with the button.
 const FOCUS_GAP: f32 = 2.0;
 
-/// The accent hairline around whatever the **keyboard** has focused — CSS's
-/// `:focus-visible`, which egui has no equivalent of (§15 D382).
+/// The accent hairline around whatever the keyboard has focused, CSS's
+/// `:focus-visible`, which egui lacks.
 ///
-/// **Call it once at the end of a modal's body**; `settings::card` does that for
-/// every card in the app so a new one cannot forget. It paints nothing at all
-/// unless a key put the focus there.
+/// Call it once at the end of a modal's body; `settings::card` does so for every
+/// card. It paints nothing unless a key put the focus there: `Tab` turns the mode
+/// on and any pointer press turns it off, since a ring on every clicked field is
+/// what `ui::text_field` already suppresses.
 ///
-/// ⚠️ **The mode flag is the whole feature, and it is `Tab` on / pointer-press
-/// off.** Marking *whatever is focused* would put a ring on every field the moment
-/// it was clicked, which is the thing browsers stopped doing and which this app
-/// already suppresses by hand (`ui::text_field` turns egui's own ring off, and
-/// [`field_frame`] is what a focused text box looks like). egui moves focus with
-/// `Tab`/`Shift+Tab` and nothing else, so that one key is the whole of "the
-/// keyboard is driving"; any pointer press hands it back.
+/// The rect is last frame's, through `Context::read_response`, because the focused
+/// widget may not have been drawn yet this pass.
 ///
-/// ⚠️ **The rect is last frame's**, through `Context::read_response` — the focused
-/// widget may not have been drawn yet this pass, and on the frame `Tab` moves the
-/// focus it certainly has not. One frame of lag on a ring nobody is watching move
-/// is not worth the alternative, which is every caller reporting its own rect.
-///
-/// ⚠️ **Every hand-rolled control in this app is already focusable**:
-/// `Sense::click()` is `CLICK | FOCUSABLE` in egui, so
-/// `allocate_exact_size(.., Sense::click())` — which is how [`button_face`],
-/// [`switch_row`] and the swatches are all built — is in the tab order whether or
-/// not anyone meant it to be. Read out of `egui::Sense` rather than assumed; it is
-/// the reason this works without touching a call site.
-///
-/// ⚠️ **The editor's panels are focusable on the same terms and get no ring, and
-/// §15 D747 records that as a *deferred question* rather than as a rule.** It is
-/// not a decision that the chrome may take focus invisibly, nor that it should not
-/// take focus at all; the entry carries the measurement and both answers.
+/// Every hand-rolled control is in the tab order, since `Sense::click()` is
+/// `CLICK | FOCUSABLE` in egui. The editor's panels are focusable too and get no
+/// ring (§15 D747 records that as a deferred question).
 pub fn focus_ring(ui: &egui::Ui) {
     let ctx = ui.ctx();
-    // Two reads and a write, never nested: the context's own lock is not
-    // re-entrant and `data_mut` inside `input` deadlocks (in release it hangs).
+    // Two reads and a write, never nested: the context lock is not re-entrant.
     let tabbed = ctx.input(|i| i.events.iter().any(is_tab));
     let pointed = ctx.input(|i| i.pointer.any_pressed());
     let key = egui::Id::new("focus-visible");
@@ -3480,16 +2535,14 @@ pub fn field_button_sized(
     resp
 }
 
-/// [`field_button_sized`] with an override mark ([`FieldMark`], §15 D981); the
-/// second return value is whether the mark's reset was clicked, and when it was
-/// the button's own click is not the caller's to act on.
+/// [`field_button_sized`] with an override mark ([`FieldMark`]); the second return
+/// value is whether the mark's reset was clicked, in which case the button's own
+/// click is not the caller's to act on.
 ///
-/// **[`segmented_marked`]'s lit cell, for a toggle**: the dot at the button's top
-/// right at rest, and with the pointer on it the glyph traded for ↺ in the same
-/// box and the mark's tooltip in place of the button's. **A click on a marked
-/// toggle is the reset**, not the toggle — for a two-state toggle the two are the
-/// same edit, and where they are not (a bold toggle over a main at 600) the reset
-/// is the one the ↺ promised. A second click then toggles as usual.
+/// This is [`segmented_marked`]'s lit cell for a toggle: the dot at the top right
+/// at rest, and with the pointer on it the glyph traded for ↺ and the mark's
+/// tooltip. A click on a marked toggle is the reset, since that is what the ↺
+/// promised; a second click toggles as usual.
 pub fn field_button_marked(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -3534,19 +2587,12 @@ pub fn field_button_marked(
 
 /// [`field_button_sized`] with a **word** in it instead of a glyph.
 ///
-/// For the controls whose whole job is not to be mistaken for an icon button
-/// somewhere else in the panel. The image popover's two mirror buttons are the
-/// case it exists for: they do to the *picture* what the Transform panel's flip
-/// buttons do to the *layer*, and on a symmetric shape the two produce the same
-/// drawing — so nothing on screen can distinguish them and only the words can.
-/// Phosphor has no second flip pair to reach for, and its own `flip-horizontal`
-/// and `flip-vertical` are not even a matched pair (one mirrors about a dashed
-/// axis, the other hangs right-triangles off a solid bar), so drawing the
-/// difference was the alternative and words are cheaper and clearer.
+/// For controls that must not be mistaken for an icon button elsewhere in the
+/// panel: the image popover's mirror buttons flip the picture where the Transform
+/// panel's flip the layer, and only words tell them apart.
 ///
-/// The ground, border, hover and the four states are [`button_face`]'s, shared
-/// with the glyph version rather than copied — a text button that drifted from
-/// the icon buttons beside it is exactly the unevenness the eye catches.
+/// The ground, border, hover and states are [`button_face`]'s, shared with the
+/// glyph version.
 pub fn label_button(
     ui: &mut egui::Ui,
     text: &str,
@@ -3567,18 +2613,10 @@ pub fn label_button(
 /// The ink a resting control's content takes: [`theme::text::MUTED`] while it can
 /// be used, [`theme::text::DISABLED`] when it cannot.
 ///
-/// **`enabled` is ignored where the surrounding `Ui` is already disabled**, for the
-/// same reason [`disable_unless`] exists. That scope has already faded this glyph
-/// by `Visuals::disabled_alpha`, so painting the disabled tier *underneath* the
-/// fade dims it twice — 40, against the 79 every other unavailable control in the
-/// app paints. Deferring is not an approximation: `MUTED` faded by a disabled scope
-/// **is** `text::DISABLED`, which is where that constant's value came from.
-///
-/// The identity row is where this showed. Its buttons pass their own condition to
-/// [`icon_button`] *and* sit in a [`disable_unless`] scope gated on the same thing,
-/// so Mask and Ungroup came out a shade darker than Group beside them — the second
-/// dim axis left over after the scope one was fixed. A control saying "unavailable"
-/// twice should not look twice as unavailable.
+/// `enabled` is ignored where the surrounding `Ui` is already disabled, for
+/// [`disable_unless`]'s reason: that scope has faded the glyph by
+/// `Visuals::disabled_alpha`, and the disabled tier underneath would dim it twice.
+/// `MUTED` faded by a disabled scope is `text::DISABLED`.
 fn resting_ink(ui: &egui::Ui, enabled: bool) -> egui::Color32 {
     match enabled || !ui.is_enabled() {
         true => theme::text::MUTED,
@@ -3589,21 +2627,12 @@ fn resting_ink(ui: &egui::Ui, enabled: bool) -> egui::Color32 {
 /// The ground, hairline and hover treatment every field-row button shares, and
 /// the colour its content should be drawn in.
 ///
-/// Split out so [`field_button_sized`] and [`label_button`] cannot disagree about
-/// any of the four [`FieldButton`] states — the states have to be geometrically
-/// and tonally identical across both or a row mixing them reads as two different
-/// controls.
+/// Shared so [`field_button_sized`] and [`label_button`] cannot disagree about any
+/// [`FieldButton`] state. Its corner is [`BUTTON_R`], which a caller repainting
+/// over the face (the dashboard's *Delete project* wash) must match.
 ///
-/// Its corner is [`BUTTON_R`], named rather than written here because a caller
-/// that repaints over this face — the dashboard's *Delete project*, which lays a
-/// red wash on the hovered state — has to round to exactly the same number or the
-/// overlay shows a hairline of the ground at each corner.
-///
-/// **`pub` for the same reason it exists**: a caller whose content is neither a
-/// glyph nor a word still owes the four states. The dashboard's project filter is
-/// the case — a colour dot, a name and a caret, sitting immediately beside a
-/// [`label_button`] and an [`action_button`], where any drift in the ground or the
-/// hairline reads as two different kinds of control in one row.
+/// `pub` because a caller whose content is neither a glyph nor a word (the
+/// dashboard's project filter) still owes the four states.
 pub fn button_face(
     ui: &mut egui::Ui,
     box_size: egui::Vec2,
@@ -3614,21 +2643,12 @@ pub fn button_face(
     let dead = resting_ink(ui, false);
     let r5 = egui::CornerRadius::same(BUTTON_R);
     let p = ui.painter();
-    // `Set` takes the *hover* treatment of an ordinary button, not `On`'s wash:
-    // its whole point is that the ground reads as off. Only the border differs.
-    // ⚠️ **The two filled states have a hover of their own, and had none at all.**
-    // They cannot fall through to the neutral arm — the loudest button on a card
-    // would go grey under the pointer — and the first spelling of them ignored
-    // `hovered` entirely instead, which left every modal's *Create project*, *Save
-    // changes* and *Delete project* completely inert to the pointer. One step up
-    // their own ramp is the whole fix: `ACCENT_900` → `ACCENT_800` and the danger
-    // ramp's twin of that.
+    // `Set` takes an ordinary button's hover, not `On`'s wash; only its border
+    // differs. The filled states need a hover of their own (a step up their ramp)
+    // or the loudest button on a card would go grey or stay inert.
     let (bg, fg) = match (state, hovered) {
-        // The *ground* is the only thing that moves, in both — the ink stays put so
-        // the two filled states lighten by the same one visible step. `ACCENT_100`
-        // exists and is deliberately not reached for here: the danger ramp has no
-        // twin of it, and a hover that brightens the text on one button and not the
-        // other is the kind of unevenness this whole function exists to prevent.
+        // Only the ground moves, so both filled states lighten by one step; the
+        // danger ramp has no twin of `ACCENT_100` for the ink.
         (FieldButton::On, false) => (color::ACCENT_900, color::ACCENT_200),
         (FieldButton::On, true) => (color::ACCENT_800, color::ACCENT_200),
         (FieldButton::Danger, false) => (color::DANGER_900, color::DANGER_200),
@@ -3644,8 +2664,8 @@ pub fn button_face(
         egui::Stroke::new(
             1.0,
             match state {
-                // The border is what `Set` and `On` share, and it is the whole of
-                // the signal that a collapsed control is still carrying something.
+                // The border `Set` and `On` share signals a collapsed control still
+                // carries something.
                 FieldButton::On | FieldButton::Set => color::ACCENT_700,
                 FieldButton::Danger => color::DANGER_700,
                 FieldButton::Off | FieldButton::Disabled => color::FIELD_BORDER,
@@ -3656,57 +2676,31 @@ pub fn button_face(
     (rect, resp, fg)
 }
 
-/// Between one labelled section and the next inside a popover — the type popup's
-/// tabs, the stroke card, the colour picker, the export settings and the export
-/// menu's divider spacing.
+/// Between one labelled section and the next inside a popover (the type popup's
+/// tabs, the stroke card, the colour picker, the export settings and menu).
 ///
-/// **One number for all five, which is the whole reason it is here.** They had
-/// four between them — 15, 11, 10 and 10 — each with a reason recorded about the
-/// card it was in, and read one after the other in the same lane those reasons do
-/// not survive contact: the cards are the same width, the same padding and the
-/// same controls ([`CONTROL_H`] — 26 when D275 was written, 28 since D386), so a
-/// section gap that changes between them is a wobble
-/// rather than a distinction (§15 D275). `popup_rule`'s 5-above-plus-4-below plus
-/// its own hairline already comes to exactly this, which is why the menus needed
-/// nothing.
-///
-/// ⚠️ **It is [`CARD_ROW_GAP`] now, not a tenth number of its own.** D275 pulled
-/// four into one and left the one at 10, which is a point off the pitch the
-/// inspector stacks every row at — invisible where an eyebrow stands between two
-/// sections, and not invisible in the stroke popover's dash block, where there is
-/// no eyebrow and this *is* the gap between two controls (§15 D386). The eyebrow
-/// is what separates one section from the next; the number underneath it is the
-/// panel's, like everything else.
+/// One number for all of them, and it is [`CARD_ROW_GAP`], the pitch the inspector
+/// stacks every row at: it shows in the stroke popover's dash block, where no
+/// eyebrow stands between two controls. `popup_rule`'s 5 above plus 4 below plus
+/// its hairline comes to the same.
 pub const POPOVER_SECTION_GAP: f32 = CARD_ROW_GAP;
 
 /// Between a small-caps eyebrow and the control it names.
 ///
-/// **Tighter than [`CARD_ROW_GAP`] on purpose, and it is the one gap that is.** A
-/// label and its control are one thing; two controls are two. Left at the row
-/// pitch the label floats equidistant between what it names and the section above
-/// it, which is the reading that makes a nine-section popover look like eighteen
-/// loose rows.
+/// Tighter than [`CARD_ROW_GAP`] on purpose: a label and its control are one
+/// thing, and at the row pitch the label would float between what it names and
+/// the section above.
 pub const SECTION_LABEL_GAP: f32 = 5.0;
 
 /// One labelled block: the eyebrow, then its controls at the card's own row pitch.
 ///
-/// **The two gaps are two numbers, which is the whole reason this exists.** Set as
-/// a single `item_spacing.y` they cannot be — and were not: the popovers ran the
-/// label gap between their *controls* as well, so a section holding two fields
-/// stacked them 5 apart where the Transform card stacks X/Y and W/H at
-/// [`CARD_ROW_GAP`]. Read one after the other at the same width those are not two
-/// rhythms, they are one rhythm and a wobble (§15 D386).
-///
-/// That reverses a decision this codebase had already made and written down — the
-/// popover took the design mock's vertical compression (5 down against the card's
-/// 9) while matching it across — on the grounds that the mock drew it that way.
-/// The maintainer's instruction is explicitly *not* the mock: the Transform card's
-/// X↔Y and X/Y↔W/H gaps are the baseline every panel and popover follows.
+/// The label gap and the control gap are two numbers, so they cannot be one
+/// `item_spacing.y`; the Transform card's gaps are the baseline every panel and
+/// popover follows.
 pub fn labelled<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.scope(|ui| {
-        // Zero, so the eyebrow's own gap is the `add_space` below and nothing
-        // else — a spacing here would be *added* to it (`settings::settings_ui`
-        // states the same trap).
+        // Zero, so the eyebrow's gap is the `add_space` below; a spacing here would
+        // be added to it (`settings::settings_ui` states the same trap).
         ui.spacing_mut().item_spacing.y = 0.0;
         ui.label(eyebrow(label));
         ui.add_space(SECTION_LABEL_GAP);
@@ -3719,25 +2713,20 @@ pub fn labelled<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::U
     .inner
 }
 
-/// Between an [`action_button`]'s glyph and its word — the design's, and the field
-/// gap the value fields use at both ends of their number.
+/// Between an [`action_button`]'s glyph and its word, the field gap the value
+/// fields use at both ends of their number.
 const ACTION_GAP: f32 = 7.0;
 /// An [`action_button`]'s leading glyph.
 const ACTION_GLYPH_PT: f32 = 15.0;
 /// What an [`action_button`]'s pair keeps clear of its own corners, so an elided
-/// name ends in a `…` with air after it rather than against the rounding.
+/// name ends in a `…` with air after it.
 const ACTION_PAD: f32 = 10.0;
 /// An [`action_button`]'s word.
 const ACTION_LABEL_PT: f32 = 12.0;
 
-/// The width an [`action_button`] needs to show `label` without eliding it.
-///
-/// **Measured off the same four constants the button lays itself out with**, which
-/// is the whole point of it existing: a caller that wants to size the box to the
-/// text — the dashboard's sort control, which changes its own word — would
-/// otherwise be re-deriving `ACTION_PAD * 2 + ACTION_GLYPH_PT + ACTION_GAP` from
-/// reading this file, and the day one of them moves the two disagree silently.
-/// [`badge_field_chrome_w`] exists for the same reason beside the same problem.
+/// The width an [`action_button`] needs to show `label` without eliding it,
+/// measured off the constants the button lays itself out with so a caller sizing
+/// the box to the text (the dashboard's sort control) cannot drift from them.
 pub fn action_button_w(ctx: &egui::Context, label: &str) -> f32 {
     let w = ctx
         .fonts_mut(|f| {
@@ -3752,22 +2741,15 @@ pub fn action_button_w(ctx: &egui::Context, label: &str) -> f32 {
     ACTION_PAD * 2.0 + ACTION_GLYPH_PT + ACTION_GAP + w
 }
 
-/// A wide button with a glyph and a word, both centred — the Export panel's
-/// *Export selection* and *Export as Zip* (`design/Editor.dc.html`), and the
-/// dashboard's sort control (`design/Dashboard.dc.html`).
+/// A wide button with a glyph and a word, both centred: the Export panel's
+/// actions and the dashboard's sort control.
 ///
-/// **Centred as a pair, where [`toggle_row`] is left-aligned**, and the difference
-/// is what each one is: a switch is a row in a list and lines up with the rows
-/// above it, where this is an action and reads as a button. Same
-/// [`button_face`], so the two are the same material.
+/// Centred as a pair, where [`toggle_row`] is left-aligned, because a switch is a
+/// row in a list and this is an action. The same [`button_face`].
 ///
-/// **The word is elided to fit, not painted through the button's edges.** The
-/// label here is not always a phrase this module chose: the Export panel puts a
-/// *layer's name* on it, and there is no length a name cannot be — `Export
-/// Ellipse 11312312 3123123132` ran out of both sides of the card. A `p.text`
-/// call clips against nothing, so the fit has to be asked for at layout time
-/// (§15 D276). A caller that would rather grow the box than lose the word asks
-/// [`action_button_w`] how wide to make it.
+/// The word is elided to fit, since it may be a layer's name and `p.text` clips
+/// against nothing, so the fit is asked for at layout time. A caller that would
+/// rather grow the box asks [`action_button_w`] how wide to make it.
 pub fn action_button(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -3780,11 +2762,8 @@ pub fn action_button(
     const PAD: f32 = ACTION_PAD;
     let (rect, resp, fg) = button_face(ui, size, state);
     let font = egui::FontId::proportional(ACTION_LABEL_PT);
-    // Measured, then placed, so the pair is centred as one thing rather than the
-    // word being centred with a glyph hanging off it. The measurement is of the
-    // galley that will actually be painted — an elided one is *narrower* than the
-    // label it came from, and centring the pair by the untruncated width would
-    // push it off the button it was just made to fit.
+    // Measured, then placed, so the pair is centred as one thing; the measure is of
+    // the elided galley, which is narrower than the label.
     let galley = ui.ctx().fonts_mut(|f| {
         let mut job = egui::text::LayoutJob::simple_singleline(label.to_owned(), font, fg);
         job.wrap = egui::text::TextWrapping::truncate_at_width(
@@ -3808,20 +2787,13 @@ pub fn action_button(
 }
 
 /// A full-width switch inside a popover: leading glyph, label, and a tick or a
-/// dash pinned to the right — the Export settings card's *Trim transparent edges*
-/// and *Pad out to a square* (`design/Editor.dc.html`).
+/// dash pinned to the right, as in the Export settings card.
 ///
-/// **[`button_face`]'s four states rather than a checkbox**, so a switch in a
-/// popover is tonally the same control as the square icon buttons in the card
-/// behind it: `On` is the accent wash, and `Disabled` is a switch that has nothing
-/// to act on and says so instead of vanishing. That is also what keeps the *whole
-/// row* the target, which a 13pt tick could never be.
+/// [`button_face`]'s four states rather than a checkbox, so it is tonally the same
+/// control as the icon buttons behind it and the whole row is the target.
 ///
-/// **The off state draws a dash, not nothing.** An empty right-hand column reads
-/// as a row that has not finished loading; the design draws `ph-minus` there, and
-/// it is the same reasoning [`menu_check`] gives for keeping its tick's column
-/// reserved — the state has to be readable at a glance rather than by noticing an
-/// absence.
+/// The off state draws a dash, not nothing, since an empty right-hand column reads
+/// as a row that has not finished loading.
 pub fn toggle_row(
     ui: &mut egui::Ui,
     glyph: &str,
@@ -3865,34 +2837,20 @@ pub fn toggle_row(
 /// The drag grip on a reorderable row: the design's six-dot glyph, sensing drag
 /// rather than click.
 ///
-/// Its own widget rather than part of the row, because the row's *other* controls
-/// have to keep working while this one is the only thing that starts a reorder —
-/// a hex field you cannot click into because the row is draggable is worse than
-/// no reorder at all. Pulled back into the field's left margin by 3px, as the
-/// design draws it, so the chip beside it still sits where it does on a row with
-/// no grip.
-/// `enabled: false` — a list of one, where there is nowhere for the only paint to
-/// go — **draws the identical glyph and simply does not drag**. Dimming it or
-/// dropping it would make the row jump about as paints are added and removed, and
-/// would spend a visual distinction on a state where nothing is being withheld.
-/// The tooltip goes, since "drag to reorder" would be a lie.
+/// Its own widget rather than part of the row, so the row's other controls keep
+/// working while this is the only thing that starts a reorder. Pulled back into the
+/// field's left margin by 3px, as the design draws it.
 ///
-/// **The hit target is the whole left end of the field**, `row_h` tall and reaching
-/// back through the field's own [`FIELD_PAD_X`] inset to its hairline — everything
-/// left of the glyph belongs to the glyph, because there is nothing else there to
-/// hit. Six dots 11pt wide by 20 is a small thing to catch, and missing it lands on
-/// the field, which does nothing.
+/// `enabled: false` (a list of one) draws the identical glyph and does not drag,
+/// so the row does not jump as paints are added; the tooltip goes.
 ///
-/// It stops at the glyph's own right edge and does **not** take the 9pt gap before
-/// the colour chip. That gap is the chip's approach: swallowing it would trade a
-/// grip that is hard to grab for a swatch that is hard to click, which is the worse
-/// half of the bargain — the swatch is used on every paint and the grip only on a
-/// list of two or more.
+/// The hit target is the whole left end of the field, `row_h` tall and reaching
+/// back through [`FIELD_PAD_X`] to the hairline. It stops at the glyph's right
+/// edge and leaves the 9pt gap to the colour chip, which is used on every paint.
 pub fn grip(ui: &mut egui::Ui, enabled: bool, row_h: f32) -> egui::Response {
-    // The glyph's own box, always allocated so the chip beside it lands in the
-    // same place whether or not this row can be reordered. The press is read from
-    // the wider rect below, so this one senses nothing: two claimants over one
-    // region and the smaller one wins wherever it lies (see [`icon_button_padded`]).
+    // The glyph's own box, always allocated so the chip lands in the same place;
+    // it senses nothing, because the press is read from the wider rect below
+    // (see [`icon_button_padded`]).
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(11.0, 20.0), egui::Sense::empty());
     let resp = if enabled {
         let hit = egui::Rect::from_min_max(
@@ -3928,72 +2886,36 @@ pub fn grip(ui: &mut egui::Ui, enabled: bool, row_h: f32) -> egui::Response {
     resp
 }
 
-/// Whether a hairline `width` points wide wants its centre on a pixel **centre**
-/// rather than on a pixel **edge**, at this display scale (§15 D479).
+/// Whether a hairline `width` points wide wants its centre on a pixel centre
+/// rather than a pixel edge, at this display scale.
 ///
-/// A line whose *device* width is odd covers a whole number of pixels only when it
-/// is centred on one; an even one only when it sits on the boundary between two.
-/// Getting it backwards is what turns a hairline into a two-pixel grey smear.
-///
-/// **The parity is `floor(width × ppp)` — the device width, floored** — and all
-/// three parts of that were wrong at some point. `rulers.rs` carries the full
-/// derivation and the probe that settled it: reading the *point* width assumes one
-/// point is one device pixel, which is false at 150% and 175%; `round` calls a
-/// 1.5-device-pixel line even, edge-centres it, and leaves a resting guide with no
-/// solid pixel at all.
-///
-/// **This is the half four spellings of the rule agree on.** They do *not* agree
-/// on the base — see [`hairline_in_column`] — which is why the shared thing is a
-/// predicate rather than the whole formula.
+/// A line whose device width is odd covers whole pixels only when centred on one;
+/// an even one only on the boundary between two. The parity is
+/// `floor(width × ppp)`, the device width floored (`rulers.rs` has the derivation).
+/// The spellings of the rule share this predicate but not the base; see
+/// [`hairline_in_column`].
 pub fn hairline_on_pixel_centre(ppp: f32, width: f32) -> bool {
     (width * ppp).floor() as i32 % 2 == 1
 }
 
-/// A hairline's coordinate snapped to the **nearest grid position of the right
-/// parity**, so it covers whole physical pixels and stays inside the column it was
-/// allocated (§15 D479).
+/// A hairline's coordinate snapped to the nearest grid position of the right
+/// parity, so it covers whole physical pixels and stays inside its column.
 ///
-/// The three chrome rules — [`rule`], `inspector::popup_rule` and
-/// `settings::section` — all draw a 1pt line into a 1pt allocation between two
-/// galleys, so the constraint is two-sided: land on the grid, and do not drift so
-/// far doing it that the ink leaves the column. **Nearest-of-the-right-parity is
-/// what satisfies both**, and it bounds the drift at half a device pixel at every
-/// scale, which is the floor on the error rather than a slack allowance — the
-/// column's centre generally is not on the grid, and no arithmetic closes a gap
-/// the two coordinate systems create.
+/// The three chrome rules ([`rule`], `inspector::popup_rule`, `settings::section`)
+/// draw a 1pt line into a 1pt allocation, so the snap must land on the grid
+/// without drifting out of the column; nearest-of-the-right-parity bounds the
+/// drift at half a device pixel. At 150% a 1.5-pixel line cannot put both edges on
+/// the grid.
 ///
-/// ⚠️ **The parity term used to be unconditional here**, which is the whole of
-/// `[S19.1-L1-04]`: `((v × ppp).floor() + 0.5) / ppp` always asks for a pixel
-/// *centre*, so at an even integer scale a 1pt line — 2 device pixels — spread as
-/// `[0.5, 1.0, 0.5]` across three. Measured at 200%, plain Windows scaling, at all
-/// three sites. It is `[1.0, 1.0]` now, and 150%'s `[0.25, 1.0, 0.25]` — which no
-/// arithmetic can improve on, since a 1.5-pixel line cannot put both edges on the
-/// grid — is unchanged.
-///
-/// ⚠️ **The two arms are not two spellings of one snap and neither may be swapped
-/// for the other**, which a probe over `ppp ∈ {1, 1.25, 1.5, 1.75, 2, 3}` says
-/// rather than taste: `floor + 0.5` is the nearest pixel *centre* and `round` the
-/// nearest pixel *edge*, so each is nearest for its own parity and up to a **whole
-/// device pixel** out for the other's — 1.0pt at 100%, which puts a 1pt rule
-/// entirely outside its 1pt column. That is the failure [`rule`]'s own history
-/// records (*"put the ink up to 0.7pt right of centre and, measured, mostly
-/// outside the column altogether"*, §15 **D46**, the second contributor to D44's
-/// unevenly spaced cluster) reached by a second road.
-///
-/// ⚠️ **`rulers::snap_across_axis` shares [`hairline_on_pixel_centre`] and not
-/// this**, which the review filed as one rule written twice (`[S18.1-L3-03]`,
-/// G20). It rounds for **both** parities, so its odd case is a nearest *edge* with
-/// half a pixel added — up to a whole device pixel from where the guide was put.
-/// A guide has no column, so nothing has ever made that visible, and this is
-/// recorded rather than changed: moving guide ink is a visible change to the one
-/// piece of this arithmetic that *is* pinned by tests, and it wants its own
-/// decision rather than being swept in behind a merge.
+/// The two arms are not interchangeable: `floor + 0.5` is the nearest pixel centre
+/// and `round` the nearest pixel edge, each up to a whole device pixel out for the
+/// other's parity, which puts a 1pt rule outside its column.
+/// `rulers::snap_across_axis` shares [`hairline_on_pixel_centre`] but not this: it
+/// rounds for both parities, and guides have no column to show the difference.
 pub fn hairline_in_column(centre: f32, ppp: f32, width: f32) -> f32 {
     let device = centre * ppp;
     match hairline_on_pixel_centre(ppp, width) {
-        // The nearest pixel *centre*, and the nearest pixel *edge*. `floor + 0.5`
-        // and `round` are those two things, not a downward bias and a nearest —
-        // which is why neither may be swapped for the other.
+        // `floor + 0.5` is the nearest pixel centre, `round` the nearest edge.
         true => (device.floor() + 0.5) / ppp,
         false => device.round() / ppp,
     }
@@ -4003,9 +2925,7 @@ pub fn hairline_in_column(centre: f32, ppp: f32, width: f32) -> f32 {
 /// row's full height and painted 16px tall, centred — a `Separator` would claim
 /// the whole remaining width.
 ///
-/// The device-grid snap is [`hairline_in_column`], which is where the reasoning
-/// this function used to carry now lives — it had been copied verbatim into two
-/// other files and had the parity bug in all three (§15 D479).
+/// The device-grid snap is [`hairline_in_column`].
 pub fn rule(ui: &mut egui::Ui, row_h: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(1.0, row_h), egui::Sense::empty());
     let half = 8.0_f32.min(row_h * 0.5);
@@ -4020,21 +2940,15 @@ pub fn rule(ui: &mut egui::Ui, row_h: f32) {
     );
 }
 
-/// Paint a **filled** lock centred in a `size`-tall box.
+/// Paint a filled lock centred in a `size`-tall box.
 ///
-/// Drawn rather than set in type: the bundled `Phosphor.ttf` is the Regular
-/// weight only, and Phosphor's Fill style is a separate font file we do not
-/// ship. The design marks a locked layer with the filled glyph specifically —
-/// it has to read as shut at a glance beside the outline one on the hover
-/// state — so the shape is reproduced here from Phosphor's own
-/// `lock-simple-fill` geometry, in its 256-unit box: a body from `32,80` to
-/// `224,224` with a 16-unit corner radius, and a shackle band between radii 32
-/// and 48 about `128,56` — i.e. a 16-wide stroke along radius 40.
+/// Drawn rather than set in type, since the bundled `Phosphor.ttf` is the Regular
+/// weight only. The shape is Phosphor's `lock-simple-fill` geometry in its
+/// 256-unit box: a body from `32,80` to `224,224` with a 16-unit corner radius,
+/// and a 16-wide shackle stroke along radius 40 about `128,56`.
 ///
-/// `size` is the em size the equivalent glyph would be set at, so a call site
-/// can hand it the same number it passes to [`theme::icon_font`] and get a lock
-/// that lines up with the outline one it replaces. `rot` turns it, for the size
-/// badge, which tilts with the layer it measures.
+/// `size` is the em size the equivalent glyph would be set at, so it lines up with
+/// the outline lock it replaces. `rot` turns it, for the size badge.
 pub fn paint_lock_filled(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -4047,25 +2961,19 @@ pub fn paint_lock_filled(
     }
 }
 
-/// Whether `resp`'s primary click this pass is the **second of a double-click**,
+/// Whether `resp`'s primary click this pass is the second of a double-click,
 /// counted the way a hand means one: within egui's `max_double_click_delay` and
 /// `max_click_dist` of the click before it, and not itself after a double.
 ///
-/// **Not `Response::double_clicked`, because egui 0.35 miscounts one case a
-/// designer makes all the time.** It reads a release within `2 ×
-/// max_double_click_delay` of the click *before last* as a **triple**, measuring
-/// distance from the *last* click only — so a click on one layer and then a fast
-/// double-click on another, all inside 0.6 s, came back count 3 and
-/// `double_clicked()` answered false: the group was not entered, the text not
-/// opened (§15 D986). Here the chain restarts wherever the pointer moved too far,
-/// and a third click on one spot is a single click, as egui's triple was.
+/// Not `Response::double_clicked`: egui 0.35 reads a release within `2 ×
+/// max_double_click_delay` of the click before last as a triple, measuring
+/// distance from the last click only, so a click on one layer then a fast
+/// double-click on another counts 3. Here the chain restarts wherever the pointer
+/// moved too far, and a third click on one spot is a single click.
 ///
-/// The record is one per context, so every reader shares it — the canvas's
-/// select arm, the pen's finish, the node tool's added point, the text editor's
-/// word, the layers panel's rename and the window's title strip; a second ask in
-/// the same pass about the same click is answered from it rather than counted
-/// twice. ⚠️ The chain is the clicks *asked about*: a click no reader asks of — a
-/// set's `+`, which returns before the select arm — does not enter it.
+/// The record is one per context, shared by every reader; a second ask in the
+/// same pass about the same click is answered from it. The chain is the clicks
+/// asked about: a click no reader asks of does not enter it.
 pub fn double_clicked(ui: &egui::Ui, resp: &egui::Response) -> bool {
     #[derive(Clone, Copy)]
     struct Last {
@@ -4114,16 +3022,12 @@ pub fn double_clicked(ui: &egui::Ui, resp: &egui::Response) -> bool {
     double
 }
 
-/// The **filled hexagon** a main component carries (§15 D981) — the second
-/// Fill-weight glyph §15 D10 counted to, drawn rather than shipped, as the lock
-/// above is: a hexagon is six points, and the font would be 480 KB for them
-/// (the session's, §15 D985). Phosphor's `hexagon` geometry in its 256-unit box,
-/// pointy-top, its vertices on the outline glyph's centre line — `128,20` at the
-/// top, `220,72` and `220,184` down the right, `128,236` at the bottom — so it sits
-/// in the box [`crate::theme::icon::HEXAGON`] outlines at the same `size`.
-/// **Measured, not recalled**: the test against the outline glyph's atlas ink at
-/// 64pt (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`) — the first build
-/// stated it from memory, `arch-scribe`'s find.
+/// The filled hexagon a main component carries, drawn rather than shipped as the
+/// lock above is. Phosphor's `hexagon` geometry in its 256-unit box, pointy-top,
+/// vertices on the outline glyph's centre line (`128,20` top, `220,72` and
+/// `220,184` down the right, `128,236` bottom), so it sits in the box
+/// [`crate::theme::icon::HEXAGON`] outlines at the same `size`
+/// (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`).
 pub fn paint_hexagon_filled(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -4182,8 +3086,8 @@ fn lock_filled_shapes(
     }
     pts.push(at(PIVOT.0 + BAND, BODY.1));
 
-    // The body: a rounded rect built as geometry in the same frame. It used to
-    // be a `RectShape`, which cannot be turned.
+    // The body: a rounded rect built as geometry in the same frame, since a
+    // `RectShape` cannot be turned.
     let body = Frame2::rotated(
         rot,
         at(
@@ -4205,13 +3109,9 @@ fn lock_filled_shapes(
     ]
 }
 
-/// The hairline round a [`segmented`] track, and the width the cells give up to
-/// it on every side.
-///
-/// One point, like every other border in the chrome — [`field_frame`]'s stroke,
-/// [`button_face`]'s, the dashboard search field's. Named rather than written as a
-/// literal because it is subtracted in one place and painted in another, and those
-/// two have to agree or the cells sit crooked in their own track.
+/// The hairline round a [`segmented`] track, and the width the cells give up to it
+/// on every side. Named because it is subtracted in one place and painted in
+/// another, and the two must agree.
 const SEGMENT_BORDER: f32 = 1.0;
 
 /// A segmented control: `n` equal cells in a recessed track, the selected one
@@ -4231,28 +3131,12 @@ pub fn segmented(
 
 /// [`segmented`] with cells that can be **unavailable** rather than absent.
 ///
-/// A disabled cell keeps its place and its label, takes no hover ground and
-/// returns no click. That is the same bargain the identity row's permanently
-/// disabled mask button makes: a control that vanishes leaves the user wondering
-/// whether the app has the feature at all, where one that is visibly unavailable
-/// says "not for this subject", which is the actual state.
+/// A disabled cell keeps its place and its label, takes no hover ground, no click
+/// and no focus. A visibly unavailable control says "not for this subject", and
+/// keeps the row its usual size (the picker's kind tabs).
 ///
-/// It also keeps the *row* the size it always is. The picker's kind tabs used to
-/// be dropped entirely for a solid-only slot, and what that left was a header with
-/// nothing in it but a close button — reported as looking empty, which it was.
-///
-/// `enabled` is asked per cell rather than passed as a mask, so the caller can
-/// answer from whatever it already knows about that index.
-///
-/// ⚠️ **"Takes no hover ground and returns no click" is the whole of it, and a
-/// disabled cell takes no *focus* either** (§15 D722, `[S18.2-L3-04]`). It used
-/// to be registered `Sense::click()` — so it was a tab stop that could not be
-/// activated — on the argument that it might carry a tooltip. The signature makes
-/// that impossible: the per-cell `Response` never leaves this function. The
-/// inspector's layout-grid row cites *"`ui::segmented_enabled`'s bargain"* and
-/// quotes only the visible-but-unavailable half, which is the half that is true.
-/// A cell that needs a tooltip goes through [`segmented_tipped`] (§15 D886),
-/// which this is the untipped form of.
+/// `enabled` is asked per cell rather than passed as a mask. A cell that needs a
+/// tooltip goes through [`segmented_tipped`], of which this is the untipped form.
 pub fn segmented_enabled(
     ui: &mut egui::Ui,
     width: f32,
@@ -4265,14 +3149,12 @@ pub fn segmented_enabled(
     segmented_tipped(ui, width, cell_h, n, selected, enabled, |_| "", paint)
 }
 
-/// [`segmented_enabled`] with a **tooltip per cell** — `tip(i)`, where an empty
-/// string is none (§15 D886).
+/// [`segmented_enabled`] with a tooltip per cell: `tip(i)`, where an empty string
+/// is none.
 ///
-/// For a control whose cells are pictures with no word beside them — the
-/// Container card's direction arrows and wrap turns, which read as nothing in
-/// particular until somebody says what they are. A disabled cell carries its
-/// tooltip too, which is what the hover-only sense below was kept for: the
-/// Container card's `grid` says *why* it cannot be picked.
+/// For cells that are pictures with no word beside them (the Container card's
+/// direction arrows). A disabled cell carries its tooltip too, saying why it
+/// cannot be picked.
 #[allow(clippy::too_many_arguments)]
 pub fn segmented_tipped(
     ui: &mut egui::Ui,
@@ -4287,16 +3169,15 @@ pub fn segmented_tipped(
     segmented_marked(ui, width, cell_h, n, selected, enabled, tip, None, paint).0
 }
 
-/// [`segmented_tipped`] with an override mark ([`FieldMark`], §15 D981); the
-/// second return value is whether the mark's reset was clicked.
+/// [`segmented_tipped`] with an override mark ([`FieldMark`]); the second return
+/// value is whether the mark's reset was clicked.
 ///
-/// **The mark sits on the lit cell**, because a segmented control has no label of
-/// its own to brighten: the dot at the cell's top right at rest, and with the
-/// pointer on the cell its picture traded for ↺ in the same box, the mark's tooltip
-/// in place of the cell's. **A click on the lit cell is the reset** — it picked the
-/// value already held, which did nothing, so the reset takes no click that meant
-/// anything. Over a selection that disagrees no cell is lit: the dot then sits at
-/// the track's top right and the reset is the card header's.
+/// The mark sits on the lit cell, since a segmented control has no label to
+/// brighten: the dot at the cell's top right at rest, and with the pointer on it
+/// the picture traded for ↺ and the mark's tooltip. A click on the lit cell is the
+/// reset, as it would have picked the value already held. Over a selection that
+/// disagrees no cell is lit: the dot sits at the track's top right and the reset
+/// is the card header's.
 #[allow(clippy::too_many_arguments)]
 pub fn segmented_marked(
     ui: &mut egui::Ui,
@@ -4316,12 +3197,8 @@ pub fn segmented_marked(
     let r5 = egui::CornerRadius::same(5);
     let p = ui.painter();
     p.rect_filled(track, r5, theme::color::text_a(13));
-    // The design's hairline, the same one every field and button in the chrome
-    // wears — `text 8%` over whatever the track is sitting on, which is why it is
-    // [`theme::color::text_a`] rather than the solid [`color::FIELD_BORDER`]: a
-    // segmented control appears on a card, in a popover and in the dashboard's
-    // header, and those are three different grounds. It was the **only** control
-    // class in the app still drawing its ground bare (§15 D386).
+    // The chrome's hairline, `text 8%` rather than the solid `FIELD_BORDER`, since
+    // the track sits on a card, a popover and the dashboard header.
     p.rect_stroke(
         track,
         r5,
@@ -4329,11 +3206,8 @@ pub fn segmented_marked(
         egui::StrokeKind::Inside,
     );
 
-    // ⚠️ **The hairline comes out of the cells, not out of the track.** The track
-    // is what a caller sized and what has to keep lining up with the field beside
-    // it, so the border is drawn *inside* the box already allocated and the cells
-    // move in by its width — which is also what the design does: a 28pt control is
-    // `1 + 2 + 22 + 2 + 1`, not `2 + 24 + 2` with a border hung outside it.
+    // The hairline comes out of the cells, not the track: the track is what a
+    // caller sized, and a 28pt control is `1 + 2 + 22 + 2 + 1`.
     let inner = track.shrink(PAD + SEGMENT_BORDER);
     let cell_w = (inner.width() - GAP * (n.saturating_sub(1)) as f32) / n.max(1) as f32;
     let mut clicked = None;
@@ -4347,28 +3221,9 @@ pub fn segmented_marked(
             egui::vec2(cell_w, inner.height()),
         );
         let live = enabled(i);
-        // 🚨 **A disabled cell senses hover, not click** (§15 D722,
-        // `[S18.2-L3-04]`). This was `Sense::click()` either way, on the stated
-        // ground that *"the cell can carry a tooltip explaining why it is
-        // unavailable"* — **which no caller could then do**: the function
-        // returned `Option<usize>`, `resp` never escaped, and `paint` was handed a
-        // `&Painter` rather than a response. The one production caller
-        // (`picker::picker_body`) hung none, and `segmented` passes `|_| true` so
-        // it has no disabled cells at all. (`tip` below is how a caller can now,
-        // §15 D886.)
-        //
-        // What it did instead was put the cell in the **keyboard tab order** —
-        // `Sense::click()` is `CLICK | FOCUSABLE`, which `focus_ring`'s ⚠️ warns
-        // about from the other side — so Tab stopped on a cell that swallowed
-        // Return and Space and offered neither the click nor the explanation.
-        //
-        // ⚠️ **Still registered, rather than not sensed at all.** The rect stays
-        // claimed so the cell reports hover, which is what the *ground* is drawn
-        // from and what a future tooltip would rest on; `Sense::hover()` is
-        // `Sense::empty()` (§15 D688), so it takes no focus and no click. The
-        // tooltip was wanted in the end (§15 D886), and it arrived the way this
-        // said it should — by widening the signature, as [`segmented_tipped`]'s
-        // `tip` — rather than by a sense nobody could read.
+        // A disabled cell senses hover, not click: `Sense::click()` is `FOCUSABLE`,
+        // so it would be a tab stop that swallows Return and Space. It is still
+        // registered so the cell reports hover for its ground and its `tip`.
         let resp = ui.interact(
             rect,
             ui.id()
@@ -4426,12 +3281,8 @@ pub fn segment_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &str, on:
     );
 }
 
-/// A [`segmented`] cell showing nothing but a dash — the **mixed** state.
-///
-/// A segmented control cannot show "several of these at once", so it shows none
-/// of them and says so: the track paints with no cell raised and this dash in the
-/// middle. Blank would read as a bug; the selected-looking first cell would be a
-/// lie.
+/// A [`segmented`] cell showing nothing but a dash: the mixed state, with no cell
+/// raised, since blank would read as a bug and a raised first cell as a lie.
 pub fn segment_mixed(painter: &egui::Painter, rect: egui::Rect) {
     painter.text(
         rect.center(),
@@ -4444,64 +3295,32 @@ pub fn segment_mixed(painter: &egui::Painter, rect: egui::Rect) {
 
 // --- the slider ------------------------------------------------------------
 
-/// The row a [`slider`] allocates — the knob's diameter.
+/// The row a [`slider`] allocates: the knob's diameter.
 ///
-/// ⚠️ **It is not the height of the ink, and this doc said it was** (§15 D673,
-/// `[S18.2-L3-05]`). It read *"the knob's diameter, which is the tallest thing in
-/// it"*; the tallest thing in it is the knob's **shadow**, a `half`-radius disc
-/// drawn one point lower ([`slider`], the design's `box-shadow: 0 1px 3px`), so a
-/// slider paints `SLIDER_H + 1` of ink into the `SLIDER_H` it reserves. Measured
-/// at ppp 1.0 over a 120pt slider: row `120 × 11`, ink `120 × 12`, bottom overflow
-/// exactly 1.0.
+/// Not the height of the ink: the knob's shadow is a `half`-radius disc one point
+/// lower, so a slider paints `SLIDER_H + 1` of ink into the row it reserves. The
+/// bleed lands in the caller's row gap;
+/// `a_sliders_shadow_leaves_the_row_by_exactly_one_point` bounds it.
 ///
-/// **A shadow outside the box is what a shadow is**, so the bleed is the design
-/// rather than a defect — it lands in the caller's row gap, and the one production
-/// caller (`typography::axis_slider`) has room. What was wrong was a `pub`
-/// constant telling its callers it bounded the drawing.
-/// `a_sliders_shadow_leaves_the_row_by_exactly_one_point` is now the gate on how
-/// far, because a number in a doc comment is not one. (Plain backticks: it is a
-/// `#[cfg(test)]` item, which `cargo doc` cannot see — §15 D319. Written as a
-/// `[link]` first, and **the doc gate caught it**, which is D319's mechanism from
-/// a third direction: not a link nothing checks, but a production doc that cannot
-/// name a test at all.)
-///
-/// 🚨 **The app's other slider was said to answer the same question the other way,
-/// and measurement says it answers a different question** (§15 D766, ruling D673).
-/// `panels::picker`'s track bounds its knob **vertically** — that is what its
-/// `+ 6.0` buys — and lets it hang **7pt off each horizontal end**, unclamped,
-/// where this one bleeds 1pt below and clamps travel so the knob cannot leave the
-/// rail. **They bound different axes**, so there was no "which is right" to rule
-/// on: the sentence this replaces (*"its knob is given room where `ui::slider`'s
-/// overhangs"*) is true of one axis and silent about the one where the answers are
-/// reversed.
-///
-/// ⚠️ **And `picker`'s constant was never this quantity.** It is now `TRACK_H`,
-/// because it is the *rail's* thickness — this one is the **knob diameter**, with
-/// [`SLIDER_RAIL_H`] under it. Unifying the two values would have thickened the
-/// picker's gradient strips and left its knob exactly where it was.
-///
-/// ⚠️ **`the number every caller reserves` was an overstatement and is gone**: no
-/// production code outside this file reads this constant. `slider` reserves it on
-/// its callers' behalf, which is a different claim and the true one.
+/// `panels::picker`'s track bounds its knob vertically and lets it hang 7pt off
+/// each horizontal end; this one clamps travel so the knob stays on the rail. Its
+/// `TRACK_H` is the rail's thickness, while this is the knob diameter, with
+/// [`SLIDER_RAIL_H`] under it.
 pub const SLIDER_H: f32 = 11.0;
-/// The rail's thickness. **3, and the knob is nearly four times it**: the design
-/// draws a hairline track with a bead riding on it, where egui's own `Slider`
-/// draws a chunky rail and a handle barely thicker than it — the two read as
-/// completely different controls beside the same fields.
+/// The rail's thickness: 3, with a knob nearly four times it, a hairline track
+/// with a bead riding on it.
 const SLIDER_RAIL_H: f32 = 3.0;
 
 /// A value between two bounds: a hairline rail, filled in accent to the knob.
 ///
-/// **Hand-painted rather than `egui::Slider`**, for the reason `segmented` and
-/// `switch` are: the design specifies a 3pt rail, an 11pt knob, the filled half in
-/// `ACCENT_600` and the knob in `ACCENT_100`, and egui derives all four from
-/// `Spacing` and `Visuals` in ways that cannot be reached without restyling every
-/// slider in the process. It also drops `Slider`'s text box, arrows and drag
-/// handles, none of which this wants — the axis rows carry their own numeric field.
+/// Hand-painted rather than `egui::Slider`: the design's 3pt rail, 11pt knob,
+/// `ACCENT_600` fill and `ACCENT_100` knob cannot be reached through `Spacing` and
+/// `Visuals` without restyling every slider, and the axis rows carry their own
+/// numeric field.
 ///
 /// The knob's centre travels between `half..width - half` so it cannot hang off
-/// either end of the rail, and the rail is drawn full width underneath: a knob
-/// whose *edge* touched the end would read as a value short of the maximum.
+/// the rail, which is drawn full width: a knob whose edge touched the end would
+/// read as short of the maximum.
 pub fn slider(
     ui: &mut egui::Ui,
     width: f32,
@@ -4514,10 +3333,8 @@ pub fn slider(
     let half = SLIDER_H / 2.0;
     let travel = (rect.width() - SLIDER_H).max(1.0);
 
-    // **Absolute, not incremental**: a slider jumps to where it is pressed and
-    // then follows the pointer, which is what every slider does and what makes a
-    // click on the rail mean something. (A `DragValue` is the opposite — see
-    // `value_field` — because a number has no rail to point at.)
+    // Absolute, not incremental: it jumps to where it is pressed, then follows the
+    // pointer.
     if let Some(pos) = resp.interact_pointer_pos()
         && hi > lo
     {
@@ -4549,8 +3366,7 @@ pub fn slider(
             color::ACCENT_600,
         );
     }
-    // The design's `box-shadow: 0 1px 3px rgba(0,0,0,.4)` — one soft disc under
-    // the knob, which is what lifts a light bead off a light rail.
+    // The design's `box-shadow: 0 1px 3px rgba(0,0,0,.4)`: one soft disc under the knob.
     p.circle_filled(
         egui::pos2(knob_x, rect.center().y + 1.0),
         half,
@@ -4579,44 +3395,17 @@ const SWITCH_ROW_BLEED: f32 = 4.0;
 
 /// A two-state toggle: a track with a knob at one end.
 ///
-/// **A rounded-rectangle knob in a rounded-rectangle track, not a pill.** Every
-/// other control in the chrome is a 4–5px rounded box — the segmented cells, the
-/// field buttons, the swatches — and a capsule switch in among them reads as
-/// borrowed from somewhere else. The radii here are the same family: 5 outside,
-/// 3 inside.
+/// A rounded-rectangle knob in a rounded-rectangle track, not a pill, matching
+/// the 4–5px boxes of the rest of the chrome: radii 5 outside, 3 inside.
 ///
-/// **The travel is the whole signal, and the colour is the confirmation.** The
-/// knob moves the width of the track and the ground goes accent; either alone is
-/// a state that has to be *inspected* rather than seen, which is the failure mode
-/// of a checkbox in a scrolling list. This one is built for exactly that list —
-/// the OpenType features — where a dozen rows are read as a column and what
-/// matters is which of them stand out.
+/// The travel is the signal and the colour the confirmation; either alone has to
+/// be inspected rather than seen in a list like the OpenType features. Hover lifts
+/// the resting track, the larger shape under the pointer.
 ///
-/// Hover lifts the resting track rather than the knob: the track is the larger
-/// shape and the one the pointer is actually over.
-///
-/// **Painting, not a widget**, because the only thing that wants a switch so far
-/// wants it at the end of a row whose *whole width* is the target — see
-/// [`switch_row`], and [`icon_button_padded`] for why the two cannot both sense.
-/// A standalone `switch` widget is four lines on top of this and can be added the
-/// day something needs one; adding it now would be a builder with no callers, and
-/// **`dead_code` would say so on the next `cargo check`** — which is a reason to
-/// wait rather than a reason not to.
-///
-/// 🚨 **That last clause used to read *"which in a library crate `dead_code` never
-/// notices"*, and it is void in the file it is written in** (§15 D665,
-/// `[S18.2-L3-06]`). `ondin-app` is not a library crate: `Cargo.toml` declares
-/// only `[[bin]] name = "ondin"`, there is no `src/lib.rs`, and `main.rs`'s
-/// `mod ui;` carries no `#[allow(dead_code)]` — so the lint analyses every item
-/// here and an uncalled `pub fn switch` would surface on the plain
-/// `cargo check --release -p ondin-app` gate. The decision is unchanged and its
-/// stated reason was the opposite of the fact, which is worse than no reason: it
-/// told the next reader this module can hide an uncalled `pub` builder.
-///
-/// ⚠️ **The true version of that rule is CLAUDE.md's and it is about `ondin-core`,
-/// where a `pub` item *is* the API and `dead_code` never fires** — plus the second
-/// half, which is not about `pub` at all: a derived `PartialEq` hides an unread
-/// **field** anywhere in the workspace, this crate included.
+/// Painting, not a widget, because the only caller wants it at the end of a row
+/// whose whole width is the target (see [`switch_row`], and [`icon_button_padded`]
+/// for why the two cannot both sense). A standalone widget would have no callers,
+/// and `ondin-app` is a binary, so `dead_code` would flag it.
 pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bool) {
     let (track, knob) = match (on, hot) {
         (true, false) => (color::ACCENT_600, color::ACCENT_100),
@@ -4638,19 +3427,13 @@ pub fn paint_switch(painter: &egui::Painter, rect: egui::Rect, on: bool, hot: bo
     );
 }
 
-/// Type size of a [`switch_row`]'s label.
-///
-/// Named because a *second* kind of row shares this column — the typography
-/// panel's n-way `cvXX` row, which is not a switch and still has to be read as
-/// one of the same list. Two literals is how the two come to disagree by half a
-/// point, which is the sort of thing that only shows up on screen.
+/// Type size of a [`switch_row`]'s label, shared with the typography panel's
+/// n-way `cvXX` row, which sits in the same column.
 pub const SWITCH_ROW_LABEL_PT: f32 = 11.5;
 
 /// The ink of a toggle-list row's label: [`theme::text::STRONG`] when the row is
-/// on, [`theme::text::MUTED`] when it is off.
-///
-/// The two tiers are what let a dozen rows be read as a column — see
-/// [`switch_row`] — so a row that is not a switch still owes them.
+/// on, [`theme::text::MUTED`] when it is off. A row that is not a switch still
+/// owes the two tiers (see [`switch_row`]).
 pub fn switch_row_ink(on: bool) -> egui::Color32 {
     if on {
         theme::text::STRONG
@@ -4661,27 +3444,22 @@ pub fn switch_row_ink(on: bool) -> egui::Color32 {
 
 /// A row of a toggle list: a label, and a [`paint_switch`] against the right margin.
 ///
-/// Returns the **row's** response, so `clicked()` is the toggle and a hover
-/// attaches to the row itself rather than to whatever `Ui` happens to contain it.
-/// The typography panel's feature list needs the second half: a switch labelled
-/// "Tabular figures" says what it is called and nothing about what it does.
+/// Returns the row's response, so `clicked()` is the toggle and a hover tooltip
+/// attaches to the row itself (the typography panel's feature list needs one).
 ///
-/// **The row is the target, not the switch.** A 26×16 switch is a small thing to
-/// hit at the end of a wide row, and a clickable switch *inside* a clickable row
-/// is the trap [`icon_button_padded`] describes — the inner claimant wins the hit
-/// test wherever it lies, so the row would be live everywhere except on the
-/// control. So the switch is painted rather than allocated, and the row senses.
+/// The row is the target, not the switch: a clickable switch inside a clickable
+/// row would win the hit test wherever it lies (see [`icon_button_padded`]), so
+/// the switch is painted and the row senses.
 ///
-/// The label dims when the feature is off, the way [`menu_check`]'s does: a
-/// column of a dozen rows is read as a column, and two tiers of contrast say
-/// which ones are on without the eye having to find each knob.
+/// The label dims when the feature is off, as [`menu_check`]'s does, so two tiers
+/// of contrast say which rows are on.
 pub fn switch_row(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> egui::Response {
     switch_row_inner(ui, label, Some(on), height, false)
 }
 
-/// A [`switch_row`] whose value an instance overrides (§15 D981): the dot after
-/// the label. **No ↺**: a switch has two values, so the reset *is* the toggle the
-/// row already makes, and the caller's tooltip names the main's value.
+/// A [`switch_row`] whose value an instance overrides: the dot after the label.
+/// No ↺, since the reset is the toggle the row already makes; the caller's tooltip
+/// names the main's value.
 pub fn switch_row_marked(
     ui: &mut egui::Ui,
     label: &str,
@@ -4692,38 +3470,21 @@ pub fn switch_row_marked(
     switch_row_inner(ui, label, Some(on), height, marked)
 }
 
-/// A [`switch_row`] over a selection whose runs disagree: the word **"Mixed"**
-/// where the switch would be (§15 D752).
+/// A [`switch_row`] over a selection whose runs disagree: the word "Mixed" where
+/// the switch would be (§15 D130).
 ///
-/// 🚨 **The word, not a third knob state, and that is §15 D130 rather than a
-/// preference.** D130 is *Resolved* and states the rule once: *"A control says
-/// **Mixed**. If it is too small to hold five letters it says a dash, and there
-/// are exactly two"* — `ui::segment_mixed` and `ui::Swatch::Mixed`. A feature row
-/// is the width of the card, so five letters fit with room to spare, and a third
-/// dash would be a departure from a live entry rather than a consistency repair.
-/// The maintainer independently ruled out the knob: *"A three way switch would be
-/// visually weird (thumb in the middle?) so I'll take the dim and tooltip
-/// approach."*
-///
-/// ⚠️ **Painting the knob at the first run's value is the thing this exists to
-/// stop.** That is what the section did — `shown` resolves at `range.start`, so a
-/// selection half of which has `tnum` on drew a column of dead switches — and
-/// D130's own argument for the swatch applies exactly: *"whichever it picked would
-/// read as a claim the next click would make true"*, which here it then would.
-///
-/// ⚠️ **The row stays live.** Dim is a readout, not a disablement: clicking is how
-/// a mixed range is resolved, and a row that refused the click would leave the
-/// user no way to make the selection agree.
+/// The word rather than a third knob state, since a feature row has room for five
+/// letters. A knob painted at the first run's value would read as a claim the
+/// next click makes true. The row stays live: dim is a readout, and clicking is
+/// how a mixed range is resolved.
 pub fn switch_row_mixed(ui: &mut egui::Ui, label: &str, height: f32) -> egui::Response {
     switch_row_inner(ui, label, None, height, false)
 }
 
 /// The one implementation behind [`switch_row`] and [`switch_row_mixed`].
 ///
-/// `on: None` is *the runs disagree*. One function rather than two spellings, so
-/// the hover ground, the row height, the label ink tiers and the right margin
-/// cannot come apart between the definite row and the mixed one — they sit in the
-/// same column and are read as one list.
+/// `on: None` is the runs disagree. One function so the hover ground, height, ink
+/// tiers and right margin cannot come apart between the two rows of one column.
 fn switch_row_inner(
     ui: &mut egui::Ui,
     label: &str,
@@ -4736,11 +3497,8 @@ fn switch_row_inner(
         egui::Sense::click(),
     );
     if resp.hovered() {
-        // **Painted wider than the row, and the ink stays put.** The label lines
-        // up with the eyebrow above it and the segmented tracks around it — every
-        // other thing in this column is flush with the content edge — so the row
-        // cannot take an inset to breathe in. The hover ground borrows it from the
-        // card's own padding instead, which is empty either way.
+        // Painted wider than the row, the ink staying put: the label is flush with
+        // the content edge, so the ground borrows the card's padding.
         ui.painter().rect_filled(
             rect.expand2(egui::vec2(SWITCH_ROW_BLEED, 0.0)),
             egui::CornerRadius::same(5),
@@ -4753,8 +3511,7 @@ fn switch_row_inner(
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(SWITCH_ROW_LABEL_PT),
-        // A mixed row takes the *off* tier. It is the dimmer of the two, and a
-        // range that disagrees is not a range this feature is on for.
+        // A mixed row takes the off tier: the feature is not on for the range.
         switch_row_ink(on.unwrap_or(false)),
     );
     if marked {
@@ -4773,9 +3530,7 @@ fn switch_row_inner(
             on,
             resp.hovered(),
         ),
-        // **Right-aligned to the same margin the switch occupies**, so the column
-        // reads as one list rather than as rows of two different shapes — the
-        // switch's right edge is `inner.right()` and so is the word's.
+        // Right-aligned to the switch's margin, so the column reads as one list.
         None => {
             ui.painter().text(
                 egui::pos2(inner.right(), inner.center().y),
@@ -4789,20 +3544,12 @@ fn switch_row_inner(
     resp
 }
 
-/// What a control says when the selection disagrees with itself (§15 D130).
-///
-/// **One spelling, because the rule is about the word.** D130 reversed an earlier
-/// entry to land on it and names the only two places a dash is allowed instead;
-/// a second literal is how the app comes to say "Mixed" in one panel and
-/// "mixed" or "—" in the next.
+/// What a control says when the selection disagrees with itself (§15 D130), one
+/// spelling so no panel says "mixed" or "—" instead.
 pub const MIXED_WORD: &str = "Mixed";
 
-/// Type size of a [`segment_label`].
-///
-/// Named rather than inlined because a cell **clips nothing**: `painter.text`
-/// centres a galley in the rect and lets it run over the neighbours, so whether a
-/// label fits its cell is a question about this number and the cell arithmetic,
-/// and one a test can only ask if it can see both.
+/// Type size of a [`segment_label`]. Named because a cell clips nothing, so
+/// whether a label fits is a question a test can ask only with this number.
 pub const SEGMENT_LABEL_PT: f32 = 10.0;
 
 /// Centred text for a [`segmented`] cell.
@@ -4819,11 +3566,8 @@ pub fn segment_label(painter: &egui::Painter, rect: egui::Rect, text: &str, on: 
 /// A [`segment_label`] for a cell that is present but unavailable — see
 /// [`segmented_enabled`].
 ///
-/// [`theme::text::DISABLED`], which is the tier `icon_button` already uses for a
-/// disabled glyph, so a dead tab and a dead button are the same statement. A
-/// **third** tier and not the resting one: the resting label is what an
-/// *available* choice looks like, and two readings of one colour is how a disabled
-/// control comes to look merely unselected.
+/// [`theme::text::DISABLED`], the tier `icon_button` uses for a disabled glyph, and
+/// not the resting one, or a disabled cell would look merely unselected.
 pub fn segment_label_disabled(painter: &egui::Painter, rect: egui::Rect, text: &str) {
     painter.text(
         rect.center(),
@@ -4863,12 +3607,10 @@ pub fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect, cell: f32) 
 /// than as a widget (the style and variable browsers, the `--` list, a styled
 /// card's capsule).
 ///
-/// **Rounded without a ground to mask against** (§15 D1082). [`swatch`] squares
-/// its checkerboard off with [`mask_corners`] in the colour it sits on; these
-/// rows sit on a hover wash or a lit row, so there is no one colour to name, and
-/// the square checkerboard behind a rounded fill was what read as a light patch
-/// with a blob in it. The checkerboard's own cells are rounded at the corners
-/// instead, and an opaque colour paints none of it.
+/// Rounded without a ground to mask against: [`swatch`] masks its checkerboard in
+/// the colour it sits on, but these rows sit on a hover wash or lit row. The
+/// checkerboard's own cells are rounded at the corners instead, and an opaque
+/// colour paints none of it.
 pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) {
     let r = (rect.width().min(rect.height()) * 0.25).round();
     if c.a() < 255 {
@@ -4876,8 +3618,7 @@ pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) 
         let r8 = r as u8;
         p.rect_filled(rect, r8, egui::Color32::WHITE);
         let dark = egui::Color32::from_gray(0xd8);
-        // Two by two, the dark ones on the diagonal — each touching one corner
-        // of the chip, and rounded there.
+        // Two by two, the dark ones on the diagonal, rounded at their corner.
         let tl = egui::Rect::from_min_size(rect.min, egui::vec2(cell, cell));
         let br = egui::Rect::from_min_max(rect.min + egui::vec2(cell, cell), rect.max);
         p.rect_filled(
@@ -4909,23 +3650,11 @@ pub fn paint_colour_chip(p: &egui::Painter, rect: egui::Rect, c: egui::Color32) 
 /// Paint a left-to-right ramp of `stops` across `rect` as a vertex-coloured
 /// mesh. Square corners — see [`mask_corners`].
 ///
-/// ⚠️ **The offsets are made monotonic here, and the doc used to state "sorted"
-/// as a precondition nothing checked and nothing on the read path established**
-/// (§15 D564). `panels::paint::with_stops` sorts on the *write* path, so a
-/// gradient the user has touched is fine; a gradient **imported** from a
-/// `<linearGradient>` with descending offsets is not, and `panels::paint::stops_of`
-/// hands the list over verbatim. `[(1.0, red), (0.0, blue)]` painted the ramp
-/// **backwards** — two of the four triangles wound the other way and the end
-/// extensions gave the left edge the *last* stop's colour.
-///
-/// **Clamped rather than sorted, because that is what the canvas beside it
-/// does.** §15 D455 settled that question for the importer, the renderer and the
-/// SVG writer and picked SVG's rule — *"each gradient offset is required to be
-/// equal to or greater than the previous"* — over a sort, on the argument that a
-/// file is to be read rather than guessed at. The chip was the fourth door and
-/// was missed, so one document was drawn two ways in one frame: the swatch
-/// mirrored, the artwork clamped. `ondin_core::image::monotonic_offset` is the
-/// rule, spelled once.
+/// The offsets are made monotonic here, not assumed sorted: `panels::paint::with_stops`
+/// sorts on the write path, but an imported `<linearGradient>` with descending
+/// offsets arrives verbatim and would paint backwards. Clamped rather than sorted,
+/// as the canvas does, so the swatch and the artwork agree
+/// (`ondin_core::image::monotonic_offset`, SVG's rule).
 pub fn paint_ramp(painter: &egui::Painter, rect: egui::Rect, stops: &[(f32, egui::Color32)]) {
     if stops.is_empty() {
         return;
@@ -4977,14 +3706,10 @@ pub fn paint_sv_plane(painter: &egui::Painter, rect: egui::Rect, hue: f32) {
 /// `bg`. egui cannot round a vertex-coloured mesh, so the ramp and SV plane are
 /// drawn square and masked — which is exact, unlike insetting them.
 ///
-/// Emitted as one **`Mesh`**, deliberately, not as filled polygons. A corner
-/// sliver is tangent to both edges it meets, so its path doubles back on itself
-/// at each tangent point; egui's anti-aliased fill mitres that zero-degree
-/// vertex and the result shoots spikes several pixels clear of the rect — on a
-/// 14px swatch they read as crop marks around the colour chip. A mesh is
-/// rasterized from its vertices with no feathering and no mitre, so the mask
-/// cannot escape its own geometry. The hairline drawn over the same rounded
-/// boundary afterwards is what smooths the arc.
+/// Emitted as one `Mesh`, not filled polygons: a corner sliver is tangent to both
+/// its edges, and egui's anti-aliased fill mitres that zero-degree vertex into
+/// spikes clear of the rect. A mesh has no feathering or mitre; the hairline drawn
+/// over the boundary afterwards smooths the arc.
 pub fn mask_corners(painter: &egui::Painter, rect: egui::Rect, radius: f32, bg: egui::Color32) {
     painter.add(egui::Shape::mesh(corner_mask(rect, radius, bg)));
 }
@@ -5019,9 +3744,8 @@ fn corner_mask(rect: egui::Rect, radius: f32, bg: egui::Color32) -> egui::Mesh {
     const STEPS: usize = 8;
     for (corner, a, b) in corners {
         let centre = corner + a * r + b * r;
-        // A fan from the square corner out to the arc: triangle `i` spans the
-        // corner and two neighbouring arc points, so the union is the sliver
-        // between the corner and the rounded boundary.
+        // A fan from the square corner out to the arc: the sliver between the
+        // corner and the rounded boundary.
         let apex = mesh.vertices.len() as u32;
         mesh.colored_vertex(corner, bg);
         for i in 0..=STEPS {
@@ -5041,36 +3765,19 @@ pub enum Swatch<'a> {
     Solid(egui::Color32),
     /// A gradient's stops, previewed as a left-to-right ramp.
     Ramp(&'a [(f32, egui::Color32)]),
-    /// The paints this chip stands for do not agree on a colour — the **mixed**
-    /// state, drawn as the bare checkerboard with a dash on it.
-    ///
-    /// Nothing over the checkerboard, because that is already what this app draws
-    /// where there is no paint, and the dash is [`segment_mixed`]'s mark — the one
-    /// the app makes where a control has no room for the word "Mixed" that every
-    /// field says. A 16px chip has no room. A plausible colour would be the one
-    /// thing it must not show: whichever one it picked would read as a claim the
-    /// next click would then make true of every layer.
-    ///
-    /// It does read a little like a transparent paint, which is the cost of using
-    /// the checkerboard for both. The word beside it is what settles that, and is
-    /// why the chip is not asked to carry the state on its own.
+    /// The paints this chip stands for do not agree on a colour: the bare
+    /// checkerboard with a dash on it, [`segment_mixed`]'s mark, since a 16px chip
+    /// has no room for the word "Mixed". A plausible colour would read as a claim
+    /// the next click makes true. It reads a little like a transparent paint; the
+    /// word beside it settles that.
     Mixed,
-    /// An image fill's thumbnail — the picture as that layer shows it, cut to
-    /// the chip's square by [`crate::thumbs`].
+    /// An image fill's thumbnail, cut to the chip's square by [`crate::thumbs`], so
+    /// an image row's label stays on the same x as the rows above. Over the
+    /// checkerboard like the rest.
     ///
-    /// **The chip was always going to be this**, which is why an image row draws
-    /// one rather than a glyph: the paint rows are a column of chips and a column
-    /// of labels, and a picture that opted out of the first would put its label
-    /// on a different x from every row above it (§15 D180).
-    ///
-    /// Over the checkerboard like the rest, so a PNG with a transparent corner
-    /// says so here in the same way a 50% colour does.
-    ///
-    /// `alpha` is the brush's own `ImageSampler::alpha` — [`panels::paint::image_alpha`]
-    /// is the one place that reads it — so a fill faded to 30% draws a chip faded
-    /// to 30% (§15 D784). It rides on the variant rather than being folded into
-    /// the texture because the texture is **shared**: `thumbs` keys its atlas by
-    /// picture, and two layers can carry one photograph at two opacities.
+    /// `alpha` is the brush's own `ImageSampler::alpha` ([`panels::paint::image_alpha`]
+    /// reads it). It rides on the variant rather than the texture, which is
+    /// shared: two layers can carry one photograph at two opacities.
     ///
     /// [`panels::paint::image_alpha`]: crate::panels::paint::image_alpha
     Picture {
@@ -5082,52 +3789,26 @@ pub enum Swatch<'a> {
 /// The hairline every colour chip wears, drawn over its rounded boundary after
 /// the corners are masked.
 ///
-/// **Always on, never conditional.** A chip whose colour is near the row's own
-/// ground is otherwise invisible — a `2F2F2F` fill sits on `color::FIELD`
-/// (`2F2F30`) and there is nothing to see. A threshold would pop: scrub a colour
-/// across it and the border flicks on and off, and getting the threshold right at
-/// all needs a *perceptual* metric, since RGB distance fires on `2F2F2F` against
-/// `262626` and stays quiet for a saturated blue beside a saturated purple. None
-/// of that is needed, because **the risk here is one-sided**: the UI is dark, so
-/// only dark chips vanish, and translucent white is either helping or invisible.
+/// Always on, since a chip near the row's own ground is otherwise invisible and a
+/// threshold would pop as a colour is scrubbed. White, not the picker's black,
+/// which would be invisible on a dark chip and darken light edges; the risk is
+/// one-sided because the UI is dark.
 ///
-/// **White, not the picker's black.** `picker.rs` hairlines its ramps in
-/// translucent black, which is right over a bright SV plane and exactly the wrong
-/// direction here: black on a dark chip on a dark row is invisible twice over.
-/// This is also why the chip's *old* border was removed and why restoring it in
-/// the same colour would be a mistake — an inset **black** hairline darkened
-/// every light colour's edge and read as a frame around the swatch rather than as
-/// the swatch. White self-cancels on exactly the colours that complained.
-///
-/// **76/255 is set by the black chip, which is the hard case.** Composited over a
-/// chip, the hairline's value climbs from the alpha (over black) to the chip's own
-/// colour (over white), so the darkest chip is the one that has to clear the
-/// ground — grey 76 against `color::FIELD`'s 47, a step of 29 levels. Every
-/// lighter chip lifts further and needs no help; a white one shows nothing at all,
-/// which is the point.
-///
-/// It has a second job the theme has always asked of it: [`mask_corners`] emits a
-/// `Mesh`, which epaint rasterizes with no feathering, so without a stroke over the
-/// same arc the rounded corner is a hard aliased step. `picker::preview_chip` pairs
-/// the two exactly this way, and the chips now do too.
-///
-/// **Four call sites still mask and stop** — `picker.rs`'s `stop_bar`, `sv_plane`,
-/// `hue_slider` and `alpha_slider` — so pairing the two is the rule and not yet the
-/// practice. Their hairline would not be this colour: they are masked against
-/// `color::CARD` under a bright ramp or plane, which is the case `preview_chip`
-/// chose translucent black for. Decided separately, and noted here so the next
-/// reader does not take this constant for the whole answer (§15 D231).
-/// Spelled premultiplied because that is the `const` constructor; this is
-/// `Color32::from_white_alpha(76)`, which is the same four bytes.
+/// 76/255 is set by the black chip: grey 76 against `color::FIELD`'s 47. It also
+/// smooths the hard aliased step of [`mask_corners`]'s `Mesh`
+/// (`picker::preview_chip` pairs the two the same way). The picker's `stop_bar`,
+/// `sv_plane`, `hue_slider` and `alpha_slider` mask without it; their ground is
+/// `color::CARD` under a bright ramp, which wants translucent black (§15 D231).
+/// Spelled premultiplied for the `const` constructor; it equals
+/// `Color32::from_white_alpha(76)`.
 pub const SWATCH_HAIRLINE: egui::Color32 = egui::Color32::from_rgba_premultiplied(76, 76, 76, 76);
 
-/// A small colour chip: checkerboard, the paint, and [`SWATCH_HAIRLINE`] over
-/// the rounded boundary. Sensed for clicks — the inspector's paint rows open the
+/// A small colour chip: checkerboard, the paint, and [`SWATCH_HAIRLINE`] over the
+/// rounded boundary. Sensed for clicks; the inspector's paint rows open the
 /// picker from it.
 ///
-/// `bg` is the ground the chip sits on, because rounding its corners means
-/// painting the leftover square over in that colour ([`mask_corners`]) — a chip
-/// told the wrong ground shows four visible notches.
+/// `bg` is the ground the chip sits on, painted over the leftover corners
+/// ([`mask_corners`]); the wrong ground shows four notches.
 pub fn swatch(
     ui: &mut egui::Ui,
     box_size: f32,
@@ -5142,19 +3823,13 @@ pub fn swatch(
             p.rect_filled(rect, egui::CornerRadius::ZERO, c);
         }
         Swatch::Ramp(stops) => paint_ramp(p, rect, stops),
-        // **`Color32::WHITE` is `image`'s identity multiplier, not a colour** — a
-        // chip drawn in the theme's ink would be a photograph in one hue, which is
-        // what tinting a texture means. So the only thing this tint is allowed to
-        // carry is a uniform multiplier, and the brush's alpha is exactly one
-        // (§15 D784): white scaled by `alpha` leaves every hue where it was and
-        // fades the picture over the checkerboard behind it.
+        // `Color32::WHITE` is `image`'s identity multiplier; scaled by `alpha` it
+        // fades the picture over the checkerboard without shifting any hue.
         Swatch::Picture { id, alpha } => {
             let tint = egui::Color32::WHITE.gamma_multiply(alpha);
             p.image(id, rect, crate::thumbs::FULL_UV, tint);
         }
-        // Over the checkerboard rather than over a ground of its own, and the ink
-        // is dark for that reason: the chip's light squares are what the dash has
-        // to read against.
+        // Over the checkerboard, so the ink is dark to read against its light squares.
         Swatch::Mixed => {
             p.text(
                 rect.center(),
@@ -5166,10 +3841,8 @@ pub fn swatch(
         }
     }
     mask_corners(p, rect, 4.0, bg);
-    // **After the mask**, or the mask bites four pieces out of it. `Inside`
-    // rather than `Outside` for the same reason the radius is repeated here: a
-    // chip sits in a row of a fixed height, and a stroke that grew it by a point
-    // on each side would push the label beside it.
+    // After the mask, or the mask bites pieces out of it. `Inside`, since a stroke
+    // that grew the chip would push the label beside it.
     p.rect_stroke(
         rect,
         egui::CornerRadius::same(4),
@@ -5182,34 +3855,20 @@ pub fn swatch(
 /// Strip a `DragValue`'s own grounds and borders, so it floats on whatever the
 /// caller has already drawn.
 ///
-/// **One block, three callers** (§15 D723, `[S18.1-L3-06]`). [`value_field_f64`],
-/// [`badge_field`] and [`bare_drag_value`] each held a verbatim copy of this
-/// eight-line sequence with its own paragraph restating the same reasoning — and
-/// a fourth field wanting a bare `DragValue` would have got a fourth. The two
-/// egui facts below are the whole of why it is eight lines and not one, and they
-/// are worth having in one place rather than three.
+/// Shared by [`value_field_f64`], [`badge_field`] and [`bare_drag_value`].
 ///
-/// **A `DragValue` has two faces and both ground themselves.** The resting face
-/// is a `Button`, which fills from `bg_fill`/`weak_bg_fill` and outlines from
-/// `bg_stroke` across all four widget states; the keyboard-editing face is a
-/// `TextEdit`, which fills from `extreme_bg_color` and, once focused, outlines
-/// itself in `selection.stroke`. A caller that has drawn its own field, pill or
-/// row wants none of them.
+/// A `DragValue` has two faces and both ground themselves: the resting `Button`
+/// fills from `bg_fill`/`weak_bg_fill` and outlines from `bg_stroke` in all four
+/// widget states, and the keyboard `TextEdit` fills from `extreme_bg_color` and,
+/// once focused, outlines itself in `selection.stroke`.
 ///
-/// 🚨 **The width goes and the colour stays, and that distinction is a reported
-/// bug.** `selection.stroke` has two jobs in egui: it is that focus outline,
-/// *and* it is the colour selected glyphs are repainted in —
-/// `text_selection::visuals::paint_text_selection` writes it straight into the
-/// galley's vertices. `Stroke::NONE` is transparent, so zeroing the whole thing
-/// turned **every selected digit invisible** and left an opaque selection block
-/// with nothing legible inside it. A zero-*width* stroke is skipped by the
-/// tessellator, so the outline is gone either way; keeping the colour is what
-/// keeps the text.
+/// The width goes and the colour stays: `selection.stroke` is also the colour
+/// selected glyphs are repainted in, and a transparent `Stroke::NONE` would make
+/// every selected digit invisible, while a zero-width stroke is skipped by the
+/// tessellator.
 ///
-/// ⚠️ **What is deliberately *not* here**: the selection **fill** behind the
-/// digits, which is what shows the field is being typed into. And nothing about
-/// text colour, padding or spacing — `badge_field` overrides the ink because a
-/// light pill needs dark digits, and that is its business and not this rule's.
+/// Deliberately not here: the selection fill, which shows the field is being typed
+/// into, and text colour, padding and spacing.
 fn strip_drag_value_chrome(ui: &mut egui::Ui) {
     let w = &mut ui.visuals_mut().widgets;
     for ws in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
@@ -5225,48 +3884,19 @@ fn strip_drag_value_chrome(ui: &mut egui::Ui) {
 /// A `DragValue` with every ground and border of its own stripped off, so it
 /// floats on whatever row it sits in.
 ///
-/// The paint rows and the picker's hex row already *are* fields — a recessed
-/// pane with a hairline — and a second bordered box for the opacity inside one
-/// reads as a control bolted onto the row rather than part of it. That includes
-/// the hover border, which was the loudest of the three: hovering a paint row
-/// lit up a rectangle around two digits.
+/// The paint rows and the picker's hex row already are fields, and a second
+/// bordered box for the opacity inside one reads as bolted on, including its
+/// hover border.
 pub fn bare_drag_value(ui: &mut egui::Ui, value: egui::DragValue<'_>) -> egui::Response {
     ui.scope(|ui| {
         strip_drag_value_chrome(ui);
-        // Arithmetic, as in every other field ([`crate::expr::eval`]).
+        // Arithmetic, as in every other field (`crate::expr::eval`). The parser goes
+        // on last here because this helper is handed a finished `DragValue`.
         //
-        // ⚠️ **The parser goes on *last* here and *first* in the other two, and
-        // that is the signature rather than a different decision** (§15 D723).
-        // [`value_field_f64`] and [`badge_field`] build the `DragValue`
-        // themselves, so they can set a parser the caller's `build` closure is
-        // free to replace; this helper is handed a **finished** `DragValue` and
-        // has nowhere earlier to put one. **The rule is the same in all three —
-        // the parser is a default a caller may replace** — and only here is the
-        // rule unofferable. A field that has to parse something other than a
-        // number cannot use this helper for it, and wants one of the other two.
-        //
-        // ⚠️ This read as a *limitation of this helper* and the sibling's read as
-        // a *feature of that one*, each written as though it were the only copy —
-        // which is how one rule came to look like two contracts.
-        //
-        // ⚠️ **`clamp_existing_to_range(false)` goes on here for the same reason
-        // and it did not until §15 D552.** This helper is handed a finished
-        // `DragValue`, so a *ranged* one arrived carrying egui's default — the
-        // field rewriting a stored value outside its range on every frame and
-        // reporting the rewrite as a user edit (D425).
-        //
-        // ⚠️ **All four production callers pass `.range(0.0..=100.0)`, and every
-        // one of them is an alpha percentage** — the picker's opacity field,
-        // `inspector::paint_row`, `inspector::slot_color_row` and
-        // `typography::char_color_row`. So egui's default was live at four sites
-        // out of four and held harmless by four *separate* producers, every one of
-        // them guaranteeing 0..1 by construction. That is `[S23.1-L1-01]`'s own
-        // shape — a property of code elsewhere holding a widget's behaviour up —
-        // so the decision is made here rather than left to whatever the next
-        // caller's producer happens to promise. (This comment said *three of the
-        // four are unranged* when it was written; `arch-scribe` counted them, and
-        // the measurement supports the stronger conclusion.) Last, like the
-        // parser, and for the same reason.
+        // `clamp_existing_to_range(false)` goes on for the same reason: every
+        // production caller passes `.range(0.0..=100.0)` for an alpha percentage,
+        // and egui's default would rewrite a stored value outside it each frame
+        // and report that as a user edit.
         let value = scrub_speed_for(ui.ctx(), value)
             .custom_parser(crate::expr::eval)
             .clamp_existing_to_range(false);
@@ -5380,40 +4010,21 @@ pub fn hex_of(c: ondin_core::peniko::Color) -> String {
 /// but a field that refuses to hold them refuses the paste outright.
 pub const HEX_CHAR_LIMIT: usize = 9;
 
-/// Whether a text field's edit has ended **and is meant to be kept** — the frame
-/// it lost focus, unless `Escape` is what took the focus away (§15 D808).
+/// Whether a text field's edit has ended and is meant to be kept: the frame it
+/// lost focus, unless `Escape` is what took the focus away.
 ///
-/// 🚨 **`Escape` committed.** Four chrome text fields decided they were finished
-/// from `resp.lost_focus()` alone — the inspector's hex and layer-name fields, the
-/// stroke-dash list and the Export panel's prefix/suffix — and egui does not
-/// revert a `TextEdit` on `Escape`: it hands back what was typed and merely
-/// surrenders focus. So the key that cancels a gesture everywhere else in the app
-/// *applied* the edit, and spent an undo step doing it. Measured on the hex field:
-/// typing `336699` over `[0.5, 0.25, 0.125, 1.0]` and pressing `Escape` leaves
-/// `[0.2, 0.4, 0.6, 1.0]` and `undo_depth` 1.
+/// egui does not revert a `TextEdit` on `Escape`; it hands back what was typed and
+/// surrenders focus, so deciding from `resp.lost_focus()` alone applies the edit
+/// and spends an undo step. `app::OndinApp::edit_valve` carries the rule for the
+/// numeric fields; a text field cannot use the valve (see
+/// `inspector::paint_hex_field`) and shares this one sentence of it.
 ///
-/// **The rule already existed twice and was broken at four sites beside it**,
-/// which is why it is a function now rather than a fifth copy of the condition.
-/// `app::OndinApp::edit_valve` carries it for every *numeric* field — it is the
-/// `if !…key_pressed(Escape)` on the falling edge of D316's engagement latch, and
-/// §15 D317 is the entry for getting its ordering right — and
-/// `panels::dashboard`'s rename field carries it as an arm further up. A text
-/// field cannot use the valve itself (see `inspector::paint_hex_field`), so what
-/// it can share is this one sentence of it.
+/// It reads the key rather than the focus: `Escape` clears egui's focus in
+/// `Memory::begin_pass`, so the frame `lost_focus()` fires is the frame the press
+/// is still in `input`, and the next frame cannot tell the two exits apart.
 ///
-/// ⚠️ **It reads the key rather than the focus, and that is not the same
-/// question.** `Escape` clears egui's focus in `Memory::begin_pass`, so the frame
-/// a field reports `lost_focus()` is the frame the press is still in `input` —
-/// which is `input::resolve`'s own note (§15 D317) from the other end. Asking
-/// `has_focus()` or the next frame's state answers nothing: by then the key is
-/// gone and the two ways out of a field are indistinguishable.
-///
-/// ⚠️ **One test covers all four callers, because the rule is here and not at
-/// them** — `inspector::paint_hex_field_tests::escape_abandons_a_typed_hex_instead_of_committing_it`,
-/// and dropping the second term above is what it flips against. The three other
-/// sites have no `Escape` assertion of their own and are not meant to grow one;
-/// what they owe is to call this rather than to re-spell it. (Plain backticks:
-/// the test is `cfg(test)` and a production doc may not link one — §15 D319.)
+/// `inspector::paint_hex_field_tests::escape_abandons_a_typed_hex_instead_of_committing_it`
+/// covers all callers by dropping the second term.
 pub fn defocus_commits(resp: &egui::Response) -> bool {
     resp.lost_focus() && !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape))
 }
@@ -5421,16 +4032,12 @@ pub fn defocus_commits(resp: &egui::Response) -> bool {
 /// Select the whole of a hex field the moment it takes focus, so typing replaces
 /// the colour instead of inserting into it. Call with the field's own response.
 ///
-/// **Parity with the number fields, which get this for free.** `DragValue` selects
-/// all on the click that focuses it (`egui::widgets::drag_value::select_all_text`),
-/// so every W, H and rotation in the inspector could be clicked and retyped — while
-/// the hex beside them dropped a caret where the pointer landed and left `6D8CD9`
-/// to be cleared by hand. A plain `TextEdit` has no such behaviour; this is egui's
-/// own recipe, applied where egui does not.
+/// Parity with the number fields: `DragValue` selects all on the click that
+/// focuses it, while a plain `TextEdit` drops a caret. This is egui's own recipe
+/// applied to the hex field.
 ///
-/// Stored **after** the field has run, which is why it takes effect from the next
-/// frame: the click that focused it also placed a caret, and that write has to be
-/// the one overwritten rather than the other way round. `DragValue` does the same.
+/// Stored after the field has run, so it takes effect from the next frame and
+/// overwrites the caret the focusing click placed.
 pub fn select_all_on_focus(ui: &egui::Ui, resp: &egui::Response, text: &str) {
     if !resp.gained_focus() {
         return;
@@ -5448,15 +4055,9 @@ pub fn select_all_on_focus(ui: &egui::Ui, resp: &egui::Response, text: &str) {
 /// Parse `RGB` / `RRGGBB` / `RRGGBBAA`, with or without a leading `#`, and with
 /// any surrounding whitespace.
 ///
-/// The hash is optional in **both** directions: copying a colour out of a
-/// browser, a style guide or another design tool gives you `#EB6E5A`, and
-/// typing it by hand gives you `EB6E5A`. Either has to work, and neither leaves
-/// the hash behind — [`hex_of`] is what the field shows once the value lands,
-/// and it never writes one.
-///
-/// Alpha is the caller's business — the hex field edits the colour, the opacity
-/// field beside it edits the alpha — so an eight-digit value's last pair is
-/// accepted and dropped rather than rejected.
+/// The hash is optional: a pasted colour carries one and a typed one does not, and
+/// [`hex_of`] never writes one. Alpha is the opacity field's business, so an
+/// eight-digit value's last pair is accepted and dropped.
 pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
     let s = s.trim().trim_start_matches('#').trim();
     if !s.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -5474,19 +4075,16 @@ pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
     }
 }
 
-/// The app's mark, `icons/icon-64.png`, compiled in — the top bars' brand mark
-/// on both screens (§15 D961). 64 pixels for a mark drawn at 26 points, so a 2×
-/// display still has artwork to sample from; below that it is mipmapped.
+/// The app's mark, `icons/icon-64.png`, compiled in for the top bars: 64 pixels
+/// for a mark drawn at 26 points, so a 2× display still has artwork to sample.
 static LOGO_PNG: &[u8] = include_bytes!("../../../icons/icon-64.png");
 
-/// **The app's mark, painted into `rect`**, with the rounded hover fill behind it
-/// when `lit` — the one affordance the editor's mark has left to say it is a
-/// control, now that its colours are the artwork's.
+/// The app's mark, painted into `rect`, with a rounded hover fill behind it when
+/// `lit`.
 ///
-/// The texture is uploaded on the first call and kept in egui's memory, so
-/// both screens and every frame share one. Decoded with eframe's own icon
-/// decoder, the same one `main::window_icon` goes through, so a bad file is
-/// the same panic in the same place, and `main`'s test pins the 512 beside it.
+/// The texture is uploaded on the first call and kept in egui's memory, shared by
+/// both screens. It is decoded with the same eframe decoder as
+/// `main::window_icon`, so a bad file panics in the same place.
 pub(crate) fn logo(ui: &egui::Ui, rect: egui::Rect, lit: bool) {
     let id = egui::Id::new("ondin-logo");
     // Read into a local: two `Context` accessors nested deadlock (CLAUDE.md).
@@ -5517,9 +4115,7 @@ pub(crate) fn logo(ui: &egui::Ui, rect: egui::Rect, lit: bool) {
 mod pulse_tests {
     use super::{PULSE_HOLD, PULSE_RAMP, pulse_alpha};
 
-    /// **`pulse_alpha` is the maintainer's shape** (§15 D1027): whole at the
-    /// click, down to half, held, back to whole, held, and round again — sampled a
-    /// hair either side of each edge, so a step in the wrong place is seen.
+    /// `pulse_alpha` runs whole, down to half, held, back to whole, held, repeating.
     #[test]
     fn the_pulse_dips_to_half_holds_and_comes_back() {
         let e = 0.01;
@@ -5540,13 +4136,9 @@ mod dropdown_place_tests {
     use super::dropdown_place;
     use eframe::egui;
 
-    /// **A list opens under its field, left edges together, or right edges
-    /// together at the screen's right, and above the field at its bottom**
-    /// (§15 D1084), then clamped on screen.
+    /// A list opens under its field, flips to right-aligned or above at the screen edges, and is clamped on screen.
     ///
-    /// flip: `dropdown_place` answering `menu_place` at the field's bottom-left
-    /// (the reported bug) → fails *"under it, left edges together"*, the gap
-    /// lost.
+    /// flip: `dropdown_place` answering `menu_place` → fails "under it, left edges together".
     #[test]
     fn a_list_opens_under_its_field_or_flips_at_the_edges() {
         let ctx = egui::Context::default();
@@ -5589,19 +4181,12 @@ mod dropdown_place_tests {
 
 #[cfg(test)]
 mod logo_tests {
-    //! Plain backticks in this module's prose: `cargo doc` cannot see a
-    //! `cfg(test)` module, so a link here is checked by nothing (§15 D319).
+    //! Plain backticks in this module's prose: `cargo doc` cannot see a `cfg(test)` module.
     use super::*;
 
-    /// **The mark is the 64-pixel artwork with a transparent ground**, and the
-    /// texture is uploaded once however many frames draw it.
+    /// The mark is the 64px artwork with a transparent ground, and its texture is uploaded once.
     ///
-    /// The size pins the file — `icon.png` and `icon-1024.png` beside it are
-    /// the same artwork — and the corner and the middle of the coil pin that it
-    /// is the mark and not an opaque square.
-    ///
-    /// **Flip run**, the `insert_temp` that keeps the handle removed: fails on
-    /// *"the texture is kept"* — the predicted site.
+    /// flip: dropping the `insert_temp` that keeps the handle → fails "the texture is kept".
     #[test]
     fn the_logo_is_the_64px_mark_and_uploads_once() {
         let icon = eframe::icon_data::from_png_bytes(LOGO_PNG).unwrap();
@@ -5633,36 +4218,17 @@ mod logo_tests {
 mod tests {
     use super::*;
 
-    /// A stored value outside a field's range is **shown**, not rewritten — and
-    /// a frame with no events reports no change.
+    /// A stored value outside a field's range is shown, not rewritten, and an event-free frame reports no change.
     ///
-    /// ⚠️ **This is one line's worth of behaviour for all 82 numeric fields in
-    /// the app**, and none of them chose it: egui's `clamp_existing_to_range`
-    /// defaults to `true` and is applied unconditionally every frame, so any
-    /// value the document already held outside a control's range was rewritten
-    /// to the nearest end on the frame the panel first drew it. `value_field_f64`
-    /// then took `let before = *value` around `ui.add`, saw the widget's own
-    /// rewrite, and called `mark_changed` — which routes it through `edit_valve`
-    /// and out as a **transaction**. So an imported blur radius of 1200 became
-    /// 1000, in an undo step, with nobody touching anything.
+    /// The in-range control keeps it honest: a fix that stopped reporting changes at all would pass without it.
     ///
-    /// The range still bounds what a scrub or a keystroke can reach; `Scrub::settle`
-    /// is what clamps a gesture, and it is untouched. What is given up is the
-    /// widget rewriting the *document*, which §5.3 already says it should not:
-    /// *"clamped where the outline is built … not on the way in"*.
-    ///
-    /// **The in-range control is the assertion that keeps this honest** — without
-    /// it a fix that stopped reporting changes at all would pass.
-    ///
-    /// Flip-check, run: removing `.clamp_existing_to_range(false)` fails on the
-    /// first assertion with `1000` where `1200` was, which is the reported symptom.
+    /// flip: removing `.clamp_existing_to_range(false)` → fails at the first assertion (1000 where 1200 was).
     #[test]
     fn a_stored_value_outside_a_fields_range_is_shown_rather_than_rewritten() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // One frame with no events at all: nothing is being edited.
         let draw = |v: &mut f64| {
             let mut changed = false;
             let _ = ctx.run_ui(Default::default(), |ui| {
@@ -5690,9 +4256,7 @@ mod tests {
             "and a frame nobody touched must not report a user edit"
         );
 
-        // The control: an in-range value is equally untouched and equally quiet,
-        // so the assertions above are about the clamp rather than about the
-        // field having gone inert.
+        // Control: an in-range value is equally quiet.
         let mut in_range = 500.0;
         let changed = draw(&mut in_range);
         assert_eq!(in_range, 500.0);
@@ -5709,9 +4273,7 @@ mod tests {
         assert_eq!(parse_hex("12345"), None);
     }
 
-    /// A pasted colour arrives with a hash far more often than not, and the
-    /// field must take it either way — and never hand the hash back, because
-    /// `hex_of` is what redraws the field once the value is applied.
+    /// `parse_hex` takes a colour with or without a hash; `hex_of` never returns one.
     #[test]
     fn a_hash_is_optional_going_in_and_never_comes_back_out() {
         for spelling in ["#6D8CD9", "6D8CD9", "  #6d8cd9  ", "#6D8CD9FF"] {
@@ -5724,17 +4286,12 @@ mod tests {
         assert_eq!(parse_hex("#fff"), Some([0xFF, 0xFF, 0xFF]));
         let round_tripped = ondin_core::peniko::Color::from_rgba8(0x6D, 0x8C, 0xD9, 0xFF);
         assert_eq!(hex_of(round_tripped), "6D8CD9", "the hash must not survive");
-        // A stray hash mid-string is not a colour, and neither is a lone one.
         assert_eq!(parse_hex("6D#8CD9"), None);
         assert_eq!(parse_hex("#"), None);
-        // The longest accepted form fits in what the fields allow.
         assert_eq!("#6D8CD9FF".len(), HEX_CHAR_LIMIT);
     }
 
-    /// The picker's colour path must not drift. Every control writes back
-    /// `Hsv -> Color`, so `Color -> Hsv -> Color` has to be the identity at
-    /// 8-bit precision — including at low alpha, where routing through egui's
-    /// premultiplied `Color32` used to lose the RGB triple entirely.
+    /// `Color -> Hsv -> Color` is the identity at 8-bit precision, low alpha included.
     #[test]
     fn hsv_round_trips_every_colour_exactly() {
         use ondin_core::peniko::Color;
@@ -5756,13 +4313,7 @@ mod tests {
         }
     }
 
-    /// The corner mask must stay inside the box it is rounding.
-    ///
-    /// It used to be four anti-aliased polygons. A corner sliver is tangent to
-    /// both edges it meets, so its outline doubles back on itself at each
-    /// tangent point, and egui mitred that zero-degree vertex into spikes 6px
-    /// clear of a 14px swatch — which is what the crop-mark artifacts around
-    /// every colour chip were.
+    /// The corner mask stays inside the box it rounds (a mitred tangent vertex once spiked out).
     #[test]
     fn the_corner_mask_never_paints_outside_its_rect() {
         let rect = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(14.0, 14.0));
@@ -5786,8 +4337,7 @@ mod tests {
         }
     }
 
-    /// Greys have no hue to recover, so the picker carries one alongside. What
-    /// matters is that saturating a grey does not silently jump to red.
+    /// A grey keeps the hue it is given, so saturating it does not jump to red.
     #[test]
     fn a_grey_keeps_whatever_hue_it_is_given() {
         let c = Hsv::new(0.6, 0.0, 0.5, 1.0).to_color();
@@ -5796,8 +4346,7 @@ mod tests {
         assert!((Hsv::from_color(saturated).h - 0.6).abs() < 1e-5);
     }
 
-    /// Lay out one `value_field` in a card and return what got painted, plus
-    /// the field's id so a second pass can hand it keyboard focus.
+    /// Paints one `value_field` in a card; returns the shapes and the field's id.
     fn paint_value_field(
         ctx: &egui::Context,
         prefix: Prefix,
@@ -5828,25 +4377,13 @@ mod tests {
         (out.shapes.into_iter().map(|c| c.shape).collect(), id)
     }
 
-    /// **A field must occupy the width it was given, whatever number is in it.**
-    ///
-    /// The resting face of a `DragValue` is a `Button` with `TextWrapMode::Extend`,
-    /// which never truncates — so a number too wide for its room does not clip, it
-    /// *grows*, and the growth propagates out through the frame to the card and the
-    /// whole inspector. Reported as a stroke weight clipping off the edge of the app,
-    /// and visible from three digits, because the prefix inset used to be applied as
-    /// `button_padding` and so counted twice: 44 of the weight field's 68px content
-    /// box was padding.
-    ///
-    /// Measured at the two widths the Stroke panel actually uses, across the whole
-    /// range the fields accept.
+    /// A field keeps the width it was given at the largest value it accepts; the resting `DragValue` button grows rather than clips.
     #[test]
     fn a_value_field_holds_its_width_up_to_the_largest_value_it_accepts() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // The stroke weight field, and one of the four per-side widths beside it.
         for width in [88.0_f32, 131.0] {
             for value in [1.0_f64, 100.0, 1000.0, 9999.0, MAX_STROKE_WIDTH] {
                 let out = ctx.run_ui(Default::default(), |ui| {
@@ -5880,15 +4417,7 @@ mod tests {
         }
     }
 
-    /// The prefix has to be legible in *both* faces of the field, and the number has
-    /// to stay put between them.
-    ///
-    /// This is why the inset is reserved space with the glyph painted into it, rather
-    /// than `DragValue::prefix`: a prefix **atom** is laid out by the resting
-    /// `Button` only, and the keyboard face is a bare `TextEdit` that never sees it —
-    /// so the glyph disappeared and the digits jumped left on focus. Its sibling
-    /// `focusing_a_value_field_outlines_the_row_and_leaves_the_value_put` catches the
-    /// jump; this catches the glyph going missing, which that one would not.
+    /// The prefix glyph is painted in both the resting and the keyboard face of a field.
     #[test]
     fn a_value_fields_prefix_survives_being_typed_into() {
         for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ARROW_CLOCKWISE)] {
@@ -5896,7 +4425,6 @@ mod tests {
             theme::install(&ctx);
             paint_value_field(&ctx, prefix, None); // warm the font atlas
 
-            // Every text run painted that is *not* the value.
             let glyphs = |shapes: &[egui::Shape]| {
                 shapes
                     .iter()
@@ -5919,11 +4447,7 @@ mod tests {
         }
     }
 
-    /// A `DragValue` being typed into is a `TextEdit`, and a focused `TextEdit`
-    /// frames *itself* — a second outline starting at the first digit, so the
-    /// number reads as sitting on top of its own border. `value_field`
-    /// suppresses that and strokes the row instead. What must hold: focusing a
-    /// field does not move the value, and the only outline is the field's own.
+    /// Focusing a field does not move the value, and the only outline is the row's own.
     #[test]
     fn focusing_a_value_field_outlines_the_row_and_leaves_the_value_put() {
         for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ARROW_CLOCKWISE)] {
@@ -5967,7 +4491,6 @@ mod tests {
                 rings.iter().all(|r| *r == row),
                 "a focused field drew an outline that is not the row's {row:?}: {rings:?}"
             );
-            // And the value clears that outline by the field's own margin.
             assert!(
                 value_x(&focused) - row.min.x >= 9.0,
                 "the value sits {}px from the outline",
@@ -5976,15 +4499,13 @@ mod tests {
         }
     }
 
-    /// The window the wrap tests pretend to be in. Big enough to hold two trigger
-    /// bands and a gap, which is what `wrap_scrub` refuses to act without.
+    /// The window the wrap tests run in: room for two trigger bands and a gap, which `wrap_scrub` requires.
     const WINDOW: egui::Rect = egui::Rect {
         min: egui::Pos2::ZERO,
         max: egui::pos2(1200.0, 800.0),
     };
 
-    /// Lay out one `value_field` over `v`, feeding it `events`, and report the box
-    /// the number claimed along with everything egui asked the backend to do.
+    /// Lays out one `value_field` over `v` fed `events`; returns its box and the full output.
     fn drive_value_field_out(
         ctx: &egui::Context,
         v: &mut f64,
@@ -6003,9 +4524,6 @@ mod tests {
                     ui,
                     egui::vec2(200.0, 28.0),
                     Prefix::Text("W"),
-                    // Configured as the real geometry fields are, formatter included —
-                    // the point of `digits_shown` below is that the pinned precision is
-                    // what the wrap cannot disturb.
                     v,
                     Scrub::whole(1.0 / SCRUB_SCALE),
                     |d| d.custom_formatter(number(2)),
@@ -6030,10 +4548,7 @@ mod tests {
         })
     }
 
-    /// How many decimal places the field actually painted this pass.
-    ///
-    /// Read off the shapes rather than computed, because what went wrong was purely a
-    /// matter of what reached the screen: the value was right throughout.
+    /// How many decimal places the field painted this pass, read off the shapes.
     fn digits_shown(out: &egui::FullOutput) -> usize {
         let text = out
             .shapes
@@ -6059,14 +4574,7 @@ mod tests {
         }
     }
 
-    /// **The prefix is part of the scrub.** A press that lands on the `W` and drags
-    /// right has to move the number, because the label is what the hand aims at when
-    /// it goes looking for "the width field" — and for as long as the prefix was a
-    /// widget in front of the value, the leftmost fifth of every field did nothing.
-    ///
-    /// Driven with real pointer events rather than by measuring rects: what matters
-    /// is that the gesture *lands*, and a rect that merely contains the prefix would
-    /// prove nothing if a widget in front of it took the press (§9.2).
+    /// A press on the prefix and a drag right moves the number; driven with real pointer events.
     #[test]
     fn dragging_a_value_field_by_its_prefix_moves_the_number() {
         let ctx = egui::Context::default();
@@ -6074,8 +4582,6 @@ mod tests {
         let mut v = 100.0_f64;
         let rect = drive_value_field(&ctx, &mut v, vec![]); // warm fonts and geometry
 
-        // Two points in from the field's own left edge — on the label, as far from
-        // the digits as the field goes.
         let on_prefix = egui::pos2(rect.left() + 2.0, rect.center().y);
         drive_value_field(
             &ctx,
@@ -6098,13 +4604,7 @@ mod tests {
         );
     }
 
-    /// **A scrub that runs into the window's edge teleports to the other side**, so
-    /// the reach of a field is how long you are willing to drag rather than how wide
-    /// the monitor is (§15 D66).
-    ///
-    /// Checked through the `CursorPosition` command the pass emits, which is the whole
-    /// of what this code decides — the OS actually moving the pointer is the backend's
-    /// half and cannot be seen from here.
+    /// A scrub that reaches the window's edge asks (via `CursorPosition`) for the pointer on the far side, horizontally only.
     #[test]
     fn a_scrub_that_reaches_an_edge_wraps_the_pointer_to_the_far_side() {
         let ctx = egui::Context::default();
@@ -6113,7 +4613,6 @@ mod tests {
         let rect = drive_value_field(&ctx, &mut v, vec![]);
         let start = rect.center();
 
-        // Press, then drag left until the pointer is inside the left-hand band.
         drive_value_field(
             &ctx,
             &mut v,
@@ -6128,12 +4627,8 @@ mod tests {
             to.x > WINDOW.right() - WRAP_EDGE * 3.0 && to.x < WINDOW.right() - WRAP_EDGE,
             "wrapped to {to:?}, which is not just inside the right-hand edge"
         );
-        // **y is left exactly alone**, even though this field sits within a band of the
-        // window's top — the case that made wrapping both axes wrong, since a purely
-        // horizontal drag would have teleported vertically the moment it began.
         assert_eq!(to.y, at_edge.y, "the vertical axis must not be touched");
 
-        // Mid-field, nothing wraps — otherwise the pointer would jump on every drag.
         let (_, quiet) = drive_value_field_out(
             &ctx,
             &mut v,
@@ -6145,11 +4640,7 @@ mod tests {
         );
     }
 
-    /// **The pass after a wrap must not move the value.** egui reads `drag_delta` as
-    /// the difference between successive pointer positions, so a teleport arrives
-    /// indistinguishable from a flick most of the window wide — and applied to a
-    /// number it would send it flying. `scrub_speed_for` spends that pass on a zero
-    /// speed instead, which is the one thing making cursor wrapping usable at all.
+    /// The pass after a wrap does not move the value (`scrub_speed_for` zeroes the teleport's delta), and the next real move scrubs again.
     #[test]
     fn the_pass_after_a_wrap_swallows_the_teleports_own_delta() {
         let ctx = egui::Context::default();
@@ -6163,15 +4654,12 @@ mod tests {
             vec![egui::Event::PointerMoved(start), press(start, true)],
         );
 
-        // Into the left band: this pass wraps.
         let at_edge = egui::pos2(WRAP_EDGE - 4.0, start.y);
         let (_, out) =
             drive_value_field_out(&ctx, &mut v, vec![egui::Event::PointerMoved(at_edge)]);
         let to = wrapped_to(&out).expect("the wrap");
         let before = v;
 
-        // The teleport itself, as the backend would report it: a jump of most of the
-        // window's width, in the *opposite* direction to the drag.
         drive_value_field(&ctx, &mut v, vec![egui::Event::PointerMoved(to)]);
         assert_eq!(
             v,
@@ -6180,8 +4668,6 @@ mod tests {
             v - before
         );
 
-        // And the very next pass of real movement scrubs again, so the wrap costs one
-        // pass and not the rest of the gesture.
         drive_value_field(
             &ctx,
             &mut v,
@@ -6190,17 +4676,7 @@ mod tests {
         assert!(v < before, "the drag stopped scrubbing after the wrap: {v}");
     }
 
-    /// **The teleport is recognised whenever it turns up, not on the pass after it was
-    /// asked for.** This is the bug the first version had, and it was reported from the
-    /// Rotation field: the request only reaches the backend after the frame body
-    /// (`<OndinApp as eframe::App>::ui`) returns, the
-    /// OS posts the resulting move whenever it gets round to it, and the hand keeps
-    /// producing real events in the meantime — so a one-pass window missed the artefact,
-    /// which then landed at full speed and, on a field that commits every pass, stayed.
-    ///
-    /// Three things have to hold together here, which is why they are one test: the real
-    /// motion during the wait scrubs normally, the late teleport costs nothing, and the
-    /// gesture carries on afterwards.
+    /// A teleport is swallowed whenever it arrives, not only on the next pass; real motion in between scrubs normally.
     #[test]
     fn a_teleport_that_lands_late_is_still_swallowed() {
         let ctx = egui::Context::default();
@@ -6214,13 +4690,10 @@ mod tests {
             vec![egui::Event::PointerMoved(start), press(start, true)],
         );
 
-        // Into the left band: this pass asks for the wrap.
         let edge = egui::pos2(WRAP_EDGE - 4.0, start.y);
         let (_, out) = drive_value_field_out(&ctx, &mut v, vec![egui::Event::PointerMoved(edge)]);
         let to = wrapped_to(&out).expect("the wrap");
 
-        // Four passes of ordinary movement before the OS answers. Each must scrub, and
-        // none may be mistaken for the teleport.
         let mut at = edge;
         for _ in 0..4 {
             let before = v;
@@ -6237,7 +4710,6 @@ mod tests {
             );
         }
 
-        // Now the teleport finally arrives.
         let before = v;
         drive_value_field(&ctx, &mut v, vec![egui::Event::PointerMoved(to)]);
         assert_eq!(
@@ -6247,7 +4719,6 @@ mod tests {
             v - before
         );
 
-        // And the drag is still live, and free to wrap again.
         drive_value_field(
             &ctx,
             &mut v,
@@ -6256,20 +4727,11 @@ mod tests {
         assert!(v < before, "the drag stopped scrubbing after the wrap: {v}");
     }
 
-    /// **A wrap must not change how many digits the field shows**, which is the second
-    /// thing reported about it: for exactly the frame the pointer teleported on, the
-    /// Transform panel read `411.672736201535258`.
-    ///
-    /// The value was never wrong — a `DragValue` derives its precision from its *speed*
-    /// (`auto_decimals = (aim_radius / speed).log10().ceil().clamp(0, 15)`), and the
-    /// swallow pass sets the speed to zero, so the guess came back at its ceiling of
-    /// fifteen. Pinning the precision is what makes the display independent of a speed
-    /// that has been borrowed for something else (§15 D66, `number`).
+    /// A wrap does not change the digits shown: `DragValue` derives precision from speed, which the swallow pass zeroes, so `number` pins it.
     #[test]
     fn a_wrap_does_not_change_how_many_digits_a_field_shows() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        // A value with far more precision than the field should ever show.
         let mut v = 411.672_736_201_535_26_f64;
         let rect = drive_value_field(&ctx, &mut v, vec![]);
         let start = rect.center();
@@ -6284,8 +4746,6 @@ mod tests {
         let to = wrapped_to(&out).expect("the wrap");
         assert!(digits_shown(&out) <= 2, "before the teleport");
 
-        // The teleport itself — the pass whose speed is zeroed, and the one frame the
-        // report was of.
         let (_, landing) = drive_value_field_out(&ctx, &mut v, vec![egui::Event::PointerMoved(to)]);
         assert!(
             digits_shown(&landing) <= 2,
@@ -6294,9 +4754,7 @@ mod tests {
         );
     }
 
-    /// A request the platform never answers must not leave the drag unable to wrap for
-    /// the rest of its life — it gives up after `WRAP_GIVE_UP` passes and goes back to
-    /// stalling at the edge, which is merely how every field behaved before.
+    /// A wrap request the platform never answers is given up after `WRAP_GIVE_UP` passes, and a fresh one is allowed.
     #[test]
     fn an_unanswered_wrap_request_is_eventually_given_up_on() {
         let ctx = egui::Context::default();
@@ -6314,8 +4772,6 @@ mod tests {
         let (_, out) = drive_value_field_out(&ctx, &mut v, vec![egui::Event::PointerMoved(edge)]);
         assert!(wrapped_to(&out).is_some(), "the first request");
 
-        // The pointer stays in the band and the teleport never comes — as it would not
-        // on a platform that refuses to move the cursor.
         for _ in 0..WRAP_GIVE_UP {
             drive_value_field(&ctx, &mut v, vec![egui::Event::PointerMoved(edge)]);
         }
@@ -6326,9 +4782,7 @@ mod tests {
         );
     }
 
-    /// Making the number's box the whole field must not *move* the number: the digits
-    /// still start one prefix and one gap in from the field's edge, which is where
-    /// laying the prefix out ahead of them put them.
+    /// The digits start one prefix width and one gap in from the field's edge.
     #[test]
     fn the_number_still_sits_a_prefix_and_a_gap_from_the_fields_edge() {
         let ctx = egui::Context::default();
@@ -6356,9 +4810,6 @@ mod tests {
                 .find(|(_, t)| !t.starts_with("101"))
                 .expect("the prefix is painted");
             let want = ctx.fonts_mut(|f| {
-                // The prefix's own advance width, which is what the inset is built
-                // from — measured here rather than assumed, so a change of type size
-                // does not need this number changed with it.
                 let lead = match prefix {
                     Prefix::Text(t) => f.layout_no_wrap(
                         t.to_owned(),
@@ -6386,10 +4837,7 @@ mod tests {
         }
     }
 
-    /// A colour typed into a hex field has to *replace* the one there, the way a
-    /// number typed into a `DragValue` does. Driven with real events, because the
-    /// thing under test is what a keystroke does to the buffer — asserting on the
-    /// stored cursor range would restate the implementation instead of the behaviour.
+    /// A colour typed into a hex field replaces the one there; driven with real events.
     #[test]
     fn a_hex_field_is_retyped_rather_than_inserted_into() {
         let ctx = egui::Context::default();
@@ -6423,8 +4871,7 @@ mod tests {
             ],
             &mut text,
         );
-        // The click focused it and the selection was stored behind that frame's own
-        // caret placement, so the typing lands on the frame after.
+        // The selection is stored behind that frame's caret placement, so typing lands a frame later.
         run(vec![egui::Event::Text("F".to_owned())], &mut text);
         assert_eq!(
             text, "F",
@@ -6432,7 +4879,7 @@ mod tests {
         );
     }
 
-    /// Rasterize `lock_filled_shapes` onto a pixel grid, `true` where it inks.
+    /// Rasterizes `lock_filled_shapes` onto a pixel grid, `true` where it inks.
     fn lock_coverage(size: f32, center: egui::Pos2, w: usize, h: usize) -> Vec<bool> {
         let mut tess = egui::epaint::tessellator::Tessellator::new(
             1.0,
@@ -6463,12 +4910,7 @@ mod tests {
         grid
     }
 
-    /// The filled lock is drawn, not set in type, so nothing but a test tells us
-    /// it still looks like a lock. Two things make it one: a solid body, and a
-    /// shackle above it that is a *band* — if the arc ever loses its hole the
-    /// glyph reads as a blob, which is exactly what "just fill it in" produces.
-    /// It also has to stay inside the em box it claims, or it collides with the
-    /// eye beside it in the layers tree.
+    /// The filled lock has a solid body and a banded shackle (with a hole), inside its em box.
     #[test]
     fn the_filled_lock_has_a_body_and_a_shackle_with_a_hole() {
         const SIZE: f32 = 15.0;
@@ -6482,7 +4924,7 @@ mod tests {
         let (top, bottom) = (rows[0], rows[rows.len() - 1]);
         let (left, right) = (cols[0], cols[cols.len() - 1]);
 
-        // Inside the em box, centred in it. One pixel of slack for rounding.
+        // One pixel of slack for rounding.
         let half = SIZE / 2.0;
         assert!(
             top as f32 >= centre.y - half - 1.0 && (bottom + 1) as f32 <= centre.y + half + 1.0,
@@ -6493,7 +4935,6 @@ mod tests {
             "lock ink spans columns {left}..{right}"
         );
 
-        // The body is the widest part and sits below the shackle.
         let width_of = |y: usize| (0..W).filter(|x| ink(*x, y)).count();
         let widest = (top..=bottom).max_by_key(|y| width_of(*y)).unwrap();
         assert!(
@@ -6501,8 +4942,7 @@ mod tests {
             "the widest row ({widest}) should be the body, in the lower half"
         );
 
-        // Somewhere between the top of the ink and the top of the body there is
-        // a row with a gap in the middle: the shackle's two legs.
+        // A row above the body with a gap in the middle: the shackle's two legs.
         let banded = (top..widest).any(|y| {
             let on: Vec<usize> = (0..W).filter(|x| ink(*x, y)).collect();
             !on.is_empty() && on.windows(2).any(|p| p[1] - p[0] > 1)
@@ -6510,15 +4950,7 @@ mod tests {
         assert!(banded, "the shackle has no hole — it is a blob, not a lock");
     }
 
-    /// **The drawn filled hexagon sits on the outline glyph's ink** (§15 D985) —
-    /// what `arch-scribe` read the first build claiming without a check. At 64pt
-    /// the outline `HEXAGON` is laid out and its coverage read off the font atlas;
-    /// the polygon, centred on the glyph's logical cell, must sit inside that
-    /// ink's box by about half Phosphor's 16-unit stroke on every side — its
-    /// vertices are the stroke's centre line — and the glyph must be pointy-top,
-    /// its ink narrow at the top, as the polygon is. ⚠️ The canvas centred it on
-    /// that cell too until §15 D993 lifted it a point, by eye, so this pins the
-    /// polygon against the glyph and not the canvas's placement.
+    /// The filled hexagon polygon, centred on the outline `HEXAGON` glyph's cell, sits inside the glyph's ink box by about half the stroke on every side, and the glyph is pointy-top.
     #[test]
     fn the_filled_hexagon_sits_on_the_outline_glyphs_ink() {
         const SIZE: f32 = 64.0;
@@ -6538,7 +4970,7 @@ mod tests {
         assert!(!uv.is_nothing(), "the glyph rasterized");
         let cell = g.logical_rect().translate(row.pos.to_vec2());
         let origin = row.pos + g.pos.to_vec2() + uv.offset;
-        // Read into locals before the next `Context` accessor (no nesting).
+        // Locals first: nested `Context` accessors deadlock.
         let atlas = ctx.fonts(|f| f.image());
         let ppp = ctx.pixels_per_point();
         let (gw, gh) = (
@@ -6572,7 +5004,6 @@ mod tests {
                  {half_stroke:.2} — ink {ink_box:?}, polygon {poly:?}"
             );
         }
-        // Pointy-top: a row a tenth of the way down is far narrower than the middle.
         let width = |y: usize| (0..gw).filter(|x| ink(*x, y)).count();
         let near_top = width(r0 + (r1 - r0) / 10);
         let mid = (r0 + r1) / 2;
@@ -6584,31 +5015,13 @@ mod tests {
         );
     }
 
-    /// A label too long for its button is elided *inside* it.
-    ///
-    /// **The reported symptom is a layer's name.** The Export panel's button reads
-    /// `Export {name}`, and `Export Ellipse 11312312 3123123132` ran out of both
-    /// ends of the card — the name is not a phrase this module chose and has no
-    /// length limit anywhere. Nothing about that is visible in the source: the
-    /// button lays its own text out and paints it with a `Painter`, which clips
-    /// against nothing, so the overflow only exists in the shapes.
-    ///
-    /// Both halves are asserted, because either alone passes for the wrong reason:
-    /// a galley that is *elided* could still be centred by the untruncated width
-    /// and hang off the left, and ink that is *inside* the rect would also be
-    /// inside it if the label happened to be short. And **the name off the
-    /// screenshot is one of two cases, not the whole of it** — laid out in full it
-    /// comes to 220.9 in a 221pt button, so it is the *padding* that catches it
-    /// and the containment check alone would let it through by a twentieth of a
-    /// point. The second name is the one that genuinely runs out of both ends.
+    /// A label too long for its button is elided inside it: the galley is elided and its ink stays within the button's rect.
     #[test]
     fn a_long_action_button_label_is_elided_inside_the_button() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        // One pass so the fonts exist to lay anything out with.
         let _ = ctx.run_ui(Default::default(), |_| {});
-        // The Export panel's own button: the card's content width less the ⋯
-        // beside it and the gap between them.
+        // The Export panel's button: card content width less the ⋯ and the gap.
         const W: f32 = 284.0 - CARD_MARGIN_X * 2.0 - 28.0 - 7.0;
 
         for long in [
@@ -6665,16 +5078,9 @@ mod tests {
 mod head_tests {
     use super::*;
 
-    /// **A header's `+` and `⋯` sit `HEAD_MORE_GAP` apart, and each keeps its
-    /// own press** (§15 D1091): the boxes the two paint are the gap apart, a
-    /// press anywhere on the `⋯`'s box is the `⋯`'s, and the two padded targets
-    /// meet in the middle of the gap.
+    /// A header's `+` and `⋯` sit `HEAD_MORE_GAP` apart and their padded press targets meet mid-gap.
     ///
-    /// The bug was that the gap was never allocated — the `⋯`'s
-    /// `add_space(-item_spacing)` put the `+`'s box against it — while each
-    /// button's hit pad still reached half the gap past its box, so the `+`
-    /// took the `⋯`'s left 8 points. Flip, run: that `add_space` put back fails
-    /// *"the boxes are the gap apart"*, 0.
+    /// flip: putting back the `⋯`'s `add_space(-item_spacing)` → fails "the boxes are the gap apart".
     #[test]
     fn a_heads_plus_and_more_keep_their_own_presses() {
         let ctx = egui::Context::default();
@@ -6734,23 +5140,11 @@ mod head_tests {
         assert!(right.more && !right.acted, "right of it, the ⋯");
     }
 
-    /// A press **on the glyph** opens the menu.
-    ///
-    /// This is the regression the user reported: the head used to be two
-    /// `ui.label`s with their responses unioned, and a label wins the hit test
-    /// over a rect that merely contains it — so the only clickable part was the
-    /// empty band above and below the icons. Clicking the icon, which is the one
-    /// thing that looks clickable, did nothing.
-    ///
-    /// The press is aimed at the centre of the returned rect, because that is
-    /// where the glyphs are painted. Geometry alone would not catch this: the
-    /// old rect was the right rect, it just was not the thing being hit.
+    /// A press on the centre of a menu head, where the glyphs are painted, clicks it.
     #[test]
     fn a_menu_head_is_clicked_on_its_own_glyph() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // First pass: lay the head out and learn where it is. Fonts are only
-        // available once a frame has run, so this doubles as that.
         let mut rect = egui::Rect::NOTHING;
         let _ = ctx.run_ui(Default::default(), |ui| {
             rect = menu_head(
@@ -6764,7 +5158,6 @@ mod head_tests {
         assert!(rect.is_positive(), "the head allocated nothing");
         assert_eq!(rect.height(), HEAD_H);
 
-        // Second pass: press and release on the middle of it.
         let centre = rect.center();
         let press = |pressed| egui::Event::PointerButton {
             pos: centre,
@@ -6789,18 +5182,9 @@ mod head_tests {
         assert!(clicked, "a press on the glyph did not reach the head");
     }
 
-    /// **A menu head answers the pointer the way an icon button does, and
-    /// stays lit while its menu is open** (§15 D963): under the pointer, or
-    /// with `open`, it paints the `HOVER` ground and draws its mark and caret
-    /// in `TEXT`; at rest and closed it paints no ground and leaves both marks
-    /// their own colours.
+    /// A menu head hovered or `open` paints the `HOVER` ground and draws mark and caret in `TEXT`; at rest and closed it paints neither.
     ///
-    /// **Flip runs**: `open` ignored fails on *"an open head stays lit with the
-    /// pointer away"*, predicted. The ground's fill dropped fails there too,
-    /// `(0, 2)` against `(1, 2)` — the open case comes first now, and catches
-    /// the missing ground before the hovered case is reached. Run before the
-    /// open case existed, the same flip failed on *"a hovered head paints the
-    /// HOVER ground"*; `arch-scribe` predicted the move and the re-run agreed.
+    /// flip: ignoring `open` → fails "an open head stays lit with the pointer away".
     #[test]
     fn a_menu_head_lights_under_the_pointer_like_an_icon_button() {
         let ctx = egui::Context::default();
@@ -6837,7 +5221,6 @@ mod head_tests {
         assert_eq!(texts, 2, "the fixture draws a mark and a caret");
         assert_eq!((grounds, lit), (0, 0), "a head at rest lights nothing");
 
-        // Open, with the pointer nowhere near it — down in its menu, say.
         let (_, grounds, lit, _) = frame(&ctx, Default::default(), true);
         assert_eq!(
             (grounds, lit),
@@ -6845,7 +5228,7 @@ mod head_tests {
             "an open head stays lit with the pointer away"
         );
 
-        // The pointer over it, then a frame for the hover to be read back.
+        // One frame for the hover to register, one to read it back.
         let over = egui::RawInput {
             events: vec![egui::Event::PointerMoved(rect.center())],
             ..Default::default()
@@ -6855,7 +5238,6 @@ mod head_tests {
         assert_eq!(grounds, 1, "a hovered head paints the HOVER ground");
         assert_eq!(lit, 2, "and draws its mark and its caret in TEXT");
 
-        // And closed with the pointer gone, it goes dark again.
         let away = egui::RawInput {
             events: vec![egui::Event::PointerGone],
             ..Default::default()
@@ -6865,20 +5247,7 @@ mod head_tests {
         assert_eq!((grounds, lit), (0, 0), "closed and left, it goes dark");
     }
 
-    /// **A card's eyebrow takes the arrow, not an I-beam.**
-    ///
-    /// Reported after living with the inspector: *Appearance*, *Fill*, *Stroke* —
-    /// every header — put a text cursor over a row that behaves like a button,
-    /// because egui's labels are selectable by default and a selectable label sets
-    /// `CursorIcon::Text` for as long as it is hovered. Nothing in `section_head`
-    /// says so or could; the switch is one line in `theme::install_style_into`,
-    /// which is exactly why it is worth a test that names the header rather than
-    /// the flag.
-    ///
-    /// **The second half is what stops this passing on a context where nothing was
-    /// hovered at all** — the failure mode of every cursor assertion. Turning the
-    /// style flag back on, the same pointer over the same word reports `Text`, so
-    /// the arrow in the first half is a *result* and not an absence.
+    /// A card's eyebrow takes the arrow, not an I-beam; with selectable labels restored the same hover reports `Text`, proving the hover registered.
     #[test]
     fn a_card_eyebrow_takes_the_arrow_rather_than_the_i_beam() {
         let over_the_eyebrow = |selectable: bool| {
@@ -6890,8 +5259,6 @@ mod head_tests {
             let head = |ui: &mut egui::Ui| {
                 section_head(ui, "Appearance", true, None, true);
             };
-            // First pass: lay it out and find the word. Fonts only exist once a
-            // frame has run, so this doubles as that.
             let out = ctx.run_ui(Default::default(), head);
             let at = out
                 .shapes
@@ -6903,9 +5270,7 @@ mod head_tests {
                     _ => None,
                 })
                 .expect("the eyebrow is painted");
-            // Then hold the pointer on it. A widget's interaction state is last
-            // frame's, so the first of these is the frame that registers the hover
-            // and the second is the one that can act on it.
+            // Interaction state is last frame's, so hold the pointer for several frames.
             let mut icon = egui::CursorIcon::default();
             for _ in 0..3 {
                 let raw = egui::RawInput {
@@ -6929,9 +5294,7 @@ mod head_tests {
         );
     }
 
-    /// The mark and its caret are `gap` apart and nothing wider, so the gap a
-    /// head asks for is the gap it gets — nothing scaling with it or creeping in
-    /// to make one cluster's carets sit differently from another's.
+    /// A menu head's width grows by exactly the `gap` it is asked for.
     #[test]
     fn a_menu_heads_width_is_its_two_glyphs_and_the_gap() {
         let ctx = egui::Context::default();
@@ -6952,22 +5315,10 @@ mod head_tests {
             });
             w
         };
-        // Widening the gap by 4 widens the head by exactly 4: the head's own
-        // padding is a constant either side, not something that rides on `gap`.
         assert!((measure(5.0) - measure(1.0) - 4.0).abs() < 1e-3);
     }
 
-    /// **A head and an icon button hold their ink the same distance from the
-    /// edge of the box they occupy.**
-    ///
-    /// The top bar's right cluster alternates the two — undo and redo are icon
-    /// buttons, View, Snap and the zoom readout are heads — and one gap for the
-    /// whole row only *looks* like one gap if the two kinds of control are inset
-    /// alike. An `icon_button` gets its inset for free from being a 26pt box
-    /// around a 16pt glyph; a head allocated only its galleys, so its mark sat
-    /// 5pt nearer the divider beside it and the cluster read as unevenly spaced
-    /// however the gaps were tuned (§15 D44). Measured on the painted glyph
-    /// rather than the allocated rect, because the rects were never the problem.
+    /// A head and an icon button inset their glyphs the same distance from their box edge (`HEAD_PAD`).
     #[test]
     fn a_head_and_an_icon_button_inset_their_glyphs_alike() {
         let ctx = egui::Context::default();
@@ -6988,9 +5339,6 @@ mod head_tests {
             });
         });
 
-        // Both controls are one box with glyphs painted in it; the first glyph
-        // in each is the mark, and its left edge is what the eye measures the
-        // spacing from.
         let inks: Vec<egui::Rect> = out
             .shapes
             .iter()
@@ -7001,7 +5349,6 @@ mod head_tests {
             .collect();
         assert!(inks.len() >= 2, "expected two marks, got {inks:?}");
 
-        // The button paints its glyph centred, so its inset is half the slack.
         let button_inset = (HEAD_H - GLYPH) / 2.0;
         assert!(
             (button_inset - HEAD_PAD).abs() < 1e-3,
@@ -7010,35 +5357,7 @@ mod head_tests {
         );
     }
 
-    /// **A rule's hairline lands on a device pixel, within half of one of the
-    /// centre of the column it was given.**
-    ///
-    /// A rule's neighbours are galleys, so its 1pt column starts at a fractional
-    /// x. Rounding that centre in *point* space — which is what this did — pushed
-    /// the ink up to 0.7pt right of centre and, at 100%, mostly outside the
-    /// column: both top-bar dividers leaned the same way, so the cluster read as
-    /// unevenly spaced whatever the gaps were set to (§15 D44). Checked at 125%
-    /// and 150% as well as 100%, because point space and device space agree only
-    /// at 100% and that is exactly what hid it.
-    ///
-    /// Half a device pixel is the floor on the error, not a slack allowance: a
-    /// crisp line has to sit on the grid, the column's centre generally does not,
-    /// and no amount of care closes a gap the two coordinate systems create. The
-    /// stroke is a *point* wide, so on a column whose own edges fall between
-    /// pixels some of that width necessarily overhangs — which is why this
-    /// measures the centre line and not the ink.
-    ///
-    /// ⚠️ **This test asserted a pixel *centre* unconditionally until §15 D479, and
-    /// that is why it could not see `[S19.1-L1-04]`.** Which grid position is the
-    /// crisp one is a question about the line's **device** width: odd wants a pixel
-    /// centre, even wants a pixel edge. A 1pt line is odd at 100%, 125%, 150% and
-    /// 175% — every scale in this loop but one — so an assertion that hard-coded
-    /// the odd answer looked exhaustive and was right four times out of five, and
-    /// **wrong at exactly the case it was failing to draw**: 200%, where the line
-    /// is 2 device pixels and spread `[0.5, 1.0, 0.5]` across three. The review
-    /// recorded `ui::rule` as *"pinned by nothing"*; it was pinned by this, which
-    /// is worse — **a test naming a rule and asserting a special case of it**, the
-    /// G19 shape, in the one place that would have caught the bug.
+    /// A rule's hairline sits on the device-pixel grid its width needs (centre for an odd device width, edge for an even one), within half a pixel of its column's centre, at several scales.
     #[test]
     fn a_rules_hairline_lands_on_a_pixel_inside_its_own_column() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
@@ -7047,8 +5366,7 @@ mod head_tests {
             ctx.set_pixels_per_point(ppp);
             let _ = ctx.run_ui(Default::default(), |_| {});
 
-            // A fractional origin is the case that matters, so start the row
-            // with something of non-integer width and let the rule follow it.
+            // A fractional origin: start the row with something of non-integer width.
             let mut column = egui::Rect::NOTHING;
             let out = ctx.run_ui(Default::default(), |ui| {
                 ui.horizontal(|ui| {
@@ -7070,9 +5388,6 @@ mod head_tests {
             assert_eq!(painted.len(), 1, "{ppp}x: expected one hairline");
             let x = painted[0];
 
-            // On the grid position its own device width needs, so it is one crisp
-            // line rather than two soft ones: a pixel centre for an odd device
-            // width, a pixel edge for an even one.
             let device = x * ppp;
             let want_centre = hairline_on_pixel_centre(ppp, 1.0);
             let off = match want_centre {
@@ -7086,7 +5401,6 @@ mod head_tests {
                 (1.0 * ppp).floor(),
                 if want_centre { "centre" } else { "edge" }
             );
-            // And no further from the column's centre than that snapping forces.
             let drift = (x - column.center().x).abs();
             assert!(
                 drift <= 0.5 / ppp + 1e-3,
@@ -7096,16 +5410,7 @@ mod head_tests {
         }
     }
 
-    /// Everything in a field row is the height it asked for and starts on one
-    /// baseline — the fields *and* the buttons beside them.
-    ///
-    /// This is the assertion for `FIELD_BORDER_H`, and it has to measure the
-    /// painted **grounds** rather than the returned rects: the response is the
-    /// frame's content box, which is exactly where the missing 2px hid. With the
-    /// rows over-allocating, the three grounds came out 30/30/28 tall at y
-    /// 0.0/1.0/1.5 — a field row whose second column sat 1px low and whose
-    /// button was 2px short, both of which read as sloppiness rather than as a
-    /// margin bug.
+    /// Fields and the button beside them paint grounds of the requested height on one baseline (`FIELD_BORDER_H`); measured on painted grounds, not returned rects.
     #[test]
     fn a_field_row_is_one_height_on_one_baseline() {
         let ctx = egui::Context::default();
@@ -7138,8 +5443,6 @@ mod head_tests {
             });
         });
 
-        // Every ground is a rect filled with the field colour: two rows and the
-        // button, which shares their ground on purpose.
         let grounds: Vec<egui::Rect> = out
             .shapes
             .iter()
@@ -7164,32 +5467,9 @@ mod head_tests {
 mod dim_tests {
     use super::*;
 
-    /// **`Ui::disable` fades everything inside it, explicitly-coloured text
-    /// included** — grounds, strokes and glyphs alike, all by `disabled_alpha`.
+    /// `Ui::disable` fades grounds, strokes and glyphs alike by `disabled_alpha`, explicitly-coloured text included.
     ///
-    /// egui 0.35 disables with `painter.multiply_opacity(disabled_alpha)`, and
-    /// every shape the scope emits goes through `epaint`'s `adjust_colors`, which
-    /// for a `Shape::Text` takes `Arc::make_mut` on the galley and recolours the
-    /// **mesh vertices** of every row. So there is no way to smuggle a colour past
-    /// it: `RichText::color(…)` and `Painter::text(…, colour)` fade exactly as a
-    /// plain `ui.label` does.
-    ///
-    /// **The trap this test exists to stop, because it caught me.** A galley
-    /// carries the colour in two places, and only one of them paints.
-    /// `galley.job.sections[..].format.color` is the layout *input* and
-    /// `adjust_colors` never touches it; `galley.rows[..].row.visuals.mesh
-    /// .vertices[..].color` is the output, baked at layout time from that same
-    /// format, and is what the tessellator draws. A probe reading the section
-    /// therefore reports "explicitly-coloured text does not fade" — confidently,
-    /// reproducibly, and wrongly. **Read the vertices.**
-    ///
-    /// `Color32::PLACEHOLDER` in a vertex is the sentinel meaning "substitute
-    /// `fallback_color` at tessellation", and `fallback_color` is adjusted too, so
-    /// that path fades as well. `theme::install` sets `override_text_color`, which
-    /// changes which of the two paths a plain label takes and nothing about the
-    /// outcome.
-    ///
-    /// Asserted rather than described, so an egui upgrade that changes it says so.
+    /// Read the galley's mesh vertices, not `job.sections[..].format.color` (the layout input, never adjusted); `PLACEHOLDER` there defers to the also-faded `fallback_color`.
     #[test]
     fn disabling_a_scope_fades_everything_including_explicitly_coloured_text() {
         let ctx = egui::Context::default();
@@ -7201,11 +5481,8 @@ mod dim_tests {
                     if off {
                         ui.disable();
                     }
-                    // 1. explicit colour through RichText
                     ui.label(egui::RichText::new("A").color(theme::text::MUTED));
-                    // 2. plain label, colour from visuals
                     ui.label("B");
-                    // 3. explicit colour straight onto the painter
                     let p = ui.painter();
                     p.text(
                         egui::pos2(50.0, 50.0),
@@ -7214,7 +5491,6 @@ mod dim_tests {
                         egui::FontId::proportional(12.0),
                         theme::text::MUTED,
                     );
-                    // 4. a filled rect
                     p.rect_filled(
                         egui::Rect::from_min_size(egui::pos2(0.0, 80.0), egui::vec2(9.0, 9.0)),
                         egui::CornerRadius::ZERO,
@@ -7223,10 +5499,6 @@ mod dim_tests {
                 });
             })
         };
-        // **What actually paints a glyph is the mesh vertex**, not the layout
-        // section — see this test's own note. `PLACEHOLDER` there means "defer to
-        // `fallback_color`", which the tessellator substitutes later, so that is
-        // the one case where the fallback is the answer.
         let ink = |out: &egui::FullOutput, want: &str| -> egui::Color32 {
             out.shapes
                 .iter()
@@ -7261,8 +5533,7 @@ mod dim_tests {
         for name in ["A", "B", "C"] {
             let (lit, dim) = (ink(&on, name), ink(&off, name));
             assert_ne!(lit, dim, "{name} did not fade");
-            // Halved, which is `Visuals::disabled_alpha` — asserted so that a
-            // theme setting it explicitly has to come past this test.
+            // Halved: `Visuals::disabled_alpha`.
             assert!(
                 (i32::from(dim.a()) - i32::from(lit.a()) / 2).abs() <= 1,
                 "{name} faded from {lit:?} to {dim:?}, which is not the 0.5 \
@@ -7271,21 +5542,7 @@ mod dim_tests {
         }
     }
 
-    /// Alpha the vertices of the corner mask were painted at, if a mask was
-    /// painted. The mask is the one part of a `swatch` whose colour is the
-    /// *ground* rather than the paint, which is exactly what makes it the part a
-    /// faded scope ruins.
-    /// **A gate inside a gate must not fade twice**, which is what
-    /// `disable_unless` exists for.
-    ///
-    /// `Ui::disable` multiplies the painter's opacity rather than setting it, and
-    /// `add_enabled_ui` does not guard on the ambient state, so the naive nesting
-    /// lands at 0.25 against its neighbours' 0.5. It shows as one row carrying two
-    /// dim levels — unevenness, which reads as a rendering fault rather than as a
-    /// gate, and is exactly the kind of thing that is invisible in the source.
-    ///
-    /// Asserted as an A/B against a single gate, and against the unguarded nesting
-    /// too, so it cannot pass by the fade having quietly stopped happening.
+    /// A gate inside a gate does not fade twice (`disable_unless`); the unguarded nesting does, so the fade is known to happen.
     #[test]
     fn nesting_a_disabled_gate_does_not_double_fade() {
         let ctx = egui::Context::default();
@@ -7338,25 +5595,7 @@ mod dim_tests {
         );
     }
 
-    /// **"Unavailable" and "switched off" are different greys, and both routes to
-    /// "unavailable" are the same one.**
-    ///
-    /// The app dims for two unrelated reasons and used to do it at the same value:
-    /// `theme::text::FAINT` (97) painted a disabled glyph, while a hidden paint row
-    /// is `HIDDEN_OPACITY` over a `MUTED` one (95) and a hidden or locked layer row
-    /// is `text_a(102)`. Two and five levels apart is no distance, so dim alone
-    /// read as "inert, don't bother" on a control that was merely switched off.
-    ///
-    /// Two things are asserted, because the fix has two halves. **Disabled is one
-    /// ink however it is reached** — `Ui::disable`'s 0.5 fade of a `MUTED` glyph
-    /// lands on the same value as the explicit `DISABLED` constant, which is where
-    /// 79 came from rather than being picked. And **it clears both off tiers** by a
-    /// margin that reads, the same order as the step that settled
-    /// `SWATCH_HAIRLINE`.
-    ///
-    /// `FAINT` itself is untouched and is *not* asserted against here: it stayed
-    /// the tier for placeholders, hints and eyebrows, which are quiet rather than
-    /// unavailable, and it is allowed to sit wherever the off tiers do.
+    /// Disabled is one ink however reached (`Ui::disable`'s fade of `MUTED` equals `DISABLED`), and it clears both "switched off" tiers by `MARGIN` levels.
     #[test]
     fn unavailable_and_switched_off_are_different_greys() {
         const OFF_HIDDEN_ROW: u8 = 95; // HIDDEN_OPACITY (0.6) over MUTED
@@ -7366,7 +5605,6 @@ mod dim_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
-        // A disabled glyph reached through the *scope*, measured as painted.
         let faded = ctx.run_ui(Default::default(), |ui| {
             ui.add_enabled_ui(false, |ui| {
                 icon_button(ui, theme::icon::EYE, 22.0, 16.0, false, true);
@@ -7406,18 +5644,7 @@ mod dim_tests {
         }
     }
 
-    /// **Saying "unavailable" twice must not look twice as unavailable.**
-    ///
-    /// A control can be dimmed by its own `enabled` flag, by a disabled scope
-    /// around it, or — in the identity row — by both, because the row gates itself
-    /// and then gates each button on a condition of its own. Under the naive
-    /// spelling the three channels compose: `DISABLED` (79) painted inside a scope
-    /// already faded by `disabled_alpha` gives 40, so *Mask* and *Ungroup* sat a
-    /// shade darker than *Group* beside them, in one row. Uneven rather than
-    /// wrong-looking, which is the kind of thing that never gets reported.
-    ///
-    /// The three spellings are asserted to agree, which is the property that
-    /// matters — not any one of their values.
+    /// A control disabled by its flag, by a scope, or by both paints the same ink.
     #[test]
     fn a_control_disabled_twice_over_is_no_darker_than_one_disabled_once() {
         let ctx = egui::Context::default();
@@ -7443,13 +5670,10 @@ mod dim_tests {
             }
         };
 
-        // Its own flag alone — no scope in play.
         let by_flag = ink(&btn(false));
-        // A disabled scope alone, the button believing itself live.
         let by_scope = ink(&|ui: &mut egui::Ui| {
             ui.add_enabled_ui(false, btn(true));
         });
-        // Both at once, which is what the identity row does.
         let by_both = ink(&|ui: &mut egui::Ui| {
             ui.add_enabled_ui(false, btn(false));
         });
@@ -7465,6 +5689,7 @@ mod dim_tests {
         );
     }
 
+    /// Alpha the corner mask of a `swatch` was painted at, if one was; the mask uses the ground colour.
     fn mask_alpha(out: &egui::FullOutput, bg: egui::Color32) -> Option<u8> {
         out.shapes.iter().find_map(|c| match &c.shape {
             egui::Shape::Mesh(m) => m
@@ -7479,29 +5704,11 @@ mod dim_tests {
         })
     }
 
-    /// A hidden paint row is faded, and its **swatch is not**.
-    ///
-    /// `Ui::multiply_opacity` fades everything drawn inside it, and `swatch`
-    /// rounds its corners by painting the leftover slivers in the *ground* colour
-    /// (`mask_corners`). Under a multiplied opacity that mask goes translucent,
-    /// the chip shows through it, and the square corners partly reappear — the
-    /// "four visible notches" artifact `mask_corners` exists to prevent, arriving
-    /// by a new route. It reads as a tessellation bug and traces back to the
-    /// opacity scope, so the chip is painted outside it.
-    ///
-    /// Checked as an A/B rather than as one absolute number, because "the mask is
-    /// opaque" would also pass if the dim were silently doing nothing at all.
-    ///
-    /// The factor below is illustrative and deliberately does **not** track the
-    /// inspector's `HIDDEN_OPACITY`: what is under test is `set_opacity(1.0)`
-    /// escaping an enclosing `multiply_opacity`, which holds at any factor under 1.
-    /// Chasing the product value here would couple this to a number that exists to
-    /// be retuned by eye.
+    /// A dimmed row fades but its swatch's corner mask stays opaque (`set_opacity(1.0)` escapes the enclosing `multiply_opacity`); the factor is illustrative, not `HIDDEN_OPACITY`.
     #[test]
     fn a_dimmed_row_fades_everything_but_the_swatch() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // Fonts are only available once a frame has run.
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         let chip = egui::Color32::from_rgb(0xEB, 0x6E, 0x5A);
@@ -7540,7 +5747,6 @@ mod swatch_hairline_tests {
     fn draw(chip: egui::Color32) -> (egui::FullOutput, egui::Rect) {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // Fonts are only available once a frame has run.
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut rect = egui::Rect::NOTHING;
         let out = ctx.run_ui(Default::default(), |ui| {
@@ -7549,12 +5755,7 @@ mod swatch_hairline_tests {
         (out, rect)
     }
 
-    /// The chip's hairline, and where in the frame it was painted.
-    ///
-    /// Every other rect a `swatch` emits is a `rect_filled` — the checkerboard's
-    /// white base, its grey cells, the paint itself — so a non-zero stroke width
-    /// identifies this one without matching on a colour the test is about to
-    /// assert on.
+    /// The chip's hairline (the only stroked rect) and its index in the frame.
     fn hairline(out: &egui::FullOutput) -> (usize, &egui::epaint::RectShape) {
         let mut found = out
             .shapes
@@ -7569,15 +5770,9 @@ mod swatch_hairline_tests {
         one
     }
 
-    /// `top` composited over an opaque `under`.
+    /// `top` composited over an opaque `under`, in gamma space (the GPU blends linearly).
     ///
-    /// **In gamma space, which the GPU is not.** epaint hands the shader
-    /// premultiplied gamma bytes and the framebuffer blends them linearly, so the
-    /// reported `2F2F2F` chip lands nearer 86 on screen than the 109 this returns.
-    /// It makes no difference to what is asserted: the binding case is the *black*
-    /// chip, where the hairline composites to its own alpha under either rule, and
-    /// the margin is set by that one. Worth knowing before anyone tunes `MARGIN`
-    /// against the lighter chip's number.
+    /// The binding case is the black chip, where both rules agree, so `MARGIN` is set by it.
     fn over(top: egui::Color32, under: egui::Color32) -> egui::Color32 {
         let (t, u) = (top.to_srgba_unmultiplied(), under.to_srgba_unmultiplied());
         let a = t[3] as f32 / 255.0;
@@ -7595,23 +5790,9 @@ mod swatch_hairline_tests {
             .unwrap()
     }
 
-    /// **A chip the colour of the row it sits on is still visible**, because its
-    /// hairline is not.
+    /// A chip the colour of its row (`2F2F2F` on `FIELD`, and black, the binding case) stays visible: its hairline composites at least `MARGIN` levels from the row.
     ///
-    /// The two chips are the two ends of the problem. `2F2F2F` on `color::FIELD`
-    /// (`2F2F30`) is the case as reported — a fill one level off its own ground,
-    /// with nothing whatever to see. Black is what actually sets the alpha:
-    /// composited over a chip the hairline climbs from the alpha itself (over
-    /// black) to the chip's own colour (over white), so the darkest chip is the
-    /// one that has to clear the ground, and every lighter chip clears it by more.
-    ///
-    /// The margin is asserted rather than the constant so that the *reason* is
-    /// what fails. Flipped against the two versions somebody would plausibly
-    /// write: `from_black_alpha(76)` — the picker's direction, right over a bright
-    /// SV plane and wrong here — leaves the reported chip 15 levels from its
-    /// ground and the black one 47 *below* it, still invisible in the second case
-    /// and worse in the first; and trimming the alpha to be subtler fails on
-    /// black first, at 65.
+    /// flip: `from_black_alpha(76)` for the hairline → fails the margin on the `2F2F2F` chip.
     #[test]
     fn a_chip_the_colour_of_its_row_is_still_visible() {
         const MARGIN: i32 = 25;
@@ -7635,14 +5816,7 @@ mod swatch_hairline_tests {
         }
     }
 
-    /// **After the mask, and inside the chip.**
-    ///
-    /// `mask_corners` paints the leftover corner slivers in the ground colour,
-    /// so a hairline drawn before it has four pieces bitten out of it — the
-    /// artifact reads as a tessellation bug and traces back to paint order. And a
-    /// chip sits in a row of a fixed height: a stroke drawn `Outside` would grow
-    /// it by a point on each side and push the label beside it, which is the shape
-    /// of the complaint that got the *previous* border removed.
+    /// The hairline is painted after the corner mask (or the mask bites it) and stays inside the chip's rect.
     #[test]
     fn the_hairline_goes_over_the_mask_and_does_not_grow_the_chip() {
         let (out, rect) = draw(egui::Color32::from_rgb(0xEB, 0x6E, 0x5A));
@@ -7669,29 +5843,9 @@ mod swatch_hairline_tests {
 mod segment_border_tests {
     use super::*;
 
-    /// **A `segmented` track wears the same hairline every field and button
-    /// does** (§15 D386), and its cells sit inside it rather than under it.
+    /// A `segmented` track wears the field hairline (a stroked rect at the track's bounds, after its ground) and its cells sit inside it.
     ///
-    /// The one control class in the chrome that was still drawing a bare ground —
-    /// found by dumping every rounded `RectShape` the inspector, the dashboard and
-    /// the modals paint with a fill and no stroke over it, which came back with
-    /// the two alignment tracks, the dashboard's view toggle and nothing else.
-    /// The switches came back too and are *right* to: the design draws a toggle
-    /// with no border, and so do the sliders and the Align row's buttons.
-    ///
-    /// ⚠️ **The track paints two `RectShape`s on one rect now — ground, then
-    /// hairline** — which is why the assertion looks for a stroked rect at the
-    /// track's own bounds rather than counting shapes. Two tests were reading the
-    /// second one as a second control before this landed
-    /// (`the_image_cards_tracks_and_fields_are_one_height` decided the fixture was
-    /// not a column).
-    ///
-    /// Flipped both ways. Dropping the `rect_stroke` fails on `hairline` — as
-    /// predicted. Leaving `inner` at `track.shrink(PAD)` fails on the cell's
-    /// *height*, 24 against the 22 asserted, and **not** on its position: the cell
-    /// still starts inside the border either way, so a test that only checked
-    /// `cell.min.y > track.min.y` would have passed the version that lays the cell
-    /// against the hairline.
+    /// flip: dropping the `rect_stroke` → fails at `hairline`. Leaving `inner` at `track.shrink(PAD)` → fails on the cell's height (24 against 22), not its position.
     #[test]
     fn a_segmented_track_wears_the_fields_hairline_and_its_cells_sit_inside_it() {
         const CELL_H: f32 = 24.0;
@@ -7710,8 +5864,7 @@ mod segment_border_tests {
                 _ => None,
             })
             .collect();
-        // The track is the only thing here `CELL_H + 4` tall — the two points of
-        // padding it adds at each end.
+        // The track is the only rect `CELL_H + 4` tall.
         let track = rects
             .iter()
             .find(|r| (r.rect.height() - (CELL_H + 4.0)).abs() < 0.01)
@@ -7733,8 +5886,7 @@ mod segment_border_tests {
              popover and in the dashboard header alike"
         );
 
-        // The raised cell: `1 + 2` in from the track at both ends, so a 28pt
-        // control holds a 22pt chip — the design's `1 + 2 + 22 + 2 + 1`.
+        // The raised cell is `1 + 2` in from the track at both ends.
         let cell = rects
             .iter()
             .find(|r| r.rect.height() < track.height() && r.fill != egui::Color32::TRANSPARENT)
@@ -7760,9 +5912,7 @@ mod segment_border_tests {
 mod transform_row_tests {
     use super::*;
 
-    /// The inspector card's content width at the design's measurements: a 296px
-    /// column less its 12px right padding is a 284px card, less
-    /// `CARD_MARGIN_X` either side.
+    /// The inspector card's content width: a 284px card less `CARD_MARGIN_X` either side.
     const CARD: f32 = 284.0 - CARD_MARGIN_X * 2.0;
     const GAP: f32 = 7.0;
     const H: f32 = 28.0;
@@ -7789,18 +5939,11 @@ mod transform_row_tests {
         rects
     }
 
-    /// **A unit longer than its field leaves is cut, and the field keeps its size**
-    /// (§15 D1081). The Transform card's H on a hugging column reads `fit content`
-    /// beside its number; in a narrow inspector that asked for more than the field
-    /// had, the number's box came out negative, and egui panics on a negative
-    /// desired size — selecting the column crashed the app.
+    /// A unit longer than its field leaves is cut and the field keeps its width (a negative number box panics egui).
     ///
-    /// Flip: `Extend` back in the unit's `into_galley`, the digits' floor kept,
-    /// fails the width assertion — the field grows to 124 for its 90.
+    /// flip: `Extend` back in the unit's `into_galley` → fails the width assertion (124 for 90).
     #[test]
     fn a_unit_wider_than_its_field_is_cut_and_the_field_keeps_its_width() {
-        // About the Transform card's H in a narrow inspector: room for the
-        // prefix and three digits, not for the whole unit beside them.
         let w = 90.0;
         let rects = grounds(|ui| {
             let mut v = 120.0_f64;
@@ -7826,26 +5969,9 @@ mod transform_row_tests {
         );
     }
 
-    /// **Tab goes from one field's digits to the next field's digits, and stops
-    /// nowhere in between** (§15 D290).
+    /// Tab goes from one field's digits to the next field's and stops on no other rect (prefix strip, unit).
     ///
-    /// A `value_field` is three interactive rects — the prefix scrub strip, the
-    /// `DragValue`, and a clickable unit at the far end — and only the middle one
-    /// has a keyboard face. `Sense::click()` and `Sense::click_and_drag()` are
-    /// `… | FOCUSABLE`, so the other two were tab stops that painted no focus of
-    /// their own: X → Y took two presses and the first landed on 16 × 26 pixels of
-    /// nothing. Reported on Transform, where the fields are used in pairs.
-    ///
-    /// **Asserted as "no id but these two is ever focused", not as a step count.**
-    /// A count pins the bug that was reported and nothing else; the set catches a
-    /// third rect gaining `FOCUSABLE` later, which is the same bug arriving by a
-    /// different route. The second field is deliberately the **suffixed** variant,
-    /// because that is the one with a stop on each side of its digits — a row of
-    /// two plain fields would have gone green with the unit's half unfixed.
-    ///
-    /// The sweep is six presses over a two-field row, so it wraps and comes round:
-    /// `None` in the sequence is egui's own gap at the end of the focus list, not a
-    /// widget.
+    /// The second field is the suffixed variant, which has a stop on each side of its digits; `None` in the sweep is egui's own end-of-list gap.
     #[test]
     fn tabbing_a_row_of_fields_steps_from_digits_to_digits() {
         let (order, unknown) = tab_sweep();
@@ -7870,8 +5996,6 @@ mod transform_row_tests {
         let fw = (CARD - GAP) / 2.0;
         let mut ids = Vec::new();
         let frame = |events: Vec<egui::Event>, ids: &mut Vec<(egui::Id, String)>| {
-            // The frame's ink is not the question here; focus is read back off the
-            // context afterwards.
             let _ = ctx.run_ui(
                 egui::RawInput {
                     events,
@@ -7928,10 +6052,7 @@ mod transform_row_tests {
                     .find(|(i, _)| *i == id)
                     .map(|(_, n)| n.clone())
                     .unwrap_or_else(|| {
-                        // The rect and the sense, because the whole difficulty of
-                        // this bug was that the offender draws nothing: a failure
-                        // message naming only an `Id` would send the next reader
-                        // looking for a widget rather than for a `Sense`.
+                        // Name the rect and sense: the offender draws nothing, so an `Id` alone says little.
                         let what = ctx
                             .read_response(id)
                             .map(|r| format!("{:?} {:?}", r.rect, r.sense))
@@ -7945,18 +6066,7 @@ mod transform_row_tests {
         (order, unknown)
     }
 
-    /// **W is exactly as wide as X, and the row still fills the card.**
-    ///
-    /// This is the design change the whole row exists for, and it is invisible in
-    /// code: three slots split evenly would put W's right edge a button's-worth
-    /// left of X's, and that misalignment down the middle of the card is the first
-    /// thing the eye finds. H absorbing the difference has nothing above it to
-    /// line up with, so nothing shows.
-    ///
-    /// Measured rather than reasoned about, because the arithmetic runs through
-    /// `FIELD_BORDER_H` — a frame told to hold 28px of content paints 30 — and
-    /// that is exactly the class of off-by-two that reads as "the boxes don't
-    /// line up" and is invisible in the source.
+    /// W is exactly as wide as X (same right edge) and the W/H/chain row reaches the card's far edge; measured on painted grounds (`FIELD_BORDER_H`).
     #[test]
     fn w_lines_up_with_x_and_the_row_fills_the_card() {
         let fw = (CARD - GAP) / 2.0;
@@ -8006,7 +6116,6 @@ mod transform_row_tests {
         assert_eq!(wh.len(), 3, "W, H and the chain: {wh:?}");
         assert_eq!(xy[0].width(), wh[0].width(), "W is not as wide as X");
         assert_eq!(xy[0].max.x, wh[0].max.x, "W's right edge is not X's");
-        // Both rows reach the card's far edge — the chain button ends where Y does.
         assert!(
             (xy[1].max.x - wh[2].max.x).abs() < 0.01,
             "the rows do not end together: {:?} vs {:?}",
@@ -8015,9 +6124,7 @@ mod transform_row_tests {
         );
     }
 
-    /// The four quarter-turn and mirror buttons split the card evenly and fill it,
-    /// which is what makes them read as one control rather than as 28px squares
-    /// with a gap on the end.
+    /// The four quarter-turn and mirror buttons split the card evenly and fill it.
     #[test]
     fn the_four_transform_buttons_split_the_card_evenly() {
         let bs = grounds(|ui| {
@@ -8047,9 +6154,7 @@ mod transform_row_tests {
         );
     }
 
-    /// A paint row leaves exactly the eye button's width beside it, and the two
-    /// share a baseline — the field and the button disagreeing about whether 28 is
-    /// inside or outside the hairline is what `FIELD_BORDER_H` exists for.
+    /// A paint row leaves exactly the eye button's width beside it and shares its baseline (`FIELD_BORDER_H`).
     #[test]
     fn a_paint_row_and_its_eye_fill_the_card_on_one_baseline() {
         const ROW_GAP: f32 = 6.0;
@@ -8058,11 +6163,7 @@ mod transform_row_tests {
                 ui.spacing_mut().item_spacing.x = ROW_GAP;
                 let size = egui::vec2(ui.available_width() - H - ROW_GAP, H);
                 field_row(ui, size, |ui| {
-                    // As the real row does: a `field_row`'s frame shrink-wraps,
-                    // so what makes the ground the full 222px is the right-aligned
-                    // group claiming the rest of it. Spelled out here rather than
-                    // stubbed with a label, or the probe would measure a row the
-                    // panel never draws.
+                    // As the real row: a `field_row` shrink-wraps, so the right-aligned group fills it.
                     ui.label("E9E9ED");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label("100%");
@@ -8086,33 +6187,9 @@ mod transform_row_tests {
 mod selection_tests {
     use super::*;
 
-    /// Selected digits must stay legible in **every** helper that strips a
-    /// `DragValue`'s chrome.
+    /// Selected digits stay opaque in every helper that strips a `DragValue`'s chrome.
     ///
-    /// `selection.stroke` is two things in egui: the outline a focused `TextEdit`
-    /// frames itself with, *and* the colour selected glyphs are repainted in —
-    /// `paint_text_selection` writes it into the galley's own vertices. Both helpers
-    /// suppress the outline, and suppressing it with `Stroke::NONE` (transparent)
-    /// turned the selected digits invisible: the opaque selection fill stayed, so a
-    /// field being typed into showed a solid blue block with nothing in it.
-    ///
-    /// **All of them, in one table**, because the bug was fixed in `value_field`
-    /// and left live in `bare_drag_value` — the report named the number fields,
-    /// and the opacity fields are the same line one helper over. A test that
-    /// covered only the reported one would have let that stand.
-    ///
-    /// ⚠️ **`badge_field` was the third helper and was not in this table until
-    /// 2026-09-10** (§15 D723, `[S18.1-L3-06]`) — which is the doc above happening
-    /// a second time, to the test written to stop it happening. The three now
-    /// share one `strip_drag_value_chrome`, so a regression would take all three
-    /// at once; the arm is kept anyway, because what this pins is that each
-    /// *helper* is still wired to the rule, and the cheapest way to break that is
-    /// for one of them to stop calling it.
-    ///
-    /// The galley is the only place the evidence lives — the selection is inside the
-    /// text mesh, not a separate shape — so this reads glyph vertex alphas out of it
-    /// rather than looking for a rect. And it drives real pointer and key events to
-    /// make the selection, rather than asserting on the visuals it is testing.
+    /// `selection.stroke` is also the colour selected glyphs are repainted in, so a transparent `Stroke::NONE` hides them; read from the galley's glyph vertices, with a real selection made by pointer and key events.
     #[test]
     fn selected_digits_are_never_painted_transparent() {
         for what in ["value_field", "bare_drag_value", "badge_field"] {
@@ -8122,7 +6199,6 @@ mod selection_tests {
 
             let mut v = 12345.0_f64;
             let field = |ui: &mut egui::Ui, v: &mut f64| match what {
-                // In a field row, as the paint row draws it.
                 "bare_drag_value" => {
                     let dv = egui::DragValue::new(v).custom_formatter(number(2));
                     field_row(ui, egui::vec2(120.0, 28.0), |ui| bare_drag_value(ui, dv))
@@ -8136,16 +6212,11 @@ mod selection_tests {
                     Prefix::Icon(icon::LINE_SEGMENT),
                     v,
                     Scrub::whole(0.5),
-                    // Formatter pinned as every real field pins it, so the digits
-                    // read `12345` rather than however many places egui's
-                    // auto-precision derives from the drag speed — the trap
-                    // `number` exists for (§15 D66).
                     |d| d.custom_formatter(number(2)),
                 ),
             };
 
-            // Learn where it is, then double-click into it — which is what puts a
-            // `DragValue` into keyboard editing.
+            // A double-click puts a `DragValue` into keyboard editing.
             let mut rect = egui::Rect::NOTHING;
             let _ = ctx.run_ui(Default::default(), |ui| rect = field(ui, &mut v).rect);
             let c = rect.center();
@@ -8165,8 +6236,7 @@ mod selection_tests {
             for evs in [
                 vec![egui::Event::PointerMoved(c), click(true), click(false)],
                 vec![click(true), click(false)],
-                // Home, then Shift+End: select the lot, whatever the entry left the
-                // caret doing.
+                // Home, then Shift+End: select everything.
                 vec![
                     key(egui::Key::Home, egui::Modifiers::NONE),
                     key(egui::Key::End, egui::Modifiers::SHIFT),
@@ -8196,9 +6266,7 @@ mod selection_tests {
                 .unwrap_or_else(|| panic!("{what}: the field's digits were never painted"));
             let row = &digits.rows[0].row;
 
-            // The selection fill is appended to this same mesh, so an opaque run of
-            // it is how we know a selection is actually up — without that check, "the
-            // glyphs are opaque" would pass on an unselected field and prove nothing.
+            // The selection fill is in this same mesh; without it the opaque-glyph check proves nothing.
             let fill = ctx.style_of(egui::Theme::Dark).visuals.selection.bg_fill;
             let selected = row
                 .visuals
@@ -8226,8 +6294,7 @@ mod scrub_tests {
     use super::*;
     use crate::theme::icon;
 
-    /// Drag `dx` horizontally, starting either on the prefix or on the digits, and
-    /// report where the value ends up.
+    /// Drags `dx` horizontally from the prefix or the digits and returns the resulting value.
     fn drag(scrub: Scrub, start_in_prefix: bool, dx: f32) -> f64 {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -8250,10 +6317,7 @@ mod scrub_tests {
                     );
                 },
             );
-            // **The field's painted ground, not the response's rect.** The response
-            // is the union of the number and the prefix strip, so it *shrinks* if the
-            // strip stops sensing — which would quietly move this test's aim point
-            // into the number and let it pass with the prefix scrub broken.
+            // The painted ground, not the response rect: that shrinks if the prefix strip stops sensing.
             out.shapes
                 .iter()
                 .find_map(|c| match &c.shape {
@@ -8262,12 +6326,9 @@ mod scrub_tests {
                 })
                 .expect("the field paints its ground")
         };
-        // Two passes so the widget's geometry is established before it is aimed at.
         field(&ctx, Vec::new());
         let rect = field(&ctx, Vec::new());
         let from = if start_in_prefix {
-            // Inside the reserved strip: past the field's own `FIELD_PAD_X` and into
-            // the prefix, which is ~22px wide for any glyph the design uses.
             egui::pos2(rect.left() + FIELD_PAD_X + 4.0, rect.center().y)
         } else {
             rect.center()
@@ -8288,18 +6349,10 @@ mod scrub_tests {
         v
     }
 
-    /// **The whole field scrubs, the prefix included, and both halves agree.**
-    ///
-    /// A field whose number scrubs and whose own label does not means remembering
-    /// which apps start the drag on the icon and which on the digits — and the label
-    /// is where the hand goes, since it is what says which number this is. The prefix
-    /// strip is a second claimant applying the drag itself (`value_field`), so
-    /// "agree" is a real risk rather than a tautology: the two arithmetic paths are
-    /// genuinely different code.
+    /// A scrub starting on the prefix strip lands where one starting on the digits does; the two are different arithmetic paths.
     #[test]
     fn a_scrub_starting_on_the_prefix_moves_the_value_the_same_way() {
-        // 37px is deliberately not a whole number of steps at these speeds, so a
-        // difference in rounding between the two paths would show.
+        // 37px is not a whole number of steps, so a rounding difference would show.
         for scrub in [Scrub::whole(0.5), Scrub::whole(0.25), Scrub::fine(0.02, 2)] {
             let digits = drag(scrub.clone(), false, 37.0);
             let prefix = drag(scrub.clone(), true, 37.0);
@@ -8312,10 +6365,7 @@ mod scrub_tests {
         }
     }
 
-    /// **Scrubbing lands on whole units.** X, Y, W, H, rotation and skew are all
-    /// `Scrub::whole`, and a coordinate dragged to 109.25 is precision the number does
-    /// not mean — it goes into the saved file and shows up in the panel. Typing is
-    /// untouched, which is what keeps a hairline or 33.3% askable.
+    /// Scrubbing a `Scrub::whole` field lands on whole units, while a fine field keeps its fraction.
     #[test]
     fn scrubbing_a_whole_field_never_lands_on_a_fraction() {
         for dx in [7.0_f32, 13.0, 37.0, -23.0, 101.0] {
@@ -8328,71 +6378,28 @@ mod scrub_tests {
                 );
             }
         }
-        // And a field that asks for decimals still gets them, or the rule above would
-        // be indistinguishable from rounding everything.
         let fine = drag(Scrub::fine(0.02, 2), false, 37.0);
         assert_ne!(fine, fine.round(), "a fine field lost its fraction: {fine}");
     }
 
-    /// Typing is never rounded — the other half of the bargain, and the half that
-    /// makes the rule above acceptable.
+    /// `Scrub::settle` rounds a drag to whole units and clamps after rounding; typing is never rounded.
     #[test]
     fn a_whole_field_still_accepts_a_typed_fraction() {
         let scrub = Scrub::whole(0.5);
         assert_eq!(scrub.settle(109.25), 109.0, "a drag settles");
-        // `settle` is only ever reached from a drag; the range still clamps.
         let bounded = Scrub::whole(0.5).range(0.0..=100.0);
         assert_eq!(bounded.settle(150.0), 100.0);
         assert_eq!(bounded.settle(-5.0), 0.0);
-        // A rounded value can step outside a fractional bound, so the clamp has to
-        // come after the rounding rather than before it.
         let fractional = Scrub::whole(0.5).range(0.0..=99.4);
         assert_eq!(fractional.settle(99.4), 99.0);
     }
 
-    /// **Two fields in one row must not share a widget id.**
-    ///
-    /// The prefix strip is a second widget inside every field, and its first version
-    /// took `ui.id().with("prefix-scrub")` — but `Ui::id` is the *containing* Ui's,
-    /// which every field in a `horizontal` shares. So both strips claimed one id, egui
-    /// lit the whole Transform and Stroke panels with its clash overlay, and the
-    /// strips were inert behind it. Reported as red boxes over every field.
-    ///
-    /// Asserted through the overlay rather than by comparing ids, because the overlay
-    /// is what the user saw — and it catches any *other* widget in a field colliding
-    /// too, which comparing two known ids would not.
-    ///
-    /// 🚨 **The warning is switched on here rather than asserted, because egui's
-    /// default for it is `cfg!(debug_assertions)`** (§15 D597). Asserting the
-    /// ambient value made this test *fail* under `cargo test --release` on its own
-    /// fixture check — *"the clash warning is off, so this test cannot fail"* —
-    /// which is the assertion doing its job and is also a red release suite nobody
-    /// was looking at, since none of the six gates runs the tests in release
-    /// (`check --release` compiles and does not test). ⚠️ **This is the
-    /// `debug_assertions` hole from a new direction**: the recorded one is a line
-    /// behind egui's own `cfg` breaking the release *build*; this is a *test* whose
-    /// subject exists only in debug. Setting it makes the assertion mean the same
-    /// thing in both profiles, which is what it was always trying to say.
+    /// Two fields in one row share no widget id, asserted through egui's clash overlay (which catches any widget in a field).
     #[test]
     fn a_row_of_value_fields_has_no_id_clash() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        // The warning has to be *on* for absence of it to mean anything —
-        // `theme::install` quiets its noisier sibling `warn_if_rect_changes_id`
-        // (§15 D65) and deliberately leaves this one alone.
-        //
-        // 🚨 **Set, not read, and that is §15 D597's whole subject**: egui defaults
-        // this option to `cfg!(debug_assertions)`, so reading the ambient value made
-        // this test **red in release** on its own fixture check, under a command no
-        // gate issued. **§15 D771 is the ruling** — `cargo test --workspace
-        // --release` is a session-close step in `CLAUDE.md`'s gate list rather than
-        // a per-edit gate, because the release *run* is three times faster than the
-        // debug one and the cost is a second profile's build and 2.4 GB of disk.
-        //
-        // ⚠️ **The citation is here because D771 changed no production line and
-        // would otherwise be invisible to the D-number census** — D735's shape, and
-        // D741's fix for it: put the number where the next reader of the thing it
-        // is about will meet it.
+        // Set, not read: egui defaults this to `cfg!(debug_assertions)`, so the test would fail in release.
         ctx.options_mut(|o| o.warn_on_id_clash = true);
         assert!(
             ctx.options(|o| o.warn_on_id_clash),
@@ -8428,10 +6435,7 @@ mod scrub_tests {
         );
     }
 
-    /// And the strips are wired to their *own* numbers. One shared id would have made
-    /// two fields move together, which is the same bug wearing a different symptom —
-    /// and the sort a clash test alone can miss, since ids can be distinct and still
-    /// be plumbed to the wrong value.
+    /// Each field's prefix strip scrubs only its own number.
     #[test]
     fn each_fields_prefix_scrubs_only_its_own_number() {
         let ctx = egui::Context::default();
@@ -8473,8 +6477,7 @@ mod scrub_tests {
         let grounds = run(Vec::new(), &mut a, &mut b);
         assert_eq!(grounds.len(), 2, "expected two field grounds: {grounds:?}");
 
-        // The *second* field's prefix, so a strip wired to the wrong number shows up
-        // as the first field moving.
+        // The second field's prefix, so a mis-wired strip moves the first field.
         let from = egui::pos2(grounds[1].left() + FIELD_PAD_X + 4.0, grounds[1].center().y);
         let to = egui::pos2(from.x + 40.0, from.y);
         let button = |pos, pressed| egui::Event::PointerButton {
@@ -8495,19 +6498,10 @@ mod scrub_tests {
         assert!(b > 80.0, "the second field's prefix did not scrub it: {b}");
     }
 
-    /// **A field whose comment says it lands on tenths has to land on tenths.**
-    ///
-    /// The star's inner ratio defaults to the golden section, 38.2%, and its comment
-    /// records that rounding the field to integers once made that value unreachable
-    /// by dragging. The panel-wide whole-units rule (§15 D75) was briefly applied here
-    /// too and put it straight back: a drag from 38.2 went to 38.0 on the first pixel.
-    /// A ratio is not an integer by nature, which is where that rule stops.
-    ///
-    /// Pinned as the contrast, because `fine` alone passing proves nothing about which
-    /// one the field was given.
+    /// A fine field keeps the tenths of the star's 38.2% ratio under a drag, where a whole field destroys them (the contrast pins which was given).
     #[test]
     fn a_fine_field_keeps_the_tenths_a_whole_one_destroys() {
-        /// Drag 8px right from `start` and collect the distinct values passed through.
+        /// Drags 8px right from `start` and collects the distinct values passed through.
         fn sweep(scrub: Scrub, start: f64) -> Vec<f64> {
             let ctx = egui::Context::default();
             theme::install(&ctx);
@@ -8564,8 +6558,7 @@ mod scrub_tests {
             seen
         }
 
-        // The inner-ratio field's configuration. Every step stays on a tenth, and the
-        // golden section it started from survives.
+        // The inner-ratio field: every step stays on a tenth and the golden section survives.
         let fine = sweep(Scrub::fine(0.25, 1).range(5.0..=100.0), 38.2);
         for v in &fine {
             assert!(
@@ -8578,10 +6571,7 @@ mod scrub_tests {
             "the golden section did not survive the start of the drag: {fine:?}"
         );
 
-        // And the rule it must *not* be given, so this test tells the two apart. The
-        // sweep's first entry is the value before egui's drag threshold is crossed, so
-        // the contrast to assert is what the drag *leaves behind*: `whole` throws the
-        // tenth away on its first real step and never returns to one.
+        // The first entry is the value before egui's drag threshold, so assert on what follows.
         let whole = sweep(Scrub::whole(0.25).range(5.0..=100.0), 38.2);
         let after: Vec<f64> = whole.iter().copied().skip(1).collect();
         assert!(!after.is_empty(), "the whole field never moved: {whole:?}");
@@ -8596,49 +6586,13 @@ mod scrub_tests {
         assert_ne!(fine, whole, "the two rules are indistinguishable here");
     }
 
-    /// **An inverted range must not take the process down.**
+    /// An inverted `Scrub` range is swapped (as egui does) rather than panicking in `f64::clamp`; a NaN bound is dropped.
     ///
-    /// `[S18.1-L1-01]`, §15 D462. `f64::clamp`'s *"min > max, or either was NaN"*
-    /// is an unconditional assert in `core`, not a `debug_assert!`, and a panic
-    /// inside `eframe`'s update closure takes everything since the last
-    /// `.recovery/` snapshot with it.
+    /// A document-derived bound (an image fill's Crop scale) can invert. Also driven through the real widget on a drag frame, from the digits and from the prefix strip.
     ///
-    /// ⚠️ **This is the only one of the forty-one `Scrub::range` call sites whose
-    /// bound comes from the document**, which is why an inverted range was
-    /// reachable at all. `inspector.rs`'s *Scale* field for an image fill in
-    /// *Crop* builds `floor..=10_000.0` from `ImageRef::cover_scale` — frame
-    /// world units over picture **pixels**, uncapped — so a 16×16 icon on a
-    /// 1920×1080 rectangle gives `12000.0..=10000.0`. The `.max(0.01)` already on
-    /// that floor closes `clamp`'s NaN half and left the ordering half open.
-    ///
-    /// ⚠️ **egui swaps where this app died**, which is why nothing upstream
-    /// caught it: `DragValue::clamp_value_to_range` opens by exchanging an
-    /// inverted pair, so the widget rendered happily and only the app's own
-    /// re-clamp panicked. Two spellings of one rule, one of them fatal.
-    ///
-    /// ⚠️ **Driven through the real widget, not only through `settle`.** The
-    /// panic was on a *drag frame*, so the assertion that names it is a press and
-    /// a 24pt move through `value_field` — the two doors in `value_field_f64` are
-    /// the prefix strip and the `DragValue`, and both are exercised here.
-    ///
-    /// ⚠️ **Flipped** by restoring `self.range = range`: the first assertion
-    /// panics inside `f64::clamp` with *"min > max, or either was NaN. min =
-    /// 12000, max = 10000"*, which is the finding in one line. The control — an
-    /// ordinary `0.0..=10_000.0` range, which clamps to 10 000 before and after —
-    /// stays green, so this is not a test about clamping.
-    ///
-    /// ⚠️ **The finding's own suggested assertion contradicts its own fix
-    /// sketch**, and following it would have written a test the fix fails. It
-    /// proposes *"`range(12_000.0..=10_000.0).settle(12_000.0)` asserting
-    /// `10_000.0`"*, which is what **clamping to the ceiling** would give; the
-    /// sketch beside it proposes **swapping**, under which `12 000` is inside
-    /// `10 000..=12 000` and stays. Swapping is what shipped, because it is what
-    /// egui does and the whole point is that the two must agree. The assertions
-    /// below therefore pin the *interval* — floor, ceiling and a value between —
-    /// rather than one number that reads as either answer.
+    /// flip: restoring `self.range = range` → the first assertion panics inside `f64::clamp`.
     #[test]
     fn an_inverted_scrub_range_is_put_the_right_way_round_rather_than_fatal() {
-        // The mechanism first, because it is the cheap half.
         let inverted = Scrub::fine(0.5, 2).range(12_000.0..=10_000.0);
         assert_eq!(
             inverted.settle(0.0),
@@ -8655,8 +6609,7 @@ mod scrub_tests {
             11_000.0,
             "so the interval between them is what the range means"
         );
-        // A `NaN` bound is dropped rather than swapped: `f64::min` answers the
-        // non-NaN operand, so swapping would pin the field to one number.
+        // Swapping a `NaN` bound would pin the field to one number.
         let nanny = Scrub::fine(0.5, 2).range(f64::NAN..=10_000.0);
         assert_eq!(
             nanny.settle(99_999.0),
@@ -8664,13 +6617,11 @@ mod scrub_tests {
             "no bound, not a pinned one"
         );
 
-        // The control, which passed before this fix and must still.
         assert_eq!(
             Scrub::fine(0.5, 2).range(0.0..=10_000.0).settle(12_000.0),
             10_000.0
         );
 
-        // And end to end, on a drag frame — the frame that panicked.
         let landed = drag(Scrub::fine(0.5, 2).range(12_000.0..=10_000.0), false, 24.0);
         assert!(
             landed.is_finite(),
@@ -8689,7 +6640,7 @@ mod scrub_tests {
 mod combo_chevron_tests {
     use super::*;
 
-    /// Draw a closed `ComboBox` with the app's icon and report its shapes.
+    /// Draws a closed `ComboBox`, with the app's icon or without, and returns its shapes.
     fn shapes(with_icon: bool) -> Vec<egui::epaint::Shape> {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -8706,13 +6657,7 @@ mod combo_chevron_tests {
         out.shapes.into_iter().map(|c| c.shape).collect()
     }
 
-    /// The glyph, at the size and ink the design asks for — and **no filled
-    /// triangle**, which is the thing being replaced.
-    ///
-    /// egui's default is a `convex_polygon` of three points painted in
-    /// `fg_stroke.color`: the *interaction* colour, so it brightened on hover and
-    /// went full white with the popup open. That is why the arrows were the
-    /// loudest thing in a panel of dropdowns.
+    /// A closed dropdown paints one chevron glyph at the design's size and ink, and not egui's filled triangle.
     #[test]
     fn a_dropdown_closes_with_a_chevron_and_not_egui_s_triangle() {
         let painted = shapes(true);
@@ -8748,8 +6693,7 @@ mod combo_chevron_tests {
 mod combo_height_tests {
     use super::*;
 
-    /// The height a `ComboBox` paints with `interact_size.y` set to `y`, or with
-    /// the theme left alone.
+    /// The height a `ComboBox` paints with `interact_size.y` set to `y`, or the theme's own.
     fn painted(y: Option<f32>) -> f32 {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -8774,14 +6718,7 @@ mod combo_height_tests {
         out
     }
 
-    /// **A combo paints exactly `interact_size.y`, and nothing else it is given.**
-    ///
-    /// Both halves matter, because the two ways of getting this wrong were both in
-    /// the Type panel at once and produced *different* wrong heights: the family
-    /// dropdown said nothing and got the theme's 24px, and the variant dropdown
-    /// subtracted `FIELD_BORDER_H` — right for content *inside* a `field_row`,
-    /// wrong for a combo, which strokes its border inside its own rect — and got
-    /// 26. The reported symptom was three heights down one card: 24, 26, 28.
+    /// A combo paints exactly `interact_size.y`: a combo strokes its border inside its own rect, so `FIELD_BORDER_H` is not subtracted, and the theme default is 24.
     #[test]
     fn a_combos_height_is_its_interact_size_and_the_hairline_is_not_subtracted() {
         assert_eq!(painted(Some(28.0)), 28.0, "a 28px row asks for 28");
@@ -8802,22 +6739,9 @@ mod combo_height_tests {
 mod meter_tests {
     use super::*;
 
-    /// One painted `value_field_metered`, as its **ground**, its **zero tick**
-    /// and its **bar**.
+    /// One painted `value_field_metered` as its ground, zero tick and bar rects, all from `.shapes`.
     ///
-    /// **All taken out of `.shapes`, and the response's rect deliberately not
-    /// used.** A field's `Response` covers its *content* box — the allocation less
-    /// the frame's `FIELD_PAD_X` at each end and its hairline — where the bar is
-    /// drawn across the field's ink, padding included, which is what the design's
-    /// `overflow: hidden` does. So a test that measured the bar against the
-    /// response would report a correct bar escaping its field by nine points at
-    /// each end, which is what the first version of this did.
-    ///
-    /// The ground is found by its **colour**, which is the only thing separating
-    /// it from the wash in a flattened shape list. **The tick and the bar cannot
-    /// be**, since being the same blue is the whole point of the tick — so they
-    /// are taken in *paint order*, which is a real property rather than a
-    /// convenience: the tick is reserved first so that the bar covers it.
+    /// The response rect is the content box, narrower than the field's ink the bar spans. The ground is found by colour; the tick and bar share a colour and are taken in paint order (the tick is reserved first).
     fn parts(frac: f32) -> (egui::Rect, egui::Rect, egui::Rect) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -8859,24 +6783,12 @@ mod meter_tests {
         )
     }
 
-    /// **The bar grows from the middle, and the two signs are mirror images.**
-    ///
-    /// This is the whole of the correction the control was reshaped for: a bar
-    /// anchored at the left draws −40 and +40 identically, which for a value whose
-    /// zero is its middle contradicts the digits beside it rather than compressing
-    /// them.
-    ///
-    /// Asserting the *pair* rather than one of them is what makes it a test about
-    /// the centre. A single positive bar half the field wide is also what a
-    /// left-anchored bar at 0.5 paints, so either sign on its own passes against
-    /// the version this replaces; only the two together pin where the origin is.
+    /// The bar grows from the middle and the two signs mirror; the pair pins the origin, since one sign alone also fits a left-anchored bar.
     #[test]
     fn the_meter_grows_from_the_middle_and_mirrors_across_it() {
         let (ground, _, plus) = parts(0.5);
         let (_, _, minus) = parts(-0.5);
-        // **Inside the hairline, not under it.** `FIELD_BORDER_H` is the border's
-        // two points counted across a field; half of it is what the bar clears at
-        // each edge, which is the whole of what `overflow: hidden` means here.
+        // Inside the hairline: the bar clears half of `FIELD_BORDER_H` at each edge.
         let ink = ground.shrink(FIELD_BORDER_H / 2.0);
         let mid = ink.center().x;
 
@@ -8891,7 +6803,7 @@ mod meter_tests {
             plus.left(),
             minus.right()
         );
-        // A quarter of the field each, since half the *travel* is half of half.
+        // Half the travel is a quarter of the field.
         for (name, bar) in [("+0.5", plus), ("-0.5", minus)] {
             assert!(
                 (bar.width() - ink.width() * 0.25).abs() < 0.51,
@@ -8908,17 +6820,7 @@ mod meter_tests {
         }
     }
 
-    /// **The value is right-aligned in a metered field and beside its prefix
-    /// everywhere else.**
-    ///
-    /// Two things it would be easy to get wrong in opposite directions: making
-    /// every field in the app right-align its number, and leaving the metered one
-    /// with the number in the middle of the bar it is supposed to be reading.
-    ///
-    /// Measured off the painted galley rather than asserted in the source, and as
-    /// a *comparison between the two spellings* rather than an absolute — the
-    /// number's exact x depends on the digits and the font, and what matters is
-    /// which end of the field it is at.
+    /// A metered field's value is right-aligned (past the field's middle); a plain field's sits by its prefix. Compared between the two, not absolute.
     #[test]
     fn a_metered_fields_value_sits_at_the_far_end_where_a_plain_ones_sits_by_its_label() {
         fn digits_x(metered: bool) -> (f32, egui::Rect) {
@@ -8950,8 +6852,7 @@ mod meter_tests {
                 }
                 .rect;
             });
-            // The number's galley, which is the one that is not the prefix: both
-            // are text, and the prefix is laid out first.
+            // The number is the rightmost text; the prefix is laid out first.
             let x = out
                 .shapes
                 .iter()
@@ -8970,8 +6871,6 @@ mod meter_tests {
             "the metered field's number is at {metered} and the plain one's at \
              {plain} — the metered one has to be further right"
         );
-        // Past the middle of the field, which "further right" alone does not say:
-        // a number one point right of the label is also further right.
         assert!(
             metered > field.center().x,
             "the metered number sits at {metered}, left of the field's middle at {}",
@@ -8979,15 +6878,7 @@ mod meter_tests {
         );
     }
 
-    /// **Zero paints nothing, and either extreme fills its half.** The three are
-    /// what a card of seven rows is read by — which of them are doing nothing at
-    /// all, and which have run out of range in which direction.
-    ///
-    /// The extremes are **half** the field now, not all of it, and that is the
-    /// arithmetic most likely to be got wrong on the way to a centre origin:
-    /// scaling the full width by the signed fraction rather than the half-width
-    /// makes ±1 reach twice as far as the field has, and everything under about
-    /// 0.5 still looks right.
+    /// Zero paints no bar and either extreme fills half the field (scaling the full width would overreach, yet look right under 0.5).
     #[test]
     fn the_meter_is_empty_at_zero_and_fills_one_half_at_each_extreme() {
         let (_, _, empty) = parts(0.0);
@@ -9013,16 +6904,7 @@ mod meter_tests {
         }
     }
 
-    /// **A row at rest is not an empty box: the zero tick is always there.**
-    ///
-    /// Reported on the machine against the first centre-origin version, which drew
-    /// nothing at all at zero — and a field with nothing in it reads as no control
-    /// rather than as a control at its neutral value.
-    ///
-    /// It is checked at a **non-zero** value too, and that is the half that would
-    /// otherwise rot: "draw a tick when the value is zero" is the obvious spelling
-    /// and it takes the origin away exactly when the bar gives it something to be
-    /// read against.
+    /// The zero tick is a hairline at the field's middle at every value, nonzero included, stopping short of the border.
     #[test]
     fn the_zero_tick_is_a_hairline_at_the_middle_whatever_the_value() {
         for (name, frac) in [("0", 0.0_f32), ("+0.4", 0.4), ("-1", -1.0)] {
@@ -9039,8 +6921,6 @@ mod meter_tests {
                 tick.center().x,
                 ink.center().x
             );
-            // Full height *of the ink*, so it stops short of the border rather
-            // than meeting it — which is the whole of what was asked for.
             assert!(
                 (tick.height() - ink.height()).abs() < 0.51,
                 "the tick at {name} is {} tall in {} of ink",
@@ -9054,19 +6934,7 @@ mod meter_tests {
         }
     }
 
-    /// **Each pair of corners rounds only when the bar reaches that end.**
-    ///
-    /// A mid-field bar with rounded ends is a capsule floating in a field rather
-    /// than a fill running out of it, and a bar that reaches an edge with square
-    /// ones paints two accent slivers into the corners the field's ground leaves
-    /// for the card behind it. Both are one `match` away from each other and
-    /// neither is visible in the source.
-    ///
-    /// **Both signs, because a centre-anchored bar has two ends in play** where
-    /// the left-anchored one this replaced only ever had its right. A version that
-    /// kept the old rule — left corners always round, right only when full — draws
-    /// a rounded left edge in the middle of the field on every negative value, and
-    /// passes every assertion the positive half of this makes.
+    /// Each pair of bar corners rounds only when the bar reaches that end, for both signs.
     #[test]
     fn a_bars_corners_are_square_except_where_it_meets_an_edge() {
         let corners = |frac: f32| {
@@ -9085,9 +6953,7 @@ mod meter_tests {
                     |d| d,
                 );
             });
-            // The **second** wash rect. The first is the zero tick, which shares
-            // the bar's colour on purpose and is square by construction — reading
-            // it here instead would make every case below pass for free.
+            // The second wash rect is the bar; the first is the square zero tick.
             let washes: Vec<egui::CornerRadius> = out
                 .shapes
                 .iter()
@@ -9150,8 +7016,7 @@ mod expr_field_tests {
         }
     }
 
-    /// One pass over a lone `value_field`, returning its painted ground for the
-    /// next pass to aim at — the same fixture `app`'s edit-valve tests drive.
+    /// One pass over a lone `value_field`, returning its painted ground for the next pass to aim at.
     fn pass(ctx: &egui::Context, v: &mut f64, events: Vec<egui::Event>) -> egui::Rect {
         let out = ctx.run_ui(
             egui::RawInput {
@@ -9180,13 +7045,7 @@ mod expr_field_tests {
         rect
     }
 
-    /// Put the field into its keyboard face, type `text` a character at a time,
-    /// and report what the value read after each one.
-    ///
-    /// **A character at a time, because that is how the field is parsed.** egui
-    /// updates while editing, so every prefix of the string is handed to the
-    /// parser on its way to the whole — which is the half of this that a single
-    /// `Event::Text` would not exercise at all.
+    /// Types `text` into the field's keyboard face a character at a time (egui parses every prefix), returning the value after each and after Enter.
     fn typed(text: &str) -> Vec<f64> {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -9194,8 +7053,7 @@ mod expr_field_tests {
         pass(&ctx, &mut v, Vec::new());
         let rect = pass(&ctx, &mut v, Vec::new());
         let at = rect.center();
-        // A click with no travel is what swaps a `DragValue` for a `TextEdit`,
-        // and the focus it gains selects the digits already there.
+        // A click with no travel swaps the `DragValue` for a `TextEdit` and selects its digits.
         pass(
             &ctx,
             &mut v,
@@ -9224,14 +7082,7 @@ mod expr_field_tests {
         trail
     }
 
-    /// The reported gap, end to end: a width field takes `135*2` and reads 270.
-    ///
-    /// The **trail** is the assertion rather than the final number, because the
-    /// value is written on every keystroke: the field walks through 1, 13, 135
-    /// as the first operand is typed — which it always did — and the interesting
-    /// entry is the fourth, where `135*` is rejected and the value *stays* at
-    /// 135 rather than being read as part of itself. Committed on Enter, the
-    /// answer survives the field being re-formatted.
+    /// A width field takes `135*2` and reads 270; the trail pins that `135*` is rejected and the value stays 135 until Enter.
     #[test]
     fn a_width_field_evaluates_the_sum_typed_into_it() {
         assert_eq!(
@@ -9241,8 +7092,7 @@ mod expr_field_tests {
         );
     }
 
-    /// And the everyday case still behaves: a plain number typed into a field is
-    /// the number, not an expression that happens to have no operators in it.
+    /// A plain number typed into a field is the number.
     #[test]
     fn a_plain_number_is_unaffected_by_the_parser_that_can_take_sums() {
         assert_eq!(*typed("42").last().unwrap(), 42.0);
@@ -9273,23 +7123,7 @@ mod operator_glyph_tests {
         (g.advance_width, [g.uv_rect.offset.x, g.uv_rect.offset.y])
     }
 
-    /// **An operator's glyph changes as the sum around it is typed, and that is
-    /// Inter rather than the app.**
-    ///
-    /// Reported as an asterisk that "shifts slightly, making it look like a
-    /// different character was set in place" on the keystroke after it — which
-    /// is exactly what happens, because it *is* a different character. egui 0.35
-    /// shapes with harfrust and asks for the font's default feature set, which
-    /// includes `calt`; Inter's contextual alternates swap in a figure-aligned
-    /// asterisk and re-centre `+` and `−` once digits surround them. Reading the
-    /// two out of the atlas as pictures is what settled it: a six-pointed
-    /// asterisk on the digits' centre line against a five-pointed one riding
-    /// high.
-    ///
-    /// Nothing to fix — the alternate is the better-looking of the two and the
-    /// one the field settles on. This is here so the next report of it is
-    /// answered in a test run rather than in another afternoon with the atlas,
-    /// and it fails honestly if a future Inter stops doing it.
+    /// An operator's glyph changes as digits surround it because Inter's `calt` swaps in a figure-aligned alternate, not because of the app; fails if Inter stops.
     #[test]
     fn an_operator_between_digits_is_the_fonts_alternate_glyph_not_ours() {
         let ctx = egui::Context::default();
@@ -9307,9 +7141,7 @@ mod operator_glyph_tests {
             between.0 > alone.0,
             "the figure asterisk is the wider of the two: {between:?} against {alone:?}"
         );
-        // The same feature, without a substitution: `-` keeps its glyph and is
-        // lifted to the digits' centre line, which is the one-pixel shift the
-        // report also named.
+        // `-` keeps its glyph and is lifted to the digits' centre line.
         let (hyphen_alone, hyphen_between) = (glyph(&ctx, "10 -", 3), glyph(&ctx, "10 - 3", 3));
         assert_eq!(
             hyphen_alone.0, hyphen_between.0,
@@ -9344,26 +7176,11 @@ mod context_menu_chrome_tests {
         ctx
     }
 
-    /// **A card paints the width it is named**, for every `(width, pad)` pair the
-    /// app opens one at.
+    /// A `menu_frame` sized by `menu_inner_w` paints the width it is named, for every `(width, pad)` pair the app uses.
     ///
-    /// The guard `menu_inner_w` exists for. Every popover in the app is a
-    /// `menu_frame` with `set_width` inside it, and every one of them subtracted
-    /// the padding and forgot the border, so every one painted two points wider
-    /// than the design draws it — 212 / 152 / 162 / 274 against 210 / 150 / 160 /
-    /// 272 (§15 D307). Nothing on screen contradicted it: the number was only ever
-    /// compared against the *other* copy of itself, and both copies were the
-    /// content box.
+    /// It pins `menu_inner_w`'s arithmetic only; a call site doing its own subtraction would pass.
     ///
-    /// ⚠️ Flipped against the version anybody would write — `set_width(w - pad *
-    /// 2.0)`, which is what every call site contained — and every row is out by
-    /// exactly `2 * MENU_BORDER`. The four pairs rather than one because the bug
-    /// was invisible at every one of them for the same reason.
-    ///
-    /// **What this cannot see is a call site.** It drives `menu_frame` directly,
-    /// so it pins `menu_inner_w`'s arithmetic and would pass beside a ninth
-    /// popover that did its own subtraction — which is exactly how the eighth
-    /// survived the pass that converted the other seven (§15 D307).
+    /// flip: `set_width(w - pad * 2.0)` → every row is out by `2 * MENU_BORDER`.
     #[test]
     fn a_menu_card_paints_the_width_it_is_named() {
         let ctx = ctx_at(1.0);
@@ -9391,34 +7208,7 @@ mod context_menu_chrome_tests {
         }
     }
 
-    /// **A menu opened at any of the four corners stays inside the viewport, at
-    /// 100% *and* 150%.**
-    ///
-    /// Both halves matter and they fail differently. The flip is what a menu near
-    /// the bottom-right needs — and *Delete* is the last row, so an unflipped menu
-    /// loses exactly the row that is hardest to reach another way. The rounding is
-    /// the half that has caught this project before: a fix that rounds back to the
-    /// original value at 150% display scaling is a no-op on the user's actual
-    /// machine, and 1.5 is what that machine is set to.
-    ///
-    /// **Two assertions, because the clamp alone passes the obvious one.**
-    /// Deleting the flip and keeping only the clamp still leaves every corner
-    /// inside the viewport — the menu is simply shoved left until it fits — so a
-    /// test that asked only "is it on screen" was green against a placement with
-    /// no flip in it at all. That was found by doing it, which is the whole reason
-    /// the second assertion exists.
-    ///
-    /// What the flip actually claims is that the menu is **hinged on the
-    /// pointer**: it opens up and to the left, so the press stays on an *edge* of
-    /// the card rather than in the middle of it. A shoved menu puts the pointer
-    /// over a row three pixels in from the corner. So the second assertion is that
-    /// the card lies wholly on one side of the press on each axis, which is what
-    /// only the flip can produce.
-    ///
-    /// The rounding is the third thing being asserted and it is the one that has
-    /// caught this project before: a fix that rounds back to the original value at
-    /// 150% display scaling is a no-op on the user's actual machine, and 1.5 is
-    /// what that machine is set to.
+    /// A menu opened at any corner stays inside the viewport at 100% and 150%, and lies wholly on one side of the press on each axis (the flip, which a clamp alone would not produce).
     #[test]
     fn a_menu_opened_at_any_corner_stays_inside_the_viewport() {
         let size = egui::vec2(210.0, 460.0);
@@ -9434,8 +7224,7 @@ mod context_menu_chrome_tests {
                 screen.right_top(),
                 screen.left_bottom(),
                 screen.right_bottom(),
-                // A hair inside the bottom-right, which is where the flip has to
-                // fire without the clamp being what saves it.
+                // Just inside the bottom-right, where the flip must fire without the clamp saving it.
                 screen.right_bottom() - egui::vec2(3.0, 3.0),
             ] {
                 let pos = menu_place(&ctx, at, size);
@@ -9444,8 +7233,7 @@ mod context_menu_chrome_tests {
                     screen.contains_rect(placed),
                     "at {at:?} ppp {ppp}: {placed:?} escapes {screen:?}"
                 );
-                // Half a point of slack, which is what device-pixel rounding at
-                // 150% can move an edge by.
+                // Half a point of slack for device-pixel rounding at 150%.
                 assert!(
                     pos.x >= at.x - 0.5 || pos.x + size.x <= at.x + 0.5,
                     "at {at:?} ppp {ppp}: {placed:?} straddles the press in x"
@@ -9458,9 +7246,7 @@ mod context_menu_chrome_tests {
         }
     }
 
-    /// **A menu taller than the viewport clamps rather than flips.** Flipping
-    /// only moves which end is lost; the top is the end with the head rows on it,
-    /// so it is the end that must survive.
+    /// A menu taller than the viewport clamps to its top (the head rows) rather than flips.
     #[test]
     fn a_menu_taller_than_the_viewport_is_pinned_to_its_top() {
         let ctx = ctx_at(1.0);
@@ -9470,18 +7256,9 @@ mod context_menu_chrome_tests {
         assert_eq!(pos.y, screen.top(), "a too-tall menu must keep its head");
     }
 
-    /// **A dimmed row can still be hovered, so the sentence saying *why* has
-    /// somewhere to land.**
+    /// A dimmed menu row is still hoverable (so its tooltip can land) and refuses the click; asserted on `hovered()` because tooltip ink never reaches `.shapes`.
     ///
-    /// This is `inspector::menu_action`'s measurement at a second call site, and
-    /// it is asserted on `hovered()` rather than on the tooltip's ink because a
-    /// tooltip's galley never reaches `run_ui`'s `.shapes` at all — checked there,
-    /// with time past the delay and the pointer still.
-    ///
-    /// Flipped against the version that reads naturally — allocating with
-    /// `Sense::click()` and wrapping the row in a `ui.disable()`d scope, which is
-    /// how the image popover first spelled it — where `hovered()` is false in
-    /// exactly the state the sentence is for.
+    /// flip: `Sense::click()` inside a `ui.disable()`d scope → `hovered()` is false.
     #[test]
     fn a_dimmed_menu_row_is_still_hoverable_and_still_refuses_the_click() {
         let ctx = egui::Context::default();
@@ -9489,8 +7266,7 @@ mod context_menu_chrome_tests {
         let at = egui::pos2(60.0, 12.0);
         let mut hovered = false;
         let mut clicked = false;
-        // Two passes: a widget's interaction state is last frame's, so the frame
-        // that places the row cannot also be the frame that reports the hover.
+        // Interaction state is last frame's, so run several passes.
         for pass in 0..4 {
             let out = ctx.run_ui(
                 egui::RawInput {
@@ -9539,10 +7315,7 @@ mod context_menu_chrome_tests {
         assert!(!clicked, "a dimmed row must not be clickable");
     }
 
-    /// How many rows painted the hover ground this frame.
-    ///
-    /// The ground is the only `text_a(20)` rect a bare `menu_row` draws — no frame,
-    /// no separator — so counting them is counting highlights.
+    /// How many rows painted the hover ground (the only `text_a(20)` rect a bare `menu_row` draws).
     fn grounds(out: &egui::FullOutput) -> usize {
         out.shapes
             .iter()
@@ -9553,19 +7326,9 @@ mod context_menu_chrome_tests {
             .count()
     }
 
-    /// **A keyboard highlight paints the ground, and it paints exactly one of
-    /// them** (`docs/context-menus.md` §8).
+    /// A keyboard highlight paints exactly one ground even with the pointer resting on another row (`docs/context-menus.md` §8).
     ///
-    /// Two claims, and only the first is obvious. The second is the whole reason
-    /// `MenuRow::highlight` is an `Option<bool>` passed to *every* row rather
-    /// than a `bool` set on one: with the pointer resting over row 0 and `↓` having
-    /// walked to row 2, a highlight that only *added* a ground would paint two, and
-    /// a menu with two highlights is a menu that cannot say what `Enter` will do.
-    ///
-    /// So the fixture puts the pointer on the first row and the highlight on the
-    /// third, which is the state the bug lives in. **Flipped against
-    /// `row.highlight == Some(true) || resp.hovered()`** — the spelling that reads
-    /// naturally and passes the first assertion — where the count is 2.
+    /// flip: `row.highlight == Some(true) || resp.hovered()` → the count is 2.
     #[test]
     fn a_keyboard_highlight_paints_one_ground_and_the_pointer_cannot_add_another() {
         let ctx = egui::Context::default();
@@ -9573,9 +7336,7 @@ mod context_menu_chrome_tests {
         let on_first = egui::pos2(60.0, MENU_ROW_H * 0.5);
         let labels = ["One", "Two", "Three"];
         let mut counts = Vec::new();
-        // Four passes: interaction state is last frame's, so the frame that places
-        // the rows cannot be the frame that reports the hover. Only the last is
-        // measured.
+        // Four passes (interaction state is last frame's); only the last is measured.
         for keyboard in [false, true] {
             let mut last = 0;
             for _ in 0..4 {
@@ -9604,9 +7365,6 @@ mod context_menu_chrome_tests {
             }
             counts.push(last);
         }
-        // The fixture: with nobody driving the keyboard, the pointer on row 0 is
-        // painting one ground. Without this the second assertion could pass over a
-        // menu that paints nothing at all.
         assert_eq!(
             counts[0], 1,
             "the pointer has to be painting a ground for this test to be about anything"
@@ -9617,44 +7375,16 @@ mod context_menu_chrome_tests {
         );
     }
 
-    /// **The clamp has the last word, not the rounding** — §15 D666,
-    /// `[S18.1-L3-07]`.
+    /// `menu_place` clamps after it rounds: at ppp 1.5 the right limit 1263 rounds outward to 1263.333, so the clamp must have the last word; an ordinary placement still snaps.
     ///
-    /// 🚨 **`menu_place`'s doc gave the opposite order twice**, in a function
-    /// whose own next sentence says *"the order is the whole of the function"*:
-    /// *"flip first, then clamp, then round"*, and *"rounding comes last"*. The
-    /// code has always been `snap(pos).clamp(…)`, and the code is right — half a
-    /// pixel past the right edge is a menu with its last column cut, where half a
-    /// pixel off the pixel grid is a hairline that looks soft.
+    /// `at` is outside the viewport on purpose: on screen, the clamp can never bite after a flip.
     ///
-    /// **The fixture is the one input where the two orders differ**, and it takes
-    /// three things at once: a fractional `pixels_per_point`, a right limit that
-    /// rounds **outward** at it, and an `at` far enough right that the clamp
-    /// actually bites after the flip. At ppp 1.5 the limit is
-    /// `1400 − 137 = 1263`, and `1263 × 1.5 = 1894.5` rounds *up* to 1895, i.e.
-    /// `1263.333` — a third of a point past the edge. Every ordinary placement
-    /// gives the same answer under both orders, which is why this went unnoticed
-    /// and why the assertion has to be an exact `f32` comparison.
-    ///
-    /// ⚠️ **`at` is outside the viewport, deliberately.** The clamp cannot bite
-    /// after a flip otherwise: flipping subtracts the same `size.x` the limit
-    /// does, so an `at` on screen always lands on screen. A pointer position from
-    /// before a viewport resize is exactly the case this function exists to
-    /// survive.
-    ///
-    /// ⚠️ **Flip run**, the two operations swapped to `snap(pos.clamp(…))`.
-    /// Predicted failing assertion: the clamped one, at `1263.3334` against
-    /// `1263.0` — and the crisp case below stays green, which is why both are
-    /// here.
+    /// flip: `snap(pos.clamp(…))` → the clamped assertion fails (1263.3334 against 1263.0).
     #[test]
     fn a_menu_is_clamped_after_it_is_rounded_and_not_before() {
         let ctx = ctx_at(1.5);
         let size = egui::vec2(137.0, 40.0);
-        // ⚠️ **Placed inside a frame, because `content_rect()` outside one is
-        // egui's 10,000pt fallback** — 6666.7 at this scale, which is wider than
-        // any `at` a test would write and so clamps nothing. The first draft read
-        // it from `ctx_at`'s context directly and got `1450` back untouched: a
-        // fixture that never reached the state it named.
+        // Placed inside a frame: outside one, `content_rect()` is egui's 10,000pt fallback and clamps nothing.
         let place = |at: egui::Pos2| {
             let mut out = egui::Pos2::ZERO;
             let _ = ctx.run_ui(
@@ -9671,8 +7401,6 @@ mod context_menu_chrome_tests {
         };
         let limit = 1400.0 - size.x;
 
-        // The fixture: this limit really is the one that rounds outward, or the
-        // test is about an input where both orders agree.
         assert_ne!(
             (limit * 1.5).round() / 1.5,
             limit,
@@ -9689,8 +7417,6 @@ mod context_menu_chrome_tests {
             (limit * 1.5).round() / 1.5 - limit
         );
 
-        // And an ordinary placement is still snapped to the device grid, which is
-        // what the rounding is for at all.
         let crisp = place(egui::pos2(100.3, 100.3));
         assert_eq!(
             crisp.x,
@@ -9700,24 +7426,12 @@ mod context_menu_chrome_tests {
     }
 }
 
-/// The type family row's warning state, which is chrome rather than typography —
-/// `glyph_and_text_tinted` lives here, so its one guarantee is asserted here.
+/// The type family row's warning state (`glyph_and_text_tinted`).
 #[cfg(test)]
 mod family_row_chrome_tests {
     use super::*;
 
-    /// **A tinted glyph survives into the galley a `ComboBox` paints** (§15 D227).
-    ///
-    /// The type family row says "this font cannot be had" by wearing `TEXT_AA` in
-    /// `theme::color::WARN`, and it says it through `selected_text`, which takes a
-    /// single `WidgetText`. Whether a widget honours the colours inside a
-    /// `LayoutJob` or overrides them with its own text colour is egui's business and
-    /// not ours to assume — and if it overrides them the warning is simply invisible,
-    /// which is the one failure mode a colour-only signal has.
-    ///
-    /// So this asserts the actual painted vertices: the row's glyph section has to
-    /// come out `WARN` and its label section must **not**, because the label carries
-    /// the family's name and tinting that would read as the pick not having taken.
+    /// A `WARN`-tinted glyph survives into the galley a `ComboBox` paints (a widget could override the `LayoutJob` colours), while the label stays full-strength `TEXT`.
     #[test]
     fn a_warn_tinted_combo_glyph_reaches_the_painted_galley() {
         let ctx = egui::Context::default();
@@ -9740,9 +7454,7 @@ mod family_row_chrome_tests {
                     .show_ui(ui, |_| {});
             },
         );
-        // Every colour any text vertex was painted in. A galley's mesh is atlas-UV
-        // quads whose **vertex colour is the ink colour** — `theme.rs`'s atlas tests
-        // read the other half of the same mesh, the coverage behind the UVs.
+        // A galley mesh's vertex colour is the ink colour.
         let mut colours = Vec::new();
         for clipped in &out.shapes {
             if let egui::Shape::Text(t) = &clipped.shape {
@@ -9766,21 +7478,11 @@ mod family_row_chrome_tests {
 
 #[cfg(test)]
 mod hairline_tests {
-    //! The device-pixel snap the chrome's three rules share (§15 D479).
-    //!
-    //! `rulers.rs`'s `guide_geometry_tests` pins the *guide's* half of the same
-    //! parity rule and is the older of the two; this module exists because
-    //! `ui::rule` was pinned by nothing at all, which is how it came to carry a
-    //! defect at 200% for as long as it did (`[S19.1-L1-04]`).
+    //! The device-pixel snap the chrome's three rules share.
 
     use super::*;
 
-    /// How much of each device pixel a `width`-point line centred at `at` covers.
-    ///
-    /// The same helper `rulers.rs`'s `guide_geometry_tests` carries, and it is
-    /// copied rather than shared on purpose: it is four lines of definition, and a
-    /// test helper reaching across module boundaries to another test module is a
-    /// dependency between two suites that are meant to be able to disagree.
+    /// How much of each device pixel a `width`-point line centred at `at` covers (a copy of the helper in `rulers.rs`, kept so the suites stay independent).
     fn coverage(at: f32, ppp: f32, width: f32) -> Vec<f32> {
         let centre = at * ppp;
         let (lo, hi) = (centre - width * ppp / 2.0, centre + width * ppp / 2.0);
@@ -9793,24 +7495,9 @@ mod hairline_tests {
         out
     }
 
-    /// **A 1pt hairline covers whole device pixels at an even integer scale, and
-    /// the fractional scales are unchanged** (§15 D479, `[S19.1-L1-04]`).
+    /// A 1pt hairline covers whole device pixels at an even integer scale; fractional scales give the best a fractional width can.
     ///
-    /// 200% is the case that bites: the old unconditional `+ 0.5` asked for a pixel
-    /// *centre* for a 2-device-pixel line and got `[0.5, 1.0, 0.5]` — one whole
-    /// pixel with a soft edge either side, which is the "two-pixel grey smear" the
-    /// arithmetic exists to prevent, arriving across three. 150% is the control and
-    /// **must not move**: `[0.25, 1.0, 0.25]` is the best a 1.5-pixel line can do,
-    /// since a fractional device width cannot put both edges on the grid, so a
-    /// "fix" that changed it would be changing the wrong thing.
-    ///
-    /// ⚠️ **Flip-check, run: `hairline_on_pixel_centre` forced to `true`**, which is
-    /// exactly the code before the fix. Fails at `ppp = 2.0` with `[0.5, 1.0, 0.5]`
-    /// against `[1.0, 1.0]`, and at no other scale — because at every other scale in
-    /// the list a 1pt line's device width really is odd, so the unconditional
-    /// version was accidentally right. **That is why one site went nine months
-    /// looking correct**, and it is the argument for the parity being a named
-    /// predicate rather than a `+ 0.5`.
+    /// flip: `hairline_on_pixel_centre` forced to `true` → fails at ppp 2.0 (`[0.5, 1.0, 0.5]` against `[1.0, 1.0]`) and at no other scale.
     #[test]
     fn a_hairline_covers_whole_pixels_wherever_the_scale_allows_it() {
         for (ppp, want) in [
@@ -9829,33 +7516,9 @@ mod hairline_tests {
         }
     }
 
-    /// **Each arm takes the *nearest* grid position of its own parity, and that is
-    /// the reason this is not `rulers::snap_across_axis`** (§15 D479).
+    /// Each arm takes the nearest grid position of its own parity, so the snap never moves a rule more than half a device pixel from its column's centre (unlike `rulers::snap_across_axis`).
     ///
-    /// The review filed the two as one rule written twice and proposed calling the
-    /// ruler's spelling from here. They share the parity predicate and nothing
-    /// else. **Half a device pixel is the bound**, and it is the floor on the error
-    /// rather than a slack allowance: grid positions of one parity are `1/ppp`
-    /// apart, so nothing can do better, and the column's centre generally is not on
-    /// the grid at all.
-    ///
-    /// ⚠️ **Two flips, run separately, because it is one arm each.**
-    ///
-    /// - Odd arm degraded to `(round + 0.5)`, which is `snap_across_axis`'s exact
-    ///   spelling: **fails at `ppp = 1.0` at 1.0000pt** — a whole point, i.e. a 1pt
-    ///   rule drawn entirely outside its 1pt column, which is the failure `rule`'s
-    ///   own history records at §15 **D46** reached by a second road. The parity is
-    ///   untouched, so the coverage test above stays **green**, which is what says
-    ///   these two tests are about different things.
-    /// - Even arm degraded to `floor`: **fails at `ppp = 2.0` at 0.4975pt** against
-    ///   a bound of 0.25.
-    ///
-    /// ⚠️ **The second flip did not bite at first, and the test was wrong rather
-    /// than the flip.** The bound was written as a flat `0.5` **points**, which
-    /// 0.4975 passes — so above 100% it was asserting nothing at all. Half a
-    /// *device* pixel is the quantity this doc always meant and `head_tests` has
-    /// used all along, and the flip that failed to bite is what found the
-    /// difference.
+    /// flip: odd arm as `(round + 0.5)` → fails at ppp 1.0 (1.0pt drift); even arm as `floor` → fails at ppp 2.0 (0.4975pt against 0.25).
     #[test]
     fn the_snap_never_pushes_a_rule_out_of_its_own_column() {
         for ppp in [1.0f32, 1.25, 1.5, 1.75, 2.0, 3.0] {
@@ -9874,18 +7537,9 @@ mod hairline_tests {
         }
     }
 
-    /// **And `ui::rule` actually paints there**, which the two tests above cannot
-    /// say — they pin arithmetic, and a call site that kept its own copy would pass
-    /// both of them.
+    /// `ui::rule` paints its `LineSegment` on the snapped coordinate at 200%; the arithmetic tests above would pass beside a call site with its own copy.
     ///
-    /// Read back out of `FullOutput::shapes` as the `LineSegment` the function
-    /// draws, at 200%, which is the scale the defect was measured at.
-    ///
-    /// ⚠️ **`inspector::popup_rule` and `settings::section` are pinned by
-    /// construction and not by assertion** — each is now a single call to
-    /// `hairline_in_column` with nothing between it and the painter. That is
-    /// weaker than this test and is said plainly rather than implied: what would
-    /// catch a third copy appearing is a reader, not a gate.
+    /// `inspector::popup_rule` and `settings::section` are single calls to `hairline_in_column` and are not asserted.
     #[test]
     fn the_align_rows_divider_paints_on_the_snapped_coordinate() {
         let ctx = egui::Context::default();
@@ -9932,14 +7586,11 @@ mod hairline_tests {
 
 #[cfg(test)]
 mod ramp_tests {
-    //! The gradient **chip** against the gradient on the page (§15 D564).
-    //!
-    //! Plain backticks throughout, per §15 D319 — `cargo doc` cannot see a
-    //! `#[cfg(test)]` module, so a `[link]` here is checked by nothing.
+    //! The gradient chip against the gradient on the page.
 
     use super::*;
 
-    /// The ramp mesh's columns, as `(x, colour)` in the order they were built.
+    /// The ramp mesh's columns, as `(x, colour)` in build order.
     fn columns(ctx: &egui::Context, stops: &[(f32, egui::Color32)]) -> Vec<(f32, egui::Color32)> {
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 20.0));
         let out = ctx.run_ui(Default::default(), |ui| {
@@ -9962,29 +7613,9 @@ mod ramp_tests {
             .collect()
     }
 
-    /// **A descending stop list draws what the canvas draws, not its mirror.**
+    /// A descending stop list is clamped as the canvas clamps it (columns never walk backwards, the first stop's colour fills the box); an ascending control shows the probe can report agreement and rules out a sort.
     ///
-    /// The reported failure, measured: `[(1.0, red), (0.0, blue)]` — what a
-    /// `<linearGradient>` with descending offsets imports as — built columns at
-    /// x `[0, 100, 0, 100]`, so two of the four triangles were wound backwards
-    /// and the chip painted the ramp reversed. The artwork beside it did not:
-    /// §15 D455 put `make_stops_monotonic` on the renderer, the importer and the
-    /// SVG writer, so one document was drawn two ways in one frame.
-    ///
-    /// ⚠️ **Non-decreasing x is the assertion, not "the left edge is red".** The
-    /// second is true and is a consequence of this input; the first is the
-    /// property — a mesh whose columns walk backwards is a folded ramp whatever
-    /// colours it happens to carry, and a fixture with three stops would satisfy
-    /// a left-edge assertion while still folding in the middle.
-    ///
-    /// ⚠️ **The ascending control is what says the probe can report agreement**,
-    /// and it is also what stops a "fix" that sorted: a sort and a clamp give
-    /// different pictures on this input (D455's own argument), and the ascending
-    /// row is unchanged under either.
-    ///
-    /// **Flip-checked** by dropping the `monotonic_offset` call: red at the
-    /// non-decreasing assertion, reading `0` after `100`, which is the reported
-    /// symptom.
+    /// flip: dropping the `monotonic_offset` call → fails the non-decreasing assertion (`0` after `100`).
     #[test]
     fn a_descending_ramp_is_clamped_the_way_the_canvas_clamps_it() {
         let ctx = egui::Context::default();
@@ -9995,8 +7626,6 @@ mod ramp_tests {
             egui::Color32::from_rgb(0, 0, 255),
         );
 
-        // The control: an ordinary ramp, and the fixture assertion for the shape
-        // of what `columns` returns.
         let up = columns(&ctx, &[(0.0, blue), (1.0, red)]);
         assert_eq!(up.len(), 4, "two ends plus a column per stop: {up:?}");
         assert_eq!(
@@ -10020,38 +7649,13 @@ mod ramp_tests {
 
 #[cfg(test)]
 mod slider_ink_tests {
-    //! How far a `slider`'s drawing leaves the row it allocates (§15 D673).
-    //!
-    //! Plain backticks throughout, per §15 D319.
+    //! How far a `slider`'s drawing leaves the row it allocates.
 
     use super::*;
 
-    /// **The shadow bleeds one point below the row, and no further**
-    /// (`[S18.2-L3-05]`).
+    /// The knob's shadow bleeds exactly one point below the row (the design's `box-shadow: 0 1px 3px`) and the other three sides are tight.
     ///
-    /// `SLIDER_H` is `pub` and `slider` reserves it on its callers' behalf — ⚠️ not
-    /// *"the number every caller reserves"*, which is what this said and what the
-    /// constant's own doc said until §15 D766: **no production code outside `ui.rs`
-    /// reads it.** Its doc also
-    /// used to call the knob *"the tallest thing in it"*. It is not: the knob's
-    /// shadow is a `half`-radius disc drawn one point lower, so a slider paints
-    /// `SLIDER_H + 1` into the `SLIDER_H` it asks for.
-    ///
-    /// **The bleed is kept and pinned rather than removed.** A shadow outside the
-    /// box is what a shadow is — the design asks for `box-shadow: 0 1px 3px` — and
-    /// the one production caller has the row gap for it. What could not stand was
-    /// the *doc*, and a corrected sentence would rot the same way; this is the
-    /// gate, so the number lives somewhere that fails.
-    ///
-    /// ⚠️ **It asserts the three other sides are tight, and those are the
-    /// load-bearing half.** A test that only bounded the bottom would pass for a
-    /// knob that had grown in every direction, which is the change somebody
-    /// adjusting a radius would actually make.
-    ///
-    /// **Flip:** change the shadow's offset at `center().y + 1.0` to `+ 2.0` and
-    /// the bottom assertion fails with `2` against `1`; drop it to `center().y` and
-    /// it fails the other way, which is the half that stops this being a
-    /// one-directional bound. Both predicted correctly.
+    /// flip: shadow offset `center().y + 1.0` to `+ 2.0` → the bottom assertion fails (`2` against `1`); to `center().y` → it fails the other way.
     #[test]
     fn a_sliders_shadow_leaves_the_row_by_exactly_one_point() {
         let ctx = egui::Context::default();
@@ -10100,37 +7704,13 @@ mod slider_ink_tests {
 
 #[cfg(test)]
 mod zero_sense_hover_tests {
-    //! What a widget that senses nothing is hovered *by* (§15 D688).
-    //!
-    //! (Plain backticks per §15 D319.)
+    //! What a widget that senses nothing is hovered by.
 
     use super::*;
 
-    /// **A zero-sense widget is hovered only while nothing interactive is above
-    /// it** (`[S18.1-L3-08]`).
+    /// A zero-sense widget (`Sense::empty()`, which does not win hit tests on its own) is hovered only while nothing interactive is registered above it (egui's last-wins rule).
     ///
-    /// `menu_row`'s comment said a dimmed row's `Sense::hover()` *"must still win
-    /// the hit test"*. It does not — egui filters hit-test candidates on
-    /// `senses_click()` / `senses_drag()`, and `Sense::hover()` **is**
-    /// `Sense::empty()`, `const HOVER = 0`. What the dimmed row's tooltip actually
-    /// rests on is `interaction.rs`'s `is_on_top_of_the_interactive_widget`, which
-    /// is a **conditional** guarantee: last wins.
-    ///
-    /// 🚨 **The second case is the whole test.** `inspector::menu_action` already
-    /// pins the positive half — a zero-sense claimant allocated *after* a disabled
-    /// scope does see the pointer. Nothing pinned the negative half, which is the
-    /// half the false sentence denied: put something interactive over the same
-    /// rectangle *afterwards* and the zero-sense widget stops being hovered. Two
-    /// claimants over one region is exactly the arrangement three functions in this
-    /// file deliberately construct.
-    ///
-    /// ⚠️ **Interaction state is last frame's**, so this pumps two passes and reads
-    /// the response back on the second, per the technique this project records for
-    /// every hover probe.
-    ///
-    /// **Flip:** drop the `ui.interact(…, Sense::click())` line and the second
-    /// assertion fails — the row is hovered again, because nothing is above it.
-    /// Predicted correctly.
+    /// flip: dropping the `ui.interact(…, Sense::click())` line → the second assertion fails (the row is hovered again).
     #[test]
     fn a_row_that_senses_nothing_is_hovered_only_while_it_is_on_top() {
         let hovered_with_a_widget_over_it = |covered: bool| {
@@ -10176,19 +7756,11 @@ mod zero_sense_hover_tests {
 
 #[cfg(test)]
 mod segmented_disabled_tests {
-    //! What a **disabled** segmented cell claims (§15 D722, `[S18.2-L3-04]`).
-    //!
-    //! (Plain backticks per §15 D319.)
+    //! What a disabled segmented cell claims.
 
     use super::*;
 
-    /// Tab through a three-cell segmented control with `disabled` unavailable,
-    /// and report how many distinct widgets the keyboard can reach.
-    ///
-    /// **Counted rather than named**, because naming cell 1 would mean spelling
-    /// out `segmented_enabled`'s id formula here — and an assertion that copies a
-    /// formula goes vacuously green the day the formula changes, which is the
-    /// trap `leftover_temps`' doc records in `atomic`.
+    /// Tabs through a three-cell segmented control with cell `disabled` unavailable and returns how many distinct widgets the keyboard reaches; counted, not named, so no id formula is copied.
     fn tab_stops(disabled: usize) -> usize {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -10216,8 +7788,7 @@ mod segmented_disabled_tests {
             repeat: false,
             modifiers: Default::default(),
         };
-        // More presses than there are cells, so the order wraps and every stop is
-        // met however the focus starts.
+        // More presses than cells, so the order wraps and meets every stop.
         for _ in 0..6 {
             frame(vec![tab()]);
             if let Some(id) = ctx.memory(|m| m.focused())
@@ -10229,33 +7800,9 @@ mod segmented_disabled_tests {
         seen.len()
     }
 
-    /// **A cell that cannot be clicked is not a tab stop** (§15 D722).
+    /// A disabled segmented cell is not a tab stop (`Sense::click()` includes `FOCUSABLE`), while an all-enabled control keeps all three.
     ///
-    /// `segmented_enabled` registered every cell with `Sense::click()`, disabled
-    /// ones included, and the only reason its comment gave was *"so the cell can
-    /// carry a tooltip explaining why it is unavailable"*. **No caller can carry
-    /// that tooltip**: the function returns `Option<usize>`, the per-cell
-    /// `Response` is a local that never escapes, and `paint` is handed a
-    /// `&Painter` rather than a response. Its one production caller,
-    /// `picker::picker_body`, hangs none and could not; `segmented` passes
-    /// `|_| true` and has no disabled cells at all. **One caller, zero tooltips.**
-    ///
-    /// 🚨 **What the registration did instead is put the cell in the keyboard tab
-    /// order**, because `Sense::click()` is `CLICK | FOCUSABLE` — which
-    /// `focus_ring`'s own ⚠️ warns about from the other side. So Tab stopped on a
-    /// cell that then swallowed Return and Space, offering neither the click nor
-    /// the promised explanation.
-    ///
-    /// The enabled control is the other half: dropping the sense for *every* cell
-    /// would pass a test that only counted the disabled one.
-    ///
-    /// ⚠️ **Flip-checked twice and the control is the one that earned its place.**
-    /// Restoring `Sense::click()` for both is red at the second assertion, `3`
-    /// against `2`, as predicted. Dropping to `Sense::hover()` for *both* — the
-    /// over-broad reading of the same fix — is red at the **first**, `0` against
-    /// `3`: the whole control becomes unreachable from the keyboard. Without that
-    /// fixture line the second flip is green and the segmented control silently
-    /// stops being tabbable.
+    /// flip: `Sense::click()` for every cell → fails the second assertion (3 against 2); `Sense::hover()` for every cell → fails the first (0 against 3).
     #[test]
     fn a_disabled_segmented_cell_is_not_a_tab_stop() {
         // 3 is out of range, so nothing is disabled: the control.
@@ -10276,20 +7823,11 @@ mod segmented_disabled_tests {
 
 #[cfg(test)]
 mod hairline_weight_tests {
-    //! A menu separator's rule keeps its weight as the display scale rises
-    //! (§15 D721, `[S18.1-L3-04]`).
-    //!
-    //! (Plain backticks per §15 D319.)
+    //! A menu separator's rule keeps its weight as the display scale rises.
 
     use super::*;
 
-    /// The height `menu_sep` actually paints, in points, at `ppp`.
-    ///
-    /// Read out of `FullOutput::shapes` rather than computed, because the whole
-    /// question is what reaches the screen. The rule is the only `Rect` in the
-    /// output — `allocate_exact_size` with `Sense::empty()` paints nothing — and
-    /// it is picked by being far shorter than its own allocation rather than by
-    /// index, so a stray background rect would not be mistaken for it.
+    /// The height `menu_sep` paints, in points, at `ppp`; picked as the rect far shorter than its allocation.
     fn painted_rule(ppp: f32) -> f32 {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -10308,47 +7846,9 @@ mod hairline_weight_tests {
             .fold(0.0_f32, f32::max)
     }
 
-    /// **A separator is a 1pt rule at every display scale**, and it used to be one
-    /// device pixel (§15 D721).
+    /// A separator is a nominal 1pt rule snapped to `round(ppp).max(1.0)` whole device pixels (1.333pt at ppp 1.5: crisp beats exact-but-smeared), matching `MENU_BORDER`'s weight.
     ///
-    /// `menu_sep` painted `1.0 / ppp` **points** — a single device pixel — where
-    /// its own doc says *"**1pt** of `text_a(20)`"* and, two paragraphs down, *"the
-    /// rule stays 1pt and only the air moved"*, and where `MENU_SEP_H` allocates
-    /// `1.0 + SEP_AIR * 2.0`. Measured before the fix: **1.0 pt at ppp 1.0, 0.667
-    /// at 1.5, 0.5 at 2.0.**
-    ///
-    /// 🚨 **The cost is a comparison inside one card.** `MENU_BORDER` is a 1-*point*
-    /// stroke around the very frame the separator sits in, 5pt away, and so is
-    /// every other hairline in the chrome — `field_frame`'s, `button_face`'s,
-    /// `SEGMENT_BORDER`, and `inspector::popup_rule`, which is this same separator
-    /// one menu over. At 200% the group rule was **half** the weight of its own
-    /// card's border; at 300%, a third.
-    ///
-    /// ⚠️ **The device-pixel snapping is kept and was never the defect.** The doc
-    /// argues for it — *"a 1pt rule landing on a half pixel is the one width where
-    /// the rounding shows as a colour change rather than a position change"* — and
-    /// the finding agrees the technique is the only one in this file that is crisp
-    /// at every scale. What was wrong is the **width**. So the rule is now a
-    /// *nominal* point snapped to whole device pixels, which is what those two
-    /// sentences mean together: `round(ppp).max(1.0)` device pixels.
-    ///
-    /// **At ppp 1.5 that is 1.333pt rather than 1.0**, and the finding's own
-    /// suggested assertion — *"equals `MENU_BORDER` at ppp ∈ {1, 1.5, 2}"* — would
-    /// fail on it. Painting exactly 1.0pt there is the alternative and it is
-    /// *blurry*: 1.5 device rows, half a row of partial coverage, the case the doc
-    /// names. A third of a point too heavy, crisply, beats correct and smeared —
-    /// and it errs toward the rule being **seen**, which is the whole reason a
-    /// separator exists. This is the choice; it is not the finding's.
-    ///
-    /// ⚠️ **Flip-checked in both directions, and each bites on a different
-    /// assertion**, which is what says the three are asking three questions.
-    /// Restoring `1.0 / ppp` fails the *third* — `0.667pt = 1 device pixel where a
-    /// nominal 1pt snaps to 2`. Painting a bare `1.0` — the obvious "just make it a
-    /// point" fix, and the finding's own suggested assertion — fails the **first**:
-    /// `0.99999976pt = 1.4999996 device pixels, which is not a whole number`. The
-    /// second assertion, *at least one device pixel*, bit under neither and is kept
-    /// anyway: it is the one that would catch a future `weight` derived from a
-    /// smaller nominal.
+    /// flip: restoring `1.0 / ppp` → fails the third assertion; a bare `1.0` → fails the first (not a whole number of device pixels). The second guards a future smaller nominal.
     #[test]
     fn a_menu_separator_holds_its_weight_as_the_display_scale_rises() {
         for ppp in [1.0_f32, 1.5, 2.0, 3.0] {
@@ -10365,12 +7865,7 @@ mod hairline_weight_tests {
                 "at ppp {ppp} the rule paints {device} device pixels — a hairline \
                  thinner than one pixel is a hairline the display cannot draw"
             );
-            // ⚠️ **Stated exactly rather than as a tolerance.** *"Within half a
-            // device pixel of 1pt"* is the same rule and at ppp 1.5 it lands
-            // exactly on its own boundary — `0.667` and `1.333` are both 0.333
-            // out, so the wrong answer and the right one are equally admissible
-            // and the assertion decides nothing at the one scale that is
-            // interesting.
+            // Exact, not a half-pixel tolerance: at ppp 1.5, 0.667 and 1.333 are equally far from 1pt.
             let want = (1.0_f32 * ppp).round().max(1.0);
             assert!(
                 (device - want).abs() < 1e-3,
@@ -10381,17 +7876,7 @@ mod hairline_weight_tests {
         }
     }
 
-    /// The rule fits inside the height `menu::height` reserves for it, at every
-    /// scale — which is what stops this fix moving a menu.
-    ///
-    /// ⚠️ **`MENU_SEP_H` does not depend on `ppp` and must not start to.**
-    /// `menu::height` sums it *before* the menu is shown, because `menu_place`
-    /// flips and clamps against a size it does not yet have on screen, and
-    /// `a_menus_computed_height_is_the_height_it_paints` is the other half of that
-    /// guarantee. The rule growing from 0.5pt to 1.333pt at ppp 1.5 has to stay
-    /// inside the 7pt already allocated — it does, with `SEP_AIR` either side —
-    /// and this is the assertion that says so rather than leaving it to be
-    /// noticed.
+    /// The rule fits inside the `MENU_SEP_H` that `menu::height` reserves before the menu is shown, at every scale; that constant must not depend on `ppp`.
     #[test]
     fn the_rule_still_fits_the_height_the_menu_reserved_for_it() {
         for ppp in [1.0_f32, 1.5, 2.0, 3.0] {
@@ -10408,27 +7893,14 @@ mod hairline_weight_tests {
 
 #[cfg(test)]
 mod picture_swatch_tests {
-    //! A picture chip is drawn at the brush's own alpha (§15 D784).
-    //!
-    //! This is the surface §15 D773 named — the inspector's paint-row chip — read
-    //! out of `FullOutput::shapes` rather than reasoned about, because `swatch`
-    //! hands the tint to `Painter::image` and what a reader wants to know is what
-    //! reached the mesh.
-    //!
-    //! (Plain backticks per §15 D319.)
+    //! A picture chip is drawn at the brush's own alpha; read from `FullOutput::shapes` since `swatch` hands the tint to `Painter::image`.
 
     use super::*;
 
-    /// The vertex colour of the one textured mesh a chip paints.
-    ///
-    /// A glyph is a textured mesh too, so this would be ambiguous in a `Ui` with
-    /// text in it — there is none here, and the assertion below checks exactly one
-    /// mesh came back rather than trusting that.
+    /// The vertex colour of the one textured mesh a chip paints (ambiguous beside text, so callers assert exactly one mesh).
     fn chip_tint(ctx: &egui::Context, alpha: f32) -> Vec<egui::Color32> {
         let out = ctx.run_ui(Default::default(), |ui| {
-            // Built inside the closure: `run_ui` takes an `FnMut`, and `Swatch`
-            // is not `Copy`, so a chip passed in from outside would be moved on
-            // the first call.
+            // Built inside: `run_ui` takes an `FnMut` and `Swatch` is not `Copy`.
             swatch(
                 ui,
                 16.0,
@@ -10450,12 +7922,12 @@ mod picture_swatch_tests {
             .collect()
     }
 
-    /// A texture id that is not the font atlas, so `chip_tint` can tell the
-    /// chip's own mesh from anything epaint draws with glyphs.
+    /// A texture id that is not the font atlas, so `chip_tint` can tell the chip's mesh from glyphs.
     fn picture() -> egui::TextureId {
         egui::TextureId::User(7)
     }
 
+    /// A 30% picture fill draws a fainter chip than an opaque one, whose tint is the identity `WHITE`.
     #[test]
     fn a_faded_picture_chip_is_drawn_faded() {
         let ctx = egui::Context::default();
@@ -10487,18 +7959,7 @@ mod picture_swatch_tests {
         );
     }
 
-    /// **The tint is a multiplier and not a colour**, which is the property that
-    /// keeps a photograph looking like itself: scaled white leaves r = g = b.
-    ///
-    /// ⚠️ **Worth its own assertion because the plausible wrong fix passes the test
-    /// above.** Tinting with `color::TEXT` faded, or with `from_black_alpha`, is
-    /// also "not WHITE" and also has a lower alpha — and it is what a reader
-    /// reaches for who has read the theme's other tinting rules first.
-    ///
-    /// ⚠️ **And it is green under the flip the test above catches**, which is the
-    /// other half of the same point: drawing the chip untinted (the state before
-    /// §15 D784) keeps r = g = b perfectly. The two tests pin different halves —
-    /// *is it faded* and *is it still a photograph* — and neither is redundant.
+    /// The chip tint is a grey multiplier (r = g = b), not a colour, so the picture keeps its hues; a `TEXT`-based tint would pass the fading test above but fail here.
     #[test]
     fn the_chip_tint_stays_grey_so_the_picture_keeps_its_hues() {
         let ctx = egui::Context::default();
@@ -10515,9 +7976,7 @@ mod picture_swatch_tests {
 
 #[cfg(test)]
 mod double_click_tests {
-    //! `ui::double_clicked`'s counting (§15 D986), with egui's own answer beside
-    //! it as the control that the quirk is really being exercised. Plain
-    //! backticks, per §15 D319.
+    //! `ui::double_clicked`'s counting, with egui's own answer beside it as the control.
 
     use super::double_clicked;
 
@@ -10526,8 +7985,7 @@ mod double_click_tests {
         max: egui::Pos2::new(400.0, 300.0),
     };
 
-    /// One pass, `events` delivered, over a widget covering the area: ours, then
-    /// egui's `Response::double_clicked`.
+    /// One pass with `events` over a widget covering the area: ours, then egui's `Response::double_clicked`.
     fn pass(ctx: &egui::Context, events: Vec<egui::Event>) -> (bool, bool) {
         let mut out = (false, false);
         let _ = ctx.run_ui(
@@ -10557,15 +8015,9 @@ mod double_click_tests {
         pass(ctx, vec![button(false)])
     }
 
-    /// **The chain is the click before, near and soon, and a third click is a
-    /// single one**: a fast pair on one spot is a double; a third there is not,
-    /// as egui's triple was not; a fourth starts the next double; a click and then
-    /// a fast pair somewhere else is a double, where egui answers *no* — the
-    /// quirk, asserted as the control so this test is known to be about it; and a
-    /// pair slower than `max_double_click_delay` is two singles.
+    /// A double is the click before, near and soon; a third click is single, a fourth starts the next double, a click then a fast pair elsewhere is a double (egui says no), and a slow pair is two singles.
     ///
-    /// Flip, run: the `!l.double` term dropped from the chain fails *"a third
-    /// click on one spot is a single one"*.
+    /// flip: dropping the `!l.double` term from the chain → fails "a third click on one spot is a single one".
     #[test]
     fn a_double_click_is_the_click_before_near_and_soon() {
         let ctx = egui::Context::default();

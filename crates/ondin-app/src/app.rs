@@ -225,28 +225,15 @@ impl ClipStamp {
 
 /// The values a gesture holds **while it is running**, in one place so that
 /// "is anything in flight?" is answered by the type instead of by a list somebody
-/// has to remember to extend (§15 D785, `[A2-L7-02]`).
+/// has to remember to extend: [`Self::any`] is a `PartialEq` against `Default`,
+/// so a field added here is covered by `cancel_gesture`'s gate the day it is
+/// added. A hand-kept `||` chain went stale twice, and a right-click cancel on
+/// two fields did nothing while the value committed on release.
 ///
-/// 🚨 **The list went stale twice and the cost was silent.** `cancel_gesture`'s
-/// gate was a hand-written `||` chain over fields scattered through `OndinApp`'s
-/// 101, and `[A1-L2-02]` found it two short: right-clicking to cancel a scrub on
-/// the export-quality field or on the inspector's guide-position field **did
-/// nothing, and the value committed on release**. Neither shows through
-/// `has_gesture_preview` — `SetExports` never reaches `set_preview` and
-/// `SetGuidePosition` is absorbed as a no-op — so there was no second signal to
-/// fall back on. Three of that chain's clauses had been added one at a time, each
-/// after a field was added elsewhere and nothing told the gate, and the comment on
-/// one of them says as much: *"which is the shape of bug this whole list is made
-/// of"*.
-///
-/// **[`Self::any`] is exhaustive by construction**, because it is a `PartialEq`
-/// against `Default`. An **eighth** field added to this struct is covered on the day
-/// it is added, with nothing to remember — which is the whole of what this type is
-/// for, and the only reason it is worth moving fields out of `OndinApp` at all.
-/// (Seven fields below; `cancel_gesture`'s own note says *eighth* too. The
-/// finding's *"fifteen in-flight-gesture fields"* counts `drag`, `layer_drag`,
-/// `multi_transform_drag`, `secondary_press` and `alt_clone`, which are not here —
-/// see *What is deliberately not here*.)
+/// **A value in flight carries its subject**: the layer it was begun against
+/// travels with it (`session_scrub`'s node, `OpacityEntry::subject`), so a
+/// snapshot put back or a value committed later never lands on a selection
+/// that has moved since.
 ///
 /// # What is deliberately not here
 ///
@@ -269,10 +256,7 @@ pub(crate) struct InFlight {
     /// The typographic spans as they were when the field scrub now in flight
     /// began — **what a right-click cancel puts back**, and the only record of it,
     /// since a session's own preview is what `clear_preview` hides rather than
-    /// undoes. Reported as right-click resetting the text but not the field.
-    ///
-    /// The node is carried with the lists so a snapshot cannot be applied to a
-    /// session that has since moved to a different layer.
+    /// undoes. The node is its subject (the type's rule).
     pub(crate) session_scrub: Option<(NodeId, CharSpans, ParaSpans)>,
     /// The Settings modal's nudge pair as it was when the field scrub now in
     /// flight began — **what a right-click cancel puts back**, and the only
@@ -1938,28 +1922,9 @@ pub(crate) struct OpacityEntry {
     /// value it resolves to.
     first: u8,
     at: f64,
-    /// **The layers the digit was typed against** (§15 D470).
-    ///
-    /// ⚠️ **Without it the commit re-read the live selection at deadline time**,
-    /// 600 ms later, and landed on whatever was selected *then*.
-    /// `[S16.1-L1-02]`, measured headless with `RawInput::time` driven: two rects
-    /// at 1.0, select A, press `4` — A previews at 40% — click B inside the
-    /// window, and when the window shuts **A is back at 1.0 and B is committed to
-    /// 0.4**, `undo_depth 0 → 1`, status *"Opacity 40%"*. The user typed a digit
-    /// against A, watched A change, and B — which they merely selected — keeps the
-    /// value. One undo restores B; A never gets what was asked for.
-    ///
-    /// **The rule was already written in this struct's sibling.**
-    /// [`InFlight::session_scrub`] — the other "value in flight that
-    /// `RenderOverrides` cannot preview" — says verbatim: *"the node is carried
-    /// with the lists so a snapshot cannot be applied to a session that has since
-    /// moved to a different layer."* This is that shape and did not carry it.
-    ///
-    /// ⚠️ **The empty-selection row was clean by accident and one level down**, at
-    /// [`OndinApp::set_opacity_pct_on`]'s `if tx.0.is_empty() { return; }`, where
-    /// [`OndinApp::opacity_digit`] — the *other* reader of the same entry — has an
-    /// explicit guard. The deadline twin had neither, and the selection-*moved*
-    /// case had no guard anywhere.
+    /// **The layers the digit was typed against**, which the commit at the
+    /// window's deadline lands on — [`InFlight`]'s rule, a value in flight
+    /// carries its subject.
     subject: Vec<NodeId>,
 }
 
@@ -18380,38 +18345,15 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A typed opacity digit lands on what it was typed against, 600 ms later**
-    /// (§15 D470) — `[S16.1-L1-02]`.
+    /// **A typed opacity digit lands on what it was typed against, 600 ms later**,
+    /// not on what is selected when the window shuts — `InFlight`'s rule. Select
+    /// A, press `4`, click B inside the window: A takes 0.4 and B keeps 1.0. The
+    /// empty selection commits nothing. The clock is driven through
+    /// `RawInput::time`, which `OPACITY_DIGIT_WINDOW` is read against.
     ///
-    /// `OpacityEntry` held `first` and `at` and **no subject**, so
-    /// `fold_opacity_entry` re-read the live selection at deadline time. Select A,
-    /// press `4` — A previews at 40% — click B inside the window, and when the
-    /// window shuts A is back at 1.0 and **B** is committed to 0.4, `undo_depth
-    /// 0 → 1`, status *"Opacity 40%"*. The user typed a digit against A, watched A
-    /// change, and B — which they merely selected — keeps the value. One undo
-    /// restores B; A never gets what was asked for.
-    ///
-    /// ⚠️ **The rule was already written two hundred lines above the type, in the
-    /// same struct.** `session_scrub`, the sibling *"value in flight that
-    /// `RenderOverrides` cannot preview"*, says verbatim: *"the node is carried
-    /// with the lists so a snapshot cannot be applied to a session that has since
-    /// moved to a different layer."*
-    ///
-    /// ⚠️ **The empty-selection row was clean by accident and one level down**, at
-    /// `set_opacity_pct_on`'s `if tx.0.is_empty() { return; }` — where
-    /// `opacity_digit`, the *other* reader of the same entry, has an explicit
-    /// guard. It is asserted here anyway, because "clean for a reason nobody
-    /// wrote down" is how the moved case came to have no guard at all.
-    ///
-    /// **The clock is driven through `RawInput::time`**, which is why this is fast:
-    /// `OPACITY_DIGIT_WINDOW` is read against `InputState::time`, not an `Instant`.
-    ///
-    /// ⚠️ **Flipped** by committing against `self.session.selection` in
-    /// `fold_opacity_entry`: fails on the moved row with `(1.0, 0.4)` — A back at
-    /// 1.0 and B holding the typed value, the finding's own numbers to the digit.
-    /// The **control** — the selection staying on A — is green either way, and is
-    /// what says the harness delivers the keystroke and reaches the deadline at
-    /// all.
+    /// Flip: `fold_opacity_entry` committing against `self.session.selection` →
+    /// fails on the moved row with `(1.0, 0.4)`. The control, the selection
+    /// staying on A, is green either way and shows the deadline is reached.
     #[test]
     fn a_typed_opacity_digit_lands_on_the_layer_it_was_typed_against() {
         let ctx = egui::Context::default();

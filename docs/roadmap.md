@@ -12,12 +12,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and
   each restates the arm. One helper taking the drawn box, the wanted box and the held handle.
 
-## Now · Keyboard
-
-- **"A value in flight carries its subject" is written three times** (§15 D470): the docs on
-  `InFlight::session_scrub` and `OpacityEntry::subject`, and the D470 regression test's doc. State it
-  once, on `InFlight`.
-
 ## Now · Files, library and storage
 
 - **The two project cards hand-roll their footers** (§15 D719): `new_project_modal` and

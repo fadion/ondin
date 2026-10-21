@@ -49,27 +49,12 @@ use std::process::Command;
 
 /// Crate-name prefixes that must never appear in the dependency tree of a crate
 /// that has to stay **headless** — `ondin-core` by invariant 1, `ondin-mcp` by
-/// §3. No GPU, no windowing, no UI.
+/// §3. No GPU, no windowing, no UI. The transitive half of core's rule; its
+/// direct dependencies are held to `CORE_PERMITTED` below.
 ///
-/// ⚠️ **This list is narrower than the rule it enforces, and it is matched by
-/// `starts_with`, which is where several near-misses live.** §3 states the rule
-/// as *"any GPU/windowing/UI crate"*; `"eframe".starts_with("egui")` is `false`,
-/// and so are `emath`, `ecolor`, `epaint`, `epaint_default_fonts` and
-/// `raw-window-handle` — every one of them really in the app's tree. `epaint`
-/// had a partial accidental backstop (it pulls `vello_common`/`vello_cpu`, which
-/// trips the `vello` prefix), but that edge is version-contingent and the others
-/// had none at all. The names below are now enumerated rather than inferred.
-///
-/// **The right shape is an allowlist** — §3 already enumerates what core *may*
-/// depend on, so the test could assert the direct list is a subset of it and
-/// fall back to prefixes for the transitive tree.
-///
-/// ⚠️ **That change was blocked on §3's list being wrong, and it is not any
-/// more** (§15 D427). §3 omitted `roxmltree`, `skrifa`, `read-fonts` and
-/// `flo_curves`, all really there, and baking a wrong allowlist in would have
-/// been worse than the denylist. The list was corrected on 2026-09-06, so the
-/// stated blocker is gone and the inversion is now ordinary work rather than
-/// work waiting on a decision.
+/// ⚠️ **Matched by `starts_with`, so every name is enumerated**:
+/// `"eframe".starts_with("egui")` is `false`, and so are `emath`, `ecolor`,
+/// `epaint` and `raw-window-handle`, all really in the app's tree.
 const HEADLESS: &[&str] = &[
     "vello",             // GPU/CPU renderer — belongs only in ondin-render
     "wgpu",              // GPU abstraction
@@ -135,6 +120,78 @@ const RULES: &[(&str, &[&str])] = &[
     ("ondin-render", NO_UI),
     ("ondin-export", NO_UI),
 ];
+
+/// What `ondin-core` may declare: `design/foundations.md` §3's permitted list,
+/// which must stay set-equal to the manifest.
+const CORE_PERMITTED: &[&str] = &[
+    "base64",
+    "flo_curves",
+    "kurbo",
+    "parley",
+    "peniko",
+    "read-fonts",
+    "roxmltree",
+    "rstar",
+    "rustc-hash",
+    "serde",
+    "serde_json",
+    "skrifa",
+    "taffy",
+    "thiserror",
+];
+
+/// The crate names `manifest` declares under `[dependencies]` and its
+/// `[target.….dependencies]` tables — not dev or build dependencies, which are
+/// not part of the shipped graph §3 is about.
+fn declared(manifest: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut in_deps = false;
+    for line in manifest.lines() {
+        let line = line.trim();
+        if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            in_deps = header == "dependencies"
+                || (header.starts_with("target.") && header.ends_with(".dependencies"));
+            continue;
+        }
+        if !in_deps || line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        // `kurbo.workspace = true`, `taffy = { … }` and `"x" = …` all put the
+        // name first.
+        let name = line
+            .split(['.', '=', ' '])
+            .next()
+            .unwrap_or_default()
+            .trim_matches('"');
+        names.push(name.to_string());
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// `ondin-core` declares exactly §3's permitted list: a dependency added to the
+/// manifest without the list fails, and so does a name left on the list after
+/// the manifest dropped it. Flip: adding `"image"` to `CORE_PERMITTED` →
+/// fails, listing it as permitted and undeclared.
+#[test]
+fn ondin_core_declares_exactly_the_permitted_list() {
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+    )
+    .expect("core's manifest is readable");
+    let declared = declared(&manifest);
+    assert!(
+        declared.iter().any(|d| d == "kurbo"),
+        "the parse found core's dependencies at all: {declared:?}"
+    );
+    let mut permitted: Vec<String> = CORE_PERMITTED.iter().map(|s| s.to_string()).collect();
+    permitted.sort_unstable();
+    assert_eq!(
+        declared, permitted,
+        "ondin-core's [dependencies] (left) must equal §3's permitted list (right)"
+    );
+}
 
 /// The packages named by `RULES`, for the vacuity guard below: a rule whose
 /// subject is not in the tree at all has checked nothing, and would pass.
@@ -309,32 +366,8 @@ fn only_ondin_render_declares_vello() {
             .expect("a crate directory has a UTF-8 name")
             .to_string();
         let text = std::fs::read_to_string(&manifest).expect("manifest is readable");
-
-        // Section-aware, because `[dev-dependencies]` is out of scope for the
-        // same reason the tree walk passes `--edges normal`: a test-only
-        // dependency is not part of the shipped graph §3 is about.
-        let mut in_deps = false;
-        for line in text.lines() {
-            let line = line.trim();
-            if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-                in_deps = header == "dependencies"
-                    || (header.starts_with("target.") && header.ends_with(".dependencies"));
-                continue;
-            }
-            if !in_deps || line.starts_with('#') || line.is_empty() {
-                continue;
-            }
-            // `vello.workspace = true`, `vello_cpu = { … }` and
-            // `ondin-core = { path = … }` all put the crate name first.
-            let name = line
-                .split(['.', '=', ' '])
-                .next()
-                .unwrap_or_default()
-                .trim_matches('"');
-            if name.starts_with("vello") {
-                declarers.push(member.clone());
-                break;
-            }
+        if declared(&text).iter().any(|n| n.starts_with("vello")) {
+            declarers.push(member);
         }
     }
 

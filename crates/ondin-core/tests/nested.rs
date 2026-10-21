@@ -198,6 +198,69 @@ fn fixture() -> F {
     f
 }
 
+/// A main named `name` last at the root holding `Icon`, an instance of Arrow ·
+/// Regular; returns the main and its `Icon`.
+fn main_with_icon(f: &mut F, name: &str) -> (NodeId, NodeId) {
+    let main = f.ids.mint();
+    let index = f.node(f.root).children().len();
+    f.commit(vec![create(main, f.root, index, frame(80.0, 30.0), name)]);
+    let (tx, icon) = instance(&f.doc, &mut f.ids, f.a_reg, main);
+    f.commit(tx.0);
+    f.commit(vec![
+        Operation::SetName {
+            id: icon,
+            name: "Icon".into(),
+        },
+        Operation::SetComponent {
+            id: main,
+            component: true,
+        },
+    ]);
+    (main, icon)
+}
+
+/// A set **Buttons** whose variants are `sizes`, one `Size` value each, every
+/// variant holding an `Icon`; returns the set, its variants and their `Icon`s.
+fn buttons(f: &mut F, sizes: &[&str]) -> (NodeId, Vec<NodeId>, Vec<NodeId>) {
+    let set = f.ids.mint();
+    let index = f.node(f.root).children().len();
+    f.commit(vec![create(
+        set,
+        f.root,
+        index,
+        frame(300.0, 100.0),
+        "Buttons",
+    )]);
+    let (mut mains, mut icons) = (Vec::new(), Vec::new());
+    for (i, s) in sizes.iter().enumerate() {
+        let (main, icon) = main_with_icon(f, s);
+        f.commit(vec![Operation::Reparent {
+            id: main,
+            new_parent: set,
+            index: i,
+        }]);
+        mains.push(main);
+        icons.push(icon);
+    }
+    let mut ops = vec![Operation::SetVariantSet {
+        id: set,
+        set: Some(VariantSet {
+            props: vec![VariantProp {
+                name: "Size".into(),
+                values: sizes.iter().map(|s| s.to_string()).collect(),
+            }],
+        }),
+    }];
+    for (m, s) in mains.iter().zip(sizes) {
+        ops.push(Operation::SetVariant {
+            id: *m,
+            values: vec![s.to_string()],
+        });
+    }
+    f.commit(ops);
+    (set, mains, icons)
+}
+
 /// **A shown slot lists its copy on the instance**, and only once shown:
 /// `shown_nested` is empty, then names `r` with the path and the name-path key
 /// the card matches several instances by; and the last showing taken away takes
@@ -625,51 +688,8 @@ fn a_mains_properties_round_trip_through_a_file() {
 #[test]
 fn showing_a_slot_in_a_set_shows_it_in_every_variant() {
     let mut f = fixture();
-    let [set, small, large] = [(); 3].map(|_| f.ids.mint());
-    f.commit(vec![
-        create(set, f.root, 3, frame(300.0, 100.0), "Buttons"),
-        create(small, set, 0, frame(80.0, 30.0), "Small"),
-        create(large, set, 1, frame(120.0, 40.0), "Large"),
-    ]);
-    let mut icons = Vec::new();
-    for v in [small, large] {
-        let (tx, icon) = instance(&f.doc, &mut f.ids, f.a_reg, v);
-        f.commit(tx.0);
-        f.commit(vec![Operation::SetName {
-            id: icon,
-            name: "Icon".into(),
-        }]);
-        icons.push(icon);
-    }
-    let size = |v: &str| vec![v.to_string()];
-    f.commit(vec![
-        Operation::SetComponent {
-            id: small,
-            component: true,
-        },
-        Operation::SetComponent {
-            id: large,
-            component: true,
-        },
-        Operation::SetVariantSet {
-            id: set,
-            set: Some(VariantSet {
-                props: vec![VariantProp {
-                    name: "Size".into(),
-                    values: vec!["Small".into(), "Large".into()],
-                }],
-            }),
-        },
-        Operation::SetVariant {
-            id: small,
-            values: size("Small"),
-        },
-        Operation::SetVariant {
-            id: large,
-            values: size("Large"),
-        },
-    ]);
-    let (tx, l1) = instance(&f.doc, &mut f.ids, large, f.root);
+    let (_, mains, icons) = buttons(&mut f, &["Small", "Large"]);
+    let (tx, l1) = instance(&f.doc, &mut f.ids, mains[1], f.root);
     f.commit(tx.0);
     assert!(variant::shown_nested(&f.doc, l1).is_empty());
     f.show(icons[0], true);
@@ -682,6 +702,80 @@ fn showing_a_slot_in_a_set_shows_it_in_every_variant() {
     let shown = variant::shown_nested(&f.doc, l1);
     assert_eq!(shown.len(), 1, "{shown:?}");
     assert_eq!(shown[0].copy, copy);
+}
+
+/// **A main moved into a set after a showing exists is bound** at the shown name
+/// path, as *Add variant* would bind it.
+///
+/// Flip, run: `settle`'s extension of the showing by `owed` dropped fails
+/// *"Huge's Icon joins the showing"*.
+#[test]
+fn a_main_moved_into_a_set_with_a_showing_is_bound() {
+    let mut f = fixture();
+    let (set, _, icons) = buttons(&mut f, &["Small", "Large"]);
+    f.show(icons[0], true);
+    let (huge, huge_icon) = main_with_icon(&mut f, "Huge");
+    assert!(!variant::slot_is_shown(&f.doc, huge_icon));
+    f.commit(vec![Operation::Reparent {
+        id: huge,
+        new_parent: set,
+        index: 2,
+    }]);
+    assert_eq!(
+        variant::set_of(&f.doc, huge),
+        Some(set),
+        "Huge is a variant"
+    );
+    assert!(
+        variant::slot_is_shown(&f.doc, huge_icon),
+        "Huge's Icon joins the showing"
+    );
+}
+
+/// **Combining mains where only one shows its slot binds the slot in each**: the
+/// set's one showing covers every variant.
+#[test]
+fn combining_mains_binds_the_slot_every_main_holds() {
+    let mut f = fixture();
+    let (a, a_icon) = main_with_icon(&mut f, "Chip/On");
+    let (b, b_icon) = main_with_icon(&mut f, "Chip/Off");
+    f.show(a_icon, true);
+    assert!(!variant::slot_is_shown(&f.doc, b_icon));
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let (tx, _) = variant::combine(&f.doc, &res, &mut f.ids, &[a, b]).unwrap();
+    f.commit(tx.0);
+    assert!(variant::slot_is_shown(&f.doc, a_icon));
+    assert!(
+        variant::slot_is_shown(&f.doc, b_icon),
+        "Off's Icon is shown as On's is"
+    );
+}
+
+/// **A nested instance renamed onto a shown path in one variant is bound**: it
+/// arrives under its main's name, unbound, and the rename to `Icon` binds it.
+///
+/// Flip, run: `settle`'s `SetName` gate without `in_shown_set` skips the pass on
+/// the rename and fails *"the renamed instance is shown"*.
+#[test]
+fn a_slot_renamed_onto_a_shown_path_is_bound() {
+    let mut f = fixture();
+    let (_, mains, icons) = buttons(&mut f, &["Small", "Large"]);
+    f.show(icons[0], true);
+    f.commit(vec![Operation::DeleteNode { id: icons[1] }]);
+    let (tx, fresh) = instance(&f.doc, &mut f.ids, f.a_reg, mains[1]);
+    f.commit(tx.0);
+    assert!(
+        !variant::slot_is_shown(&f.doc, fresh),
+        "not yet at the path"
+    );
+    f.commit(vec![Operation::SetName {
+        id: fresh,
+        name: "Icon".into(),
+    }]);
+    assert!(
+        variant::slot_is_shown(&f.doc, fresh),
+        "the renamed instance is shown"
+    );
 }
 
 /// **The rules**: one showing per owner, and a showing binds only a nested

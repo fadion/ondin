@@ -374,7 +374,10 @@ fn binding_fits(nodes: &FxHashMap<NodeId, Node>, owner: NodeId, bound: &Node) ->
 /// - **properties sit on an owner**: a variant's move to its set, merged by name
 ///   and kind; a node that is no longer a main or a set loses them;
 /// - **every binding still fits**: a bound layer deleted, moved out of the
-///   owner's mains, or bound twice for one field is unbound.
+///   owner's mains, or bound twice for one field is unbound;
+/// - **a set's showing covers every variant**: the nested instance at a shown
+///   slot's name path in each variant is bound, so a main that joins the set by
+///   any door is bound as [`set_shown`] would have bound it.
 ///
 /// Empty for a document with no set, variant or property and a transaction that
 /// makes none.
@@ -395,7 +398,8 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
     });
     // **Only an edit that can break a rule pays for the scratch copy** — the
     // clone is this pass's whole cost and the commit runs it on every edit: the
-    // tree changing shape, a main made or unmade, a variant renamed by hand — or
+    // tree changing shape, a main made or unmade, a variant renamed by hand, a
+    // layer renamed inside a set that shows a slot (its name path may now be shown) — or
     // a link moved, since a swap or nested binding fits only a node linked to a
     // main (`kind_fits`): a detach of a bound or shown slot was refused at the
     // commit (`[X6.1-L2-03]`).
@@ -408,7 +412,9 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
             | Operation::SetSwap { .. } => true,
-            Operation::SetName { id, .. } => doc.get(*id).is_some_and(|n| !n.variant.is_empty()),
+            Operation::SetName { id, .. } => {
+                doc.get(*id).is_some_and(|n| !n.variant.is_empty()) || in_shown_set(doc, *id)
+            }
             _ => false,
         });
     let relevant = |n: &Node| n.set.is_some() || !n.variant.is_empty() || !n.props.is_empty();
@@ -553,6 +559,18 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
     if scratch.apply_unchecked(&Transaction(ops.clone())).is_err() {
         return ops;
     }
+    let owed: FxHashMap<NodeId, Vec<NodeId>> = sets
+        .iter()
+        .filter_map(|&s| {
+            let showing = scratch
+                .get(s)?
+                .props
+                .iter()
+                .find(|p| p.kind == PropKind::Nested)?;
+            let more = owed_slots(&scratch, s, &showing.bound);
+            (!more.is_empty()).then_some((s, more))
+        })
+        .collect();
     let nodes = scratch.node_map();
     for &id in &ids {
         let Some(n) = nodes.get(&id) else { continue };
@@ -570,6 +588,9 @@ pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Opera
         for p in n.props.iter() {
             let mut p = p.clone();
             let kind = p.kind;
+            if kind == PropKind::Nested {
+                p.bound.extend(owed.get(&id).into_iter().flatten().copied());
+            }
             p.bound.retain(|b| {
                 nodes
                     .get(b)
@@ -2044,6 +2065,70 @@ fn at_name_path(doc: &Document, top: NodeId, path: &[(String, usize)]) -> Option
     Some(at)
 }
 
+/// The main at or above `id`: the variant a slot sits in.
+fn main_above(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| doc.get(a)) {
+        if n.component {
+            return Some(n.id);
+        }
+        at = n.parent;
+    }
+    None
+}
+
+/// Whether `id` sits in a variant of a set that shows a slot: a rename there can
+/// move a nested instance onto a shown name path.
+fn in_shown_set(doc: &Document, id: NodeId) -> bool {
+    main_above(doc, id)
+        .and_then(|v| doc.get(v)?.parent)
+        .and_then(|s| doc.get(s))
+        .is_some_and(|s| s.set.is_some() && s.props.iter().any(|p| p.kind == PropKind::Nested))
+}
+
+/// The nested instance at `path` in each of `set`'s variants, where there is one.
+fn slots_at(doc: &Document, set: NodeId, path: &[(String, usize)]) -> Vec<NodeId> {
+    variants(doc, set)
+        .into_iter()
+        .filter_map(|v| at_name_path(doc, v, path))
+        .filter(|s| {
+            doc.get(*s)
+                .and_then(|n| n.link)
+                .and_then(|l| doc.get(l))
+                .is_some_and(|l| l.component)
+        })
+        .collect()
+}
+
+/// The slots `set`'s showing owes beyond `bound`: the nested instance at each
+/// bound slot's name path in every variant, as [`set_shown`] binds them. A main
+/// that joins the set, or a nested instance added to one variant at a shown
+/// path, is bound by this at the commit.
+fn owed_slots(doc: &Document, set: NodeId, bound: &[NodeId]) -> Vec<NodeId> {
+    let mut paths: Vec<Vec<(String, usize)>> = Vec::new();
+    for &b in bound {
+        // A slot that has left the set is the pruning's, not a path to follow.
+        let Some(v) =
+            main_above(doc, b).filter(|v| doc.get(*v).and_then(|n| n.parent) == Some(set))
+        else {
+            continue;
+        };
+        let path = name_path(doc, v, b);
+        if !path.is_empty() && !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    let mut out = Vec::new();
+    for path in &paths {
+        for s in slots_at(doc, set, path) {
+            if !bound.contains(&s) && !out.contains(&s) {
+                out.push(s);
+            }
+        }
+    }
+    out
+}
+
 /// Whether `copy` is a **shown** nested copy: some node on its chain of links is
 /// a slot its owner shows. What gates the carry by property name (4Q's *"limited
 /// to shown rows"*).
@@ -2114,29 +2199,7 @@ pub fn set_shown(
     let owner = owner_above(doc, slot)?;
     let o = doc.get(owner)?;
     let slots: Vec<NodeId> = match o.set {
-        Some(_) => {
-            let variant_of = |id: NodeId| {
-                let mut at = Some(id);
-                while let Some(n) = at.and_then(|a| doc.get(a)) {
-                    if n.component {
-                        return Some(n.id);
-                    }
-                    at = n.parent;
-                }
-                None
-            };
-            let path = name_path(doc, variant_of(slot)?, slot);
-            variants(doc, owner)
-                .into_iter()
-                .filter_map(|v| at_name_path(doc, v, &path))
-                .filter(|s| {
-                    doc.get(*s)
-                        .and_then(|n| n.link)
-                        .and_then(|l| doc.get(l))
-                        .is_some_and(|l| l.component)
-                })
-                .collect()
-        }
+        Some(_) => slots_at(doc, owner, &name_path(doc, main_above(doc, slot)?, slot)),
         None => vec![slot],
     };
     let mut props = o.props.clone();

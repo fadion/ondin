@@ -696,7 +696,9 @@ never raw fields) on every instance of the main.
   (`nested_slots`).
 - Model: `PropKind::Nested`, a **showing**, not a value — at most one per owner, nameless, bound to the
   shown slots, driving no field, so binding checks, delete pruning and set scope are the property
-  machinery's. `set_shown` binds the slot at its name path in every variant of a set.
+  machinery's. `set_shown` binds the slot at its name path in every variant of a set, and
+  `variant::settle` keeps that true at every commit: a main joining the set by any door, or a nested
+  instance added or renamed onto a shown path, is bound (`owed_slots`).
 - An instance's card draws, after its own rows, one group per shown instance (`shown_nested`, layers
   order, recursing so two levels flatten under a › path), headed by the layer and the main it shows now
   (a group follows an outer swap); rows are `instance_rows` = `own_rows` + `shown_groups`, but **never
@@ -712,7 +714,6 @@ never raw fields) on every instance of the main.
 - Only a main's author shows nested properties. A nested instance added inside an instance, not in
   its main, has no slot and shows nothing on the outer card; it is edited by selecting it. Promoting
   it waits on pushing an instance's changes to its main (`roadmap.md`, *Later*).
-- Open items are in `roadmap.md`'s *Now · Nested component properties*.
 
 ### Traps
 

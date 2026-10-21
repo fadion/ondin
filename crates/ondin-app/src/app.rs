@@ -895,6 +895,12 @@ pub struct OndinApp {
     /// Where the pointer is while an armed eyedropper hides it from egui
     /// (`OndinApp::gate_dropper_input`): off the canvas, egui is told it is gone.
     pub(crate) dropper_pointer: Option<egui::Pos2>,
+    /// The window as it stood when the eyedropper armed: what every pick off
+    /// the canvas reads (`crate::eyedropper::Frozen`).
+    pub(crate) dropper_frozen: crate::eyedropper::Frozen,
+    /// A press off the canvas while armed, which egui never saw; its release is
+    /// the pick (primary) or the way out (secondary).
+    pub(crate) dropper_press: Option<(egui::Pos2, egui::PointerButton)>,
     /// The text node currently being edited in-canvas.
     pub(crate) text: Option<TextSession>,
     /// Points selected inside a path, for the node tool — a third kind of
@@ -2379,6 +2385,8 @@ impl OndinApp {
             dropper_pick: None,
             dropper_picks: 0,
             dropper_pointer: None,
+            dropper_frozen: Default::default(),
+            dropper_press: None,
             text: None,
             points: PointSet::default(),
             collapsed: HashSet::new(),

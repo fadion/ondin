@@ -1,12 +1,16 @@
-//! The eyedropper (design canvas, *Eyedropper*): picks a colour off the rendered
-//! canvas — onto the selection from the rail (`I`), or into one slot from a
+//! The eyedropper (design canvas, *Eyedropper*): picks a colour off anything in
+//! the window — onto the selection from the rail (`I`), or into one slot from a
 //! colour picker's pick button.
 //!
-//! A click asks for the sample under it and the write waits for that sample
-//! ([`PendingPick`]), because the GPU readback lands a frame later
-//! (`canvas::CanvasRenderer::request_sample`). Nothing is previewed on the canvas:
-//! a preview would change the very pixels the next sample reads (the design's
-//! rule 4).
+//! **Two sources.** Over the canvas a click asks for the rendered pixel under it
+//! and the write waits for that sample ([`PendingPick`]), because the GPU
+//! readback lands a frame later (`canvas::CanvasRenderer::request_sample`); it
+//! follows a pan or zoom made while armed. Everywhere else a click reads a
+//! capture of the window taken while armed ([`Frozen`]): a live capture would
+//! always read the loupe, which sits under the pointer.
+//!
+//! Nothing is previewed on the canvas: a preview would change the very pixels
+//! the next sample reads (the design's rule 4).
 
 use crate::app::OndinApp;
 use crate::canvas::{LOUPE_SIDE, Sample, SampleKey};
@@ -15,6 +19,7 @@ use crate::tools::Tool;
 use eframe::egui;
 use ondin_core::Brush;
 use ondin_core::peniko::Color;
+use std::sync::Arc;
 
 /// Where an armed eyedropper's pick lands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -25,25 +30,53 @@ pub(crate) enum DropTarget {
     Picker,
 }
 
-/// A click waiting for the sample under it.
+/// Where a pick reads its colour.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum PickAt {
+    /// The canvas: the write needs a sample with this key.
+    Canvas(SampleKey),
+    /// Anywhere else: this point of the frozen window.
+    Window(egui::Pos2),
+}
+
+/// A click waiting for the colour under it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) struct PendingPick {
-    /// What the click was over; the write needs a sample with this key.
-    pub key: SampleKey,
+    pub at: PickAt,
     /// Alt: the top stroke rather than the top fill.
     pub stroke: bool,
     /// Shift: stay armed after the pick.
     pub stay: bool,
 }
 
+/// The window captured while armed, which every pixel off the canvas is read
+/// from. The panels are inert while armed ([`OndinApp::gate_dropper_input`]),
+/// so it stays true but for the picker's live preview; a pick that stays armed,
+/// a resize or a scale change asks for it again.
+#[derive(Default)]
+pub(crate) enum Frozen {
+    /// Not asked for: the next armed frame is drawn without the loupe and
+    /// captured.
+    #[default]
+    None,
+    /// Captured in this pass (`Context::cumulative_pass_nr`), which tags the
+    /// request; lands as an `egui::Event::Screenshot` once the GPU has copied it.
+    Asked(u64, Screen),
+    Ready(Arc<egui::ColorImage>, Screen),
+}
+
+/// The window's size in points and its scale, which a frozen frame must match.
+pub(crate) type Screen = (egui::Rect, f32);
+
+/// The tag on the eyedropper's `ViewportCommand::Screenshot`, carrying the pass
+/// that asked, so a capture from an earlier arming is not taken for this one.
+struct FrozenShot(u64);
+
 /// The loupe's cells, in points.
 const CELL: f32 = 8.0;
 /// The gap between the loupe and its hex chip.
 const CHIP_GAP: f32 = 5.0;
 const CHIP_H: f32 = 20.0;
-/// Where the "Off canvas" hint's top-centre sits from the pointer: under the
-/// dropper cursor's glyph, which hangs down and right of its tip.
-const OFF_CANVAS_HINT: egui::Vec2 = egui::vec2(10.0, 24.0);
 
 impl OndinApp {
     /// What an armed eyedropper would pick into, or `None` when it is not armed.
@@ -70,6 +103,8 @@ impl OndinApp {
     /// from. False when neither was.
     pub(crate) fn disarm_dropper(&mut self) -> bool {
         self.dropper_pick = None;
+        self.dropper_press = None;
+        self.dropper_frozen = Frozen::None;
         if let Some(p) = self.picker.as_mut().filter(|p| p.picking) {
             p.picking = false;
             p.preview = None;
@@ -82,32 +117,53 @@ impl OndinApp {
         false
     }
 
-    /// While an eyedropper is armed, egui sees the pointer only where a click
-    /// picks: the canvas, and the picker when it is the one picking. Elsewhere it
-    /// is told the pointer is gone and gets no press and no wheel, so no panel
-    /// hovers, takes a click or scrolls; [`OndinApp::dropper_pointer`] keeps the
-    /// position for the dropper's own cursor. Run on the raw input, before egui.
+    /// While an eyedropper is armed, egui sees the pointer only over the canvas.
+    /// Elsewhere it is told the pointer is gone and gets no press and no wheel,
+    /// so no panel hovers, takes a click or scrolls, and the frozen window stays
+    /// true; [`OndinApp::dropper_pointer`] keeps the position for the loupe. A
+    /// click there is the dropper's own: a pick off the frozen window, or with
+    /// the secondary button the way out. Run on the raw input, before egui.
     ///
     /// A press egui already has finishes untouched wherever it goes, so a pan
     /// dragged off the canvas still ends — and a release with no press egui saw
     /// is dropped, which is what spends the release of a swallowed press.
     pub(crate) fn gate_dropper_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        let Some(target) = self.dropper_armed() else {
+        if self.dropper_armed().is_none() {
+            self.dropper_press = None;
+            self.dropper_frozen = Frozen::None;
             // Disarmed with the pointer hidden: hand it back where it is, or the
             // panel under it would not hover until it moved.
             if let Some(p) = self.dropper_pointer.take() {
                 raw.events.insert(0, egui::Event::PointerMoved(p));
             }
             return;
-        };
-        let (canvas, picker) = (self.canvas_rect, target == DropTarget::Picker);
+        }
+        if let Frozen::Asked(n, screen) = self.dropper_frozen
+            && let Some(image) = raw.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot {
+                    user_data, image, ..
+                } if user_data
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.downcast_ref::<FrozenShot>())
+                    .is_some_and(|s| s.0 == n) =>
+                {
+                    Some(image.clone())
+                }
+                _ => None,
+            })
+        {
+            self.dropper_frozen = Frozen::Ready(image, screen);
+        }
+        let canvas = self.canvas_rect;
         // The panels all draw in the background layer, and the canvas is the one
-        // among them that picks; any area above it is chrome.
+        // among them egui keeps; any area above it is chrome, the picker too.
         let live = |p: egui::Pos2| match ctx.layer_id_at(p) {
-            Some(l) if l.id == crate::panels::picker_layer_id() => picker,
             Some(l) if l.order != egui::Order::Background => false,
             _ => canvas.contains(p),
         };
+        let modifiers = raw.modifiers;
+        let (mut press, mut released) = (self.dropper_press, None);
         let (mut down, latest) = ctx.input(|i| (i.pointer.any_down(), i.pointer.latest_pos()));
         let mut hidden = self.dropper_pointer;
         // Armed with the pointer resting on a panel — `I`, or the rail's own
@@ -135,10 +191,20 @@ impl OndinApp {
                 (at, hidden) = (None, None);
                 true
             }
-            egui::Event::PointerButton { pos, pressed, .. } => {
+            egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                ..
+            } => {
                 let keep = if pressed { down || live(pos) } else { down };
                 if keep {
                     down = pressed;
+                } else if pressed {
+                    press = press.or(Some((pos, button)));
+                } else if let Some((at, b)) = press.filter(|&(_, b)| b == button) {
+                    press = None;
+                    released = Some((at, b));
                 }
                 keep
             }
@@ -148,6 +214,20 @@ impl OndinApp {
             _ => true,
         });
         self.dropper_pointer = hidden;
+        self.dropper_press = press;
+        match released {
+            Some((at, egui::PointerButton::Primary)) => {
+                self.dropper_pick = Some(PendingPick {
+                    at: PickAt::Window(at),
+                    stroke: modifiers.alt,
+                    stay: modifiers.shift,
+                });
+            }
+            Some((_, egui::PointerButton::Secondary)) => {
+                self.disarm_dropper();
+            }
+            _ => {}
+        }
     }
 
     /// The canvas's input while an eyedropper is armed: a click asks for the
@@ -169,10 +249,10 @@ impl OndinApp {
         let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
         self.dropper_picks += 1;
         self.dropper_pick = Some(PendingPick {
-            key: SampleKey {
+            at: PickAt::Canvas(SampleKey {
                 pick: self.dropper_picks,
                 ..self.sample_key(p, rect, ppp)
-            },
+            }),
             stroke: alt,
             stay: shift,
         });
@@ -238,11 +318,16 @@ impl OndinApp {
             }
             None => {}
         }
+        // Still armed: the pick changed what the panels show, so the frozen
+        // window is asked for again on the next frame, which draws the change.
+        if self.dropper_armed().is_some() {
+            self.dropper_frozen = Frozen::None;
+        }
     }
 
     /// Sample under the pointer, land a waiting pick, feed the picker's preview,
     /// and draw the loupe — once a frame, after the canvas has rendered.
-    /// Returns true while a readback is in flight.
+    /// Returns true while a readback or the frozen window is in flight.
     pub(crate) fn dropper_frame(
         &mut self,
         ui: &egui::Ui,
@@ -252,9 +337,28 @@ impl OndinApp {
     ) -> bool {
         let Some(target) = self.dropper_armed() else {
             self.dropper_pick = None;
+            self.dropper_frozen = Frozen::None;
             return false;
         };
         let ctx = ui.ctx().clone();
+        let screen: Screen = (ctx.content_rect(), ctx.pixels_per_point());
+        if matches!(&self.dropper_frozen, Frozen::Asked(_, s) | Frozen::Ready(_, s) if *s != screen)
+        {
+            self.dropper_frozen = Frozen::None;
+        }
+        // This frame is the one captured, so it draws no loupe.
+        let pass = ctx.cumulative_pass_nr();
+        let freezing = matches!(self.dropper_frozen, Frozen::None);
+        if freezing {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::new(
+                FrozenShot(pass),
+            )));
+            self.dropper_frozen = Frozen::Asked(pass, screen);
+        }
+        let frozen = match &self.dropper_frozen {
+            Frozen::Ready(image, (_, ppp)) => Some((image.clone(), *ppp)),
+            _ => None,
+        };
         // Off the canvas egui is told the pointer is gone (`gate_dropper_input`).
         let pointer = ctx.pointer_hover_pos().or(self.dropper_pointer);
         let over_canvas = pointer
@@ -262,23 +366,33 @@ impl OndinApp {
             .filter(|p| rect.contains(*p));
         let camera = self.session.camera;
         let backdrop = self.session.preview_canvas_background();
-        let mut busy = false;
+        // Ask for frames until the capture lands, but not forever: a surface
+        // format egui cannot capture never answers.
+        let mut busy = matches!(self.dropper_frozen, Frozen::Asked(at, _) if pass < at + 30);
         // The pick first: it is the sample that must land, and the hover is
         // usually the same pixel.
         let want = self
             .dropper_pick
-            .map(|p| p.key)
+            .and_then(|p| match p.at {
+                PickAt::Canvas(key) => Some(key),
+                PickAt::Window(_) => None,
+            })
             .or_else(|| over_canvas.map(|p| self.sample_key(p, rect, ppp)));
         if let Some(key) = want {
             let (doc, res, _) = self.session.render_inputs();
-            busy = self.canvas.request_sample(key, doc, res, &camera, backdrop);
+            busy |= self.canvas.request_sample(key, doc, res, &camera, backdrop);
         }
         if let Some(pick) = self.dropper_pick {
-            let landed = self
-                .canvas
-                .sample()
-                .filter(|s| s.key == pick.key)
-                .map(|s| s.center());
+            let landed = match pick.at {
+                PickAt::Canvas(key) => self
+                    .canvas
+                    .sample()
+                    .filter(|s| s.key == key)
+                    .map(|s| s.center()),
+                PickAt::Window(p) => frozen
+                    .as_ref()
+                    .map(|(image, ppp)| center(&window_region(image, p, *ppp))),
+            };
             match landed {
                 Some(Some(rgb)) => {
                     self.dropper_pick = None;
@@ -288,43 +402,68 @@ impl OndinApp {
                 None => {}
             }
         }
-        // The picker shows the latest sample while the pointer is on the canvas,
-        // as the loupe does; off it, its own colour.
+        let window = frozen.as_ref().and_then(|(image, ppp)| {
+            let p = pointer.filter(|_| over_canvas.is_none())?;
+            Some(window_region(image, p, *ppp))
+        });
+        // The picker shows what the loupe shows; with nothing under the pointer
+        // yet, its own colour.
         //
-        // ⚠️ **The latest sample, not the one for this pixel.** Each pixel of
-        // movement starts a readback that lands a frame later, and waiting for the
-        // matching one put the slot's own colour back for that frame: the picker
-        // flickered on every move. Headless samples land at once, so no test
-        // here can see this.
-        let hovered = over_canvas
-            .and(self.canvas.sample())
-            .and_then(Sample::center);
+        // ⚠️ **On the canvas, the latest sample, not the one for this pixel.**
+        // Each pixel of movement starts a readback that lands a frame later, and
+        // waiting for the matching one put the slot's own colour back for that
+        // frame: the picker flickered on every move. Headless samples land at
+        // once, so no test here can see this.
+        let hovered = match &window {
+            Some(px) => center(px),
+            None => over_canvas
+                .and(self.canvas.sample())
+                .and_then(Sample::center),
+        };
         if target == DropTarget::Picker
             && let Some(p) = &mut self.picker
         {
             p.preview = hovered;
         }
-        if let Some(p) = pointer {
-            let over_picker = ctx
-                .layer_id_at(p)
-                .is_some_and(|l| l.id == crate::panels::picker_layer_id());
-            if over_canvas.is_some() {
-                draw_loupe(&ctx, p, self.canvas.sample(), ctx.content_rect());
-            } else if !over_picker {
-                // Off the canvas the loupe gives way to the dropper cursor and a
-                // hint under it (L5); the picker keeps its own pointer.
-                ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-                ctx.set_cursor_image(self.cursors.image(&ctx, crate::cursor::Bitmap::Eyedropper));
-                draw_chip(
-                    &loupe_painter(&ctx),
-                    p.x + OFF_CANVAS_HINT.x,
-                    p.y + OFF_CANVAS_HINT.y,
-                    None,
-                );
+        let Some(p) = pointer else { return busy };
+        if over_canvas.is_some() {
+            if !freezing {
+                let sample = self.canvas.sample().map(|s| s.pixels.as_slice());
+                draw_loupe(&ctx, p, sample, ctx.content_rect());
             }
+        } else if let Some(px) = &window {
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+            draw_loupe(&ctx, p, Some(px), ctx.content_rect());
+        } else {
+            // Until the frozen window lands there is nothing to read off the
+            // canvas, and the dropper's own cursor stands in for the loupe.
+            ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+            ctx.set_cursor_image(self.cursors.image(&ctx, crate::cursor::Bitmap::Eyedropper));
         }
         busy
     }
+}
+
+/// The loupe's pixels round `at` (in points) off a frozen window captured at
+/// `ppp` pixels per point; `None` past its edge.
+fn window_region(image: &egui::ColorImage, at: egui::Pos2, ppp: f32) -> Vec<Option<[u8; 3]>> {
+    let half = (LOUPE_SIDE / 2) as i64;
+    let [w, h] = image.size.map(|v| v as i64);
+    let (cx, cy) = ((at.x * ppp).floor() as i64, (at.y * ppp).floor() as i64);
+    (-half..=half)
+        .flat_map(|dy| (-half..=half).map(move |dx| (cx + dx, cy + dy)))
+        .map(|(x, y)| {
+            ((0..w).contains(&x) && (0..h).contains(&y)).then(|| {
+                let c = image.pixels[(y * w + x) as usize];
+                [c.r(), c.g(), c.b()]
+            })
+        })
+        .collect()
+}
+
+/// A loupe's hotspot colour.
+fn center(pixels: &[Option<[u8; 3]>]) -> Option<[u8; 3]> {
+    pixels[(LOUPE_SIDE * LOUPE_SIDE / 2) as usize]
 }
 
 /// The painter the loupe and its chip draw with, over every panel and popover.
@@ -336,13 +475,19 @@ fn loupe_painter(ctx: &egui::Context) -> egui::Painter {
 }
 
 /// The loupe centred on the hotspot `at`, with its hex chip under it — above it
-/// where the chip would leave `screen` (the design's L1, L2). Before the first
-/// sample lands it is an empty frame.
+/// where the chip would leave `screen` (the design's L1, L2). `pixels` are
+/// [`LOUPE_SIDE`]² row-major; before the first sample lands it is an empty
+/// frame with no chip.
 ///
 /// **Two rims, dark outside light**, under a soft shadow: whatever the ground,
 /// one of the pair contrasts with it, so the loupe never dissolves into a
 /// flat colour the way a single light hairline did over a pale page.
-fn draw_loupe(ctx: &egui::Context, at: egui::Pos2, sample: Option<&Sample>, screen: egui::Rect) {
+fn draw_loupe(
+    ctx: &egui::Context,
+    at: egui::Pos2,
+    pixels: Option<&[Option<[u8; 3]>]>,
+    screen: egui::Rect,
+) {
     let painter = loupe_painter(ctx);
     let side = LOUPE_SIDE as f32 * CELL;
     let loupe = egui::Rect::from_center_size(at, egui::vec2(side, side));
@@ -357,8 +502,8 @@ fn draw_loupe(ctx: &egui::Context, at: egui::Pos2, sample: Option<&Sample>, scre
         .as_shape(loupe, radius),
     );
     painter.rect_filled(loupe, radius, egui::Color32::from_gray(18));
-    if let Some(s) = sample {
-        for (i, px) in s.pixels.iter().enumerate() {
+    if let Some(pixels) = pixels {
+        for (i, px) in pixels.iter().enumerate() {
             let Some([r, g, b]) = *px else { continue };
             let (x, y) = (
                 (i as u32 % LOUPE_SIDE) as f32,
@@ -414,27 +559,18 @@ fn draw_loupe(ctx: &egui::Context, at: egui::Pos2, sample: Option<&Sample>, scre
     } else {
         loupe.top() - CHIP_GAP - CHIP_H
     };
-    draw_chip(&painter, at.x, top, sample.and_then(Sample::center));
+    if let Some(rgb) = pixels.and_then(center) {
+        draw_chip(&painter, at.x, top, rgb);
+    }
 }
 
 /// The chip under the loupe — swatch and hex — centred on `x` with its top at
-/// `top`; with no colour, the "Off canvas" hint under the dropper cursor (L5).
-fn draw_chip(painter: &egui::Painter, x: f32, top: f32, center: Option<[u8; 3]>) {
-    let text = match center {
-        Some([r, g, b]) => crate::ui::hex_of(Color::from_rgba8(r, g, b, 255)),
-        None => "Off canvas".to_owned(),
-    };
+/// `top`.
+fn draw_chip(painter: &egui::Painter, x: f32, top: f32, [r, g, b]: [u8; 3]) {
+    let text = crate::ui::hex_of(Color::from_rgba8(r, g, b, 255));
     let font = egui::FontId::proportional(10.5);
-    let galley = painter.layout_no_wrap(
-        text,
-        font,
-        if center.is_some() {
-            egui::Color32::WHITE
-        } else {
-            egui::Color32::from_white_alpha(170)
-        },
-    );
-    let swatch = if center.is_some() { 10.0 + 5.0 } else { 0.0 };
+    let galley = painter.layout_no_wrap(text, font, egui::Color32::WHITE);
+    let swatch = 10.0 + 5.0;
     let w = galley.size().x + swatch + 12.0;
     let chip = egui::Rect::from_min_size(egui::pos2(x - w / 2.0, top), egui::vec2(w, CHIP_H));
     painter.rect(
@@ -444,19 +580,17 @@ fn draw_chip(painter: &egui::Painter, x: f32, top: f32, center: Option<[u8; 3]>)
         egui::Stroke::new(1.0, egui::Color32::from_white_alpha(31)),
         egui::StrokeKind::Inside,
     );
-    let mut x = chip.left() + 6.0;
-    if let Some([r, g, b]) = center {
-        let sw =
-            egui::Rect::from_min_size(egui::pos2(x, chip.center().y - 5.0), egui::vec2(10.0, 10.0));
-        painter.rect(
-            sw,
-            egui::CornerRadius::same(3),
-            egui::Color32::from_rgb(r, g, b),
-            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(64)),
-            egui::StrokeKind::Inside,
-        );
-        x += swatch;
-    }
+    let x = chip.left() + 6.0;
+    let sw =
+        egui::Rect::from_min_size(egui::pos2(x, chip.center().y - 5.0), egui::vec2(10.0, 10.0));
+    painter.rect(
+        sw,
+        egui::CornerRadius::same(3),
+        egui::Color32::from_rgb(r, g, b),
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(64)),
+        egui::StrokeKind::Inside,
+    );
+    let x = x + swatch;
     painter.galley(
         egui::pos2(x, chip.center().y - galley.size().y / 2.0),
         galley,
@@ -859,9 +993,10 @@ mod tests {
         app
     }
 
-    /// **Off the canvas an armed dropper hides the pointer from egui and spends
+    /// **Off the canvas an armed dropper hides the pointer from egui and keeps
     /// its click and wheel** — over a panel and over the inspector — keeping the
-    /// position for its own cursor; disarming hands the pointer back.
+    /// position for the loupe and the click as a window pick; disarming hands
+    /// the pointer back.
     /// flip: `gate_dropper_input`'s `live` answering true → fails at the gone.
     #[test]
     fn off_the_canvas_the_panels_get_no_pointer() {
@@ -888,19 +1023,25 @@ mod tests {
         );
         assert_eq!(out, vec![egui::Event::PointerGone; 2]);
         assert_eq!(app.dropper_pointer, Some(ON_INSPECTOR));
+        assert_eq!(
+            app.dropper_pick.map(|p| p.at),
+            Some(PickAt::Window(ON_INSPECTOR)),
+            "the last click is the dropper's"
+        );
         assert!(app.disarm_dropper(), "fixture: disarmed");
         let out = gate(&ctx, &mut app, Vec::new());
         assert_eq!(out, vec![egui::Event::PointerMoved(ON_INSPECTOR)]);
         assert_eq!(app.dropper_pointer, None);
     }
 
-    /// **Over the canvas and the picking picker everything passes, and a press
-    /// made on the canvas finishes off it** — a pan dragged past the canvas
-    /// still gets its release.
+    /// **Over the canvas everything passes, and a press made on the canvas
+    /// finishes off it** — a pan dragged past the canvas still gets its
+    /// release. The picking picker is pickable, not clickable.
     /// flip: `live` taking the background layer for chrome → fails at the first
-    /// move; the `PointerMoved` arm ignoring `down` → fails at the drag.
+    /// move; the `PointerMoved` arm ignoring `down` → fails at the drag; `live`
+    /// answering true over the picker → fails at the picker.
     #[test]
-    fn the_canvas_and_the_picker_get_the_pointer() {
+    fn the_canvas_gets_the_pointer_and_the_picker_does_not() {
         let ctx = egui::Context::default();
         let mut app = laid_out(&ctx);
         let events = vec![
@@ -908,12 +1049,252 @@ mod tests {
             button(ON_CANVAS, true),
             egui::Event::PointerMoved(ON_LAYERS),
             button(ON_LAYERS, false),
-            egui::Event::PointerMoved(ON_PICKER),
-            button(ON_PICKER, true),
-            button(ON_PICKER, false),
         ];
         assert_eq!(gate(&ctx, &mut app, events.clone()), events);
         assert_eq!(app.dropper_pointer, None);
+        let out = gate(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(ON_PICKER),
+                button(ON_PICKER, true),
+                button(ON_PICKER, false),
+            ],
+        );
+        assert_eq!(out, vec![egui::Event::PointerGone], "the picker");
+        assert_eq!(
+            app.dropper_pick.map(|p| p.at),
+            Some(PickAt::Window(ON_PICKER))
+        );
+    }
+
+    const GREEN: [u8; 3] = [0x2E, 0xB8, 0x6E];
+
+    /// One whole app frame at `SCREEN`, through the gate as eframe runs it.
+    fn app_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> egui::FullOutput {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(SCREEN),
+            events,
+            modifiers,
+            ..Default::default()
+        };
+        app.gate_dropper_input(ctx, &mut raw);
+        let mut f = eframe::Frame::_new_kittest();
+        ctx.run_ui(raw, |ui| eframe::App::ui(app, ui, &mut f))
+    }
+
+    /// Move to `at`, then press and release `which` there, each in a frame.
+    fn app_click(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        at: egui::Pos2,
+        which: egui::PointerButton,
+        modifiers: egui::Modifiers,
+    ) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: which,
+            pressed,
+            modifiers,
+        };
+        app_frame(ctx, app, vec![egui::Event::PointerMoved(at)], modifiers);
+        app_frame(ctx, app, vec![press(true)], modifiers);
+        app_frame(ctx, app, vec![press(false)], modifiers);
+        app_frame(ctx, app, Vec::new(), modifiers);
+    }
+
+    /// The capture eframe answers a pending ask with, tagged `pass`: `SCREEN`
+    /// in grey, with `GREEN` round `ON_LAYERS`.
+    fn capture(pass: u64) -> egui::Event {
+        let w = SCREEN.width() as usize;
+        let mut image =
+            egui::ColorImage::filled([w, SCREEN.height() as usize], egui::Color32::from_gray(40));
+        let [r, g, b] = GREEN;
+        for y in 290..310 {
+            for x in 140..160 {
+                image.pixels[y * w + x] = egui::Color32::from_rgb(r, g, b);
+            }
+        }
+        egui::Event::Screenshot {
+            viewport_id: egui::ViewportId::ROOT,
+            user_data: egui::UserData::new(FrozenShot(pass)),
+            image: Arc::new(image),
+        }
+    }
+
+    fn asked(app: &OndinApp) -> u64 {
+        match app.dropper_frozen {
+            Frozen::Asked(pass, _) => pass,
+            _ => panic!("fixture: a capture is asked for"),
+        }
+    }
+
+    /// **Off the canvas a click picks off the frozen window**: the layers panel's
+    /// pixel lands in the picker's slot, and a capture tagged for another ask is
+    /// not taken for this one.
+    /// flip: `gate_dropper_input` ignoring the tag → fails at the stale capture.
+    #[test]
+    fn off_the_canvas_a_pick_reads_the_frozen_window() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        let a = app.picker.as_ref().expect("fixture").node;
+        let pass = asked(&app);
+        app_frame(
+            &ctx,
+            &mut app,
+            vec![capture(pass + 1)],
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            matches!(app.dropper_frozen, Frozen::Asked(..)),
+            "a stale capture is not this one"
+        );
+        app_frame(&ctx, &mut app, vec![capture(pass)], egui::Modifiers::NONE);
+        assert!(matches!(app.dropper_frozen, Frozen::Ready(..)));
+        app_click(
+            &ctx,
+            &mut app,
+            ON_LAYERS,
+            egui::PointerButton::Primary,
+            egui::Modifiers::NONE,
+        );
+        let [r, g, b] = GREEN;
+        assert_eq!(top_fill(&app, a), Some([r, g, b, 102]), "green, at a's 40%");
+        assert!(
+            !app.picker.as_ref().expect("still open").picking,
+            "disarmed by the pick"
+        );
+        assert!(
+            matches!(app.dropper_frozen, Frozen::None),
+            "disarming drops the frozen window"
+        );
+    }
+
+    /// **Hovering off the canvas previews the frozen pixel in the picker.**
+    /// flip: `dropper_frame`'s `hovered` reading only the canvas → fails here.
+    #[test]
+    fn hovering_off_the_canvas_previews_the_frozen_pixel() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        let pass = asked(&app);
+        app_frame(&ctx, &mut app, vec![capture(pass)], egui::Modifiers::NONE);
+        app_frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(ON_LAYERS)],
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(app.picker.as_ref().and_then(|p| p.preview), Some(GREEN));
+    }
+
+    /// **A right-click off the canvas is the way out**: it disarms and writes
+    /// nothing, as the picker's own button is no longer clickable.
+    /// flip: the `Secondary` arm of `gate_dropper_input`'s release removed →
+    /// fails at `picking`.
+    #[test]
+    fn a_right_click_off_the_canvas_disarms() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        let pass = asked(&app);
+        app_frame(&ctx, &mut app, vec![capture(pass)], egui::Modifiers::NONE);
+        let revision = app.session.revision();
+        app_click(
+            &ctx,
+            &mut app,
+            ON_LAYERS,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::NONE,
+        );
+        assert!(!app.picker.as_ref().expect("still open").picking);
+        assert_eq!(app.session.revision(), revision, "nothing written");
+    }
+
+    /// **A pick that stays armed asks for the window again**, since the panels
+    /// now show what it wrote.
+    /// flip: `land_pick` not resetting `dropper_frozen` → fails at `Asked`.
+    #[test]
+    fn a_shift_pick_refreezes_the_window() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        let pass = asked(&app);
+        app_frame(&ctx, &mut app, vec![capture(pass)], egui::Modifiers::NONE);
+        app_click(
+            &ctx,
+            &mut app,
+            ON_LAYERS,
+            egui::PointerButton::Primary,
+            egui::Modifiers::SHIFT,
+        );
+        assert!(app.picker.as_ref().expect("open").picking, "still armed");
+        assert!(asked(&app) > pass, "asked again after the pick");
+    }
+
+    /// The loupe's dark body among a frame's shapes.
+    fn has_loupe(out: &egui::FullOutput) -> bool {
+        let side = LOUPE_SIDE as f32 * CELL;
+        out.shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(r) => {
+                r.rect.size() == egui::vec2(side, side) && r.fill == egui::Color32::from_gray(18)
+            }
+            _ => false,
+        })
+    }
+
+    fn asks_capture(out: &egui::FullOutput) -> bool {
+        out.viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .is_some_and(|v| {
+                v.commands
+                    .iter()
+                    .any(|c| matches!(c, egui::ViewportCommand::Screenshot(_)))
+            })
+    }
+
+    /// **The captured frame is drawn without the loupe**, which is back on the
+    /// next; a resize asks again.
+    /// flip: `dropper_frame` drawing the canvas loupe while `freezing` → fails
+    /// at the first frame.
+    #[test]
+    fn the_captured_frame_has_no_loupe() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _, _) = app(&ctx);
+        let none = egui::Modifiers::NONE;
+        app_frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(ON_CANVAS)],
+            none,
+        );
+        app_frame(&ctx, &mut app, Vec::new(), none);
+        app.choose_tool(Tool::Eyedropper);
+        let out = app_frame(&ctx, &mut app, Vec::new(), none);
+        assert!(asks_capture(&out), "the arming frame asks");
+        assert!(!has_loupe(&out), "and draws no loupe");
+        let out = app_frame(&ctx, &mut app, Vec::new(), none);
+        assert!(!asks_capture(&out), "asked once");
+        assert!(
+            has_loupe(&out),
+            "fixture: the loupe is back over the canvas"
+        );
+        let pass = asked(&app);
+        let mut f = eframe::Frame::_new_kittest();
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(SCREEN.shrink(10.0)),
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut f),
+        );
+        assert!(
+            asks_capture(&out) && asked(&app) > pass,
+            "a resize asks again"
+        );
     }
 
     /// **The hover sample is the pixel under the pointer, keyed to it**, and a

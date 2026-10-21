@@ -71,7 +71,7 @@ It keeps no colour of its own: it reads its target brush through `display_node` 
 
 The hex row opens with a pick button (`Picker::picking`), the eyedropper's door into this one slot
 (§9.4). Only the Solid and gradient faces draw the row, so `picker_body` disarms the button whenever
-the Variables face or an Image brush is showing: a face with no button cannot stay armed. While it is armed the hovered colour
+the Variables face or an Image brush is showing: a face with no button cannot stay armed. While it is armed the picker takes no click, only picks (§9.4), and the hovered colour
 stands in for the edited stop's in the plane, hue and hex (`Picker::preview`, with a dim *was
 XXXXXX*), for the eye only: nothing previews on the canvas, because the next sample would read it. A
 pick writes through `OndinApp::write_slot_rgb`, the hex field's door: the RGB is set and that paint's

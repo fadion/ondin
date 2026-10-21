@@ -16,7 +16,7 @@ resize, drop outlines and the transform origin (pivot).
 - **Align** to each other, to the container (one layer selected), or to a **key layer** (`Alt`+`Shift`+click). **Distribute** (equal gaps, 3+ layers) and a **named gap** (2+ layers, packed outwards from the key).
 - **Flip** H/V across the selection's centreline, or about a single layer's pivot where one is placed; **quarter turns** either way. **Z-order** one step or all the way (`Ctrl`+`[`/`]`).
 - **Snapping**: alignment, equal-gap (gaps quoted on the canvas), baselines, the pixel grid. **Guides and view**: rulers and guides (`Shift`+`R`), View and Snap menus, present mode.
-- **Eyedropper** (`I`, or a picker's pick button): picks a colour off the rendered canvas onto the selection or into one picker slot (below).
+- **Eyedropper** (`I`, or a picker's pick button): picks a colour off any pixel in the window, chrome included, onto the selection or into one picker slot (below).
 - **Paint editing**: stacked fills and strokes (§6.3), solid or linear/radial gradient, in a detached picker; stroke options, per-corner radius, polygon sides, star points and ratio, opacity, artboard background. Bulk editing covers a multi-selection's transform, opacity, radius, fill and stroke list, Group Colors.
 - **Clipboard** (cut/copy/paste, duplicate via `InsertSubtree`; Alt-drag drags out a copy), the **layers panel** (drag reorder/reparent of the whole selection, rename, `Shift`/`Ctrl` selection, visibility, lock, filter), nudge and the `Ctrl`+arrow size step, pan/zoom, and save/open with unsaved-change protection.
 
@@ -42,7 +42,7 @@ convention; the alternative is finishing a wrong edit and undoing it).
 - The cancel shares a rung with Escape: `OndinApp::cancel_gesture` serves both. With nothing in flight it is a strict no-op, so right-click-to-remove-a-gradient-stop still works. Cancelling cannot end the press (§15 D31).
 - "Is anything in flight" cannot be asked of egui's `dragged_id` (a fast right-click has already cleared it, §15 D168); `cancel_gesture` asks `InFlight::any`, exhaustive by construction.
 - A cancel must shut every window the gesture opened: the two-digit opacity window's clock is a separate field, so `cancel_gesture` clears `opacity_entry`.
-- An armed eyedropper is a gesture a right-click calls off: the press runs `disarm_dropper`, setting `gesture_cancelled` if it disarmed (no menu opens, nothing is selected), then `cancel_gesture` as ever, so anything else in flight goes with the same press.
+- An armed eyedropper is a gesture a right-click calls off: on the canvas the press runs `disarm_dropper`, setting `gesture_cancelled` if it disarmed (no menu opens, nothing is selected), then `cancel_gesture` as ever, so anything else in flight goes with the same press. Off the canvas egui never sees the press, and its release disarms (`gate_dropper_input`).
 
 **The cancel happens on the press and the menu opens on the release** (`context-menus.md` §0 R1);
 only one of the two pays out (a cancel on the release would let the gesture run on under the menu; a
@@ -205,10 +205,18 @@ switch cannot be in). Unlike `cancel_gesture`'s `InFlight::any`, its three field
 
 ### The eyedropper (`eyedropper.rs`)
 
-**It samples what is seen**: the rendered canvas texture's pixel under the hotspot, composited
-over the canvas ground and opaque, so a translucent layer gives the blended colour. egui paints the
-overlays (selection, handles, guides, rulers, pixel grid) over that texture, so they are never
-sampled. The texture holds sRGB bytes, the document's space (invariant 7), so nothing is converted.
+**It samples what is seen**, anywhere in the window, from two sources:
+
+- **Over the canvas** (where egui sees the pointer): the rendered canvas texture's pixel under the
+  hotspot, composited over the canvas ground and opaque, so a translucent layer gives the blended
+  colour. egui paints the overlays (selection, handles, guides, rulers, pixel grid) over that
+  texture, so they are never sampled. Read live, so a pan or zoom made while armed is followed.
+- **Everywhere else**: the frozen frame (`OndinApp::dropper_frozen: eyedropper::Frozen`), a capture
+  of the whole window, so the chrome's own colours are pickable. A live capture cannot work: the
+  loupe sits under the pointer, so it would always read the loupe.
+
+Both hold sRGB bytes: the texture is the document's space (invariant 7), and the window surface
+(Rgba8Unorm or Bgra8Unorm) holds egui's gamma-space bytes. Nothing is converted.
 
 **Two doors**, and `OndinApp::dropper_armed` says which is armed; a picker's pick button outranks
 the rail tool, as the narrower ask.
@@ -216,18 +224,19 @@ the rail tool, as the narrower ask.
 | Door | Arms | Writes | Afterwards |
 | --- | --- | --- | --- |
 | Rail tool `Tool::Eyedropper` (`I`) | remembers the tool it was armed from (`dropper_return`); keeps the selection; disarms a picker's pick button | `ondin_core::set_top_paint_all`: every paint target's top **visible** fill (last in the list, which is paint order), or a new fill where none is visible; `Alt` the top stroke, adding a default one. Through `edited_brush`, so a binding survives an unchanged colour; opacity kept (`paint::alpha_of`, so a gradient's or picture's carries to the solid). Nothing selected: the hex goes to the clipboard and the status reads *Copied 6D8CD9 · nothing selected* | one shot: hands back to `dropper_return`; `Shift` keeps it armed |
-| A picker's pick button (`Picker::picking`, at the start of `hex_row`) | toggles on the button | that picker's slot only, through `write_slot_rgb`, the hex field's door (§9.3) | picker stays open, disarmed |
+| A picker's pick button (`Picker::picking`, at the start of `hex_row`) | the button; a picking picker takes no click, so the button cannot disarm it | that picker's slot only, through `write_slot_rgb`, the hex field's door (§9.3) | picker stays open, disarmed; `Shift` keeps it armed |
 
 - **One click, one transaction, one undo step.** A click never changes the selection.
-- **No canvas preview.** Hovering writes nothing and installs no `RenderOverrides`: a preview would change the pixels the next sample reads. From a picker, the hovered colour shows in its plane, hue and hex (`Picker::preview`), with a dim *was XXXXXX* beside the hex.
+- **No canvas preview.** Hovering writes nothing and installs no `RenderOverrides`: a preview would change the pixels the next sample reads. From a picker, the hovered colour (canvas sample or frozen pixel) shows in its plane, hue and hex (`Picker::preview`), with a dim *was XXXXXX* beside the hex. That preview is not in the frozen frame: picking over the picker reads it as captured.
 - **The readback** (`CanvasRenderer::request_sample`): after the render, the `LOUPE_SIDE`² (11×11) device-pixel region round the hotspot is copied out of the canvas texture into a mapped buffer, without waiting, and collected a frame later. A `SampleKey` (hotspot, session revision, camera centre and zoom, canvas pixel size, `pick`) that matches the last sample is not read again, which keeps a still pointer from repainting forever. Headless, `cpu_region` draws the same region with `vello_cpu` and it lands at once; the tests use that arm.
 - **A pick always reads afresh.** Uncommitted changes (typing in a text session, a preview, a decode landing, the previewed ground) move pixels without moving the revision, so a key can match pixels that have changed. Hover keys carry `pick` 0; each click mints its own number (`OndinApp::dropper_picks`, in `dropper_input`), so its key matches no earlier sample and the canvas is read again. A stale loupe is only a look; a stale pick is a wrong write. The accepted cost: under a still pointer the hover loupe can stay stale until the pointer moves. Pinned by `a_pick_reads_afresh_when_pixels_moved_under_a_still_pointer`.
-- **Pick timing.** A click records a `PendingPick` with that key; `OndinApp::dropper_frame` (run in `draw_canvas` after the render) lands it when a sample with that key arrives.
+- **Pick timing.** A click records a `PendingPick` whose `at` is a `PickAt`: `Canvas(key)` on the canvas, `Window(pos)` elsewhere. `OndinApp::dropper_frame` (run in `draw_canvas` after the render) lands a canvas pick when a sample with that key arrives, a window pick once the frozen frame is there.
+- **The frozen frame** (`Frozen`: `None` → `Asked(pass, screen)` → `Ready(image, screen)`). Armed and `None`, `dropper_frame` sends one `ViewportCommand::Screenshot` tagged `FrozenShot(pass)`, and that frame draws no loupe, because eframe captures the frame the command is sent in. `gate_dropper_input` takes the `Event::Screenshot` only when its tag matches the pending ask, so a capture from an earlier arming is ignored. While `Asked`, `dropper_frame` keeps asking for frames for 30 passes, not forever: a surface format egui cannot capture (only Rgba8Unorm and Bgra8Unorm are) never answers. It is asked again after a pick that leaves the dropper armed (`land_pick` resets it, since the panels now show the write), and when the window's size in points or its pixels-per-point differ from the frozen frame's. Disarming drops it. `window_region` reads the `LOUPE_SIDE`² device-pixel region round `floor(p * ppp)`.
 - **Input.** In `normal_mode_input` the dropper takes every press an armed pan does not (Space, Hand and middle-drag still pan), ahead of guides, handles and tools: they are chrome its sample never sees. It also routes in `TextInsert`, so a picker opened over a text session can pick. While a dropper is armed the canvas does not answer as Select (`OndinApp::selecting`): a picker's pick button leaves the tool on Select, and without this the hover outline, spacing bands and guide grabs kept answering.
-- **The rest of the window is inert while armed** (`OndinApp::gate_dropper_input`, from `raw_input_hook`). egui gets the pointer only over the canvas, and over the picker when it is the one picking. Elsewhere it is told the pointer is gone and gets no press or wheel, so no panel hovers, takes a click or scrolls; `dropper_pointer` keeps the position for the dropper's cursor. A press egui already has finishes untouched, so a pan dragged off the canvas still ends; disarming hands the pointer back where it is. The canvas is told apart from the panels by `canvas_rect`, since all of them share egui's background layer.
-- **Ways out.** `Escape` is one rung (`disarm_dropper`, `shortcuts.md` §11): it disarms a picker's button and leaves the picker open, or hands the rail tool back. A right-click disarms and spends the click (above). A second `I` is `choose_tool`'s toggle arm.
-- **The loupe is the cursor.** Over the canvas the cursor is `CursorIcon::None`; the loupe draws the region at 8pt a pixel, centred on the hotspot, the centre pixel ringed, with a hex chip below (above near the window's bottom). Its edge is two rims, dark outside light, under a soft shadow, so one of the pair contrasts with any ground. Off the canvas there is no loupe: the pointer is the eyedropper bitmap (`cursor::Bitmap::Eyedropper`, the rail glyph mirrored to aim from its tip like the pen's) with an *Off canvas* chip under it. Over the picker window neither is drawn, so the picker keeps its own pointer.
-- **The picker's preview is the latest sample**, not the one for the pixel under the pointer: each pixel of movement starts a readback that lands a frame later, and waiting for the matching one put the slot's own colour back for that frame.
+- **The rest of the window is inert while armed** (`OndinApp::gate_dropper_input`, from `raw_input_hook`), which is what keeps the frozen frame true. egui gets the pointer only over the canvas; the picking picker too is pickable, not clickable. Elsewhere egui is told the pointer is gone and gets no press or wheel, so no panel hovers, takes a click or scrolls; `dropper_pointer` keeps the position for the loupe. A press there is the dropper's (`OndinApp::dropper_press`) and its release acts: primary records a `PickAt::Window` pick at the press position (`Alt` stroke, `Shift` stay), secondary disarms. A press egui already has finishes untouched, so a pan dragged off the canvas still ends; disarming hands the pointer back where it is. The canvas is told apart from the panels by `canvas_rect`, since all of them share egui's background layer; any area above that layer is chrome.
+- **Ways out.** `Escape` is one rung (`disarm_dropper`, `shortcuts.md` §11): it disarms a picker's button and leaves the picker open, or hands the rail tool back. A right-click anywhere disarms and spends the click (above). A second `I` is `choose_tool`'s toggle arm. The picker's own pick button is not one: a picking picker takes no click.
+- **The loupe is the cursor** everywhere (`CursorIcon::None`): it draws the region at 8pt a pixel, centred on the hotspot, the centre pixel ringed, with a hex chip below (above near the window's bottom). Its edge is two rims, dark outside light, under a soft shadow, so one of the pair contrasts with any ground. Off the canvas, until the frozen frame lands, the eyedropper bitmap (`cursor::Bitmap::Eyedropper`, the rail glyph mirrored to aim from its tip like the pen's) stands in, with no chip.
+- **On the canvas the picker's preview is the latest sample**, not the one for the pixel under the pointer: each pixel of movement starts a readback that lands a frame later, and waiting for the matching one put the slot's own colour back for that frame.
 
 ### Skew
 
@@ -318,3 +327,4 @@ Canvas skew and Alt-resize deliberately do not, each having its own fixed point 
 - **Middle-button pan over the origin fields.** It is still swallowed by their `Area` (unverified).
 - **Menu placement order.** `menu_place` must clamp after rounding; reversing the order cuts off a menu's last column.
 - **The eyedropper's repaint guard is unpinned.** `request_sample`'s GPU arm skipping a key that matches the last sample is all that stops a still, armed pointer repainting every frame; headless the CPU arm answers `false` whatever the key, so `the_hover_sample_is_keyed_to_the_pointer` does not catch its removal.
+- **The frozen frame's three guards.** The capture frame draws no loupe (`the_captured_frame_has_no_loupe`), a capture is taken only on its own `FrozenShot` tag (`off_the_canvas_a_pick_reads_the_frozen_window`), and `dropper_frame` stops asking for frames 30 passes after an unanswered ask, or a surface egui cannot capture repaints forever (unpinned).

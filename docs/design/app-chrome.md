@@ -60,7 +60,7 @@ ondin-app/src/
 ├─ atomic.rs        write(): temp, sync_all, rename (every record the app keeps)
 ├─ canvas.rs        CanvasRenderer (wgpu texture, the eyedropper's readback) + canvas interaction and overlays
 ├─ cursor.rs        canvas cursor bitmaps
-├─ eyedropper.rs    the eyedropper: arming, the pending pick, the write, the loupe (§9.4)
+├─ eyedropper.rs    the eyedropper: arming, the frozen window, the pending pick, the write, the loupe (§9.4)
 ├─ grid.rs          pixel grid (one-world-unit lattice)
 ├─ input.rs         Mode + Action: mode-aware keyboard routing
 ├─ measure.rs       Axis + Measure: Alt-hover measure and spacing-snap gaps; pure Rect geometry

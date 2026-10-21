@@ -73,20 +73,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   three greps standing in for `clippy::duplicated_attributes` (silent inside `impl` blocks). Run each
   against a fixture that must match and one that must not.
 
-## Next · Eyedropper: pick anywhere in the app (first up)
-
-Today the dropper reads the canvas only, and the rest of the window is "Off canvas". Make every
-pixel inside the window pickable, the UI's own colours included, so "Off canvas" goes away.
-
-- **Freeze the window on arming.** One `ViewportCommand::Screenshot` with the loupe hidden for that
-  frame. A live capture cannot work: the loupe sits under the pointer, so its own pixels are always
-  the ones read. The frozen frame stays true because `gate_dropper_input` keeps the panels inert
-  while armed.
-- **Two sources.** The canvas region keeps `request_sample` (it follows a pan or zoom made while
-  armed); everything else reads the frozen frame, which lands at once.
-- **The cost:** a picker that is picking becomes pickable, not clickable, so the ways out are
-  `Escape` and right-click. Its live preview is not in the frozen frame.
-
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
 **What was measured (2026-10-20):** comments are **8.4 MB of the 17 MB of Rust (49%)**:
@@ -186,7 +172,8 @@ Designed in §15 D1098; nothing built.
 - **`Event::Zoom` and touchscreen pinch** (§15 D822) — trigger: a Mac or a touch device.
 - **Eyedropper: sampling outside the window** with the same loupe (design canvas, *Eyedropper*).
   Needs a capture path per OS (Windows has no system picker), and an off-window sample needs
-  converting from the display's space to sRGB. Inside the window is the Next entry above.
+  converting from the display's space to sRGB. Inside the window is built (`tools.md`, *The
+  eyedropper*).
 - **egui 0.36** is blocked by vello requiring wgpu 29 (check — last asked 2026-09-03). Re-derive
   `ui::menu_rows`' button-style arithmetic when it moves.
 

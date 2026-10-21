@@ -33,7 +33,8 @@ pub(crate) use layers::node_icon as layers_icon;
 pub(crate) use layers::op_glyph;
 pub(crate) use paint::{CharSlot, PaintDrag, PaintSlot, map_image};
 pub(crate) use picker::Picker;
-/// The picker's window id, for the eyedropper's "over the picker" question.
+/// The picker's window id, for the eyedropper tests' layer fixture.
+#[cfg(test)]
 pub(crate) use picker::layer_id as picker_layer_id;
 pub(crate) use typography::TypeSubject;
 /// A value delete awaiting its confirmation (§15 D996).

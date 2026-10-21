@@ -1335,17 +1335,11 @@ fn gradient_def(name: &str, brush: &ondin_core::GradientBrush, frame: Option<Rec
             fmt(p.start_center.x),
             fmt(p.start_center.y),
         ),
-        // A sweep gradient has no SVG 1.1 equivalent; approximate it as a
-        // radial one rather than dropping the paint entirely.
-        //
-        // ⚠️ **The radius came from the shape only from §15 D647; before it this
-        // arm wrote `r="50"` as a literal, whatever the shape's size.** The two
-        // arms above take their geometry from the gradient and this one had
-        // nowhere to take it from — a sweep's payload is a centre and two angles
-        // — so a number was invented, and it is the one thing here that does not
-        // survive a change of scale: on a 2 000-unit shape the export was a
-        // 50-unit blob at the centre with the last stop flooding the rest, and on
-        // a 10-unit shape it overflowed the other way. `[S8.1-L1-06]`.
+        // A sweep gradient has no SVG 1.1 equivalent; approximate it as a radial
+        // one reaching the shape's farthest corner (`sweep_radius`), since a
+        // sweep carries no radius of its own. Where there is no such radius the
+        // `50` is unobservable: a node with no box paints nothing, and a browser
+        // paints nothing through a singular `gradientTransform`, whatever `r`.
         GradientKind::Sweep(p) => format!(
             "    <radialGradient id=\"{name}\" gradientUnits=\"userSpaceOnUse\"{spread}{xform} cx=\"{}\" cy=\"{}\" r=\"{}\">\n{stops}    </radialGradient>\n",
             fmt(p.center.x),

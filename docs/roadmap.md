@@ -44,12 +44,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   `edit_project_modal`. Edit fits `settings::modal_footer` as it is; New needs the commit label
   ("Create project") as a parameter, with `dirty` read as "commit enabled".
 
-## Now · Core, rendering and export
-
-- **A sweep gradient exports `r="50"` when its radius is unknown** (§15 D762): `svg::sweep_radius`
-  answers `None` for a non-invertible transform or a missing frame, and the caller falls to
-  `.unwrap_or(50.0)`.
-
 ## Now · Tooling
 
 - **Hand-written checks never controlled** (§15 D827, D828): the census rows in the `codebase-review`

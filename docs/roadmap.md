@@ -26,12 +26,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **Rename's menu row is live in present mode.** `context-menus.md` now dims it there, as the chord
   refuses (`rename_selection`); the row in `menu.rs` and the comment above it still don't.
 
-## Now · Inspector
-
-- **Ctrl+E's Flatten gives one sentence for three refusals** (§15 D734). `flatten_selection` posts a
-  fixed message; post the `Err` from `booleanable_selection`, as the boolean row's disabled hover
-  already does.
-
 ## Now · Keyboard
 
 - **"A value in flight carries its subject" is written three times** (§15 D470): the docs on

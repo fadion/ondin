@@ -2854,14 +2854,19 @@ impl OndinApp {
     /// about, and the layers the operation consumed are gone.
     ///
     /// **The admission test is the dropdown's own**, because `Ctrl+E` does not go
-    /// through the disabled state that the menu row does. Without it the keyboard path
-    /// would reach the builder with a lone rectangle and report "operation not valid
-    /// for this node kind" — technically true, and no help at all about what to select.
-    /// One predicate, so the two entrances agree about what is flattenable.
+    /// through the disabled state that the menu row does — and its refusal is the
+    /// dropdown's sentence, naming what to fix. Only the count refusal is worded
+    /// for this verb, which also takes a lone boolean.
     pub(crate) fn flatten_selection(&mut self) {
-        if self.selected_boolean().is_none() && self.booleanable_selection().is_err() {
-            self.session
-                .info("Select a boolean, or two or more layers, to flatten");
+        if self.selected_boolean().is_none()
+            && let Err(why) = self.booleanable_selection()
+        {
+            let few = build::outermost(&self.session.doc, self.session.selection.ids()).len() < 2;
+            self.session.info(if few {
+                "Select a boolean, or two or more layers, to flatten"
+            } else {
+                why
+            });
             return;
         }
         let ids = self.session.selection.ids().to_vec();
@@ -17232,6 +17237,23 @@ mod mask_card_tests {
         assert!(
             app.booleanable_selection().is_ok(),
             "two shapes in one group is the case the dropdown exists for"
+        );
+
+        // Ctrl+E's Flatten says the same, and words only the count for itself.
+        // Flip: `flatten_selection` posting its fixed sentence for every refusal
+        // fails at the kind sentence.
+        let flatten = |app: &mut crate::app::OndinApp, sel: Vec<NodeId>| {
+            app.session.selection.set(sel);
+            app.flatten_selection();
+            app.session.status().text.clone()
+        };
+        assert_eq!(
+            flatten(&mut app, vec![a, text]),
+            "Text and artboards cannot be boolean operands"
+        );
+        assert_eq!(
+            flatten(&mut app, vec![a]),
+            "Select a boolean, or two or more layers, to flatten"
         );
     }
 

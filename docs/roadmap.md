@@ -5,16 +5,6 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
-## Now · Canvas and interaction
-
-
-## Now · Tooling
-
-- **Hand-written checks never controlled** (§15 D827, D828): the census rows in the `codebase-review`
-  and `release-review` skills, and the three greps standing in for `clippy::duplicated_attributes`
-  (silent inside `impl` blocks), which are written down nowhere in the tree. Record the greps first,
-  then run each check against a fixture that must match and one that must not.
-
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
 **What was measured (2026-10-20):** comments are **8.4 MB of the 17 MB of Rust (49%)**:
@@ -111,6 +101,13 @@ Designed in §15 D1098; nothing built.
   eyedropper*).
 - **egui 0.36** is blocked by vello requiring wgpu 29 (check — last asked 2026-09-03). Re-derive
   `ui::menu_rows`' button-style arithmetic when it moves.
+
+## Later · Tooling
+
+- **The review skills' census rows are never controlled** (§15 D827): the rows in `codebase-review`'s
+  and `release-review`'s fact sheet are descriptions a pass turns into commands. Trigger: the next
+  review's Pass 0 — write each command down and run it against a fixture that must match and one
+  that must not before trusting its count.
 
 ## Parked decisions
 

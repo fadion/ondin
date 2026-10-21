@@ -174,7 +174,8 @@ Keep the whole log; a red run here cannot be asked for again.
 Before trusting a gate on a defect it was quiet about, read its predicate, and break the
 thing it claims to cover to see it go red. Known holes:
 
-- `clippy::duplicated_attributes` is silent inside `impl` blocks.
+- `clippy::duplicated_attributes` is silent inside `impl` blocks; `ondin-core`'s
+  `tests/duplicated_attributes.rs` scans the source for it instead.
 - No gate catches an unused dependency.
 - `valve_condition_gate` reads a 160-character window and excuses a line by a marker within
   15 lines back / 4 forward. Put the marker last in its comment block.

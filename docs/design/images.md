@@ -27,7 +27,7 @@ The model's brush is `peniko::Brush<ImageBrush<ImageRef>, GradientBrush>`, alias
 
 ### Gradient stops
 
-Stop offsets ascend: `image::make_stops_monotonic` clamps each offset up to the running maximum (SVG's rule). A descending ramp otherwise draws as a flat fill of the first stop. It is applied at four independent doors: `svg_in::Gradients::collect`, `color::brush_to_backend`, `ondin_export::svg::gradient_def` (on a copy), and the gradient chips (`ui::paint_ramp`), all sharing `image::monotonic_offset`. It is a clamp, not a sort (`[0,0.8,0.2,1]` clamps to `[0,0.8,0.8,1]`); `panels::paint::with_stops` sorts, because dragging a handle past a neighbour means "put it there". Nothing clamps on load.
+Stop offsets ascend: `image::make_stops_monotonic` clamps each offset up to the running maximum (SVG's rule). A descending ramp otherwise draws as a flat fill of the first stop. It is applied at four independent doors: `svg_in::Gradients::collect`, `color::brush_to_backend`, `ondin_export::svg::gradient_def` (on a copy), and the gradient chips (`ui::paint_ramp`), all sharing `image::monotonic_offset`. It is a clamp, not a sort (`[0,0.8,0.2,1]` clamps to `[0,0.8,0.8,1]`); `panels::paint::with_stops` sorts, because dragging a handle past a neighbour means "put it there". Every gradient read — a load, a paste, an MCP call — is clamped too: `GradientBrush` deserializes through `GradientBrushWire`, so a stored ramp is already the picture the renderers draw.
 
 A stop's alpha is clamped in `svg_in::stop_of` (import) and `panels::paint::alpha_of` (readout); nothing clamps on load.
 

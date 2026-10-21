@@ -1631,7 +1631,12 @@ pub type ImageBrush = peniko::ImageBrush<ImageRef>;
 /// been a schema break for every gradient ever saved, to add a field almost none
 /// of them use. `a_gradient_written_before_the_transform_existed_still_reads` is
 /// what says so.
+///
+/// **Read through [`GradientBrushWire`]**, which makes the stops monotonic
+/// ([`make_stops_monotonic`]), so a file, a paste or an MCP call holding a
+/// descending ramp arrives as the picture every renderer draws of it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "GradientBrushWire")]
 pub struct GradientBrush {
     /// The ramp, its kind and its geometry, in the space `transform` maps from.
     #[serde(flatten)]
@@ -1685,6 +1690,30 @@ pub struct GradientBrush {
     pub opacity: f32,
 }
 
+/// A [`GradientBrush`] as read, before its stops are made monotonic. The same
+/// keys and defaults as the brush.
+#[derive(Deserialize)]
+struct GradientBrushWire {
+    #[serde(flatten)]
+    gradient: peniko::Gradient,
+    #[serde(default)]
+    transform: kurbo::Affine,
+    #[serde(default = "one")]
+    opacity: f32,
+}
+
+impl From<GradientBrushWire> for GradientBrush {
+    fn from(w: GradientBrushWire) -> Self {
+        let mut gradient = w.gradient;
+        make_stops_monotonic(&mut gradient.stops);
+        Self {
+            gradient,
+            transform: w.transform,
+            opacity: w.opacity,
+        }
+    }
+}
+
 /// Whether `t` is the identity, for `skip_serializing_if`.
 fn is_identity(t: &kurbo::Affine) -> bool {
     *t == kurbo::Affine::IDENTITY
@@ -1722,9 +1751,8 @@ fn is_one(a: &f32) -> bool {
 /// why `panels::paint::with_stops` keeps its `sort_by` and this does not replace
 /// it. Dragging a stop handle past its neighbour means *"put it there"*; a file
 /// that says `0.2` after `0.8` is a file to be read, not an intention to be
-/// guessed at. Before this existed the two rules and the raw list gave one
-/// document **three** renderings depending on the route taken to it — import,
-/// render, or touch a colour and render again.
+/// guessed at. Every gradient read is clamped here ([`GradientBrush`]'s
+/// deserialization), so the sort only ever sees a ramp that is already in order.
 pub fn make_stops_monotonic(stops: &mut [peniko::ColorStop]) {
     // Starting at 0 rather than at the first stop's own offset, because a ramp is
     // defined on `0..=1` and both authoring doors already say so:
@@ -1877,6 +1905,29 @@ mod tests {
             serde_json::from_str::<Brush>(&out).expect("round trips"),
             squashed
         );
+    }
+
+    /// A descending ramp is read clamped, SVG's reading: `[0, 0.8, 0.2, 1]`
+    /// arrives as `[0, 0.8, 0.8, 1]`, not sorted. Flip: `GradientBrushWire`'s
+    /// `From` without `make_stops_monotonic` → the offsets assertion fails.
+    #[test]
+    fn a_descending_ramp_is_read_clamped() {
+        let stops = [0.0, 0.8, 0.2, 1.0].map(|o| peniko::ColorStop {
+            offset: o,
+            color: peniko::color::DynamicColor::from_alpha_color(peniko::Color::BLACK),
+        });
+        let written = Brush::Gradient(GradientBrush {
+            gradient: peniko::Gradient::new_linear((0.0, 0.0), (10.0, 0.0)).with_stops(stops),
+            transform: kurbo::Affine::IDENTITY,
+            opacity: 1.0,
+        });
+        let json = serde_json::to_string(&written).expect("serializes");
+        let peniko::Brush::Gradient(g) = serde_json::from_str::<Brush>(&json).expect("reads")
+        else {
+            panic!("a gradient");
+        };
+        let offsets: Vec<f32> = g.gradient.stops.iter().map(|s| s.offset).collect();
+        assert_eq!(offsets, [0.0, 0.8, 0.8, 1.0]);
     }
 
     /// **An image brush is a key, and the sampler is peniko's.**

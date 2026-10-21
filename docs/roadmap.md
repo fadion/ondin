@@ -58,9 +58,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **Core's dependency gate is a denylist** (§15 D427, D775). Make `deps_forbidden.rs`'s core row an
   allowlist of `design/foundations.md` §3's permitted list, which matches the manifest. The other
   crates have no permitted list and keep their denylists.
-- **A descending gradient ramp on disk stays descending** (§15 D455): `io::load` does not run
-  `image::make_stops_monotonic`. Every drawing path sorts, so touching one colour commits a second
-  picture. `make_stops_monotonic`'s doc still describes a three-way split.
 - **Rules stated in more than one place**: SVG region writing in `svg::effect_def`, `adjust_def` and
   the alpha `<mask>` (§15 D458); a mask group's clip arm-for-arm in `Resolved::mask_path`,
   `resolve::mask_extent` and `query::mask_extent_local` (§15 D460); §6.4's two effect stages in

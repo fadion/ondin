@@ -5190,21 +5190,11 @@ impl OndinApp {
             // what it is about to destroy. It is recorded in `library::project` and
             // in §15 instead of on screen.
 
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                // **Red where the other cards are blue** — *Create project* and
-                // *Save changes* are `FieldButton::On`, so the confirming button of
-                // the card that destroys something is `Danger`, its twin on the
-                // other ramp. Two grey buttons side by side, one of which removes a
-                // project with no trash to come back from, is what this was.
-                if settings::text_button(ui, "Delete project", FieldButton::Danger).clicked() {
-                    confirm = true;
-                }
-                if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    cancel = true;
-                }
-            });
+            match settings::danger_footer(ui, "Delete project") {
+                Some(settings::Decision::Save) => confirm = true,
+                Some(settings::Decision::Cancel) => cancel = true,
+                None => {}
+            }
         });
 
         // Escape and the backdrop, both Cancel — see `new_project_modal`.
@@ -5328,12 +5318,9 @@ impl OndinApp {
                         }
                     }
                 });
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    cancel = true;
-                }
-            });
+            if settings::cancel_footer(ui) {
+                cancel = true;
+            }
         });
         // Escape and the backdrop, both Cancel — see `new_project_modal`.
         if modal.should_close() {
@@ -5994,20 +5981,11 @@ impl OndinApp {
                 .size(12.0)
                 .color(theme::text::MUTED),
             );
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                // Red, like *Delete project*'s confirm — the two cards on this
-                // screen that destroy something now agree, which is the whole
-                // argument for `FieldButton::Danger` being a state rather than a
-                // colour written at one call site.
-                if settings::text_button(ui, "Delete", FieldButton::Danger).clicked() {
-                    decision = Some(true);
-                }
-                if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    decision = Some(false);
-                }
-            });
+            match settings::danger_footer(ui, "Delete") {
+                Some(settings::Decision::Save) => decision = Some(true),
+                Some(settings::Decision::Cancel) => decision = Some(false),
+                None => {}
+            }
         });
         // Escape and the backdrop, both Cancel — see `new_project_modal`.
         if modal.should_close() {

@@ -550,23 +550,38 @@ pub(crate) fn modal_footer(
     commit: &'static str,
     enabled: bool,
 ) -> Option<Decision> {
+    let state = if enabled {
+        FieldButton::On
+    } else {
+        FieldButton::Disabled
+    };
+    footer(ui, Some((commit, state)))
+}
+
+/// [`modal_footer`] for a card that destroys something: the commit red
+/// (`FieldButton::Danger`), the blue commits' twin on the other ramp, and always
+/// live — the card opening is the question.
+pub(crate) fn danger_footer(ui: &mut egui::Ui, commit: &'static str) -> Option<Decision> {
+    footer(ui, Some((commit, FieldButton::Danger)))
+}
+
+/// [`modal_footer`] for a card whose choice is made in its body: *Cancel*
+/// alone. Answers whether it was pressed.
+pub(crate) fn cancel_footer(ui: &mut egui::Ui) -> bool {
+    matches!(footer(ui, None), Some(Decision::Cancel))
+}
+
+/// The one footer row: *Cancel*, with `commit`'s label and state to its right.
+fn footer(ui: &mut egui::Ui, commit: Option<(&'static str, FieldButton)>) -> Option<Decision> {
     let mut decision = None;
     ui.add_space(FOOTER_GAP);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         // Rightmost, because it is added first in a right-to-left
         // row — and rightmost is where the design puts the commit.
-        if text_button(
-            ui,
-            commit,
-            if enabled {
-                FieldButton::On
-            } else {
-                FieldButton::Disabled
-            },
-        )
-        .clicked()
-            && enabled
+        if let Some((label, state)) = commit
+            && text_button(ui, label, state).clicked()
+            && state != FieldButton::Disabled
         {
             decision = Some(Decision::Save);
         }

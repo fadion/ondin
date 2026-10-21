@@ -58,6 +58,24 @@ pub const BLUR_DEVIATION: f64 = 0.5;
 /// cannot disagree.
 pub const BLUR_CUTOFF: f64 = 3.0;
 
+/// The largest blur radius an effect may carry — a shadow's or a layer blur's.
+///
+/// A protective bound: the CPU backend allocates padding proportional to
+/// [`reach`], so an absurd radius is an enormous buffer rather than a silly
+/// picture. A thousand is far past any radius that means anything on a page.
+/// `Document::apply` refuses past it and the SVG importer clamps to it.
+pub const MAX_BLUR: f64 = 1_000.0;
+
+/// Whether no blur in `effect` is past [`MAX_BLUR`].
+pub fn blur_within_cap(effect: &Effect) -> bool {
+    let ok = |r: f64| r <= MAX_BLUR;
+    match &effect.kind {
+        EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => ok(s.blur),
+        EffectKind::LayerBlur { radius } => ok(*radius),
+        EffectKind::Filters(_) => true,
+    }
+}
+
 /// The radius a freshly added blur — a shadow's or a [`EffectKind::LayerBlur`]'s
 /// — starts on.
 ///
@@ -337,15 +355,16 @@ impl Effect {
         }
     }
 
-    /// The floor a bound number is read at: 0 for a blur, a radius the effects
-    /// card's field ranges from 0, so a negative variable draws no blur rather
-    /// than a meaningless one; none for an offset or a spread, which the card
-    /// lets go negative (§15 D1074).
-    pub fn number_floor(slot: usize) -> f64 {
+    /// A bound number as it is read: a blur within `0..=`[`MAX_BLUR`], the range
+    /// the effects card and `Document::apply` hold a typed one to, so a negative
+    /// variable draws no blur and an absurd one no enormous buffer; an offset or a
+    /// spread as it is, which the card lets go negative. `NaN` reads as the floor.
+    pub fn number_read(slot: usize, x: f64) -> f64 {
         if slot == EFFECT_BLUR {
-            0.0
+            // `max` first: it answers 0 for `NaN`, where `clamp` would keep it.
+            x.max(0.0).clamp(0.0, MAX_BLUR)
         } else {
-            f64::NEG_INFINITY
+            x
         }
     }
 
@@ -759,21 +778,12 @@ impl FilterChannel {
 /// `NaN` radius was always a benign no-op while an infinite one was a bounds
 /// lie: two non-finite inputs, two different silent answers, from one idiom.
 ///
-/// ⚠️ **The *preview* path does not come through an operation and is bounded by
-/// something else.** An effect being scrubbed reaches the renderer through
-/// `RenderOverrides` before anything is committed, so the operation guard is not
-/// what covers it. `stack_escape` reads five fields, and **two** constants cover
-/// them: `inspector.rs`'s `MAX_BLUR` (1000) on the two blur scrubs, and
-/// `MAX_OFFSET` (10,000) on a shadow's offset and spread. `Filters` escape
-/// nothing at all, so the four filter factors are not on this path. On the
-/// import side `svg_in::deviation_of` filters `is_finite`. **Not one of those
-/// bounds is this function** — worth knowing before somebody removes one as
-/// redundant.
-///
-/// ⚠️ **Corrected after being written as *"three bounds"* over two fields**
-/// (§15 D641). `arch-scribe` read the claim against `inspector.rs` and found the
-/// offset and spread scrubs, which the sentence had left out; the ranged fields
-/// are five, not two.
+/// ⚠️ **The *preview* path does not come through an operation.** An effect being
+/// scrubbed reaches the renderer through `RenderOverrides` uncommitted, bounded by
+/// the inspector's ranges: [`MAX_BLUR`] on the two blurs, `MAX_OFFSET` on a
+/// shadow's offset and spread. `Document::apply` refuses a blur past
+/// [`MAX_BLUR`] and `svg_in::deviation_of` clamps to it. **None of those bounds
+/// is this function** — worth knowing before somebody removes one as redundant.
 pub fn escaped(bounds: kurbo::Rect, escape: Insets, world: kurbo::Affine) -> kurbo::Rect {
     if escape == Insets::ZERO {
         return bounds;
@@ -1055,6 +1065,16 @@ pub fn stack_escape(effects: &[Keyed<Effect>]) -> Insets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bound blur reads within `0..=MAX_BLUR` and `NaN` reads as 0; an offset
+    /// reads as it is. Flip: `number_read` without its cap → the cap fails.
+    #[test]
+    fn a_bound_blur_reads_within_its_range() {
+        assert_eq!(Effect::number_read(EFFECT_BLUR, 1e30), MAX_BLUR, "the cap");
+        assert_eq!(Effect::number_read(EFFECT_BLUR, -4.0), 0.0);
+        assert_eq!(Effect::number_read(EFFECT_BLUR, f64::NAN), 0.0);
+        assert_eq!(Effect::number_read(EFFECT_X, -1e30), -1e30);
+    }
 
     /// The offset is the reason a shadow's reach cannot be one number, and the
     /// arithmetic is easy to write with the signs the wrong way round — which

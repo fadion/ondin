@@ -1067,7 +1067,7 @@ pub(crate) fn detach_vars(
                             && vars.contains(&x)
                         {
                             let n = match t.resolve_opt(x, mode) {
-                                Some(Value::Number(n)) => n.max(crate::Effect::number_floor(slot)),
+                                Some(Value::Number(n)) => crate::Effect::number_read(slot, n),
                                 _ => 0.0,
                             };
                             e.value.set_number(slot, n);

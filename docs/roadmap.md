@@ -58,9 +58,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **Core's dependency gate is a denylist** (§15 D427, D775). Make `deps_forbidden.rs`'s core row an
   allowlist of `design/foundations.md` §3's permitted list, which matches the manifest. The other
   crates have no permitted list and keep their denylists.
-- **An absurd finite blur reaches the model** (§15 D454), e.g. `stdDeviation="1e30"`:
-  `op_set_effects` checks finiteness only, and so does `svg_in::deviation_of`. Refuse at the
-  operation, promoting `inspector.rs`' `MAX_BLUR` into core, which covers MCP too.
 - **A descending gradient ramp on disk stays descending** (§15 D455): `io::load` does not run
   `image::make_stops_monotonic`. Every drawing path sorts, so touching one colour commits a second
   picture. `make_stops_monotonic`'s doc still describes a three-way split.

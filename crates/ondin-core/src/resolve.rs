@@ -2191,85 +2191,40 @@ mod measurable_bounds_tests {
     }
 
     /// **A blur radius whose *square* overflows does not report that it reaches
-    /// nowhere** (§15 D685).
+    /// nowhere** (§15 D685) — asked of `stack_escape` and `escaped` directly,
+    /// since `Document::apply` now refuses such a radius and only an uncommitted
+    /// preview could still carry one. A box that silently has not grown makes
+    /// `scene::paint_node` cull artwork that is on screen; an infinite escape is
+    /// an absence instead (`measurable`).
     ///
-    /// 🚨 **The sibling `arch-scribe` found while sweeping for D676's shape, and it
-    /// fails in the opposite direction, which is worse.** `stack_escape` summed
-    /// `deviation(r).powi(2)`, so a radius past about `2.7e154` — finite, and
-    /// accepted by `build::effect_is_finite` at both its doors — made `sigma2`
-    /// infinite and handed `escaped` an `Insets::uniform(inf)`. That function takes
-    /// the insets apart as `x1 - x0`, so the offset came out **NaN**, and
-    /// `f64::min` returns the operand that is not NaN: the box came back
-    /// **unchanged**. An unbounded blur reporting the extent of a bare rectangle.
-    ///
-    /// ⚠️ **D676 answered `inf` and this answered the *original box*, and only the
-    /// second is dangerous.** An infinite ink box makes everything draw and every
-    /// raster enormous — loud. A box that has silently not grown makes
-    /// `scene::paint_node` cull artwork that is on screen, which is the one error
-    /// these bounds may not make (`mask_extent`'s doc says so at length).
-    ///
-    /// **Two flips, and the pair is the argument for both repairs.** Restoring
-    /// `deviation(radius).powi(2)` in `stack_escape` fails at
-    /// `expect("the node has ink")` — ⚠️ **not** at the assertion, which is the
-    /// prediction corrected: `escaped`'s finiteness guard catches the infinite
-    /// escape and `measurable` drops the box, so the *floor* holds and the node
-    /// simply has no ink. Removing that guard **as well** is what reproduces the
-    /// original defect, and it prints it exactly: *"the blur reported reaching
-    /// nowhere: ink `0,0 .. 100,100` against box `0,0 .. 100,100`"*. So the two are
-    /// a fix and a floor rather than one rule written twice, and only running both
-    /// flips says which is which.
+    /// Flips: `deviation(radius).powi(2)` restored in `stack_escape` fails at the
+    /// `expect`; with `escaped`'s finiteness guard removed too, at the first
+    /// assertion — the two are a fix and a floor.
     #[test]
     fn a_blur_whose_square_overflows_still_reports_the_ink_it_covers() {
-        let mut ids = IdSource::new(11);
-        let root = ids.mint();
-        let mut doc = Document::new(root);
-        let node = ids.mint();
-        create(
-            &mut doc,
-            node,
-            root,
-            0,
-            rect_kind(100.0, 100.0),
-            Affine::IDENTITY,
-        );
+        let blur = |radius| {
+            crate::keyed_by_position([crate::effect::Effect::new(
+                crate::effect::EffectKind::LayerBlur { radius },
+            )])
+        };
+        let box_ = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let ink_of = |radius| {
+            crate::geometry::measurable(crate::effect::escaped(
+                box_,
+                crate::effect::stack_escape(&blur(radius)),
+                Affine::IDENTITY,
+            ))
+        };
         // `deviation` halves it, so the square of this is about `1.8e308` — the
         // last decade before the old spelling overflowed.
-        let radius = 4e154;
-        doc.apply(&Transaction(vec![Operation::SetEffects {
-            id: node,
-            effects: crate::keyed_by_position([crate::effect::Effect::new(
-                crate::effect::EffectKind::LayerBlur { radius },
-            )]),
-        }]))
-        .expect("a blur is a legal effect");
-
-        let res = Resolved::rebuild(&doc);
-        let ink = res.ink_bounds(node).expect("the node has ink");
-        let box_ = res.world_bounds(node).expect("and a box");
+        let ink = ink_of(4e154).expect("the blur has ink");
         assert!(
             ink.x0 < box_.x0 && ink.x1 > box_.x1,
             "the blur reported reaching nowhere: ink {ink:?} against box {box_:?}"
         );
-        assert!(
-            ink.x0.is_finite() && ink.x1.is_finite(),
-            "and it is a number: {ink:?}"
-        );
-
-        // The control: a radius whose escape genuinely overflows `f64` has no
-        // measurable ink at all, rather than the box it started from.
-        doc.apply(&Transaction(vec![Operation::SetEffects {
-            id: node,
-            effects: crate::keyed_by_position([crate::effect::Effect::new(
-                crate::effect::EffectKind::LayerBlur { radius: f64::MAX },
-            )]),
-        }]))
-        .expect("still a legal effect");
-        let res = Resolved::rebuild(&doc);
-        assert_eq!(
-            res.ink_bounds(node),
-            None,
-            "an escape past f64 is an absence, not the original box"
-        );
+        // The control: an escape that genuinely overflows `f64` is an absence,
+        // not the box it started from.
+        assert_eq!(ink_of(f64::MAX), None);
     }
 }
 

@@ -3955,7 +3955,10 @@ fn deviation_of(v: &str) -> Option<(f64, bool)> {
         [x, y] => ((x + y) * 0.5, (x - y).abs() > 1e-9),
         _ => return None,
     };
-    (dev.is_finite() && dev >= 0.0).then_some((dev, uneven))
+    // Clamped so the radius it becomes stays within `effect::MAX_BLUR`, which
+    // `Document::apply` would otherwise refuse the whole import for.
+    let cap = crate::effect::MAX_BLUR * crate::effect::BLUR_DEVIATION;
+    (dev.is_finite() && dev >= 0.0).then_some((dev.min(cap), uneven))
 }
 
 /// `flood-color` and `flood-opacity` as one colour.
@@ -5472,6 +5475,28 @@ mod tests {
             );
             assert!(out.skipped.is_empty(), "{paint} → {:?}", out.skipped);
         }
+    }
+
+    /// An absurd finite `stdDeviation` imports as a blur clamped to
+    /// `effect::MAX_BLUR`, not a refused import. Flip: `deviation_of` without its
+    /// `min` → the import's `apply` refuses with `BlurTooLarge` and this panics.
+    #[test]
+    fn an_absurd_deviation_imports_clamped_to_the_blur_cap() {
+        let (doc, out) = imported(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                 <defs><filter id="f"><feGaussianBlur stdDeviation="1e30"/></filter></defs>
+                 <rect width="50" height="20" filter="url(#f)"/>
+               </svg>"##,
+        );
+        let fx = stack_of(&doc, &out);
+        assert!(
+            matches!(
+                fx.as_slice(),
+                [crate::effect::Effect { kind: EffectKind::LayerBlur { radius }, .. }]
+                    if *radius == crate::effect::MAX_BLUR
+            ),
+            "{fx:?}"
+        );
     }
 
     /// **`clip-path` and `mask` are properties too**, which is the sweep the `filter`

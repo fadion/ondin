@@ -483,16 +483,9 @@ impl AngleScrub {
 /// way, so the extra 10% costs nothing that matters.
 const HIDDEN_OPACITY: f32 = 0.6;
 
-/// How far an effect's blur may be scrubbed or typed.
-///
-/// A bound rather than none, and a protective one: the CPU backend
-/// allocates padding proportional to `effect::reach`, so a radius typed with
-/// an extra digit is an enormous buffer rather than a silly picture. A
-/// thousand is already far past any radius that means anything on a page,
-/// and — like every range in this file — a first-draft number (§15 D186).
-/// Module-level since the bound chip's retype caps at it too (§15 D1074's
-/// reading (d), fixed in its third amendment).
-pub(super) const MAX_BLUR: f64 = 1_000.0;
+/// How far an effect's blur may be scrubbed or typed: core's cap, which the
+/// bound chip's retype stops at too.
+pub(super) const MAX_BLUR: f64 = ondin_core::effect::MAX_BLUR;
 /// The reach of an effect's offset or spread, in both directions.
 pub(super) const MAX_OFFSET: f64 = 10_000.0;
 

@@ -1497,6 +1497,9 @@ pub enum OpError {
     /// reach it (`[S8.2-L1-03]`).
     #[error("an export spec's scale or quality is not a usable value")]
     BadExportSpec,
+    /// A blur radius past [`crate::effect::MAX_BLUR`].
+    #[error("a blur radius is past {}", crate::effect::MAX_BLUR)]
+    BlurTooLarge,
     #[error("operation not valid for this node kind")]
     WrongKindForOp,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside

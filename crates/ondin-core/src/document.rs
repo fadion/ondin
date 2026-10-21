@@ -573,8 +573,9 @@ impl Document {
     }
 
     /// The number effect slot `slot` bound to `var` is drawn at, at `id` in table
-    /// `t` (§15 D1074): the variable's number in the mode in force, floored by
-    /// `Effect::number_floor` (a blur at 0); a missing or non-number value 0.
+    /// `t` (§15 D1074): the variable's number in the mode in force, read through
+    /// `Effect::number_read` (a blur within its range); a missing or non-number
+    /// value 0.
     pub fn effect_number_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -583,7 +584,7 @@ impl Document {
         slot: usize,
     ) -> f64 {
         match self.resolve_var_in(t, id, var) {
-            Some(crate::variable::Value::Number(x)) => x.max(crate::Effect::number_floor(slot)),
+            Some(crate::variable::Value::Number(x)) => crate::Effect::number_read(slot, x),
             _ => 0.0,
         }
     }
@@ -1910,6 +1911,9 @@ impl Document {
             {
                 return Err(OpError::NonFinite);
             }
+            if !n.effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
+                return Err(OpError::BlurTooLarge);
+            }
         }
 
         for n in nodes {
@@ -2442,6 +2446,9 @@ impl Document {
         // the same order `op_insert_subtree` uses.
         if !effects.iter().all(|e| effect_is_finite(e)) {
             return Err(OpError::NonFinite);
+        }
+        if !effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
+            return Err(OpError::BlurTooLarge);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         if matches!(node.kind, NodeKind::Root) {
@@ -3735,6 +3742,51 @@ mod tests {
             Err(OpError::NonFinite)
         ));
         assert!(!doc.contains(g));
+    }
+
+    /// Both effect doors refuse a blur past `effect::MAX_BLUR` and take one at
+    /// it. Flip: either `blur_within_cap` check removed → that door's `Err`
+    /// assertion fails.
+    #[test]
+    fn a_blur_past_the_cap_is_refused_at_both_doors() {
+        let blur = |radius| {
+            crate::keyed_by_position([crate::Effect::new(crate::EffectKind::LayerBlur { radius })])
+        };
+        let shadow = |b| {
+            crate::keyed_by_position([crate::Effect::new(crate::EffectKind::DropShadow(
+                crate::Shadow {
+                    blur: b,
+                    ..crate::Shadow::default()
+                },
+            ))])
+        };
+        let cap = crate::effect::MAX_BLUR;
+        let (mut doc, _root, ab) = base();
+        let mut ids = IdSource::new(0xF0);
+        let g = ids.mint();
+        insert(&mut doc, vec![group(g, None, vec![])], ab).expect("a group");
+        let set = |doc: &mut Document, effects| {
+            doc.apply(&Transaction(vec![Operation::SetEffects { id: g, effects }]))
+        };
+        set(&mut doc, blur(cap)).expect("a blur at the cap");
+        set(&mut doc, shadow(cap)).expect("a shadow at the cap");
+        assert!(matches!(
+            set(&mut doc, blur(cap + 1.0)),
+            Err(OpError::BlurTooLarge)
+        ));
+        assert!(matches!(
+            set(&mut doc, shadow(1e30)),
+            Err(OpError::BlurTooLarge)
+        ));
+
+        let h = ids.mint();
+        let mut n = group(h, None, vec![]);
+        n.effects = blur(1e30);
+        assert!(matches!(
+            insert(&mut doc, vec![n], ab),
+            Err(OpError::BlurTooLarge)
+        ));
+        assert!(!doc.contains(h));
     }
 
     /// The pivot arm's twin for **paint**, the fourth family (§15 D831).

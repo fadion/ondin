@@ -11,7 +11,7 @@ pub type EffectVars = [Option<VarId>; 4];   // X, Y, blur, spread (EFFECT_X/_Y/_
 impl Effect {
     pub fn numbers(&self) -> [Option<f64>; 4];  // None where the kind has no such number
     pub fn set_number(&mut self, slot: usize, x: f64);  // silent no-op where the kind lacks it
-    pub fn number_floor(slot: usize) -> f64;    // blur 0; offset and spread unfloored
+    pub fn number_read(slot: usize, x: f64) -> f64;  // blur within 0..=MAX_BLUR; offset and spread as is
 }
 
 pub enum EffectKind {
@@ -42,7 +42,7 @@ pub fn escaped(bounds: Rect, escape: Insets, world: Affine) -> Rect;   // local 
 - **Four effects**: the ones expressible on all three of the canvas, the raster export and the SVG writer. Background blur and noise are deliberately not built (§1, §15 D333). Per-effect blend modes are a deferred non-goal with a keyboard block reserved.
 - **`visible` sits beside the payload** (as on `Fill`) so hiding a shadow does not throw away its tuned numbers. The eye, the shadow colour and the inner shadow's spread are additions to the mockup.
 - **A shadow's opacity is its colour's alpha**, with no second field. The rule is "one door": `paint::alpha_of` / `with_alpha` are the single pair that read and write a brush's alpha. (A gradient fill's opacity is its own field because scaling stops is not invertible through zero, §15 D767.)
-- **A blur stores the radius the designer types**, not the gaussian deviation; `BLUR_DEVIATION` is the one place the two relate. CSS `blur(12px)` means deviation 6; SVG `feGaussianBlur` and both vello backends take the deviation.
+- **A blur stores the radius the designer types**, not the gaussian deviation; `BLUR_DEVIATION` is the one place the two relate. CSS `blur(12px)` means deviation 6; SVG `feGaussianBlur` and both vello backends take the deviation. A radius is capped at `MAX_BLUR` (1,000), because the CPU backend's buffer grows with it: `Document::apply` refuses past it (`OpError::BlurTooLarge`, at `SetEffects` and `InsertSubtree`), the SVG importer clamps to it, and a bound blur is read within it.
 - **`Filters` is factors with 1.0 neutral, hue in degrees**, deliberately unlike `ImageAdjust` (`-1..=1`, zero neutral, see images.md): these numbers go straight into `feColorMatrix` and the shader. `Filters::is_neutral` and `changed` answer "is the row doing anything" and "how many channels are off neutral"; a neutral row must emit no primitive.
 - **`escape` is how far an effect's ink lands outside the geometry**, as `Insets` read outward; zero for a hidden effect. A drop shadow reaches `blur + spread` on the side the offset points at, and the same minus the offset on the other. An inner shadow and a `Filters` row escape `ZERO`.
   - `escape` is where ink *lands*, not where passes must be *evaluated*. An inner shadow is cast from everything outside the layer, so its silhouette needs `blur + |spread| + |offset|` out. Both renderers get that free (outside the buffer reads as no layer); the SVG writer pads the filter region (§7), because outside a filter region every primitive is transparent black. Do not "fix" `escape` towards the pad: it would break every bound in §5.9.

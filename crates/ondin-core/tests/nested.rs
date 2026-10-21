@@ -778,6 +778,88 @@ fn a_slot_renamed_onto_a_shown_path_is_bound() {
     );
 }
 
+/// **In a set, two same-named nested instances are two slots**: showing the
+/// second `Icon` in Small shows the second in Large and neither first one.
+///
+/// Flip, run: `name_path` counting every sibling as the 0th fails at
+/// *"Large's second Icon is shown"* — the showing went to both first Icons.
+#[test]
+fn showing_the_second_of_two_same_named_slots_in_a_set_shows_only_that_one() {
+    let mut f = fixture();
+    let (_, mains, firsts) = buttons(&mut f, &["Small", "Large"]);
+    let mut seconds = Vec::new();
+    for m in &mains {
+        let (tx, icon) = instance(&f.doc, &mut f.ids, f.a_reg, *m);
+        f.commit(tx.0);
+        f.commit(vec![Operation::SetName {
+            id: icon,
+            name: "Icon".into(),
+        }]);
+        seconds.push(icon);
+    }
+    for m in &mains {
+        let icons = f
+            .node(*m)
+            .children()
+            .iter()
+            .filter(|c| f.node(**c).name() == "Icon")
+            .count();
+        assert_eq!(icons, 2, "each variant holds two same-named Icons");
+    }
+    f.show(seconds[0], true);
+    assert!(
+        variant::slot_is_shown(&f.doc, seconds[1]),
+        "Large's second Icon is shown"
+    );
+    assert!(
+        !variant::slot_is_shown(&f.doc, firsts[0]),
+        "Small's first Icon is not shown"
+    );
+    assert!(
+        !variant::slot_is_shown(&f.doc, firsts[1]),
+        "Large's first Icon is not shown"
+    );
+}
+
+/// **Two mains that each show a slot, combined, make one showing on the set**,
+/// bound to both slots, and the mains keep none of their own.
+///
+/// ⚠️ Three defences in `settle` each hold this alone, so no single flip bites:
+/// the merge step's match by kind for a showing, the pruning pass's merge by
+/// kind, and `owed_slots` (the first showing takes the second's slot, the
+/// duplicate is pruned and the emptied showing dropped). Run with all three off,
+/// the commit is refused, `PropertyName`, at `commit`'s `expect`.
+#[test]
+fn combining_two_showing_mains_merges_their_showings_into_one() {
+    let mut f = fixture();
+    let (a, a_icon) = main_with_icon(&mut f, "Chip/On");
+    let (b, b_icon) = main_with_icon(&mut f, "Chip/Off");
+    f.show(a_icon, true);
+    f.show(b_icon, true);
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let (tx, set) = variant::combine(&f.doc, &res, &mut f.ids, &[a, b]).unwrap();
+    f.commit(tx.0);
+    let showings: Vec<Vec<NodeId>> = f
+        .node(set)
+        .props()
+        .iter()
+        .filter(|p| p.kind == PropKind::Nested)
+        .map(|p| p.bound.clone())
+        .collect();
+    assert_eq!(showings.len(), 1, "one showing on the set: {showings:?}");
+    let mut bound = showings[0].clone();
+    bound.sort();
+    let mut want = vec![a_icon, b_icon];
+    want.sort();
+    assert_eq!(bound, want, "bound to both slots");
+    for m in [a, b] {
+        assert!(
+            !f.node(m).props().iter().any(|p| p.kind == PropKind::Nested),
+            "a variant keeps no showing of its own"
+        );
+    }
+}
+
 /// **The rules**: one showing per owner, and a showing binds only a nested
 /// instance — two `Nested` properties, or one bound to the plain `Label`, are
 /// refused at the commit.

@@ -4931,6 +4931,74 @@ mod tests {
         );
     }
 
+    /// **A group whose copy shows a variant names its set** (4M's *Icon · Arrow
+    /// right*): Badge made the variant *Dot* of a set *Badges*, the group reads
+    /// *· Badges*, not the variant's derived name.
+    ///
+    /// Flip: `shown_groups`' `shown_as` naming the main itself → fails at
+    /// *"the group names the set"*.
+    #[test]
+    fn a_shown_variant_is_named_by_its_set() {
+        use ondin_core::variant::{self, VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        let mut n = nested_fixture(&ctx);
+        let badge = n
+            .app
+            .session
+            .doc
+            .get(n.slot)
+            .and_then(|s| s.link())
+            .expect("the slot is a Badge instance");
+        let set = n.app.session.ids.mint();
+        let root = n.app.session.doc.root();
+        let index = n.app.session.doc.get(root).unwrap().children().len();
+        assert!(n.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: set,
+                parent: root,
+                index,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 100.0),
+                },
+                transform: None,
+                name: Some("Badges".into()),
+            },
+            Operation::Reparent {
+                id: badge,
+                new_parent: set,
+                index: 0,
+            },
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Style".into(),
+                        values: vec!["Dot".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: badge,
+                values: vec!["Dot".into()],
+            },
+        ])));
+        assert_eq!(variant::set_of(&n.app.session.doc, badge), Some(set));
+        let tx = variant::set_shown(&n.app.session.doc, &mut n.app.session.ids, n.slot, true)
+            .expect("a showing");
+        assert!(n.app.session.commit(tx));
+        n.app.session.selection.set_one(n.b1);
+        let out = settle(&mut n.app, &ctx);
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.contains(&"· Badges".to_string()),
+            "the group names the set: {painted:?}"
+        );
+        assert!(
+            !painted.contains(&"· Dot".to_string()),
+            "not the variant: {painted:?}"
+        );
+    }
+
     /// Every filled rect the frame painted — the fields, the dropdowns' faces and
     /// the switch's track.
     fn fills(out: &egui::FullOutput) -> Vec<(egui::Rect, egui::Color32)> {

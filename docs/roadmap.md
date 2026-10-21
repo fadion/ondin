@@ -34,11 +34,19 @@ pointer when the archived reasoning matters; otherwise drop it.
 - Comment-only changes. Each batch runs `cargo fmt`, `cargo check --all-targets`, the doc gate
   (`--document-private-items`) and `cargo test`, then commits per crate or per large file.
 - After each batch, `git diff` should show no change outside `//` lines (`git diff -U0 | grep '^[+-]' | grep -v '^[+-][[:space:]]*//'` returns only the file headers).
-- Order: the three largest app files, then the rest of `ondin-app`, then `ondin-core`,
-  `ondin-render` and `ondin-export`.
+- Order: the rest of `ondin-app` (largest first: `dashboard.rs`, `typography.rs`, `ui.rs`,
+  `tools/mod.rs`), then `ondin-core`, `ondin-render` and `ondin-export`. `inspector.rs`,
+  `canvas.rs` and `app.rs` are done (24–30% comments now).
+- One agent per file at a time: two in one file break each other's exact-match edits. A range
+  of ~6,000 lines is one agent; the next starts at the item the last one names.
+- rustfmt pulls a one-line `//` between array elements onto the element above; keep such a
+  comment two lines long or delete it.
+- The comment-only check that also catches trailing comments: strip `^\s*//` and blank lines
+  from `HEAD` and from the file, and `diff` the two.
 
-**Cost:** roughly 5–6M subagent tokens; reading the tree alone is about 4.5M. Target: comments
-down to about 15–20% of the source, roughly 2.5–3.5 MB in place of 8.4 MB.
+**Cost:** about 300k subagent tokens per 6,000-line range, so roughly 13M for the rest of the
+tree; Sonnet does the test modules as well as the default model. Target: comments down to about
+15–20% of the source.
 
 ## Later · Components and layout
 

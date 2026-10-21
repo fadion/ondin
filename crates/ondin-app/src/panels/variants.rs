@@ -1243,7 +1243,7 @@ impl OndinApp {
     /// the variant's derived *Regular* (4M).
     fn shown_groups(&mut self, ui: &mut egui::Ui, roots: &[NodeId]) {
         struct Group {
-            title: String,
+            path: Vec<String>,
             main: Option<String>,
             copies: Vec<NodeId>,
             hidden: Option<String>,
@@ -1280,12 +1280,7 @@ impl OndinApp {
                     // A variant reads as its set.
                     let shown_as = |m: NodeId| name_of(variant::set_of(doc, m).unwrap_or(m));
                     Some(Group {
-                        title: g
-                            .path
-                            .iter()
-                            .map(|c| name_of(*c))
-                            .collect::<Vec<_>>()
-                            .join(" › "),
+                        path: g.path.iter().map(|c| name_of(*c)).collect(),
                         main: same.then(|| mains[0].map(shown_as)).flatten(),
                         copies,
                         hidden,
@@ -1295,18 +1290,32 @@ impl OndinApp {
         };
         for g in groups {
             ui.add_space(4.0);
+            // 4M's sub-heading: the instance's hexagon, then the path in the row
+            // labels' type with its › and the main a step fainter.
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.label(
-                    egui::RichText::new(&g.title)
-                        .size(12.0)
-                        .color(theme::text::STRONG),
+                    egui::RichText::new(icon::HEXAGON)
+                        .font(theme::icon_font(14.0))
+                        .color(theme::text::MUTED),
                 );
-                ui.label(
-                    egui::RichText::new(format!("· {}", g.main.as_deref().unwrap_or("")))
-                        .size(12.0)
-                        .color(theme::text::DIM),
-                );
+                for (i, name) in g.path.iter().enumerate() {
+                    if i > 0 {
+                        ui.label(egui::RichText::new("›").size(12.0).color(theme::text::DIM));
+                    }
+                    ui.label(
+                        egui::RichText::new(name)
+                            .size(12.0)
+                            .color(theme::text::MUTED),
+                    );
+                }
+                if let Some(main) = &g.main {
+                    ui.label(
+                        egui::RichText::new(format!("· {main}"))
+                            .size(12.0)
+                            .color(theme::text::DIM),
+                    );
+                }
             });
             if g.main.is_none() {
                 note(ui, icon::STACK, "Different mains");

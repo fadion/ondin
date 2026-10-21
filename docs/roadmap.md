@@ -81,16 +81,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   (silent inside `impl` blocks), which are written down nowhere in the tree. Record the greps first,
   then run each check against a fixture that must match and one that must not.
 
-## Now · Nested component properties
-
-- **A main that joins a set after a showing exists is not bound.** Only *Add variant* (`add_variant`)
-  extends a showing's bindings. A main reparented into the set, *Combine as variants* where only some
-  mains show, *Duplicate as component* on a variant, and a nested instance added later to one variant
-  at a shown path all leave the slot unbound; `variant::settle` merges showings but never binds by
-  name path.
-- **The group sub-heading in `variants::shown_groups`** uses plain 12 pt labels, not the mockup's
-  type. Read the design canvas's artboard before changing it.
-
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
 **What was measured (2026-10-20):** comments are **8.4 MB of the 17 MB of Rust (49%)**:

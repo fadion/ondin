@@ -3329,6 +3329,33 @@ mod flex_tests {
         );
     }
 
+    /// Whitespace-only text claims no wider a min- or max-content than its auto
+    /// box, which is 0 wide. Flip: `content_widths` without its whitespace case →
+    /// fails on min, parley's width of the spaces.
+    #[test]
+    fn whitespace_only_text_claims_no_width_its_box_lacks() {
+        let text = NodeKind::Text {
+            content: "   ".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let parts = crate::node::TextRef::of(&text).unwrap();
+        let auto = crate::text::measure(parts).width();
+        let (min, max) = crate::text::content_widths(parts);
+        assert_eq!(auto, 0.0, "the fixture's auto box is 0 wide");
+        assert!(
+            min <= auto && max <= auto,
+            "min {min}, max {max}, box {auto}"
+        );
+    }
+
     /// A group with its own layout nested in a row is laid out in the same pass:
     /// its size comes from the row, its children from it.
     #[test]

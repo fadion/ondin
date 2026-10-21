@@ -5025,6 +5025,12 @@ pub fn measure(parts: TextRef<'_>) -> Rect {
 /// different paragraphs.
 pub fn content_widths(parts: TextRef<'_>) -> (f64, f64) {
     let shaped = shape(parts);
+    // Whitespace-only text: parley counts the spaces, while the auto box is
+    // `layout.width()`, which leaves trailing whitespace out. The box is the truth.
+    if parts.content.trim().is_empty() {
+        let w = f64::from(shaped.layout.width());
+        return (w, w);
+    }
     let w = shaped.layout.calculate_content_widths();
     let paras = Paragraphs::new(parts);
     let font_size = parts.style.font_size;

@@ -41,12 +41,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   `InFlight::session_scrub` and `OpacityEntry::subject`, and the D470 regression test's doc. State it
   once, on `InFlight`.
 
-## Now · Text
-
-- **Whitespace-only text claims a min-content width its auto box lacks** (§15 D931): `"   "` reports
-  min 8.89 against an auto box 0 wide, read by container layout (§15 D872). `text::content_widths`
-  has no case for it.
-
 ## Now · Files, library and storage
 
 - **The two project cards hand-roll their footers** (§15 D719): `new_project_modal` and

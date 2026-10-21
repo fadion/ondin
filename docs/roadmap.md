@@ -11,9 +11,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   `railed_resize` and `kind_to_solve_against`, but `resize_to_handle` takes `drawn` from
   `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and
   each restates the arm. One helper taking the drawn box, the wanted box and the held handle.
-- **The guide commit table's Alt-drag-copy arm has no test** (§15 D474): `finish_guide_drag`'s
-  `(Some(id), false) if d.copying`. Add a pair to `rulers::the_guide_commit_table_answers_each_of_its_arms`,
-  and correct its doc's arm count.
 
 ## Now · Keyboard
 

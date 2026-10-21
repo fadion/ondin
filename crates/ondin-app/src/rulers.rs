@@ -2966,47 +2966,17 @@ mod guide_grab_tests {
         );
     }
 
-    /// **The six-arm commit table, which had no test caller at all** (§15 D474).
+    /// **`finish_guide_drag`'s commit table, arm by arm**: (1) an Alt-dragged
+    /// copy dropped on the ruler leaves the original, (2) a press that changes
+    /// nothing is no undo step, (3) a scope change alone is one, (4) a guide
+    /// pulled out and put back never existed, (5) an Alt-dragged copy dropped on
+    /// the canvas is copied there.
     ///
-    /// `[A5-L6-04]`: `grep -rn "finish_guide_drag\|update_guide_drag" crates/`
-    /// returned **one** hit outside the functions themselves, a comment in
-    /// `canvas.rs`. The two tests above stop one call earlier — both drive
-    /// `begin_guide_drag` and assert on the drag's *opening* state — so **nothing
-    /// in the workspace released a guide drag**, and the whole of the decision
-    /// that writes to the document was held up by its own comments.
-    ///
-    /// Three one-line mutations were all green before this, and the first is data
-    /// the user did not ask to lose:
-    ///
-    /// 1. Collapsing `(Some(_), true) if d.copying => {}` into
-    ///    `(Some(id), true) => self.remove_guide(id)` — one character — makes
-    ///    **Alt-dragging a copy and dropping it back on the ruler delete the
-    ///    original**. The arm's own comment is the specification: *"not
-    ///    `remove_guide` — an Alt-drag was never asking to delete anything, and
-    ///    the original has not moved."*
-    /// 2. `let moved = true;` — claimed to make every click that merely *selects*
-    ///    a guide push an undo step.
-    /// 3. Dropping `|| g.owner != d.owner` — dragging a guide into a frame
-    ///    without shifting its line commits nothing and the scope change is
-    ///    silently lost.
-    ///
-    /// ⚠️ **Mutation 2 does not bite, and that is a finding rather than a failed
-    /// experiment.** Run, `let moved = true;` leaves every assertion here green:
-    /// §15 **D428**'s guard in `EditorSession::commit_inner` already drops a
-    /// transaction whose every operation writes back the value that is already
-    /// there, and a `SetGuideScope` to the same owner at the same position is
-    /// exactly that. **The finding was written against a tree where D428 had
-    /// landed**, and its own claim about the consequence is refuted. What `moved`
-    /// still buys is the op not being built and the rule stated at the site that
-    /// has it; the assertion below is kept, because it is the property, and the
-    /// note above `moved` now says which guard is holding it.
-    ///
-    /// ⚠️ **Mutations 1 and 3 both bite, at the sites named.** They are the two
-    /// that matter: one loses the user's guide, and the other loses a scope
-    /// change silently.
-    ///
-    /// The harness was three calls short — `update_guide_drag` and
-    /// `finish_guide_drag` are `&mut self` and take no egui context.
+    /// Flips: collapsing (1)'s `if d.copying` arm into the delete fails at (1);
+    /// dropping `|| g.owner != d.owner` fails at (3); (5)'s arm made the plain
+    /// move fails at *"a copy exists"*. ⚠️ `let moved = true;` does not bite:
+    /// `EditorSession::commit_inner` already drops a transaction that writes back
+    /// what is there, so (2) is held by that guard as well.
     #[test]
     fn the_guide_commit_table_answers_each_of_its_arms() {
         let ctx = egui::Context::default();
@@ -3140,6 +3110,38 @@ mod guide_grab_tests {
             before + 1,
             "control: dropped on the canvas, a pulled guide exists"
         );
+
+        // **5. An Alt-dragged guide dropped on the canvas is copied there**, the
+        // original staying where it was.
+        let (mut app, id, rect, ppp) = app_with_guide(&ctx, GuideAxis::Vertical, 200.0);
+        app.show_rulers = true;
+        let before = app.session.doc.guides().len();
+        let depth = app.session.history.undo_depth();
+        let on_line = app.to_screen(Point::new(200.0, 100.0), rect, ppp);
+        let to = egui::pos2(on_line.x + 60.0, 300.0);
+        app.begin_guide_drag(Some(id), GuideAxis::Vertical, on_line, rect, ppp);
+        app.update_guide_drag(to, rect, ppp, true);
+        app.finish_guide_drag();
+        assert_eq!(app.session.doc.guides().len(), before + 1, "a copy exists");
+        assert_eq!(
+            app.session.doc.guide(id).map(|g| g.position),
+            Some(200.0),
+            "the original has not moved"
+        );
+        let copy = app
+            .session
+            .doc
+            .guides()
+            .iter()
+            .find(|g| g.id != id)
+            .copied()
+            .expect("the copy");
+        assert!(
+            (copy.position - 200.0).abs() > 1.0,
+            "the copy lands where the line was dragged to: {}",
+            copy.position
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
     }
 
     /// **A guide the app has decided not to show is not moved by the arrow keys

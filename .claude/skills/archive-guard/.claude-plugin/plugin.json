@@ -1,0 +1,6 @@
+{
+  "name": "archive-guard",
+  "version": "0.1.0",
+  "description": "Refuses reading the frozen ledger under docs/archive/ whole; grep and ranged reads stay allowed.",
+  "author": { "name": "Fadion Dashi" }
+}

@@ -29,6 +29,7 @@ module you are actively designing in belongs in the main loop.
 - **`edit-guard`** refuses script rewrites, directory-wide `git add` and `git checkout`-style
   undo; **`doc-run-guard`** flags an edit that carried a doc comment off its item. Both
   enforce `AGENTS.md`'s editing rules.
-- `.claude/settings.json` (local, gitignored) denies `Read` on `docs/archive/**`; grep it.
+- **`archive-guard`** refuses a whole `Read` of `docs/archive/**`; grep it for one entry, then
+  read that range with a `limit`.
 - `.claude/launch.json`'s `probe-static` serves `target/probe` for browser comparisons.
 - Use the scratchpad for files you expect to revert.

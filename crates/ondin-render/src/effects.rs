@@ -541,13 +541,13 @@ pub fn device_sigma(radius: f64, scale_x: f64, scale_y: f64) -> (f32, f32) {
 /// `scale` is device pixels per document unit along each axis, so an authored
 /// radius becomes a kernel and an authored offset becomes pixels.
 ///
-/// **Two stages, matching the SVG writer exactly** (`svg::effect_def`): `Filters`
+/// **The statement of §6.4's two stages**, which the SVG writer
+/// (`svg::effect_def`) and the bounds (`effect::stack_escape`) follow: `Filters`
 /// and `LayerBlur` transform the layer's own appearance in list order, then every
-/// shadow is cast from *that* and merged behind or in front. The one-fold
-/// version, where each effect reads whatever the previous produced, makes an
-/// inner shadow following a drop shadow take its silhouette from the layer plus
-/// the shadow — and the two writers would then disagree about a file, which is
-/// the failure this whole module is arranged to prevent.
+/// shadow is cast from *that* and merged behind or in front. Not one fold, where
+/// each effect reads what the previous produced: an inner shadow after a drop
+/// shadow would take its silhouette from the layer plus the shadow. Reorder the
+/// stages here and both followers move too; nothing fails if only one does.
 pub fn run(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64)) {
     for e in effects.iter().filter(|e| e.visible) {
         match &e.kind {

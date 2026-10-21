@@ -438,41 +438,28 @@ fn effect_region(
     transform: Affine,
     effects: &[Keyed<Effect>],
 ) -> Option<Rect> {
-    let ink = res.ink_bounds(id)?;
-    let world = res.world_transform(id)?;
-    // **A flattened node exports unfiltered rather than not at all** (§15 D508,
-    // `[S8.1-L1-03]`). `world.inverse()` divides by the determinant, so a node
-    // scaled flat — `Affine::scale_non_uniform(1.0, 0.0)`, which is a resize
-    // handle dragged onto the opposite edge — gave a region of `NaN`s, and
-    // `transform_rect_bbox` of a `NaN` affine is a `Rect` of `NaN`s rather than
-    // `None`, so the def was collected and the `<g filter>` wrapper written. Per
-    // the spec an unparseable filter region means the **referencing element is
-    // not rendered**, so one layer went silently missing from a file that was
-    // otherwise correct — the worse of this finding's two outcomes, because
-    // nothing about it looks wrong.
-    //
-    // `None` here drops the filter and keeps the artwork, which is the fallback
-    // `ScenePainter::push_effect_layer`'s own doc argues for: *"it draws the
-    // artwork unfiltered rather than dropping it, which is the failure mode worth
-    // having"*. `fmt`'s floor would have made the region `0` instead, which is a
-    // filter region of no area — the same silent drop with a parseable spelling.
-    // 🚨 **`affine_is_invertible`, and the threshold it replaces was the least
-    // defensible of the four** (§15 D762). This read
-    // `world.determinant().abs() < f64::EPSILON`. `f64::EPSILON` is ≈2.22e-16 and
-    // is a **relative** quantity — the gap between 1.0 and the next representable
-    // double — where a determinant is in **squared world units**. On a node at
-    // millimetre scale the test is effectively `== 0.0`; on one at `1e8` units it
-    // can never fire, so the guard silently stopped guarding at large coordinates.
-    // It was a number chosen because it is spelled like a small number.
+    // `None` drops the filter and keeps the artwork, the fallback
+    // `ScenePainter::push_effect_layer` argues for.
+    Some(ink_in(res, id, id, transform)? + Insets::uniform(inner_working_pad(effects)))
+}
+
+/// `ink_of`'s ink box in the space `outer` maps `frame`'s local space into —
+/// the box every region this writer emits (a filter's, an alpha mask's) is
+/// built from.
+///
+/// `None` where `frame` is scaled flat (`affine_is_invertible`): its inverse is
+/// `NaN`s, and per the spec an unparseable region means the **referencing
+/// element is not rendered** — a layer silently missing from a file that is
+/// otherwise correct. Two AABBs rather than one, because a rotated node's world
+/// ink box has to be re-boxed coming back; too large costs a little memory, too
+/// small crops.
+fn ink_in(res: &Resolved, ink_of: NodeId, frame: NodeId, outer: Affine) -> Option<Rect> {
+    let ink = res.ink_bounds(ink_of)?;
+    let world = res.world_transform(frame)?;
     if !ondin_core::build::affine_is_invertible(world) {
         return None;
     }
-    // Two AABBs rather than one, because a rotated node's ink box is axis-aligned
-    // in world space and has to be re-boxed after coming back. Conservative in
-    // the direction a filter region must be: too large costs a little memory,
-    // too small silently crops the effect.
-    let region = (transform * world.inverse()).transform_rect_bbox(ink);
-    Some(region + Insets::uniform(inner_working_pad(effects)))
+    Some((outer * world.inverse()).transform_rect_bbox(ink))
 }
 
 /// How far outside the layer this stack's **inner** shadows have to be able to
@@ -527,15 +514,8 @@ fn inner_working_pad(effects: &[Keyed<Effect>]) -> f64 {
 
 /// The `<filter>` for one node's effect stack.
 ///
-/// **Two stages, not one fold.** `Filters` and `LayerBlur` transform the layer's
-/// own appearance, in list order; every shadow is then cast from *that*, and the
-/// shadows merge behind and in front of it. The one-fold version — where each
-/// effect reads whatever the previous one produced — is the obvious spelling and
-/// it is wrong in a way the markup shows plainly: an inner shadow following a
-/// drop shadow takes its silhouette from the layer **plus the drop shadow**, so
-/// it draws a second inner edge along the outside of the shadow. Casting every
-/// shadow from the layer is also what Figma does, and what anyone stacking two
-/// shadows at different distances expects.
+/// **Two stages, as `ondin_render::effects::run` states them**: the layer's own
+/// appearance first, then every shadow cast from that.
 ///
 /// **`color-interpolation-filters="sRGB"` is mandatory, not decoration.** The
 /// spec's default is `linearRGB`, so leaving it off makes every browser blur and
@@ -1726,44 +1706,16 @@ fn emit_node(
                 // repaired in D566 and the export was not, so the same document
                 // exported one picture and drew another.
                 MaskMode::Alpha if doc.shown(*child) => {
-                    // ⚠️ **The region is written, and SVG's default for it is
-                    // wrong for us in exactly the way [`effect_region`]'s doc
-                    // says a filter's is** (§15 D458). `<mask>` defaults to
-                    // `-10%, -10%, 120%, 120%`, and under `userSpaceOnUse` a
-                    // percentage is a fraction of the **viewport** read as a
-                    // length in the *current* user space — which here is this
-                    // node's local space, not the page. Everything outside the
-                    // region is mask value 0, i.e. erased.
-                    //
-                    // `[S8.1-L1-01]`, measured in Chrome on a 400×400 artboard
-                    // holding a group with an alpha mask and a coincident red
-                    // rectangle. The drawing came back opaque to x=399 at
-                    // identity, **x=219** under `scale(0.5)`, **x=43** under
-                    // `scale(0.1)` — exactly `1.1 × 400 × scale`, which pins the
-                    // mechanism rather than merely observing a loss — and under
-                    // `translate(-1000)` with the children at local `+1000`,
-                    // **nothing at all**. That last case costs everything: a
-                    // group whose children sit past 110% of the viewport *in the
-                    // group's own coordinates* loses its masked artwork entirely,
-                    // at any scale, and the file still opens and still looks
-                    // deliberate.
-                    //
-                    // **The mask's own ink box is the right region, not the run's.**
-                    // Outside it the mask draws nothing, so its value is 0 there
-                    // whatever the region says — an infinite region and this one
-                    // give the same picture. Inflated by a tenth, which is SVG's
-                    // own margin computed in the space that was meant: a region
-                    // too large is inert, and §5.9's rule is that too small is the
-                    // one error these bounds may not make.
-                    //
-                    // `<clipPath>` needs none of this and `MaskMode::Shape` is
-                    // therefore untouched; `<mask>` is the third region-bearing
-                    // element this writer emits and was the only one written
-                    // without one.
-                    let region = res.ink_bounds(*child).and_then(|ink| {
-                        res.world_transform(id)
-                            .map(|w| w.inverse().transform_rect_bbox(ink))
-                    });
+                    // ⚠️ **The region is written** ([`ink_in`], as a filter's is):
+                    // `<mask>` defaults to `-10%, -10%, 120%, 120%` of the
+                    // **viewport**, read as lengths in this node's local space, and
+                    // everything outside the region is erased — a group whose
+                    // children sit past 110% of the viewport in its own
+                    // coordinates lost its masked artwork entirely. The mask's own
+                    // ink box is the right region: outside it the mask is 0
+                    // whatever the region says. Inflated by a tenth, SVG's own
+                    // margin in the space that was meant. `<clipPath>` needs none.
+                    let region = ink_in(res, *child, id, Affine::IDENTITY);
                     let region = match region {
                         // A mask with no ink erases the run wherever it is
                         // evaluated, so the absent region is already correct and

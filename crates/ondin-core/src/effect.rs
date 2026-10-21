@@ -960,46 +960,16 @@ pub fn buffer_box_within(
 
 /// How far a whole stack reaches outside the geometry it is applied to.
 ///
-/// The **union**, not the sum: two effects both reaching 10px out do not reach
-/// 20px out, they each reach 10. Summing is the obvious wrong answer and it
-/// inflates every cached bound on a layer with two shadows.
+/// **Per stage of `ondin_render::effects::run`, and a union within each.**
+/// Stage 1 is one isotropic reach from the convolved deviation of every visible
+/// `LayerBlur` (`σ = √(σ₁² + σ₂²)`, since the blurs apply in sequence; `Filters`
+/// add nothing). Stage 2 is each shadow's own escape **grown by stage 1 on every
+/// side**, since stage 1's output is its silhouette. Two shadows reaching 10px
+/// each reach 10, not 20.
 ///
-/// ⚠️ **A union of the right quantities, and it was a union of the wrong ones**
-/// (§15 D473). `[S10.1-L2-02]`: the sentence above is true of two *shadows* and
-/// **false of anything §6.4 composes**, and §6.4 composes two things.
-/// `render::effects::run` applies `Filters` and `LayerBlur` **sequentially** to
-/// the layer, keeps that as `graphic`, and casts every shadow from *it* — so a
-/// `DropShadow`'s silhouette is the **already blurred** layer, and two
-/// `LayerBlur`s convolve at `σ = √(σ₁² + σ₂²)` rather than at `max(σ₁, σ₂)`.
-///
-/// Measured in release through the CPU backend, a 40×40 rect carrying
-/// `[LayerBlur { radius: 12 }, DropShadow { offset: (0, 40), blur: 4 }]` — an
-/// everyday Figma stack. The shadow's alpha down the centre column ran
-/// `… 87, 71, 54, 38, 0, 0, 0` — it **stopped dead at 38/255 with a hard edge**,
-/// exactly at `ink_bounds.y1`, losing the whole faint end of the gaussian. The
-/// arithmetic predicted the shortfall to the unit: claimed `max(18, reach(4) + 40)
-/// = 46`, true `18 + 6 + 40 = 64`, measured cut 18 units short at the claimed
-/// number. Two `LayerBlur { radius: 12 }` cut at 5/255 where the single blur of
-/// the same composed deviation fades to 0 with 7.5 units to spare.
-///
-/// ⚠️ **The two single-effect controls were always clean**, which is what says
-/// this is the composition and not the bound: the same shadow with no layer blur
-/// falls to `… 10, 3, 1, 0` and reaches zero exactly at its own `ink_bounds.y1`,
-/// and the same layer blur with no shadow ends at 0 too.
-///
-/// ⚠️ **The under-covered box is also the buffer**, which is why it cuts rather
-/// than merely mis-culls: `grow_to_escape` ends `device_ink.intersect(grown)`, so
-/// the silhouette is read from a buffer that has already lost the tail — §15
-/// D342's mechanism one level up. And §5.9's rule is that **too small is the one
-/// error these bounds may not make.**
-///
-/// **So: per stage, and still a union.** Stage 1 is one isotropic reach from the
-/// convolved deviation of every visible `LayerBlur` (`Filters` add nothing).
-/// Stage 2 is each shadow's own escape **grown by stage 1 on every side**, since
-/// stage 1's output is its silhouette. The answer is the union of those — the
-/// same rule the old comment states, applied to the quantities §6.4 actually
-/// produces. §15 **D334**'s *"union, never a sum"* is right about two shadows and
-/// is what this narrows.
+/// ⚠️ **Too small is the one error these bounds may not make**: the box is also
+/// the buffer (`grow_to_escape` ends `device_ink.intersect(grown)`), so an
+/// under-covering stage cuts the shadow's tail off with a hard edge.
 pub fn stack_escape(effects: &[Keyed<Effect>]) -> Insets {
     // Stage 1: the visible layer blurs convolve. `deviation` is what `reach`
     // multiplies by `BLUR_CUTOFF`, so the composition is done in deviations and

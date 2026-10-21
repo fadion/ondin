@@ -223,32 +223,20 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
         .reduce(|a, b| a.union(b))
 }
 
-/// The box `id` **clips with** when it is a mask, in its own local space
-/// (§15 D460).
-///
-/// [`local_box`]'s twin of `resolve::mask_extent`, arm for arm with
-/// [`Resolved::mask_path`]: a `Group` skips the masks *inside* it and unions the
-/// rest un-narrowed, an invisible node clips with nothing, and every other kind
-/// clips with its own box. Separate from the world-space helper because
-/// `local_box` works in the node's own space throughout and composing the two
-/// would mean an inverse per child.
+/// The box `id` **clips with** when it is a mask, in its own local space:
+/// `resolve::mask_parts` folded over [`local_box`]. Separate from the
+/// world-space fold because `local_box` works in the node's own space
+/// throughout, and composing the two would mean an inverse per child.
 fn mask_extent_local(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
-    use crate::node::NodeKind;
-    let node = doc.get(id)?;
-    if !doc.shown(id) {
-        return None;
-    }
-    match node.kind() {
-        NodeKind::Group | NodeKind::Root => node
-            .children()
-            .iter()
-            .filter(|c| !doc.get(**c).is_some_and(|n| n.mask()))
+    match crate::resolve::mask_parts(doc, id)? {
+        crate::resolve::MaskParts::Members(cs) => cs
+            .into_iter()
             .filter_map(|c| {
-                let local = res.used_local(doc, *c)?;
-                mask_extent_local(doc, res, *c).map(|b| geometry::transform_rect(local, b))
+                let local = res.used_local(doc, c)?;
+                mask_extent_local(doc, res, c).map(|b| geometry::transform_rect(local, b))
             })
             .reduce(|a, b| a.union(b)),
-        _ => local_box(doc, res, id),
+        crate::resolve::MaskParts::Own => local_box(doc, res, id),
     }
 }
 

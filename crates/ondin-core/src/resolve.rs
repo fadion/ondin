@@ -88,24 +88,49 @@ fn clipped_to(b: Rect, m: Rect) -> Option<Rect> {
 /// been resolved, in the incremental one because a node not in the dirty set
 /// keeps a box that is still valid.
 ///
-/// **Arm for arm with `mask_path`**, which is what makes it right rather than
-/// merely different: the `Group | Root` arm filters mask children out and unions
-/// the rest, an invisible node answers `None`, and every other kind is its own
-/// measured box. It costs a walk of the mask's subtree, once per mask.
+/// [`mask_parts`] folded over measured boxes. It costs a walk of the mask's
+/// subtree, once per mask.
 fn mask_extent(doc: &Document, boxes: &FxHashMap<NodeId, Rect>, id: NodeId) -> Option<Rect> {
+    match mask_parts(doc, id)? {
+        MaskParts::Members(cs) => cs
+            .into_iter()
+            .filter_map(|c| mask_extent(doc, boxes, c))
+            .reduce(|a, b| a.union(b)),
+        MaskParts::Own => boxes.get(&id).copied(),
+    }
+}
+
+/// What a mask clips with, one level down.
+pub(crate) enum MaskParts {
+    /// The union of these children, each read the same way.
+    Members(Vec<NodeId>),
+    /// The node's own outline or box.
+    Own,
+}
+
+/// **The one statement of what a mask clips with**, which
+/// [`Resolved::mask_path`], [`mask_extent`] and `query::mask_extent_local`
+/// each fold into their own answer (a path, a world box, a local box).
+/// `None` for a hidden node: it masks nothing. A group or the root clips with
+/// the union of its children **that are not masks themselves** — an inner mask
+/// paints nothing, and is not honoured either, so the clip is a little too
+/// generous rather than a path intersection per mask per frame. Any other kind
+/// clips with itself.
+pub(crate) fn mask_parts(doc: &Document, id: NodeId) -> Option<MaskParts> {
     let node = doc.get(id)?;
     if !doc.shown(id) {
         return None;
     }
-    match node.kind() {
-        NodeKind::Group | NodeKind::Root => node
-            .children()
-            .iter()
-            .filter(|c| !doc.get(**c).is_some_and(|n| n.mask()))
-            .filter_map(|c| mask_extent(doc, boxes, *c))
-            .reduce(|a, b| a.union(b)),
-        _ => boxes.get(&id).copied(),
-    }
+    Some(match node.kind() {
+        NodeKind::Group | NodeKind::Root => MaskParts::Members(
+            node.children()
+                .iter()
+                .copied()
+                .filter(|c| !doc.get(*c).is_some_and(|n| n.mask()))
+                .collect(),
+        ),
+        _ => MaskParts::Own,
+    })
 }
 
 fn entry(id: NodeId, r: Rect) -> BoundsEntry {
@@ -1253,51 +1278,27 @@ impl Resolved {
     /// keeps is exactly the ink it would have laid down.
     pub fn mask_path(&self, doc: &Document, id: NodeId) -> Option<BezPath> {
         let node = doc.get(id)?;
-        if !doc.shown(id) {
-            return None;
-        }
-        let own = match node.kind() {
-            NodeKind::Text { .. } => self
-                .text
-                .get(&id)
-                .map(text::outline)
-                .filter(|p| !p.elements().is_empty()),
-            // A **union**, not a concatenation, and the reason is narrower than
-            // `operand_of`'s — measured, because the cheap version passes a
-            // careless test. This clip is filled **non-zero**, under which two
-            // *same-wound* members appended do merge; what breaks is two members
-            // wound **against** each other, whose overlap sums to zero and comes
-            // out as a hole exactly where the shapes cross. A user's own paths
-            // carry whatever winding they were drawn in, so that is the ordinary
-            // case rather than a contrived one, and
-            // `a_group_masks_with_the_union_of_its_contents` is built out of it
-            // for that reason. This is the one arm that costs real arithmetic,
-            // and it is bounded by what is inside the group.
-            //
-            // **A mask *inside* a mask group is skipped rather than honoured**,
-            // and the two halves of that are worth separating. Skipped: it paints
-            // nothing, so unioning its outline in would make the group keep ink
-            // it does not draw. Not honoured: its own siblings are unioned in
-            // whole, so a group that masks internally offers slightly more
-            // outline than it shows. Both readings are conservative — a clip that
-            // is too generous — and the exact answer needs a path *intersection*,
-            // which is a second boolean per mask per frame for a case nobody has
-            // asked for yet.
-            NodeKind::Group | NodeKind::Root => {
-                let inner: Vec<BezPath> = node
-                    .children()
-                    .iter()
-                    .filter(|c| !doc.get(**c).is_some_and(|n| n.mask()))
-                    .filter_map(|c| self.mask_path(doc, *c))
+        let own = match mask_parts(doc, id)? {
+            // A **union**, not a concatenation: under non-zero two members wound
+            // against each other would cancel to a hole where they cross
+            // (`a_group_masks_with_the_union_of_its_contents`).
+            MaskParts::Members(cs) => {
+                let inner: Vec<BezPath> = cs
+                    .into_iter()
+                    .filter_map(|c| self.mask_path(doc, c))
                     .collect();
                 boolean::evaluate(crate::node::BoolOp::Union, &inner)
             }
-            // **Every other kind through [`Self::local_path`]**, which is the one
-            // that already knows a boolean's outline comes from the cache and
-            // everything else's from its kind. Spelling those two arms again here
-            // would be a second copy of that split, and this is the caller that
-            // function's doc comment asked for.
-            _ => self.local_path(doc, id),
+            MaskParts::Own => match node.kind() {
+                NodeKind::Text { .. } => self
+                    .text
+                    .get(&id)
+                    .map(text::outline)
+                    .filter(|p| !p.elements().is_empty()),
+                // A boolean's outline from the cache, everything else's from its
+                // kind — `local_path`'s split, not a second copy of it.
+                _ => self.local_path(doc, id),
+            },
         }?;
         Some(local_in(&self.used, node) * own)
     }

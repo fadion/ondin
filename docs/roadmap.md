@@ -46,10 +46,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Now · Core, rendering and export
 
-- **Rules stated in more than one place**: SVG region writing in `svg::effect_def`, `adjust_def` and
-  the alpha `<mask>` (§15 D458); a mask group's clip arm-for-arm in `Resolved::mask_path`,
-  `resolve::mask_extent` and `query::mask_extent_local` (§15 D460); §6.4's two effect stages in
-  `effect::stack_escape`, `svg::effect_def` and `render::effects::run` (§15 D473).
 - **A sweep gradient exports `r="50"` when its radius is unknown** (§15 D762): `svg::sweep_radius`
   answers `None` for a non-invertible transform or a missing frame, and the caller falls to
   `.unwrap_or(50.0)`.

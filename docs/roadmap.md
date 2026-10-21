@@ -12,12 +12,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and
   each restates the arm. One helper taking the drawn box, the wanted box and the held handle.
 
-## Now · Files, library and storage
-
-- **The two project cards hand-roll their footers** (§15 D719): `new_project_modal` and
-  `edit_project_modal`. Edit fits `settings::modal_footer` as it is; New needs the commit label
-  ("Create project") as a parameter, with `dirty` read as "commit enabled".
-
 ## Now · Tooling
 
 - **Hand-written checks never controlled** (§15 D827, D828): the census rows in the `codebase-review`

@@ -331,7 +331,7 @@ impl OndinApp {
             self.font_cache_row(ui);
 
             // --- footer ------------------------------------------------
-            if let Some(d) = modal_footer(ui, draft != saved) {
+            if let Some(d) = modal_footer(ui, "Save changes", draft != saved) {
                 decision = Some(d);
             }
         });
@@ -537,14 +537,19 @@ pub(crate) fn modal_title(ui: &mut egui::Ui, title: &str) -> bool {
     .inner
 }
 
-/// The *Cancel* / *Save changes* pair, right-aligned, with the commit lit only
-/// when there is something to commit. Returns the [`Decision`] a press made.
+/// The *Cancel* / commit pair, right-aligned — `commit` is the commit's label,
+/// *Save changes* or *Create project* — with the commit lit only when `enabled`:
+/// there is something to commit. Returns the [`Decision`] a press made.
 ///
 /// **Shared for the reason the footer is the one row a user reads twice**: it is
 /// where they look to find out whether the form has taken anything, so two cards
 /// whose commits light on different rules are two cards that disagree about what
 /// *edited* means.
-pub(crate) fn modal_footer(ui: &mut egui::Ui, dirty: bool) -> Option<Decision> {
+pub(crate) fn modal_footer(
+    ui: &mut egui::Ui,
+    commit: &'static str,
+    enabled: bool,
+) -> Option<Decision> {
     let mut decision = None;
     ui.add_space(FOOTER_GAP);
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -553,15 +558,15 @@ pub(crate) fn modal_footer(ui: &mut egui::Ui, dirty: bool) -> Option<Decision> {
         // row — and rightmost is where the design puts the commit.
         if text_button(
             ui,
-            "Save changes",
-            if dirty {
+            commit,
+            if enabled {
                 FieldButton::On
             } else {
                 FieldButton::Disabled
             },
         )
         .clicked()
-            && dirty
+            && enabled
         {
             decision = Some(Decision::Save);
         }

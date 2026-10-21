@@ -4934,28 +4934,11 @@ impl OndinApp {
                 "Files stay in the project either way — the folder is only for looking at.",
             );
 
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let enabled = !np.name.trim().is_empty();
-                if settings::text_button(
-                    ui,
-                    "Create project",
-                    if enabled {
-                        FieldButton::On
-                    } else {
-                        FieldButton::Disabled
-                    },
-                )
-                .clicked()
-                    && enabled
-                {
-                    create = true;
-                }
-                if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    cancel = true;
-                }
-            });
+            match settings::modal_footer(ui, "Create project", !np.name.trim().is_empty()) {
+                Some(settings::Decision::Save) => create = true,
+                Some(settings::Decision::Cancel) => cancel = true,
+                None => {}
+            }
         });
         // Escape *and* a click on the backdrop, both of which mean Cancel — the
         // design hangs `closeNewProject` on the backdrop, and `should_close` is
@@ -5065,42 +5048,19 @@ impl OndinApp {
                 "Hidden from the sidebar and from every project list. Its files stay where they are.",
             );
 
-            ui.add_space(settings::FOOTER_GAP);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                // **Lit only when there is something to save** (§15 D719,
-                // `[S20.3-L3-06]`). This was `!ep.name.trim().is_empty()` alone,
-                // so opening the card and clicking *Save changes* — or pressing
-                // Enter — rewrote `projects.json` and rescanned the library for
-                // nothing. `settings::modal_footer`, the library Settings card's
-                // own footer, has said `&& dirty` all along; this is that rule
-                // reaching the card that writes the most.
-                //
-                // A project deleted from under the card answers `None` and dims
-                // the button, which is the honest drawing of it: `save_project`
-                // has nothing to write it back to either.
-                let enabled = !ep.name.trim().is_empty()
-                    && stored
-                        .as_ref()
-                        .is_some_and(|before| ep.differs_from(before));
-                if settings::text_button(
-                    ui,
-                    "Save changes",
-                    if enabled {
-                        FieldButton::On
-                    } else {
-                        FieldButton::Disabled
-                    },
-                )
-                .clicked()
-                    && enabled
-                {
-                    save = true;
-                }
-                if settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
-                    cancel = true;
-                }
-            });
+            // **Lit only when there is something to save**: opening the card and
+            // saving would rewrite `projects.json` and rescan the library for
+            // nothing. A project deleted from under the card answers `None` and
+            // dims it, as `save_project` has nothing to write it back to either.
+            let enabled = !ep.name.trim().is_empty()
+                && stored
+                    .as_ref()
+                    .is_some_and(|before| ep.differs_from(before));
+            match settings::modal_footer(ui, "Save changes", enabled) {
+                Some(settings::Decision::Save) => save = true,
+                Some(settings::Decision::Cancel) => cancel = true,
+                None => {}
+            }
         });
         if modal.should_close() {
             cancel = true;
@@ -5400,24 +5360,10 @@ impl OndinApp {
     /// answer is complete and nothing has happened yet.
     ///
     /// The editor's Settings card stages for a softer version of the same reason
-    /// (`crate::settings`), and the two are now the same card: same
-    /// [`settings::card_modal`], same [`settings::section`] headers, same footer
-    /// with the commit lit only when the draft differs from what is saved. It was
-    /// reported as *"Settings is a mess that looks nothing like the layout in
-    /// design/"*, and the cause was that it had been built out of egui's default
-    /// modal and egui's default checkboxes and combo boxes rather than out of the
-    /// app's own kit (§15 D368).
-    ///
-    /// ⚠️ **"The two" is Settings and Settings, and the sentence above reads as
-    /// though it covered this screen** (§15 D719, `[S20.3-L3-06]`).
-    /// `new_project_modal` and `edit_project_modal` each hand-roll their footer
-    /// rather than calling [`settings::modal_footer`], so *"same footer"* has
-    /// never been true of them — the same control written three times, which is
-    /// how the rule that matters came to be in only one of them. **The *Edit
-    /// project* card's commit is lit on `EditProject::differs_from` now**, so the
-    /// two agree about the rule and still not about the footer; folding both
-    /// project cards onto `modal_footer` is the remaining half and is a layout
-    /// change rather than a behavioural one.
+    /// (`crate::settings`), and the two are the same card: same
+    /// [`settings::card_modal`], same [`settings::section`] headers, same
+    /// [`settings::modal_footer`] with the commit lit only when the draft differs
+    /// from what is saved — the footer the two project cards use too.
     ///
     /// The Cancel/Save pair is therefore load-bearing rather than convention,
     /// and it is what the design draws.
@@ -5679,7 +5625,7 @@ impl OndinApp {
             }
 
             // --- footer ----------------------------------------------------
-            if let Some(x) = settings::modal_footer(ui, d != saved) {
+            if let Some(x) = settings::modal_footer(ui, "Save changes", d != saved) {
                 decision = Some(x);
             }
         });

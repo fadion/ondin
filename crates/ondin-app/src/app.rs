@@ -4328,12 +4328,11 @@ impl OndinApp {
     /// predicates is the defect; the doc comment above already promised they were
     /// one list, and now the promise covers what is in it.
     ///
-    /// ⚠️ **The layers panel is the exception and it is deliberate** — it does not
-    /// come through here. A locked layer can still be selected by clicking its row,
-    /// and once selected the inspector's rules apply unchanged (§15 D71, D323: it can
-    /// be recoloured; what the lock stops is dragging it about). What D746 settles is
-    /// narrower than those entries and does not contradict them: **the canvas never
-    /// selects a locked layer, by any gesture**.
+    /// ⚠️ **The layers panel and a frame's name tag are the exceptions, and they
+    /// are deliberate** — neither comes through here. A locked layer can still be
+    /// selected by clicking its row, a locked frame by its tag, and once selected
+    /// the inspector's rules apply unchanged (a lock stops dragging, not
+    /// recolouring). **No gesture that describes a set selects a locked layer.**
     pub(crate) fn marquee_candidates(&self) -> Vec<NodeId> {
         let mut ids = self.marquee_range();
         ids.retain(|id| self.may_select_in_bulk(*id));

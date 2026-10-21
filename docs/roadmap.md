@@ -7,10 +7,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Now · Canvas and interaction
 
-- **Comments still state the old locked-layer rule.** The name tag selecting a locked frame is now a
-  deliberate exception (`design/app-selection.md`, *Locked layers*), but `canvas::frame_edge_at`'s doc
-  and its test still say the canvas never selects a locked layer "by any gesture". Trim them to the
-  set-gesture rule.
 - **The railed-text resize arms of `tools/mod.rs` measure different boxes** (§15 D472). Both call
   `railed_resize` and `kind_to_solve_against`, but `resize_to_handle` takes `drawn` from
   `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and

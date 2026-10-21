@@ -10130,16 +10130,11 @@ impl OndinApp {
     fn frame_edge_at(&self, world: Point) -> Option<NodeId> {
         let slop = f64::from(FRAME_EDGE_PICK_PX) / self.points_per_world();
         self.artboards().into_iter().rev().find(|id| {
-            // 🚨 **The two predicates every other pick door carries, and this
-            // one shipped without either** (§15 D839). `pick_leaf` filters
-            // through `query::hit_test`'s `is_effectively_interactable` and
-            // `frame_label_at` through `shown_visible`; this link was added on
-            // its own and consulted neither, so a **locked** frame and a
-            // **hidden** frame were both selectable by their border —
-            // `architecture.md` §9.4 being *"the canvas never selects a locked
-            // layer, by any gesture"*. `Selection::set_one` filters nothing,
-            // which is why each door has to carry its own and why a new door is
-            // exactly where this goes wrong.
+            // 🚨 **Visibility and lock, carried here because `Selection::set_one`
+            // filters nothing**: each pick door carries its own, and a new door
+            // is exactly where one goes missing. A frame's edge describes the
+            // frame as artwork, which a lock refuses; its name tag is the one
+            // door that takes a locked frame (`design/app-selection.md`).
             self.is_occupied_frame(*id)
                 && self.shown_visible(*id)
                 && !ondin_core::is_effectively_locked(&self.session.doc, *id)
@@ -25655,31 +25650,13 @@ mod frame_edge_tests {
         });
     }
 
-    /// **A locked frame and a hidden one are not selectable by their border**
-    /// (§15 D839).
+    /// **A locked frame and a hidden one are not selectable by their border**;
+    /// `Selection::set_one` filters nothing, so a door that does not filter
+    /// selects. Each case asserts the border answers before the flag is set, so
+    /// a fixture that missed the band fails rather than passing on `None`.
     ///
-    /// 🚨 This link shipped consulting **neither** predicate, where both sibling
-    /// links carry one: `pick_leaf` filters through `query::hit_test`'s
-    /// `is_effectively_interactable` and `frame_label_at` through
-    /// `shown_visible`. `architecture.md` §9.4 is *"the canvas never selects a
-    /// locked layer, by any gesture"*, and `Selection::set_one` filters nothing,
-    /// so a door that does not filter is a door that selects.
-    ///
-    /// ⚠️ **Both, and separately, because they are two predicates.** A fix that
-    /// added only `shown_visible` — the nearer one to hand, since
-    /// `frame_label_at` uses it — passes a hidden-only test and leaves §9.4's
-    /// own sentence false.
-    ///
-    /// ⚠️ **The control runs first.** Each case asserts the border answers
-    /// *before* the flag is set, so a fixture that never reached the band would
-    /// fail loudly rather than pass by answering `None` for the wrong reason —
-    /// which is this whole test's failure mode, every assertion being `None`.
-    ///
-    /// Flip, run: the lock term deleted and `shown_visible` left in place — the
-    /// half-fix the doc above predicts, and the one somebody reaching for
-    /// `frame_label_at`'s predicate would write. **Red on the locked case,
-    /// green on the hidden one**, which is what says the two terms are two
-    /// claims rather than one spelled twice.
+    /// Flip: the lock term deleted with `shown_visible` kept → red on the locked
+    /// case, green on the hidden one; the two terms are two claims.
     #[test]
     fn a_locked_or_hidden_frames_edge_is_not_pickable() {
         for (what, op) in [

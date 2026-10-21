@@ -1341,19 +1341,14 @@ pub struct Context<'a> {
     pub any_guides: bool,
     /// Each of the five View switches this menu can show, as it stands.
     pub view: ViewState,
-    /// Whether present mode is on — read by exactly one row (§15 D758).
+    /// Whether present mode is on — read by *Show rulers* and *Rename*, whose
+    /// effects present mode hides.
     ///
     /// **Not in [`ViewState`], though present mode is a `ViewSwitch` too.** That
     /// struct answers *"what is this switch's state, for the tick beside its row"*,
-    /// and no menu draws a *Present mode* row — `context-menus.md` §6.1 keeps it
-    /// out deliberately. This asks a different question: *"is another switch's row
-    /// worth offering"*. Putting it in `ViewState` would make `ViewState::get`
-    /// answer `Some` for a switch that has no row, which is exactly the confusion
-    /// §15 D675 removed from that function.
-    ///
-    /// ⚠️ **It became reachable on 2026-09-15.** No context menu could be open in
-    /// present mode until §15 D756 removed `open_context_menu`'s refusal, so this
-    /// field would have been dead the day before.
+    /// and no menu draws a *Present mode* row (`context-menus.md` §6.1). This asks
+    /// whether another row is worth offering; in `ViewState` it would make
+    /// `ViewState::get` answer `Some` for a switch that has no row.
     pub present: bool,
     /// Whether a segment (rather than only anchors) is part of the point
     /// selection — what separates §6.5's two Delete rows.
@@ -1540,9 +1535,15 @@ pub(crate) const COMBINE_MIXED: &str =
 /// presence.
 #[derive(Clone, Copy, Default)]
 pub struct LayerState {
-    pub hidden: bool,
-    /// This layer's **own** lock flag — what *Lock* / *Unlock* writes and what its
-    /// label reads.
+    /// Every layer *Hide* / *Show* acts on — the selection's outermost layers —
+    /// is hidden, so the row reads *Show*: the action shows exactly then
+    /// (`OndinApp::set_switch`), and a label read off the right-clicked layer
+    /// alone said *Show* over a selection it was about to hide.
+    pub all_hidden: bool,
+    /// Every layer *Lock* / *Unlock* acts on is locked, so the row reads
+    /// *Unlock* — [`Self::all_hidden`]'s rule for the lock.
+    pub all_locked: bool,
+    /// This layer's **own** lock flag — what the editing rows' refusal names.
     ///
     /// **Not the one that dims an editing row**; that is [`Self::locked_within`].
     /// The two were one field until §15 D321, and they cannot be: a layer inside a
@@ -2150,28 +2151,18 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
 
     // --- state ------------------------------------------------------------
     //
-    // The label follows the target: a mixed selection reads *Hide* and hides all
-    // of it, which is what the chord does (`OndinApp::set_switch`).
+    // The labels say what the action does over the whole selection: a mixed
+    // selection reads *Hide* and hides all of it (`OndinApp::set_switch`).
     rows.extend([
-        Row::new(Item::ToggleHidden).label(if st.hidden { "Show" } else { "Hide" }),
-        Row::new(Item::ToggleLocked).label(if st.locked { "Unlock" } else { "Lock" }),
-        // Single-selection only and refused in present mode, both of which the
-        // built chord already imposes: with several picked there is no one row to
-        // lay the field over.
-        //
-        // ⚠️ **And never dimmed by the lock, which it was until §15 D529.**
-        // `docs/context-menus.md` §5.9 lists the five rows that stay live over a
-        // locked layer and *Rename* is one of them — a name is not the layer's
-        // artwork, which is the argument that keeps *Copy* and *Copy properties*
-        // live two groups up. **The row was the only one of the verb's three
-        // doors that refused**: `Ctrl+R`, `F2` and the layers panel's
-        // double-click all renamed a locked layer without complaint. That is the
-        // failure §15 D261 states 380 lines below this line, in the *Edit image*
-        // push — *"a menu refusing where a key allows is the failure, and a menu
-        // agreeing with one is not"* — and *Edit image* was brought into line by
-        // adding the refusal to the verb; here the design says the other way, so
-        // the dim goes.
-        Row::new(Item::Rename).dim_if(!one, "Pick one layer to rename it"),
+        Row::new(Item::ToggleHidden).label(if st.all_hidden { "Show" } else { "Hide" }),
+        Row::new(Item::ToggleLocked).label(if st.all_locked { "Unlock" } else { "Lock" }),
+        // One layer only, since the field lays over one row, and not in present
+        // mode, which hides the panel that holds it — the chord refuses there
+        // too (`rename_selection`). Never dimmed by the lock: a name is not the
+        // layer's artwork (`docs/context-menus.md` §5.9).
+        Row::new(Item::Rename)
+            .dim_if(!one, "Pick one layer to rename it")
+            .dim_if(cx.present, "Leave present mode to rename"),
     ]);
 
     // --- navigate ---------------------------------------------------------
@@ -2995,9 +2986,10 @@ impl OndinApp {
         };
         let picture = tools::croppable_fill(node.paint());
         LayerState {
-            // What the layer shows, a bound visibility resolved (§15 D1059) —
-            // the row runs `toggle_hidden`, which reads the same.
-            hidden: !self.session.doc.shown(id),
+            // The two switches' own answers over the selection, which the menu's
+            // door has already made hold the right-clicked layer (C2).
+            all_hidden: self.hide_switch_shows(),
+            all_locked: !self.lock_switch_locks(),
             locked: node.locked(),
             // The **ancestors'** answer, asked of the parent so this node's own flag
             // is not folded in twice — `locked_within` derives the combination.
@@ -4327,6 +4319,7 @@ mod tests {
         );
         cx.state = LayerState {
             locked: true,
+            all_locked: true,
             ..LayerState::default()
         };
         let groups = build(&cx);
@@ -6168,6 +6161,111 @@ mod restore_children_tests {
             .collect();
         app.context_menu = None;
         labels
+    }
+
+    /// *Hide*/*Show* and *Lock*/*Unlock* say what the action does over the whole
+    /// selection — a hidden, locked layer right-clicked among visible, unlocked
+    /// ones reads *Hide* and *Lock* — and *Rename* dims in present mode.
+    ///
+    /// Flips: `layer_menu_state` reading the right-clicked layer's own flags →
+    /// fails at the mixed selection's *Hide*; *Rename*'s present-mode dim
+    /// dropped → fails at the last assertion.
+    #[test]
+    fn the_toggle_labels_read_the_whole_selection() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xB1D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [f, a, b, h] = [(); 4].map(|_| ids.mint());
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        doc.apply(&Transaction(vec![
+            create(
+                f,
+                root,
+                NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+            ),
+            create(a, f, rect()),
+            create(b, f, rect()),
+            create(h, f, rect()),
+            Operation::SetVisible {
+                id: h,
+                visible: false,
+            },
+            Operation::SetLocked {
+                id: h,
+                locked: true,
+            },
+        ]))
+        .expect("a frame of three rects, one hidden and locked");
+        app.session.adopt_document(doc, None);
+
+        let rows = |app: &mut OndinApp, sel: Vec<NodeId>, id: NodeId| {
+            app.session.selection.set(sel);
+            app.open_context_menu(
+                &ctx,
+                Target::Layer {
+                    id,
+                    door: Door::Panel,
+                },
+                None,
+            );
+            let rows: Vec<(Item, String, bool)> = app
+                .open_menu_rows()
+                .iter()
+                .flatten()
+                .map(|r| (r.item, r.label.to_string(), r.enabled))
+                .collect();
+            app.context_menu = None;
+            rows
+        };
+        let label = |rows: &[(Item, String, bool)], item: Item| {
+            rows.iter()
+                .find(|r| r.0 == item)
+                .map(|r| r.1.clone())
+                .expect("the row")
+        };
+
+        let mixed = rows(&mut app, vec![a, b, h], h);
+        assert_eq!(
+            label(&mixed, Item::ToggleHidden),
+            "Hide",
+            "it hides all three"
+        );
+        assert_eq!(
+            label(&mixed, Item::ToggleLocked),
+            "Lock",
+            "it locks all three"
+        );
+        let alone = rows(&mut app, vec![h], h);
+        assert_eq!(label(&alone, Item::ToggleHidden), "Show");
+        assert_eq!(label(&alone, Item::ToggleLocked), "Unlock");
+
+        let rename = |rows: &[(Item, String, bool)]| {
+            rows.iter()
+                .find(|r| r.0 == Item::Rename)
+                .expect("the row")
+                .2
+        };
+        assert!(rename(&rows(&mut app, vec![a], a)), "live on one layer");
+        app.present = true;
+        assert!(
+            !rename(&rows(&mut app, vec![a], a)),
+            "dim in present mode, where the field's panel is hidden"
+        );
     }
 
     /// **The row is offered exactly where the row's dot is, and puts back exactly

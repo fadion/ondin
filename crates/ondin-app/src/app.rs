@@ -3444,6 +3444,31 @@ impl OndinApp {
         Self::set_switch(locked)
     }
 
+    /// The `visible` [`Self::toggle_hidden`] moves the selection's outermost
+    /// layers to — on what they show, a bound visibility resolved — and so
+    /// whether the menu's row reads *Show*.
+    pub(crate) fn hide_switch_shows(&self) -> bool {
+        let doc = &self.session.doc;
+        Self::hide_switch(
+            build::outermost(doc, self.session.selection.ids())
+                .into_iter()
+                .filter(|id| doc.get(*id).is_some())
+                .map(|id| doc.shown(id)),
+        )
+    }
+
+    /// The `locked` [`Self::toggle_locked`] moves the selection's outermost
+    /// layers to, and so whether the menu's row reads *Lock*.
+    pub(crate) fn lock_switch_locks(&self) -> bool {
+        let doc = &self.session.doc;
+        Self::lock_switch(
+            build::outermost(doc, self.session.selection.ids())
+                .into_iter()
+                .filter_map(|id| doc.get(id))
+                .map(|n| n.locked()),
+        )
+    }
+
     /// Hide or show the whole selection — `Ctrl+Shift+H` (`docs/shortcuts.md` §4).
     ///
     /// **One switch for the set, not one per layer** — a per-layer flip would make
@@ -3464,12 +3489,7 @@ impl OndinApp {
     /// button agree.
     fn toggle_hidden(&mut self) {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
-        // On what the layers show, a bound visibility resolved (§15 D1059).
-        let visible = Self::hide_switch(
-            ids.iter()
-                .filter(|id| self.session.doc.get(**id).is_some())
-                .map(|id| self.session.doc.shown(*id)),
-        );
+        let visible = self.hide_switch_shows();
         let ops: Vec<Operation> = ids
             .iter()
             .map(|id| Operation::SetVisible { id: *id, visible })
@@ -3485,11 +3505,7 @@ impl OndinApp {
     /// Mixed **locks**, per [`Self::set_switch`].
     fn toggle_locked(&mut self) {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
-        let locked = Self::lock_switch(
-            ids.iter()
-                .filter_map(|id| self.session.doc.get(*id))
-                .map(|n| n.locked()),
-        );
+        let locked = self.lock_switch_locks();
         let ops: Vec<Operation> = ids
             .iter()
             .map(|id| Operation::SetLocked { id: *id, locked })

@@ -175,8 +175,8 @@ and *Duplicate as component* draw the filled hexagon.
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
-| Hide / Show | `Ctrl+Shift+H` | label from the right-clicked layer's own visibility; never dims |
-| Lock / Unlock | `Ctrl+Shift+L` | label from the right-clicked layer's **own** flag; never dims |
+| Hide / Show | `Ctrl+Shift+H` | *Show* only when every selected layer is hidden, as the action shows only then (a mixed selection hides); never dims |
+| Lock / Unlock | `Ctrl+Shift+L` | *Unlock* only when every selected layer's **own** flag is set, as the action unlocks only then; never dims |
 | Rename | `Ctrl+R` (`F2`) | dims *"Pick one layer to rename it"* unless one layer, and *"Leave present mode to rename"* in present mode, where the panel that holds the field is hidden; live on a lock |
 
 ### Navigate

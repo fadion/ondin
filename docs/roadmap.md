@@ -14,13 +14,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **The guide commit table's Alt-drag-copy arm has no test** (§15 D474): `finish_guide_drag`'s
   `(Some(id), false) if d.copying`. Add a pair to `rulers::the_guide_commit_table_answers_each_of_its_arms`,
   and correct its doc's arm count.
-- **A context menu's Hide/Show and Lock/Unlock label disagrees with the action.** The label reads the
-  right-clicked layer's own flag (`menu::layer_menu_state`); `toggle_hidden`/`toggle_locked` hide or
-  lock every member unless all already are (`set_switch`). With A and B visible and H hidden, a panel
-  right-click on H reads *Show* and hides A and B. The label should answer the action's rule over the
-  selection; `context-menus.md`'s *State* table changes with it.
-- **Rename's menu row is live in present mode.** `context-menus.md` now dims it there, as the chord
-  refuses (`rename_selection`); the row in `menu.rs` and the comment above it still don't.
 
 ## Now · Keyboard
 

@@ -34,9 +34,10 @@ pointer when the archived reasoning matters; otherwise drop it.
 - Comment-only changes. Each batch runs `cargo fmt`, `cargo check --all-targets`, the doc gate
   (`--document-private-items`) and `cargo test`, then commits per crate or per large file.
 - After each batch, `git diff` should show no change outside `//` lines (`git diff -U0 | grep '^[+-]' | grep -v '^[+-][[:space:]]*//'` returns only the file headers).
-- Order: the rest of `ondin-app` (largest first: `ui.rs`, `tools/mod.rs`, `layers.rs`,
-  `menu.rs`), then `ondin-core`, `ondin-render` and `ondin-export`. `inspector.rs`,
-  `canvas.rs`, `app.rs`, `dashboard.rs` and `typography.rs` are done (24–30% comments now).
+- Order: the rest of `ondin-app` (largest first: `menu.rs`, `input.rs`, `rulers.rs`,
+  `panels/export.rs`), then `ondin-core` (`text.rs`, `svg_in.rs`, `build.rs` first),
+  `ondin-render` and `ondin-export`. `inspector.rs`, `canvas.rs`, `app.rs`, `dashboard.rs`,
+  `typography.rs`, `ui.rs`, `tools/mod.rs` and `layers.rs` are done (24–31% comments now).
 - One agent per file at a time: two in one file break each other's exact-match edits. A range
   of ~6,000 lines is one agent; the next starts at the item the last one names.
 - rustfmt pulls a one-line `//` between array elements onto the element above; keep such a

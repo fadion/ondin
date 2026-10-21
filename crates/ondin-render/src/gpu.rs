@@ -770,25 +770,25 @@ impl VelloGpuRenderer {
     /// runs**: a level's consumers are the passes of the level above, which have
     /// not happened yet.
     ///
-    /// Returns each atlas slot *and the renderer holding it*, so the caller can
-    /// unregister them after the frame: `override_image` keys the engine's map by
-    /// blob id and every frame mints new ones, so leaving them in would grow that
-    /// map without bound.
+    /// Pushes each atlas slot *and the renderer holding it* onto `registered` as
+    /// it is made, so the caller unregisters them after the frame **even when a
+    /// pass fails part-way**: `override_image` keys the engine's map by blob id and
+    /// every frame mints new ones, so a slot left in grows that map without bound.
     fn resolve_effects(
         &mut self,
         device: &Device,
         queue: &Queue,
         jobs: Vec<EffectJob>,
         budget: u64,
-    ) -> Result<Vec<(Holder, ImageData)>, vello::Error> {
+        registered: &mut Vec<(Holder, ImageData)>,
+    ) -> Result<(), vello::Error> {
         if jobs.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         let deepest = jobs.iter().map(|j| j.level).max().unwrap_or(0);
         // The packed texture may not exceed what the device can allocate. Shelf
         // packing wraps at this width and the rows stack under it.
         let limit = device.limits().max_texture_dimension_2d;
-        let mut registered = Vec::with_capacity(jobs.len());
         let mut by_level: Vec<Vec<EffectJob>> = (0..=deepest).map(|_| Vec::new()).collect();
         for job in jobs {
             by_level[job.level].push(job);
@@ -977,7 +977,7 @@ impl VelloGpuRenderer {
                 pass += 1;
             }
         }
-        Ok(registered)
+        Ok(())
     }
 
     /// Build the scene for `vp` and rasterize it into `target` (an RGBA texture
@@ -1000,34 +1000,25 @@ impl VelloGpuRenderer {
         // (`pack`): a scene the size of the page, carrying at most the page's
         // paths, is a load this renderer is measured to survive.
         let budget = u64::from(vp.pixel_size.0) * u64::from(vp.pixel_size.1);
-        let registered = match self.resolve_effects(device, queue, jobs, budget) {
-            Ok(r) => r,
-            Err(e) => {
-                // Every texture this frame took goes back, or the pool would
-                // carry them as busy into the next frame and allocate beside them.
-                // ⚠️ The slots earlier passes registered this frame are lost with
-                // the error and never unregistered — §15 D1003 (7)'s *Fix*.
-                self.pool.end_frame();
-                return Err(e);
-            }
-        };
-        let params = RenderParams {
-            base_color,
-            width: vp.pixel_size.0,
-            height: vp.pixel_size.1,
-            antialiasing_method: AaConfig::Area,
-        };
+        let mut registered = Vec::new();
         let out = self
-            .renderer
-            .render_to_texture(device, queue, &scene, target, &params);
-        // **Unregistered on the way out, including when the render failed.** The
-        // slots were minted for this frame alone; leaving them behind would keep
-        // both the map entry and the texture it holds alive for the life of the
-        // renderer, which for a viewport-sized layer is 8 MB a frame. **From the
-        // renderer that holds each one** — a nested layer's slot lives in a layer
-        // renderer's atlas, not the page's (§15 D404). ⚠️ This is the page's
-        // render; a failed *effect* pass returns before it, above, and its slots
-        // are never unregistered (§15 D1003 (7)'s *Fix*).
+            .resolve_effects(device, queue, jobs, budget, &mut registered)
+            .and_then(|()| {
+                let params = RenderParams {
+                    base_color,
+                    width: vp.pixel_size.0,
+                    height: vp.pixel_size.1,
+                    antialiasing_method: AaConfig::Area,
+                };
+                self.renderer
+                    .render_to_texture(device, queue, &scene, target, &params)
+            });
+        // **Unregistered on the way out, whichever pass failed.** The slots were
+        // minted for this frame alone; leaving them behind would keep both the map
+        // entry and the texture it holds alive for the life of the renderer, which
+        // for a viewport-sized layer is 8 MB a frame. **From the renderer that
+        // holds each one** — a nested layer's slot lives in a layer renderer's
+        // atlas, not the page's.
         for (holder, image) in registered {
             match holder {
                 Holder::Page => self.renderer.unregister_texture(image),

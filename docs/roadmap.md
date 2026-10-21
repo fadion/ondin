@@ -71,8 +71,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **A sweep gradient exports `r="50"` when its radius is unknown** (§15 D762): `svg::sweep_radius`
   answers `None` for a non-invertible transform or a missing frame, and the caller falls to
   `.unwrap_or(50.0)`.
-- **A failed effect pass leaks that frame's atlas slots** (§15 D1003 (7)): a `render_to_texture` error
-  in `VelloGpuRenderer::resolve_effects` returns before the slots are handed back.
 
 ## Now · Tooling
 

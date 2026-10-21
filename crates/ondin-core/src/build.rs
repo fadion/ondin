@@ -1464,6 +1464,29 @@ pub fn can_outline_text(res: &Resolved, id: NodeId) -> bool {
         .is_some_and(|l| !crate::text::outline(l).elements().is_empty())
 }
 
+/// Whether `id` is **artwork** a rail may be made of — the one question both
+/// rail doors ask ([`text_on_new_path`] and `query::outline_at`). Three roles
+/// reach them as ordinary kinds and are not: a page (a frame or the root, whose
+/// consumption orphans its guides), a boolean's operand (its edge lies on the
+/// result's silhouette, and consuming it guts the boolean) and a mask
+/// (consuming it unmasks what it hid).
+pub fn is_rail_artwork(doc: &Document, id: NodeId) -> bool {
+    let Some(node) = doc.get(id) else {
+        return false;
+    };
+    if node.mask() || matches!(node.kind(), NodeKind::Artboard { .. } | NodeKind::Root) {
+        return false;
+    }
+    let mut cursor = node.parent();
+    while let Some(c) = cursor.and_then(|c| doc.get(c)) {
+        if matches!(c.kind(), NodeKind::Boolean { .. }) {
+            return false;
+        }
+        cursor = c.parent();
+    }
+    true
+}
+
 /// Make a **new, empty** text node set along `path`, consuming it — the Text
 /// tool's click on an outline (§15 D408).
 ///
@@ -1492,68 +1515,9 @@ pub fn text_on_new_path(
     at_world: Point,
 ) -> Result<(Transaction, NodeId), OpError> {
     let node = doc.get(path).ok_or(OpError::NoSuchNode(path))?;
-    // **Nothing becomes a rail from inside a boolean** — the same refusal `mask`
-    // makes (grep *"Nothing masks inside a boolean"*, some six hundred lines up in
-    // this file), in almost the same words and for the same reason: a `Boolean`'s
-    // children are operands rather than artwork (§15 D453). ⚠️ This said *"forty
-    // lines up"* and the pointer is the whole value of the sentence.
-    //
-    // ⚠️ **This function consumes the layer it is handed**, which is what makes
-    // the missing gate data loss rather than a no-op. Measured: two rects
-    // combined with `Subtract` put the subtrahend's edge exactly on the result's
-    // silhouette — that is what a boolean *is* — so a Text-tool click on that
-    // edge picked the *operand*, deleted it, and installed a `Text` node inside
-    // the `Boolean`. Three things at once, none announced: the boolean silently
-    // became its base, the text was parented somewhere `scene.rs` returns before
-    // ever reaching, and the status line said *"the shape became the rail"*. The
-    // caret was live over a blank page and `Ctrl+Z` was the only way back.
-    //
-    // Refused here rather than only at the pick, because this is the door every
-    // caller comes through and `can_parent(Boolean, Text)` is `true`, so
-    // `Document::apply` has no reason of its own to say no.
-    if matches!(
-        node.parent().and_then(|p| doc.get(p)).map(|n| n.kind()),
-        Some(NodeKind::Boolean { .. })
-    ) {
-        return Err(OpError::WrongKindForOp);
-    }
-    // **And nothing becomes a rail that is a page** — `[S3.1-L2-03]`, and the
-    // half of D453 the ancestry test above does *not* reach: a frame's parent is
-    // never a boolean (§15 D876), so a frame passes straight through it.
-    //
-    // ⚠️ **`local_path` answering `Some` is not a licence to consume.** It says
-    // `Some` for an `Artboard` deliberately — *"a frame has an outline, and it is
-    // its own frame"* (§15 D144) — and this function read "has a local path" as
-    // "may be deleted", which is true of every other kind and false of this one.
-    // Measured: a frame nested in a frame, carrying one guide scoped to it, came
-    // back `Ok`; applied, the frame was gone and the guide was not, because the
-    // emitted `DeleteNode` carries no [`guides_of`] ops. `io::save` succeeded and
-    // `io::load` answered *"guide … is scoped to …, which is not a frame in this
-    // document"* — forever.
-    //
-    // **Refused here rather than left to `outline_at`'s kind skip**, which is
-    // what made this unreachable from a click (D408: a frame is a page, its edge
-    // is a boundary rather than a drawn curve) and which is one layer above the
-    // builder that needs it. Unreachable is not refused: the MCP write surface,
-    // the command line and any second entrance added later all arrive here
-    // directly — which is `mask`'s own argument for its refusal, quoted above.
-    if matches!(node.kind(), NodeKind::Artboard { .. } | NodeKind::Root) {
-        return Err(OpError::WrongKindForOp);
-    }
-    // **And nothing becomes a rail that is a mask** — `[S4.1-L1-02]`, and the
-    // third role in a row that reaches this function as an ordinary kind
-    // (§15 D456). Consuming a mask is the one of the three that changes what
-    // *other* layers look like: measured on the suite's `mask_fixture`, the mask
-    // was deleted, the flag did not travel to the `Text` that replaced it, and
-    // the group's bounds went `50×50` → `-11,-11..500,400` — the artwork it was
-    // hiding fully visible, with the status line saying *"the shape became the
-    // rail"*.
-    //
-    // **The belt to `query::outline_at`'s braces.** That query no longer offers a
-    // mask, which is what a click can reach; this is what the MCP write surface
-    // and the command line reach, and it is the same argument as the two guards
-    // above.
-    if node.mask() {
+    // Refused here as well as at the pick: this consumes the layer, and the MCP
+    // write surface and the command line arrive here directly.
+    if !is_rail_artwork(doc, path) {
         return Err(OpError::WrongKindForOp);
     }
     // The outline as drawn — a bound width or height at its number, never the 0

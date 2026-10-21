@@ -557,50 +557,17 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
             continue;
         }
         let Some(node) = doc.get(id) else { continue };
-        if matches!(
-            node.kind(),
-            NodeKind::Artboard { .. } | NodeKind::Text { .. }
-        ) {
+        // A text has no outline to type along; the roles that may not become a
+        // rail are `text_on_new_path`'s own question. Neither is
+        // [`is_effectively_interactable`]'s, which `hit_test` shares and which
+        // must let a boolean's operand through to `group_chain`.
+        if matches!(node.kind(), NodeKind::Text { .. }) || !crate::build::is_rail_artwork(doc, id) {
             continue;
         }
-        // **A boolean's operands are not outlines anybody may aim at** (§15 D453).
-        // They are in the pick index — `build_index` filters on `is_indexed(kind)`
-        // alone, which knows nothing about ancestry — and a `Subtract`'s
-        // subtrahend has an edge lying *exactly* on the result's silhouette,
-        // because that is what a boolean is. So the Text tool's rail affordance
-        // lit up on the operand and `text_on_new_path` then consumed it.
-        //
-        // ⚠️ **Here and not in [`is_effectively_interactable`]**, which walks the
-        // same chain and would be the tidier home: `hit_test` shares that
-        // function and is *supposed* to return operands, resolving them to their
-        // container through `group_chain` afterwards. Folding this in there would
-        // make a boolean unclickable.
-        //
-        // Before the `local_path` build and the nearest-point solve, so on a
-        // rejected candidate it saves that work rather than adding to it.
-        if has_boolean_ancestor(doc, id) {
-            continue;
-        }
-        // **A mask is not a rail, and neither is ink the mask has clipped away**
-        // (§15 D456). `[S4.1-L1-02]`: this asked two of [`hit_test`]'s three
-        // questions and not the third, so the *same* two clicks answered
-        // differently through the two doors.
-        //
-        // Measured on the suite's own `mask_fixture` — a group holding a 50×50
-        // rect marked *Use as mask* under a 500×400 rect. Clicking the mask's
-        // edge: `hit_test` answered the artboard and this answered **the mask**,
-        // so the rail affordance lit up on a layer that paints nothing;
-        // `text_on_new_path` then deleted it and the group's bounds went
-        // `50×50` → `-11,-11..500,400`, the artwork silently unmasked with the
-        // status line saying *"the shape became the rail"*. Clicking the masked
-        // rect's edge out in the clipped-away region: this answered the rect where
-        // the canvas shows nothing at all.
-        //
-        // ⚠️ **Behind [`is_effectively_interactable`] and behind the two skips
-        // above, on purpose.** This walks the ancestor chain and asks
-        // `mask_path` — the most expensive question in the loop — and the loop
-        // runs over every candidate outline on every frame the Text or Pen tool is
-        // in hand. The cheap rejections come first.
+        // **Nor is ink a mask has clipped away**, which the canvas does not show
+        // (§15 D456) — the same question `hit_test` asks. Behind the cheap
+        // rejections, on purpose: it asks `mask_path`, the most expensive
+        // question in a loop that runs every frame the Text or Pen tool is in hand.
         if masked_away(doc, res, id, p) {
             continue;
         }
@@ -697,22 +664,6 @@ fn seg_hull(seg: &kurbo::PathSeg) -> Rect {
         y1 = y1.max(q.y);
     }
     Rect::new(x0, y0, x1, y1)
-}
-
-/// Whether any ancestor of `id` is a [`crate::node::NodeKind::Boolean`].
-///
-/// Its own kind is not consulted: a boolean *is* an outline and clicking its edge
-/// is exactly the gesture — what must not be aimed at is a node **inside** one.
-fn has_boolean_ancestor(doc: &Document, id: NodeId) -> bool {
-    let mut cursor = doc.get(id).and_then(|n| n.parent());
-    while let Some(c) = cursor {
-        let Some(node) = doc.get(c) else { return false };
-        if matches!(node.kind(), crate::node::NodeKind::Boolean { .. }) {
-            return true;
-        }
-        cursor = node.parent();
-    }
-    false
 }
 
 /// A node is interactable only if it and every ancestor are visible and none is

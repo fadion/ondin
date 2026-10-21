@@ -11,9 +11,6 @@ code before picking an item up — an item's premise can go stale while its ask 
   deliberate exception (`design/app-selection.md`, *Locked layers*), but `canvas::frame_edge_at`'s doc
   and its test still say the canvas never selects a locked layer "by any gesture". Trim them to the
   set-gesture rule.
-- **Three role refusals are written at two doors** (§15 D456): boolean operand, frame and mask are each
-  refused by `query::outline_at` (the mask through the shared `masked_away`) and again by
-  `build::text_on_new_path`'s own guards. Replace them with one question: is the consumed thing artwork?
 - **The railed-text resize arms of `tools/mod.rs` measure different boxes** (§15 D472). Both call
   `railed_resize` and `kind_to_solve_against`, but `resize_to_handle` takes `drawn` from
   `anchored_box` (the cached layout bounds) and `scale_geometry` re-shapes through `railed_box`, and

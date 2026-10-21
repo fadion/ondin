@@ -1,21 +1,16 @@
 //! The layers tree: z-order, structure, visibility and locking.
 //!
-//! Rows are painted by hand rather than composed from egui widgets, because the
-//! design calls for a 26px row with hover-revealed controls and a size badge —
-//! cheaper and more predictable to draw directly than to fight widget layout.
+//! Rows are painted by hand: a 26px row with hover-revealed controls and a size
+//! badge is simpler to draw directly than to coax out of egui widget layout.
 //!
-//! Dragging a row reorders or reparents it. That goes through
-//! `build::reparent_preserving_world`, not the raw `Reparent` op: local
-//! transforms mean a naive reparent teleports the node by the difference
-//! between the two parents.
+//! Dragging a row reorders or reparents it through `build::reparent_preserving_world`,
+//! not the raw `Reparent` op, which would teleport the node by the difference
+//! between the two parents' transforms.
 //!
-//! **The drop follows the indent, both ways.** A gap between two rows is a run of
-//! insertion points rather than one — a level for each the two rows have in common —
-//! and the pointer's *horizontal* travel from where the row was picked up chooses
-//! between them, drawing the insertion line at that level's own column. So a layer is
-//! carried out of a group by taking it to the bottom of the group and moving left, and
-//! into one by moving right, which is the gesture Figma and its neighbours have.
-//! [`depth_range`] is the rule and [`OndinApp::drop_hint`] is where it is read.
+//! The drop follows the indent: a gap between two rows is a run of insertion
+//! points, one per level the two rows share, and the pointer's horizontal travel
+//! from the pick-up point chooses between them. [`depth_range`] is the rule and
+//! [`OndinApp::drop_hint`] is where it is read.
 
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
@@ -23,35 +18,18 @@ use eframe::egui;
 use ondin_core::{NodeId, NodeKind, Operation, Transaction, build};
 use std::collections::{HashMap, HashSet};
 
-/// Row height. **The rows do not touch** — `item_spacing.y` is 1 in the tree, so
-/// the pitch is 27 and every guide and drop line has a gap to cross or centre in.
+/// Row height. The rows do not touch: `item_spacing.y` is 1 in the tree, so the
+/// pitch is 27 and every guide and drop line has a gap to cross or centre in.
 const ROW_H: f32 = 26.0;
 
-/// The **header**'s left and right margin, in points.
-///
-/// Here rather than in `app.rs`, where the `Margin` is spelled, because a copy of
-/// it there would be the number that goes stale. `i8` for the same reason the
-/// margin is one — `egui::Margin` takes whole points.
-///
-/// ⚠️ **This is not what governs a row**, and [`MIN_W`]'s derivation used it as
-/// though it were until 2026-09-06. The header frame is a *sibling* of the
-/// `ScrollArea`; what indents the tree is [`TREE_PAD_X`]. See that constant.
+/// The header's left and right margin, in points (`i8` because `egui::Margin`
+/// takes whole points). It does not govern a row: the header frame is a sibling of
+/// the `ScrollArea`, and [`TREE_PAD_X`] is what indents the tree.
 pub(crate) const PAD_X: i8 = 12;
 
-/// The **tree**'s left and right gutter, in points — the `ScrollArea`'s inner
-/// frame, and so the term that actually narrows a row (§15 D444).
-///
-/// ⚠️ **[`MIN_W`]'s derivation subtracted `2 * PAD_X` (24) instead of this (12),
-/// so every width figure in that constant's prose and in [`MAX_W`]'s was 12pt
-/// pessimistic.** Measured off a real `layers_panel` at `MIN_W`: a row runs
-/// `6.0..204.0`, i.e. **198pt**, where the derivation said 186.
-///
-/// Nothing user-visible followed, because the error is entirely in the safe
-/// direction — 210 and 600 are both *more* generous than they were argued to be.
-/// What it cost is the thing `panel_width_tests` exists for and says in its own
-/// `//!`: retuning the header's gutter moved three assertions about the tree, and
-/// retuning the tree's own moved none of them. That is the module's stated
-/// failure mode, inverted.
+/// The tree's left and right gutter, in points — the `ScrollArea`'s inner frame,
+/// and so the term that actually narrows a row (§15 D444). A row at [`MIN_W`] runs
+/// `6.0..204.0`, i.e. 198pt.
 pub(crate) const TREE_PAD_X: i8 = 6;
 /// Room left for the caret column on a row that has one, and on a top-level row
 /// whether it has one or not.
@@ -60,41 +38,25 @@ const CARET_ROOM: f32 = 16.0;
 const NO_CARET_ROOM: f32 = 2.0;
 /// Half the kind glyph's 15pt box — `icon_x` is a *centre*.
 const ICON_HALF: f32 = 8.0;
-/// From the kind glyph's centre to where the name starts.
-///
-/// 15, not 12: the glyph is drawn centred, so half of its 15pt advance already
-/// sits to the right, and the name was landing about 3px closer than the design's
-/// 7px gap.
+/// From the kind glyph's centre to where the name starts: half the glyph's 15pt
+/// advance already sits to the right, leaving the design's 7px gap.
 const NAME_GAP: f32 = 15.0;
 /// The lock glyph's centre, in from the row's right edge.
 const LOCK_INSET: f32 = 14.0;
 
 /// The room a component mark takes at a row's right edge (§15 D981) — the dot
-/// for an override, `+` for a layer of the instance's own — clear of the lock's
-/// glyph beside it. With a mark, a badge's right edge sits this far in from the
-/// row's edge rather than 4 (so it moves left by 5, not by this).
+/// for an override, `+` for a layer of the instance's own. With a mark, a badge's
+/// right edge sits this far in from the row's edge rather than 4.
 const MARK_SLOT: f32 = 9.0;
 
 /// A row's component mark (§15 D981).
 ///
-/// A removed or reordered child marks **its parent's row**, expanded or collapsed,
-/// with a tooltip naming what ([`child_drift_tip`]) — §15 D1003 (9),
-/// `[X11.1-L2-03]`; expanded, it had marked no row at all. The ruling's *Restore*
-/// in the row's context menu is *Restore children* (`menu::Item::RestoreChildren`),
-/// offered on exactly the rows this dot is on for their children
-/// (`menu::Context::children_differ`, the same [`child_drift_scoped`]) and putting
-/// back exactly what the tooltip names — narrower than *Reset ‹layer›* / *Reset
-/// all*, the only verbs that touch fields.
-///
-/// **The scope is the row's fold** (§15 D1004 (2)). **Collapsed**, the dot
-/// bubbles up whatever differs inside, so the tooltip counts and *Restore
-/// children* restores every removed child and every changed order anywhere in the
-/// subtree (`reset::subtree_child_drift`, `reset::restore_structure`); a collapsed
-/// row lit by field overrides or local layers alone offers *Reset all* only.
-/// **Expanded**, the row's own children only (`reset::child_drift`,
-/// `reset::restore_own_children`) — deeper rows carry their own dots and rows.
-/// As first built (`5bce910`) a collapsed row whose only change was a removed
-/// grandchild wore the dot and was offered no *Restore children*.
+/// A removed or reordered child marks its parent's row, with a tooltip naming what
+/// ([`child_drift_tip`]); *Restore children* in the row's menu is offered on
+/// exactly those rows and puts back what the tooltip names (§15 D1003 (9)).
+/// The scope is the row's fold (§15 D1004 (2)): collapsed, every removed child and
+/// changed order anywhere in the subtree (`reset::subtree_child_drift`); expanded,
+/// the row's own children only (`reset::child_drift`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowMark {
     /// An override — on the row, or, collapsed, anything inside it differing; and
@@ -105,8 +67,7 @@ enum RowMark {
 }
 
 /// The tooltip on a parent row whose children differ from its source's —
-/// *"1 removed · order changed"*, the ruling's own example (§15 D1003 (9)) — or
-/// `None` when they do not.
+/// *"1 removed · order changed"* — or `None` when they do not.
 pub(crate) fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String> {
     let mut parts = Vec::new();
     if d.removed > 0 {
@@ -118,10 +79,8 @@ pub(crate) fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// What a row's tooltip counts and its *Restore children* restores, by its fold
-/// (§15 D1004 (2)): `folded`, every removed child and changed order anywhere in
-/// `id`'s subtree (`reset::subtree_child_drift`); else `id`'s own children
-/// (`reset::child_drift`). Never a field either way.
+/// What a row's tooltip counts and its *Restore children* restores, by its fold:
+/// `folded`, the whole subtree; else `id`'s own children. Never a field.
 pub(crate) fn child_drift_scoped(
     doc: &ondin_core::Document,
     id: NodeId,
@@ -134,30 +93,23 @@ pub(crate) fn child_drift_scoped(
     }
 }
 
-/// Whether a row whose layer is a picture shows the picture's thumbnail in its
-/// icon slot: not when the row wears the hexagon (`hexagon`, `Some` for a main or
-/// an instance root) — the hexagon is the row's one component mark (§15 D981,
-/// `[X11.1-L1-04]`). A free function because the thumbnail itself is a texture a
-/// headless app never decodes, so the row cannot be asked.
+/// Whether a picture row shows its thumbnail in the icon slot: not when the row
+/// wears the hexagon (`Some` for a main or an instance root), its one component
+/// mark (§15 D981). A free function because a headless app never decodes the
+/// texture, so the row cannot be asked.
 fn wears_thumbnail(hexagon: Option<bool>) -> bool {
     hexagon.is_none()
 }
 
-/// From the lock's centre to the eye's — the glyphs are 15pt, so the old 18pt
-/// pitch left them almost touching.
+/// From the lock's centre to the eye's.
 const EYE_PITCH: f32 = 23.0;
 
-/// The capsule a bound layer's eye sits in (§15 D1060) — the identity card's
-/// bound eye's 22×18 (§15 D1059), clear of the lock glyph by 4.5 at
-/// [`EYE_PITCH`].
+/// The capsule a bound layer's eye sits in (§15 D1060), clear of the lock glyph
+/// by 4.5 at [`EYE_PITCH`].
 const BOUND_EYE: egui::Vec2 = egui::vec2(22.0, 18.0);
 
 /// Where a row's kind glyph is centred, measured from the row rect's left edge.
-///
-/// Extracted from the row walk **so that [`MIN_W`] can be argued from the same
-/// numbers the row is drawn with** rather than from a copy of them. One
-/// production caller and one test caller; the name follows at [`NAME_GAP`] past
-/// what this answers.
+/// Shared with [`MIN_W`]'s argument so both use the numbers the row is drawn with.
 fn icon_offset(depth: usize, caret_room: bool) -> f32 {
     indent_of(depth)
         + if caret_room {
@@ -171,298 +123,133 @@ fn icon_offset(depth: usize, caret_room: bool) -> f32 {
 /// The size of the eye, lock and kind glyphs, in points.
 const ICON_PT: f32 = 15.0;
 
-/// The panel's width when nothing has been dragged — §15 D330's 300, now a
-/// *default* rather than an exact size (§15 D349).
+/// The panel's width when nothing has been dragged — a default, not an exact size
+/// (§15 D330, D349).
 pub(crate) const DEFAULT_W: f32 = 300.0;
 
 /// How narrow the drag may take the panel.
 ///
-/// **Measured off the row walk's own arithmetic, not chosen** — and composed from
-/// the same items the walk draws with, so retuning any of them moves this rather
-/// than silently invalidating it: `w − 2·`[`PAD_X`]` − `[`icon_offset`]` −
-/// `[`NAME_GAP`]` − `[`LOCK_INSET`]` − `[`EYE_PITCH`]` − `[`ICON_PT`]`/2` is what
-/// a **hovered** row's name has to live in, and that expression is the whole of
-/// what a minimum can be argued from. Hovered, because at rest a visible,
-/// unlocked, unbadged row draws nothing on its right at all and has the whole
-/// row — a minimum argued from the roomy state is one that breaks the moment the
-/// pointer arrives.
+/// Derived from the row walk's own items: `w − 2·`[`PAD_X`]` − `[`icon_offset`]` −
+/// `[`NAME_GAP`]` − `[`LOCK_INSET`]` − `[`EYE_PITCH`]` − `[`ICON_PT`]`/2` is the room a
+/// hovered row's name lives in, so retuning any of them moves this rather than
+/// silently invalidating it. Hovered, because at rest a row draws nothing on its
+/// right and a minimum argued from that breaks when the pointer arrives.
 ///
-/// **210 is where two independent readings of it meet**, which is why it is this
-/// number and not a round 200:
-///
-/// - a **top-level** row keeps 108.5pt of name while hovered — measured against
-///   real names at the row's own 12.5pt, where `Rectangle 12` lays out at 75.06
-///   and `Button primary hover` at 124.34, so the common case fits and the long
-///   case is the one that clips. (`Hero background`, at 102.69, is the nearest
-///   thing to a borderline case and also clips.) **The same two names the test
-///   uses**, deliberately: this comment and
-///   `panel_width_tests::the_minimum_keeps_a_real_layer_name_on_a_top_level_row`
-///   advertised different long names for a while, which reads as two different
-///   arguments for one number;
-/// - a **four-deep** row's hovered name room stops being negative. Four levels is
-///   not an arbitrary depth to test at — it is the depth §15 D330 already argued
-///   the 300 from ("a layer four deep had about 90pt at 250"), so this reuses that
-///   decision's own reference rather than inventing one.
-///
-/// ⚠️ **The second reading no longer picks 210, and this sentence is left as the
-/// place that says so.** It crosses zero at **194.5**, not the 206.5 written here
-/// until 2026-09-06: both figures came from subtracting the header's `2 * PAD_X`
-/// where a row is narrowed by [`TREE_PAD_X`], which is half of it. So the two
-/// readings do **not** meet at 210 — the first one above is now the only one
-/// choosing it, and this one would have allowed 195. **210 is left alone**,
-/// because the error was entirely in the safe direction and the number that looks
-/// right on screen is not something a derivation gets to overrule; but the
-/// argument for it is one reading, not two, and re-tightening it is a design call.
-///
-/// Below this the name of a nested row is drawn *underneath* the eye, which is a
-/// broken picture rather than a tight one. Above it, clipping is the user's
-/// choice.
-///
-/// ⚠️ **The panel's header is not the binding constraint and was checked, not
-/// assumed** — the search field is `ui.available_width()` and flexes, and the
-/// eyebrow plus its two 20pt buttons want well under the 198pt of content this
-/// leaves.
+/// 210 is chosen by one reading: a top-level row keeps 108.5pt of name while
+/// hovered, so `Rectangle 12` (75.06) fits and `Button primary hover` (124.34)
+/// clips, the same names as
+/// `panel_width_tests::the_minimum_keeps_a_real_layer_name_on_a_top_level_row`.
+/// The other reading, a four-deep row's hovered name room reaching zero, crosses at
+/// 194.5; 210 is left above it on purpose. Below this a nested row's name is drawn
+/// underneath the eye. The header is not binding: the search field flexes and the
+/// eyebrow plus its two 20pt buttons want well under the 198pt of content.
 pub(crate) const MIN_W: f32 = 210.0;
 
-/// How wide the drag may take the panel: twice the default.
-///
-/// A cap at all, because a panel dragged over the whole window is a state with no
-/// signpost out of it; egui only stops it at the window edge. Twice the default
-/// because that is past every tree this has to hold — at 600 a row **eight** deep
-/// still has **281.5pt** of name hovered — so the cap binds only on someone
-/// starving the canvas.
-///
-/// ⚠️ This said 310, which is a real reading of the same row and the wrong one:
-/// it is the **at-rest, badged** figure. The row has three readings, not two —
-/// 314 at rest with nothing on its right, 310 once a `RowBadge`'s 4pt inset is
-/// owed, and 269.5 hovered, where the eye-and-lock cluster takes 44.5. The
-/// sentence is about the hovered formula [`MIN_W`] is derived from, so it wanted
-/// the last of the three. Caught by `arch-scribe` reading the arithmetic back out
-/// of the constants and by nothing else: the test asserts `> 200.0`, and **a
-/// bound loose enough to be about the right thing is loose enough not to notice
-/// which of three numbers is in the prose beside it.**
-///
-/// ⚠️ **All three of those readings were then 12pt low**, for a reason that has
-/// nothing to do with which one the sentence wanted: the derivation subtracted
-/// the header's `2 * PAD_X` where a row is narrowed by [`TREE_PAD_X`]. The
-/// hovered figure is **281.5**, the other two 326 and 322. The loose `> 200.0`
-/// bound is the same lesson twice over — it could not see a wrong *reading* and
-/// it could not see a wrong *first term* either.
+/// How wide the drag may take the panel: twice the default, so a panel dragged
+/// over the whole window is not a state with no way out. At 600 a row eight deep
+/// still has 281.5pt of name hovered (326 at rest, 322 with a `RowBadge`).
 pub(crate) const MAX_W: f32 = 600.0;
 
-/// The default has to sit **inside** the pair, or the panel opens at a width the
-/// user cannot drag back to.
-///
-/// A `const` assertion rather than one in `panel_width_tests`, where it started:
-/// all three are compile-time constants, so this is something the compiler can
-/// simply refuse, and clippy said as much (`assertions_on_constants`). Failing
-/// the build at the definition beats failing a test that has to be *run*, and it
-/// puts the check where the next person retuning one of the three is looking.
-///
-/// ⚠️ Flipped by moving `DEFAULT_W` to 900: `error[E0080]: evaluation panicked`,
-/// pointing at this line. It bites at compile time, which is the whole claim.
+/// The default has to sit inside the pair, or the panel opens at a width the user
+/// cannot drag back to; a `const` assertion fails the build at the definition.
 const _: () = assert!(MIN_W < DEFAULT_W && DEFAULT_W < MAX_W);
 
-/// The side of a layer row's image thumbnail, in points.
-///
-/// **16, chosen by eye against 20 on the machine.** The argument for the larger
-/// number was that a thumbnail wants to be recognisable and 20 is roughly the
-/// row's height; seen in a real tree it was simply too heavy, and the smaller
-/// square reads as a picture just as well while leaving the row quieter. It also
-/// puts the thumbnail at the size of the 15-point glyph it replaces, so an image
-/// row no longer sits taller than every other row in the column.
-///
-/// Nothing in the surrounding geometry forced either number — the column has
-/// room for both. The caret is centred 19 points to the left of `icon_x` with an
-/// 11-point glyph and the name starts at `icon_x + 15`, so 16 clears the caret by
-/// 5.5 and the name by 7, against 3.5 and 5 at 20. What is worth keeping is the
-/// ceiling: at 26 — the row's own height — the square would come within half a
-/// point of the caret and two of the name, so "as tall as the row" was never
-/// available here whatever it looks like elsewhere.
+/// The side of a layer row's image thumbnail, in points: 16 matches the 15-point
+/// glyph it replaces, so an image row is not taller than the rest. It clears the
+/// caret by 5.5 and the name by 7; the row's own 26 would come within half a point
+/// of the caret.
 const THUMB: f32 = 16.0;
-/// The thumbnail's corner radius, in points. Asked for on the machine at the
-/// same time as the size.
-///
-/// 3 where the inspector's chip is 4, and they are deliberately not shared: the
-/// chip's radius belongs to `ui::swatch` and every colour in the app wears it,
-/// so matching them would mean either restyling every swatch or special-casing
-/// the one that holds a picture.
+/// The thumbnail's corner radius, in points. Not shared with the inspector's chip
+/// (4), whose radius belongs to `ui::swatch`.
 const THUMB_RADIUS: u8 = 3;
-/// The indent added per tree level. See [`indent_of`], which is where the
-/// arithmetic lives, and [`caret_column`], which is what the guides hang off.
+/// The indent added per tree level. See [`indent_of`], where the arithmetic lives,
+/// and [`caret_column`], which the guides hang off.
 ///
-/// 31pt per level, not the 16 this started at: at 16 a nested row was only one
-/// caret-width to the right of its parent, and with the caret drawn on the parent
-/// rather than the child there was almost nothing to tell "inside this frame"
-/// from "next to it". It is also the number behind the panel's 300pt width (§15
-/// D330) — four levels of indent leave a name very little room at 250.
-///
-/// ⚠️ **The design asks for 22 and this deliberately does not follow it** —
-/// asked and answered on the machine, *"indent is fine too, no need to change
-/// it"* (§15 D331). That 22 is the newer number: the layers pane went from 15 per
-/// level to a consistent 22 in the same pass that added the guides, which is
-/// coherent as a *pair* — a guide says which container a row is in, so the indent
-/// need not carry that alone and 9pt of name per level comes back. It was reported
-/// rather than implemented because the change was asked for as *bigger* indents
-/// and 31 already is bigger, so following the design would have tightened the tree
-/// in the name of widening it. **Not an open question**: 31 is the settled number,
-/// and nothing in the guides turns on it — they are drawn from [`caret_column`] at
-/// whatever this says.
+/// 31pt, not the design's 22 (§15 D331): at 16 a nested row was one caret-width
+/// right of its parent and nothing told "inside" from "next to". Settled; the guides
+/// are drawn from [`caret_column`] at whatever this says.
 const INDENT: f32 = 31.0;
 /// The tree guides' dash: 1.5pt of ink to every 2.5pt of gap — the design's
 /// `repeating-linear-gradient(… 0 1.5px, transparent 1.5px 4px)`.
 ///
-/// ⚠️ **Every run starts with a dash, and that is load-bearing rather than a
-/// default.** `Shape::dashed_line` opens with ink at the start of the path, so a
-/// run beginning at a **junction** — the elbow, or the top of a row — puts ink
-/// through it whatever the arithmetic either side works out to. This shipped the
-/// other way, with the below-elbow run phased to continue the lattice the row's top
-/// had started (`(-along).rem_euclid(4)`), which is more correct in the abstract and
-/// was reported from the machine within the hour: *"a slight gap on the vertical
-/// lines where they meet the horizontal ones"*. A three-point gap opening exactly
-/// where the eye follows the line around a corner, to keep a rhythm nobody can
-/// count. The rhythm is now per-run, as the design's per-row backgrounds are, and
-/// what that costs is one dash of double length at each junction — which reads as
-/// the junction being marked.
+/// Every run starts with a dash: `Shape::dashed_line` opens with ink, so a run
+/// beginning at a junction (the elbow, or a row's top) puts ink through it. Phasing
+/// the below-elbow run to continue the lattice left a visible gap at the corner.
 const GUIDE_DASH: f32 = 1.5;
 /// The gap between two of [`GUIDE_DASH`]'s dashes.
 const GUIDE_GAP: f32 = 2.5;
-/// How far clear of its trunk a row's elbow starts.
-///
-/// **One gap of the dash pattern past the trunk's own ink**, which is half a point
-/// either side of its column: so the corner reads as the pattern turning rather
-/// than as two lines meeting in a blot. The other half of the same report as
-/// [`GUIDE_DASH`]'s note — *"the horizontal lines start a pixel or two more to the
-/// right"* — and it shipped at 1.0, which put the elbow's first dash half a point
-/// off the trunk's edge.
+/// How far clear of its trunk a row's elbow starts: one dash gap past the trunk's
+/// own ink (half a point either side of its column), so the corner reads as the
+/// pattern turning.
 const ELBOW_CLEAR: f32 = 0.5 + GUIDE_GAP;
-/// A tree guide at rest — the design's 8.5% of the text colour.
-///
-/// **Not one of [`theme::text`]'s tiers**, which start at 38% and are a *type*
-/// ramp. A hairline the width of a caret's stroke has to sit under the dimmest
-/// glyph in the panel, or the gutter competes with the names.
+/// A tree guide at rest — the design's 8.5% of the text colour. Below
+/// [`theme::text`]'s dimmest tier (38%) so the gutter does not compete with names.
 const GUIDE_REST: egui::Color32 = theme::color::text_a(22);
 /// [`GUIDE_REST`] lit: the trunk from the hovered row's parent down to its elbow,
 /// at the design's 34%.
 const GUIDE_HOVER: egui::Color32 = theme::color::text_a(87);
 /// How close to a row's edge counts as "drop between" rather than "drop into".
 const EDGE_FRACTION: f32 = 0.3;
-/// How far, in indents, the pointer has to leave the level the drag is currently holding
+/// How far, in indents, the pointer has to leave the level the drag is holding
 /// before the drop line moves to another one. See [`depth_asked_for`].
 ///
-/// **0.65 against the 0.5 that plain rounding gives**, which is 20pt of travel where the
-/// bare threshold was 15.5. Not chosen as a feel: 0.5 is not a threshold at all but the
-/// point where two levels are equally close, so a hand that is *aiming* at neither — one
-/// holding a drag still, or moving down the tree — sits on it and the line flickers
-/// between two indents. Anything above 0.5 turns that edge into a band; 0.65 is the
-/// smallest number that puts the band comfortably outside a still hand's jitter and the
-/// few points of horizontal drift in a vertical drag, while still letting a deliberate
-/// sideways move land in under two thirds of one indent.
+/// 0.65 rather than plain rounding's 0.5, which is where two levels are equally
+/// close: a still or vertically moving hand sits on it and the line flickers. 0.65
+/// (20pt) puts the band outside that jitter while a deliberate sideways move still
+/// lands in under one indent.
 const STICK: f32 = 0.65;
 /// How long a drag has to rest on a collapsed group before it opens, in seconds.
-///
-/// **One second, asked for as one second.** Long enough that dragging *past* a collapsed
-/// group on the way somewhere else does not open it, short enough that a hand that has
-/// stopped and is waiting gets an answer before it decides the panel is not going to
-/// give one. The branch opens and stays open — this is the same `collapsed` set a caret
-/// click writes, so the tree is left as the drag found it only if the drop did not need
-/// to go inside, which is the honest outcome either way.
+/// Long enough that dragging past a group does not open it. The branch stays open:
+/// it writes the same `collapsed` set a caret click does.
 const SPRING_SECS: f64 = 1.0;
 
 /// A layer row being dragged, and where it would land if released now.
 pub struct LayerDrag {
-    /// Every row being carried, not just the one under the pointer.
-    ///
-    /// Dragging a row that is part of the selection takes the **whole**
-    /// selection with it, which is what the canvas has always done for a move
-    /// and what makes the tree usable for reorganising more than one layer.
-    /// Already reduced to [`build::outermost`], so a selection holding both a
-    /// group and something inside it does not move the inner node twice (§5.7a).
+    /// Every row being carried. Dragging a row that is part of the selection takes
+    /// the whole selection, reduced to [`build::outermost`] so a group and
+    /// something inside it do not move the inner node twice (§5.7a).
     pub ids: Vec<NodeId>,
     pub target: Option<DropTarget>,
-    /// Where the pointer was when the drag started, and how deep the row under it
-    /// was. **The pair is the origin the indent gesture is measured from** — see
-    /// [`depth_asked_for`], which is where the reason a displacement and not an
-    /// absolute x is written down.
-    ///
-    /// The depth is the *grabbed* row's, not the whole set's: a drag carrying rows
-    /// from several levels has no one depth, and the row the pointer is actually on
-    /// is the one the hand is thinking about.
+    /// Where the pointer was when the drag started, and the depth of the grabbed
+    /// row: the origin the indent gesture is measured from (see
+    /// [`depth_asked_for`]).
     pub grab: (f32, usize),
-    /// The level the indent gesture is currently holding — [`depth_asked_for`]'s
-    /// answer from last frame, **before** the boundary's own range clamped it.
-    ///
-    /// Starts at the grabbed row's depth, so a drag that has not moved sideways asks
-    /// for the level it was picked up at.
+    /// The level the indent gesture is holding — [`depth_asked_for`]'s answer from
+    /// last frame, before the boundary's own range clamped it.
     pub level: usize,
-    /// The container the drop would land in, **as it was last frame** — the row that
-    /// paints its name and glyph in [`color::SELECT`] to say so.
+    /// The container the drop would land in, as of last frame — the row that paints
+    /// its name and glyph in [`color::SELECT`].
     ///
-    /// ⚠️ **A frame behind, and it has to be.** A row's ink is painted while the walk
-    /// is passing it, and the drop is not worked out until the walk is over — an
-    /// indent-aware target is a claim about the row above a boundary and the row below
-    /// it at once ([`OndinApp::drop_hint`]). So the walk reads the answer the last one
-    /// reached. That is the same deal every hover in the panel already runs on, egui
-    /// reporting interaction against the previous frame's geometry, and the lag is
-    /// invisible: it is one frame, and only on the frames where the drop changes which
-    /// container it is in.
-    ///
-    /// **Not merged into [`target`], which is deliberately cleared every frame** so
-    /// that releasing off the tree drops nothing rather than acting on a stale answer
-    /// (§15 D19). This is that same staleness, kept on purpose, for painting only — it
-    /// must never decide where a layer lands.
+    /// A frame behind by necessity: rows are painted before the walk works out the
+    /// drop ([`OndinApp::drop_hint`]). Not merged into [`target`], which is cleared
+    /// every frame so that releasing off the tree drops nothing (§15 D19); this is
+    /// for painting only and must never decide where a layer lands.
     ///
     /// [`target`]: LayerDrag::target
     pub lit: Option<NodeId>,
     /// The collapsed group the pointer is resting on, and the time it arrived —
-    /// [`SPRING_SECS`] later the branch opens. `None` whenever the pointer is not on
-    /// one, which is what makes the wait start again rather than accumulate.
+    /// [`SPRING_SECS`] later the branch opens. `None` whenever the pointer is off
+    /// one, so the wait restarts rather than accumulates.
     pub spring: Option<(NodeId, f64)>,
     /// Why the drop under the pointer is refused, when the reason is one kind per
-    /// set (§15 D1003 (5), [`OndinApp::set_refusal`]) — said by the release, as the
-    /// canvas's move says it. Cleared every frame with [`target`], for the same
-    /// reason: a release off the tree says nothing.
+    /// set (§15 D1003 (5), [`OndinApp::set_refusal`]) — said by the release.
+    /// Cleared every frame with [`target`].
     ///
     /// [`target`]: LayerDrag::target
     pub refused: Option<&'static str>,
 }
 
-/// Where a dragged row would be inserted: a slot in one parent's child list, and
-/// nothing else.
-///
-/// ⚠️ **It carried a third field, `into`, saying whether the drop was inside a
-/// container rather than between siblings, and it is gone.** Nothing in production
-/// ever read it — the tests compared whole values, which is why it looked alive: the
-/// affordance is chosen from [`DropSpot`], which is what the pointer actually landed
-/// on, and `plan_layer_move` only ever wanted the parent and the index. It had also stopped meaning what it said — a drop indented in as a
-/// container's first child *is* a drop inside it and set `into: false`, because by
-/// then the field meant "which of the two hints was drawn" rather than anything about
-/// the destination.
-///
-/// ⚠️ **And no gate would have said so — the one that kept it quiet is the derived
-/// `PartialEq`.** Measured rather than assumed, on a private module holding one `pub`
-/// struct with one unread field: bare, `dead_code` fires; with `Debug` it still fires
-/// (rustc deliberately does not count that as a read) and with `Clone, Copy` it still
-/// fires; add `PartialEq, Eq` and it goes silent, `--test` or not. So a field can be
-/// read forever by a derive and an `assert_eq!` over the whole value and be dead in
-/// production the entire time. It is **not** the `pub`, which is worth saying because
-/// that is the reflex here: `ondin-app` has no lib target, so a `pub` item inside a
-/// module of it is not externally reachable and the lint does analyse it. That
-/// exemption is `ondin-core`'s, one crate over. This went because the struct was read
-/// against `plan_layer_move`, not because anything failed.
+/// Where a dragged row would be inserted: a slot in one parent's child list.
+/// The affordance is chosen from [`DropSpot`]; `plan_layer_move` only wants the
+/// parent and the index.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct DropTarget {
     pub parent: NodeId,
     pub index: usize,
 }
 
-/// The glyph for one boolean operation — Phosphor's own four, which is what the
-/// design asks for and what every other tool draws.
-///
-/// Beside [`node_icon`] because it has the same two readers for the same reason: the
-/// tree draws it on a boolean's row and the inspector's dropdown draws it in both its
-/// closed state and its menu, and one operation looking like two different pictures
-/// in the two places would be the whole cost of a second table.
+/// The glyph for one boolean operation. Beside [`node_icon`] because the tree and
+/// the inspector's dropdown both draw it and must show the same picture.
 pub(crate) fn op_glyph(op: ondin_core::BoolOp) -> &'static str {
     match op {
         ondin_core::BoolOp::Union => icon::UNITE_SQUARE,
@@ -472,28 +259,14 @@ pub(crate) fn op_glyph(op: ondin_core::BoolOp) -> &'static str {
     }
 }
 
-/// Whether any paint on `node` names a picture `store` cannot draw — the merged
-/// condition §15 D179 keeps merged.
+/// Whether any paint on `node` names a picture `store` cannot draw (§15 D179).
 ///
-/// **A free function over the store, not a method on the app**, so it can be
-/// asked directly: this is the whole of the decision the row's colour rests on,
-/// and a test of it should not have to draw a row to reach it.
-///
-/// Asked of the **decode cache** rather than of the document, so it is the same
-/// question the walk asks before drawing the placeholder. A panel that answered
-/// from the table alone would catch a dangling id and miss both a dead link and
-/// bytes that would not decode — two of the three states.
-///
-/// Fills *and* strokes, unlike the canvas placeholder, which is drawn only for a
-/// fill: that drawing is a statement about an *area* and a stroke has none, but
-/// the row is a statement about the *layer*, and a layer whose border is a
-/// missing picture is as broken as one whose middle is. Hidden paints are
-/// skipped, because nothing is drawing them to be missing.
+/// Asked of the decode cache rather than the document, so a dead link and bytes
+/// that will not decode count as well as a dangling id. Fills and strokes both:
+/// the row speaks for the layer, and a missing border picture is as broken as a
+/// missing middle. Hidden paints are skipped.
 pub(crate) fn picture_missing(store: &ondin_render::ImageStore, node: &ondin_core::Node) -> bool {
     let paint = node.paint();
-    // A frame's ground used to be chained on here out of its own field. It is one
-    // of the fills below now (§15 D400), and so is every *other* fill a frame can
-    // hold — which this could not have seen.
     paint
         .fills
         .iter()
@@ -507,37 +280,12 @@ pub(crate) fn picture_missing(store: &ondin_render::ImageStore, node: &ondin_cor
         })
 }
 
-/// The picture a row draws a thumbnail of: the first visible **fill** that is
-/// one.
+/// The picture a row draws a thumbnail of: the first visible fill that is one.
 ///
-/// **Deliberately narrower than [`picture_missing`], which is right beside it
-/// and reads almost the same paints.** That function asks whether the layer is
-/// *broken*, so a stroke painted with a dead link counts — a border that cannot
-/// draw is as broken as a middle that cannot. This one asks what the layer
-/// *looks like*, and a stroke's picture is a few pixels wide on the canvas and
-/// nothing at all in a twenty-pixel square.
-///
-/// ⚠️ **A frame's ground is in scope now and used to be out of it** (§15 D400),
-/// and the change is worth stating because it was never an exclusion anyone
-/// wrote: this reads `fills`, a frame's ground lived in a field of its own, and
-/// the comment here justified the omission after the fact ("a frame is a
-/// container rather than a picture"). A frame filled with a photograph now shows
-/// that photograph as its row's thumbnail, exactly as a rectangle filled with it
-/// does. Its size badge is unaffected — the badge slot is the *other* end of the
-/// row.
-///
-/// The **first** fill rather than the topmost-opaque one. A stack of image fills
-/// is rare, and picking between them by coverage would make the row's answer
-/// depend on alpha arithmetic nothing else in the panel does.
-///
-/// ⚠️ **It answers with the whole brush and used to answer with `&ImageRef`**
-/// (§15 D784). The picture is what the thumbnail draws and the **sampler** is how
-/// faded it draws — and dropping the second on the floor here is why this row
-/// showed a 30% fill at full opacity for as long as an image fill has had an
-/// alpha. A helper that returns half of a brush is how the other half gets
-/// forgotten by every caller at once.
-///
-/// [`thumb_tint`] is what the second half is for.
+/// Narrower than [`picture_missing`]: a stroke's picture is nothing in a small
+/// square. The first fill rather than the topmost-opaque one, to avoid alpha
+/// arithmetic here. It answers with the whole brush because [`thumb_tint`] needs
+/// its alpha (§15 D784).
 fn picture_of(node: &ondin_core::Node) -> Option<&ondin_core::ImageBrush> {
     node.paint()
         .fills
@@ -549,26 +297,9 @@ fn picture_of(node: &ondin_core::Node) -> Option<&ondin_core::ImageBrush> {
         })
 }
 
-/// The tint a row's thumbnail is drawn with: the row's own dimming and the
-/// picture's own alpha, composed.
-///
-/// **The fill is the texture's tint, not a colour drawn under it** — the same 40%
-/// a dimmed glyph takes, as a multiplier over the picture, so a hidden layer's
-/// thumbnail fades with its name instead of staying the one bright thing on a row
-/// that is out of play.
-///
-/// 🚨 **Two multipliers, and they compose rather than one winning** (§15 D784).
-/// The row's dimming says *this layer is out of play*; the brush's alpha says
-/// *this paint is faint*. They are facts about different things, so a hidden
-/// layer holding a 30% picture is dimmer than either alone — and a rule that
-/// picked a winner would make one of the two invisible exactly when the other
-/// was also true.
-///
-/// ⚠️ **It is a named function so that it can be asserted at all.** The drawn
-/// thumbnail is not reachable from a headless test without a decoded picture in
-/// the store *and* a texture the frame budget did not defer, which is two pieces
-/// of machinery between the test and the decision. The decision is this
-/// expression; the rest is the thumbnail cache, which has its own tests.
+/// The tint a row's thumbnail is drawn with: the row's dimming (the 40% a dimmed
+/// glyph takes) and the picture's own alpha, composed rather than one winning
+/// (§15 D784). A named function so a headless test can reach the decision.
 fn thumb_tint(dimmed: bool, picture: Option<&ondin_core::ImageBrush>) -> egui::Color32 {
     let base = match dimmed {
         true => egui::Color32::from_white_alpha(102),
@@ -577,15 +308,9 @@ fn thumb_tint(dimmed: bool, picture: Option<&ondin_core::ImageBrush>) -> egui::C
     base.gamma_multiply(picture.map_or(1.0, crate::panels::paint::image_brush_alpha))
 }
 
-/// Half the width of a row control's hit band, either side of the x it is drawn
-/// centred on.
-///
-/// **One number for the click and for the hover.** The row is a single
-/// `click_and_drag` region rather than three widgets, so both the "did you press
-/// the eye" test and the "is the pointer on the eye" test are hand-written
-/// against these x's — and two hand-written bands are how a control comes to
-/// light up somewhere it cannot be pressed. [`RowTargets`] is the one answer
-/// both ask.
+/// Half the width of a row control's hit band, either side of its centre x. One
+/// number for click and hover, so a control cannot light up where it cannot be
+/// pressed; [`RowTargets`] is the one answer both ask.
 const CONTROL_HIT: f32 = 9.0;
 
 /// Which of a row's three hand-drawn controls a point lands on.
@@ -609,13 +334,8 @@ struct RowTargets {
 }
 
 impl RowTargets {
-    /// The control at `x`, resolved **caret, then eye, then lock**.
-    ///
-    /// The order is the click's own and matters only where two bands overlap,
-    /// which on a deeply indented narrow panel they can: the caret walks right
-    /// with the indent while the eye is pinned to the right edge. Resolving it
-    /// here rather than in an `else if` chain is what keeps the mark under the
-    /// pointer and the thing the press acts on the same control.
+    /// The control at `x`, resolved caret, then eye, then lock — the click's own
+    /// order, which matters where bands overlap on a deep, narrow panel.
     fn at(&self, x: f32) -> Option<RowHit> {
         let near = |c: &Option<f32>| c.is_some_and(|at| (x - at).abs() <= CONTROL_HIT);
         if near(&self.caret) {
@@ -631,67 +351,31 @@ impl RowTargets {
 }
 
 /// The one remark a resting row makes at its right-hand end.
-///
-/// Two shapes rather than one string because one of them is a Phosphor glyph and
-/// glyphs want `theme::icon_font`, not the proportional face — and the size that
-/// puts a pictogram on the same ink height as a word is not the same number
-/// ([`BADGE_STACK`], [`BADGE_MASK`]), nor the same number as each other.
 enum RowBadge {
     /// An artboard's `800 × 600`.
     Text(String),
-    /// A Phosphor glyph and **the type size that puts it on the word's ink
-    /// height**, which is a property of the glyph rather than of the slot.
-    ///
-    /// The size travels with the pictogram because it is not one number. A
-    /// circle reaches its extremes where a stack of bars does not, so
-    /// `circle-half` at the stack's 11.0 inks 9.60 against the word's 8.80 at
-    /// 125% — visibly the heavier of two marks that are meant to be the same
-    /// kind of remark. One constant here would be a number measured for the
-    /// first glyph and inherited by the second without anyone re-checking it.
+    /// A Phosphor glyph and the type size that puts it on the word's ink height.
+    /// The size travels with the glyph because it differs per glyph
+    /// ([`BADGE_STACK`], [`BADGE_MASK`]).
     Icon(&'static str, f32),
 }
 
-/// Type size for the base operand's `stack-simple`, chosen so it inks the same
-/// height as the worded badge beside it in the same slot.
-///
-/// **Measured, not picked**, by laying both out and reading the ink box off the
-/// galley's `uv_rect` — which is the *tight* glyph bitmap, unlike the galley's
-/// own height. `800 × 600` at 10.5 and `stack-simple` at 11.0 ink the same
-/// height at 100%, 125% and 150% display scaling (9.00 / 8.80 / 8.67) and are
-/// half a point apart at 200%. The next size up, 12, is taller at every scaling
-/// above 100% — so this is a plateau rather than a coin toss, and
-/// `the_base_badge_inks_as_tall_as_the_worded_one` holds it there.
-///
-/// **It matches the *word*, not the buttons.** The eye and lock take this slot
-/// over on hover and are 15, but those are controls and a badge is an
-/// annotation; the artboard's `800 × 600` has been the quieter of the two in
-/// this exact slot since it was written.
+/// Type size for the base operand's `stack-simple`, so it inks the same height as
+/// the worded badge beside it (`800 × 600` at 10.5). Measured from the galley's
+/// `uv_rect`; the two match at 100%–150% scaling, and
+/// `the_base_badge_inks_as_tall_as_the_worded_one` holds it. It matches the word,
+/// not the 15pt hover controls: a badge is an annotation.
 const BADGE_STACK: f32 = 11.0;
 
-/// Type size for a mask's `circle-half`, measured the same way and landing
-/// somewhere else — which is the whole reason [`RowBadge::Icon`] carries its
-/// size.
-///
-/// A **better** plateau than the stack's, as it happens: at 10.0 the glyph inks
-/// 9.00 / 8.80 / 8.67 / 8.50 across the four scalings, which is the word's height
-/// exactly at all four rather than at three of them. Either side is worse — 9.5
-/// is short at 100% and 125%, and 11.0 (the stack's number, and what this would
-/// have been had one constant served both) is 0.80 tall at 125% and 0.66 at 150%.
+/// Type size for a mask's `circle-half`, measured the same way; at 10.0 it inks
+/// the word's height at all four scalings (11.0 is too tall at 125% and 150%).
 const BADGE_MASK: f32 = 10.0;
 
-/// Whether `node` is the shape a `Subtract` cuts into — its **base** operand.
-///
-/// **The one thing about a boolean the tree shows without saying** (§15 D244).
-/// Operand
-/// order *is* child order (§15 D113: creation-time ordering, never a stored
-/// flag), and only `Subtract` reads it, so the base is `children[0]` — which the
-/// tree, drawing topmost-first, puts on the *bottom* row. That is a real fact
-/// about the artwork and it was legible only to someone who already knew the
-/// rule; every other operation folds commutatively, so a mark on any of them
-/// would be claiming a significance the arithmetic does not have.
-///
-/// Asked of the parent rather than of the node, because being a base is not a
-/// property of the shape: drag it up one row and it stops being one.
+/// Whether `node` is the shape a `Subtract` cuts into — its base operand, the
+/// one thing about a boolean the tree shows without saying (§15 D244). Operand
+/// order is child order (§15 D113) and only `Subtract` reads it, so the base is
+/// `children[0]`, on the tree's bottom row. Asked of the parent, because being a
+/// base is not a property of the shape.
 fn subtract_base(doc: &ondin_core::Document, node: &ondin_core::Node) -> bool {
     let Some(parent) = node.parent().and_then(|p| doc.get(p)) else {
         return false;
@@ -717,39 +401,24 @@ pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
         NodeKind::Line { .. } => (icon::LINE_SEGMENT, theme::text::MUTED),
         NodeKind::Path { .. } => (icon::POLYGON, color::ACCENT_400),
         NodeKind::Text { .. } => (icon::TEXT_T, theme::text::MUTED),
-        // Accent, like `Path`: both are shapes whose outline the user authored
-        // rather than picked from the shape tools, and a boolean *is* a path by the
-        // time anything draws it.
-        //
-        // **The operation's own glyph**, now that the dropdown's four exist. The row
-        // used to draw the path icon for all four and lean on the name to
-        // disambiguate — which works until the layer is renamed, and a boolean gets
-        // renamed like anything else ("Badge cutout"). The icon is the half of the
-        // row that cannot be edited away.
+        // Accent, like `Path`, with the operation's own glyph: the name can be
+        // renamed away, the icon cannot.
         NodeKind::Boolean { op } => (op_glyph(*op), color::ACCENT_400),
     }
 }
 
-/// The egui id of a row's rename field. Stable across frames and unique per
-/// row, so focus can be asked for before the widget itself exists.
-///
-/// `pub(crate)` because focus for it is asked for from **outside** this file:
-/// `OndinApp::rename_selection` is the other way a rename opens — `Ctrl+R`, `F2`
-/// and the context menu's row — and it has to ask at the same moment the
-/// double-click below does (§15 D216).
+/// The egui id of a row's rename field, stable across frames so focus can be
+/// asked for before the widget exists. `pub(crate)` because `Ctrl+R`, `F2` and the
+/// context menu open a rename from outside this file (§15 D216).
 pub(crate) fn rename_field_id(id: NodeId) -> egui::Id {
     egui::Id::new(("layer-rename", id))
 }
 
-/// Where the rename field goes on a row whose name is painted from `left`.
-///
-/// **The full row height, starting exactly at the name's own left edge.** Both
-/// halves are load-bearing and both were wrong once: inset the rect and the name
-/// jumps sideways the moment it is double-clicked, and shorten it and `put`'s
-/// centring has less room than the painted name had, so the text rides up. The
-/// field's own `margin` must be zero and its `vertical_align` centred for this
-/// rect to land the text back where `Align2::LEFT_CENTER` had it — measured, not
-/// assumed (see the test below).
+/// Where the rename field goes on a row whose name is painted from `left`: the
+/// full row height, starting at the name's own left edge, so the text does not
+/// shift when the rename opens. The field's `margin` must be zero and its
+/// `vertical_align` centred for this rect to land the text where
+/// `Align2::LEFT_CENTER` had it.
 fn rename_field_rect(row: egui::Rect, left: f32) -> egui::Rect {
     egui::Rect::from_min_max(
         egui::pos2(left, row.top()),
@@ -766,16 +435,9 @@ pub(crate) struct MovePlan {
 
 /// Plan the drop of `moving` into `target`, as one list of operations.
 ///
-/// **Every index is computed against the list the previous operations leave
-/// behind**, not against the document as it stands. That is the care
-/// `build::z_order` takes and for the same reason: three rows dropped into one
-/// parent with three indices all read off the original list land in the wrong
-/// order, or out of range. So the child lists this touches are simulated and each
-/// operation is planned against the simulation.
-///
-/// A free function rather than a method because it is the whole of the tricky
-/// part and none of the UI — it needs no `OndinApp`, and so it can be tested
-/// without one.
+/// Every index is computed against the list the previous operations leave behind
+/// (as `build::z_order` does), so the touched child lists are simulated. A free
+/// function so it can be tested without an `OndinApp`.
 pub(crate) fn plan_layer_move(
     doc: &ondin_core::Document,
     res: &ondin_core::Resolved,
@@ -823,29 +485,10 @@ pub(crate) fn plan_layer_move(
         }
         slot = at + 1;
     }
-    // ⚠️ **A plan whose *composition* changes nothing is no plan** (§15 D532).
-    // The no-op test above is per row and compares each row's landing index with
-    // the position it had **before** the rows ahead of it were lifted out, so a
-    // run of rows dropped at the boundary immediately after itself gives every
-    // one of them an `at` that differs from its own `at_from` while the net
-    // permutation is the identity. Measured over `[k0, k1, k2]` moving
-    // `[k0, k1]`: index 2 produces **two** `Reorder`s and a byte-identical child
-    // list, `undo_depth 0 → 1`, the document dirtied — an autosave and a crash
-    // snapshot — and a status line claiming *"Reordered 2 layers"*. The
-    // single-row version of the same drop is correctly `ops = 0`.
-    //
-    // ⚠️ **D428's `changes_nothing` cannot see this and it is worth knowing
-    // why.** `Operation::Reorder`'s arm asks `child_index(doc, id) ==
-    // Some(index)` of the document as it stands, and each op moves its row to an
-    // index it is not at *yet*; not one of them is a no-op, so the transaction is
-    // not one either. **A composition of real operations that comes back to where
-    // it started is a shape no per-operation guard can catch** — which is why the
-    // test is here, against the simulation this function already keeps, rather
-    // than at the commit.
-    //
-    // Only when nothing was reparented: a reparent's transform ops are not
-    // modelled by `sim`, so a child-list comparison would be answering about half
-    // the transaction.
+    // A plan whose composition is the identity is no plan (§15 D532): the per-row
+    // test above misses a run dropped right after itself, and no per-operation
+    // guard can see it. Only when nothing was reparented, since `sim` does not
+    // model a reparent's transform ops.
     if !reparented
         && sim
             .iter()
@@ -863,46 +506,17 @@ enum RowEdge {
     Bottom,
 }
 
-/// Width of the insertion line, in points.
-///
-/// **Two, asked for on the machine** — *"make the drop line 2px, right now it's a bit too
-/// thin"*. It shipped at 2, went to 1 to match the outline that means "inside", and is
-/// back: at one point it is a hairline the eye has to hunt for, which is the wrong trade
-/// for the single most important thing a drag has to say.
-///
-/// ⚠️ **This is half of a pair that was deliberately matched, and the other half has not
-/// moved.** The 1pt outline was chosen *because* the line was 1pt: at two, "the pair read
-/// as belonging to different controls rather than as two answers to the same question".
-/// That argument was about two strokes of equal length; it is weaker than it looks here,
-/// because a 1pt outline runs the whole way round a 26pt row and a 2pt line is one short
-/// horizontal run, so the outline is already the heavier mark of the two by area. Worth
-/// re-reading if the outline is ever reported as looking thin beside it.
+/// Width of the insertion line, in points. 1pt is a hairline the eye has to hunt for
+/// on the most important thing a drag says; the 1pt "inside" outline is already the
+/// heavier mark by area.
 const DROP_LINE_PT: f32 = 2.0;
 
 /// Where the insertion line goes: the middle of the `gap` between the two rows the
-/// boundary separates, rather than either row's own edge.
-///
-/// **The rows do not touch**, and that is the whole reason this is not just `rect.top()`.
-/// The tree lays its rows out with `item_spacing.y` between them, so "the boundary between
-/// these two rows" has *two* y coordinates — the upper row's bottom and the lower row's
-/// top, one gap apart. Half a gap in from whichever edge is being named lands both on the
-/// same place: `upper.bottom() + gap/2` and `lower.top() - gap/2` are the same number by
-/// construction.
-///
-/// That mattered because a boundary used to be named from two different **lists**: the
-/// boundary between a frame and its topmost child is "the top of the frame's list" reached
-/// from inside the frame, and "beside the frame" reached from the frame's own row — two
-/// lists, two owners, two edges. Reported as the line jumping a pixel there and nowhere
-/// else, which is exactly one `item_spacing.y`.
-///
-/// ⚠️ **That report is now unreachable rather than fixed**, and the test below is the only
-/// thing still keeping the two spellings honest. [`boundary_y`] names a boundary by its
-/// position *on screen*, so there is one owner by construction and only one of the two
-/// edges is ever asked for at a given boundary. Which does not make the arithmetic
-/// optional: the day something reaches for `rect.top()` again, the line moves a pixel at
-/// every boundary rather than at one.
-///
-/// Centring it in the gap is also where a line between two things belongs.
+/// boundary separates, not either row's own edge. The rows do not touch, so a
+/// boundary has two y coordinates one `item_spacing.y` apart;
+/// `upper.bottom() + gap/2` and `lower.top() - gap/2` are the same number.
+/// [`boundary_y`] asks for only one edge per boundary, but using `rect.top()` would
+/// move the line a pixel at every boundary.
 fn drop_line_y(rect: egui::Rect, edge: RowEdge, gap: f32) -> f32 {
     match edge {
         RowEdge::Top => rect.top() - gap / 2.0,
@@ -910,23 +524,12 @@ fn drop_line_y(rect: egui::Rect, edge: RowEdge, gap: f32) -> f32 {
     }
 }
 
-/// The y of screen boundary `boundary`, which is the gap **above** `rows[boundary]` — so
-/// `0` is the top of the list and `rows.len()` is the bottom of it. `n` rows have `n + 1`
-/// of them.
+/// The y of screen boundary `boundary`, the gap above `rows[boundary]`: `0` is the
+/// top of the list and `rows.len()` the bottom, so `n` rows have `n + 1`.
 ///
-/// **Exactly one line, by construction.** This replaced a rule every row evaluated for
-/// itself, which is what let the same boundary be drawn twice: two 1pt strokes at one y
-/// composite their antialiased fringes into a heavier line, and where the two rows'
-/// coordinates fall either side of a device pixel the band doubles outright — reported as a
-/// line that visibly changed weight as it moved down the list. Before that it was worse
-/// still: a rule that never asked whether the boundary was *this* row's drew a line at
-/// every boundary in the list, and two lines around one row read as a box, which is what
-/// the tree uses to say "this will go **inside**" (§9.4).
-///
-/// Naming the boundary from the *screen* rather than from a child list is what makes both
-/// of those impossible to write again, and it is the same move indent-aware dropping needed
-/// anyway: which levels a drop may take is a fact about the two rows a boundary sits
-/// between ([`depth_range`]), and a row painting itself does not know what follows it.
+/// Naming a boundary from the screen gives exactly one line per boundary; two
+/// strokes at one y composite into a heavier line, and two lines around one row
+/// read as the "inside" box (§9.4). It is also the unit [`depth_range`] needs.
 fn boundary_y(rows: &[TreeRow], boundary: usize, gap: f32) -> Option<f32> {
     match boundary.checked_sub(1) {
         // Below the row above it — which is every boundary but the topmost.
@@ -937,19 +540,10 @@ fn boundary_y(rows: &[TreeRow], boundary: usize, gap: f32) -> Option<f32> {
     }
 }
 
-/// A horizontal band of `width` points centred on `y`, snapped to whole **device** pixels:
-/// the centre and the width to hand the painter.
-///
-/// The same care `ui::rule` takes over its hairline, and for the same reason. A 2pt line at
-/// a fractional y rasterises across three device rows with the outer two only partly
-/// covered, which reads as a softer and fatter line than the identical line half a pixel
-/// along — and the fractional offset of one boundary in the tree need not match the next,
-/// so the drop line changed weight as it moved down the list. Snapping is what makes every
-/// boundary draw the same line.
-///
-/// **Parity is the part that is easy to get wrong**: a band an even number of device pixels
-/// wide wants its centre *on* a pixel boundary, an odd one wants it in the middle of a
-/// pixel. 2pt is even at 100% and 200% and odd at 150%, so both cases are ordinary.
+/// A horizontal band of `width` points centred on `y`, snapped to whole device
+/// pixels: the centre and the width to hand the painter, so every boundary draws the
+/// same line (as `ui::rule` does). Parity matters: an even pixel count wants its
+/// centre on a pixel boundary, an odd one in the middle of a pixel.
 fn snap_across(y: f32, width: f32, ppp: f32) -> (f32, f32) {
     let px = (width * ppp).round().max(1.0);
     let centre = if (px as i64) % 2 == 0 {
@@ -961,9 +555,8 @@ fn snap_across(y: f32, width: f32, ppp: f32) -> (f32, f32) {
 }
 
 /// The same colour at a fixed alpha, for the 40% treatment a locked or hidden
-/// row gets. `Color32` is premultiplied, so the components have to be rescaled
-/// with the alpha rather than just having `a` overwritten — doing the latter to
-/// the accent-blue frame glyph washed it out to near-white.
+/// row gets. `Color32` is premultiplied, so the components are rescaled with the
+/// alpha rather than overwriting `a`.
 fn dim_to(c: egui::Color32, alpha: u8) -> egui::Color32 {
     let [r, g, b, _] = c.to_srgba_unmultiplied();
     egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
@@ -975,49 +568,26 @@ fn indent_of(depth: usize) -> f32 {
     6.0 + (depth as f32 - 1.0) * INDENT
 }
 
-/// The x a row at this depth centres its caret on.
-///
-/// **A named column because the tree guides run down it.** A guide for level `n`
-/// is the trunk of an ancestor at depth `n`, and it is drawn in that ancestor's
-/// *descendants'* rows — so the one thing that has to hold is that the line and
-/// the caret it hangs off agree about where the column is, from rows that never
-/// compute each other's geometry.
+/// The x a row at this depth centres its caret on. Named because the tree guides
+/// run down it: a level-`n` trunk is drawn in its descendants' rows, which must
+/// agree with the caret about the column.
 fn caret_column(left: f32, depth: usize) -> f32 {
     left + indent_of(depth) + 5.0
 }
 
-/// The depth the pointer is *asking* for, before the tree gets a say: one level per
+/// The depth the pointer is asking for, before the tree gets a say: one level per
 /// [`INDENT`] moved sideways from where the drag was picked up.
 ///
-/// ⚠️ **Relative to the grab, never absolute.** Reading the depth straight off the
-/// pointer's x is the obvious spelling and it is unusable: a row is picked up by its
-/// *name*, which at depth 1 already starts 45pt in, so the drag would jump to depth 2
-/// before the pointer had moved at all. What the gesture actually means is "one indent
-/// further in than I started", so what it measures is displacement. Figma and every tree
-/// that has this read it the same way.
+/// Relative to the grab, never absolute: a row is picked up by its name, which at
+/// depth 1 already starts 45pt in, so an absolute reading would jump a level before
+/// the pointer moved.
 ///
-/// ⚠️ **`held` is the level this said last frame, and it is what makes the line stay
-/// put.** Rounding alone puts a hard edge exactly half an indent from each level's
-/// column, and a hand holding a drag steady across it flickers the line between two
-/// indents — reported from the machine as *"moving the line between indents is a bit
-/// twitchy"*. So the level only changes once the pointer is [`STICK`] of an indent away
-/// from the one being held, which is a band 2·`STICK` wide rather than an edge; inside it
-/// the answer is simply last frame's. Crossing out of the band re-rounds, so the jump is
-/// still to the nearest level and never to a level the hand has passed over.
-///
-/// The band being wider than half an indent is the whole point and is what makes this
-/// hysteresis rather than a bigger dead zone: leaving level 2 rightwards takes `2 +
-/// STICK`, and coming back from 3 takes `3 - STICK`, which is a lower x — so a reversal
-/// has to be deliberate before it counts.
-///
-/// Floored at 1 rather than clamped to anything meaningful, because [`drop_spot`] clamps
-/// it into [`depth_range`] straight afterwards and that is where the tree's own answer
-/// lives. The floor is here only because the arithmetic runs through a `usize`.
-///
-/// ⚠️ **`held` must be the level this returned, not the clamped one the drop used.** They
-/// differ wherever a boundary's range bit, and feeding the clamped value back would let a
-/// narrow boundary rewrite where the hand thinks it is — so passing over a one-level gap
-/// would silently re-origin the gesture.
+/// `held` is the level this returned last frame, giving hysteresis: the level only
+/// changes once the pointer is [`STICK`] of an indent from the held one, then
+/// re-rounds to the nearest. It must be this function's own answer, not the clamped
+/// one the drop used, or a one-level gap would re-origin the gesture. Floored at 1
+/// only because the arithmetic runs through a `usize`; [`drop_spot`] clamps into
+/// [`depth_range`].
 fn depth_asked_for(grab_depth: usize, grab_x: f32, x: f32, held: usize) -> usize {
     let raw = grab_depth as f32 + (x - grab_x) / INDENT;
     let level = if (raw - held as f32).abs() > STICK {
@@ -1030,45 +600,31 @@ fn depth_asked_for(grab_depth: usize, grab_x: f32, x: f32, held: usize) -> usize
 
 /// The depths a drop at screen boundary `boundary` may take, shallowest first.
 ///
-/// **This is the whole of indent-aware dropping.** A gap between two rows is not one
-/// insertion point but a run of them, one per level the two rows have in common, and which
-/// one the drop takes is the only thing the pointer's x decides. Dragging a row to the
-/// bottom of a group and then leftwards walks it out of the group and into the parent —
-/// and the same gesture rightwards walks it in — because the boundary below the group's
-/// last child spans both levels.
+/// This is the whole of indent-aware dropping: a gap offers one insertion point per
+/// level the two rows share.
 ///
-/// - **The shallowest** is the depth of the row *below*, and it is a hard floor: anything
-///   shallower would have to close containers that the rows below it are still inside. The
-///   last boundary in the tree has no row below and so bottoms out at the top level.
-/// - **The deepest** is the depth of the row *above*, or the floor if that is deeper.
+/// - The shallowest is the depth of the row below, a hard floor (anything shallower
+///   would close containers the rows below are still inside). The last boundary has
+///   no row below and bottoms out at the top level.
+/// - The deepest is the depth of the row above, or the floor if that is deeper. That
+///   covers "drop in as first child" without recording whether a container is open:
+///   an expanded container's children are drawn directly below it, and a collapsed
+///   one offers only its own level (the outline on its row is the way in, §9.4).
 ///
-/// ⚠️ **That second clause is the "drop in as the first child" case, and it is why no row
-/// has to record whether it is open.** A container's children are drawn immediately below
-/// it, so "the row below is deeper than the row above" and "the row above is an expanded
-/// container" are the same statement about a tree — and a *collapsed* container has
-/// nothing of its own below it, so the range stops at its own level and the only way in is
-/// the outline on its row (§9.4). Spelling it as `above.depth + is_expanded` was the first
-/// draft and it computes the identical number on every input, which makes `is_expanded` a
-/// field with nothing to say and one more thing that could come to disagree with the walk.
-///
-/// The two ends never cross, which is the same fact once more: whenever the floor is the
-/// deeper of the pair it becomes both ends, and the boundary offers exactly one level.
+/// The ends never cross; when the floor is deeper it becomes both ends.
 fn depth_range(rows: &[TreeRow], boundary: usize) -> std::ops::RangeInclusive<usize> {
     let above = boundary.checked_sub(1).and_then(|i| rows.get(i));
     let below = rows.get(boundary);
-    // No row below is the bottom of the tree, where anything may be dropped at the top
-    // level; no row above is the top of it, where the first row's own level is the only
-    // offer — and the first row of a tree is always top-level, so the two agree.
+    // No row below is the bottom of the tree (top level only); no row above is the
+    // top, where the first row's own level is the only offer.
     let shallowest = below.map_or(1, |b| b.depth);
     let deepest = above.map_or(shallowest, |a| a.depth).max(shallowest);
     shallowest..=deepest
 }
 
-/// Where in the tree the pointer is, before the document has had a say about whether the
-/// drop is legal.
-///
-/// Pure screen geometry, so it can be tested without a document — [`OndinApp::drop_hint`]
-/// is what turns one of these into a [`DropTarget`].
+/// Where in the tree the pointer is, before the document says whether the drop is
+/// legal. Pure screen geometry; [`OndinApp::drop_hint`] turns one into a
+/// [`DropTarget`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum DropSpot {
     /// Inside the container row at this index in `rows`, at the top of its list.
@@ -1078,43 +634,24 @@ enum DropSpot {
 }
 
 /// What one frame's pointer says: where the drop would go, and the level the indent
-/// gesture is now holding.
-///
-/// **The two are not the same number and the difference is load-bearing.** `spot`'s depth
-/// has been clamped into what the boundary can offer; `level` has not, and it is what gets
-/// fed back to [`depth_asked_for`] next frame. Feeding the clamped one back would let a
-/// boundary that offers a single level quietly re-origin the gesture, so dragging *over* a
-/// one-level gap would change what the hand's position means on the far side of it.
+/// gesture is now holding. `spot`'s depth is clamped into what the boundary offers;
+/// `level` is not, and is what feeds [`depth_asked_for`] next frame.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct DropRead {
     spot: DropSpot,
     level: usize,
 }
 
-/// Read the pointer against the drawn rows: which boundary it is at, or which container it
-/// is inside.
+/// Read the pointer against the drawn rows: which boundary it is at, or which
+/// container it is inside.
 ///
-/// **The vertical split is unchanged** — [`EDGE_FRACTION`] of a container row at each end
-/// means "between", the middle means "inside" (§9.4) — and a collapsed group still takes a
-/// drop only that way, since there is no boundary inside a branch that is not on screen.
-///
-/// ⚠️ **Horizontally the pointer is allowed to leave the panel to the left, and that is
-/// deliberate.** The **whole row** is the drag handle — `allocate_exact_size` takes
-/// `available_width()` — so a row can be picked up in the empty gutter left of its glyphs,
-/// a few points from the panel's edge, and one [`INDENT`] of leftward travel from there is
-/// off the panel altogether. `rect.contains(pointer)` would refuse exactly those drags,
-/// leaving the outdent reachable from some grab points and not others, which reads as it
-/// working intermittently rather than as a rule.
-///
-/// **The number to reason from is the grab, not the glyph.** This said "grabbed by its icon
-/// at depth 2 is roughly 20pt in", which is wrong and made the case sound tighter than it
-/// is: `icon_x` at depth 2 is 47 or 61 depending on whether the row keeps caret room, and an
-/// outdent from *there* stays on the panel comfortably. It is the gutter grab that needs the
-/// freedom, which is what `the_outdent_still_works_when_the_pointer_has_left_the_panel`
-/// uses.
-///
-/// To the right the rect still bounds it: past the panel is the canvas, and a drop there
-/// means nothing.
+/// [`EDGE_FRACTION`] of a container row at each end means "between", the middle
+/// "inside" (§9.4). Horizontally the pointer may leave the panel to the left: the
+/// whole row is the drag handle, so a gutter grab is a few points from the edge and
+/// one [`INDENT`] of leftward travel leaves the panel; refusing it would make the
+/// outdent work from some grab points only
+/// (`the_outdent_still_works_when_the_pointer_has_left_the_panel`). To the right
+/// the rect bounds it.
 fn drop_spot(
     rows: &[TreeRow],
     pointer: egui::Pos2,
@@ -1122,12 +659,9 @@ fn drop_spot(
     held: usize,
 ) -> Option<DropRead> {
     let (grab_x, grab_depth) = grab;
-    // ⚠️ **The first row the pointer has not passed the bottom of, rather than the row it
-    // is inside.** The rows do not touch — `item_spacing.y` puts a gap between them — so
-    // asking for containment leaves a dead band at every boundary, and the indicator
-    // blinks off for the frame the pointer crosses it. Landing in the gap picks the row
-    // *below* it, whose `t` then comes out negative and names the boundary the gap is.
-    // Off the top of the list is the one case that has no row and is not a drop.
+    // The first row the pointer has not passed the bottom of, not the row it is
+    // inside: containment would leave a dead band in each inter-row gap. A gap picks
+    // the row below, whose `t` is negative. Off the top of the list is not a drop.
     let (i, row) = rows
         .iter()
         .enumerate()
@@ -1140,9 +674,7 @@ fn drop_spot(
     }
     let t = (pointer.y - row.rect.top()) / row.rect.height();
     if row.container && t > EDGE_FRACTION && t < 1.0 - EDGE_FRACTION {
-        // The level is carried through untouched: the pointer is not asking about
-        // indents here, and zeroing it would re-origin the gesture on the way past a
-        // group.
+        // The level is carried through: zeroing it would re-origin the gesture.
         return Some(DropRead {
             spot: DropSpot::Into(i),
             level: held,
@@ -1161,40 +693,22 @@ fn drop_spot(
     })
 }
 
-/// Where a row's elbow crosses it: the y the horizontal run sits on, and where the
-/// vertical is split.
-///
-/// **Snapped to a whole device pixel here, not in the painter**, which is the
-/// difference between the two runs meeting and missing. The vertical is cut at
-/// this y and the horizontal is drawn on it, so a snap applied to one and not the
-/// other puts the junction half a pixel out of true — half of the reported gap at
-/// the corner, and the half that survives any dash arithmetic.
+/// Where a row's elbow crosses it: the y the horizontal run sits on and where the
+/// vertical is split. Snapped to a whole device pixel here, not in the painter, so
+/// the two runs meet rather than sit half a pixel out of true.
 fn elbow_y(rect: egui::Rect, ppp: f32) -> f32 {
     snap_across(rect.center().y, 1.0, ppp).0
 }
 
-/// One drawn row, as everything painted *after* the walk sees it.
+/// One drawn row, as everything painted after the walk sees it.
 ///
-/// **Collected during the walk and read after it**, because every guide is a
-/// statement about rows *other than* the one being painted: the trunk crossing
-/// this row belongs to an ancestor several rows up, whether it carries on depends
-/// on a row below, and whether it is lit depends on which row the pointer is over
-/// — which the walk only learns when it reaches it. One pass cannot answer any of
-/// the three.
-///
-/// **The drop hint is now the second reader, for the same reason.** An
-/// indent-aware drop is a claim about a *boundary* — the row above it and the row
-/// below it together say which levels the drop may take ([`depth_range`]) — and a
-/// row being painted does not yet know what follows it. That is why this is no
-/// longer `TreeRow`: the walk collects the tree, and two passes read it.
-///
-/// Guides are drawn over the row grounds rather than under them, which is what the
-/// design's per-row backgrounds do too: a `background-color` sits *behind* the
-/// gradients painted on top of it. The drop hint goes over both.
+/// Collected during the walk and read after it, because every guide is a statement
+/// about other rows (an ancestor's trunk, a row below, the hovered row), and the
+/// drop hint needs the rows above and below a boundary ([`depth_range`]). Guides
+/// are drawn over the row grounds, the drop hint over both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TreeRow {
-    /// The layer this row draws. Only the drop pass reads it — a guide is pure
-    /// geometry and never asks the document anything.
+    /// The layer this row draws. Only the drop pass reads it.
     id: NodeId,
     /// The row's own box.
     rect: egui::Rect,
@@ -1207,18 +721,11 @@ struct TreeRow {
     selected: bool,
     hovered: bool,
     /// A `Group`, `Artboard` or `Boolean` — something the middle of whose row means
-    /// "inside it". Whether it is *open* is not recorded and does not need to be:
-    /// see [`depth_range`], which reads that off the row below instead.
+    /// "inside it". Openness is read off the row below ([`depth_range`]).
     container: bool,
-    /// A container with children that are **not** on screen — the one thing about a
-    /// row's own state that the drop pass cannot work out for itself, and the one
-    /// spring-loading acts on.
-    ///
-    /// ⚠️ **Not the negation of the `expanded` flag this struct used to carry, which
-    /// is why one came back after the other went.** That flag was removable because an
-    /// *open* container is exactly a row whose successor is deeper, so the row list
-    /// already said it. A *closed* one is invisible in the same list: it has no rows
-    /// below it and neither does a leaf, and nothing on screen tells the two apart.
+    /// A container with children that are not on screen — the one thing the drop
+    /// pass cannot work out from the row list (a closed container looks like a
+    /// leaf), and what spring-loading acts on.
     closed: bool,
 }
 
@@ -1236,22 +743,14 @@ struct GuideSeg {
 enum GuideInk {
     /// Structure and nothing else.
     Rest,
-    /// On the path to the row under the pointer. **Beats [`Selected`], because the
-    /// pointer is a question being asked now where a selection is a state that
-    /// persists** — and a hover that could not be seen over a selected leg would
-    /// leave the panel unable to answer it. *"Hover takes precedence."*
+    /// On the path to the row under the pointer. Beats [`Selected`]: hover is a
+    /// question asked now, a selection persists.
     ///
     /// [`Selected`]: GuideInk::Selected
     Hovered,
-    /// On the path to a selected row: `color::SELECT`, the same blue the row's own
-    /// kind glyph wears, so the leg and the glyph are one statement about one
-    /// layer. Full strength rather than a tier of it — a dashed hairline inks 37%
-    /// of its length, so the blue reads as a tint without being mixed as one.
-    ///
-    /// **A selected row under the pointer keeps this**: it is already the row the
-    /// panel is talking about, so there is nothing for a hover to add. Asked for
-    /// exactly that way — *"the currently selected layer doesn't apply a hover
-    /// anymore"*.
+    /// On the path to a selected row: `color::SELECT`, the blue of the row's kind
+    /// glyph, at full strength (a dashed hairline inks 37% of its length). A
+    /// selected row under the pointer keeps this.
     Selected,
 }
 
@@ -1266,16 +765,13 @@ impl GuideInk {
 }
 
 /// What one row's guides run over: the level its parent's trunk is on, and the
-/// half-open range of rows **above** it that trunk crosses.
-///
-/// The range stops before the row itself, whose connector and elbow are on the path
-/// but whose trunk *below* that elbow is not — that stretch belongs to the siblings
-/// further down and says nothing about this row. `None` for a top-level row, which
-/// hangs off nothing.
+/// half-open range of rows above it that trunk crosses. The range stops before the
+/// row itself (the trunk below its elbow belongs to later siblings). `None` for a
+/// top-level row.
 fn guide_path(rows: &[TreeRow], row: usize) -> Option<(usize, std::ops::Range<usize>)> {
     let level = rows[row].depth.checked_sub(1).filter(|l| *l >= 1)?;
-    // The parent's own row — or, in a tree filtered down to rows whose parent is
-    // not among them, the row itself, which then claims nothing above it.
+    // The parent's own row — or, in a filtered tree whose parent is absent, the row
+    // itself, which then claims nothing above it.
     let start = rows[..row]
         .iter()
         .rposition(|r| r.depth == level)
@@ -1287,18 +783,12 @@ fn guide_path(rows: &[TreeRow], row: usize) -> Option<(usize, std::ops::Range<us
 /// level `n`.
 ///
 /// The trunk of a level-`n` ancestor carries on past a row when that ancestor has
-/// another child after the branch this row sits in. Read off the displayed order
-/// that is: scanning down, the first row shallow enough to close the branch — depth
-/// `n + 1` or less — is at exactly `n + 1`.
+/// another child after the branch this row sits in: scanning down, the first row at
+/// depth `n + 1` or less is at exactly `n + 1`.
 ///
-/// **One pass up the list rather than that scan per row and level**, so nesting
-/// cannot make this quadratic: a row at depth `d` sets the bit for level `d - 1`,
-/// being one of that ancestor's children, and clears every level from `d` down,
-/// being the row that closes those branches.
-///
-/// Levels past 64 are not tracked and their trunks are not drawn. Level 64 starts
-/// `indent_of(64)` — 1959pt — from the panel's edge, which is a guide nobody can
-/// see in a 300pt column.
+/// One pass up the list, so nesting cannot make this quadratic: a row at depth `d`
+/// sets the bit for level `d - 1` and clears every level from `d` down. Levels past
+/// 64 are not tracked (they start 1959pt from the panel's edge).
 fn trunks_below(rows: &[TreeRow]) -> Vec<u64> {
     let mut out = vec![0u64; rows.len()];
     let mut mask = 0u64;
@@ -1314,49 +804,25 @@ fn trunks_below(rows: &[TreeRow]) -> Vec<u64> {
 }
 
 /// Every dashed run the tree guides need, for rows in the order they are drawn
-/// (§15 D331).
+/// (§15 D331): the trunks (one per ancestor whose branch is still open, down the
+/// level's [`caret_column`]), the connector (the parent's trunk above this row's
+/// elbow) and the elbow (a horizontal run out to `lead`).
 ///
-/// Three things make up a row's guides, and the design draws all three as
-/// backgrounds on the row itself:
+/// A trunk whose branch has already closed is not drawn, which departs from the
+/// design's markup: a stub for every level would leave a fragment under a line that
+/// stopped a row earlier.
 ///
-/// - **the trunks**, one per ancestor whose branch is still open, each crossing the
-///   row down the caret column of the level it belongs to ([`caret_column`]);
-/// - **the connector**, the part of the *parent's* trunk above this row's elbow —
-///   the same column, and what makes the row hang off its parent rather than
-///   merely sit under it;
-/// - **the elbow**, a horizontal run from that column out to `lead`, which is
-///   where the row's own leading glyph begins.
-///
-/// ⚠️ **A trunk whose branch has already closed is not drawn at all**, which is the
-/// one place this departs from the design's markup. There a row carries a
-/// stub-height background for *every* level, which is right for the fixture it was
-/// drawn against — no ancestor in it dies above a deeper row. Read as a rule it
-/// would leave a fragment in mid-air: with `A → B → C` each an only child, A's
-/// trunk ends at B's elbow, and a stub at A's column in C's row is a dash under a
-/// line that stopped a row earlier.
-///
-/// **Hovering lights the path from the parent, not the whole ancestry** — and a
-/// selection lights the same path in `color::SELECT`. The run is the parent's trunk
-/// from the row under the parent down to that row's elbow, so it answers "which one
-/// is this inside" once, rather than drawing a lit ladder the eye then has to read.
-/// Below the elbow the same trunk goes back to [`GUIDE_REST`], and no other level
-/// lights at all.
-///
-/// **The two claims overlap and hover wins the overlap, one run at a time** — which
-/// is what makes "only on the part that applies to that layer" true: hovering a row
-/// between a selected row and their shared parent greys the trunk down to the
-/// hovered row's own elbow and leaves the rest of the selected leg blue. See
-/// [`GuideInk`] for both halves of the precedence, including the one exception.
+/// Hovering lights only the path from the parent to the row's elbow, not the whole
+/// ancestry, and a selection lights the same path in `color::SELECT`. Where the two
+/// overlap hover wins, one run at a time (see [`GuideInk`]).
 fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
     let below = trunks_below(rows);
-    // A hovered row that is itself selected has no hover path at all — the `filter`
-    // is the whole of "the selected layer no longer applies a hover".
+    // A hovered row that is itself selected has no hover path.
     let hovered = rows
         .iter()
         .position(|r| r.hovered && !r.selected)
         .and_then(|h| guide_path(rows, h).map(|(l, over)| (h, l, over)));
-    // Every selected row, because a selection is a set: two selected siblings light
-    // two legs off one trunk, and the union is what gets drawn.
+    // Every selected row: two selected siblings light two legs off one trunk.
     let selected: Vec<(usize, usize, std::ops::Range<usize>)> = rows
         .iter()
         .enumerate()
@@ -1410,10 +876,7 @@ fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
             }
         }
         if row.depth >= 2 {
-            // Out of the parent's column, [`ELBOW_CLEAR`] clear of its ink, to the
-            // row's leading glyph. The elbow belongs to this row alone — an
-            // intervening row's stays at rest while the trunk through it lights,
-            // which is what keeps a lit path a line rather than a comb.
+            // The elbow belongs to this row alone, so a lit path is a line, not a comb.
             let x = caret_column(row.rect.left(), row.depth - 1);
             out.push(GuideSeg {
                 from: egui::pos2(x + ELBOW_CLEAR, elbow),
@@ -1429,16 +892,10 @@ fn tree_guide_segments(rows: &[TreeRow], gap: f32) -> Vec<GuideSeg> {
     out
 }
 
-/// Paint what [`tree_guide_segments`] worked out.
-///
-/// **The across-the-run snapping is here rather than in the geometry**, the way
-/// [`drop_line_y`] and [`snap_across`] already split: what column a guide belongs
-/// in is a fact about the tree, and which device pixel that lands on is a fact
-/// about the monitor. A 1pt line centred on a whole point covers half of two
-/// pixels, which at [`GUIDE_REST`]'s alpha is a guide that reads as a smudge rather
-/// than a line. The elbow's *own* y is the exception and is snapped in
-/// [`elbow_y`], because it is a coordinate two runs have to agree on rather than
-/// one run's offset from its column — so for a horizontal run this is idempotent.
+/// Paint what [`tree_guide_segments`] worked out. The across-the-run device-pixel
+/// snap lives here rather than in the geometry (a 1pt line on a whole point smudges
+/// across two pixels); the elbow's own y is snapped in [`elbow_y`], so for a
+/// horizontal run this is idempotent.
 fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f32) {
     for seg in tree_guide_segments(rows, gap) {
         let vertical = seg.from.x == seg.to.x;
@@ -1462,15 +919,9 @@ fn paint_tree_guides(painter: &egui::Painter, rows: &[TreeRow], gap: f32, ppp: f
 impl OndinApp {
     pub(crate) fn layers_tree(&mut self, ui: &mut egui::Ui) {
         let root = self.session.doc.root();
-        // Re-derive the drop target from scratch each frame: only the row the
-        // pointer is actually over gets to set one, so dragging off the tree
-        // and releasing drops nothing rather than acting on a stale target.
-        //
-        // **The container it named is kept for exactly one frame on the way past**, so
-        // the walk below can light that row's ink — see [`LayerDrag::lit`], which is
-        // where the reason a frame's lag is the only option lives. Reading it here, in
-        // the one place the answer is thrown away, is what stops the two drifting: there
-        // is no second assignment that could forget.
+        // Re-derive the drop target each frame so releasing off the tree drops
+        // nothing. The container it named is kept one frame in `lit` for the walk's
+        // ink (see [`LayerDrag::lit`]).
         if let Some(drag) = self.layer_drag.as_mut() {
             drag.lit = drag.target.map(|t| t.parent);
             drag.target = None;
@@ -1478,8 +929,7 @@ impl OndinApp {
             ui.ctx().request_repaint();
         }
         self.sync_tree_to_selection();
-        // An empty search box is not a search: it would hide the whole tree the
-        // instant the field opened.
+        // An empty search box is not a search.
         let needle = self
             .layer_filter
             .as_ref()
@@ -1487,8 +937,7 @@ impl OndinApp {
             .filter(|f| !f.is_empty());
         let shown = needle.as_deref().map(|n| self.matching_rows(n));
 
-        // Every row the walk draws, for the guides and the drop hint to be worked out
-        // from once it is over ([`TreeRow`]).
+        // Every row the walk draws, for the guides and the drop hint ([`TreeRow`]).
         let mut drawn = Vec::new();
         match &shown {
             Some(rows) if rows.is_empty() => {
@@ -1499,9 +948,8 @@ impl OndinApp {
                         .color(theme::text::FAINT),
                 );
             }
-            // Collected whether or not the guides are switched on — a handful of
-            // numbers per row against a walk that lays out and paints one, and the
-            // alternative is a second reading of the preference per row.
+            // Collected whether or not the guides are on: cheaper than a second
+            // preference read per row.
             _ => self.layers_row(ui, root, 0, shown.as_ref(), &mut drawn),
         }
         if self.prefs.tree_guides {
@@ -1512,41 +960,21 @@ impl OndinApp {
                 ui.ctx().pixels_per_point(),
             );
         }
-        // **After the guides, so the hint is on top of them.** It answers a question
-        // being asked right now where a guide is standing structure, and the line
-        // crosses a trunk at every level it is indented past.
+        // After the guides, so the hint is on top of them.
         self.drop_hint(ui, &drawn);
 
-        // Resolve the drag when the **primary** button is released anywhere
-        // (§15 D581). `any_released()` was the workspace's only one, against
-        // three `primary_released()` in `canvas.rs`, and the difference was
-        // reachable: clicking the scroll wheel part-way through a row drag
-        // landed the drop at whatever the pointer happened to be over, with the
-        // primary still held and now controlling nothing. The secondary button
-        // is already answered one layer up — `OndinApp::ui` runs `cancel_gesture`
-        // before the panels and that clears `layer_drag` by name — so the middle
-        // button was the one door with no answer at either end.
+        // Only the primary button resolves the drag (§15 D581): a middle click
+        // mid-drag must not land the drop. The secondary button is answered by
+        // `cancel_gesture` in `OndinApp::ui`.
         if ui.input(|i| i.pointer.primary_released()) {
             self.finish_layer_drag();
         }
     }
 
-    /// What a click on a row selects, given the modifiers.
-    ///
-    /// **Shift takes a range, Ctrl/Cmd toggles one row** — the split every list
-    /// in every file manager and design tool has, and Figma's own in this exact
-    /// panel. Shift used to toggle here, which left range-selecting a run of
-    /// twenty layers as twenty clicks and left Ctrl doing nothing at all.
-    ///
-    /// This is not the canvas's Shift, and the two are not in conflict. On canvas
-    /// there is no order to take a range *along*, so Shift adds and removes there
-    /// — again as Figma does. §15 D47 governs Shift during a transform gesture
-    /// (constrain, never snap-disable) and has nothing to say about either.
-    ///
-    /// The range runs along the rows **as displayed**: collapsed subtrees are not
-    /// in it, and while a filter is up neither is anything filtered out. Picking a
-    /// range off the screen and getting layers that were not on it is the one
-    /// outcome nobody expects.
+    /// What a click on a row selects, given the modifiers: Shift takes a range,
+    /// Ctrl/Cmd toggles one row. The canvas's Shift adds and removes instead, as
+    /// there is no order to take a range along. The range runs along the rows as
+    /// displayed: collapsed and filtered-out rows are not in it.
     fn select_from_row(&mut self, id: NodeId, shown: Option<&HashSet<NodeId>>, ui: &egui::Ui) {
         let (shift, ctrl) =
             ui.input(|i| (i.modifiers.shift, i.modifiers.ctrl || i.modifiers.command));
@@ -1564,13 +992,10 @@ impl OndinApp {
             if let (Some(a), Some(b)) = (anchor, here) {
                 let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                 self.session.selection.set(rows[lo..=hi].to_vec());
-                // The anchor stays put, so the range can be stretched and pulled
-                // back from the other end without re-picking its start.
+                // The anchor stays put so the range can be stretched either way.
                 return;
             }
-            // No anchor to measure from — the first Shift-click of a session, or
-            // one whose anchor has been collapsed away. Behave as a toggle rather
-            // than doing nothing.
+            // No anchor (first Shift-click, or it was collapsed away): toggle.
             self.session.selection.toggle(id);
             self.layers_range_anchor = Some(id);
             return;
@@ -1579,12 +1004,9 @@ impl OndinApp {
         self.layers_range_anchor = Some(id);
     }
 
-    /// The rows the tree is currently showing, top to bottom.
-    ///
-    /// **Must walk exactly as [`Self::layers_row`] draws** — same filter, same
-    /// collapse check, same reversed children — because a range is measured
-    /// along it and any disagreement would select rows the user cannot see. The
-    /// two are separate only because one paints and one does not.
+    /// The rows the tree is currently showing, top to bottom. Must walk exactly as
+    /// [`Self::layers_row`] draws (same filter, collapse check, reversed children),
+    /// or a range would select rows the user cannot see.
     fn visible_rows(&self, shown: Option<&HashSet<NodeId>>) -> Vec<NodeId> {
         let mut out = Vec::new();
         self.collect_visible_rows(self.session.doc.root(), 0, shown, &mut out);
@@ -1631,43 +1053,23 @@ impl OndinApp {
 
     /// The in-place rename field, laid over the row where its name was.
     ///
-    /// Buffered rather than committed per keystroke, like the paint hex field:
-    /// one rename is one undo step, not one per character. Enter and clicking
-    /// away both keep it; Escape throws it away, which is the only way back out
-    /// of a rename started by accident. A name typed empty is discarded too — a
-    /// nameless row is unusable, and silently keeping the old name is kinder than
-    /// refusing with a message.
+    /// Buffered, so one rename is one undo step. Enter and clicking away keep it;
+    /// Escape or an empty name discards it.
     fn layer_rename_field(&mut self, ui: &mut egui::Ui, id: NodeId, row: egui::Rect, left: f32) {
         let Some((_, text)) = &self.renaming_layer else {
             return;
         };
         let mut buf = text.clone();
-        // ⚠️ **The caret is asked for here, on the frame the field first draws, and
-        // the alternative is a crash** (§15 D332, superseding D216's mechanism).
-        // Every door onto a rename used to request
-        // focus at the moment it *opened* one — the double-click below, and
-        // `OndinApp::rename_selection` for the chord and the menu row — on the
-        // documented assumption that egui holds a request until the widget appears.
-        // It does. What it also does is hand AccessKit a focused id with no node
-        // behind it, and `accesskit_consumer` panics on that rather than ignoring
-        // it: *"Focused ID #… is not in the node list"*. Two of those doors could
-        // not draw the field in the frame that asked — the double-click reads a
-        // `renaming` flag latched earlier in the row, and the context menu is drawn
-        // *after* the layers panel — so both crashed on the way in.
-        //
-        // `read_response` is the previous pass's, so `None` is "this field did not
-        // exist last pass" and the request is a **one-shot on first draw**. Which
-        // is what makes it safe to ask from in here at all: the trap the old comment
-        // warned about is a re-request gated on *not having* focus, since that also
-        // fires on the frame Enter or Escape takes focus away — the field grabs it
-        // straight back and can never be left.
+        // Focus is requested here, once, on the frame the field first draws (§15
+        // D332): requesting it when a door opens the rename hands AccessKit a
+        // focused id with no node, and `accesskit_consumer` panics. It must stay a
+        // one-shot; re-requesting whenever focus is absent would regrab it on the
+        // frame Enter or Escape takes it away.
         let fid = rename_field_id(id);
         if ui.ctx().read_response(fid).is_none() {
             ui.ctx().memory_mut(|m| m.request_focus(fid));
         }
-        // Sits exactly where the painted name sat — see `rename_field_rect`.
-        // `TextEdit` insets its text by `Margin::symmetric(4, 2)` and aligns it
-        // `LEFT_TOP` by default, which is why both are overridden below.
+        // Sits where the painted name sat — see `rename_field_rect`.
         let field = rename_field_rect(row, left);
         let resp = ui.put(
             field,
@@ -1675,10 +1077,7 @@ impl OndinApp {
                 .id(rename_field_id(id))
                 .frame(egui::Frame::NONE)
                 .margin(egui::Margin::ZERO)
-                // `TextEdit` aligns its text `LEFT_TOP` by default, and `put`
-                // stretches it over the whole row, so without this the name
-                // rides up to the row's top edge while every other row's sits on
-                // its middle.
+                // `TextEdit` defaults to `LEFT_TOP`, which would ride the name up.
                 .vertical_align(egui::Align::Center)
                 .desired_width(field.width())
                 .font(egui::FontId::proportional(12.5))
@@ -1688,13 +1087,9 @@ impl OndinApp {
             *stored = buf.clone();
         }
 
-        // **A press anywhere else ends the rename**, whatever that somewhere is —
-        // another row, a panel, the canvas. egui moves focus by itself only when
-        // the thing clicked is focusable, and most of this app's surface is
-        // painted by hand and senses clicks without ever taking focus, so a click
-        // on the artwork would otherwise leave the field open and the edit
-        // uncommitted. Gated on the field actually holding focus, so the second
-        // press of the double-click that opened it cannot close it again.
+        // A press anywhere else ends the rename: hand-painted surfaces never take
+        // focus themselves. Gated on the field holding focus, so the double-click
+        // that opened it cannot close it.
         if resp.has_focus() {
             let pressed_elsewhere = ui.input(|i| i.pointer.any_pressed())
                 && ui
@@ -1707,9 +1102,8 @@ impl OndinApp {
             }
         }
 
-        // Escape is read before the commit, not after: it is the one way out of
-        // a rename started by accident, and by the time focus is gone the key is
-        // the only thing left saying which of the two happened.
+        // Escape is read before the commit: once focus is gone it is the only
+        // thing saying which of the two happened.
         if resp.lost_focus() {
             let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
             let name = buf.trim().to_string();
@@ -1724,18 +1118,10 @@ impl OndinApp {
         }
     }
 
-    /// Follow a selection made somewhere else — almost always the canvas.
-    ///
-    /// Two things have to happen, and only on the frame the selection actually
-    /// changed. **Open what it is buried in**, because a layer selected on canvas
-    /// that sits three collapsed frames deep is simply not in the tree, and the
-    /// panel silently showing nothing selected reads as a bug. And **ask to
-    /// scroll to it**, because a long tree scrolled elsewhere is the same problem
-    /// with the row merely off screen instead of folded away.
-    ///
-    /// Collapsing a frame the selection is inside is left alone: that is the user
-    /// closing something deliberately, and re-opening it under them would make
-    /// the caret look broken. Only a *change of selection* re-opens anything.
+    /// Follow a selection made somewhere else — almost always the canvas: on the
+    /// frame it changed, open what it is buried in and ask to scroll to it. Only a
+    /// change of selection re-opens anything; a frame the user collapsed with the
+    /// selection inside stays closed.
     fn sync_tree_to_selection(&mut self) {
         let current = self.session.selection.ids().to_vec();
         if current == self.layers_synced_selection {
@@ -1743,10 +1129,7 @@ impl OndinApp {
         }
         self.layers_synced_selection = current.clone();
         for id in &current {
-            // The whole chain, with no early exit. Collapse state is per node and
-            // independent — an open frame can sit inside a closed one — so unlike
-            // `matching_rows`, meeting an ancestor that is already open says
-            // nothing at all about the ones above it.
+            // The whole chain, no early exit: an open frame can sit inside a closed one.
             let mut cursor = self.session.doc.get(*id).and_then(|n| n.parent());
             while let Some(p) = cursor {
                 self.collapsed.remove(&p);
@@ -1756,45 +1139,9 @@ impl OndinApp {
         self.scroll_layers_to_selection = !current.is_empty();
     }
 
-    // **`autoscroll_while_dragging` was here and is deleted** (§15 D576,
-    // `[S15.1-L1-01]`).
-    //
-    // The tree had **two** drag-to-edge autoscrollers, both reached every frame a
-    // drag was live: this one, called from `layers_tree`, and `app::layers_panel`'s
-    // band, which runs immediately above the call to `layers_tree` in the same
-    // `ScrollArea`. Both read `ui.clip_rect()` and the tree's only margin is
-    // horizontal, so the two bands sat on the identical y range.
-    //
-    // `egui::Ui::scroll_with_delta_animation` **accumulates** (`state.scroll_delta.0
-    // += delta`), so they added: 16.0 pt per frame at the very edge, **960 pt/s at
-    // 60 Hz**, against `LAYER_SCROLL_MAX`'s own doc — *"420 … points per second.
-    // Slower than the canvas: the target is one 20px row, not a region"*. And only
-    // one of the two was `dt`-scaled, so it read **1500 pt/s at 120 Hz**, which is
-    // the thing `* dt` exists to prevent.
-    //
-    // ⚠️ **The animation is last-write-wins, so this one silently undid the other's
-    // decision.** `layers_panel` passes `ScrollAnimation::none()` under a comment
-    // saying why — *"egui's default easing would keep gliding after the hand stopped
-    // and overshoot the row being aimed at"* — and this called plain
-    // `scroll_with_delta`, which is the style default. The glide that comment says
-    // was removed was reinstated one call later, every frame.
-    //
-    // ⚠️ **And the linear ramp swamped the quadratic one.** `ui::edge_scroll_speed`
-    // is `t²` so *"a creep is available for most of the band"*; 14pt into the band
-    // this one's linear term was **4.8×** the quadratic one, so the creep the curve
-    // was shaped for did not exist.
-    //
-    // Deleted rather than merged: `app::layers_panel`'s is the one §9.4 and D278
-    // describe, and it is the `dt`-scaled, quadratic, instant one. **Two
-    // implementations of one feature, each with a doc comment claiming to be the
-    // only one** — this one's said *"without this the panel can only be reordered
-    // within one screenful"*, which was true of the other.
+    // The drag-to-edge autoscroll lives in `app::layers_panel`, not here (§15 D576).
 
     /// Fold every container, or unfold them all when nothing is folded.
-    ///
-    /// One button rather than two: with a tree of any size the answer to "are
-    /// these all open" is obvious at a glance, so a control that reads the room
-    /// and does the other thing is a button's worth of chrome instead of two.
     pub(crate) fn toggle_collapse_all(&mut self) {
         let containers = self.tree_containers();
         let anything_open = containers.iter().any(|id| !self.collapsed.contains(id));
@@ -1805,14 +1152,10 @@ impl OndinApp {
         }
     }
 
-    /// Fold every container, whatever state the tree is in.
-    ///
-    /// **Not [`Self::toggle_collapse_all`], and the difference is the whole reason
-    /// this exists.** That one reads the room; this one is the answer to
-    /// `prefs::Prefs::collapse_groups_on_open`, which is asked immediately after
-    /// `reset_transient_state` has emptied `collapsed` — so the toggle would find
-    /// "everything open", fold it, and then be a *toggle* on a tree the user has
-    /// not looked at yet. Two verbs because there are two questions.
+    /// Fold every container, whatever state the tree is in. Unlike
+    /// [`Self::toggle_collapse_all`] it is unconditional, which
+    /// `prefs::Prefs::collapse_groups_on_open` needs right after
+    /// `reset_transient_state` empties `collapsed`.
     pub(crate) fn collapse_all(&mut self) {
         let containers = self.tree_containers();
         self.collapsed.extend(containers);
@@ -1836,24 +1179,10 @@ impl OndinApp {
     }
 
     /// Whether every container in the tree is folded — what the collapse-all
-    /// button reads to decide which way it points.
-    ///
-    /// ⚠️ **Through [`Self::tree_containers`], and it used to walk the tree itself**
-    /// (§15 D674, `[S15.1-L3-02]`). It re-inlined that function's two-clause
-    /// container filter with `&& !self.collapsed.contains(&id)` bolted on, so
-    /// *"what counts as a container"* was written twice — once for the button's
-    /// **glyph**, which is this, and once for the button's **action**, which is
-    /// [`Self::toggle_collapse_all`]'s `anything_open`. Widen or narrow one and the
-    /// arrow points one way while the press does the other, with nothing in between
-    /// to disagree. `architecture.md` names the two functions in one breath as the
-    /// argument for the control existing at all — *"a control that looks and does
-    /// the other thing costs one button instead of two"* — which is the coupling
-    /// stated and, until this, not enforced.
-    ///
-    /// This is the exact negation of `anything_open`, which is what makes the pair
-    /// one sentence rather than two agreeing ones. It also drops the second full
-    /// `subtree_nodes` walk per frame — this is read on every frame the panel
-    /// draws, where the toggle's walk is per click.
+    /// button reads to decide which way it points. Goes through
+    /// [`Self::tree_containers`] so the glyph and [`Self::toggle_collapse_all`]'s
+    /// action cannot disagree about what counts as a container (§15 D674); it is the
+    /// exact negation of `anything_open`.
     pub(crate) fn tree_is_all_collapsed(&self) -> bool {
         self.tree_containers()
             .iter()
@@ -1861,12 +1190,7 @@ impl OndinApp {
     }
 
     /// Rows to show for a name filter: every node whose name matches, plus the
-    /// ancestors needed to reach it.
-    ///
-    /// Ancestors matter — a bare list of matches would show "Headline" with no
-    /// indication of which frame it belongs to, and there are usually several.
-    /// Non-matching *descendants* are dropped, so a matched frame does not drag
-    /// its whole subtree back into view.
+    /// ancestors needed to reach it. Non-matching descendants are dropped.
     fn matching_rows(&self, needle: &str) -> HashSet<NodeId> {
         let mut keep = HashSet::new();
         let mut stack = vec![self.session.doc.root()];
@@ -1916,19 +1240,17 @@ impl OndinApp {
                 .collect(),
             None => node.children().to_vec(),
         };
-        // What the layer shows, a bound visibility resolved (§15 D1059): the eye
-        // states it, and its click writes the opposite, which detaches the binding.
+        // What the layer shows, a bound visibility resolved (§15 D1059); the eye's
+        // click writes the opposite, which detaches the binding.
         let visible = self.session.doc.shown(id);
-        // Bound to a boolean variable, the eye stays drawn in the capsule (§15
-        // D1060).
+        // Bound to a boolean variable, the eye stays drawn in the capsule (§15 D1060).
         let bound_eye = node.visible_var().is_some();
         let locked = node.locked();
         let name = node.name().to_string();
         let (glyph, mut glyph_col) = node_icon(node.kind());
-        // **A main or an instance wears the hexagon** (§15 D981) — filled for a
-        // main (`ui::paint_hexagon_filled`, Phosphor Regular having no filled
-        // one, §15 D985), outline for an instance — in place of its kind's glyph,
-        // and **neutral, selected or not**: component-ness is shape, never hue.
+        // A main or an instance wears the hexagon in place of its kind's glyph (§15
+        // D981): filled for a main (`ui::paint_hexagon_filled`), outline for an
+        // instance, neutral selected or not.
         let hexagon = if node.component() {
             Some(true)
         } else if ondin_core::component::instance_root(&self.session.doc, id) == Some(id) {
@@ -1941,63 +1263,25 @@ impl OndinApp {
         } else {
             glyph
         };
-        // **A layer whose picture cannot be drawn wears the warning in its own
-        // icon** — §5.5a's rule that a missing picture is never a silent blank has
-        // a layers half as well as a canvas one (§15 D179). Asked of the
-        // decode cache rather than of the document, so it is the same question the
-        // walk asks before drawing the placeholder — a row saying nothing while
-        // the canvas shows a grey cross would be the two disagreeing about one
-        // layer.
-        // **And a boolean the arithmetic gave up on wears exactly the same mark**,
-        // because it is the same fact about a layer: it is there, and what it draws
-        // is not what it says it is (§15 D239). One `if` and no new colour — the row
-        // has to be readable at a glance while scrolling, and a second warning
-        // vocabulary for a second cause would be two things to learn about one
-        // symptom. `boolean_failed`, never "the outline is missing": an intersection
-        // of shapes that do not overlap is empty on purpose and must not be marked.
+        // A layer whose picture cannot be drawn wears the warning colour (§15 D179),
+        // and so does a boolean the arithmetic gave up on (§15 D239). That is
+        // `boolean_failed`, never "the outline is missing": an empty intersection is
+        // on purpose.
         if picture_missing(self.canvas.images(), node) || self.session.resolved.boolean_failed(id) {
             glyph_col = theme::color::WARN;
         }
-        // Cloned rather than borrowed because the node's borrow has to end
-        // before the painting below — see the note a few lines down. An
-        // An `ImageBrush` is an `ImageRef` — five small fields and a hash string —
-        // beside a sampler, not the picture.
+        // Cloned so the node's borrow ends before the painting below.
         let picture = picture_of(node).cloned();
-        // **A boolean takes a drop like a group does.** Its children *are* its
-        // operands, so dropping a shape onto one is how a third operand gets added —
-        // and `build::can_parent` has always allowed it. Left out here, the middle of a
-        // boolean's row offered only "between its siblings", so the one way in was to
-        // aim at the gap between two operands with the row expanded: legal, and with no
-        // highlight to say the drop was going inside.
+        // A boolean takes a drop like a group does: its children are its operands.
         let is_container = matches!(
             node.kind(),
             NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Boolean { .. }
         );
-        // The right-hand end of a resting row. **Two states, one slot**, because
-        // both are the same kind of remark — a fact about the row that the name
-        // and the glyph do not carry — and because the slot is already the one
-        // the eye and the lock take over on hover, so a second one would have to
-        // fight them for the same space. No row can want both: a frame is never
-        // an operand of anything.
-        // **Three states now, and the mask wins the slot.** It is the one of the
-        // three that changes what you see: a mask draws nothing, so its row is the
-        // only place in the app that says the layer is still there. The other two
-        // are annotations on a layer you can already see.
-        //
-        // No row could want two of those three. A frame cannot be a mask
-        // (`NodeKind::can_mask`), and a boolean's operands are consumed by the
-        // operation rather than painted, so a mask among them would clip nothing.
-        //
-        // ⚠️ **Five states since §15 D982, and a row *can* now want two**, so the
-        // order below is the rule rather than exclusivity: mask, then a folded
-        // set's count, then `{}`, then a frame's size or a subtract's base. A
-        // frame bound for visibility wants `{}` and its size, and `{}` wins; a
-        // bound mask wants both, and the mask wins.
-        //
-        // A collapsed set carries its variant count where a frame carries its size,
-        // and a layer bound to a component property carries `{}` (§15 D982, the
-        // design's 2A and 2C) — the count is what the folded row hides, and the
-        // binding is the one thing about the layer no other row says.
+        // The right-hand end of a resting row: one slot (the one the eye and lock
+        // take over on hover) for several remarks, in priority order — mask (a mask
+        // draws nothing, so its row is the only sign the layer exists), a folded
+        // set's variant count, `{}` for a component-property binding (§15 D982),
+        // then a frame's size or a subtract's base.
         let doc = &self.session.doc;
         let set_count = (node.set().is_some() && self.collapsed.contains(&id))
             .then(|| ondin_core::variant::variants(doc, id).len());
@@ -2014,8 +1298,7 @@ impl OndinApp {
         } else if bound {
             Some(RowBadge::Icon(icon::BRACKETS_CURLY, BADGE_STACK))
         } else {
-            // The frame's **used** size (§15 D868) — the badge reports the frame
-            // on the canvas, which is where container layout put it.
+            // The frame's used size (§15 D868): where container layout put it.
             match self.session.resolved.used_kind_of(node) {
                 NodeKind::Artboard { size, .. } => Some(RowBadge::Text(format!(
                     "{} × {}",
@@ -2031,24 +1314,14 @@ impl OndinApp {
         if depth > 0 {
             let selected = self.session.selection.contains(id);
             let has_children = !children.is_empty();
-            // While filtering, every branch is open: a match hidden inside a
-            // collapsed ancestor is a search that found nothing.
+            // While filtering, every branch is open.
             let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
-            // **The row's component mark** (§15 D981): `+` for a layer of an
-            // instance's own — a local addition, a kept child (which reads as
-            // local, the maintainer's ruling), or a local instance placed inside —
-            // and a dot for an override: on the row that holds it while expanded,
-            // and on a **collapsed** row for *anything* inside differing from its
-            // main, local layers and removed children included (ruling (e)).
-            //
-            // And the **parent row whose children differ** — a child removed, or
-            // the linked children out of order — carries the dot expanded as well
-            // as collapsed, with a tooltip naming what (§15 D1003 (9),
-            // `[X11.1-L2-03]`): a removed child has no row of its own, and
-            // reordered children each have no field override, so an expanded
-            // instance asking `overrides` alone put the mark nowhere. Collapsed, the
-            // tooltip counts the whole subtree, as the bubbled dot covers it (§15
-            // D1004 (2), `child_drift_of`).
+            // The row's component mark (§15 D981): `+` for a layer of an instance's
+            // own, a dot for an override — on the holding row while expanded, on a
+            // collapsed row for anything inside differing from its main. A parent
+            // whose children differ (removed or reordered) carries the dot too, with
+            // a tooltip naming what; collapsed, it counts the whole subtree (§15
+            // D1003 (9), D1004 (2), `child_drift_of`).
             let (mark, children_tip) = {
                 let doc = &self.session.doc;
                 let in_instance = doc
@@ -2095,28 +1368,14 @@ impl OndinApp {
                 .as_ref()
                 .is_some_and(|d| d.ids.contains(&id));
 
-            // ⚠️ **Where the drop target is worked out is no longer here**, and the
-            // trap that put it here is worth keeping: it must be read from
-            // `pointer_interact_pos` against a row's *rect*, never from
-            // `resp.hovered()`. While a drag is in flight egui reports only the
-            // dragged widget as hovered ("If currently dragging, only that and
-            // nothing else is hovered"), so every other row said no, no drop target
-            // was ever recorded, and releasing did nothing at all — which is what
-            // made the whole reorder/reparent gesture look unimplemented (§15 D19).
-            // [`OndinApp::drop_hint`] reads the rects this walk collects, after it,
-            // because an indent-aware drop is a claim about two rows at once.
+            // The drop target is read in [`OndinApp::drop_hint`] from the rects this
+            // walk collects, against `pointer_interact_pos`, never `resp.hovered()`:
+            // during a drag egui reports only the dragged widget as hovered (§15 D19).
 
-            // Asked before the painter is taken, so the `&mut self.thumbs` and
-            // the `&self.canvas` borrows do not have to share a line with one
-            // borrowed out of `ui`. `None` for a layer with no picture, one the
-            // store cannot draw, or one the pass's budget deferred — and all
-            // three fall back to the glyph, which for the second is the amber
-            // one D179 already set above.
-            //
-            // ⚠️ **And never for a main or an instance**, whose hexagon is the
-            // row's one component mark (§15 D981, `[X11.1-L1-04]`): a frame main
-            // with a photo fill drew its thumbnail, the `match` below taking that
-            // arm first, and its row said nothing of being a component.
+            // Asked before the painter is taken, for the borrows. `None` for no
+            // picture, one the store cannot draw, or one the pass's budget deferred
+            // (all fall back to the glyph), and never for a main or an instance,
+            // whose hexagon is the row's component mark (§15 D981).
             let thumb = picture
                 .as_ref()
                 .filter(|_| wears_thumbnail(hexagon))
@@ -2136,42 +1395,25 @@ impl OndinApp {
             let cy = rect.center().y;
             let left = rect.left();
             let caret_x = caret_column(left, depth);
-            // **Right-side controls: eye / lock** (on hover, or when toggled off).
-            // [`EYE_PITCH`] apart — the glyphs are 15px, so the old 18px pitch left
-            // them almost touching.
-            //
-            // Their x's are worked out **here**, above the caret they are drawn
-            // after, because all three go into one [`RowTargets`] and the caret
-            // is the first thing painted. Nothing about them depends on anything
-            // between the two points.
+            // Right-side controls: eye / lock (on hover, or when toggled off),
+            // [`EYE_PITCH`] apart. Their x's are worked out before the caret is
+            // painted because all three go into one [`RowTargets`].
             let lock_x = rect.right() - LOCK_INSET;
             let eye_x = lock_x - EYE_PITCH;
-            // **And while bound** (§15 D1060): the binding is a fact about the
-            // layer no other row says, as a hidden layer's eye is.
+            // Also while bound (§15 D1060), as a hidden layer's eye is.
             let show_eye = hovered || !visible || bound_eye;
             let show_lock = hovered || locked;
             let targets = RowTargets {
                 caret: has_children.then_some(caret_x),
                 eye: show_eye.then_some(eye_x),
-                // Not gated on `show_lock`, which is how the click test has always
-                // read it: a press can only arrive with the pointer on the row, and
-                // the pointer on the row is what `show_lock` already means.
+                // Not gated on `show_lock`: a press only arrives with the pointer on
+                // the row, which is what `show_lock` already means.
                 lock: Some(lock_x),
             };
-            // **The control the pointer is actually on**, as opposed to the row —
-            // which the row's own `hovered` already says and which is what makes
-            // the eye and lock appear at all. Two different questions on one
-            // response, and until §15 D246 only the first was asked, so all three
-            // controls arrived with nothing to say they could be pressed.
+            // The control the pointer is on, as opposed to the row (§15 D246).
             let under = resp.hover_pos().and_then(|q| targets.at(q.x));
-            // A hovered control lights to `STRONG`, the app's brightest ink, in
-            // every state it has. **One destination rather than one step per
-            // resting colour**: the eye rests at two greys and the lock at two
-            // more, and "a tier up from wherever you were" would give four
-            // different amounts of feedback for one gesture. No ground behind it
-            // — the row already has a hover ground of its own, and a second
-            // rectangle inside it would read as a button the rest of the panel
-            // does not have.
+            // A hovered control lights to `STRONG` from every resting colour, with
+            // no ground behind it (the row has its own hover ground).
             let lit = |on: bool, resting: egui::Color32| {
                 if on { theme::text::STRONG } else { resting }
             };
@@ -2188,21 +1430,14 @@ impl OndinApp {
                     lit(under == Some(RowHit::Caret), theme::text::DIM),
                 );
             }
-            // A childless row normally reclaims the caret's 16px, which reads
-            // fine mid-tree where the indent has already said how deep you are.
-            // At the **top level** it does not: a frame with a caret would sit
-            // further right than the loose shape above it and look like that
-            // shape's child. So depth 1 always leaves the caret's room, whether
-            // it has one or not, and the top level lines up as one column.
+            // A childless row reclaims the caret's 16px, except at the top level,
+            // where a frame with a caret would sit right of the loose shape above
+            // it and look like its child: depth 1 always leaves the room.
             let caret_room = has_children || depth == 1;
             let icon_x = left + icon_offset(depth, caret_room);
-            // **Where this row's elbow has to stop**: short of whichever glyph
-            // leads the row, which is the caret when there is one and the kind
-            // icon when there is not — and below the top level those are the two
-            // *different* columns `caret_room` puts them in. Two points off an
-            // 11pt caret box and four off a 15pt icon's, the design's own pair:
-            // the wider gap is because a Phosphor glyph's ink stops well inside
-            // its box, so an equal number would read as a tighter one.
+            // Where the elbow stops: short of the leading glyph (caret, else kind
+            // icon). Two points off an 11pt caret box and four off a 15pt icon's
+            // (a Phosphor glyph's ink stops well inside its box).
             let lead = if has_children {
                 caret_x - 7.5
             } else {
@@ -2214,42 +1449,21 @@ impl OndinApp {
                 depth,
                 lead,
                 elbow: elbow_y(rect, ui.ctx().pixels_per_point()),
-                // **The same `selected` the row's own ground and glyph are painted
-                // from**, so a layer picked on the canvas lights its leg without
-                // the panel being told twice: this is `session.selection`, which is
-                // one selection for the whole app.
                 selected,
                 hovered,
                 container: is_container,
                 closed: is_container && has_children && !expanded,
             });
-            // A layer that cannot be edited — locked or hidden — is drawn at
-            // 40% throughout, glyph and name together, the way the design marks
-            // them. Not two tiers: a locked layer reads as out of play for the
-            // same reason a hidden one does, and giving them different greys
-            // only invited the question of which was which.
+            // A locked or hidden layer is drawn at 40% throughout, glyph and name.
             let dimmed = locked || !visible;
-            // **The container an in-flight drop would land in.** The line says *where*
-            // and cannot say *which group*: two levels are one 31pt step apart, so
-            // without this the reader counts indent columns by eye. Asked for as the
-            // whole of that affordance — *"only highlight the text and icon of the group
-            // to blue, should be enough affordance"* — after a dashed outline round the
-            // row was tried and did not sit right.
-            //
-            // A frame behind the line it belongs to, necessarily; [`LayerDrag::lit`]
-            // carries the reason.
+            // The container an in-flight drop would land in: the line says where
+            // but not which group, so its text and icon go blue. A frame behind the
+            // line ([`LayerDrag::lit`]).
             let drop_host = self.layer_drag.as_ref().is_some_and(|d| d.lit == Some(id));
-            // A selected row wears the selection hue, not the chrome accent:
-            // the row and the bounding box on canvas are one statement.
-            //
-            // **The drop host outranks both selection and dimming**, which is the right
-            // way round for the same reason a hover beats a selection in the tree guides
-            // (§15 D331): a drag is a question being asked now, where the other two are
-            // states that persist. Dimming in particular must lose — a locked or hidden
-            // group still takes children, so a host that stayed at 40% would be the
-            // panel declining to answer.
-            // The name takes its glyph's ink when selected: blue, or white beside a
-            // component's hexagon.
+            // A selected row wears the selection hue, not the chrome accent. The
+            // drop host outranks selection and dimming (a drag is a question asked
+            // now, §15 D331; a hidden group still takes children). The name takes
+            // its glyph's ink: blue, or white beside a component's hexagon.
             let name_col = match (drop_host, selected, dimmed) {
                 (true, ..) => color::SELECT,
                 (_, true, _) if hexagon.is_some() => color::TEXT,
@@ -2265,21 +1479,9 @@ impl OndinApp {
                 (_, false, false) => glyph_col,
             };
             match thumb {
-                // **Centred where the glyph would be**, because it replaces it
-                // rather than joining it: the icons down the tree are one column
-                // and a picture that sat beside its glyph would put this row's
-                // name on a different x from every other.
-                //
-                // **Rounded by the tessellator, not by a corner mask**, and the
-                // distinction is what makes it possible here at all. `swatch`
-                // rounds the inspector's chip with [`ui::mask_corners`], which
-                // paints the leftover corner *in the ground colour* — and a row's
-                // ground is three colours depending on whether it is resting,
-                // hovered or selected, so that treatment would show four notches
-                // in the wrong grey on two rows out of three. A textured
-                // `RectShape` carries its own `corner_radius` through
-                // tessellation instead and needs to know nothing about what is
-                // behind it. `Painter::image` is this shape with a radius of zero.
+                // Centred where the glyph would be, as it replaces it. Rounded by
+                // the tessellator, not `ui::mask_corners`, which paints corners in
+                // the ground colour and a row has three grounds.
                 Some(id) => {
                     p.add(egui::Shape::Rect(
                         egui::epaint::RectShape::filled(
@@ -2306,9 +1508,6 @@ impl OndinApp {
                     );
                 }
             }
-            // 15px, not 12: the glyph is drawn centred at `icon_x` so half of
-            // its 15px advance already sits to the right, and the name was
-            // landing about 3px closer than the design's 7px gap.
             let renaming = matches!(&self.renaming_layer, Some((n, _)) if *n == id);
             if !renaming {
                 p.text(
@@ -2321,10 +1520,8 @@ impl OndinApp {
             }
 
             if show_eye {
-                // **Bound, in the capsule** (§15 D1060): the identity card's
-                // bound eye (§15 D1059) at the row's size — D1038 A1's capsule
-                // rule, `text_a(28)`, 44 under the pointer. The click still
-                // writes the other value, which detaches.
+                // Bound, in the capsule (§15 D1060): `text_a(28)`, 44 under the
+                // pointer. The click still writes the other value, which detaches.
                 if bound_eye {
                     let fill = if under == Some(RowHit::Eye) { 44 } else { 28 };
                     p.rect_filled(
@@ -2349,10 +1546,8 @@ impl OndinApp {
                 );
             }
             if locked {
-                // A locked layer wears a *filled* lock, permanently — the one
-                // mark on the row that survives the pointer leaving, so the
-                // state is legible while scanning the tree rather than only
-                // while hovering it.
+                // A locked layer wears a filled lock permanently, legible while
+                // scanning rather than only on hover.
                 crate::ui::paint_lock_filled(
                     p,
                     egui::pos2(lock_x, cy),
@@ -2364,29 +1559,20 @@ impl OndinApp {
                 p.text(
                     egui::pos2(lock_x, cy),
                     egui::Align2::CENTER_CENTER,
-                    // The shackle says which state it is in, the way the eye
-                    // does: shut when locked, open when not.
                     icon::LOCK_SIMPLE_OPEN,
                     theme::icon_font(ICON_PT),
                     lit(under == Some(RowHit::Lock), theme::text::DIM),
                 );
             } else if let Some(b) = &badge {
-                // One `text` call for both, differing only in the font: the
-                // Phosphor face *is* a font here (`theme::icon_font`), so a
-                // glyph badge and a worded one sit on the same baseline, in the
-                // same colour, at the same right edge, with nothing to keep in
-                // step by hand.
+                // One `text` call for both, differing only in the font.
                 let (s, font) = match b {
                     RowBadge::Text(s) => (s.as_str(), egui::FontId::proportional(10.5)),
                     RowBadge::Icon(g, size) => (*g, theme::icon_font(*size)),
                 };
                 // Clear of a component mark, which holds the very edge.
                 let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
-                // **A worded badge ends before a resting eye** (§15 D1060): even
-                // a frame's *40 × 40* reaches 44 px in from the edge, and the
-                // eye's glyph spans 30–45 in, so a hidden or bound frame drew the
-                // two over each other (measured, `bound_eye_tests`).
-                // A glyph badge clears it where it is.
+                // A worded badge ends before a resting eye (§15 D1060; see
+                // `bound_eye_tests`); a glyph badge clears it where it is.
                 let right = match b {
                     RowBadge::Text(_) if show_eye => eye_x - BOUND_EYE.x / 2.0 - 4.0,
                     _ => rect.right() - edge,
@@ -2399,9 +1585,8 @@ impl OndinApp {
                     theme::text::FAINT,
                 );
             }
-            // The mark sits **after** the lock and the eye, at the row's very
-            // edge, so it never shifts them, and shows in every row state (§15
-            // D981) — neutral, like everything about a component.
+            // The mark sits after the lock and eye at the row's very edge, in every
+            // row state (§15 D981).
             if let Some(m) = mark {
                 let at = egui::pos2(rect.right() - MARK_SLOT / 2.0 + 1.0, cy);
                 match m {
@@ -2416,36 +1601,22 @@ impl OndinApp {
                 }
             }
 
-            // Not while the row is being renamed: the text field sitting on top
-            // of it owns the pointer then, and dragging to select a few
-            // characters must not pick the layer up and carry it off.
+            // Not while renaming: the text field owns the pointer then.
             if resp.drag_started() && !renaming {
-                // Dragging something already selected carries the set; dragging
-                // anything else selects it first, exactly as the canvas does
-                // (`begin_select_drag`), so the rule is the same wherever the
-                // gesture starts.
+                // Dragging something selected carries the set; anything else is
+                // selected first, as the canvas does (`begin_select_drag`).
                 let ids = if self.session.selection.contains(id) {
                     build::outermost(&self.session.doc, self.session.selection.ids())
                 } else {
                     self.session.selection.set_one(id);
-                    // The same line the click and right-click arms below carry,
-                    // and for the same reason (§15 D581): this is the third door
-                    // that changes the selection from inside the walk, and the
-                    // only one that was not telling the panel. Without it
-                    // `sync_tree_to_selection` reads the new selection as news on
-                    // the next frame and `scroll_layers_to_selection` recentres
-                    // the row — so picking up a row that is only *partly* in the
-                    // viewport scrolls the whole tree, and the drop boundaries
-                    // the hand was aiming at, out from under a held pointer. The
-                    // click on the identical row moves it 0.0.
+                    // Tell the panel (§15 D581), or `sync_tree_to_selection` reads
+                    // this as news and recentres a partly visible row, scrolling the
+                    // tree out from under a held pointer.
                     self.layers_synced_selection = self.session.selection.ids().to_vec();
                     vec![id]
                 };
-                // The **press** origin, not where the pointer is now: egui only
-                // reports a drag once it has passed its threshold, so by this frame
-                // the pointer has already travelled a few points from where the row
-                // was picked up. Measuring from here instead would bake that slop in
-                // as a constant offset on the indent for the rest of the gesture.
+                // The press origin, not the pointer now: egui reports a drag only
+                // past its threshold, which would bake that slop into the indent.
                 let grab_x = ui
                     .input(|i| i.pointer.press_origin())
                     .map_or(rect.left(), |p| p.x);
@@ -2460,19 +1631,11 @@ impl OndinApp {
                 });
             }
 
-            // Scroll to the selection once, on the frame it changed. The first
-            // selected row drawn wins, which with several selected is the
-            // topmost — the one a reader looks for.
+            // Scroll to the selection once, on the frame it changed; the topmost
+            // selected row wins.
             if selected && self.scroll_layers_to_selection {
                 self.scroll_layers_to_selection = false;
-                // Only when it is actually off screen. Recentring a row that is
-                // already in view moves the whole tree under the pointer for no
-                // reason, which is worse than not scrolling at all.
-                //
-                // **A jump, not a glide** (§15 D1026). egui's `scroll_to_rect`
-                // eases over several frames, which reads well across a short tree
-                // and as the panel lurching on every canvas click across a long one
-                // — the maintainer asked for it to follow without animation.
+                // Only when off screen, and a jump, not a glide (§15 D1026).
                 if !ui.clip_rect().contains_rect(rect) {
                     ui.scroll_to_rect_animation(
                         rect,
@@ -2482,33 +1645,21 @@ impl OndinApp {
                 }
             }
 
-            // The name is the one thing on the row worth editing in place, and a
-            // double-click is where everyone reaches for it. Rename used to live
-            // only in the inspector, which meant tidying up a tree was a trip to
-            // the other side of the window per layer.
-            // Counted by `ui::double_clicked`, so a click on one row and a fast
-            // double-click on the next still renames it (§15 D986).
+            // Double-click renames in place. Counted by `ui::double_clicked`, so a
+            // click on one row and a fast double-click on the next still renames
+            // it (§15 D986).
             if crate::ui::double_clicked(ui, &resp) {
                 self.renaming_layer = Some((id, name.clone()));
-                // **Opening it is all this does.** The caret is the field's own
-                // business, asked for on the frame it first draws — which is the
-                // next one, since `renaming` was latched above this. Requesting it
-                // here instead is what crashed the app on every double-click:
-                // AccessKit is handed a focused id and this frame has no node for
-                // it. See `layer_rename_field`.
+                // Focus is the field's business: see `layer_rename_field`.
             }
             if renaming {
                 self.layer_rename_field(ui, id, rect, icon_x + NAME_GAP);
             }
 
-            // `context_menu.is_none()` for the canvas's reason (R4): the click
-            // that dismisses an open menu is spent dismissing it and must not also
-            // reselect a row underneath.
+            // The click that dismisses an open menu is spent dismissing it (R4).
             if resp.clicked() && !renaming && self.context_menu.is_none() {
-                // `interact_pointer_pos`, not the `under` computed above: that
-                // one is the *hover* and this is the press, and on a touch or a
-                // click-through frame they are not always the same point.
-                // `RowTargets::at` is what they share.
+                // `interact_pointer_pos`, not the hover-based `under`: they can
+                // differ on a touch or click-through frame.
                 match resp.interact_pointer_pos().and_then(|q| targets.at(q.x)) {
                     Some(RowHit::Caret) => {
                         if expanded {
@@ -2531,22 +1682,15 @@ impl OndinApp {
                     }
                     None => self.select_from_row(id, shown, ui),
                 }
-                // The panel already knows about the selection it just made, so
-                // `sync_tree_to_selection` must not treat it as news and scroll
-                // the row the user is pointing at out from under them.
+                // The panel made this selection itself, so it must not read as news
+                // and scroll the row away.
                 self.layers_synced_selection = self.session.selection.ids().to_vec();
             }
 
-            // **The panel's door** (`docs/context-menus.md` §1). The only door that
-            // reaches a locked or hidden layer — `hit_test` skips both, so the
-            // canvas cannot deliver one — which is why the panel's menu has to
-            // carry the complete set, including the *Unlock* that is the only way
-            // back (§5.9, C4).
-            //
-            // **C6 needs no code**: the press that opens this already committed any
-            // live rename, because "a press anywhere else ends the rename"
-            // (`layer_rename_field`). The press commits, the release opens the
-            // menu, and there is no special case to write.
+            // The panel's door (`docs/context-menus.md` §1): the only one that
+            // reaches a locked or hidden layer, so its menu carries the full set,
+            // including *Unlock* (§5.9, C4). C6 needs no code: the press already
+            // committed any live rename (`layer_rename_field`).
             if resp.secondary_clicked() {
                 // C2, in the panel: a right-click on a row that is already part of
                 // the selection acts on all of it.
@@ -2569,11 +1713,9 @@ impl OndinApp {
             }
         }
 
-        // Reversed: `children` is z-order with the **last** entry nearest the
-        // viewer (§5.3), and a layers tree reads top-down as front-to-back —
-        // the row at the top of the list is the layer on top of the artwork.
-        // Every index this file computes stays a model index; only the walk is
-        // flipped, which is why the drop-target maths below has to mirror too.
+        // Reversed: `children` is z-order with the last entry nearest the viewer
+        // (§5.3). Every index this file computes stays a model index; only the
+        // walk is flipped, so the drop-target maths mirrors it.
         for child in children.into_iter().rev() {
             self.layers_row(ui, child, depth + 1, shown, rows);
         }
@@ -2581,17 +1723,10 @@ impl OndinApp {
 
     /// Hold a drag on a collapsed group for [`SPRING_SECS`] and the branch opens.
     ///
-    /// `on` is the group the pointer is resting on, or `None` for anywhere else — passing
-    /// `None` is what restarts the wait, so a drag that crosses a group and comes back
-    /// waits the full second again rather than accumulating two half-seconds into one.
-    ///
-    /// ⚠️ **The repaint request is the whole of the timing.** egui only lays out a frame
-    /// when something asks it to, and a hand holding still asks for nothing — so without
-    /// this the clock would be read once, on the frame the pointer arrived, and the group
-    /// would open on whatever unrelated event happened to wake the panel next. The drag
-    /// already requests a repaint every frame in `layers_tree`, which makes this
-    /// redundant today and correct on the day that changes; `request_repaint_after` is
-    /// the cheaper of the two spellings and says what it is for.
+    /// `on` is the group the pointer is resting on; `None` restarts the wait. The
+    /// repaint request is the timing: a still hand wakes egui for nothing, and
+    /// `layers_tree`'s per-frame repaint during a drag would otherwise be the only
+    /// thing reading the clock.
     fn spring_load(&mut self, ui: &egui::Ui, on: Option<NodeId>) {
         let now = ui.input(|i| i.time);
         let Some(drag) = self.layer_drag.as_mut() else {
@@ -2623,23 +1758,14 @@ impl OndinApp {
         }
     }
 
-    /// Turn a [`DropSpot`] — which is pure screen geometry — into the parent and index
-    /// the document will actually be asked for, or `None` where that drop is not
-    /// allowed.
+    /// Turn a [`DropSpot`] into the parent and index the document will be asked
+    /// for, or `None` where that drop is not allowed.
     ///
-    /// **The reversed walk is the whole of the arithmetic.** `children` is z-order with
-    /// the last entry nearest the viewer (§5.3) and the tree draws it top-down, so a
-    /// slot *below* a row on screen is *before* it in the model, and the top of a
-    /// container's list is `child_count` rather than 0. Every index this file computes
-    /// stays a model index; only the walk is flipped.
-    ///
-    /// ⚠️ **A drop indented out of a container lands beside an ancestor, not beside the
-    /// row the pointer is on.** That is the new half: dragging below the last child of a
-    /// group and moving left means "after the group", and the group may be several
-    /// levels up from the row the boundary was measured against. So the row is walked up
-    /// to the depth the pointer asked for and *that* node's slot is the answer — which
-    /// degenerates to the row itself when the drop is at the row's own level, so there
-    /// is one path rather than a special case.
+    /// The reversed walk is the whole of the arithmetic: a slot below a row on
+    /// screen is before it in the model, and the top of a container's list is
+    /// `child_count`. A drop indented out of a container lands beside an ancestor,
+    /// so the row is walked up to the depth the pointer asked for and that node's
+    /// slot is the answer (the row itself at its own level).
     fn resolve_drop(
         &self,
         rows: &[TreeRow],
@@ -2647,25 +1773,18 @@ impl OndinApp {
         dragged: &[NodeId],
     ) -> Option<DropTarget> {
         let target = self.drop_slot(rows, spot)?;
-        // **The destination must not be inside what is being carried**, or the drop
-        // would make a node its own descendant. Asked of the *parent* rather than of
-        // the row under the pointer, which is the shape the indent gesture forces: the
-        // pointer sits on a dragged row's own child all the way through an outdent, and
-        // the levels that are actually illegal are only the ones at or below it.
+        // The destination must not be inside what is carried. Asked of the parent,
+        // not the row under the pointer, which sits on a dragged row's own child
+        // throughout an outdent.
         if dragged
             .iter()
             .any(|d| *d == target.parent || self.is_ancestor_of(*d, target.parent))
         {
             return None;
         }
-        // A frame never sits under a boolean or a mask, at any depth, and never in a
-        // shape (§5.3, §15 D876) — refuse rather than offer an invalid drop. Every
-        // carried row has to be welcome, since they all land in the same parent: a
-        // set holding a frame and a shape can only be dropped where both fit.
-        //
-        // And the set takes them **together** (`variant::takes_together`, §15 D1003
-        // (5)): a frame main and a group main each fit an empty set alone, so the
-        // per-row check above let both in and made a set of two kinds.
+        // A frame never sits under a boolean or a mask, nor in a shape (§5.3, §15
+        // D876); every carried row must be welcome, and a set takes them together
+        // (`variant::takes_together`, §15 D1003 (5)).
         (dragged
             .iter()
             .all(|d| self.drop_is_legal(*d, target.parent))
@@ -2674,14 +1793,11 @@ impl OndinApp {
     }
 
     /// [`Self::resolve_drop`]'s geometry half: the parent and index `spot` names,
-    /// before anything asks whether the carried rows may go there — split out so
-    /// a refused drop can still say which parent refused it
+    /// split out so a refused drop can still say which parent refused it
     /// ([`Self::set_refusal`]).
     fn drop_slot(&self, rows: &[TreeRow], spot: DropSpot) -> Option<DropTarget> {
         let target = match spot {
-            // Into the container, at the end of its list — which is the top of it on
-            // screen as well as the top of its z-order, so a layer dropped onto a frame
-            // lands where the pointer is.
+            // Into the container, at the end of its list: the top of it on screen.
             DropSpot::Into(i) => {
                 let parent = rows.get(i)?.id;
                 DropTarget {
@@ -2709,9 +1825,8 @@ impl OndinApp {
                             .position(|c| *c == anchor)?;
                         DropTarget { parent, index }
                     }
-                    // The top of the whole list, which is the end of the root's. The
-                    // depth test is belt and braces: the first row of a tree is always
-                    // top-level, so [`depth_range`] cannot offer anything else here.
+                    // The top of the whole list, the end of the root's; the depth test
+                    // is belt and braces, as [`depth_range`] offers only level 1 here.
                     None if depth == 1 => {
                         let root = self.session.doc.root();
                         DropTarget {
@@ -2726,15 +1841,10 @@ impl OndinApp {
         Some(target)
     }
 
-    /// Why the layers in `dragged` may not go into `parent`, when the reason is
-    /// **one kind per set** (§15 D1003 (5)) — the message the release says, as the
-    /// canvas's move says it (`canvas::SET_OF_ANOTHER_KIND`,
-    /// `canvas::SET_OF_MIXED_KINDS`). `None` for any other refusal, which the
-    /// panel's missing hint already says.
-    ///
-    /// 🚨 **The panel refused this drop silently** (`[X2-L2-02]`'s K7 leftover):
-    /// `drop_is_legal` asked `component::can_hold`, the hint went dark, and the
-    /// release did nothing — while the canvas, refusing the same drop, said why.
+    /// Why the layers in `dragged` may not go into `parent`, when the reason is one
+    /// kind per set (§15 D1003 (5)) — the message the release says, as the canvas's
+    /// move does (`canvas::SET_OF_ANOTHER_KIND`, `canvas::SET_OF_MIXED_KINDS`).
+    /// `None` for any other refusal, which the missing hint already says.
     fn set_refusal(&self, parent: NodeId, dragged: &[NodeId]) -> Option<&'static str> {
         let doc = &self.session.doc;
         if !ondin_core::variant::is_set(doc, parent) {
@@ -2756,10 +1866,9 @@ impl OndinApp {
 
     /// What differs among the row `id`'s children, from `child_drift_cache` while
     /// the document is unchanged — the parent row's dot and tooltip (§15 D1003 (9))
-    /// and what its *Restore children* is offered for. **Its scope is the row's
-    /// fold** (§15 D1004 (2)): a [collapsed](Self::row_folded) row's whole subtree
-    /// (`reset::subtree_child_drift`), as its bubbled dot covers it; an expanded
-    /// row's own children (`reset::child_drift`), deeper rows carrying their own.
+    /// and what its *Restore children* is offered for. Its scope is the row's fold
+    /// (§15 D1004 (2)): a [collapsed](Self::row_folded) row's whole subtree, an
+    /// expanded row's own children.
     pub(crate) fn child_drift_of(&mut self, id: NodeId) -> ondin_core::reset::ChildDrift {
         let folded = self.row_folded(id);
         if let Some(d) = self.child_drift_cached(id, folded) {
@@ -2794,12 +1903,9 @@ impl OndinApp {
         self.child_drift_cache.1.get(&(id, folded)).copied()
     }
 
-    /// Whether the row `id` is drawn **collapsed** — it has children, the user
-    /// folded it, and no search is open (a search forces every branch open, as the
-    /// drawing walk does). What scopes the row's tooltip and its *Restore
-    /// children* (§15 D1004 (2)), from either door: the context menu opened on the
-    /// canvas reads the same fold, so the verb always covers what the selected
-    /// layer's row in the panel shows a dot for.
+    /// Whether the row `id` is drawn collapsed — it has children, the user folded
+    /// it, and no search is open. Scopes the row's tooltip and *Restore children*
+    /// (§15 D1004 (2)) from either door, canvas menu included.
     pub(crate) fn row_folded(&self, id: NodeId) -> bool {
         let searching = self
             .layer_filter
@@ -2833,12 +1939,9 @@ impl OndinApp {
             return false;
         };
         let doc = &self.session.doc;
-        // The ancestor half (§15 D876) is the one a kind pair cannot see: a group
-        // holding a card dropped into a boolean passes `can_parent` at every level.
-        // And the component half (`[X2-L2-02]`), which neither can see: a main or a
-        // set into a main or an instance, an instance into its own main, a main into
-        // a set of another kind (§15 D1003 (5)) — refused at the commit after the
-        // hint had offered the drop. The canvas asks the same predicate.
+        // The ancestor half (§15 D876) is what a kind pair cannot see, and the
+        // component half (`component::can_hold`) what neither sees (§15 D1003 (5)).
+        // The canvas asks the same predicate.
         build::can_parent(parent_node.kind(), node.kind())
             && (doc.frame_may_sit_under(parent) || !doc.holds_a_frame(dragged))
             && ondin_core::component::can_hold(doc, parent, dragged)
@@ -2847,65 +1950,18 @@ impl OndinApp {
     /// Read the pointer against the rows the walk just drew: work out where the drag
     /// would land, record it for the release, and draw the affordance that says so.
     ///
-    /// **One pass, after the walk, and the three used to be three places.** The target
-    /// was worked out by whichever row the pointer was inside, painted by whichever row
-    /// could recognise the boundary from its own child list, and landed from a third —
-    /// so a boundary reachable from two lists got two answers, and the rule each row
-    /// applied to decide whether the line was its own is the whole of §15 D67. None of
-    /// that survives an indent-aware drop, which is a claim about the row *above* a
-    /// boundary and the row *below* it at once: a row painting itself does not yet know
-    /// what follows it.
-    ///
-    /// The hint is drawn only where the drop is legal. Nothing is the honest answer —
-    /// and with the indent gesture it is also a live one, because moving left out of a
-    /// group is what makes the line reappear.
+    /// One pass after the walk, because an indent-aware drop is a claim about the row
+    /// above a boundary and the row below it at once (§15 D67). The hint is drawn
+    /// only where the drop is legal.
     fn drop_hint(&mut self, ui: &egui::Ui, rows: &[TreeRow]) {
         let Some(drag) = self.layer_drag.as_ref() else {
             return;
         };
-        // ⚠️ **A drag with no button behind it paints nothing and lands nothing**
-        // (§15 D471). `[S17-L1-01]`: pick a row up, and while still holding the
-        // button press the panel's own chord (`Ctrl+Alt+\`, or `Ctrl+\` for
-        // present mode). `input::resolve` is *"a pure resolution of this frame's
-        // events, with no state of its own"* and `dispatch` hands `ToggleView`
-        // straight to `set_view_switch` with no in-flight guard, so the panel is
-        // skipped on the very frame the chord lands — and `finish_layer_drag`
-        // runs inside `layers_tree`, which is not drawn. The release goes
-        // nowhere and `layer_drag` survives it.
-        //
-        // Bring the panel back and this function read `pointer_interact_pos`
-        // alone, **with no test that a button was down**, which is what turns a
-        // resting pointer into a live drop: measured, the tree lit a drop host,
-        // painted the blue line, re-derived a target from wherever the pointer
-        // happened to rest, and **the release of the next ordinary click
-        // committed it** — `undo_depth 0 → 1`, the layer reparented to the root,
-        // toast *"Moved layer"*, against a control at 0.
-        //
-        // **Here rather than at the view switch, because this closes the class.**
-        // Clearing the drag in `set_view_switch` would close the one route; a
-        // drag stranded by any *future* route still paints and still lands. This
-        // is also the recovery on the present-mode route, where `escape` cannot
-        // be one: its first rung is `self.present = false`, which restores the
-        // panel with the phantom drag live.
-        //
-        // 🚨 **Amended by §15 D582, because the first spelling of it — a bare
-        // `return` on `!primary_down()` — stopped every legitimate drop as
-        // well.** `layers_tree` clears `target` at the top of each frame and
-        // this is the only thing that re-derives it, and egui clears
-        // `pointer.down[Primary]` on the frame it *processes* the release. So
-        // the one frame that ends a drag was also the one frame that could not
-        // resolve one: the release landed nothing, silently, and the drag was
-        // discarded by `finish_layer_drag` two lines in. Measured — with the
-        // `return` in place a press-move-release over the tree leaves
-        // `undo_depth` at 0 and the child list byte-identical; with it disabled
-        // the same events give *"Reordered"* and the move.
-        //
-        // **So the release frame is admitted, and a drag with nothing behind it
-        // is now *dropped* rather than ignored.** That is strictly stronger than
-        // ignoring it: a stranded drag meets an ordinary frame — no button down,
-        // no release — before any later click can reach it, and dies there. The
-        // old spelling left it live and merely unpainted, which is why it had to
-        // refuse the release frame to stop it landing.
+        // A drag with no button behind it paints nothing and lands nothing (§15
+        // D471, D582): a drag stranded by the view-switch chord would otherwise turn
+        // a resting pointer into a live drop that the next click's release commits.
+        // The release frame is admitted, since egui clears the button state on the
+        // frame that processes it; any other frame with no button drops the drag.
         let (down, released) =
             ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released()));
         if !down && !released {
@@ -2914,24 +1970,20 @@ impl OndinApp {
         }
         let (grab, held) = (drag.grab, drag.level);
         let dragged = drag.ids.clone();
-        // ⚠️ `pointer_interact_pos` against the row rects, **never** `resp.hovered()`:
-        // while a drag is in flight egui reports only the dragged widget as hovered, so
-        // every other row says no and no drop target is ever recorded (§15 D19).
+        // `pointer_interact_pos` against the row rects, never `resp.hovered()`
+        // (§15 D19; see `layers_row`).
         let Some(pointer) = ui.ctx().pointer_interact_pos() else {
             return;
         };
         let Some(read) = drop_spot(rows, pointer, grab, held) else {
-            // Off the tree: the level is still carried, so coming back does not restart
-            // the gesture at whatever depth the pointer happens to re-enter at.
+            // Off the tree the level is still carried, so coming back does not
+            // restart the gesture.
             self.spring_load(ui, None);
             return;
         };
         let spot = read.spot;
-        // **Only the "inside this one" zone springs, not the whole row.** The edges of a
-        // row mean "between", and opening a branch there would shift every row below the
-        // pointer out from under a drop the hand had already aimed. Aiming at the middle
-        // is the one case where opening is what was being asked for, and the group's own
-        // row does not move when it does.
+        // Only the "inside this one" zone springs: opening a branch from a row's
+        // edge would shift the rows below out from under an aimed drop.
         self.spring_load(
             ui,
             match spot {
@@ -2964,26 +2016,17 @@ impl OndinApp {
                 );
             }
             DropSpot::Between { boundary, depth } => {
-                // ⚠️ **Which container the line lands in is *not* said here.** It is the
-                // destination row's own ink, painted blue by the walk a frame earlier —
-                // see `drop_host` in [`OndinApp::layers_row`] and [`LayerDrag::lit`].
-                // A dashed outline round that row was built here first and taken out
-                // again on the machine: *"let's remove the dotted outline, that doesn't
-                // sit right"*. Two boxes in a panel already using one to mean "inside"
-                // is a vocabulary, and colouring the ink says the same thing without
-                // adding one.
+                // Which container the line lands in is said by the destination
+                // row's blue ink, not here (`drop_host` in [`OndinApp::layers_row`],
+                // [`LayerDrag::lit`]).
                 let Some(y) = boundary_y(rows, boundary, ui.spacing().item_spacing.y) else {
                     return;
                 };
                 let (y, width) = snap_across(y, DROP_LINE_PT, ui.ctx().pixels_per_point());
-                // Every row spans the panel, so any of them gives the two ends. The
-                // boundary below the last row has no row of its own to ask.
+                // Every row spans the panel, so any gives the two ends.
                 let rect = rows[boundary.min(rows.len() - 1)].rect;
-                // **The line starts at the level's own indent, and that is the whole
-                // point of the gesture being visible.** A drop between two rows at
-                // different depths is ambiguous until something says which; the line's
-                // left end is that something, and it is the same column the row that
-                // lands there will start at.
+                // The line starts at the level's own indent: that is what says
+                // which depth an ambiguous drop takes.
                 painter.line_segment(
                     [
                         egui::pos2(rect.left() + indent_of(depth), y),
@@ -2995,47 +2038,27 @@ impl OndinApp {
         }
     }
 
-    /// Land the dragged rows, as one transaction and so one undo step.
+    /// Land the dragged rows, as one transaction and so one undo step. The index
+    /// arithmetic is [`plan_layer_move`]'s.
     ///
-    /// The index arithmetic is **not** here: [`plan_layer_move`] simulates the
-    /// affected child lists and plans each operation against the simulation, and
-    /// its own doc is where that is argued. What this function decides is the four
-    /// things either side of that call.
-    ///
-    /// **A dragged id that is gone from the document is dropped, not fatal.** The
-    /// set was captured when the drag began and anything can have deleted a row
-    /// since — an undo, the other end of a multi-selection, a script. Failing the
-    /// whole gesture because one of five rows evaporated would lose the four the
-    /// hand is still holding.
-    ///
-    /// **The carried set is re-sorted into document order**, so it lands in the
-    /// arrangement the tree was showing rather than in the order the rows happened
-    /// to be clicked. Click order is an artefact of the hand; the tree is what the
-    /// eye was reading.
-    ///
-    /// **An empty plan commits nothing** — dropping a row back where it already is
-    /// is not an undo step (G16's rule, one door earlier than the seam that now
-    /// enforces it).
-    ///
-    /// **The status line names the verb and the count**, and `plan.reparented` is
-    /// what tells *Moved* from *Reordered*: the two read very differently to
-    /// someone checking whether a drag went where they meant it to.
+    /// A dragged id gone from the document is dropped, not fatal. The carried set
+    /// is re-sorted into document order. An empty plan commits nothing. The status
+    /// line names the verb (*Moved* when `plan.reparented`, else *Reordered*) and
+    /// the count.
     fn finish_layer_drag(&mut self) {
         let Some(drag) = self.layer_drag.take() else {
             return;
         };
         let Some(target) = drag.target else {
             // A drop refused for one kind per set says why, as the canvas's does
-            // (§15 D1003 (5), `[X2-L2-02]`'s K7 leftover); any other refusal is
-            // the hint that never lit.
+            // (§15 D1003 (5)); any other refusal is the hint that never lit.
             if let Some(why) = drag.refused {
                 self.session.info(why);
             }
             return;
         };
 
-        // Document order, so a set of rows keeps the arrangement the tree showed
-        // rather than the order they happened to be clicked in.
+        // Document order, not click order.
         let order = ondin_core::subtree_nodes(&self.session.doc, &[self.session.doc.root()]);
         let mut moving: Vec<NodeId> = drag
             .ids
@@ -3122,11 +2145,7 @@ mod tests {
         doc.get(parent).unwrap().children().to_vec()
     }
 
-    /// **Three rows dropped at one index arrive in order and stay together.**
-    ///
-    /// The failure this guards is the whole reason the planner simulates: three
-    /// indices all read off the *original* list would drop the rows reversed, or
-    /// past the end of it. Nothing about the result looks wrong until you count.
+    /// Three rows dropped at one index arrive in order and stay together.
     #[test]
     fn several_rows_dropped_together_keep_their_order() {
         let (mut doc, res, frame, k) = tree(5);
@@ -3149,9 +2168,7 @@ mod tests {
         );
     }
 
-    /// The same drop, at an index *after* the rows being lifted out. Every
-    /// removal ahead of the slot shifts it, and forgetting that lands the set one
-    /// place too far right each time.
+    /// A drop at an index after the lifted rows accounts for their removal.
     #[test]
     fn a_drop_after_the_moved_rows_accounts_for_their_removal() {
         let (mut doc, res, frame, k) = tree(5);
@@ -3170,8 +2187,7 @@ mod tests {
         assert_eq!(children(&doc, frame), vec![k[2], k[3], k[0], k[1], k[4]]);
     }
 
-    /// Rows from two different parents landing in one, which is the case where
-    /// the destination list grows under the plan while a source list shrinks.
+    /// Rows from two different parents land in one, in order.
     #[test]
     fn rows_gathered_from_two_parents_land_in_order() {
         let (mut doc, _res, frame, k) = tree(2);
@@ -3234,8 +2250,7 @@ mod tests {
         assert_eq!(children(&doc, other), vec![x]);
     }
 
-    /// Reparenting keeps the layer where it looks: the frames sit at different
-    /// world offsets, so a raw `Reparent` would teleport it by the difference.
+    /// A reparented row does not move on screen (a raw `Reparent` would teleport it).
     #[test]
     fn a_reparented_row_does_not_move_on_screen() {
         let (mut doc, res, frame, k) = tree(1);
@@ -3261,34 +2276,9 @@ mod tests {
         let _ = frame;
     }
 
-    /// **A drop that lands the rows where they already are plans nothing** (§15
-    /// D532) — `[S15.1-L1-03]`.
-    ///
-    /// The per-row no-op test compares each row's landing index with the
-    /// position it had *before* the rows ahead of it were lifted, so a run
-    /// dropped at the boundary immediately after itself gives every row an `at`
-    /// that differs from its own `at_from` while the net permutation is the
-    /// identity. Over `[k0, k1, k2]` moving `[k0, k1]`, index 2 planned **two**
-    /// `Reorder`s over a byte-identical child list: one undo step, a dirtied
-    /// document and a status line claiming *"Reordered 2 layers"*.
-    ///
-    /// ⚠️ **D428's `changes_nothing` cannot absorb it.** `Reorder`'s arm asks
-    /// `child_index(doc, id) == Some(index)` of the document as it stands, and
-    /// each op moves its row to an index it is not at *yet* — so no op is a
-    /// no-op and the transaction is not one either. A composition of real
-    /// operations that comes back to where it started is invisible to a
-    /// per-operation guard.
-    ///
-    /// ⚠️ **The single-row case was already correct, which is what hid it.**
-    /// This test replaces one of that name which moved **one** row to index 0
-    /// and stopped — so the assertion existed, carried the right name, and
-    /// covered the arm that worked. The one-row case is kept below as the
-    /// control; *a suite of one-row drops would find nothing wrong here.*
-    ///
-    /// ⚠️ Flipped by removing the composition test: red at **index 2 with two
-    /// rows** — the first case in the loop that has more than one and lands
-    /// where it started. Indices 0 and 1 stay green either way, which is the
-    /// same reason the finding had to name the index it did.
+    /// A drop that lands the rows where they already are plans nothing (§15 D532).
+    /// flip: remove the composition test in `plan_layer_move` → fails at index 2
+    /// with two rows (indices 0 and 1 stay green either way).
     #[test]
     fn a_drop_that_moves_nothing_plans_nothing() {
         let (doc, res, frame, k) = tree(3);
@@ -3312,31 +2302,20 @@ mod tests {
                 "two rows dropped at {index} land where they already are"
             );
         }
-        // The control: one boundary further on is a real move, and still plans.
+        // Controls: a real move still plans, and the single-row case stays correct.
         assert_eq!(
             plan(&[k[0], k[1]], 3).ops.len(),
             2,
             "and a drop that does move still plans both rows"
         );
-        // The control that says the fixture can tell the two apart at all: the
-        // single-row case was correct before this and must stay correct.
         assert!(plan(&[k[0]], 0).ops.is_empty());
         assert_eq!(plan(&[k[0]], 3).ops.len(), 1);
     }
 
-    /// **One boundary, one y, whichever row is asked.** Rows do not touch — the tree puts
-    /// `item_spacing.y` between them — so the upper row's bottom and the lower row's top are
-    /// a gap apart and naming the same boundary from either side used to give two answers.
-    ///
-    /// Between siblings that never showed, because one owner draws each boundary. It showed
-    /// at the boundary a frame shares with its topmost child, which is reachable from *two
-    /// lists* — "the top of the frame's own list" from inside it, and "beside the frame"
-    /// from the frame's row — and so has an owner in each. Reported as the line jumping a
-    /// pixel there and nowhere else, which is exactly one `item_spacing.y`.
+    /// One boundary, one y, whichever row's edge is asked.
     #[test]
     fn both_sides_of_a_boundary_put_the_line_in_the_same_place() {
         for gap in [0.0_f32, 1.0, 2.0, 6.0] {
-            // Two rows as the tree lays them out: `gap` of space between them.
             let upper = egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(240.0, ROW_H));
             let lower = egui::Rect::from_min_size(
                 egui::pos2(0.0, upper.bottom() + gap),
@@ -3348,7 +2327,6 @@ mod tests {
                 (from_above - from_below).abs() < 1e-4,
                 "gap {gap}: {from_above} from above, {from_below} from below"
             );
-            // And it is *in* the gap rather than on either row.
             assert!(
                 from_above >= upper.bottom() - 1e-4 && from_above <= lower.top() + 1e-4,
                 "gap {gap}: {from_above} is outside [{}, {}]",
@@ -3358,14 +2336,11 @@ mod tests {
         }
     }
 
-    /// The line has to be the same weight wherever it lands. A 2pt stroke at a fractional
-    /// y spreads over three device rows with the outer two part-covered, and the fractional
-    /// offset of one boundary in the tree need not match the next — so it appeared to
-    /// thicken as it moved down the list.
+    /// The drop line is the same weight wherever it lands: both edges sit on device
+    /// pixel boundaries.
     #[test]
     fn the_drop_line_lands_on_whole_device_pixels() {
         for ppp in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
-            // Fractional row positions, as a real layout produces.
             for y in [40.0_f32, 66.5, 92.25, 118.7, 145.05] {
                 let (snapped, width) = snap_across(y, DROP_LINE_PT, ppp);
                 let px = width * ppp;
@@ -3373,8 +2348,6 @@ mod tests {
                     (px - px.round()).abs() < 1e-4 && px >= 1.0,
                     "width {width} is {px} device px at {ppp}"
                 );
-                // Both edges of the band land on device pixel boundaries, which is what
-                // "no partly covered row" means.
                 for edge in [snapped - width / 2.0, snapped + width / 2.0] {
                     let e = edge * ppp;
                     assert!(
@@ -3382,7 +2355,6 @@ mod tests {
                         "edge {edge} is {e} device px at {ppp} (y={y})"
                     );
                 }
-                // And it stays where it was asked to be, within a pixel.
                 assert!(
                     (snapped - y).abs() <= 1.0 / ppp,
                     "snapping moved the line from {y} to {snapped} at {ppp}"
@@ -3436,19 +2408,9 @@ mod rename_layout_tests {
         ctx.run_ui(input, |ui| app.layers_tree(ui))
     }
 
-    /// **The field asks for the caret on the frame it first draws, and never
-    /// again.**
-    ///
-    /// A rename opens from four doors and only one of them — the `Ctrl+R` / `F2`
-    /// chord — can draw the field in the frame that opened it. So the field is what
-    /// asks, on its first pass, which is the only arrangement that works from all
-    /// four *and* the only one that cannot hand AccessKit a focused id with no node
-    /// (see `OndinApp::layer_rename_field` and the test below).
-    ///
-    /// The second half is the trap the request has to avoid. Flip-checked against
-    /// the obvious spelling — re-request whenever the field does not have focus —
-    /// which grabs focus back on the frame Enter or Escape takes it away: focus
-    /// comes back as the field, so a rename could never be committed or left.
+    /// The field asks for the caret on the frame it first draws, and never again.
+    /// flip: re-request whenever the field lacks focus → the rename can never be
+    /// committed or left.
     #[test]
     fn the_rename_field_asks_for_the_caret_on_the_frame_it_first_draws() {
         let ctx = egui::Context::default();
@@ -3463,8 +2425,7 @@ mod rename_layout_tests {
              typing into"
         );
 
-        // What Enter and Escape both do first. The field is still open this frame,
-        // so a version that asks again would take the caret straight back.
+        // What Enter and Escape both do first.
         ctx.memory_mut(|m| m.surrender_focus(rename_field_id(id)));
         let _ = frame(&mut app, &ctx);
         assert_ne!(
@@ -3474,25 +2435,10 @@ mod rename_layout_tests {
         );
     }
 
-    /// ⚠️ **No frame may end with the focus on a widget that frame did not draw.**
-    ///
-    /// The reported crash, from a double-click on a layer row:
-    /// *"panicked at accesskit_consumer-0.35.0\\src\\tree.rs:71: Focused ID
-    /// #2077194978197920161 is not in the node list"*. egui builds its AccessKit
-    /// update out of the nodes the pass registered and sets `focus` from
-    /// `Memory::focused()` regardless — so requesting focus for a widget that will
-    /// not be in the frame is not the deferral it looks like, it is a panic in the
-    /// consumer at the end of that frame.
-    ///
-    /// **Two doors could not draw the field in the frame that asked**: the
-    /// double-click reads a `renaming` flag latched earlier in the row, and the
-    /// context menu is drawn *after* the layers panel. The order asserted here is
-    /// the menu's, because it is the one that cannot be fixed by moving a line — the
-    /// panel is already behind us.
-    ///
-    /// Flip-checked by putting the request back into `OndinApp::rename_selection`:
-    /// the first assertion fails, reporting a focus id against a node list that does
-    /// not contain it.
+    /// No frame ends with focus on a widget that frame did not draw (AccessKit
+    /// panics on it); the order asserted is the context menu's, drawn after the panel.
+    /// flip: request focus in `OndinApp::rename_selection` → fails at the first
+    /// `in_the_tree`.
     #[test]
     fn a_rename_opened_after_the_panel_has_drawn_leaves_no_dangling_focus() {
         let ctx = egui::Context::default();
@@ -3514,8 +2460,6 @@ mod rename_layout_tests {
             );
         };
 
-        // The context menu's order: the panel has drawn, and *then* a row opens a
-        // rename. Nothing can put the field in this frame.
         let opened = {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -3544,15 +2488,8 @@ mod rename_layout_tests {
         );
     }
 
-    /// **The rename field lands exactly on the name it replaces.**
-    ///
-    /// Both numbers here were wrong in the first cut and both are the kind of
-    /// wrong that only shows up on screen: the field was inset 3px and shortened
-    /// 3px at each end, which — once `TextEdit`'s own 4px/2px margin and its
-    /// `LEFT_TOP` default were added on top — moved the name up and sideways the
-    /// instant a row was double-clicked. Measured against a real `Align2::
-    /// LEFT_CENTER` galley rather than reasoned about, because reasoning about it
-    /// is what got it wrong.
+    /// The rename field lands exactly on the name it replaces (measured against a
+    /// real `Align2::LEFT_CENTER` galley).
     #[test]
     fn the_rename_field_sits_where_the_painted_name_sits() {
         let ctx = egui::Context::default();
@@ -3580,8 +2517,6 @@ mod rename_layout_tests {
                 field.center().y,
                 painted.center().y
             );
-            // Full row height, so the centred text has the room the painted name
-            // had. Shortening this is what pushed the name upward.
             assert!(
                 (field.height() - ROW_H).abs() < 0.01,
                 "the field is {} tall, not the row's {ROW_H}",
@@ -3657,18 +2592,11 @@ mod missing_picture_tests {
         }
     }
 
-    /// **The row's mark answers for the whole layer, not just its middle.**
-    ///
-    /// Four cases in one, because they are one rule with three chances to be
-    /// written as two: a picture nothing can draw marks the row whether it is a
-    /// fill or a *stroke*, a paint that is switched off marks nothing — the
-    /// canvas is not drawing it to be missing — and a layer with no picture at
-    /// all is never marked, which is the case every other row in the tree is.
+    /// A visible fill or stroke whose picture is gone marks the row; a hidden paint
+    /// or a layer with no picture never does.
     #[test]
     fn a_layer_is_marked_for_any_visible_paint_whose_picture_is_gone() {
-        // A store that never saw anything: every reference is unresolvable, which
-        // is the merged state D179 insists on (a dangling id, a dead link and
-        // undecodable bytes are indistinguishable here on purpose).
+        // An empty store: every reference is unresolvable (§15 D179).
         let store = ondin_render::ImageStore::new();
         let missing = || image_brush(ImageId("gone".into()));
         let solid = || Brush::Solid(Color::BLACK);
@@ -3706,8 +2634,7 @@ mod subtract_base_tests {
     use ondin_core::{BoolOp, Document, IdSource, NodeId, NodeKind, build};
 
     /// Two rects under the root, then `build::boolean` over them with `op` and
-    /// `key`. Returns the operands in *child* order, which is the order the
-    /// boolean settled on — bottom first.
+    /// `key`; returns the operands in child order, bottom first.
     fn boolean_of_two(op: BoolOp, key: Option<usize>) -> (Document, Vec<NodeId>, Vec<NodeId>) {
         let mut ids = IdSource::new(23);
         let root = ids.mint();
@@ -3749,14 +2676,8 @@ mod subtract_base_tests {
         (doc, operands, made)
     }
 
-    /// **The bottom operand of a `Subtract`, and only that one.** `children[0]`
-    /// is the base and the tree draws topmost-first, so it is the bottom row —
-    /// the fact §15 D113 makes true and nothing in the panel used to say.
-    ///
-    /// Asserted on the operand *above* it as well, which is the discriminating
-    /// half: marking every child, or marking the last one, is what a reading of
-    /// "the boolean's operands" rather than "the base" would produce, and both
-    /// pass an assertion that only looks at `children[0]`.
+    /// The bottom operand of a `Subtract` is the base, and only that one (§15 D113);
+    /// the operand above it is the discriminating assertion.
     #[test]
     fn only_the_bottom_operand_of_a_subtract_is_the_base() {
         let (doc, operands, _) = boolean_of_two(BoolOp::Subtract, None);
@@ -3771,9 +2692,8 @@ mod subtract_base_tests {
         );
     }
 
-    /// **The other three fold commutatively**, so there is no base to name and a
-    /// mark on one would claim a significance the arithmetic cannot see (§15
-    /// D113). Union stands in for all three: they take the same arm.
+    /// The other three operations fold commutatively, so there is no base to name;
+    /// Union stands in for all three.
     #[test]
     fn a_union_has_no_base_to_mark() {
         let (doc, operands, _) = boolean_of_two(BoolOp::Union, None);
@@ -3785,14 +2705,8 @@ mod subtract_base_tests {
         );
     }
 
-    /// The key layer *is* the base, by having been moved to the bottom when the
-    /// boolean was built — so the mark travels with the designation, which is
-    /// the whole point of reading it off the tree rather than off a stored flag.
-    ///
-    /// Asserted by **identity**, not by position: `operands[0]` is the base
-    /// under any spelling of this function, so the thing that has to be checked
-    /// is *which shape ended up there* — the one that was second in z-order
-    /// before the key moved it.
+    /// The key layer is the base, having been moved to the bottom, so the mark
+    /// travels with the designation; asserted by identity, not position.
     #[test]
     fn designating_the_key_moves_the_mark_with_it() {
         let (_, plain_ops, plain_made) = boolean_of_two(BoolOp::Subtract, None);
@@ -3822,8 +2736,7 @@ mod subtract_base_tests {
             !subtract_base(&doc, doc.get(root_id).unwrap()),
             "the root has no parent"
         );
-        // A rect sitting under the root beside the boolean — first child of a
-        // container, exactly as a base is, and a base of nothing.
+        // First child of a container, as a base is, and a base of nothing.
         let mut ids = IdSource::new(99);
         let loose = ids.mint();
         doc.apply(&ondin_core::Transaction(vec![
@@ -3851,13 +2764,8 @@ mod subtract_base_tests {
 mod badge_ink_tests {
     use super::*;
 
-    /// The **ink** height of a laid-out string, in points.
-    ///
-    /// `uv_rect` is the tight glyph bitmap, so `uv_rect.size` is what was
-    /// actually rasterized — where the galley's own height is the line box and
-    /// says nothing about how tall the drawing inside it is. That difference is
-    /// the whole reason this measurement exists: two things can share a line box
-    /// and look nothing alike.
+    /// The ink height of a laid-out string, in points, from the tight glyph bitmap
+    /// (`uv_rect`) rather than the galley's line box.
     fn ink_height(ctx: &egui::Context, s: &str, font: egui::FontId) -> f32 {
         let galley = ctx.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font, egui::Color32::WHITE));
         let mut lo = f32::INFINITY;
@@ -3874,24 +2782,9 @@ mod badge_ink_tests {
         hi - lo
     }
 
-    /// **The badges share a slot, so they have to share a weight.** An artboard's
-    /// size, the base operand's stack glyph and a mask's half-circle are the same
-    /// kind of remark at the same right-hand edge, and a pictogram that inks
-    /// taller than the word reads as a control rather than as an annotation.
-    ///
-    /// **Every glyph that can appear there, not just the first one, and each at
-    /// its own size.** This asserted `stack-simple` alone until masks arrived, and
-    /// the second pictogram inherited that size without anyone re-checking it —
-    /// which is precisely the failure: Phosphor glyphs do not all ink to the same
-    /// height, a circle reaching its extremes where a stack of bars does not, so
-    /// `circle-half` at the stack's 11.0 came out 9.60 against the word's 8.80 at
-    /// 125%. Extending the loop is what found that. Adding a third badge means
-    /// adding it here, with a size measured rather than borrowed.
-    ///
-    /// Across four display scalings, because the atlas quantizes to whole texels
-    /// and a size chosen at 100% can drift at 150% — a failure this codebase has
-    /// already caught a "fix" making. `BADGE_STACK` at 12 is the plausible wrong
-    /// version and it inks taller at every scaling above 100%.
+    /// Every glyph badge, at its own size, inks as tall as the worded badge across
+    /// four display scalings. A new badge belongs in the loop with a measured size.
+    /// flip: `BADGE_STACK` at 12 → fails at every scaling above 100%.
     #[test]
     fn the_base_badge_inks_as_tall_as_the_worded_one() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
@@ -3935,13 +2828,7 @@ mod row_target_tests {
         }
     }
 
-    /// **A control the row is not drawing must not answer.** A childless row has
-    /// no caret and a resting visible row shows no eye — and the row is one
-    /// `click_and_drag` region, so nothing but this stops the band being live
-    /// over empty space. It is also what stops the *hover* lighting a glyph that
-    /// is not there, which is the half added in §15 D246: before it, both
-    /// questions were separate hand-written comparisons and only the press asked
-    /// whether the control existed.
+    /// A control the row is not drawing does not answer, for press or hover (§15 D246).
     #[test]
     fn a_control_the_row_is_not_drawing_is_not_a_target() {
         let bare = RowTargets {
@@ -3958,10 +2845,8 @@ mod row_target_tests {
         assert_eq!(bare.at(186.0), Some(RowHit::Lock));
     }
 
-    /// The band is `CONTROL_HIT` either side and nothing beyond it — asserted at
-    /// the edge and a hair past it, because a band that is right in the middle
-    /// and wrong at its rim is exactly what a hover and a press written
-    /// separately drift into.
+    /// The band is `CONTROL_HIT` either side and nothing beyond it, asserted at the
+    /// edge and a hair past it.
     #[test]
     fn the_band_reaches_control_hit_either_side_and_stops() {
         let t = full();
@@ -3973,11 +2858,7 @@ mod row_target_tests {
         }
     }
 
-    /// **Where two bands overlap, one of them has to win, and it has to be the
-    /// same one for the mark and for the press.** The caret walks right with the
-    /// indent while the eye is pinned to the right edge, so a deep row in a
-    /// narrow panel can put them together — and the order here is the press's
-    /// own, which is the whole reason both go through this function.
+    /// Where two bands overlap, the caret wins, the same for hover and press.
     #[test]
     fn overlapping_bands_resolve_the_press_order() {
         let together = RowTargets {
@@ -3992,14 +2873,8 @@ mod row_target_tests {
 #[cfg(test)]
 mod tree_guide_tests {
     //! The dashed lines that say which container a row is inside, and the path
-    //! that lights on hover.
-    //!
-    //! Most of this is asserted on `tree_guide_segments` rather than through the
-    //! app, because every interesting claim is about rows *other than* the one being
-    //! drawn — whether a trunk carries on, whether it has already died, which rows a
-    //! hover lights — and a synthetic list of depths states those cases in one line
-    //! each. The app test at the end is what proves the walk feeds this function and
-    //! that the preference reaches the painter.
+    //! that lights on hover. Mostly asserted on `tree_guide_segments` over a
+    //! synthetic list of depths; the app test at the end proves the walk feeds it.
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::kurbo::Size;
@@ -4013,25 +2888,11 @@ mod tree_guide_tests {
         marked(depths, hovered, &[])
     }
 
-    /// Rows at the given depths, laid out down a panel whose left edge is 0 —
-    /// `ROW_H` tall on a `ROW_H + GAP` pitch, which is how the tree lays them out.
-    /// `hovered` and `selected` are indices into `depths`.
-    ///
-    /// `lead` is the caret row's, `caret_x - 7.5`; nothing below turns on which of
-    /// the two a row is, only on where the elbow is asked to stop. The elbow goes
-    /// through `elbow_y` rather than being written out, so the fixture cannot
-    /// disagree with the panel about where a junction is.
-    ///
-    /// **`container` is read off the depths rather than passed in**: in a real walk an
-    /// *open* container is exactly a row the next row is deeper than. That understates
-    /// it — a collapsed or empty group is a container too — and nothing here or in
-    /// `depth_range` turns on the difference, which is the note on
-    /// `TreeRow::container` seen from the fixture's side.
-    ///
-    /// `pub(super)` because `drop_indent_tests` wants the same rows: what a boundary
-    /// offers and what a guide draws are both read off a list of depths, and two
-    /// fixtures free to disagree about what "a tree three deep" looks like would be two
-    /// trees.
+    /// Rows at the given depths down a panel whose left edge is 0, `ROW_H` tall on a
+    /// `ROW_H + GAP` pitch; `hovered` and `selected` index `depths`. `lead` is the
+    /// caret row's, and the elbow goes through `elbow_y`. `container` is read off the
+    /// depths (a row the next is deeper than). `pub(super)` so `drop_indent_tests`
+    /// shares the same rows.
     pub(super) fn marked(
         depths: &[usize],
         hovered: Option<usize>,
@@ -4055,10 +2916,8 @@ mod tree_guide_tests {
                     selected: selected.contains(&i),
                     hovered: hovered == Some(i),
                     container: depths.get(i + 1).is_some_and(|&next| next > depth),
-                    // A list of depths cannot say this — which is the point of the field
-                    // and the reason it is not the negation of the one that went. Nothing
-                    // reached from a `marked` fixture reads it; spring-loading is driven
-                    // through the panel, over a real document.
+                    // A list of depths cannot say this; spring-loading is driven
+                    // through the panel over a real document.
                     closed: false,
                 }
             })
@@ -4090,17 +2949,10 @@ mod tree_guide_tests {
             .expect("an elbow")
     }
 
-    /// **A row hangs off the column its parent's caret is on, and its elbow reaches
-    /// its own glyph.**
-    ///
-    /// The two ends of the claim `caret_column` exists for: the guide is drawn in
-    /// the child's row and the caret in the parent's, and neither computes the
-    /// other's geometry. A top-level row is checked to have no guides at all —
-    /// there is no row above it to hang off, the root being implicit.
-    ///
-    /// Flip-checked by hanging the connector off `caret_column(left, depth)` — the
-    /// row's own column rather than its parent's, which is the plausible off-by-one
-    /// — reporting 42 where 11 belongs.
+    /// A row hangs off the column its parent's caret is on, its elbow reaches its own
+    /// glyph, and a top-level row has no guides.
+    /// flip: hang the connector off `caret_column(left, depth)` → fails at 42 where 11
+    /// belongs.
     #[test]
     fn a_row_hangs_off_the_column_its_parents_caret_is_on() {
         let r = rows(&[1, 2], None);
@@ -4134,15 +2986,9 @@ mod tree_guide_tests {
         );
     }
 
-    /// **A trunk runs down past every child but the last, and stops at that one's
-    /// elbow.**
-    ///
-    /// The one rule that makes the gutter readable: a line that carried on past the
-    /// last child would say the frame holds something further down, and a line that
-    /// stopped at the first would leave the rest of them hanging off nothing.
-    ///
-    /// Flip-checked by drawing the below-elbow run unconditionally: the last child
-    /// grows a second vertical and the assertion on its count fails.
+    /// A trunk runs past every child but the last and stops at that one's elbow.
+    /// flip: draw the below-elbow run unconditionally → fails at the last child's
+    /// vertical count.
     #[test]
     fn a_trunk_runs_to_the_last_child_and_stops_at_its_elbow() {
         let r = rows(&[1, 2, 2, 2], None);
@@ -4166,17 +3012,10 @@ mod tree_guide_tests {
         }
     }
 
-    /// ⚠️ **A trunk whose branch has already closed is not drawn.**
-    ///
-    /// `A → B → C`, each an only child. A's trunk ends at B's elbow, so C's row —
-    /// which is *inside* A — must draw nothing in A's column. This is the case the
-    /// design's markup does not contain and the one a literal reading of it gets
-    /// wrong: there, every row carries a stub-height background for every level.
-    ///
-    /// Flip-checked against exactly that reading — ending a closed level's run at
-    /// the elbow rather than leaving it out — which puts a second run in C's row, at
-    /// A's column, under a line that stopped a row earlier. This is the only one of
-    /// the six here that bites for that flip.
+    /// A trunk whose branch has already closed is not drawn: in `A → B → C`, C draws
+    /// nothing in A's column.
+    /// flip: end a closed level's run at the elbow instead of omitting it → fails at
+    /// the single-run count (the only test here that bites).
     #[test]
     fn a_trunk_that_already_ended_leaves_no_fragment_in_a_deeper_row() {
         let r = rows(&[1, 2, 3], None);
@@ -4190,28 +3029,16 @@ mod tree_guide_tests {
         );
     }
 
-    /// **Hovering a row lights the path from its parent down to its own elbow, and
-    /// nothing else.**
-    ///
-    /// Four separate claims, and each is a different way of getting this wrong: the
-    /// parent's trunk lights over the rows *between* the two, the hovered row's
-    /// connector lights but the same trunk below its elbow does not, the elbow of an
-    /// intervening row stays dark, and no other level lights at all. A lit ladder
-    /// down every ancestor answers "how deep is this" — which the indent already
-    /// says — where the point is "which one is it inside".
-    ///
-    /// Flip-checked twice. Lighting the trunk over `start..=h` rather than `start..h`
-    /// — the version that reads more naturally — lights the hovered row's trunk
-    /// below its elbow and fails the second claim. Dropping the `*l == level` test
-    /// lights the level-1 trunk as well and fails the fourth.
+    /// Hovering a row lights the path from its parent down to its own elbow and
+    /// nothing else: the parent's trunk between the two, the connector but not the
+    /// trunk below the elbow, no intervening elbow, no other level.
+    /// flip: light the trunk over `start..=h` rather than `start..h` → fails the
+    /// below-elbow claim; drop the `*l == level` test → fails the level-1 claim.
     #[test]
     fn hovering_a_row_lights_the_trunk_it_hangs_off() {
-        // frame ▸ group ▸ three deep rows ▸ a second child of the frame. ⚠️ Both
-        // extras are load-bearing: the hovered row needs a **sibling after it** or
-        // it has no trunk below its own elbow and the second claim is vacuous — the
-        // first version of this test had none, and the `start..=h` flip below did not
-        // bite. The frame's second child is what puts a level-1 trunk through the
-        // deep rows for the fourth claim to be about.
+        // frame ▸ group ▸ three deep rows ▸ a second child of the frame. The
+        // hovered row needs a sibling after it (a trunk below its elbow), and the
+        // frame's second child puts a level-1 trunk through the deep rows.
         let r = rows(&[1, 2, 3, 3, 3, 2], Some(3));
         let segs = tree_guide_segments(&r, GAP);
         let level2 = caret_column(0.0, 2);
@@ -4289,27 +3116,16 @@ mod tree_guide_tests {
         }
     }
 
-    /// **A selected row wears its leg in the selection blue, and hover takes the
-    /// overlap.**
-    ///
-    /// Three claims, all reported as one rule from the machine. The selected row's
-    /// leg — its parent's trunk over the rows between, its connector, its elbow — is
-    /// `GuideInk::Selected`. Hovering *another* row greys only the part of that trunk
-    /// on the hovered row's own path, so the blue survives below it. And hovering the
-    /// selected row itself changes nothing: *"the currently selected layer doesn't
-    /// apply a hover anymore"*.
-    ///
-    /// Flip-checked three times, one per claim: testing `selected` before `hovered`
-    /// keeps the leg blue under another row's hover and fails the second; dropping
-    /// the `&& !r.selected` greys the whole leg the moment the pointer lands on it
-    /// and fails the third; and marking the *whole* trunk rather than the path
-    /// (`over.contains(&i) || i == owner` without the `connector` term) turns the
-    /// stretch below the selected row's elbow blue, which is the fourth assertion.
+    /// A selected row wears its leg (parent trunk, connector, elbow) in
+    /// `GuideInk::Selected`; hovering another row greys only its own path; hovering
+    /// the selected row changes nothing.
+    /// flip: test `selected` before `hovered` → fails the crossed-hover claim; drop
+    /// `&& !r.selected` → fails the same-row claim; mark the whole trunk (no
+    /// `connector` term) → fails the below-elbow claim.
     #[test]
     fn a_selected_row_wears_its_leg_in_the_selection_blue() {
-        // frame ▸ group ▸ three deep rows, the last of them selected, so its leg
-        // crosses two rows and there is a stretch of trunk below its own elbow that
-        // must *not* light.
+        // frame ▸ group ▸ three deep rows, the last selected: its leg crosses two
+        // rows and a stretch of trunk below its elbow must not light.
         let level2 = caret_column(0.0, 2);
         let depths = [1, 2, 3, 3, 3];
         let leg = |segs: &[GuideSeg], row: &TreeRow| -> Vec<GuideSeg> {
@@ -4351,8 +3167,7 @@ mod tree_guide_tests {
             "and not an intervening row's"
         );
 
-        // The row between the selection and its parent, hovered: grey down to *its*
-        // elbow, blue from there on.
+        // The row between the selection and its parent, hovered.
         let crossed = tree_guide_segments(&marked(&depths, Some(2), &[3]), GAP);
         assert_eq!(
             leg(&crossed, &r[2])
@@ -4429,10 +3244,7 @@ mod tree_guide_tests {
     }
 
     /// Every line segment the panel paints, with the pointer wherever `at` says.
-    ///
-    /// ⚠️ **Five passes.** A widget's interaction state is last frame's, so one pass
-    /// reports nothing hovered however the pointer is placed. Nothing here animates
-    /// its geometry, so this is settling rather than sampling.
+    /// Five passes, since a widget's interaction state is last frame's.
     fn dashes(
         app: &mut OndinApp,
         ctx: &egui::Context,
@@ -4463,28 +3275,11 @@ mod tree_guide_tests {
             .collect()
     }
 
-    /// ⚠️ **The trunk is inked through the junction the elbow leaves it at.**
-    ///
-    /// The reported defect: *"a slight gap on the vertical lines where they meet the
-    /// horizontal ones"*. The cause was a dash **offset** on the below-elbow run,
-    /// phasing it to continue the lattice the row's top had started, which put the
-    /// pattern's 2.5pt gap directly under every corner — three points of nothing
-    /// exactly where the eye follows the line round the bend.
-    ///
-    /// Asserted on the **painted dashes**, since the defect is inside a run rather
-    /// than in the list of runs: for every elbow whose trunk carries on below it, the
-    /// first dash under the elbow has to start *at* the elbow.
-    ///
-    /// The other half — that ink arrives from above — is a guard rather than the
-    /// biting half, and this is worth knowing before trusting it: the connector's
-    /// last dash **ended exactly at the elbow in the broken version too**, so an
-    /// assertion phrased as "there is ink at the elbow's y" passes either way. What
-    /// changed is only what happens below it.
-    ///
-    /// Flip-checked by restoring the offset — `(-(elbow - top)).rem_euclid(4.0)` —
-    /// which reports the trunk resuming **2.5pt** below the elbow. It was 3 in the
-    /// version that shipped, the other half-point being the unsnapped elbow that
-    /// `elbow_y` now fixes.
+    /// The trunk is inked through the junction the elbow leaves it at: asserted on
+    /// the painted dashes, the first dash under each elbow with a carried-on trunk
+    /// starts at the elbow. The ink-from-above half is only a guard.
+    /// flip: restore the dash offset `(-(elbow - top)).rem_euclid(4.0)` → fails with
+    /// the trunk resuming 2.5pt below the elbow.
     #[test]
     fn the_trunk_is_inked_through_the_junction() {
         let ctx = egui::Context::default();
@@ -4497,10 +3292,8 @@ mod tree_guide_tests {
                 .collect()
         };
 
-        // Each elbow, as the y it sits on and the column it leaves. ⚠️ Every *dash*
-        // of the run comes back separately, so the run's own start is the leftmost
-        // of them — which is where `ELBOW_CLEAR` was measured from, off an unsnapped
-        // column, while the trunk is drawn on the snapped one.
+        // Each elbow, as the y it sits on and the column it leaves. Every dash comes
+        // back separately, so a run's start is the leftmost of them.
         let mut ys: Vec<f32> = all
             .iter()
             .filter(|(a, b, _)| a.y == b.y)
@@ -4551,20 +3344,10 @@ mod tree_guide_tests {
         );
     }
 
-    /// **The pointer on a row lights that row's guides, through the panel.**
-    ///
-    /// The *rule* is `tree_guide_segments`' and is pinned above; what this adds is
-    /// the wiring — that the `hovered` a row hands the guides is the same
-    /// `resp.hovered()` its own ground is painted from, so the two cannot disagree
-    /// for a frame. It is also the only assertion here that the guides light at all
-    /// in the running app.
-    ///
-    /// The pointer goes on the **last** row, whose parent is two rows up, so the lit
-    /// path has to cross a row to reach it. With the pointer below the tree nothing
-    /// lights, which is the half that makes the other one mean something.
-    ///
-    /// Flip-checked by pushing `hovered: false` into every `TreeRow`: the lit count
-    /// comes back 0 where 18 belongs.
+    /// The pointer on a row lights that row's guides through the panel: the wiring
+    /// of `hovered` into `TreeRow`. The pointer goes on the last row, so the lit path
+    /// crosses a row; below the tree nothing lights.
+    /// flip: push `hovered: false` into every `TreeRow` → the lit count is 0, not 18.
     #[test]
     fn the_pointer_on_a_row_lights_its_guides() {
         let ctx = egui::Context::default();
@@ -4581,8 +3364,7 @@ mod tree_guide_tests {
             "with the pointer below the tree nothing is on the path"
         );
 
-        // Four rows, 26pt on a 27pt pitch from the top of the panel: y 100 is the
-        // last of them.
+        // Four rows on a 27pt pitch: y 100 is the last of them.
         let on_row = dashes(&mut app, &ctx, Some(egui::pos2(120.0, 100.0)));
         assert!(lit(&on_row) > 0, "the pointer on a row lights its path");
         for (a, b, _) in on_row.iter().filter(|(.., c)| *c == GUIDE_HOVER) {
@@ -4595,19 +3377,10 @@ mod tree_guide_tests {
         }
     }
 
-    /// **The walk feeds the guides, and the preference reaches the painter.**
-    ///
-    /// The one thing the segment tests above cannot say: that `layers_row` collects
-    /// the rows it draws and that `Prefs::tree_guides` is read where the drawing
-    /// happens. Asserted on the dashes' x's as well as their count, because "some
-    /// line segments arrived" would pass for a drop hint or a rule.
-    ///
-    /// ⚠️ The columns are the *snapped* ones — 11.5 and 42.5 rather than 11 and 42 —
-    /// which is `paint_tree_guides` putting a 1pt hairline on a whole device pixel
-    /// at 100%.
-    ///
-    /// Flip-checked by dropping the `self.prefs.tree_guides` test: the second half
-    /// fails with the same count as the first.
+    /// The walk feeds the guides and the preference reaches the painter, asserted on
+    /// the dashes' x's (the snapped columns 11.5 and 42.5) as well as their count.
+    /// flip: drop the `self.prefs.tree_guides` test → the second half fails with the
+    /// same count as the first.
     #[test]
     fn the_panel_draws_the_guides_and_the_preference_switches_them_off() {
         let ctx = egui::Context::default();
@@ -4661,14 +3434,9 @@ mod drop_indent_tests {
     /// ```
     ///
     /// The walk reverses each child list (§5.3), so top to bottom the rows are
-    /// `frame, group, c2, c1, d, e` at depths `1, 2, 3, 3, 2, 1`.
-    ///
-    /// ⚠️ **The group holds *two* rects and the frame holds something besides the
-    /// group, and both are load-bearing.** With one rect in the group, dragging it to
-    /// the bottom of the group is a drop beside itself, so "stayed inside" and "went
-    /// nowhere" are the same outcome and the interesting assertion is vacuous. Without
-    /// `d`, the boundary under the group has no shallower row below it and the range
-    /// collapses to one level — there would be nothing to pick between.
+    /// `frame, group, c2, c1, d, e` at depths `1, 2, 3, 3, 2, 1`. The group holds two
+    /// rects (else dragging one to the group's bottom is a drop beside itself) and
+    /// the frame holds `d` (else the boundary under the group offers one level).
     struct Fixture {
         app: OndinApp,
         root: NodeId,
@@ -4737,17 +3505,10 @@ mod drop_indent_tests {
         }
     }
 
-    /// **A drop is refused where `apply` would refuse the reparent, ancestors
-    /// included** (§15 D870, D876) — a page holding a mask group, a plain group, and
-    /// a group holding a card frame.
-    ///
-    /// The card's group may go into the plain group (a frame may sit in a group,
-    /// at any depth) and not into the mask, and every parent–child pair in that
-    /// refused drop is legal on its own — group into group — so the kind check
-    /// alone offered it and the commit bounced it.
-    ///
-    /// **Flip run**, the `frame_may_sit_under || !holds_a_frame` clause deleted:
-    /// fails on *"a card's group into a mask"* at `true`, the predicted site.
+    /// A drop is refused where `apply` would refuse the reparent, ancestors included
+    /// (§15 D870, D876): a card's group goes into a plain group, not into a mask.
+    /// flip: delete the `frame_may_sit_under || !holds_a_frame` clause → fails at
+    /// "a card's group into a mask".
     #[test]
     fn a_frame_cannot_be_dropped_under_a_mask_at_any_depth() {
         let ctx = egui::Context::default();
@@ -4808,15 +3569,9 @@ mod drop_indent_tests {
         assert!(!app.drop_is_legal(card, masked), "a card into a mask");
     }
 
-    /// **A drop is refused where the component rules would refuse it**
-    /// (`[X2-L2-02]`, §15 D1003 (5)) — two mains `k` and `m`, frames at the root,
-    /// and a rect: a main into a main is `NestedMain` at the commit, so the panel
-    /// must not offer it, while the rect into the same main is ordinary. And a main
-    /// stays droppable in its own parent, whatever is around it — a reorder is
-    /// never refused.
-    ///
-    /// **Flip run**, the `component::can_hold` clause deleted: fails on *"a main
-    /// into a main"* at `true`, the predicted site.
+    /// A drop is refused where the component rules would refuse it (§15 D1003 (5)):
+    /// a main into a main, while a rect into it and a main in its own parent are fine.
+    /// flip: delete the `component::can_hold` clause → fails at "a main into a main".
     #[test]
     fn a_main_cannot_be_dropped_into_a_main() {
         let ctx = egui::Context::default();
@@ -4863,24 +3618,12 @@ mod drop_indent_tests {
         assert!(app.drop_is_legal(m, root), "a main in its own parent");
     }
 
-    /// **A set keeps to one kind through the panel too, and a refused drop says
-    /// why** (`[X2-L2-02]`'s K7 leftovers, §15 D1003 (5)) — an empty set `e`, a
-    /// set `s` holding one frame variant `v`, a frame main `f` and a group main
-    /// `g` (holding a rect), all at the root; one row each for the two sets.
-    ///
-    /// Two holes. `drop_is_legal` asks `component::can_hold` one row at a time,
-    /// and an empty set fits either kind, so `f` and `g` carried together onto
-    /// `e` resolved to a target and the release made a set of two kinds. And a
-    /// refused drop — `g` onto `s`, a set of frames — went dark in the hint and
-    /// did nothing at the release, while the canvas, refusing the same move,
-    /// says why. The release now carries the refusal's message
-    /// (`LayerDrag::refused`).
-    ///
-    /// **Flip run**, the `takes_together` clause deleted from `resolve_drop`:
-    /// fails at *"a frame main and a group main together into an empty set"*
-    /// with `Some(DropTarget { parent: e, .. })`, the predicted site. With the
-    /// `drag.refused` read deleted from `finish_layer_drag`: fails at *"the
-    /// release says why"* with an empty status, as predicted.
+    /// A set keeps to one kind through the panel, and a refused drop says why (§15
+    /// D1003 (5)): mixed kinds onto an empty set, and a group main onto a set of
+    /// frames, are refused with the canvas's message (`LayerDrag::refused`).
+    /// flip: delete the `takes_together` clause from `resolve_drop` → fails at "a
+    /// frame main and a group main together into an empty set"; delete the
+    /// `drag.refused` read from `finish_layer_drag` → fails at "the release says why".
     #[test]
     fn a_set_keeps_to_one_kind_and_a_refused_drop_says_why() {
         let ctx = egui::Context::default();
@@ -4983,9 +3726,7 @@ mod drop_indent_tests {
         assert_eq!(app.session.doc.get(g).unwrap().parent(), Some(root));
     }
 
-    /// ⚠️ **Five passes**, for the same reason `tree_guide_tests::dashes` takes
-    /// five: a widget's interaction state is last frame's, so one pass reports
-    /// nothing hovered however the pointer is placed.
+    /// Five passes, as `tree_guide_tests::dashes` takes.
     fn pump(app: &mut OndinApp, ctx: &egui::Context, at: Option<egui::Pos2>) -> egui::FullOutput {
         let mut input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -4997,13 +3738,8 @@ mod drop_indent_tests {
         if let Some(p) = at {
             input.events.push(egui::Event::PointerMoved(p));
         }
-        // ⚠️ **The button goes down on the first pass and stays down** (§15 D471).
-        // These tests simulate a *drag*, and `drop_hint` refuses to read a target
-        // while no primary button is held — a hover is not a drop, which is what
-        // let a drag stranded by the panel's own chord land on the next ordinary
-        // click. Pressing once and letting egui carry `primary_down` is the
-        // faithful shape: repeating the press in all five passes would work too
-        // and would be a hand on a key rather than a hand on a mouse.
+        // The button goes down on the first pass and stays down: `drop_hint`
+        // refuses to read a target without a held primary button (§15 D471).
         let mut first = input.clone();
         if let Some(p) = at {
             first.events.push(press(p, true));
@@ -5025,14 +3761,8 @@ mod drop_indent_tests {
         }
     }
 
-    /// `pump` with the frame clock pinned, for the one thing here that is about time.
-    ///
-    /// ⚠️ **All five passes see the same `t`.** That is what makes the wait explicit
-    /// rather than a race with the wall clock: the pass that first sees the group starts
-    /// the timer at `t`, and the four settling passes after it read `t − t = 0`, so a
-    /// spring can only fire on a later call with a later `t`. `pump` itself deliberately
-    /// leaves `time` unset and runs on egui's own clock, because pinning it there would
-    /// change the conditions of every test that already passes through it.
+    /// `pump` with the frame clock pinned: all five passes see the same `t`, so a
+    /// spring can only fire on a later call with a later `t`.
     fn pump_at(
         app: &mut OndinApp,
         ctx: &egui::Context,
@@ -5058,13 +3788,9 @@ mod drop_indent_tests {
         full
     }
 
-    /// The six row boxes, top to bottom.
-    ///
-    /// **Read out of the paint rather than worked out here.** A row's y depends on
-    /// `item_spacing` and on whatever margin the `Ui` starts with, and a test that
-    /// derives them for itself agrees with its own arithmetic rather than with the
-    /// panel. Selecting every layer makes each row paint a `SELECT_ROW` ground, which
-    /// is one box per row and nothing else in that colour.
+    /// The row boxes of the `light` layers, top to bottom, read out of the paint
+    /// rather than derived: selecting a layer makes its row paint a `SELECT_ROW`
+    /// ground, one box per row and nothing else in that colour.
     fn row_rects(f: &mut Fixture, ctx: &egui::Context, light: &[NodeId]) -> Vec<egui::Rect> {
         f.app.session.selection.set(light.to_vec());
         let full = pump(&mut f.app, ctx, None);
@@ -5086,69 +3812,18 @@ mod drop_indent_tests {
         rects
     }
 
-    /// Every row of an untouched fixture, top to bottom.
-    ///
-    /// ⚠️ **Which rows are lit is not free, which is why `row_rects` takes them.**
-    /// `sync_tree_to_selection` opens every ancestor of anything selected, so lighting a
-    /// row *inside* a group expands that group — and a test that collapses one and then
-    /// measures with this would be measuring a tree it had just re-opened. It is not
-    /// hypothetical: the spring-loading test below was written that way and its fixture
-    /// assertion caught it at six rows against the four it expected.
+    /// Every row of an untouched fixture, top to bottom. Which rows are lit is not
+    /// free: `sync_tree_to_selection` opens every ancestor of anything selected, so
+    /// lighting a row inside a collapsed group re-opens it.
     fn open_rows(f: &mut Fixture, ctx: &egui::Context) -> Vec<egui::Rect> {
         let all = [f.frame, f.group, f.c1, f.c2, f.d, f.e];
         row_rects(f, ctx, &all)
     }
 
-    /// **A drag with no button behind it paints nothing and lands nothing**
-    /// (§15 D471) — `[S17-L1-01]`.
-    ///
-    /// Pick a row up and, still holding the button, press the panel's own chord
-    /// (`Ctrl+Alt+\`, or `Ctrl+\` for present mode). `input::resolve` is *"a pure
-    /// resolution of this frame's events, with no state of its own"* and
-    /// `dispatch` hands `ToggleView` straight to `set_view_switch` with no
-    /// in-flight guard, so the panel is skipped on the very frame the chord
-    /// lands — and `finish_layer_drag` runs inside `layers_tree`, which is not
-    /// drawn. **The release goes nowhere and `layer_drag` survives it.**
-    ///
-    /// Bring the panel back and `drop_hint` read `pointer_interact_pos` alone,
-    /// with no test that a button was down. Measured: the tree lit a drop host,
-    /// painted the blue line, re-derived a target from wherever the pointer was
-    /// *resting*, and the release of the next ordinary click committed it —
-    /// `undo_depth 0 → 1`, `c1.parent` root where it had been the group, toast
-    /// *"Moved layer"*, against a control at 0.
-    ///
-    /// ⚠️ **Guarded in `drop_hint` rather than at the view switch, because that
-    /// closes the class.** Clearing the drag in `set_view_switch` closes the one
-    /// route; a drag stranded by any *future* route still paints and still lands.
-    /// It is also the recovery on the present-mode route, where `escape` cannot
-    /// be one: its first rung is `self.present = false`, which restores the panel
-    /// with the phantom drag live, and only a *second* Escape reaches
-    /// `cancel_gesture`.
-    ///
-    /// ⚠️ **The guard broke six existing tests, and they were the ones that were
-    /// wrong.** `pump` and `pump_at` drove a `PointerMoved` and no press, so
-    /// every drop-target test in this module was simulating a drag with the mouse
-    /// button up — the exact state the defect is about, asserted as if it were
-    /// normal. Both helpers press on the first pass now and let egui carry
-    /// `primary_down`.
-    ///
-    /// ⚠️ **Flipped** by deleting the `primary_down` early return: fails on the
-    /// first assertion, the panel answering a drop target for a pointer merely
-    /// resting on a row. The control below — the same position with the button
-    /// held — is what says this is not a test about `drop_hint` having stopped
-    /// working.
-    ///
-    /// 🚨 **Amended by §15 D582, and the amendment is why this test is not the
-    /// whole story.** D471's guard was a bare `return`, which left the stranded
-    /// drag *live* and merely unpainted — so it also had to refuse the frame a
-    /// legitimate release arrives on, and that killed every drop in the panel for
-    /// a day. The guard now **clears** the drag instead, and admits the release
-    /// frame. This test passes either way, because it never releases anything:
-    /// what it measures is that a button-less pointer resolves no target and
-    /// draws no line, and both spellings do that. The release side is
-    /// `drag_start_sync_tests::releasing_the_primary_over_the_tree_lands_the_drop`
-    /// and it is a **different** assertion — a green run here says nothing at all
-    /// about it, which is exactly how the regression got in.
+    /// A drag with no button behind it paints nothing and lands nothing (§15 D471):
+    /// a button-less pointer resolves no target and draws no line. The release side
+    /// is `drag_start_sync_tests::releasing_the_primary_over_the_tree_lands_the_drop`.
+    /// flip: delete the `primary_down` early return → fails at the first assertion.
     #[test]
     fn a_drag_with_no_button_behind_it_paints_nothing() {
         let ctx = egui::Context::default();
@@ -5156,8 +3831,8 @@ mod drop_indent_tests {
         let rows = open_rows(&mut f, &ctx);
         let over_root_row = rows[0].center();
 
-        /// Arm a drag and pump with the button either held or up, answering with
-        /// the target the panel derived and how many drop lines it drew.
+        /// Arm a drag and pump with the button held or up, answering with the target
+        /// derived and the drop lines drawn.
         fn stranded(
             f: &mut Fixture,
             ctx: &egui::Context,
@@ -5215,13 +3890,8 @@ mod drop_indent_tests {
             "control: with the button held the same position is a live drop, \
              got {target:?}"
         );
-        // ⚠️ **The control asserts the *target* and not the line**, because this
-        // aim point is the middle of a container row — a drop *inside* it, which
-        // lights the host's ground rather than drawing a between-rows line. The
-        // target is the load-bearing half anyway: it is what a release commits.
-        // Measured while writing this: `Some(DropTarget { parent: frame, index:
-        // 2 })` with **0** lines, which is correct and would have failed a
-        // careless `lines > 0`.
+        // The control asserts the target, not the line: this aim point is inside a
+        // container row, which draws an outline rather than a between-rows line.
     }
 
     /// Put a drag in flight carrying `ids`, picked up at `grab`, and move the pointer
@@ -5237,10 +3907,7 @@ mod drop_indent_tests {
             ids,
             target: None,
             grab,
-            // The gesture starts holding the level it was picked up at, as the panel's
-            // own `drag_started` arm does. ⚠️ **Not 0**: `depth_asked_for` measures
-            // against this, so a fixture starting elsewhere would be a fixture whose
-            // pointer means something different from the panel's.
+            // Starts holding the level it was picked up at, as the panel does.
             level: grab.1,
             lit: None,
             spring: None,
@@ -5262,26 +3929,19 @@ mod drop_indent_tests {
         (target, lines)
     }
 
-    /// **The reported gesture, end to end through the panel.** One gap — the one under
-    /// the group's last row — and two answers, chosen by moving the pointer sideways:
-    /// left of it the layer lands beside the group inside the frame, right of it the
-    /// layer stays at the bottom of the group. And the line that says which is drawn at
-    /// that level's own indent, a whole `INDENT` apart between the two.
-    ///
-    /// Flip-checked against the version this replaced rather than against no feature at
-    /// all: before the change the boundary named one parent — whichever list the row
-    /// under the pointer was in — so both x's were the row's left edge and both targets
-    /// were `{group, 0}`. Every assertion below fails on that, which is the point;
-    /// asserting only that *a* line is drawn would have passed it.
+    /// The indent gesture end to end: the gap under the group's last row gives two
+    /// answers by sideways travel (beside the group in the frame, or the group's
+    /// bottom), and the line is drawn at that level's own indent, one `INDENT` apart.
+    /// flip: name one parent per boundary (the row under the pointer's list) → every
+    /// assertion fails.
     #[test]
     fn one_gap_offers_a_level_per_indent_and_the_pointer_picks_it() {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let rows = open_rows(&mut f, &ctx);
-        // The gap between `c1` (row 3, depth 3) and `d` (row 4, depth 2): the last row
-        // of the group, and the row after the group.
+        // The gap between `c1` (row 3, depth 3) and `d` (row 4, depth 2).
         let under_c1 = rows[3].bottom() - 4.0;
-        // Picked up on `c2`'s name — the row above `c1`, and the same level.
+        // Picked up on `c2`'s name, the row above, at the same level.
         let grab_x = 150.0;
         let grab = (grab_x, 3);
 
@@ -5315,7 +3975,7 @@ mod drop_indent_tests {
              beside it in the frame"
         );
 
-        // ...and the line moved with it, by exactly one level.
+        // The line moved with it, by exactly one level.
         let left = |lines: &[(egui::Pos2, egui::Pos2)]| {
             assert_eq!(lines.len(), 1, "one drop, one line: {lines:?}");
             assert_eq!(lines[0].0.y, lines[0].1.y, "the drop line is horizontal");
@@ -5340,43 +4000,27 @@ mod drop_indent_tests {
         );
     }
 
-    /// **The other half of the asked-for gesture: making a layer belong to a group.**
-    /// The middle of a container row means "inside it" and the indent has no vote there
-    /// — which is worth pinning precisely *because* every other part of the drag now
-    /// reads the pointer's x, so "this one does not" is a claim rather than an absence.
-    /// It is also the only way into a collapsed group **without opening it**: the branch
-    /// has no boundary of its own on screen for the indent gesture to reach, and the
-    /// other way in — resting on it until it springs — leaves it open afterwards.
-    ///
-    /// And it is an outline, never a line: two lines around one row read as a box, and
-    /// a box is what the tree uses to say "inside" (§15 D67).
-    ///
-    /// ⚠️ **`d` is what gets carried, not one of the group's own rects.** Dragging a
-    /// node into the list it is already in makes `plan_layer_move` plan nothing, so the
-    /// assertion would hold for a drop that does nothing at all.
-    ///
-    /// Flip-checked by making the middle of a container row an ordinary boundary — the
-    /// version somebody would write on the way to "the x decides everything" — which
-    /// fails on the leftmost of the three x's.
+    /// The middle of a container row means "inside it" whatever the x says, as an
+    /// outline never a line (§15 D67); it is the only way into a collapsed group
+    /// without opening it. `d` is carried, since dropping a node into its own list
+    /// plans nothing.
+    /// flip: make the middle of a container row an ordinary boundary → fails at the
+    /// leftmost x.
     #[test]
     fn the_middle_of_a_container_row_still_means_inside_it_whatever_the_x_says() {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let rows = open_rows(&mut f, &ctx);
-        // The group's own row, dead centre — and `d` is the thing being carried, so the
-        // drop is a real reparent rather than a node landing in its own list.
         let d = f.d;
         let grab_x = 150.0;
         let centre = rows[1].center().y;
-        // Left, centre and right across the whole row: the indent has no vote here.
         for x in [grab_x - INDENT * 2.0, grab_x, grab_x + INDENT] {
             let (target, lines) = drag(&mut f, &ctx, vec![d], (grab_x, 2), egui::pos2(x, centre));
             assert_eq!(
                 target,
                 Some(DropTarget {
                     parent: f.group,
-                    // The end of the model list is the top of the group on screen, so
-                    // the layer lands where the pointer is (§5.3).
+                    // The end of the model list is the top of the group on screen.
                     index: 2,
                 }),
                 "x {x}: the middle of a container row is `into`, at the top of its list"
@@ -5388,9 +4032,7 @@ mod drop_indent_tests {
             );
         }
 
-        // ...and the outline is drawn, on that row and no other. Filtered by colour and
-        // by `StrokeKind::Inside`, which is what `drop_hint` asks for and what a row's
-        // own ground (a *filled* rect) is not.
+        // The outline is drawn on that row and no other.
         f.app.layer_drag = Some(LayerDrag {
             ids: vec![d],
             target: None,
@@ -5413,14 +4055,10 @@ mod drop_indent_tests {
         assert_eq!(outlines, vec![rows[1]], "one outline, on the group's row");
     }
 
-    /// **The gap between two rows is not a dead band.** Rows do not touch, so asking
-    /// which row *contains* the pointer has no answer for the frame it spends crossing a
-    /// boundary — and the indicator blinking off for one frame while the hand is moving
-    /// steadily is exactly the kind of artefact that gets caught by stepping a capture.
-    /// A pointer in the gap means the boundary the gap is.
-    ///
-    /// Flip-checked against `rect.y_range().contains(pointer.y)`, which is what this was
-    /// first written as: the target comes back `None` and no line is drawn.
+    /// The gap between two rows is not a dead band: a pointer in it means the
+    /// boundary the gap is.
+    /// flip: use `rect.y_range().contains(pointer.y)` → the target is `None` and no
+    /// line is drawn.
     #[test]
     fn the_gap_between_two_rows_is_the_boundary_rather_than_nothing() {
         let ctx = egui::Context::default();
@@ -5443,23 +4081,15 @@ mod drop_indent_tests {
         assert_eq!(lines.len(), 1, "and the line is still drawn: {lines:?}");
     }
 
-    /// **The pointer may leave the panel to the left, and the outdent needs it to.**
-    ///
-    /// A row grabbed by its icon is barely 20pt from the panel's edge, so reaching the
-    /// top level from depth 3 asks the pointer for a negative x. Bounding the gesture
-    /// with `rect.contains(pointer)` — which is what the old per-row target did, and the
-    /// obvious thing to write — leaves the outdent reachable from some grab points and
-    /// not from others, which reads as it working intermittently.
-    ///
-    /// To the right the rect still bounds it: past the panel is the canvas.
+    /// The pointer may leave the panel to the left (the outdent needs it) but not to
+    /// the right, where the canvas is.
     #[test]
     fn the_outdent_still_works_when_the_pointer_has_left_the_panel() {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let rows = open_rows(&mut f, &ctx);
         let under_d = rows[4].bottom() - 4.0;
-        // Grabbed at the far left of a depth-2 row, then dragged one level further left
-        // — which is off the panel altogether.
+        // Grabbed at the far left of a depth-2 row, then dragged off the panel.
         let grab_x = 18.0;
         let to = egui::pos2(grab_x - INDENT, under_d);
         assert!(
@@ -5478,7 +4108,7 @@ mod drop_indent_tests {
         );
         assert_eq!(lines.len(), 1, "and the line is drawn: {lines:?}");
 
-        // The same pointer to the *right* of the panel is off the tree and drops nothing.
+        // To the right of the panel it drops nothing.
         let (past, no_lines) = drag(
             &mut f,
             &ctx,
@@ -5490,17 +4120,9 @@ mod drop_indent_tests {
         assert!(no_lines.is_empty(), "and nothing is drawn: {no_lines:?}");
     }
 
-    /// **A boundary offers the levels its two rows have in common, and no others.**
-    ///
-    /// The floor is the row below's depth because anything shallower would have to
-    /// close containers those rows are still inside; the ceiling is the row above's
-    /// because there is nothing deeper open there to go into.
-    ///
-    /// Flip-checked by taking the floor from the row *above* instead — the symmetrical
-    /// mistake, and the one that reads more naturally next to the ceiling. It collapses
-    /// every boundary to a single level, which is the whole feature gone, and it is
-    /// caught at boundary 1 — *before* either of the two boundaries this feature is
-    /// about, so the flip proves less here than the two drag tests it also fails.
+    /// A boundary offers the levels its two rows have in common, and no others.
+    /// flip: take the floor from the row above → fails at boundary 1 (before the two
+    /// boundaries that matter, which the drag tests catch).
     #[test]
     fn a_boundary_spans_the_levels_its_two_rows_share() {
         let rows = super::tree_guide_tests::marked(&[1, 2, 3, 3, 2, 1], None, &[]);
@@ -5508,24 +4130,16 @@ mod drop_indent_tests {
             let r = depth_range(&rows, b);
             (*r.start(), *r.end())
         };
-        // Above the first row: only the top level, and it is the only offer.
         assert_eq!(range(0), (1, 1));
-        // Under the frame, which is open: its first child's level and nothing else.
         assert_eq!(range(1), (2, 2));
         assert_eq!(range(2), (3, 3));
-        // Between the group's two rects: both are depth 3, so is the drop.
         assert_eq!(range(3), (3, 3));
-        // Under the group's last rect, above `d`: **out of the group, or stay in it.**
+        // Under the group's last rect, above `d`: out of the group, or stay in it.
         assert_eq!(range(4), (2, 3));
-        // Under `d`, above `e`: out of the frame, or stay in it.
         assert_eq!(range(5), (1, 2));
-        // Under the last row, which is itself top-level: the one level there is.
         assert_eq!(range(6), (1, 1));
 
-        // The bottom of the list is only uninteresting because *this* tree closes
-        // every branch before it ends. A tree whose last row is nested offers every
-        // level from that row's out to the top, which is the drop at the very bottom
-        // of the panel.
+        // A tree whose last row is nested offers every level out to the top.
         let deep_last = super::tree_guide_tests::marked(&[1, 2, 3], None, &[]);
         assert_eq!(
             {
@@ -5536,13 +4150,10 @@ mod drop_indent_tests {
         );
     }
 
-    /// **The indent is measured from where the row was picked up, never from the
-    /// pointer's own x.** A row is grabbed by its name, which at depth 1 already starts
-    /// 45pt in, so an absolute reading would jump to depth 2 before the pointer had
-    /// moved at all.
+    /// The indent is measured from where the row was picked up, never the pointer's
+    /// own x.
     #[test]
     fn the_depth_asked_for_is_a_displacement_from_the_grab() {
-        // Not moved: the level it was picked up at, wherever along the row that was.
         for x in [0.0_f32, 45.0, 150.0, 288.0] {
             assert_eq!(
                 depth_asked_for(3, x, x, 3),
@@ -5550,38 +4161,22 @@ mod drop_indent_tests {
                 "grabbed at x {x} and held still"
             );
         }
-        // One indent each way.
         assert_eq!(depth_asked_for(3, 150.0, 150.0 + INDENT, 3), 4);
         assert_eq!(depth_asked_for(3, 150.0, 150.0 - INDENT, 3), 2);
         assert_eq!(depth_asked_for(3, 150.0, 150.0 - INDENT * 2.0, 3), 1);
-        // Dragged far past the left edge: it bottoms out rather than wrapping round,
-        // which an unsigned subtraction would do.
+        // Far past the left edge it bottoms out rather than wrapping round.
         assert_eq!(depth_asked_for(2, 20.0, -400.0, 2), 1);
     }
 
-    /// **The level sticks to the one being held, and that is what stops the flicker.**
-    /// Reported from the machine as *"moving the line between indents is a bit twitchy"*:
-    /// plain rounding puts a hard edge exactly half an indent from each column, and a
-    /// hand that is not aiming at either level — one holding still, or moving *down* the
-    /// tree with a few points of sideways drift — sits on that edge and the line flips
-    /// between two indents frame to frame.
-    ///
-    /// Two claims, and the second is the one that makes it hysteresis rather than a wider
-    /// dead zone: the band is centred on the level being **held**, so it moves with the
-    /// answer, and leaving rightwards and returning leftwards happen at *different* x.
-    ///
-    /// Flip-checked at `STICK = 0.5`, which is the same as no feature at all — plain
-    /// rounding, since `|raw − held| > 0.5` and `round(raw) != held` then name the same
-    /// set. ⚠️ **Only the ±0.64 ends of the first loop fail on that flip**, and that is
-    /// worth saying rather than claiming the whole test bites: everything nearer the
-    /// column agrees with plain rounding by construction, so those two entries are the
-    /// test. The pair below them fails too, which is the stronger half — plain rounding
-    /// has no history to disagree with itself about.
+    /// The level sticks to the one being held, which stops the flicker: the band is
+    /// centred on the held level, so leaving rightwards and returning leftwards
+    /// happen at different x (hysteresis, not a wider dead zone).
+    /// flip: `STICK = 0.5` (plain rounding) → fails at the ±0.64 ends of the first
+    /// loop and at the held-history pair.
     #[test]
     fn the_level_sticks_until_the_pointer_has_really_left_it() {
         let g = 150.0_f32;
-        // Held at 3. Anywhere inside ±STICK of level 3's column stays 3, including the
-        // ±0.5 that bare rounding treats as the edge between two levels.
+        // Held at 3: anywhere inside ±STICK of its column stays 3.
         for f in [-0.64_f32, -0.5, -0.49, -0.2, 0.0, 0.2, 0.49, 0.5, 0.64] {
             assert_eq!(
                 depth_asked_for(3, g, g + INDENT * f, 3),
@@ -5589,18 +4184,12 @@ mod drop_indent_tests {
                 "{f} of an indent from the held level is still that level"
             );
         }
-        // Past the band it re-rounds, and to the *nearest* level — so leaving the band
-        // rightwards lands on 4 rather than creeping, and a long throw does not stop one
-        // level short of where the hand is.
+        // Past the band it re-rounds to the nearest level.
         assert_eq!(depth_asked_for(3, g, g + INDENT * 0.66, 3), 4);
         assert_eq!(depth_asked_for(3, g, g - INDENT * 0.8, 3), 2);
         assert_eq!(depth_asked_for(3, g, g + INDENT * 2.9, 3), 6);
 
-        // **The band travels with the level being held, which is the whole of the
-        // hysteresis.** One x, two answers, decided by where the drag already was: 2.55
-        // indents from the grab is inside the band of a drag holding 3 *and* inside the
-        // band of one holding 2, so each keeps what it had. Nothing about the pointer
-        // distinguishes those two frames — only the history does.
+        // One x, two answers, decided by where the drag already was.
         let at = |f: f32, held| depth_asked_for(3, g, g + INDENT * (f - 3.0), held);
         assert_eq!(at(2.55, 3), 3, "arrived from the right, still 3");
         assert_eq!(at(2.55, 2), 2, "arrived from the left, still 2");
@@ -5610,41 +4199,28 @@ mod drop_indent_tests {
             "the same x reads two ways depending on where the drag was — without that \
              there is no hysteresis, only a wider edge"
         );
-        // And the two edges are genuinely at different x: 3 is held down to 2.35, where
-        // plain rounding would have handed it back at 2.5.
+        // The two edges are at different x: 3 is held down to 2.35, not 2.5.
         assert_eq!(at(2.4, 3), 3, "coming back from 3, not yet");
         assert_eq!(at(2.3, 3), 2, "and now");
     }
 
-    /// **Rest a drag on a collapsed group and it opens after `SPRING_SECS`.** Asked for
-    /// on the machine: *"drag a layer, hover over a group for 1 second, it auto expands"*.
-    /// Without it a collapsed branch can only be dropped *onto*, never ordered within,
-    /// and the way in is to abandon the drag and click the caret.
-    ///
-    /// Four claims, and the two negative ones carry it: it does **not** open on the frame
-    /// the pointer arrives, and does **not** open early — so dragging across a collapsed
-    /// group on the way somewhere else leaves the tree alone. Then that it does open at
-    /// the second, and that the wait restarts rather than accumulates: two visits of 0.6s
-    /// are not one of 1.2.
-    ///
-    /// Flip-checked by starting the timer afresh every frame (`spring = Some((id, now))`
-    /// unconditionally, which is the shape you get from writing the assignment before the
-    /// comparison): the group never opens at all and the first assertion below fails.
+    /// Resting a drag on a collapsed group opens it after `SPRING_SECS`: not on
+    /// arrival, not early, and the wait restarts rather than accumulates.
+    /// flip: restart the timer every frame (`spring = Some((id, now))`
+    /// unconditionally) → the group never opens and the first assertion fails.
     #[test]
     fn resting_a_drag_on_a_collapsed_group_opens_it() {
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         f.app.collapsed.insert(f.group);
-        // ⚠️ **Only the rows outside the group.** Lighting one *inside* it would reopen
-        // it through `sync_tree_to_selection`, which walks the whole parent chain — the
-        // measurement would undo the state being measured. See [`open_rows`].
+        // Only rows outside the group, or `sync_tree_to_selection` reopens it
+        // (see `open_rows`).
         let outside = [f.frame, f.group, f.d, f.e];
         let rows = row_rects(&mut f, &ctx, &outside);
         assert!(
             f.app.collapsed.contains(&f.group),
             "the fixture: measuring the rows left the group collapsed"
         );
-        // `frame, group, d, e` — the group is row 1 whether or not it is open.
         let centre = rows[1].center();
         let e = f.e;
         let start = |f: &mut Fixture| {
@@ -5677,9 +4253,7 @@ mod drop_indent_tests {
             "held for the full second, the branch opens"
         );
 
-        // **The wait restarts, it does not accumulate.** Two visits of 0.6s with a step
-        // off the group in between leave it shut, where a timer that kept counting would
-        // have opened it on the second.
+        // Two visits of 0.6s with a step off the group in between leave it shut.
         f.app.collapsed.insert(f.group);
         f.app.layer_drag = None;
         start(&mut f);
@@ -5695,36 +4269,13 @@ mod drop_indent_tests {
         );
     }
 
-    /// **The container a drop would land in says so with its own ink.** The line says
-    /// *where* and cannot say *which group*: two levels are a single 31pt step apart, so
-    /// otherwise the reader counts indent columns by eye. Asked for as exactly this and
-    /// no more — *"only highlight the text and icon of the group to blue, should be
-    /// enough affordance"* — after a dashed outline round the row was built, seen, and
-    /// taken out again.
-    ///
-    /// The two halves of the claim are that it marks the *destination parent* — not the
-    /// row under the pointer, which during an outdent is one of that parent's
-    /// grandchildren — and that nothing is marked at the top level, where the parent is
-    /// the root and has no row.
-    ///
-    /// ⚠️ **This is the one assertion here that needs more than one pass, and `pump`'s
-    /// five are why it holds.** A row's ink is painted while the walk passes it and the
-    /// drop is not resolved until the walk is over, so the answer a row paints is the
-    /// previous frame's (`LayerDrag::lit`). One pass would show nothing lit and prove
-    /// the opposite of the truth.
-    ///
-    /// Flip-checked by clearing `lit` at the top of the frame instead of carrying last
-    /// frame's answer across — which is the mistake with a comment three lines above it
-    /// telling you to make it, since that is exactly what `target` beside it wants. The
-    /// row's ink never changes and the first assertion fails on `[]`.
-    ///
-    /// ⚠️ **A second flip — lighting the row *above* the line rather than the
-    /// destination parent — did not bite, and that is a fact about the code rather than
-    /// a failed experiment.** `lit` is derived in exactly one place, from `target.parent`
-    /// at the moment `target` is discarded, so a wrong answer written anywhere later is
-    /// overwritten before any row reads it. The error this test names is therefore not
-    /// reachable by a one-line slip; what would reintroduce it is someone deriving `lit`
-    /// from the rows instead, and the assertions below are aimed at that.
+    /// The container a drop would land in says so with its own ink: it marks the
+    /// destination parent, not the row under the pointer, and nothing at the top
+    /// level (the root has no row). Needs `pump`'s several passes, as the ink is last
+    /// frame's (`LayerDrag::lit`).
+    /// flip: clear `lit` at the top of the frame instead of carrying it → fails at
+    /// the first assertion on `[]`. Lighting the row above the line does not bite
+    /// (`lit` is derived in one place).
     #[test]
     fn the_line_names_its_container_by_colouring_that_rows_ink() {
         let ctx = egui::Context::default();
@@ -5732,19 +4283,12 @@ mod drop_indent_tests {
         let rows = open_rows(&mut f, &ctx);
         let c2 = f.c2;
         let grab_x = 150.0;
-        // The gap under `c1`, the group's last row: depth 3 stays in the group, depth 2
-        // lands in the frame — the same two answers as the indent test, now asking which
-        // row gets marked.
+        // The gap under `c1`: depth 3 stays in the group, depth 2 lands in the frame.
         let under_c1 = egui::pos2(grab_x, rows[3].bottom() - 4.0);
 
         /// Every galley the frame painted in `SELECT`, as `(text, y of its baseline)`.
-        ///
-        /// ⚠️ **The colour is read off the layout job's section, not off a mesh.**
-        /// `FullOutput::shapes` is pre-tessellation, so there are no vertices to look
-        /// at yet — the two places a galley carries its colour, and the one available
-        /// here is the input rather than the ink. `painter.text` puts the colour there
-        /// and nothing in this panel overrides it afterwards, so for these rows the two
-        /// agree.
+        /// The colour is read off the layout job's section, as `FullOutput::shapes`
+        /// is pre-tessellation.
         fn lit_text(full: &egui::FullOutput) -> Vec<(String, f32)> {
             full.shapes
                 .iter()
@@ -5778,8 +4322,7 @@ mod drop_indent_tests {
             lit_text(&full)
         };
 
-        // What the two rows are called and what glyphs they wear, asked of the document
-        // rather than written out: an auto-generated name is not this test's business.
+        // Names and glyphs are asked of the document, not written out.
         let named = |id: NodeId, doc: &ondin_core::Document| {
             let n = doc.get(id).expect("in the tree");
             (n.name().to_string(), node_icon(n.kind()).0.to_string())
@@ -5793,8 +4336,7 @@ mod drop_indent_tests {
             texts.contains(&group_name.as_str()) && texts.contains(&group_glyph.as_str()),
             "a drop inside the group lights that row's name and glyph, not {texts:?}"
         );
-        // ...and on the group's own row, which is what says it is *that* group rather
-        // than some other row that happens to carry the same word.
+        // And on the group's own row, not some row carrying the same word.
         for (t, y) in &inside {
             assert!(
                 *y >= rows[1].top() && *y <= rows[1].bottom(),
@@ -5815,8 +4357,7 @@ mod drop_indent_tests {
             "and leaves the group's, or both containers claim the drop: {texts:?}"
         );
 
-        // At the top level the parent is the root, which has no row: nothing to mark, and
-        // nothing that needed saying.
+        // At the top level the parent is the root, which has no row.
         let at_root = lit(&mut f, egui::pos2(grab_x, rows[5].bottom() - 4.0));
         assert!(
             at_root.is_empty(),
@@ -5827,21 +4368,9 @@ mod drop_indent_tests {
 
 #[cfg(test)]
 mod panel_width_tests {
-    //! What `MIN_W` and `MAX_W` are argued from (§15 D349).
-    //!
-    //! The panel is draggable now, so its width is a number the *user* sets and
-    //! the bounds are the only thing standing between them and a broken picture.
-    //! Both were derived rather than chosen, and a derivation nothing re-runs is a
-    //! number that stops being true the first time a row is retuned — `INDENT`
-    //! alone has moved twice (16 → 31, with the design asking for 22).
-    //!
-    //! ⚠️ **The composition below is the one thing here that is a copy.** Every
-    //! *term* is the constant or function the row walk itself draws with, so
-    //! retuning any of them moves these assertions; what is spelled twice is the
-    //! order they are added in. It could only be shared by giving the row walk a
-    //! "how much room has the name" question it never asks — it paints from the
-    //! left and lets the clip rect end the name, which is exactly why a panel
-    //! dragged too narrow is silent on screen.
+    //! What `MIN_W` and `MAX_W` are argued from (§15 D349). Every term is the
+    //! constant or function the row walk draws with, so retuning one moves these
+    //! assertions; only the order they are added in is a copy.
 
     use super::*;
 
@@ -5851,37 +4380,10 @@ mod panel_width_tests {
         content - icon_offset(depth, true) - NAME_GAP - (LOCK_INSET + EYE_PITCH + ICON_PT / 2.0)
     }
 
-    /// **A top-level row keeps a real name at the narrowest the drag allows.**
-    ///
-    /// Measured against names laid out at the row's own 12.5pt rather than against
-    /// a character count: `Rectangle 12` is 75.06pt and `Button primary hover`
-    /// 124.34, so at `MIN_W` the common case fits with room over and the long case
-    /// is the one that clips. That is the trade the minimum makes, stated as the
-    /// two numbers either side of it.
-    ///
-    /// ⚠️ Flipped to 180, the rounder wrong answer: `Rectangle 12` no longer fits
-    /// and this fails on the **first** assertion, at 66.50pt against 75.06 —
-    /// predicted there and observed there. Flipped the other way to 300 the
-    /// *second* assertion fails, and that is the half worth having: a minimum
-    /// which is merely generous stops the user doing something reasonable, and
-    /// nothing on screen would ever say so.
-    ///
-    /// ⚠️ **What the 300 flip also did was take the other two tests with it**, which
-    /// was not predicted and is the more useful finding: the band test's *lower*
-    /// bound failed (83.50pt of room ten points under a 300 minimum), and so did
-    /// the ordering invariant, because a minimum equal to the default leaves the
-    /// panel opening at a width it cannot be dragged back to. Three assertions,
-    /// three different reasons — so the ordering one was never the formality it
-    /// looked like.
-    ///
-    /// ⚠️ **That flip can no longer be run as described, and the reason is worth
-    /// more than the flip was.** The ordering invariant has since become a
-    /// `const _: () = assert!(…)` beside the constants, so `MIN_W = 300` now fails
-    /// the **build** and none of these three tests execute at all. The invariant
-    /// went from "one of three tests notices" to "the compiler refuses", which is
-    /// strictly better — but it means the past tense above is the only honest
-    /// tense, and a reader reproducing it will get a compile error rather than the
-    /// three failures it describes.
+    /// A top-level row keeps a real name at the narrowest the drag allows:
+    /// `Rectangle 12` (75.06pt) fits and `Button primary hover` (124.34) clips.
+    /// flip: `MIN_W` = 180 → fails at the first assertion (66.50pt against 75.06);
+    /// a minimum above 300 fails the second (and the `const` assertion at build).
     #[test]
     fn the_minimum_keeps_a_real_layer_name_on_a_top_level_row() {
         let ctx = egui::Context::default();
@@ -5908,9 +4410,7 @@ mod panel_width_tests {
              the default name of a new shape lays out at {common:.2} — the panel \
              can be dragged to a width where nothing is readable"
         );
-        // And not so generous that the minimum is doing nothing: a long name is
-        // still expected to clip, or `MIN_W` has quietly become a comfortable
-        // width rather than a floor.
+        // A long name still clips, or `MIN_W` is a comfortable width, not a floor.
         let long = lays_out("Button primary hover");
         assert!(
             long > room,
@@ -5920,32 +4420,10 @@ mod panel_width_tests {
         );
     }
 
-    /// **The minimum is also where a four-deep row stops drawing its name
-    /// underneath the eye.**
-    ///
-    /// The second, independent reading of the same number, and the reason it is
-    /// 210 rather than a round 200. Four levels is not an arbitrary depth to test
-    /// at: it is the depth §15 D330 argued the 300 from, so this reuses that
-    /// decision's own reference rather than inventing one.
-    ///
-    /// ⚠️ **The crossing is at 194.5, not 206.5, and this reading no longer picks
-    /// 210 — which is a question for the maintainer rather than a bug.** Both
-    /// numbers came out of a derivation that subtracted the *header*'s `2 * PAD_X`
-    /// (24) where a row is narrowed by the tree's own `TREE_PAD_X` (12); see
-    /// that constant. Corrected, a four-deep row stops drawing under the eye at
-    /// **194.5**, so on this reading alone 195 would have done and `MIN_W` carries
-    /// 15.5pt of slack rather than 3.5. `MIN_W`'s prose says *"210 is where two
-    /// independent readings of it meet"*; after the correction **they do not
-    /// meet** — the top-level-name reading is now the only one choosing 210, and
-    /// whether that is still the number wanted is a design call. Nothing on screen
-    /// changed: the error was wholly in the safe direction.
-    ///
-    /// So the band is anchored on the **crossing** rather than on `MIN_W − 10`,
-    /// which was only ever a stand-in for it and is now on the wrong side.
-    /// Asserting `hovered_name_room(MIN_W, 4) == 15.5` would pin the slack rather
-    /// than the property, and would fail on any retune that kept the picture
-    /// correct. Flipped to 180 the first assertion fails at −14.50pt, a name a
-    /// glyph under the eye.
+    /// At the minimum a four-deep row (the depth §15 D330 argued from) does not
+    /// draw its name underneath the eye; the band is anchored on the 194.5 crossing,
+    /// not on the slack.
+    /// flip: `MIN_W` = 180 → fails at the first assertion (−14.50pt).
     #[test]
     fn a_four_deep_row_is_not_drawn_under_the_eye_at_the_minimum() {
         let at_min = hovered_name_room(MIN_W, 4);
@@ -5954,8 +4432,7 @@ mod panel_width_tests {
             "four deep at the {MIN_W}pt minimum, the name has {at_min:.2}pt — it is \
              drawn underneath the eye, which is a broken row rather than a tight one"
         );
-        // Just under the measured crossing, so the formula is shown to have a real
-        // zero and this is a band rather than a one-sided bound.
+        // Just under the crossing, so this is a band rather than a one-sided bound.
         let below = hovered_name_room(194.0, 4);
         assert!(
             below < 0.0,
@@ -5965,18 +4442,9 @@ mod panel_width_tests {
         );
     }
 
-    /// **The maximum clears the deepest tree anyone would keep open.**
-    ///
-    /// `MAX_W` exists to stop the panel eating the canvas, not to ration room, so
-    /// what has to hold is that it binds only on someone starving the canvas — at
-    /// eight levels there is still a full name's worth of space.
-    ///
-    /// ⚠️ **The other half of this — that `DEFAULT_W` sits between the two — was
-    /// here and is not any more.** All three are compile-time constants, so it is
-    /// a `const _: () = assert!(…)` beside them now: the compiler refuses the
-    /// build rather than a test refusing a run, and the check sits where the next
-    /// person retuning one of the three is already looking. Clippy named it
-    /// (`assertions_on_constants`) and was right.
+    /// The maximum clears the deepest tree anyone would keep open: at eight levels
+    /// there is still a full name's worth of space. (`DEFAULT_W` sitting between the
+    /// two is a `const` assertion beside the constants.)
     #[test]
     fn the_maximum_still_holds_a_deep_tree() {
         let deep = hovered_name_room(MAX_W, 8);
@@ -5990,17 +4458,9 @@ mod panel_width_tests {
 
 #[cfg(test)]
 mod autoscroll_ownership_tests {
-    //! **The tree has one drag-to-edge autoscroller, and it is not in this file**
-    //! (§15 D576, `[S15.1-L1-01]`).
-    //!
-    //! `layers_tree` had its own, running every frame beside `app::layers_panel`'s
-    //! on the identical y range. `scroll_with_delta_animation` accumulates, so they
-    //! added — 960 pt/s at 60 Hz against a documented ceiling of 420, 1500 pt/s at
-    //! 120 Hz because only one was `dt`-scaled, and the later of the two put back
-    //! the easing the earlier had passed `ScrollAnimation::none()` to remove.
-    //!
-    //! Plain backticks throughout, per §15 D319 — this is a `#[cfg(test)]` module
-    //! and `cargo doc` cannot see it, so a `[link]` here would be checked by nothing.
+    //! The tree has one drag-to-edge autoscroller, in `app::layers_panel`, not in
+    //! `layers_tree` (§15 D576): two would add, since
+    //! `scroll_with_delta_animation` accumulates.
 
     use super::*;
     use crate::app::OndinApp;
@@ -6011,8 +4471,8 @@ mod autoscroll_ownership_tests {
         max: egui::Pos2::new(300.0, 120.0),
     };
 
-    /// A headless app holding `n` rects at the root — enough rows that the tree
-    /// overflows the 120pt viewport and there is somewhere to scroll to.
+    /// A headless app holding `n` rects at the root, enough to overflow the 120pt
+    /// viewport.
     fn app_with_rows(ctx: &egui::Context, n: usize) -> OndinApp {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -6038,8 +4498,7 @@ mod autoscroll_ownership_tests {
         }
         doc.apply(&Transaction(ops)).expect("the rows");
         app.session.adopt_document(doc, None);
-        // A live drag on the first row, which is the whole precondition both
-        // autoscrollers were gated on.
+        // A live drag, the precondition for an autoscroller.
         app.layer_drag = Some(LayerDrag {
             ids: vec![made[0]],
             target: None,
@@ -6053,7 +4512,7 @@ mod autoscroll_ownership_tests {
     }
 
     /// One frame of `layers_tree` inside a scroll area, with the pointer parked at
-    /// `at`. Returns the scroll offset the area reports **after** the frame.
+    /// `at`; returns the scroll offset after the frame.
     fn frame(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) -> f32 {
         let mut offset = 0.0;
         let _ = ctx.run_ui(
@@ -6072,32 +4531,16 @@ mod autoscroll_ownership_tests {
         offset
     }
 
-    /// **`layers_tree` scrolls nothing, however hard the pointer is pushed into the
-    /// edge.**
-    ///
-    /// The deletion, stated as behaviour. The pointer sits **above** the viewport's
-    /// top — past the far end of the band, where the deleted ramp was at its
-    /// `MAX_STEP` of 9pt per frame — and eight frames go by. The area must not have
-    /// moved at all.
-    ///
-    /// ⚠️ **The fixture assertion is what stops this being vacuous**, and it is the
-    /// one that had to be got right: a tree that fits its viewport cannot scroll for
-    /// reasons that have nothing to do with the fix, so the rows are asserted to
-    /// overflow before anything is claimed about the offset. Without it a build that
-    /// autoscrolls perfectly well passes.
-    ///
-    /// **Flip run**, `autoscroll_while_dragging` and its call restored: fails on
-    /// *"the tree scrolls itself on pass 1"* at `0.6666667`. ⚠️ **The offset is read
-    /// *after* the frame and it lags by one**: `scroll_with_delta_animation` writes a
-    /// delta the area consumes on its next pass, so a single-frame version of this
-    /// test is green under the bug. That is why there are eight — and why the failure
-    /// is on pass 1 rather than pass 0.
+    /// `layers_tree` scrolls nothing however hard the pointer is pushed into the
+    /// edge; the fixture asserts the rows overflow, or it would be vacuous. Eight
+    /// frames, since the offset lags by one.
+    /// flip: restore `autoscroll_while_dragging` and its call → fails at "the tree
+    /// scrolls itself on pass 1".
     #[test]
     fn the_tree_does_not_scroll_itself_when_a_drag_reaches_its_edge() {
         let ctx = egui::Context::default();
         let mut app = app_with_rows(&ctx, 40);
 
-        // The fixture: the content overflows, so there is somewhere to scroll to.
         let mut content = 0.0;
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -6116,15 +4559,8 @@ mod autoscroll_ownership_tests {
             "the fixture: 40 rows must overflow a 120pt viewport, got {content}"
         );
 
-        // ⚠️ **The *bottom* edge, and the top one is a fixture that cannot reach the
-        // state.** The first version of this test parked the pointer above the top
-        // edge, where the autoscroller scrolls the content *down* to reveal what is
-        // above it — and the area starts at offset 0, so there is nothing above and
-        // egui clamps the delta to nothing. The flip stayed green with the deleted
-        // function fully restored and running, which is the "its fixture never
-        // reached the state" vacuity exactly. Confirmed by probe: the pointer was
-        // seen at `(150, -4)` against a clip rect of `[0,0]-[300,120]` and the step
-        // computed to its full 9pt; the offset simply could not move.
+        // The bottom edge: at the top the area starts at offset 0, so egui clamps
+        // the delta to nothing and the fixture could not reach the state.
         let at = egui::pos2(150.0, VIEW.bottom() + 4.0);
         for pass in 0..8 {
             let offset = frame(&ctx, &mut app, at);
@@ -6138,23 +4574,9 @@ mod autoscroll_ownership_tests {
 
 #[cfg(test)]
 mod drag_start_sync_tests {
-    //! **Three doors change the selection from inside the row walk; all three now
-    //! tell the panel** (§15 D581, `[S15.1-L1-02]`), and **the drag ends on the
-    //! primary button** (§15 D581, `[S15.1-L1-04]`).
-    //!
-    //! The click and right-click arms both closed with
-    //! `layers_synced_selection = …`, under a comment saying why; the
-    //! `drag_started` arm's `set_one` did not. So `sync_tree_to_selection` read the
-    //! new selection as news on the following frame,
-    //! `scroll_layers_to_selection` fired, and `layers_row` recentred the row —
-    //! moving the whole tree, and every drop boundary in it, under a held pointer.
-    //! Invisible in the middle of a list, because the recentre is gated on
-    //! `!clip_rect.contains_rect(rect)`: it needs a row that is only *partly* in
-    //! the viewport, which is the ordinary case at either edge.
-    //!
-    //! Plain backticks throughout, per §15 D319 — this is a `#[cfg(test)]` module
-    //! and `cargo doc` cannot see it, so a `[link]` here would be checked by
-    //! nothing.
+    //! All three doors that change the selection from inside the row walk tell the
+    //! panel (`layers_synced_selection`), or the recentre moves the tree under a
+    //! held pointer; and the drag ends on the primary button (§15 D581).
 
     use super::*;
     use crate::app::OndinApp;
@@ -6192,9 +4614,8 @@ mod drag_start_sync_tests {
         }
         doc.apply(&Transaction(ops)).expect("the rows");
         app.session.adopt_document(doc, None);
-        // `made` is in model order, bottom of the stack first. The panel draws
-        // children reversed — the top row is the layer on top — so `ids[0]` is
-        // the *last* row and `ids.last()` the first; the root is not a row.
+        // `made` is in model order; the panel draws reversed, so `ids[0]` is the
+        // last row.
         (app, made)
     }
 
@@ -6232,12 +4653,8 @@ mod drag_start_sync_tests {
         }
     }
 
-    /// The row boxes of a fixture whose every row is selected, top to bottom.
-    ///
-    /// ⚠️ **This is a measurement and it leaves state behind.** Selecting to make
-    /// the grounds paint is `row_rects`' technique two modules up; what is extra
-    /// here is that the caller has to put `layers_synced_selection` back, or the
-    /// very bookkeeping under test starts the real run in the wrong state.
+    /// The row boxes of a fixture whose every row is selected, top to bottom
+    /// (`row_rects`' technique); resets `layers_synced_selection` afterwards.
     fn lit_rows(ctx: &egui::Context, app: &mut OndinApp, ids: &[NodeId]) -> Vec<egui::Rect> {
         app.session.selection.set(ids.to_vec());
         app.layers_synced_selection = ids.to_vec();
@@ -6264,9 +4681,8 @@ mod drag_start_sync_tests {
             .unwrap_or_default()
     }
 
-    /// The row that straddles the viewport's bottom edge, with a point inside its
-    /// visible half to aim at — the whole precondition, since the recentre is
-    /// gated on the row not being wholly inside the clip rect.
+    /// A point inside the visible half of the row straddling the viewport's bottom
+    /// edge; the recentre is gated on the row not being wholly inside the clip rect.
     fn clipped_row(rects: &[egui::Rect]) -> egui::Pos2 {
         let r = rects
             .iter()
@@ -6275,30 +4691,11 @@ mod drag_start_sync_tests {
         egui::pos2(150.0, (r.top() + VIEW.bottom()) * 0.5)
     }
 
-    /// **Picking up a partly-clipped row does not move the tree, and the click on
-    /// the identical row is the control.**
-    ///
-    /// Both arms end with the same one-row selection, so the selection is not what
-    /// the assertion is about — the bookkeeping is.
-    ///
-    /// ⚠️ **The fixture assertion is `clipped_row`'s `expect`, and it is what
-    /// stops this being vacuous.** A row wholly inside the viewport is never
-    /// recentred at all, so a fixture whose rows all fit passes with the fix
-    /// removed. Session 11 shipped three flip-checks that failed exactly this way;
-    /// the row is asserted to straddle the edge before anything is claimed.
-    ///
-    /// **Flip run**, the new `layers_synced_selection` line in the `drag_started`
-    /// arm removed: fails at `3.6296296` on the **fourth** offset, and the click
-    /// control stays at `0.0` — the pair that says the assertion is measuring
-    /// this mechanism and not the fixture.
-    ///
-    /// ⚠️ **The number is not the 20.7 the finding measured, and the difference
-    /// is the assertion's whole shape.** `scroll_to_rect` was animated then, so the
-    /// 20.7 arrived over several frames and the fourth read the first slice of
-    /// it (the follow is a jump since §15 D1026, which leaves this test's
-    /// all-zero assertion exactly as true). A test written to assert the *magnitude* would have to know how many
-    /// frames egui's easing takes; asserting that it is **zero on every frame**
-    /// needs no such number and is what the fix actually promises.
+    /// Picking up a partly-clipped row does not move the tree, and a click on the
+    /// identical row is the control. `clipped_row`'s `expect` is the fixture
+    /// assertion: a row wholly inside the viewport is never recentred.
+    /// flip: remove the `layers_synced_selection` line in the `drag_started` arm →
+    /// fails on the fourth offset while the click control stays 0.0.
     #[test]
     fn picking_up_a_partly_clipped_row_does_not_scroll_the_tree() {
         let ctx = egui::Context::default();
@@ -6307,8 +4704,7 @@ mod drag_start_sync_tests {
         assert_eq!(rects.len(), ids.len(), "the fixture: one ground per row");
         let at = clipped_row(&rects);
 
-        // The press, then a move past egui's drag threshold — `drag_started` is
-        // reported on the move, not on the press.
+        // The press, then a move past egui's drag threshold.
         let (o0, _) = frame(&ctx, &mut app, vec![press(at, true)]);
         let (o1, _) = frame(
             &ctx,
@@ -6325,9 +4721,7 @@ mod drag_start_sync_tests {
             1,
             "the fixture: the drag arm selected the row it picked up"
         );
-        // Two more frames: `sync_tree_to_selection` runs at the top of the *next*
-        // `layers_tree` and `scroll_to_rect`'s offset is consumed by the pass
-        // after that, so a single-frame version of this is green under the bug.
+        // Two more frames: the sync and the scroll offset land on later passes.
         let (o2, _) = frame(&ctx, &mut app, Vec::new());
         let (o3, _) = frame(&ctx, &mut app, Vec::new());
         assert_eq!(
@@ -6336,8 +4730,7 @@ mod drag_start_sync_tests {
             "the drag scrolled the tree"
         );
 
-        // The control: the identical row, clicked rather than dragged, through the
-        // arm that has carried the line all along.
+        // The control: the identical row, clicked rather than dragged.
         let (mut app, ids) = app_with_rows(&ctx, 6);
         let rects = lit_rows(&ctx, &mut app, &ids);
         let at = clipped_row(&rects);
@@ -6358,20 +4751,16 @@ mod drag_start_sync_tests {
         );
     }
 
-    /// **A selection made off the panel scrolls its row into view in one step**
-    /// (§15 D1026): the offset reaches its value and holds it, rather than
-    /// easing toward it across frames.
-    ///
-    /// Flip, run: putting back `ui.scroll_to_rect` fails *"no glide"* with the
-    /// offset easing `0, 7.9, 30.2, 65.3, …` across the eight frames.
+    /// A selection made off the panel scrolls its row into view in one step (§15
+    /// D1026), with no glide.
+    /// flip: put back `ui.scroll_to_rect` → fails at "no glide".
     #[test]
     fn a_canvas_selection_jumps_the_tree_to_its_row() {
         let ctx = egui::Context::default();
         let (mut app, ids) = app_with_rows(&ctx, 30);
         let (start, _) = frame(&ctx, &mut app, Vec::new());
         assert_eq!(start, 0.0, "the fixture: the tree starts at its top");
-        // Picked on the canvas: the selection changes behind the panel's back.
-        // `ids[0]` is the bottom of the stack, which the panel draws last.
+        // Picked on the canvas, behind the panel's back; `ids[0]` is drawn last.
         app.session.selection.set_one(ids[0]);
         let offsets: Vec<f32> = (0..8)
             .map(|_| frame(&ctx, &mut app, Vec::new()).0)
@@ -6385,31 +4774,12 @@ mod drag_start_sync_tests {
         );
     }
 
-    /// 🚨 **Releasing the primary over the tree lands the drop** — §15 D582, the
-    /// regression D471 opened and nothing could see.
-    ///
-    /// `layers_tree` clears `LayerDrag::target` at the top of every frame and
-    /// `drop_hint` is the only thing that re-derives it; D471 gave `drop_hint` a
-    /// bare `return` on `!primary_down()`. egui clears `down[Primary]` on the
-    /// frame it processes the release, so **the one frame that ends a drag was
-    /// the one frame that could not resolve one.** The release landed nothing,
-    /// silently — `finish_layer_drag` took the drag, found `target: None` two
-    /// lines in, and returned.
-    ///
-    /// ⚠️ **Nothing in the suite was measuring this**, which is why a day-old
-    /// regression in the panel's whole point survived a review finding written
-    /// against the very function. `[S15.1-L1-04]`'s own probe drove a **middle**
-    /// button release — which leaves the primary *down*, so `drop_hint` runs and
-    /// the target is there — and the eight `drop_indent_tests` set `layer_drag`
-    /// by hand and never release at all. **No test drove a press, a move and a
-    /// release end to end**, and that is the entire hole.
-    ///
-    /// **Flip run**, `!down && !released` narrowed back to `!down`: fails here on
-    /// *"the release landed nothing"* at `undo_depth 0`, and takes
-    /// `a_middle_button_release_does_not_land_a_layer_drag`'s **control** with it
-    /// — which is the control doing its job. `a_drag_with_no_button_behind_it_
-    /// paints_nothing` stays green under the same flip, so the two behaviours are
-    /// independent rather than one predicate traded for the other.
+    /// Releasing the primary over the tree lands the drop (§15 D582): a press, a
+    /// move and a release end to end. egui clears `down[Primary]` on the release
+    /// frame, which `drop_hint` must still resolve.
+    /// flip: narrow `!down && !released` back to `!down` → fails at "the release
+    /// landed nothing" (undo_depth 0), and takes the middle-button test's control
+    /// with it; `a_drag_with_no_button_behind_it_paints_nothing` stays green.
     #[test]
     fn releasing_the_primary_over_the_tree_lands_the_drop() {
         let ctx = egui::Context::default();
@@ -6422,9 +4792,7 @@ mod drag_start_sync_tests {
         for _ in 0..5 {
             let _ = frame(&ctx, &mut app, vec![egui::Event::PointerMoved(to)]);
         }
-        // The fixture, in its own terms: a drag is in flight and it has resolved
-        // somewhere to go. Without this the release is being asked to land
-        // nothing, and a build that never resolves a target passes.
+        // The fixture: a drag in flight with somewhere to go.
         assert!(
             app.layer_drag.as_ref().is_some_and(|d| d.target.is_some()),
             "the fixture: the drag must be in flight with a target"
@@ -6445,38 +4813,21 @@ mod drag_start_sync_tests {
         assert_eq!(app.session.status().text, "Reordered");
     }
 
-    /// **A middle-button release does not land a layer drag.**
-    ///
-    /// `layers_tree`'s `any_released()` was the workspace's only one; the canvas
-    /// asks `primary_released()` at all three of its sites. Clicking the scroll
-    /// wheel part-way through a row drag therefore dropped the rows wherever the
-    /// pointer happened to be, and left the still-held primary controlling
-    /// nothing.
-    ///
-    /// ⚠️ **The fixture assertion is the resolved target.** A drag with
-    /// `target: None` returns from `finish_layer_drag` two lines in whatever the
-    /// predicate says, so a fixture that never resolves one passes under the bug.
-    /// The target is asserted `is_some()` before the middle button is pressed.
-    ///
-    /// **Flip run**, `primary_released()` put back to `any_released()`: fails on
-    /// *"the middle button landed the drag"* — `layer_drag` is `None` and
-    /// `undo_depth` is 1. The primary release below is the control and it lands
-    /// the drag in both versions.
+    /// A middle-button release does not land a layer drag; the resolved target is
+    /// the fixture assertion, and the primary release is the control.
+    /// flip: `primary_released()` back to `any_released()` → fails at "the middle
+    /// button landed the drag".
     #[test]
     fn a_middle_button_release_does_not_land_a_layer_drag() {
         let ctx = egui::Context::default();
         let (mut app, ids) = app_with_rows(&ctx, 6);
         let rects = lit_rows(&ctx, &mut app, &ids);
-        // The third row up to the first — both wholly inside the viewport, and a
-        // real move rather than a drop where it started, which `plan_layer_move`
-        // would plan nothing for and the undo depth could not tell apart.
+        // The third row up to the first: a real move, not a drop where it started.
         let from = rects[2].center();
         let to = rects[0].center();
 
         let _ = frame(&ctx, &mut app, vec![press(from, true)]);
-        // ⚠️ **Five passes**, for `drop_indent_tests::pump`'s reason: a widget's
-        // interaction state is last frame's, and `drop_hint` reads the target off
-        // the hover. The button goes down once and egui carries `primary_down`.
+        // Five passes, as `drop_indent_tests::pump`.
         for _ in 0..5 {
             let _ = frame(&ctx, &mut app, vec![egui::Event::PointerMoved(to)]);
         }
@@ -6506,8 +4857,7 @@ mod drag_start_sync_tests {
             "the middle button committed a move"
         );
 
-        // The control: the primary release ends it, in this build and in the one
-        // before the fix.
+        // The control: the primary release ends it.
         let _ = frame(&ctx, &mut app, vec![press(to, false)]);
         assert!(
             app.layer_drag.is_none(),
@@ -6524,19 +4874,13 @@ mod drag_start_sync_tests {
 #[cfg(test)]
 mod collapse_all_tests {
     //! The collapse-all button's glyph and its action ask one question (§15 D674).
-    //!
-    //! Plain backticks throughout, per §15 D319 — this is a `#[cfg(test)]` module
-    //! and `cargo doc` cannot see it, so a `[link]` here would be checked by
-    //! nothing.
 
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::kurbo::Size;
 
-    /// A headless app over a tree with one container of each interesting shape:
-    /// an `Artboard` holding a rect, a `Boolean` holding two, and a **childless**
-    /// `Group`, which is the node the two predicates could most easily disagree
-    /// about.
+    /// A headless app over an `Artboard` holding a rect, a `Boolean` holding two,
+    /// and a childless `Group`.
     fn app_with_containers(ctx: &egui::Context) -> (OndinApp, Vec<NodeId>) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -6608,25 +4952,11 @@ mod collapse_all_tests {
         (app, vec![board, boolean, empty])
     }
 
-    /// **The arrow and the press agree in every state of the tree**
-    /// (`[S15.1-L3-02]`).
-    ///
-    /// `tree_is_all_collapsed` is the button's glyph and `toggle_collapse_all` is
-    /// its action, and they used to reach *"what counts as a container"* by two
-    /// independent walks. This drives the button rather than comparing the two
-    /// predicates: press it until it stops changing anything, and assert the glyph
-    /// says the opposite each time.
-    ///
-    /// ⚠️ **The childless `Group` is the fixture's point.** It is a container by
-    /// the tree's eye and not by either predicate — `!n.children().is_empty()` is
-    /// false — so a "fix" that folded it would be caught here and nowhere else.
-    ///
-    /// **Flip:** put back the inlined walk with the `id != root` clause dropped —
-    /// the plausible slip, since the root is not a row — and the **second**
-    /// assertion fails: *"after folding, the button must offer to unfold:
-    /// collapsed = {29:4, 29:2}"*. The glyph reads *"not all folded"* on a tree the
-    /// press has just folded, because the root is a container nothing can collapse.
-    /// Site predicted correctly.
+    /// The arrow and the press agree in every state of the tree: drives the button
+    /// and asserts the glyph says the opposite each time. The childless `Group` is
+    /// the fixture's point (a fix that folded it is caught only here).
+    /// flip: an inlined walk without the `id != root` clause → fails at the second
+    /// assertion, the root being a container nothing can collapse.
     #[test]
     fn the_glyph_and_the_press_read_one_definition_of_container() {
         let ctx = egui::Context::default();
@@ -6642,9 +4972,7 @@ mod collapse_all_tests {
             "after folding, the button must offer to unfold: collapsed = {:?}",
             app.collapsed
         );
-        // The set the press wrote is exactly the containers with children — the
-        // empty `Group` is not among them, and that is the same answer the glyph
-        // gives.
+        // The set the press wrote is exactly the containers with children.
         let mut folded: Vec<NodeId> = app.collapsed.iter().copied().collect();
         folded.sort_by_key(|id| format!("{id:?}"));
         let mut want: Vec<NodeId> = containers[..2].to_vec();
@@ -6665,9 +4993,8 @@ mod collapse_all_tests {
 mod thumb_tint_tests {
     use super::*;
 
-    /// An image brush at `alpha`. `ImageId` does not have to name anything a store
-    /// can draw: this is the *tint* rule, and the tint is computed before anybody
-    /// asks the thumbnail cache for a texture.
+    /// An image brush at `alpha`; the `ImageId` need not name anything drawable, as
+    /// the tint is computed before the thumbnail cache is asked.
     fn faded(alpha: f32) -> ondin_core::ImageBrush {
         let ondin_core::Brush::Image(mut img) =
             ondin_core::image_brush(ondin_core::ImageId("a".repeat(64)))
@@ -6678,12 +5005,8 @@ mod thumb_tint_tests {
         img
     }
 
-    /// The reported symptom, at the surface D773 did not name.
-    ///
-    /// **The loss comes first**: a 30% fill drew at *full* opacity here, so the
-    /// assertion that has to bite is "not opaque", and the exact value is checked
-    /// after it. Asserting only the value would pass for a tint that had gone
-    /// wrong in some other direction and read as a fade.
+    /// A 30% picture fades its row thumbnail: "not opaque" is asserted before the
+    /// exact value.
     #[test]
     fn a_faded_picture_fades_its_row_thumbnail() {
         let faint = thumb_tint(false, Some(&faded(0.3)));
@@ -6705,17 +5028,10 @@ mod thumb_tint_tests {
         );
     }
 
-    /// The two multipliers compose. **This is the assertion the obvious
-    /// implementation fails**: a `match` that answered the dimming *or* the alpha
-    /// is green on both tests above and wrong only where both are true.
-    ///
-    /// **Flipped, both ways, and the predicted sites held.** Ignoring the picture
-    /// (the state before §15 D784) fails the test above at its *first* assertion —
-    /// `left != right`, `#FF_FF_FF_FF` against itself, which is the reported
-    /// symptom in the failure message — and fails this one at `102 vs 102`.
-    /// Folding the alpha into the **undimmed arm only** is green everywhere except
-    /// here, at the same `102 vs 102`: one flip, one assertion, which is what says
-    /// this test is carrying the composition rule on its own.
+    /// The two multipliers compose; a `match` answering dimming or alpha is wrong
+    /// only where both are true.
+    /// flip: ignore the picture → fails here at `102 vs 102` (and the test above);
+    /// fold the alpha into the undimmed arm only → fails only here.
     #[test]
     fn dimming_and_a_faded_picture_compose_rather_than_one_winning() {
         let dim_only = thumb_tint(true, None);
@@ -6736,16 +5052,10 @@ mod thumb_tint_tests {
         );
     }
 
-    /// `alpha` is a float the loader does not range-check — `build::brush_is_finite`
-    /// asks only that it is finite — so a hand-edited `.ondin` reaches this with
-    /// anything finite in it, and `gamma_multiply` outside `0..=1` is not a fade.
-    ///
-    /// ⚠️ **This one is vacuous without the fold and the flip says so.** Against
-    /// the pre-fix `thumb_tint` (picture ignored) it is **green**, because both
-    /// sides of each assertion collapse to `WHITE` — it has teeth only once
-    /// something multiplies. Recorded rather than left to be rediscovered: it is a
-    /// test about the clamp, and the clamp is downstream of the decision the two
-    /// tests above pin.
+    /// `alpha` is not range-checked by the loader (`build::brush_is_finite` asks
+    /// only that it is finite), so an out-of-range one is clamped, not a wrap.
+    /// Coverage finding: green if `thumb_tint` ignores the picture, as both sides
+    /// collapse to `WHITE`; the tests above pin that decision.
     #[test]
     fn an_out_of_range_alpha_is_clamped_at_both_ends() {
         assert_eq!(
@@ -6815,10 +5125,8 @@ mod row_mark_tests {
         (app, i, [kids[0], kids[1]])
     }
 
-    /// The panel's dots and `+`s, counted off three passes' shapes — a dot is the
-    /// shared detector's 2pt muted circle (`ui::painted_override_dots`; this copy
-    /// counted any 2pt circle, `[X8.2-L3-01]`), a `+` two 1.2pt strokes (the shapes
-    /// `the_layers_panel_marks_overrides_and_local_layers` counts).
+    /// The panel's dots and `+`s over three passes: a dot is
+    /// `ui::painted_override_dots`' 2pt muted circle, a `+` two 1.2pt strokes.
     fn marks(app: &mut OndinApp, ctx: &egui::Context) -> (usize, usize) {
         let mut out = None;
         for _ in 0..3 {
@@ -6839,22 +5147,12 @@ mod row_mark_tests {
         (crate::ui::painted_override_dots(&out).len(), strokes / 2)
     }
 
-    /// **A parent whose children differ carries the dot, expanded or collapsed,
-    /// with a tooltip naming what** (`[X11.1-L2-03]`, ruled §15 D1003 (9)) —
-    /// instance `i` of a main holding two rects, one copy deleted; then, on a
-    /// fresh instance, its two copies swapped.
-    ///
-    /// Expanded, each row asked `reset::overrides`, fields only: a removed child
-    /// has no row and two reordered children have no field override each, so the
-    /// expanded instance showed **no** mark anywhere, and collapsing it showed one
-    /// (`drift`, bubbled). Now the parent row owns its children's removals and
-    /// order (`reset::child_drift`), and the tooltip says *"1 removed"* or *"order
-    /// changed"* — asserted on `child_drift_tip`, because a tooltip's ink never
-    /// arrives in a headless pass (CLAUDE.md, *Checking the chrome*).
-    ///
-    /// **Flip run**, `children.any()` dropped from the expanded arm of the row's
-    /// mark: fails at *"expanded: the parent of a removed child"* with 0, the
-    /// predicted site.
+    /// A parent whose children differ carries the dot, expanded or collapsed, with
+    /// a tooltip naming what (§15 D1003 (9)): a copy deleted, then two copies
+    /// swapped. The tooltip is asserted on `child_drift_tip`, as its ink never
+    /// arrives headless.
+    /// flip: drop `children.any()` from the expanded arm of the row's mark → fails
+    /// at "expanded: the parent of a removed child" with 0.
     #[test]
     fn a_parent_whose_children_differ_carries_the_dot_expanded_or_collapsed() {
         let ctx = egui::Context::default();
@@ -6900,13 +5198,10 @@ mod row_mark_tests {
         assert_eq!(marks(&mut app, &ctx).0, 1, "collapsed: the same dot");
     }
 
-    /// **A main's or an instance's row wears the hexagon, never its picture's
-    /// thumbnail** (`[X11.1-L1-04]`, §15 D981) — asked of `wears_thumbnail`, since
-    /// a headless app decodes no thumbnail texture and the row would draw the
-    /// hexagon either way here: the premise was read (the `match thumb` took the
-    /// texture arm first), not driven.
-    ///
-    /// **Flip run**, `wears_thumbnail` answering `true`: fails at *"a main"*.
+    /// A main's or an instance's row wears the hexagon, never its picture's
+    /// thumbnail (§15 D981), asked of `wears_thumbnail` as a headless app decodes
+    /// no texture.
+    /// flip: `wears_thumbnail` answering `true` → fails at "a main".
     #[test]
     fn a_component_row_wears_the_hexagon_not_its_thumbnail() {
         assert!(!super::wears_thumbnail(Some(true)), "a main");
@@ -6914,7 +5209,7 @@ mod row_mark_tests {
         assert!(super::wears_thumbnail(None), "a plain picture layer");
     }
 
-    /// The tooltip's words, both at once: the ruling's own example.
+    /// The tooltip names both a removal and a changed order.
     #[test]
     fn the_childrens_tooltip_names_both() {
         let d = ondin_core::reset::ChildDrift {
@@ -6928,21 +5223,11 @@ mod row_mark_tests {
         assert_eq!(super::child_drift_tip(Default::default()), None);
     }
 
-    /// **A collapsed instance's dot is for anything inside differing — a layer of
-    /// its own and a removed child included, not only a field override**
-    /// (`[X8.2-L6-09]`, ruling (e) of §15 D981) — each the instance's only
-    /// difference, collapsed.
-    ///
-    /// The one test of the collapsed arm collapsed the instance only while its
-    /// drift was a rename, so the condition narrowed to `d.fields > 0` left the
-    /// suite green.
-    ///
-    /// **Flip run**, the collapsed arm's condition narrowed to `d.fields > 0`:
-    /// fails at *"collapsed: a layer of the instance's own"* with `(0, 0)`, the
-    /// predicted site; it also fails the collapsed half of
-    /// `a_parent_whose_children_differ_carries_the_dot_expanded_or_collapsed`
-    /// (*"collapsed: the same dot"*, 0), the collapsed arm being an `else if` the
-    /// expanded arm's `child_drift` never reaches.
+    /// A collapsed instance's dot is for anything inside differing — a layer of its
+    /// own or a removed child, not only a field override (§15 D981 (e)).
+    /// flip: narrow the collapsed arm's condition to `d.fields > 0` → fails at
+    /// "collapsed: a layer of the instance's own" with `(0, 0)`, and at the collapsed
+    /// half of the test above.
     #[test]
     fn a_collapsed_instance_marks_a_local_layer_and_a_removed_child() {
         let ctx = egui::Context::default();
@@ -7019,8 +5304,8 @@ mod bound_eye_tests {
         (r, t)
     }
 
-    /// A headless app holding one 40×40 frame at the root, hidden or not, and
-    /// a boolean variable `on` that is true.
+    /// A headless app holding one 40×40 frame at the root, hidden or not, and a
+    /// true boolean variable `on`.
     fn app_with_a_frame(
         ctx: &egui::Context,
         hidden: bool,
@@ -7083,11 +5368,9 @@ mod bound_eye_tests {
             .count()
     }
 
-    /// **A bound layer's eye stays drawn, in the capsule; an unbound one at rest
-    /// draws neither** — the pointer nowhere, the row resting and shown.
-    ///
-    /// Flip, run: `show_eye` without its `|| bound_eye` fails *"bound: the
-    /// capsule"* at 0 — the capsule is drawn only inside the eye's `if`.
+    /// A bound layer's eye stays drawn in the capsule; an unbound one at rest draws
+    /// neither.
+    /// flip: `show_eye` without `|| bound_eye` → fails at "bound: the capsule".
     #[test]
     fn a_bound_layers_eye_rests_in_the_capsule() {
         let ctx = egui::Context::default();
@@ -7101,12 +5384,10 @@ mod bound_eye_tests {
         assert_eq!(capsules(&frame(&mut app, &ctx)), 1, "bound: the capsule");
     }
 
-    /// **A frame's worded size ends before a resting eye**: hidden, the frame's
-    /// eye is drawn at rest, and *40 × 40* used to end at the row's edge, over it.
-    ///
-    /// Flip, run: the badge's `right` back to `rect.right() - edge` fails *"the
-    /// size ends before the eye"*, *40 × 40* spanning 256.3–296.0 over the eye
-    /// glyph's 255.5–270.5.
+    /// A frame's worded size ends before a resting eye (a hidden frame's eye is
+    /// drawn at rest).
+    /// flip: the badge's `right` back to `rect.right() - edge` → fails at "the size
+    /// ends before the eye".
     #[test]
     fn a_worded_badge_ends_before_a_resting_eye() {
         let ctx = egui::Context::default();

@@ -1,35 +1,23 @@
 //! Projects: named, coloured containers a document can point at, and the one
-//! extra file the base folder carries (§9.5, §15 D363).
+//! extra file the base folder carries (§9.5).
 //!
-//! **A project is a set of files that name it, not a directory that holds
-//! them.** The id lives in each document's own metadata
+//! A project is a set of files that name it, not a directory that holds them. The
+//! id lives in each document's own metadata
 //! (`ondin_core::meta::DocumentMeta::project`), so moving a `.ondin` between
-//! folders does not move it between projects, a file dragged out of the library
-//! still remembers what it belonged to, and a project can exist with no files
-//! and no folder at all. A matching folder on disk is offered when a project is
-//! created and is the user's choice; when there is one, renaming the project
-//! renames it too, and that is the *only* thing the folder is for.
+//! folders does not move it between projects, and a project can exist with no
+//! files and no folder. A matching folder is the user's choice at creation; when
+//! there is one, renaming the project renames it, and that is all it is for.
 //!
-//! ⚠️ **Which means the folder can disagree with the metadata, and the metadata
-//! wins.** A file sitting in `kestrel/` whose block says `project: atlas` is in
-//! Atlas — every reader here asks the block. The alternative, deriving the
-//! project from the path, sounds tidier right up to the first file the user
-//! moves in Explorer, at which point the app would silently reassign it.
+//! The folder can disagree with the metadata, and the metadata wins: every reader
+//! asks the block, since deriving the project from the path would silently
+//! reassign any file the user moves in Explorer.
 //!
-//! **`projects.json` sits in the base folder rather than in the cache**, for the
-//! reason everything else in this module is shaped the way it is: the base
-//! folder is meant to be syncable, and a library that arrives on a second
-//! machine with its names and colours missing is not the same library.
-//!
-//! **Archiving is a flag on the project and nothing else** ([`Project::archived`]).
-//! It moves no file, touches no document's metadata and does not remove the
-//! project — an archived project still owns its files, still counts them, and
-//! still has a page of its own. What it loses is every *list* the app offers a
-//! project in ([`Projects::active`]); it is reachable from the sidebar's
-//! *Archived projects* group and from search. That is why the flag lives here
-//! rather than in the local cache: hiding a project is a decision about the
-//! library, and a library that arrives on the second machine with its archived
-//! projects back in the sidebar has not travelled.
+//! `projects.json` sits in the base folder rather than the cache because the base
+//! folder is meant to be syncable. The same holds for archiving: it is a flag on
+//! the project ([`Project::archived`]) and nothing else, moving no file and
+//! touching no document. An archived project still owns and counts its files and
+//! keeps its page; it leaves every list ([`Projects::active`]) and is reachable
+//! from the sidebar's *Archived projects* group and from search.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -40,9 +28,7 @@ pub const PROJECTS_FILE: &str = "projects.json";
 /// The nine swatches the New project dialog offers, as written to disk.
 ///
 /// Hex strings rather than a palette index, so a hand-edited file can name a
-/// colour this build has never heard of and the next one still reads it. The
-/// first is the accent, which is what a project created without touching the
-/// swatches gets.
+/// colour this build has never heard of. The first is the accent, the default.
 pub const PROJECT_COLORS: [&str; 9] = [
     "#6d8cd9", "#6dc0d9", "#7fbf9a", "#c9c06d", "#d99a6d", "#d97f7f", "#d97fb4", "#b98cd9",
     "#8f8f96",
@@ -51,9 +37,8 @@ pub const PROJECT_COLORS: [&str; 9] = [
 /// One project.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
-    /// Opaque and permanent (`super::ids::mint`). **Never the name slug**: the
-    /// id is written into every member document, so deriving it from the name
-    /// would orphan all of them on the first rename.
+    /// Opaque and permanent (`super::ids::mint`), never the name slug: the id is
+    /// written into every member document, so a rename would orphan them.
     pub id: String,
     /// What the user typed.
     pub name: String,
@@ -62,66 +47,40 @@ pub struct Project {
     /// The folder in the base directory this project's files are kept in, if the
     /// user asked for one.
     ///
-    /// A stem, not a path: it is always directly under the base folder, so a
-    /// configured base folder that moves takes its projects with it. `None` is
-    /// an ordinary state, not a missing value — a project with no folder keeps
-    /// its files at the root beside everything else.
+    /// A stem, not a path ([`is_folder_stem`]): always directly under the base
+    /// folder, so a moved base folder takes its projects with it. `None` is an
+    /// ordinary state: the files stay at the root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
     /// When the project was made, seconds since the Unix epoch.
     pub created: u64,
     /// Whether the project is archived — out of every list, but otherwise
-    /// untouched (§15 D379). See this module's own notes for what that does and
-    /// does not mean.
+    /// untouched (see the module doc).
     ///
-    /// **Written only when it is true**, so a library that has never archived
-    /// anything produces exactly the file it produced before this field existed
-    /// — and an older build reading a newer file ignores a key it does not know,
-    /// which is the additive shape [`Projects::version`] exists to avoid having
-    /// to bump.
+    /// Written only when true, so the field is additive and [`Projects::version`]
+    /// need not bump.
     #[serde(default, skip_serializing_if = "is_false")]
     pub archived: bool,
 }
 
-/// `skip_serializing_if` for a plain `bool`, spelled out rather than reached for
-/// as `std::ops::Not::not`: serde hands it a `&bool`, and a reader should not
-/// have to work out which `Not` impl that resolves to.
+/// `skip_serializing_if` for a plain `bool`; serde hands it a `&bool`.
 fn is_false(b: &bool) -> bool {
     !*b
 }
 
 /// Whether `s` is a folder name a project may carry — exactly one ordinary path
-/// component, and therefore always directly under the base folder (§15 D420).
+/// component, and therefore always directly under the base folder.
 ///
-/// ⚠️ **[`Project::folder`]'s doc has always said *"a stem, not a path"* and
-/// nothing enforced it, in a field read straight back out of a JSON file in a
-/// directory the design invites the user to share.** With `"folder": "../.."`,
-/// [`Project::dir`] returns a path outside the library, so every *New file* and
-/// *Import* into that project is written somewhere nothing will ever scan again,
-/// and *Move to project* `rename`s the existing document out of the library
-/// permanently. [`rename_folder`] is worse than a write: it `rename`s
-/// `root.join(old)` with `old` taken straight off the file, so
-/// `"../../../Users/<you>/Documents"` moves that directory into the library
-/// under a slug. `unique_stem` was applied to the destination; the **source** is
-/// what came from disk.
+/// [`Project::folder`] is read straight from a JSON file in a directory the user
+/// may share, and `relocate::merge_projects` adopts another library's records
+/// wholesale. With `"folder": "../.."`, [`Project::dir`] would leave the library
+/// and [`rename_folder`] would `rename` an arbitrary directory into it.
 ///
-/// **And the delivery route needs no local attacker.** `relocate::merge_projects`
-/// adopts the *source* library's project records wholesale when the user changes
-/// the base folder, so pointing *Change base folder* at a shared or received
-/// directory is enough.
-///
-/// Checked with `Path::components` rather than by looking for `/` and `\`,
-/// because that answers the Windows cases a substring search misses: a drive
-/// prefix (`C:\Users\Public`), a UNC root, and `.`/`..` in any position.
-///
-/// 🚨 **And a backslash is refused outright, on every platform** (§15 D967).
-/// `components` answers for the platform it runs on, and on Linux and macOS
-/// `\` is an ordinary character — so `sub\dir`, `C:\Users\Public` and
-/// `\\server\share` were each one `Normal` component there and passed, which
-/// the first CI run off Windows found. Each stays inside the library on that
-/// machine, but the library is a folder the design invites the user to sync,
-/// and the same record read on Windows is a nested path or a drive. A stem is
-/// a name that means one thing everywhere the library goes.
+/// Checked with `Path::components`, which answers the Windows cases a substring
+/// search misses: a drive prefix, a UNC root, and `.`/`..` in any position. A
+/// backslash is refused outright on every platform, because elsewhere `components`
+/// treats `\` as an ordinary character, and the same record read on Windows would
+/// be a nested path or a drive.
 pub fn is_folder_stem(s: &str) -> bool {
     let mut parts = Path::new(s).components();
     !s.contains('\\')
@@ -139,15 +98,11 @@ impl Project {
         }
     }
 
-    /// Drop anything a *file* is not allowed to assert.
-    ///
-    /// Today that is [`Self::folder`] alone. Dropping it rather than refusing the
-    /// project is the same trade `ondin_core::DocumentMeta::sanitized` makes for
-    /// a document's id: `None` is an ordinary state — "this project keeps its
-    /// files at the root beside everything else" — so the project still appears,
-    /// its documents are still found by their `meta.project`, and nothing is
-    /// hidden from the user. Refusing to load `projects.json` because one record
-    /// is wrong would empty the sidebar.
+    /// Drop anything a file is not allowed to assert — today [`Self::folder`]
+    /// alone. As with `ondin_core::DocumentMeta::sanitized`, dropping beats
+    /// refusing: `None` is an ordinary state, the project still appears and its
+    /// documents are still found by `meta.project`, whereas refusing to load
+    /// `projects.json` over one bad record would empty the sidebar.
     fn sanitized(mut self) -> Self {
         if self.folder.as_deref().is_some_and(|f| !is_folder_stem(f)) {
             self.folder = None;
@@ -159,36 +114,25 @@ impl Project {
 /// Rename a project's folder to match a new project name, returning the stem it
 /// should carry afterwards.
 ///
-/// This is the module doc's *"renaming the project renames it too"*, which was a
-/// promise about a feature that did not exist until *Edit project* did. `Ok(None)`
-/// for a project with no folder, which is an ordinary answer rather than a
-/// failure — a project without one keeps its files at the root and there is
-/// nothing on disk to follow the name.
+/// `Ok(None)` for a project with no folder, which is an ordinary answer: its
+/// files are at the root and nothing on disk follows the name.
 ///
-/// ⚠️ **The new stem can collide, and it is resolved the way a document's is** —
-/// through [`super::naming::unique_stem`], with the project's *own* folder
-/// excluded from the collision test. Without that exclusion, renaming "Kestrel" to
-/// "Kestrel " (or to anything that slugs the same) would walk to `kestrel-1`
-/// because the directory being renamed is sitting there — the same correction
-/// `store::free_stem` makes for a document.
+/// The new stem is resolved as a document's is, through
+/// [`super::naming::unique_stem`], with the project's own folder excluded from the
+/// collision test (as `store::free_stem` does), so a rename that keeps the slug
+/// does not walk to `kestrel-1`.
 ///
-/// ⚠️ **A folder the user has since deleted is adopted, not recreated.** The stem
-/// is where the project's files are *filed*, so recording the new one is the
-/// useful answer; the directory appears again the next time something is written
-/// into it, since [`crate::atomic::write`] creates the parent on the way past.
-/// Failing here instead would make a project whose folder had gone permanently
-/// unrenameable.
+/// A folder the user has since deleted is adopted, not recreated: the directory
+/// reappears when [`crate::atomic::write`] next creates the parent, and failing
+/// would leave the project permanently unrenameable.
 pub fn rename_folder(
     root: &Path,
     project: &Project,
     new_name: &str,
 ) -> std::io::Result<Option<String>> {
-    // ⚠️ **`is_folder_stem` on the *source*, which is the half `unique_stem`
-    // never covered.** The destination has always been slugged; `old` comes
-    // straight off `projects.json`, and this line is an `fs::rename` of whatever
-    // it names. `Projects::read` already drops such a value, so this is the belt
-    // to that buckle — and it reads as "the project has no folder", which is the
-    // answer this function already gives for one.
+    // `is_folder_stem` on the source, the half `unique_stem` never covered: `old`
+    // comes straight off `projects.json` and feeds an `fs::rename`. It is the
+    // belt to `Projects::read`'s buckle, and reads as "the project has no folder".
     let Some(old) = project.folder.as_deref().filter(|f| is_folder_stem(f)) else {
         return Ok(None);
     };
@@ -201,10 +145,8 @@ pub fn rename_folder(
 
 /// Every project in the library, in the order they were created.
 ///
-/// **Insertion order rather than sorted**, because this is the order the
-/// sidebar shows and the user put them in it. Nothing here needs the byte
-/// stability the document format does: `projects.json` is a handful of lines
-/// that changes only when a project does, so there is no diff to protect.
+/// Insertion order rather than sorted: it is the order the sidebar shows and the
+/// user put them in.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Projects {
     /// Bumped only if the shape changes incompatibly; a new optional field is
@@ -227,37 +169,21 @@ impl Projects {
 
     /// Every project that is not archived, in the same order.
     ///
-    /// ⚠️ **This is what a *list of projects* means everywhere in the app, and
-    /// [`Projects::get`] is deliberately not filtered.** The two answer different
-    /// questions: a list is a set of things to choose between, and a lookup is
-    /// "what is this id" — a document filed in an archived project must still
-    /// resolve to its name and its colour, or archiving would silently unfile
-    /// every file in it. So the sidebar, the header's filter, *Move to project*
-    /// and the *Recent* page's cards read this, and everything that starts from
-    /// an id reads `get`.
+    /// What a list of projects means everywhere in the app; [`Projects::get`] is
+    /// deliberately not filtered. A list is a set to choose between, a lookup is
+    /// "what is this id": a document filed in an archived project must still
+    /// resolve to its name and colour. The sidebar, the header's filter, *Move to
+    /// project* and the *Recent* cards read this; anything starting from an id
+    /// reads `get`.
     pub fn active(&self) -> impl Iterator<Item = &Project> {
         self.projects.iter().filter(|p| !p.archived)
     }
 
-    /// The project `id` names, unless it is archived — the lookup for *"may a new
-    /// document be filed here"* rather than for *"what is this id"*.
-    ///
-    /// ⚠️ **A third question, and it needed its own name because [`Self::get`]
-    /// was answering it twice** (§15 D557, `[S20.3-L1-03]`). The paragraph above
-    /// draws the line between a *list* and a *lookup* and is right about both; a
-    /// **destination** is neither. `dashboard::new_file_into` and
-    /// `OndinApp::nav_project` both resolved the nav's id through `get`, so
-    /// standing on a project's grid and archiving it left the dashed *New file in
-    /// {project}* card on screen and filed a brand-new document straight into the
-    /// archived project — the one thing `move_modal`'s own ⚠️ says cannot be done:
-    /// *"a document cannot be filed into an archived project without unarchiving
-    /// it first."* The ⋮ then offered **nothing** under *Move to project*, because
-    /// the project it was in is archived.
-    ///
-    /// **`move_modal`'s exception does not apply here and that is the difference
-    /// between the two.** That list keeps the archived project a document is
-    /// *already* in, so the sheet can show where it is; there is no "already" for
-    /// a document that does not exist yet.
+    /// The project `id` names, unless it is archived — the lookup for "may a new
+    /// document be filed here" rather than "what is this id". It is neither a list
+    /// nor a plain lookup: resolving a destination through `get` would file a new
+    /// document into an archived project. Unlike the move sheet, which keeps the
+    /// project a document is already in, a new document has no "already".
     pub fn destination(&self, id: &str) -> Option<&Project> {
         self.get(id).filter(|p| !p.archived)
     }
@@ -269,16 +195,13 @@ impl Projects {
 
     /// Read `projects.json` from the library root.
     ///
-    /// **A missing file is an empty library, not an error** — that is what a
-    /// base folder the user has just pointed at looks like, and the first
-    /// project created writes the file.
+    /// A missing file is an empty library, not an error: it is what a freshly
+    /// pointed-at base folder looks like.
     ///
-    /// ⚠️ **A file that exists but does not parse is also empty, and that is the
-    /// uncomfortable one.** It is the right behaviour for the app — refusing to
-    /// open the dashboard because one small file is malformed would be worse —
-    /// but it means a sync conflict that leaves half a file behind reads as "you
-    /// have no projects", and saving over it would then finish the job. So this
-    /// reports which case it was, and the caller must not write over an
+    /// A file that exists but does not parse is also empty (refusing to open the
+    /// dashboard would be worse), but a sync conflict leaving half a file then
+    /// reads as "no projects" and saving would finish the job. So this reports
+    /// which case it was, and the caller must not write over a
     /// [`ProjectsRead::Unreadable`] without saying so.
     pub fn read(root: &Path) -> ProjectsRead {
         let path = root.join(PROJECTS_FILE);
@@ -286,14 +209,10 @@ impl Projects {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProjectsRead::Missing,
             Err(_) => ProjectsRead::Unreadable,
             Ok(bytes) => match serde_json::from_slice::<Self>(&bytes) {
-                // ⚠️ **Sanitized here, at the one reader, rather than at each
-                // join.** There are five joins — `Project::dir` (which
-                // `store::file_document` and `store::move_to_project` both go
-                // through), `rename_folder`'s source *and* destination — and a
-                // check at each is four chances to miss the fifth. This function
-                // is also the door `relocate::merge_projects` adopts another
-                // library's records through, which is the route that needs no
-                // local attacker. See [`is_folder_stem`].
+                // Sanitized at the one reader rather than at each join
+                // (`Project::dir`, `rename_folder`'s source and destination), and
+                // this is the door `relocate::merge_projects` adopts another
+                // library's records through. See [`is_folder_stem`].
                 Ok(p) => ProjectsRead::Loaded(Self {
                     projects: p.projects.into_iter().map(Project::sanitized).collect(),
                     ..p
@@ -306,15 +225,12 @@ impl Projects {
     /// Write `projects.json` into the library root, creating the folder if it is
     /// not there yet.
     ///
-    /// Pretty-printed for the same reason the document format is: this is a file
-    /// in a folder the user was invited to point a sync client at, so it should
-    /// be something they can open and read.
-    /// ⚠️ **Atomic** (`crate::atomic`, §15 D378), and this is the file with the
-    /// most to lose from not being: `Library::may_write_projects` exists because
-    /// an *unreadable* `projects.json` must never be overwritten by the empty
-    /// list that failure produced — and a save killed halfway is precisely how a
-    /// readable one becomes unreadable. The latch guarded the second write and
-    /// nothing guarded the first.
+    /// Pretty-printed, as the document format is: the file sits in a folder the
+    /// user may sync, so it should be readable.
+    ///
+    /// Atomic (`crate::atomic`): a save killed halfway is how a readable
+    /// `projects.json` becomes unreadable, and `Library::may_write_projects`
+    /// guards only the write after that.
     pub fn write(&self, root: &Path) -> std::io::Result<()> {
         let mut bytes = serde_json::to_vec_pretty(self)?;
         bytes.push(b'\n');
@@ -322,8 +238,8 @@ impl Projects {
     }
 }
 
-/// What [`Projects::read`] found — three outcomes, because "no file" and
-/// "unreadable file" must not lead to the same write.
+/// What [`Projects::read`] found: "no file" and "unreadable file" must not lead
+/// to the same write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProjectsRead {
     Loaded(Projects),
@@ -335,9 +251,7 @@ pub enum ProjectsRead {
 
 impl ProjectsRead {
     /// The projects, treating both failure cases as empty — for the readers that
-    /// only want to draw a list.
-    ///
-    /// Callers that are about to **write** must match on the variant instead.
+    /// only want to draw a list. Callers about to write must match on the variant.
     pub fn or_empty(self) -> Projects {
         match self {
             ProjectsRead::Loaded(p) => p,
@@ -389,8 +303,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A project with no folder writes no key, so the common case reads as
-    /// plainly as it behaves.
+    /// A project with no folder writes no key.
     #[test]
     fn a_project_without_a_folder_writes_no_folder_key() {
         let only_rootless = Projects {
@@ -401,14 +314,12 @@ mod tests {
         assert!(!text.contains("folder"), "{text}");
     }
 
-    /// ⚠️ The distinction the three-variant return exists for. A folder with no
-    /// file is `Missing` and safe to write into; a folder with a broken one is
-    /// `Unreadable`, and a caller that treated the two alike would overwrite a
-    /// half-synced file with an empty list.
+    /// A folder with no file is `Missing` and safe to write into; a broken file is
+    /// `Unreadable`, and treating the two alike would overwrite a half-synced file
+    /// with an empty list.
     ///
-    /// Flip-check, run: collapsing `Unreadable` into `Missing` fails only the
-    /// second assertion here — the first stays green, which is exactly why the
-    /// two cases need separate names rather than one "is it empty".
+    /// flip: collapsing `Unreadable` into `Missing` → fails only the second
+    /// assertion.
     #[test]
     fn a_missing_file_and_a_broken_one_are_different_answers() {
         let root = temp_root("broken");
@@ -419,8 +330,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A project's directory is the root when it has no folder — the case that
-    /// makes "may or may not create a folder" invisible to every writer.
+    /// A project's directory is the root when it has no folder.
     #[test]
     fn a_projects_directory_is_its_folder_or_the_root() {
         let root = Path::new("D:/lib");
@@ -429,9 +339,7 @@ mod tests {
         assert_eq!(p.projects[1].dir(root), PathBuf::from("D:/lib"));
     }
 
-    /// An older file with no `version` key reads as version 1 rather than 0,
-    /// which is the difference between "written before the key existed" and
-    /// "written by something that meant zero".
+    /// An older file with no `version` key reads as version 1, not 0.
     #[test]
     fn a_file_without_a_version_key_reads_as_one() {
         let p: Projects = serde_json::from_str(r#"{"projects":[]}"#).unwrap();
@@ -439,8 +347,7 @@ mod tests {
     }
 
     /// The archived flag survives the file, and a library that has never archived
-    /// anything writes exactly the bytes it wrote before the field existed — which
-    /// is what makes this additive rather than a `version` bump.
+    /// anything writes no key, which keeps the field additive.
     #[test]
     fn archiving_round_trips_and_writes_no_key_until_it_is_true() {
         let mut p = sample();
@@ -452,10 +359,8 @@ mod tests {
         assert_eq!(serde_json::from_str::<Projects>(&text).unwrap(), p);
     }
 
-    /// A file written before the field existed reads as a library with nothing
-    /// archived, rather than failing to parse — and `Projects::read` turns a parse
-    /// failure into an *empty library*, so getting this wrong would not error, it
-    /// would silently lose every project.
+    /// A file written before the field existed reads as nothing archived; a parse
+    /// failure would silently empty the library.
     #[test]
     fn a_file_without_an_archived_key_reads_as_active() {
         let p: Projects = serde_json::from_str(
@@ -466,10 +371,8 @@ mod tests {
         assert_eq!(p.active().count(), 1);
     }
 
-    /// ⚠️ The split `Projects::active`'s doc is about: archiving takes a project
-    /// out of every *list* and leaves the *lookup* alone. A document filed in an
-    /// archived project must still resolve to its name and colour, or archiving
-    /// would quietly unfile everything in it.
+    /// Archiving takes a project out of every list and leaves the lookup alone, so
+    /// a document filed in it still resolves to its name and colour.
     #[test]
     fn archiving_takes_a_project_out_of_the_list_and_leaves_the_lookup_alone() {
         let mut p = sample();
@@ -515,18 +418,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ The project's *own* folder does not count as a collision. Without that
-    /// exclusion a rename that does not change the slug — "Kestrel" to "kestrel ",
-    /// or to itself — would walk to `kestrel-1` because the directory being renamed
-    /// is sitting there.
+    /// The project's own folder does not count as a collision, so a rename that
+    /// keeps the slug does not walk to `kestrel-1`. The collision test above
+    /// reaches neither arm, so this test alone covers the self-exclusion.
     ///
-    /// Flip-check, run: dropping `s != old` from the predicate fails here at
-    /// `Some("kestrel-1")` against `Some("kestrel")`, and dropping the
-    /// `root.join(old).exists()` guard beside it panics
+    /// flip: dropping `s != old` from the predicate → fails here at
+    /// `Some("kestrel-1")` against `Some("kestrel")`. Dropping the
+    /// `root.join(old).exists()` guard → panics
     /// `a_missing_folder_is_adopted_and_no_folder_is_not_an_error` on the `unwrap`.
-    /// ⚠️ **The collision test above stays green under both** — its slug always
-    /// changes and its folder always exists, so it never reaches either arm. The
-    /// self-exclusion is covered by this test alone.
     #[test]
     fn a_rename_that_does_not_change_the_slug_moves_nothing() {
         let root = temp_root("rename-same");
@@ -541,10 +440,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The two cases where there is nothing on disk to move: a project that never
-    /// had a folder answers `None`, and one whose folder the user has since deleted
-    /// adopts the new stem rather than failing. Neither creates a directory — the
-    /// next write into the project does that.
+    /// With nothing on disk to move, a project without a folder answers `None` and
+    /// one whose folder was deleted adopts the new stem; neither creates a directory.
     #[test]
     fn a_missing_folder_is_adopted_and_no_folder_is_not_an_error() {
         let root = temp_root("rename-missing");
@@ -567,26 +464,14 @@ mod tests {
     /// A `folder` that is not a single path component is dropped on the way in,
     /// so nothing downstream can join it.
     ///
-    /// ⚠️ **The field's doc has said *"a stem, not a path"* since it was
-    /// written, and until this test nothing said so to the file.** `projects.json`
-    /// sits in a folder the design invites the user to point a sync client at, and
-    /// `relocate::merge_projects` adopts another library's records wholesale when
-    /// the base folder changes — so the delivery route is *changing your base
-    /// folder to a shared directory*, not an attacker with local write access.
+    /// `dir` is the assertion rather than the field, because the escape is the
+    /// loss: `store::file_document` writes into `project.dir(root)` and
+    /// `store::move_to_project` renames a document into it. The Windows cases (a
+    /// drive prefix discards the base under `join`) are why `is_folder_stem` asks
+    /// `Path::components`.
     ///
-    /// **`dir` is the assertion rather than the field**, because the field is the
-    /// mechanism and the escape is the loss: `store::file_document` does
-    /// `create_dir_all(&project.dir(root))` and writes there, and
-    /// `store::move_to_project` `rename`s an existing document into it.
-    ///
-    /// ⚠️ **The Windows cases are the ones a substring search for `/` and `\`
-    /// misses**, which is why `is_folder_stem` asks `Path::components`: a drive
-    /// prefix discards the base entirely under `join`, exactly as an absolute
-    /// `meta.id` does.
-    ///
-    /// Flip-check, run: removing the `.map(Project::sanitized)` from
-    /// `Projects::read` fails on the first `dir` assertion, printing a path with
-    /// `..` still in it.
+    /// flip: removing `.map(Project::sanitized)` from `Projects::read` → fails at
+    /// the first `dir` assertion.
     #[test]
     fn a_project_folder_that_escapes_the_root_is_refused() {
         let root = temp_root("escape");
@@ -616,7 +501,7 @@ mod tests {
                 root,
                 "folder {bad:?} must not move the project's files anywhere"
             );
-            // And the rename door, whose *source* never went through a slug.
+            // And the rename door, whose source never went through a slug.
             assert_eq!(
                 rename_folder(&root, &read.projects[0], "Kestrel").unwrap(),
                 None

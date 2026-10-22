@@ -5,6 +5,13 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
+## Now
+
+- **PNG and JPEG export panic on an image fill under 100%.** `ondin-render/src/cpu.rs`
+  `apply_paint` passes the sampler's alpha through `color::framed_sampler`, and `vello_common`
+  0.2's `encode.rs` is `unimplemented!("Applying opacity to image commands")` for any alpha but 1.
+  The paint panel can set that alpha (`panels::paint`).
+
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

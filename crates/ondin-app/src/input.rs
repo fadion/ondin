@@ -68,6 +68,11 @@ pub enum Action {
     /// `Ctrl+Shift+E` is deliberately unbound; `Ctrl+E`'s `!m.shift` guard keeps it
     /// from falling through to *Flatten*.
     ExportAll,
+    /// *Export as HTML / React / Vue…*: the selection's code export, one zip
+    /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
+    /// the command palette is its door.
+    #[expect(dead_code, reason = "reached only through the unbuilt command palette")]
+    ExportCode(ondin_export::code::Target),
     Copy,
     Cut,
     Paste,

@@ -1835,6 +1835,86 @@ impl OndinApp {
             .unwrap_or_else(|| "Exports".into());
         format!("{stem}.zip")
     }
+
+    /// The selection written as `target`, or the sentence saying why there is
+    /// nothing to write. Reads the committed document, as every writer does.
+    pub(crate) fn code_export(
+        &self,
+        target: ondin_export::code::Target,
+    ) -> Result<ondin_export::code::CodeExport, &'static str> {
+        let subjects = self.export_subjects();
+        if subjects.is_empty() {
+            return Err("Select the layers to export as code");
+        }
+        Ok(target.export(&self.session.doc, &self.session.resolved, &subjects))
+    }
+
+    /// Export the selection as `target` code into one zip the person names, and
+    /// say what the report holds.
+    pub(crate) fn export_code(&mut self, target: ondin_export::code::Target) {
+        let export = match self.code_export(target) {
+            Ok(e) => e,
+            Err(why) => {
+                self.session.fail(why);
+                return;
+            }
+        };
+        let name = match self.export_subjects().as_slice() {
+            [one] => self
+                .session
+                .doc
+                .get(*one)
+                .map(|n| n.name().to_string())
+                .filter(|n| !n.trim().is_empty()),
+            _ => None,
+        }
+        .map(|n| format!("{n}.zip"))
+        .unwrap_or_else(|| self.export_archive_name());
+        let Some(path) = rfd::FileDialog::new()
+            .set_directory(self.export_start_dir())
+            .add_filter("ZIP archive", &["zip"])
+            .set_file_name(name)
+            .save_file()
+        else {
+            return;
+        };
+        let written = export.zip().and_then(|bytes| std::fs::write(&path, bytes));
+        if let Err(e) = written {
+            self.session.fail(format!("Could not write: {e}"));
+            return;
+        }
+        if let Some(dir) = path.parent() {
+            self.prefs.export_dir = Some(dir.into());
+            self.prefs.save();
+        }
+        self.session.info(code_export_summary(target, &export));
+    }
+}
+
+/// The status line after a code export: what was written, then what the report
+/// lists, by count.
+fn code_export_summary(
+    target: ondin_export::code::Target,
+    export: &ondin_export::code::CodeExport,
+) -> String {
+    let mut notes = Vec::new();
+    for (n, what) in [
+        (export.approximated.len(), "drawn differently"),
+        (export.positioned.len(), "with fixed positions"),
+        (export.inlined.len(), "written out as layers"),
+    ] {
+        if n > 0 {
+            notes.push(format!("{n} {what}"));
+        }
+    }
+    match notes.is_empty() {
+        true => format!("Exported {} code", target.label()),
+        false => format!(
+            "Exported {} code — {}; see report.txt",
+            target.label(),
+            notes.join(", ")
+        ),
+    }
 }
 
 /// What *Export all* does when it has never been told where to put things.
@@ -2999,5 +3079,69 @@ mod export_all_scope_tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod code_export_tests {
+    //! *Export as HTML / React / Vue…*, short of its save dialog.
+
+    use super::*;
+    use ondin_export::code::Target;
+
+    /// The selection is what is written, and nothing selected is a sentence, not
+    /// an empty zip.
+    #[test]
+    fn code_export_writes_the_selection_and_refuses_none() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let parent = app.session.doc.root();
+        let frame = app.session.ids.mint();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: frame,
+                parent,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(40.0, 30.0),
+                },
+                transform: None,
+                name: Some("Hero".into()),
+            }
+        ])));
+        app.session.selection.set(vec![]);
+        assert!(app.code_export(Target::React).is_err());
+
+        app.session.selection.set(vec![frame]);
+        for target in Target::ALL {
+            let out = app.code_export(target).expect("a selection to write");
+            let page = match target {
+                Target::Html => "index.html",
+                Target::React => "App.tsx",
+                Target::Vue => "App.vue",
+            };
+            let text = String::from_utf8(out.file(page).expect(page).to_vec()).unwrap();
+            assert!(text.contains("hero"), "{target:?} writes the frame: {text}");
+        }
+    }
+
+    /// The status line names the target and counts each list the report holds.
+    #[test]
+    fn a_code_export_says_what_its_report_lists() {
+        let clean = ondin_export::code::CodeExport::default();
+        assert_eq!(
+            code_export_summary(Target::Vue, &clean),
+            "Exported Vue code"
+        );
+        let noted = ondin_export::code::CodeExport {
+            approximated: vec!["a".into()],
+            inlined: vec!["b".into(), "c".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            code_export_summary(Target::React, &noted),
+            "Exported React code — 1 drawn differently, 2 written out as layers; see report.txt"
+        );
     }
 }

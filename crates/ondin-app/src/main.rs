@@ -427,17 +427,18 @@ fn run_export(
     let data = match format {
         ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, None).into_bytes(),
         ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => {
-            use ondin_export::code;
+            use ondin_export::code::Target;
             // The page holds the top-level layers, laid out as on the canvas.
             let origins = doc
                 .get(doc.root())
                 .map(|r| r.children().to_vec())
                 .unwrap_or_default();
-            let export = match format {
-                ExportFormat::React => code::react::react_of(&doc, &res, &origins),
-                ExportFormat::Vue => code::vue::vue_of(&doc, &res, &origins),
-                _ => code::html::html_of(&doc, &res, &origins),
+            let target = match format {
+                ExportFormat::React => Target::React,
+                ExportFormat::Vue => Target::Vue,
+                _ => Target::Html,
             };
+            let export = target.export(&doc, &res, &origins);
             if !export.approximated.is_empty()
                 || !export.positioned.is_empty()
                 || !export.inlined.is_empty()

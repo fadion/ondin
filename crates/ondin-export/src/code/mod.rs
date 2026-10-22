@@ -14,6 +14,8 @@
 //! look as the canvas does (`tests/code_fidelity.rs` holds the writer to it).
 //! [`CodeExport::positioned`] lists what draws right but lost its layout.
 
+use ondin_core::{Document, NodeId, Resolved};
+
 mod css;
 mod dom;
 pub mod html;
@@ -23,6 +25,36 @@ pub mod react;
 mod tokens;
 pub mod vue;
 mod walk;
+
+/// What a code export is written as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Html,
+    React,
+    Vue,
+}
+
+impl Target {
+    pub const ALL: [Target; 3] = [Target::Html, Target::React, Target::Vue];
+
+    /// The name a person knows it by.
+    pub fn label(self) -> &'static str {
+        match self {
+            Target::Html => "HTML",
+            Target::React => "React",
+            Target::Vue => "Vue",
+        }
+    }
+
+    /// `origins` written as this target, in the order given (later on top).
+    pub fn export(self, doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport {
+        match self {
+            Target::Html => html::html_of(doc, res, origins),
+            Target::React => react::react_of(doc, res, origins),
+            Target::Vue => vue::vue_of(doc, res, origins),
+        }
+    }
+}
 
 /// One file of a code export, at its path inside the export's folder.
 #[derive(Debug, Clone, PartialEq, Eq)]

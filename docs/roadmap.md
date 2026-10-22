@@ -33,8 +33,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
 (`export.md`, *Code export*).
 
-- **The GUI door** — Exports panel if per-framework options fit, else a menu; no new context-menu
-  rows.
 - **The components still written out as layers** (D1098 (9)):
   - a component set as one component with union props: trees merged by name path with
     conditional classes, else a switch;
@@ -58,6 +56,8 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **A palette has no `Target`**; `menu::Context` is keyed on a mandatory one. Something must answer it.
 - **About 16 `Action`s have no `Item`** (`Undo`, `Save`, `NewDocument`, `OpenSettings`, zoom, …) and
   verbs with no context ("Open Typography panel") need a home.
+- **`Action::ExportCode` has no other door**: the palette is how code export reaches the GUI. Drop
+  its `expect(dead_code)` when the palette constructs it.
 - **Layer search**: lift `matching_rows`' rule into a free function over `&Document` returning hits
   and ancestors separately, with its own case folding.
 - **Do not absorb `build.rs`'s document vocabulary** — that is shared by MCP and Command Mode.

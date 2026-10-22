@@ -1649,6 +1649,7 @@ impl OndinApp {
             Action::OpenSettings => self.toggle_settings(ctx),
             // No dialog once a destination is known this session.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
+            Action::ExportCode(target) => self.export_code(target),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
             Action::VariablesBrowser => self.toggle_var_browser(),

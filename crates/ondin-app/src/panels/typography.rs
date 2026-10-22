@@ -3,12 +3,11 @@
 //! The panel holds the controls a designer reaches for constantly — family,
 //! variant, size, line height, letter spacing, the two alignments — and the popup
 //! is strictly overflow. No control appears in both: a duplicate would have to show
-//! "mixed" twice and leaves "which one is the real setting" unanswerable.
+//! "mixed" twice.
 //!
 //! The popup's tabs are scopes ([`TypeTab`]) — Character, Paragraph, Box — labelled
 //! with the scope word because that tells the user what a change hits when the
-//! selection is partial. The axes, features and language are character-scoped, so
-//! they live under Character.
+//! selection is partial.
 //!
 //! ## Scope, and where a write goes
 //!
@@ -16,30 +15,25 @@
 //!
 //! - **A live editing session with a selection** — the range is that selection, the
 //!   control can read *mixed*, and the write goes into the session's own spans
-//!   (`TextEdit::style_selection`), previewed and committed once when the session
-//!   ends (§9.3).
+//!   (`TextEdit::style_selection`), committed once when the session ends (§9.3).
 //! - **Anything else** — the range is the whole node, and the write sets the node's
 //!   default and drops that attribute's overrides, so "make it all 24pt" leaves no
 //!   16pt run behind.
 //!
 //! Seven paragraph attributes (the spacing, first-line indent, `hanging`, the two
 //! block indents, the list marker and its nesting level) have the same two targets
-//! through [`TypeSubject::para_range`], because the scopes disagree about what a
-//! selection is:
+//! through [`TypeSubject::para_range`]:
 //!
 //! - A paragraph attribute cannot apply to half a paragraph, so the range is the
 //!   selection snapped outward to hard breaks (`text::paragraph_bounds`).
-//! - A bare caret is partial here, where for a character attribute it is not: a
-//!   caret is inside one paragraph, so an open session always writes a paragraph
-//!   span, and the node's paragraph defaults are reachable only with the layer
-//!   selected and no session running. A character write at a bare caret falls to
-//!   the node's defaults (no pending-style mechanism is wired up).
+//! - A bare caret is partial here: it is inside one paragraph, so an open session
+//!   always writes a paragraph span, and the node's paragraph defaults are reachable
+//!   only with the layer selected and no session running. A character write at a
+//!   bare caret falls to the node's defaults.
 //!
-//! The rest of the paragraph scope, and all of the block scope, has one target
-//! either way — `Alignment`, `Justify` and the base direction are one value per
-//! `Layout` and no span type carries them. The Paragraph tab sections that edit
-//! them say so on hover, because a control that quietly ignores the selection
-//! reads as broken.
+//! `Alignment`, `Justify`, the base direction and all of the block scope have one
+//! target either way (no span type carries them); the Paragraph tab sections that
+//! edit them say so on hover.
 
 use super::component::{OverrideMark, mark_num};
 use super::inspector::tip_unless_marked;
@@ -82,45 +76,39 @@ pub(crate) struct TypeSubject {
     /// The paint the text itself is drawn in — the node's first visible fill, or
     /// `None` where it has no visible fill at all.
     ///
-    /// Carried so a decoration's inherit state can be drawn: `Decoration::color`
-    /// `None` means "the text's own". It is the whole brush because the renderer
-    /// inherits the whole brush, gradient included; [`TypeSubject::text_color`] is
-    /// the collapse for controls that need one colour.
+    /// Carried so a decoration's inherit state can be drawn. The whole brush,
+    /// gradient included, because the renderer inherits it;
+    /// [`TypeSubject::text_color`] collapses it to one colour.
     pub text_paint: Option<Brush>,
     /// What the shaped layout's first line measures, in px, so the line height
-    /// field can show what `Auto` is worth and seed from it. `None` for a node
-    /// with nothing laid out.
+    /// field can show what `Auto` is worth. `None` for a node with nothing laid out.
     pub line_height: Option<f64>,
     /// The face's own underline and strikethrough thicknesses in px
-    /// (`TextLayout::decoration_sizes`), so the thickness chip seeds what the font
-    /// was drawing instead of zero, which erased the line.
+    /// (`TextLayout::decoration_sizes`), so the thickness chip seeds from the font
+    /// instead of zero, which erased the line.
     pub decoration_sizes: Option<(f64, f64)>,
     /// The bytes a character control acts on — see the module docs.
     pub range: Range<usize>,
     /// Where [`Self::shown`] resolves an attribute when the range disagrees with
-    /// itself: the byte whose style a character control describes.
+    /// itself; `None` means the node's defaults.
     ///
-    /// `None` means the node's defaults. For a selection it is `range.start`; for
-    /// a bare caret it is the byte to the caret's left, because an insertion joins
-    /// the run that ends at the caret. Byte 0 has no run to its left. This is the
-    /// readout only: a bare caret's character write still sets the node's default.
+    /// For a selection it is `range.start`; for a bare caret the byte to the caret's
+    /// left, because an insertion joins the run that ends there (byte 0 has none).
+    /// Readout only: a bare caret's character write still sets the node's default.
     pub resolve_at: Option<usize>,
     /// Whether a live session has a non-empty selection (select-all included) —
-    /// the only case in which a character control can read mixed. A bare caret and
-    /// no session are not partial; `shown` then describes the run a keystroke joins.
+    /// the only case in which a character control can read mixed.
     pub partial: bool,
     /// The node's per-paragraph overrides — the live session's own while one is
-    /// open, for the same reason `spans` is: the document's copy is a commit behind.
+    /// open, since the document's copy is a commit behind.
     pub para_spans: ParaSpans,
     /// The bytes a paragraph control acts on: the selection snapped outward to
-    /// hard breaks. See the module docs for why this is not `range`.
+    /// hard breaks.
     pub para_range: Range<usize>,
-    /// Whether the write goes into a live session's overrides rather than into the
+    /// Whether the write goes into a live session's overrides rather than the
     /// node's paragraph defaults — the paragraph scope's twin of `partial`.
     ///
-    /// True for any open session with a paragraph to name, a select-all included,
-    /// and false for an empty node, where there is no paragraph to tell apart from
-    /// the node itself.
+    /// True for any open session with a paragraph to name, false for an empty node.
     pub para_partial: bool,
     /// The other selected text layers a several-layer Type card writes beside `id`
     /// — each a whole-node, never-partial subject. Empty on a single layer's card.
@@ -144,20 +132,16 @@ impl TypeSubject {
     }
 
     fn read(app: &OndinApp, id: NodeId, node: crate::session::DisplayNode<'_>) -> Option<Self> {
-        // The resolved kind: a bound family is already the drawn one.
         let kind = node.kind().clone();
-        // The first visible fill, matching the renderer.
         let text_paint = node
             .paint()
             .fills
             .iter()
             .find(|f| f.visible)
-            // As drawn: a bound fill is its variable's colour.
             .map(|f| app.session.doc.resolve_brush(id, &f.brush).into_owned());
         let parts = TextRef::of(&kind)?;
         let len = parts.content.len();
-        // A live session's selection and own spans win: the document's copy is a
-        // commit behind.
+        // A live session's selection and spans win: the document's copy is a commit behind.
         let live = app.text.as_ref().filter(|s| s.id == id);
         let (range, spans, partial, resolve_at) =
             match live.map(|s| (s.editor.selected_range(), s.editor.spans())) {
@@ -169,13 +153,10 @@ impl TypeSubject {
                 Some((sel, spans)) => (0..len, spans.clone(), false, sel.start.checked_sub(1)),
                 None => (0..len, parts.spans.clone(), false, Some(0)),
             };
-        // The paragraph range comes from the editor's content, which is a commit
-        // ahead of the document's string.
+        // The editor's content is a commit ahead of the document's string.
         let (para_range, para_spans, para_partial) = match live {
             Some(s) => {
                 let range = s.editor.paragraph_range();
-                // Partial whenever there is a paragraph to name, which keeps the
-                // defaults out of a session's reach; empty only for an empty node.
                 let partial = !range.is_empty();
                 (range, s.editor.para_spans().clone(), partial)
             }
@@ -189,13 +170,11 @@ impl TypeSubject {
             block: *parts.block,
             sizing: *parts.sizing,
             text_paint,
-            // From the preview layout, so the readout tracks a live edit.
             line_height: app
                 .session
                 .preview_text_layout(id)
                 .map(|l| l.line_height)
                 .filter(|h| *h > 0.0),
-            // `None` for a node with nothing shaped; the thickness chip falls back.
             decoration_sizes: app
                 .session
                 .preview_text_layout(id)
@@ -257,8 +236,7 @@ impl TypeSubject {
     /// `None` when the range disagrees with itself.
     ///
     /// Two zeroes in different units are one value here: `Spans::shared_in`
-    /// compares structurally (`Em(0.0)` and `Px(0.0)` differ in the model), but
-    /// they are the same ink and must not read *Mixed*.
+    /// compares structurally, but `Em(0.0)` and `Px(0.0)` must not read *Mixed*.
     fn shared(&self, kind: CharAttrKind) -> Option<CharAttr> {
         let direct = self.spans.shared_in(&self.style, kind, self.range.clone());
         direct.or_else(|| {
@@ -274,10 +252,9 @@ impl TypeSubject {
         })
     }
 
-    /// The value to show for an attribute: the shared one, or — where the range
-    /// disagrees with itself — the value at [`Self::resolve_at`], so a field still
-    /// has digits and a drag has somewhere to start. Callers pair this with
-    /// [`Self::shared`] to decide whether to say "mixed".
+    /// The value to show for an attribute: the shared one, or the value at
+    /// [`Self::resolve_at`] where the range disagrees, so a drag has somewhere to
+    /// start. Callers pair this with [`Self::shared`] to decide on "mixed".
     fn shown(&self, kind: CharAttrKind) -> CharAttr {
         self.shared(kind).unwrap_or_else(|| match self.resolve_at {
             Some(at) => self.spans.resolve(&self.style, at).get(kind),
@@ -299,8 +276,8 @@ impl TypeSubject {
     /// Whether the range disagrees with itself about one attribute.
     ///
     /// Not [`Self::mixed`], which is false over the whole node however ragged the
-    /// spans (a whole-node write flattens them). A reset asks whether there is
-    /// anything to put back, and answering that from `shown` reads byte 0 only.
+    /// spans. A reset asks whether there is anything to put back, and `shown` reads
+    /// byte 0 only.
     fn ragged(&self, kind: CharAttrKind) -> bool {
         self.shared(kind).is_none()
     }
@@ -308,8 +285,7 @@ impl TypeSubject {
     /// Whether the range disagrees about one OpenType tag.
     ///
     /// Per tag, not per list: [`Self::mixed`] on `Features` is true once any tag
-    /// differs, which would dim every row. An absent tag is `0`, as the row reads
-    /// it. Only a partial selection can be mixed, as in [`Self::mixed`].
+    /// differs, which would dim every row. An absent tag is `0`.
     fn feature_mixed(&self, tag: Tag) -> bool {
         if !self.partial {
             return false;
@@ -392,10 +368,9 @@ impl TypeSubject {
     /// Whether the range disagrees with itself about one attribute — [`Self::ragged`]
     /// for the paragraph scope.
     ///
-    /// The hanging pair's click needs it: its "did anything change?" test compares
-    /// against [`Self::shown_paragraph`], which over a non-partial range reads the
-    /// first paragraph, so a hanging override on a later paragraph made the click
-    /// write nothing. The four length fields do not need it.
+    /// The hanging pair's click needs it: its change test compares against
+    /// [`Self::shown_paragraph`], which over a non-partial range reads the first
+    /// paragraph, so an override on a later one made the click write nothing.
     fn para_ragged(&self, kind: ParaAttrKind) -> bool {
         self.para_shared(kind).is_none()
     }
@@ -403,11 +378,9 @@ impl TypeSubject {
     /// The paragraph style the tab's spannable controls **show**: the node's
     /// defaults with the current paragraph's overrides applied.
     ///
-    /// Not what the node-level controls write from: `justify_last` and `direction`
-    /// build from `self.paragraph`, since writing a resolved value back would
-    /// promote one paragraph's indent to the node's default. It resolves at the
-    /// range's start; with no session open that is the first paragraph, as the
-    /// character fields do. [`Self::para_ragged`] answers what this does not.
+    /// Not what the node-level controls write from: writing a resolved value back
+    /// would promote one paragraph's indent to the node's default. It resolves at
+    /// the range's start; [`Self::para_ragged`] answers what this does not.
     fn shown_paragraph(&self) -> ParagraphStyle {
         self.para_spans
             .resolve(&self.paragraph, self.para_range.start)
@@ -434,13 +407,12 @@ const GAP: f32 = ui::CARD_COL_GAP;
 /// track adds its own 2pt of padding above and below.
 const SEG_CELL_H: f32 = ui::SEGMENT_CELL_H;
 
-/// What one alignment-track cell comes out at on a 284pt card; only states the
-/// tolerance a test holds the row to.
+/// What one alignment-track cell comes out at on a 284pt card.
 #[cfg(test)]
 const SEG_CELL: f32 = 28.0;
 
-/// How wide a `ui::segmented` track of `n` cells is, given the cell width: the
-/// cells, a 2pt gap between each pair, and 3pt of padding plus hairline at each end.
+/// The cell width of a `ui::segmented` track of `n` cells: a 2pt gap between each
+/// pair, and 3pt of padding plus hairline at each end.
 #[cfg(test)]
 fn seg_cell_of(track: f32, n: usize) -> f32 {
     (track - 6.0 - 2.0 * (n as f32 - 1.0)) / n as f32
@@ -457,9 +429,8 @@ const LOADING_DOT_R: f32 = 2.5;
 /// Seconds for one full breath of the loading dot.
 const LOADING_DOT_PERIOD: f64 = 1.2;
 
-/// Popup geometry. One card, and every tab draws into the same box, so the width
-/// is pinned rather than derived: a card that resized itself would jump on each
-/// tab change.
+/// Popup geometry. Every tab draws into the same box, so the width is pinned: a
+/// card that resized itself would jump on each tab change.
 const MENU_W: f32 = crate::app::POPOVER_W;
 const MENU_PAD: f32 = 11.0;
 /// The room inside the padding and the border, which everything below divides up.
@@ -474,8 +445,7 @@ const SEG_H: f32 = ui::SEGMENT_CELL_H;
 /// start edge, so with no indent it draws outside the box.
 const DEFAULT_LIST_GUTTER: f64 = 24.0;
 /// What the Paragraph tab's two node-level sections say on hover: `Layout::align`
-/// and the base direction are one value for the whole layout, and a control that
-/// quietly ignores the selection reads as broken.
+/// and the base direction are one value for the whole layout.
 const WHOLE_LAYER: &str = "The whole text layer — alignment and direction cannot vary by paragraph";
 
 /// Between one section and the next; one number for every popover in the app.
@@ -511,9 +481,8 @@ const SCREEN_MARGIN: f32 = 12.0;
 ///
 /// Picking a family clears every variable-axis setting and OpenType feature, which
 /// is destructive for a re-pick, and `apply_char_attrs`' equality guard cannot
-/// catch it because the write really changes something. `mixed` is why this takes
-/// three arguments: over a disagreeing selection, re-picking the shown family makes
-/// the selection agree. `family_row` gates nothing, so the decision lives here.
+/// catch it. `mixed` is an argument because over a disagreeing selection,
+/// re-picking the shown family makes the selection agree.
 fn family_actually_changed(chosen: Option<String>, current: &str, mixed: bool) -> Option<String> {
     chosen.filter(|f| mixed || f != current)
 }
@@ -767,9 +736,9 @@ impl OndinApp {
     /// The Type card's override marks for text `id`: the five style fields, the
     /// paragraph's alignment and the box's vertical alignment.
     ///
-    /// On a text-styled layer the five style fields carry no mark: their values are
-    /// the style's, the card's own mark says and resets a difference, and a field's
-    /// reset would write the whole `SetTextStyle` and make `style::settle` detach it.
+    /// On a text-styled layer the five style fields carry no mark: the card's own
+    /// mark resets a difference, and a field's reset would write the whole
+    /// `SetTextStyle` and make `style::settle` detach it.
     fn type_marks(&self, id: NodeId) -> TypeMarks {
         let styled = self
             .session
@@ -794,9 +763,7 @@ impl OndinApp {
         TypeMarks {
             family: self.family_mark(id),
             content: self.content_mark(id),
-            // The face: weight, italic and the axes they drive
-            // (`AXES_DRIVEN_ELSEWHERE`), as one; `opsz` and the listed axes are
-            // marked by their own sections.
+            // The face: weight, italic and the axes they drive, as one.
             variant: self.style_mark(
                 id,
                 |s| AxesOf {
@@ -882,18 +849,16 @@ impl OndinApp {
     /// The Type panel: family, variant and size, the two `Length` fields, and the
     /// alignment row with the popup's button on the end.
     pub(crate) fn inspector_type(&mut self, ui: &mut egui::Ui, subject: TypeSubject) {
-        // The button's rect reaches the popup so the dismiss test can forgive the
-        // click that opens it, or it would open and close on the same frame.
+        // The button's rect reaches the popup so the dismiss test forgives the click
+        // that opens it.
         let mut menu_button: Option<egui::Rect> = None;
-        // Over several text layers the card writes every layer, with no override
-        // marks, no *Content* row and no popup: each of those is one layer's.
+        // Over several layers the card has no marks, *Content* row or popup: each is one layer's.
         let several = !subject.others.is_empty();
         let marks = match several {
             false => self.type_marks(subject.id),
             true => TypeMarks::default(),
         };
-        // Rows stay live over a session's selection: what they write there is
-        // spans, which keep the style.
+        // Over a session's selection a write is spans, which keep the style.
         let targets = subject.ids();
         let live = subject.partial;
         self.style_card_live(
@@ -923,8 +888,7 @@ impl OndinApp {
                     );
                 });
             },
-            // The content, the paragraph and the box: no text style holds them, so
-            // they stay live on a styled layer.
+            // No text style holds the content, paragraph or box, so they stay live.
             |app, ui| {
                 if !several {
                     app.type_content_row(ui, &subject, &marks.content);
@@ -938,13 +902,10 @@ impl OndinApp {
     /// The *Content* row: the text itself, one line, and the door to binding it to
     /// a string variable.
     ///
-    /// Bound, it is the chip (`bound_field_ui`): `Backspace` detaches, a key typed
-    /// starts the replacing text. Unbound, it is a field: `--` opens the variable
-    /// list, `Enter` or a click away writes, `Escape` abandons. The write is the one
-    /// edit the typing made (common head and tail kept), so spans over the rest are
-    /// re-based. Read-only over several lines and while the canvas edits this
-    /// layer; the field menu still binds there. `mark` is [`Self::content_mark`]'s,
-    /// on the chip or, unbound, on the badge (↺ while the pointer is on the row).
+    /// Unbound, `--` opens the variable list, `Enter` or a click away writes, `Escape`
+    /// abandons. The write is the one edit the typing made (common head and tail
+    /// kept), so spans over the rest are re-based. Read-only over several lines and
+    /// while the canvas edits this layer. `mark` is [`Self::content_mark`]'s.
     fn type_content_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -1093,19 +1054,17 @@ impl OndinApp {
     /// The family dropdown — virtualized, with every row set in its own face (§9.2).
     ///
     /// Only the rows in view are built (the catalog is ~1900 families), which is why
-    /// [`FAMILY_ROW_H`] is a constant and rows are drawn by hand. Drawing a row asks
-    /// for that family's regular face, so scrolling prefetches what picking needs.
+    /// [`FAMILY_ROW_H`] is a constant. Drawing a row asks for that family's regular
+    /// face, so scrolling prefetches what picking needs.
     fn type_family_row(
         &mut self,
         ui: &mut egui::Ui,
         subject: &TypeSubject,
         mark: Option<&OverrideMark>,
     ) {
-        // Bound to a string variable, the row is the chip, unless a session's
-        // selection is what the row edits (it then writes runs over the default).
+        // Bound, the row is the chip, unless a session's selection is what it edits.
         let key = super::binding::FieldKey::Family { id: subject.id };
-        // Over several layers the row is the picker whatever is bound: a pick
-        // writes over the binding, detaching it.
+        // Over several layers the row is the picker whatever is bound.
         let several = !subject.others.is_empty();
         if !subject.partial
             && !several
@@ -1122,9 +1081,8 @@ impl OndinApp {
         let shown = attr!(subject, Family, Family);
         let mixed = subject.mixed(CharAttrKind::Family);
         let current = shown.clone();
-        // Three states: a family still downloading gets an ellipsis (the canvas
-        // is in the fallback face until it lands), and one that can never be had
-        // wears its glyph in `WARN`. `family_status` tells the last two apart.
+        // A family still downloading gets an ellipsis; one that can never be had
+        // wears its glyph in `WARN`.
         let status = (!mixed).then(|| self.fonts.family_status(&shown));
         let label = if mixed {
             "Mixed".to_string()
@@ -1133,8 +1091,7 @@ impl OndinApp {
         } else {
             shown
         };
-        // Only the glyph is tinted: dimming the name would read as the pick not
-        // having taken.
+        // Only the glyph is tinted: a dim name would read as the pick not taking.
         let head = match status {
             Some(crate::fonts::FamilyStatus::Missing) => {
                 ui::glyph_and_text_tinted(icon::TEXT_AA, &label, theme::color::WARN)
@@ -1145,24 +1102,19 @@ impl OndinApp {
         let mut reset = false;
         let mut menu_at: Option<(egui::Pos2, egui::Rect)> = None;
         let width = ui.available_width();
-        // A combo paints exactly `interact_size.y`, so the row states it, in a
-        // `scope` so the height does not leak into the fields below.
+        // A combo paints exactly `interact_size.y`; the `scope` keeps that off the fields below.
         ui.scope(|ui| {
             ui.spacing_mut().interact_size.y = ROW_H;
             ui.spacing_mut().button_padding.y = 0.0;
             let combo = egui::ComboBox::from_id_salt("font-family")
                 .icon(ui::combo_chevron)
                 .width(width)
-                // The popup holds a search field, so a click inside must not dismiss
-                // it; the explicit `ui.close()` below is then what a row pick uses.
+                // The popup holds a search field, so a click inside must not dismiss it.
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                 .selected_text(head)
                 .show_ui(ui, |ui| {
-                    // Rows draw at `FAMILY_ROW_H` by hand; the search field must not
-                    // inherit a 28px control height.
                     ui::menu_rows(ui);
                     ui.spacing_mut().item_spacing.y = 3.0;
-                    // An instance's overridden family, first.
                     if let Some(m) = mark
                         && super::component::menu_reset_row(ui, m)
                     {
@@ -1194,8 +1146,7 @@ impl OndinApp {
             if mark.is_some() {
                 super::component::combo_dot(ui.painter(), combo.rect);
             }
-            // The door to a binding is the field menu (a picker takes no `--`), not
-            // over a session's selection nor under a text style.
+            // The door to a binding is the field menu (a picker takes no `--`).
             if combo.secondary_clicked()
                 && !subject.partial
                 && !several
@@ -1203,8 +1154,7 @@ impl OndinApp {
             {
                 menu_at = Some((at, combo.rect));
             }
-            // The tooltip must hang off the combo's own response; one on the wrapping
-            // `ui.scope` never fires.
+            // The tooltip must hang off the combo's response; the `ui.scope`'s never fires.
             if status == Some(crate::fonts::FamilyStatus::Missing) {
                 combo.on_hover_text(
                     "This font is not installed and cannot be downloaded — \
@@ -1227,8 +1177,7 @@ impl OndinApp {
         }
         if let Some(family) = family_actually_changed(chosen, &current, mixed) {
             self.fonts.ensure_loaded(&family);
-            // Axis and feature settings are named by tag, which means something
-            // different in the next typeface, so they go with the family.
+            // Axis and feature tags mean something different in the next typeface.
             self.apply_char_attrs(
                 subject,
                 vec![
@@ -1306,8 +1255,7 @@ impl OndinApp {
         let current = variants
             .iter()
             .position(|v| matches_variant(v, weight, italic, &coords));
-        // Over several layers the face is compared whole: each layer is classified
-        // as the first is, and a layer on another face makes the field *Mixed*.
+        // Over several layers a layer on another face makes the field *Mixed*.
         let faces_differ = faces_disagree(&variants, subject);
         let current = current.filter(|_| !faces_differ);
         let label = if faces_differ
@@ -1340,7 +1288,6 @@ impl OndinApp {
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
-                    // An instance's overridden face, first.
                     if let Some(m) = mark {
                         reset = super::component::menu_reset_row(ui, m);
                     }
@@ -1386,8 +1333,7 @@ impl OndinApp {
                     CharAttr::Variations(merged),
                 ]
             };
-            // Each layer's own axes merged, so the first layer's hand-set axes do
-            // not land on the rest.
+            // So the first layer's hand-set axes do not land on the rest.
             self.apply_char_attrs_each(subject, |m| attrs(&attr!(m, Variations, Variations)));
         }
     }
@@ -1487,8 +1433,7 @@ impl OndinApp {
     /// Line height: `Auto`, a percentage of the font size, or absolute px.
     ///
     /// Three states on one field, cycled by the unit suffix. Auto is the font's own
-    /// line height (CSS `normal`), a distinct value that lives on the suffix beside
-    /// the other two units.
+    /// line height (CSS `normal`).
     fn type_line_height_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1517,19 +1462,17 @@ impl OndinApp {
             clickable: true,
             tooltip,
         });
-        // In Auto the digits show what Auto is worth in px and the suffix says it is
-        // automatic; only a node with nothing laid out falls back to the word "Auto".
+        // In Auto the digits show what Auto is worth in px; only a node with nothing
+        // laid out falls back to the word "Auto".
         let resolved = subject.line_height;
         let (mut shown, scrub, typed) = match current {
-            // Over several layers that disagree, a number typed is px for them
-            // all, whatever the first layer holds — click order decides nothing.
             _ if mixed => (
                 resolved.unwrap_or(0.0),
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
                 expr::Unit::Px,
             ),
-            // Auto shows px and cannot be typed into: a zero-width scrub range, and
-            // the write below is gated on `current` being `Some`.
+            // Auto cannot be typed into: a zero-width scrub range, and the write
+            // below is gated on `current` being `Some`.
             None => (
                 resolved.unwrap_or(0.0),
                 Scrub::whole(1.0).range(0.0..=0.0),
@@ -1540,8 +1483,6 @@ impl OndinApp {
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.pct),
                 expr::Unit::Pct,
             ),
-            // The px bound is derived from the font size, like every other
-            // `Length` face here. See [`Bounds`].
             Some(Length::Px(v)) => (
                 v,
                 Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
@@ -1571,7 +1512,7 @@ impl OndinApp {
                 d
             },
         );
-        // The reset, with the valve below still told since it owns the latch.
+        // The valve below still runs: it owns the latch.
         if hit && let Some(m) = mark {
             self.commit_reset(m.tx.clone());
         }
@@ -1644,8 +1585,7 @@ impl OndinApp {
     ///
     /// Both alignments live here and nowhere else; they are daily controls.
     ///
-    /// Returns the popup button's rect, which [`Self::type_menu_popup`] needs in
-    /// order not to dismiss itself on the click that opened it.
+    /// Returns the popup button's rect, which [`Self::type_menu_popup`] needs.
     fn type_alignment_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -1653,19 +1593,15 @@ impl OndinApp {
         marks: [&Option<OverrideMark>; 2],
     ) -> Option<egui::Rect> {
         let [align_mark, valign_mark] = marks;
-        // The row is on the column grid of the fields above it, not on its own
-        // module: four cells across a half-card and three across the rest cannot
-        // be equal, and the grid is what the eye reads against.
+        // The row sits on the column grid of the fields above it, not on its own module.
         let full = ui.available_width();
-        // The same `half` the field rows use, so the tracks land on their edges.
         let horizontal_w = (full - GAP) / 2.0;
-        // The remainder, which puts the popup button's right edge on the margin.
+        // The remainder puts the popup button's right edge on the margin.
         let vertical_w = full - horizontal_w - ROW_H - GAP * 2.0;
         let gap = GAP;
         let mut button = None;
-        // Over several layers a track lights only the cell they all agree on, a pick
-        // writes each its own paragraph or box in one transaction, and there is no
-        // popup, so the tracks take the button's room.
+        // Over several layers a track lights only the cell they all agree on, and
+        // with no popup the tracks take the button's room.
         let members: Vec<&TypeSubject> = std::iter::once(subject).chain(&subject.others).collect();
         let several = members.len() > 1;
         let vertical_w = if several {
@@ -1728,8 +1664,7 @@ impl OndinApp {
             };
             let enabled = members.iter().all(|m| m.sizing.height_is_authored());
             let resp = ui.scope(|ui| {
-                // Dimmed where there is no free space: an auto-height box is as tall
-                // as its text.
+                // An auto-height box is as tall as its text: no free space to align in.
                 if !enabled {
                     ui.disable();
                 }
@@ -1773,8 +1708,7 @@ impl OndinApp {
                     self.commit_block(subject.id, next);
                 }
             });
-            // Through a claimant of its own: a `Ui::scope`'s response never reports
-            // a hover, and `on_hover_text` is gated on `Response::enabled()`.
+            // A `Ui::scope`'s response never reports a hover, hence a claimant of its own.
             if !enabled {
                 ui.interact(
                     resp.response.rect,
@@ -1816,17 +1750,15 @@ impl OndinApp {
         head: Option<egui::Rect>,
     ) {
         let Some(tab) = self.type_menu else { return };
-        // The popup goes away with its button: a collapsed Type panel draws none,
-        // and a popover with no opener would edit something the card no longer shows.
+        // The popup goes with its button: a collapsed Type panel draws none.
         let Some(head) = head else {
             self.type_menu = None;
             return;
         };
         let ctx = ui.ctx().clone();
         let mut close = false;
-        // On a styled layer, outside a selection and outside the style's own *Edit*,
-        // the Character tab is read-only: its writes set the node's defaults, which
-        // would detach the style. Paragraph and Box stay live.
+        // On a styled layer, outside a selection and the style's own *Edit*, the
+        // Character tab is read-only: its writes would detach the style.
         let char_locked = !subject.partial
             && self
                 .session
@@ -1835,15 +1767,14 @@ impl OndinApp {
                 .and_then(|n| n.styles().text)
                 .is_some_and(|s| self.session.style_edit != Some(s));
         let anchor = OndinApp::popover_anchor(&ctx, head, MENU_W);
-        // Whether the pointer is over an overlay: the combo lists inside this popup
-        // are their own `Area`s, so a click in one misses `menu.contains_pointer()`.
+        // The combo lists inside this popup are their own `Area`s, so a click in one
+        // misses `menu.contains_pointer()`.
         let over_overlay = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.order >= egui::Order::Foreground);
         let screen = ctx.input(|i| i.content_rect());
-        // The tallest the tab body may become: the window less the chrome around it.
-        // A long Character tab scrolls. The border is in the subtraction because a
+        // The window less the chrome around the body; the border counts because a
         // `Frame`'s stroke grows its outer rect on both axes.
         let body_max_h = (screen.height()
             - SCREEN_MARGIN * 2.0
@@ -1855,7 +1786,6 @@ impl OndinApp {
         let menu = egui::Area::new(egui::Id::new("type-menu"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            // Keeps the card on screen when its button is near the bottom.
             .constrain_to(screen.shrink(SCREEN_MARGIN))
             .show(&ctx, |ui| {
                 ui::menu_frame(MENU_PAD).show(ui, |ui| {
@@ -1879,9 +1809,8 @@ impl OndinApp {
                             close = true;
                         }
                     });
-                    // The tab strip stays outside the scroll. The body gets an explicit
-                    // rect: a `ScrollArea` inside an `Area` sizes from the area's size
-                    // last frame, so the height would ratchet down on each tab switch.
+                    // An explicit rect: a `ScrollArea` inside an `Area` sizes from the
+                    // area's last-frame size, so the height would ratchet down per tab switch.
                     let body = egui::Rect::from_min_size(
                         ui.cursor().min,
                         egui::vec2(MENU_INNER, body_max_h),
@@ -1915,9 +1844,8 @@ impl OndinApp {
             })
             .response;
         let on_head = ctx.pointer_interact_pos().is_some_and(|p| head.contains(p));
-        // The picker this popup opens is an `egui::Window` at `Order::Middle`, neither
-        // the popup's rect nor an overlay, so a click in it must not dismiss the popup.
-        // Asked by layer identity because `picker_ui` runs after the inspector.
+        // The picker is an `egui::Window` at `Order::Middle`, neither the popup's rect
+        // nor an overlay; asked by layer identity because `picker_ui` runs later.
         let on_picker = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
@@ -1926,8 +1854,7 @@ impl OndinApp {
         let press_away = super::press_began_away(&ctx, menu.layer_id.id, menu.rect, head);
         if close
             || dismissed_by_click(ClickAway {
-                // Primary button only: a right-click cancels a gesture, possibly
-                // with the pointer out over the canvas, and must not close the popup.
+                // Primary only: a right-click cancels a gesture and must not close the popup.
                 clicked: ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)),
                 over_overlay,
                 on_menu: menu.contains_pointer(),
@@ -1953,10 +1880,9 @@ impl OndinApp {
     /// offers: the optical-size mode, the language, the variable axes and the
     /// OpenType features.
     ///
-    /// The lower half builds itself from the font, and comes last so choosing a
-    /// different family does not move the top of the tab. `locked` greys the
-    /// sections a text style holds and leaves Colour and Language live, whose
-    /// writes keep the style (`style::type_part` clears both).
+    /// The lower half builds itself from the font, and comes last so a family
+    /// change does not move the top of the tab. `locked` greys the sections a text
+    /// style holds and leaves Colour and Language live (`style::type_part` clears both).
     fn type_character_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, locked: bool) {
         let held = |app: &mut Self, ui: &mut egui::Ui, f: &dyn Fn(&mut Self, &mut egui::Ui)| {
             if locked {
@@ -1990,9 +1916,8 @@ impl OndinApp {
 
     /// The text's own colour, over whatever range a character control acts on.
     ///
-    /// First in the tab because a selection is most often made to change it. Absence
-    /// means the layer's fill stack, so the swatch can show a gradient while the
-    /// slot holds one colour: a run cannot be filled with a ramp but can inherit one.
+    /// Absence means the layer's fill stack, so the swatch can show a gradient while
+    /// the slot holds one colour: a run cannot be filled with a ramp but can inherit one.
     fn color_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let mark = self.style_mark(
             subject.id,
@@ -2044,12 +1969,8 @@ impl OndinApp {
     /// colour, shown only when there is one.
     ///
     /// One of three, though the model can hold both an underline and a
-    /// strikethrough: both at once is rarely a request, and one track shows the
-    /// whole state. Picking a decoration clears the other and carries the tuning
-    /// across.
-    ///
-    /// Each of the three numbers has a `None` state meaning "the font decides",
-    /// which stays correct across a font swap.
+    /// strikethrough. Picking a decoration clears the other and carries the tuning
+    /// across; each number's `None` state, "the font decides", survives a font swap.
     fn decoration_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let under = decoration_of(subject, CharAttrKind::Underline);
         let strike = decoration_of(subject, CharAttrKind::Strikethrough);
@@ -2109,10 +2030,8 @@ impl OndinApp {
                     Prefix::Icon(icon::LINE_VERTICAL),
                     d.thickness,
                     font_size,
-                    // Unsigned: a negative thickness has no meaning.
                     Bounds::DECORATION_THICKNESS,
-                    // What the face is drawing, so leaving *Font* changes the unit
-                    // and not the line; a zero seed would erase it.
+                    // What the face draws, so leaving *Font* keeps the line; zero would erase it.
                     subject
                         .decoration_sizes
                         .map(|(u, s)| if under.is_some() { u } else { s })
@@ -2124,15 +2043,12 @@ impl OndinApp {
                     d.thickness = next;
                     self.decoration_write(&e, subject, decoration_attr(kind, Some(d)));
                 }
-                // An arrow that points: the offset is positive-up, so clearing the
-                // descenders takes a negative number.
                 let e = optional_length_field(
                     ui,
                     egui::vec2(half, CELL),
                     Prefix::Icon(icon::ARROW_UP),
                     d.offset,
                     font_size,
-                    // Signed.
                     Bounds::DECORATION_OFFSET,
                     // Nothing to seed from: the face's offset sign is parley's, not ours.
                     None,
@@ -2145,18 +2061,9 @@ impl OndinApp {
                     self.decoration_write(&e, subject, decoration_attr(kind, Some(d)));
                 }
             });
-            // **Solid, dashed, dotted, wavy — ours, not parley's.** parley reports
-            // where a decoration goes and how thick it is; how the ink is broken
-            // up reuses the stroke dash machinery at the render boundary (§6.3).
-            //
-            // A dropdown, not a four-cell track: the four names are words rather
-            // than pictures, and four words in 250px is the width at which a
-            // segmented control starts abbreviating.
-            //
-            // Beside it, on an underline only, the skip-ink toggle: `skip_ink` is never
-            // read for a strikethrough, so the button is absent there and the dropdown
-            // takes the width back. Lit is the default state, saying what the line
-            // is doing.
+            // The line style is ours, not parley's (§6.3). The skip-ink toggle is
+            // underline-only (`skip_ink` is never read for a strikethrough), so the
+            // dropdown takes the width back there.
             let skips = under.is_some();
             let style_w = if skips {
                 MENU_INNER - COL_GAP - CELL
@@ -2206,18 +2113,14 @@ impl OndinApp {
 
     /// The decoration's colour: a swatch, its hex, its opacity, and a reset.
     ///
-    /// Absence means the text's own colour, so recolouring the text moves the
-    /// decoration; the field draws that state with the resolved colour
-    /// ([`TypeSubject::text_color`]) and the reset button shows only while the
-    /// colour is the decoration's own.
+    /// Absence means the text's own colour ([`TypeSubject::text_color`]).
     ///
     /// The hex is buffered like the paint rows' (half of `9184D9` is a legal colour,
     /// so per-keystroke parsing would leave several undo steps); the opacity goes
-    /// through the drag valve. The swatch opens the detached picker through a
-    /// `PaintSlot` of its own ([`crate::panels::paint::PaintSlot::TextDecoration`]).
+    /// through the drag valve. The swatch opens the picker through a `PaintSlot` of
+    /// its own ([`crate::panels::paint::PaintSlot::TextDecoration`]).
     fn char_color_row(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, slot: CharSlot) {
         let kind = slot.kind();
-        // The colour stored in this slot, or `None` for the inherited state.
         let own = match slot {
             CharSlot::Color => attr!(subject, Color, Color),
             CharSlot::Decoration(side) => decoration_of(subject, side.kind()).and_then(|d| d.color),
@@ -2227,14 +2130,12 @@ impl OndinApp {
             .as_ref()
             .is_some_and(|p| p.node == subject.id && p.slot == slot.paint_slot());
         let shown = own.unwrap_or_else(|| subject.text_color());
-        // The inherited paint's ramp, only while it is being inherited.
         let ramp = own.is_none().then(|| subject.text_ramp()).flatten();
         // Committed at once.
         let mut now: Option<Option<Color>> = None;
-        // Valved — a scrub is one undo step, not one per frame.
+        // Valved: a scrub is one undo step.
         let mut opacity: Option<(egui::Response, f64)> = None;
         let mut open = false;
-        // The picker opens beside this row, not the whole popup.
         let anchor = ui.cursor().min;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -2273,8 +2174,8 @@ impl OndinApp {
                     if resp.gained_focus() || resp.changed() {
                         self.char_hex = Some((slot, text.clone()));
                     }
-                    // Dropping the buffer strips a typed `#`. `Escape` drops it and
-                    // writes nothing: the clear is outside the guard, the write inside.
+                    // `Escape` drops the buffer and writes nothing: the clear is outside
+                    // the guard, the write inside.
                     if resp.lost_focus() {
                         self.char_hex = None;
                         if let Some([r, g, b]) =
@@ -2299,8 +2200,7 @@ impl OndinApp {
                     });
                 },
             );
-            // Live whenever there is anything to put back: this slot's own colour, or
-            // a range that disagrees about it (`TypeSubject::ragged`).
+            // Live while there is anything to put back (`TypeSubject::ragged`).
             if reset_slot(ui, own.is_some() || subject.ragged(kind), slot.reset_tip()) {
                 now = Some(None);
             }
@@ -2310,9 +2210,8 @@ impl OndinApp {
                 self.apply_char_attrs(subject, vec![attr]);
             }
         } else if let Some((resp, pct)) = opacity
-            // Only while the field is in use: an idle frame would otherwise build a
-            // transaction from a frame-start snapshot, and a stale `SetTextStyle`
-            // reaching the valve after another commit would undo it.
+            // Only while the field is in use: an idle frame would build a transaction
+            // from a stale snapshot whose `SetTextStyle` could undo another commit.
             //
             // valve-gate-not-a-commit: the commit is `char_valve`'s, on its own
             // engagement latch; this only decides whether to reach it.
@@ -2327,8 +2226,7 @@ impl OndinApp {
                 self.char_valve(&resp, subject, attr);
             }
         }
-        // Opening the picker adopts the colour already on screen first, since the
-        // picker needs a colour in the slot to point at.
+        // The picker needs a colour in the slot to point at.
         if open {
             if own.is_none()
                 && let Some(attr) = char_color_attr(subject, slot, Some(shown))
@@ -2342,7 +2240,7 @@ impl OndinApp {
     /// Word spacing and baseline shift, side by side.
     ///
     /// Baseline shift is signed and a draw offset: it moves the run without changing
-    /// the line box. Each field carries its own mark rather than the section's label.
+    /// the line box.
     fn spacing_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let word = self.style_mark(
             subject.id,
@@ -2397,8 +2295,7 @@ impl OndinApp {
             return;
         };
         let auto = !coords.iter().any(|a| a.tag == OPSZ);
-        // The one coordinate, absent for Auto; the Axes section's mark compares the
-        // rest. The reset rebuilds the list in the main's order (`axes_reset`).
+        // The one coordinate, absent for Auto; the Axes section marks the rest.
         let mark = self.style_mark(
             subject.id,
             |s| AxesOf {
@@ -2421,8 +2318,7 @@ impl OndinApp {
                 let mut next: Vec<AxisSetting> =
                     coords.iter().copied().filter(|a| a.tag != OPSZ).collect();
                 if i == 1 {
-                    // Manual starts from what Auto was giving. `FontAxis::clamp`, not
-                    // `f64::clamp`, which panics on a font's reversed `fvar` ends.
+                    // `FontAxis::clamp`, not `f64::clamp`, which panics on reversed `fvar` ends.
                     next.push(AxisSetting::new(OPSZ, opsz.clamp(subject.font_size())));
                 }
                 self.apply_char_attrs(subject, vec![CharAttr::Variations(next)]);
@@ -2439,14 +2335,9 @@ impl OndinApp {
 
     /// The list marker: a dropdown of `None` plus the eight kinds.
     ///
-    /// A `ComboBox` rather than a segmented track: nine cells will not fit, and the
-    /// choice has Language's shape, `None` plus named options.
-    ///
     /// Turning a marker on also opens a gutter for it, once: the marker is
     /// right-aligned on the paragraph's start edge, so at `indent_start` 0 it draws
-    /// outside the box. A default is written only while the value is still zero.
-    ///
-    /// The nesting level sits under the dropdown, only where there is a list.
+    /// outside the box. The nesting level sits under the dropdown, where there is a list.
     fn list_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, shown: &ParagraphStyle) {
         let current = shown.marker;
         let mixed = subject.para_mixed(ParaAttrKind::Marker);
@@ -2507,11 +2398,9 @@ impl OndinApp {
                 let resp = value_field(
                     ui,
                     egui::vec2(MENU_INNER, CELL),
-                    // A word: the nesting glyphs are the layers panel's language and
-                    // every "indent" glyph is taken by the section above.
+                    // A word: every "indent" glyph is taken by the section above.
                     Prefix::Text("Level"),
                     &mut level,
-                    // Slow: nine values over the whole range.
                     Scrub::whole(0.05).range(0.0..=f64::from(MAX_LIST_LEVEL)),
                     |d| mixed_text(d.max_decimals(0), level_mixed),
                 )
@@ -2526,10 +2415,8 @@ impl OndinApp {
             self.reset_marked(hit, &mark);
             return;
         }
-        // Or the frame the scrub ended on, which carries no new value and is the one
-        // the valve commits on.
+        // The frame the scrub ended on carries no new value and is the one the valve commits on.
         if let Some((resp, level)) = nest.filter(|(r, l)| *l != shown.level || r.drag_stopped()) {
-            // Through the valve: a scrub previews and commits once.
             self.valve_paragraph(&resp, subject, ParaAttr::Level(level));
         }
         let Some(next) = pick else {
@@ -2549,8 +2436,7 @@ impl OndinApp {
             CharAttr::Locale(v) => v,
             _ => None,
         };
-        // The closed field shows the friendly name from `LANGUAGES`, as the list does;
-        // an unlisted tag (an imported `xml:lang`) falls back to itself, not *None*.
+        // An unlisted tag (an imported `xml:lang`) shows as itself, not *None*.
         let label = match current.as_deref() {
             None => "None".to_string(),
             Some(tag) => LANGUAGES
@@ -2602,8 +2488,7 @@ impl OndinApp {
     }
 
     /// Every `fvar` axis with a value of its own, minus the ones a dedicated
-    /// control already drives — two controls for one axis is two chances to
-    /// disagree — in a list that scrolls rather than growing the card.
+    /// control already drives, in a list that scrolls rather than growing the card.
     fn axes_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -2618,8 +2503,7 @@ impl OndinApp {
         if listed.is_empty() {
             return;
         }
-        // The coordinates this list draws: not `opsz` (Optical size's) nor the axes
-        // the variant drives. Reset in the main's order (`axes_reset`).
+        // Not `opsz` (Optical size's) nor the axes the variant drives.
         let own = |t: Tag| t != OPSZ && !AXES_DRIVEN_ELSEWHERE.contains(&t);
         let mark = self.style_mark(
             subject.id,
@@ -2653,20 +2537,14 @@ impl OndinApp {
         self.reset_marked(hit, &mark);
     }
 
-    /// The face's OpenType features as switches, named, described on hover, and
-    /// curated — over a search field.
+    /// The face's OpenType features as curated switches over a search field; a
+    /// `cvXX` with more than one named value draws a [`feature_choice_row`] instead.
     ///
-    /// Nearly all are switches; a `cvXX` the font declares more than one named
-    /// value for draws a [`feature_choice_row`] instead (`values.len()` decides).
-    ///
-    /// The well-known tags (`tnum` first) sort to the top rather than into
-    /// `ss01`–`ss20` order. The list leaves out the tags that are required or
-    /// applied per script by the shaper (`aalt`, `ccmp`, `locl`, ...), since a switch
-    /// for them only mis-shapes text; [`REGISTRY`] carries the verdict per tag and
-    /// *Show all features* restores the rest. The model still carries any tag.
-    ///
-    /// The search field is unconditional so the card's layout does not depend on the
-    /// family.
+    /// The well-known tags (`tnum` first) sort to the top. The list leaves out the
+    /// tags the shaper requires or applies per script, since a switch for them only
+    /// mis-shapes text; [`REGISTRY`] carries the verdict per tag and *Show all
+    /// features* restores the rest. The search field is unconditional so the card's
+    /// layout does not depend on the family.
     fn features_section(
         &mut self,
         ui: &mut egui::Ui,
@@ -2676,22 +2554,19 @@ impl OndinApp {
         if available.is_empty() {
             return;
         }
-        // Over a selection whose runs disagree each row reads per tag: `set` resolves
-        // at the first run, so a disagreeing tag draws `ui::switch_row_mixed`, and a
-        // toggle writes that one tag into each run's list (`write_feature_tag`).
+        // `set` resolves at the first run, so a disagreeing tag draws
+        // `ui::switch_row_mixed` and a toggle writes into each run (`write_feature_tag`).
         let set = attr!(subject, Features, Features);
         let mut ordered: Vec<(Tag, FeatureLabel)> = available
             .iter()
             .map(|f| (f.tag, feature_label(f)))
             .collect();
         ordered.sort_by_key(|(tag, _)| (feature_rank(*tag), tag.to_string()));
-        // A withheld feature the document sets is shown anyway: a switch nobody can
-        // see is a state nobody can undo.
+        // A withheld feature the document sets is shown anyway: a state nobody can undo is a trap.
         let shown = |tag: &Tag, l: &FeatureLabel| l.offered || set.iter().any(|f| f.tag == *tag);
-        // One writer for both kinds of row: two `Option`s would make two
-        // `apply_char_attrs` calls off one `set` clone, dropping the first.
+        // One writer for both kinds of row: two would make two `apply_char_attrs`
+        // calls off one `set` clone, dropping the first.
         let mut written: Option<(Tag, u16)> = None;
-        // The whole list.
         let mark = self.style_mark(
             subject.id,
             |s| s.features.clone(),
@@ -2710,8 +2585,7 @@ impl OndinApp {
                     SEARCH_ICON_PT,
                     theme::text::FAINT,
                 ));
-                // The room left: a `TextEdit` asking for more than its row grows the
-                // row, which pins the card's width.
+                // A `TextEdit` asking for more than its row grows the row, pinning the card's width.
                 ui.add(
                     egui::TextEdit::singleline(&mut self.feature_filter)
                         .frame(egui::Frame::NONE)
@@ -2722,8 +2596,7 @@ impl OndinApp {
                 );
             });
             let needle = self.feature_filter.to_lowercase();
-            // The search test, written once: the row loop and the reveal's count must
-            // answer it the same way, or the reveal offers rows the needle filters out.
+            // Written once: the row loop and the reveal's count must agree.
             let matches = |tag: &Tag, l: &FeatureLabel| {
                 needle.is_empty()
                     || l.name.to_lowercase().contains(&needle)
@@ -2754,8 +2627,6 @@ impl OndinApp {
                             }
                             continue;
                         }
-                        // `value` resolves at the first run, so a disagreeing tag
-                        // must draw the mixed readout instead.
                         let mixed = subject.feature_mixed(*tag);
                         let row = if mixed {
                             ui::switch_row_mixed(ui, &label.name, FEATURE_ROW_H)
@@ -2773,15 +2644,13 @@ impl OndinApp {
                             row.on_hover_text(label.hover.as_str())
                         };
                         if row.clicked() {
-                            // An explicit `0`, not a removal: absent means the font's
-                            // default (ligatures are usually on), `liga 0` means off.
-                            // A mixed row turns the feature on, not off by run 1's value.
+                            // An explicit `0`, not a removal: absent means the font's default.
+                            // A mixed row turns the feature on.
                             written = Some((*tag, if mixed { 1 } else { u16::from(value == 0) }));
                         }
                     }
                 });
-            // The reveal sits under the list, not beside the search, so it does not read
-            // as a filter; absent when nothing is withheld ([`features_reveal`]).
+            // Under the list, not beside the search, so it does not read as a filter.
             if let Some(text) = features_reveal(self.show_all_features, hidden)
                 && ui
                     .add(
@@ -2791,8 +2660,7 @@ impl OndinApp {
                                 .color(theme::text::FAINT),
                         )
                         .sense(egui::Sense::click())
-                        // A clickable label is not text: a selectable `Label` reports
-                        // the I-beam cursor.
+                        // A selectable `Label` reports the I-beam cursor.
                         .selectable(false),
                     )
                     .on_hover_text(
@@ -2814,10 +2682,10 @@ impl OndinApp {
     /// Set one OpenType tag across the selection, leaving every other tag in each
     /// run as it was.
     ///
-    /// Two arms: over a selection each run keeps its own list
+    /// Over a selection each run keeps its own list
     /// (`EditorSession::style_selection_per_run`); over a whole node a write
-    /// flattens the spans by design. The merge lives here because core knows nothing
-    /// about OpenType: a run naming the tag has its value replaced, otherwise gains it.
+    /// flattens the spans. The merge lives here because core knows nothing about
+    /// OpenType.
     fn write_feature_tag(&mut self, subject: &TypeSubject, tag: Tag, value: u16) {
         let merge = move |list: &[FeatureSetting]| {
             let mut next = list.to_vec();
@@ -2845,10 +2713,7 @@ impl OndinApp {
     }
 
     /// One row of the axis list: the axis's name and its value on one line, its
-    /// slider under them.
-    ///
-    /// The name and the value share a line because the slider needs the whole width
-    /// to be aimable; the list scrolls anyway.
+    /// slider under them, since the slider needs the whole width to be aimable.
     fn axis_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -2861,7 +2726,6 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.y = LABEL_GAP;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
-                // A fixed column, so the fields line up.
                 ui.allocate_ui_with_layout(
                     egui::vec2(width - AXIS_FIELD_W - CELL - COL_GAP * 2.0, CELL),
                     egui::Layout::left_to_right(egui::Align::Center),
@@ -2882,14 +2746,11 @@ impl OndinApp {
                 );
                 self.axis_field(ui, subject, axis, coords, AXIS_FIELD_W, true);
             });
-            // `true` as for the field above: the reset means no coordinate whichever
-            // control arrives at it.
             self.axis_slider(ui, subject, axis, coords, width, true);
         });
     }
 
-    /// `opsz`'s slider and its readout on one line — the shape the section's own
-    /// label makes possible, the axis being named already.
+    /// `opsz`'s slider and its readout on one line; the section's label names the axis.
     fn opsz_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -2899,8 +2760,7 @@ impl OndinApp {
     ) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = COL_GAP;
-            // `false` for `opsz`: an absent coordinate is the Auto state, so dropping
-            // one at the default would change the mode.
+            // `false`: an absent `opsz` coordinate is the Auto state.
             self.axis_slider(
                 ui,
                 subject,
@@ -2926,16 +2786,13 @@ impl OndinApp {
     ) {
         let current = axis_value(axis, coords);
         let mut value = current;
-        // A dash where the selection disagrees, as the other Type panel fields do
-        // (`mixed_text`). The slider below keeps its knob: a knob has nowhere to mean
-        // "mixed", and the drag is relative either way.
+        // The slider keeps its knob: it has nowhere to mean "mixed".
         let mixed = subject.mixed(CharAttrKind::Variations);
         let resp = value_field(
             ui,
             egui::vec2(width, CELL),
             Prefix::Text(axis_prefix(axis.tag)),
             &mut value,
-            // Tenths, matching the quantum `AxisSetting` stores at.
             Scrub::fine(0.5, 1).range(axis.min..=axis.max),
             |d| mixed_text(d.custom_formatter(ui::number(1)), mixed),
         );
@@ -2946,13 +2803,11 @@ impl OndinApp {
                 "Back to the font's default",
             )
         {
-            // The reset is a click, so it takes the immediate write, not the valve.
             self.write_axis(subject, axis, coords, current, axis.default, resettable);
             return;
         }
-        // Valved like `axis_slider`: the prefix strip is a scrub, and `write_axis`'s
-        // `value == current` guard cannot absorb it (`apply_char_attrs` sets no
-        // preview), so it would commit one undo step per frame.
+        // Valved: the prefix strip is a scrub, and `write_axis`'s `value == current`
+        // guard cannot absorb it (`apply_char_attrs` sets no preview).
         self.axis_valve(&resp, subject, axis, coords, value, resettable);
     }
 
@@ -2968,16 +2823,14 @@ impl OndinApp {
         let current = axis_value(axis, coords);
         let mut value = current;
         let resp = ui::slider(ui, width, &mut value, axis.min..=axis.max);
-        // Valved so a sweep is one undo step, and handed over every frame: `current`
-        // reads through the preview, so a `value != current` guard would be false on
-        // the release frame and the commit would never arrive.
+        // Handed over every frame: `current` reads through the preview, so a
+        // `value != current` guard would be false on the release frame.
         self.axis_valve(&resp, subject, axis, coords, value, clear_at_default);
     }
 
     /// Write one axis coordinate, if it moved.
     ///
-    /// The decision is [`axis_coords_after`]; this is the arm that commits it
-    /// outright, and [`Self::axis_valve`] is the arm that valves it.
+    /// The decision is [`axis_coords_after`]; [`Self::axis_valve`] valves it instead.
     fn write_axis(
         &mut self,
         subject: &TypeSubject,
@@ -2995,10 +2848,10 @@ impl OndinApp {
     }
 
     /// The same write, routed through the drag valve: a preview while the control
-    /// is under the hand, one commit when it is let go.
+    /// is held, one commit on release.
     ///
     /// `clear_at_default` means what it means in [`Self::write_axis`]: an absent
-    /// coordinate differs from one equal to the font's value (for `opsz` it is a
+    /// coordinate differs from one equal to the font's value (for `opsz`, a
     /// different mode), and both controls must save the same file for the same number.
     fn axis_valve(
         &mut self,
@@ -3018,19 +2871,15 @@ impl OndinApp {
     /// Spacing, the three indents and which lines the first-line one reaches, the
     /// last line of a justified paragraph, and the base direction.
     ///
-    /// Horizontal alignment is inline in the main panel, and the wrapping controls
-    /// are on the Box tab, where line breaking is a question about the box.
-    ///
     /// Two scopes in one tab: the first section acts on the paragraphs the selection
-    /// touches and can read *mixed*; the two below act on the whole layer, since
-    /// `Justify` and the base direction are one value per `Layout`. `shown` is what
-    /// the spannable controls display and `p` the node's own defaults; building a
-    /// node-level transaction from `shown` would promote one paragraph's indent.
+    /// touches and can read *mixed*; the two below act on the whole layer. `shown`
+    /// is what the spannable controls display and `p` the node's own defaults;
+    /// building a node-level transaction from `shown` would promote one
+    /// paragraph's indent.
     fn type_paragraph_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         let shown = subject.shown_paragraph();
         let font_size = subject.font_size();
-        // The section's five values as one mark.
         let spacing_mark = self.para_mark(
             subject.id,
             |p| (p.spacing, p.indent, p.hanging, p.indent_start, p.indent_end),
@@ -3058,8 +2907,6 @@ impl OndinApp {
             let half = (MENU_INNER - COL_GAP) / 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
-                // Paragraph spacing is absolute by default: it belongs to the
-                // layout's scale, not the type size.
                 let e = length_field(
                     ui,
                     egui::vec2(half, CELL),
@@ -3083,7 +2930,6 @@ impl OndinApp {
                     subject.para_mixed(ParaAttrKind::Indent),
                     font_size,
                     Bounds::INDENT,
-                    // The tooltip follows the state: one value, two meanings.
                     if shown.hanging {
                         "Hanging indent — how far the continuation lines come in"
                     } else {
@@ -3092,9 +2938,8 @@ impl OndinApp {
                 );
                 self.paragraph_length(subject, &e, ParaAttr::Indent);
             });
-            // Which lines the indent reaches: one value, two buttons that press as a
-            // segmented control would (the first line or the ones after it, never
-            // both). See `ParagraphStyle::indent`.
+            // One value, two buttons that press as a segmented control would. See
+            // `ParagraphStyle::indent`.
             let hanging_mixed = subject.para_mixed(ParaAttrKind::Hanging);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -3110,8 +2955,7 @@ impl OndinApp {
                         "Hanging — indent the continuation lines instead",
                     ),
                 ] {
-                    // Neither lit when the range disagrees: that is this pair's whole
-                    // mixed state, and a press then makes it uniform.
+                    // Neither lit when the range disagrees: this pair's mixed state.
                     if field_button(
                         ui,
                         glyph,
@@ -3127,8 +2971,6 @@ impl OndinApp {
                     }
                 }
             });
-            // The two block indents hold every line, hence arrows against an edge
-            // (`icon::ARROW_LINE_LEFT`).
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
                 let e = length_field(
@@ -3150,8 +2992,7 @@ impl OndinApp {
                     subject.para_mixed(ParaAttrKind::IndentEnd),
                     font_size,
                     Bounds::INDENT,
-                    // Names where it does nothing: an auto-width node has no wrap
-                    // width for an end indent to narrow.
+                    // An auto-width node has no wrap width for an end indent to narrow.
                     if matches!(subject.sizing, TextSizing::Auto) {
                         "Indent from the end edge — needs a box to measure from"
                     } else {
@@ -3168,7 +3009,6 @@ impl OndinApp {
 
         self.list_section(ui, subject, &shown);
 
-        // Only under Justify, where it means anything.
         if p.align == TextAlign::Justify {
             let mark = self.para_mark(
                 subject.id,
@@ -3264,13 +3104,10 @@ impl OndinApp {
     /// Put `id`'s box into the panel's sizing cell `i` — auto width, auto height,
     /// fixed.
     ///
-    /// A method because the context menu is a second door onto the same three
-    /// states (`context-menus.md` §5.6). The switch adopts the shaped size so a mode
-    /// change does not move the text, and goes through `text_session_restyled` so a
-    /// live editor re-shapes.
-    ///
-    /// Reads the preview layout: the size adopted is the one on screen, not the
-    /// committed one from before the last keystroke.
+    /// A method because the context menu is a second door onto the same states
+    /// (`context-menus.md` §5.6). The switch adopts the shaped size, read from the
+    /// preview layout, so a mode change does not move the text, and goes through
+    /// `text_session_restyled` so a live editor re-shapes.
     pub(crate) fn set_text_sizing(&mut self, id: NodeId, i: usize) {
         let Some(sizing) = self.session.display_node(id).and_then(|n| match n.kind() {
             ondin_core::NodeKind::Text { sizing, .. } => Some(*sizing),
@@ -3295,12 +3132,9 @@ impl OndinApp {
 
     /// The box itself: how it is sized, what it is measured to, what happens to
     /// text that does not fit, and where lines may break.
-    ///
-    /// Vertical alignment is inline in the main panel, not here.
     fn type_block_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let b = subject.block;
-        // One mark per section; a reset ends the tab's frame so no later section
-        // acts on the `b` it replaced.
+        // A reset ends the tab's frame so no later section acts on the `b` it replaced.
         let mark = self.sizing_mark(subject.id);
         let (_, hit) = section_marked(ui, "Sizing", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
@@ -3381,7 +3215,6 @@ impl OndinApp {
             return;
         }
 
-        // Directly under Overflow: an ellipsis needs somewhere to stop.
         let mark = self.block_mark(
             subject.id,
             |b| b.max_lines,
@@ -3440,17 +3273,14 @@ impl OndinApp {
 
     /// The three wrapping controls, stacked, each with its own label.
     ///
-    /// Three segmented tracks rather than dropdowns, so the alternatives are visible
-    /// and a dimmed row reads as "does not apply".
-    ///
     /// Word break and Long words dim under `NoWrap`, which suppresses line breaking
     /// outright. They are dimmed, not reset: a stored `word_break` survives a trip
     /// through `NoWrap`. The gate stops there, since hard breaks still break.
     fn wrap_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         let wraps = p.wrap != WrapMode::NoWrap;
-        // One mark per label. The two inside the gate dim with it and take no click:
-        // under `NoWrap` their reset is the card header's.
+        // The two inside the gate dim with it and take no click: under `NoWrap`
+        // their reset is the card header's.
         let wrap_mark = self.para_mark(
             subject.id,
             |p| p.wrap,
@@ -3489,8 +3319,7 @@ impl OndinApp {
                 if !wraps {
                     ui.disable();
                 }
-                // Two sections share this scope only for the dimming rule, so its
-                // pitch is [`SECTION_GAP`], not [`LABEL_GAP`].
+                // The two sections share this scope only for the dimming rule.
                 ui.spacing_mut().item_spacing.y = SECTION_GAP;
                 let (_, hit) = section_marked(ui, "Word break", break_mark.as_ref(), |ui| {
                     let current = WordBreak::ALL
@@ -3559,8 +3388,7 @@ impl OndinApp {
     /// Optical margins: place each line by its ink rather than by its advance.
     ///
     /// Not inside `wrap_section`'s gate: it is most useful on a node that never
-    /// wraps, such as a single-line label. One switch and no preview text, since the
-    /// effect is a small fraction of the font size and shows on the canvas.
+    /// wraps, such as a single-line label.
     fn optical_margin_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         // A switch row's mark is the dot after its label and no ↺: its toggle is the reset.
@@ -3655,8 +3483,7 @@ impl OndinApp {
                 mixed_text(d, mixed)
             },
         );
-        // The glyph prefix alone does not say which number this is, so the tooltip
-        // does; a marked field's tip names the main's value instead.
+        // A marked field's tip names the main's value instead.
         let resp = match mark {
             None => resp.on_hover_text(tooltip),
             Some(m) => {
@@ -3667,7 +3494,6 @@ impl OndinApp {
             }
         };
         if unit.is_some_and(|u| u.clicked()) {
-            // Every layer into the first one's other unit, each at its own size.
             let to = current.unit().other();
             self.apply_char_attrs_each(subject, |m| {
                 let own = char_length(&m.shown(kind)).unwrap_or(Length::ZERO);
@@ -3685,8 +3511,8 @@ impl OndinApp {
     /// Write a decoration's thickness or offset, through the valve unless the edit
     /// was a unit click.
     ///
-    /// The same fork [`Self::paragraph_length`] makes: a scrub previews and commits
-    /// once, and a unit click has no drag for a valve to wait on.
+    /// The same fork [`Self::paragraph_length`] makes: a unit click has no drag for
+    /// a valve to wait on.
     fn decoration_write(&mut self, e: &OptionalLengthEdit, subject: &TypeSubject, attr: CharAttr) {
         if e.immediate {
             self.apply_char_attrs(subject, vec![attr]);
@@ -3695,33 +3521,27 @@ impl OndinApp {
         }
     }
 
-    /// Route a character-attribute *field* through the preview→commit valve, or —
-    /// while a live editing session owns the range — straight into that session.
-    ///
-    /// The session is its own preview (it re-shapes and the canvas draws from the
-    /// editor), so a valve there would be a second preview; the commit is owed at
-    /// the end of the session, because one editing session is one undo step (§9.3).
+    /// Route a character-attribute *field* through the preview→commit valve, or
+    /// straight into a live editing session that owns the range (its commit is owed
+    /// when it ends, §9.3).
     ///
     /// Outside a session it is an engagement-latched valve: it previews while the
     /// control is engaged and commits once on the falling edge, so typing `40`
-    /// does not commit `4` on its way. There is no arm that commits on a bare
-    /// `changed()`. (§15 D316, D812)
+    /// does not commit `4` on its way. No arm commits on a bare `changed()`.
+    /// (§15 D316, D812)
     fn char_valve(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: CharAttr) {
         if subject.partial {
             self.arm_session_scrub(resp, subject.id);
             if resp.changed() {
                 self.apply_char_attrs(subject, vec![attr]);
-                // Armed here because nothing downstream will: a partial subject
-                // commits no `commit_edit` until the session ends.
+                // A partial subject commits no `commit_edit` until the session ends.
                 self.note_live_edit(resp.dragged());
             }
             return;
         }
-        // The transaction is built unconditionally: `subject` reads through the
-        // preview, so on the release frame the equality guard would say "no change"
-        // and the commit would never happen. The engagement is read before the
-        // `gesture_cancelled` bail so a cancelled frame spends the transition, or the
-        // next frame commits the edit the cancel threw away.
+        // Built unconditionally: `subject` reads through the preview, so an equality
+        // guard would withhold the release-frame commit. The engagement is read before
+        // the `gesture_cancelled` bail so a cancelled frame spends the transition.
         let engaged = resp.dragged() || resp.has_focus();
         let was_engaged = resp.ctx.data_mut(|d| {
             let id = resp.id.with("char-valve-engaged");
@@ -3732,10 +3552,8 @@ impl OndinApp {
         if self.gesture_cancelled {
             return;
         }
-        // The edit in flight, remembered between the last keystroke and the
-        // committing frame. Insurance rather than load-bearing: no test goes red
-        // without it, but the valve must not depend on which frame egui writes the
-        // typed value back.
+        // The edit in flight between the last keystroke and the committing frame;
+        // no test needs it, but the valve must not depend on when egui writes back.
 
         let pending_key = resp.id.with("char-valve-pending");
         let (tx, changes) = char_attrs_tx(subject, vec![attr.clone()]);
@@ -3753,8 +3571,7 @@ impl OndinApp {
                 None => tx,
             }
         };
-        // Every frame, as `edit_valve` does, or the box stays over the artwork for
-        // the whole scrub.
+        // Every frame, as `edit_valve` does.
         self.note_edit(Some(resp), &tx);
         if engaged {
             self.session.set_preview(&tx);
@@ -3762,23 +3579,20 @@ impl OndinApp {
             // `Escape` abandons a typed value; egui merely surrenders focus.
             if !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.commit_edit(tx.clone());
-                // As in `apply_char_attrs`: the editor adopts the cleared list.
                 self.text_session_restyled_after(&tx);
             }
             self.session.clear_gesture_preview();
             resp.ctx
                 .data_mut(|d| d.insert_temp::<Option<CharAttr>>(pending_key, None));
         }
-        // No third arm commits on a bare `changed()`: every caller is
-        // engagement-bearing, and egui's clamp of an out-of-range stored value
-        // marks an untouched field `changed()`, which would spend an undo step.
+        // No arm commits on a bare `changed()`: egui's clamp of an out-of-range
+        // stored value marks an untouched field changed.
     }
 
-    /// Remember what a session-scoped scrub is about to overwrite, on the frame its
-    /// drag begins.
+    /// Remember what a session-scoped scrub is about to overwrite, on `drag_started`.
     ///
     /// The write goes into the editor, so this snapshot is all `cancel_gesture` can
-    /// wind back to — see [`InFlight::session_scrub`]. Taken on `drag_started` alone.
+    /// wind back to — see [`InFlight::session_scrub`].
     ///
     /// [`InFlight::session_scrub`]: crate::app::InFlight::session_scrub
     fn arm_session_scrub(&mut self, resp: &egui::Response, id: NodeId) {
@@ -3794,9 +3608,9 @@ impl OndinApp {
     /// Apply one of `docs/shortcuts.md` §10's styling chords to the live session.
     ///
     /// Every chord goes through the same `apply_char_attrs` / `commit_paragraph` the
-    /// panel's controls use, so a chord and a click produce identical edits,
-    /// including the scope rule. Silent with no session open: [`Action::TextStyle`]
-    /// is only resolved in `Mode::TextInsert`.
+    /// panel's controls use, so a chord and a click produce identical edits.
+    /// Silent with no session open: [`Action::TextStyle`] resolves only in
+    /// `Mode::TextInsert`.
     ///
     /// [`Action::TextStyle`]: crate::input::Action::TextStyle
     pub(crate) fn text_chord(&mut self, chord: TextChord) {
@@ -3807,8 +3621,7 @@ impl OndinApp {
             return;
         };
         match chord {
-            // Exclusive with strikethrough, with the colour and thickness carried
-            // over, as clicking the segmented track does.
+            // Exclusive with strikethrough, as clicking the track is.
             TextChord::Underline => {
                 let under = decoration_of(&subject, CharAttrKind::Underline);
                 let strike = decoration_of(&subject, CharAttrKind::Strikethrough);
@@ -3823,8 +3636,7 @@ impl OndinApp {
                 self.apply_char_attrs(&subject, attrs);
             }
             TextChord::Size(step) => {
-                // `CharAttr::Size` clamps itself to `MIN_FONT_SIZE..=MAX_FONT_SIZE`,
-                // so held keys stop at the ends without a second bound here.
+                // `CharAttr::Size` clamps itself, so held keys stop at the ends.
                 let next = subject.font_size() + f64::from(step) * FONT_SIZE_STEP;
                 self.apply_char_attrs(&subject, vec![CharAttr::Size(next)]);
             }
@@ -3833,9 +3645,8 @@ impl OndinApp {
                     CharAttr::LetterSpacing(l) => l,
                     _ => Length::ZERO,
                 };
-                // A held key stops where the field stops, read off the field's own
-                // [`Bounds`]. The cap is on the control, not the model (a file may
-                // hold an out-of-range value the field shows rather than rewrites),
+                // A held key stops where the field's [`Bounds`] stop. The cap is on
+                // the control, not the model (a file may hold an out-of-range value),
                 // hence [`stepped_into`] and not `clamp` (§15 D425).
                 let next = match (
                     current,
@@ -3847,16 +3658,14 @@ impl OndinApp {
                     (Length::Px(c), Length::Px(v)) => {
                         Length::Px(stepped_into(c, v, Bounds::TRACKING.px(subject.font_size())))
                     }
-                    // `step_length` keeps the unit, so a mixed pair cannot arise;
-                    // the bound would be in the wrong unit if it did.
+                    // `step_length` keeps the unit, so a mixed pair cannot arise.
                     (_, stepped) => stepped,
                 }
                 .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(next)]);
             }
             TextChord::Leading(step) => {
-                // Auto seeds from what Auto is currently worth in px, as the field
-                // does, not from a nominal 0.
+                // Auto seeds from what Auto is worth in px, as the field does.
                 let current = match subject.shown(CharAttrKind::LineHeight) {
                     CharAttr::LineHeight(v) => v,
                     _ => None,
@@ -3864,7 +3673,6 @@ impl OndinApp {
                 let from = current
                     .or_else(|| subject.line_height.map(Length::Px))
                     .unwrap_or(Length::Em(1.0));
-                // [`stepped_into`] bounds the step as in the tracking arm;
                 // `Length::canonical` does not bound, so a held key would go negative.
                 let next = match (
                     from,
@@ -3883,8 +3691,7 @@ impl OndinApp {
                 .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LineHeight(Some(next))]);
             }
-            // Node-level, so a paragraph-style commit rather than a span (see
-            // [`TextChord::Align`]); a no-op press leaves no undo step.
+            // Node-level (see [`TextChord::Align`]); a no-op press leaves no undo step.
             TextChord::Align(align) => {
                 if subject.paragraph.align == align {
                     return;
@@ -3896,8 +3703,7 @@ impl OndinApp {
         }
     }
 
-    /// Apply character attributes now — for the controls that are a click rather
-    /// than a drag, and for the unit toggles, which change the value without any
+    /// Apply character attributes now — for clicks and unit toggles, which have no
     /// drag for a valve to wait on.
     pub(super) fn apply_char_attrs(&mut self, subject: &TypeSubject, attrs: Vec<CharAttr>) {
         if subject.partial {
@@ -3909,22 +3715,20 @@ impl OndinApp {
             self.preview_session();
             return;
         }
-        // Here equality is the right question: this path is for clicks with no
-        // preview in play, and a no-op click must leave no undo step.
+        // No preview is in play here, so equality is the right question: a no-op
+        // click must leave no undo step.
         let (tx, changes) = char_attrs_tx(subject, attrs);
         if changes {
             self.commit_edit(tx.clone());
-            // `_after`: this transaction clears the attribute's spans over the whole
-            // node, and a session on a bare caret reaches here, so the editor must
-            // adopt the cleared list.
+            // A session on a bare caret reaches here, so the editor must adopt the
+            // cleared span list.
             self.text_session_restyled_after(&tx);
         }
     }
 
     /// [`Self::apply_char_attrs`] with each layer's own attributes — `each` is asked
-    /// once per layer of a several-layer subject, for writes whose value depends on
-    /// the layer (a unit click converting each amount at its own size, a variant
-    /// merged into each layer's own axes).
+    /// once per layer, for writes whose value depends on the layer (a unit click, a
+    /// variant merged into each layer's own axes).
     fn apply_char_attrs_each(
         &mut self,
         subject: &TypeSubject,
@@ -3954,7 +3758,6 @@ impl OndinApp {
     pub(crate) fn char_slot_color(&self, id: NodeId, slot: CharSlot) -> Option<Color> {
         let subject = TypeSubject::of(self, id)?;
         match slot {
-            // The picker opens on the colour already on screen.
             CharSlot::Color => Some(match attr!(subject, Color, Color) {
                 Some(c) => c,
                 None => subject.text_color(),
@@ -3968,10 +3771,9 @@ impl OndinApp {
 
     /// Write a colour the detached picker is editing back into a decoration.
     ///
-    /// The paint slots whose write is not a document transaction: while a live
-    /// session owns the range the write belongs in its spans (§9.3). It routes to
-    /// `apply_char_attrs` for a click and `char_valve` for a drag, one route for both
-    /// character-scoped slots ([`crate::panels::paint::PaintSlot::char_scoped`]).
+    /// Routes to `apply_char_attrs` for a click and `char_valve` for a drag, for both
+    /// character-scoped slots ([`crate::panels::paint::PaintSlot::char_scoped`]);
+    /// while a live session owns the range the write belongs in its spans (§9.3).
     ///
     /// Returns whether it had anything to write, which is `preview_slot`'s answer.
     /// A gradient collapses to its first stop; the picker disables its gradient tabs
@@ -3983,10 +3785,8 @@ impl OndinApp {
         brush: &Brush,
         how: CharWrite<'_>,
     ) -> bool {
-        // A commit reads the committed document, the other two verbs the preview: the
-        // press frame has just put this colour in the preview, so comparing against it
-        // would make `apply_char_attrs` see no change. Clearing the preview instead
-        // would drop a live text session's `session_preview` too.
+        // A commit reads the committed document: the press frame has just put this
+        // colour in the preview, so `apply_char_attrs` would see no change.
         let subject = match how {
             CharWrite::Commit => TypeSubject::committed(self, id),
             CharWrite::Valve(_) | CharWrite::Preview => TypeSubject::of(self, id),
@@ -4000,22 +3800,17 @@ impl OndinApp {
         let Some(attr) = char_color_attr(&subject, slot, Some(color)) else {
             return false;
         };
-        // A live selection collapses the three verbs into one: nothing a session
-        // styles reaches history until it ends (§9.3), so "show" and "commit" are the
-        // same write into the editor's spans. `char_valve`'s `changed()` gate would
-        // miss the picker's raw sensed regions, so it is not used here.
+        // A live selection writes straight into the editor's spans (§9.3);
+        // `char_valve`'s `changed()` gate would miss the picker's raw regions.
         if subject.partial {
-            // The gate the valve would provide: `valve_slot` is called every frame by
-            // several picker controls, and writing on every call would overwrite the
-            // control under the pointer. The test includes the pointer terms because a
-            // raw sensed region reports neither `changed` nor `lost_focus`.
+            // `valve_slot` runs every frame, and writing on every call would overwrite
+            // the control under the pointer.
             //
             // valve-gate-not-a-commit: the write goes into the live session, not a valve.
             if let CharWrite::Valve(resp) = how {
                 if !(resp.dragged() || resp.drag_stopped() || resp.changed() || resp.lost_focus()) {
                     return false;
                 }
-                // The selection chrome retreats as for every live edit.
                 self.note_live_edit(resp.dragged());
             }
             self.apply_char_attrs(&subject, vec![attr]);
@@ -4024,9 +3819,8 @@ impl OndinApp {
         match how {
             CharWrite::Commit => self.apply_char_attrs(&subject, vec![attr]),
             CharWrite::Valve(resp) => self.char_valve(resp, &subject, attr),
-            // Preview only, not through `char_valve`: a press that never becomes a
-            // drag has no release frame to clear the preview. A live selection never
-            // reaches here.
+            // Not through `char_valve`: a press that never becomes a drag has no
+            // release frame to clear the preview.
             CharWrite::Preview => {
                 let (tx, _) = char_attrs_tx(&subject, vec![attr]);
                 self.session.set_preview(&tx);
@@ -4047,13 +3841,11 @@ impl OndinApp {
         }
     }
 
-    /// Apply one spannable paragraph attribute now — for the controls that are a
-    /// click rather than a drag, and for the unit chips, which change the value
-    /// with no drag for a valve to wait on.
+    /// Apply one spannable paragraph attribute now, for clicks and unit chips.
     ///
     /// [`apply_char_attrs`]'s twin, with the same two targets: a live session gets it
-    /// in its own `ParaSpans` (committed once when it ends, §9.3); anything else
-    /// sets the node's defaults and drops that attribute's overrides.
+    /// in its own `ParaSpans` (committed when it ends, §9.3); anything else sets the
+    /// node's defaults and drops that attribute's overrides.
     ///
     /// [`apply_char_attrs`]: Self::apply_char_attrs
     fn apply_para_attrs(&mut self, subject: &TypeSubject, attrs: Vec<ParaAttr>) {
@@ -4066,7 +3858,6 @@ impl OndinApp {
             self.preview_session();
             return;
         }
-        // As in `apply_char_attrs`: a no-op click must leave no undo step.
         let (tx, changes) = para_attrs_tx(subject, attrs);
         if changes {
             self.commit_edit(tx);
@@ -4074,18 +3865,15 @@ impl OndinApp {
         }
     }
 
-    /// A spannable paragraph write through the drag valve: previewed while the
-    /// control is under the hand, committed once when it is released.
+    /// A spannable paragraph write through the drag valve.
     ///
     /// The transaction is built unconditionally, as in `char_valve`: `subject` reads
-    /// through the preview, so on a drag's release frame a "did anything change"
-    /// guard would withhold the commit that is owed.
+    /// through the preview, so a change guard would withhold the release-frame commit.
     fn valve_paragraph(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: ParaAttr) {
         if subject.para_partial {
             self.arm_session_scrub(resp, subject.id);
             if resp.changed() {
                 self.apply_para_attrs(subject, vec![attr]);
-                // Armed here because no `commit_edit` is on this path.
                 self.note_live_edit(resp.dragged());
             }
             return;
@@ -4115,9 +3903,8 @@ impl OndinApp {
 
 /// One labelled block of the popup: a small-caps eyebrow, then its controls.
 ///
-/// Three gaps: the popup's `item_spacing.y` separates sections ([`SECTION_GAP`]);
-/// [`ui::labelled`] holds the label to its control at [`LABEL_GAP`] and two controls
-/// of one section at [`ui::CARD_ROW_GAP`].
+/// The popup's `item_spacing.y` separates sections ([`SECTION_GAP`]);
+/// [`ui::labelled`] sets the label gap ([`LABEL_GAP`]) and the control gap.
 fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui::labelled(ui, label, add)
 }
@@ -4126,8 +3913,8 @@ fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) ->
 /// label (full brightness with a dot, ↺ under the pointer), and a click on it is the
 /// reset, which the second return value reports. Unmarked, exactly [`section`].
 ///
-/// One mark per section, since most controls inside have no label to carry a dot;
-/// the two prefixed spacing fields and the *Margins* switch row carry their own.
+/// One mark per section; the two prefixed spacing fields and the *Margins* switch
+/// row carry their own.
 fn section_marked<R>(
     ui: &mut egui::Ui,
     label: &str,
@@ -4165,7 +3952,7 @@ fn section_marked<R>(
 /// own. Returns whether it was pressed.
 ///
 /// Always drawn, dimmed when there is nothing to put back: an empty slot would read
-/// as the row stopping short. `Disabled` also refuses the hover.
+/// as the row stopping short.
 fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
     let resp = field_button(
         ui,
@@ -4184,11 +3971,9 @@ fn reset_slot(ui: &mut egui::Ui, active: bool, tooltip: &str) -> bool {
 /// default per attribute, plus the spans with that attribute's overrides dropped.
 ///
 /// Both halves, always: setting the default alone leaves an override span behind.
-///
-/// The transaction always comes back, with the equality reported beside it:
-/// `subject` reads through the preview, so on a drag's release frame the new style
-/// equals it and a valve given `None` would never commit. A several-layer subject
-/// writes every layer, each its own defaults with `attrs` set, in one transaction.
+/// The transaction always comes back, with the equality beside it: on a drag's
+/// release frame the new style equals the preview, and a valve given `None` would
+/// never commit. A several-layer subject writes every layer in one transaction.
 fn char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transaction, bool) {
     let (mut tx, mut changes) = one_char_attrs_tx(subject, attrs.clone());
     for other in &subject.others {
@@ -4214,7 +3999,6 @@ fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transactio
             Operation::SetTextStyle {
                 id: subject.id,
                 style,
-                // The next op overwrites the re-statement this asks for.
                 spans: None,
             },
             Operation::SetTextSpans {
@@ -4231,8 +4015,7 @@ fn one_char_attrs_tx(subject: &TypeSubject, attrs: Vec<CharAttr>) -> (Transactio
 ///
 /// [`char_attrs_tx`]'s twin, down to the order of the two operations: the style op
 /// re-states the span list (`Document::op_set_paragraph_style`), then the spans op
-/// installs the list computed here. Also returns whether anything changed, which
-/// only the click path may act on.
+/// installs the list computed here. Only the click path may act on the changed flag.
 fn para_attrs_tx(subject: &TypeSubject, attrs: Vec<ParaAttr>) -> (Transaction, bool) {
     let mut paragraph = subject.paragraph.clone();
     let mut spans = subject.para_spans.clone();
@@ -4289,12 +4072,11 @@ impl<V: PartialEq> PartialEq for AxesOf<V> {
 }
 
 /// `cur`'s coordinates with the ones `owned` picks reset to `src`'s, in `src`'s
-/// order — the copy's own value kept at each tag `owned` does not pick, and a tag
-/// only the copy has kept after them.
+/// order; the copy's own value stays at each tag `owned` does not pick, and a tag
+/// only the copy has follows.
 ///
 /// The order matters: `reset::overrides` and `propagate`'s merge compare
-/// `variations` as an ordered list, so a copy that differed only in the section's
-/// axes must come out equal to its source.
+/// `variations` as an ordered list.
 fn axes_reset(
     cur: &[AxisSetting],
     src: &[AxisSetting],
@@ -4316,8 +4098,7 @@ fn axes_reset(
 /// The attribute that puts `color` in `slot` — `None` meaning "inherit".
 ///
 /// One builder for every write to a character-scoped slot, so the row, the picker
-/// and the slot verbs agree. `None` for a decoration slot with no decoration on it,
-/// which is also how the picker learns to close itself.
+/// and the slot verbs agree. `None` for a decoration slot with no decoration on it.
 fn char_color_attr(
     subject: &TypeSubject,
     slot: CharSlot,
@@ -4349,9 +4130,8 @@ const DECORATION_GLYPHS: [&str; 3] = [icon::MINUS, icon::TEXT_UNDERLINE, icon::T
 /// not overlap a slider that reaches the same edge.
 const LIST_GUTTER: f32 = 10.0;
 
-/// Which of the Decoration strip's three cells is lit, and (in [`decoration_write`])
-/// what picking cell `i` writes: one rule read in two directions, lifted out of
-/// `decoration_section` so a test can reach it. Cell 0 is no decoration.
+/// Which of the Decoration strip's three cells is lit; cell 0 is no decoration.
+/// Lifted out of `decoration_section` so a test can reach it.
 fn decoration_cell(under: Option<Decoration>, strike: Option<Decoration>) -> usize {
     match (under, strike) {
         (Some(_), _) => 1,
@@ -4403,8 +4183,7 @@ fn matches_variant(v: &FontVariant, weight: u16, italic: bool, coords: &[AxisSet
 
 /// Whether a several-layer subject's layers sit on different faces of `variants`,
 /// each classified by [`matches_variant`] (a layer on no face differs from one on a
-/// face). False on a single layer. Two cuts of one weight and slope that differ by
-/// an axis they name are different faces.
+/// face). False on a single layer.
 fn faces_disagree(variants: &[FontVariant], subject: &TypeSubject) -> bool {
     let face = |m: &TypeSubject| {
         variants.iter().position(|v| {
@@ -4423,8 +4202,7 @@ fn faces_disagree(variants: &[FontVariant], subject: &TypeSubject) -> bool {
 /// Replace a `DragValue`'s digits with a dash when the range disagrees with
 /// itself.
 ///
-/// A dash, not a blank and not the first value: blank reads as broken, and one of
-/// several values reads as a claim that it is the value.
+/// A dash, not a blank (reads as broken) and not the first value (reads as a claim).
 fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
         return d.custom_formatter(|_, _| "–".into());
@@ -4435,9 +4213,8 @@ fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
 /// What picking list marker `next` writes — the marker, and a gutter for it if the
 /// paragraph has none.
 ///
-/// A marker is right-aligned on the paragraph's start edge, so with no indent it
-/// draws outside the box. The gutter opens only where the indent resolves to zero
-/// (hence `font_size`), and turning a marker off never touches the indent.
+/// The gutter opens only where the indent resolves to zero (hence `font_size`),
+/// and turning a marker off never touches the indent.
 fn marker_attrs(next: Option<ListMarker>, indent_start: Length, font_size: f64) -> Vec<ParaAttr> {
     let mut attrs = vec![ParaAttr::Marker(next)];
     if next.is_some() && indent_start.resolve(font_size) == 0.0 {
@@ -4448,9 +4225,8 @@ fn marker_attrs(next: Option<ListMarker>, indent_start: Length, font_size: f64) 
 
 /// The variation coordinates after setting `axis` to `value`.
 ///
-/// `clear_at_default` drops the coordinate rather than writing the font's own value,
-/// which keeps the file free of settings that say nothing. It is off for `opsz`,
-/// where an absent coordinate is the Auto state.
+/// `clear_at_default` drops the coordinate rather than writing the font's own value.
+/// It is off for `opsz`, where an absent coordinate is the Auto state.
 fn axis_coords_after(
     axis: &FontAxis,
     coords: &[AxisSetting],
@@ -4472,10 +4248,9 @@ fn axis_coords_after(
 /// in whatever units, or `None` when they are not.
 ///
 /// It stops at zero because zero is the only amount where the unit carries no
-/// information about the ink (`Em(0.02)` and `Px(0.32)` are the same ink at 16pt
-/// and different at 24); widening it is a decision. It hands back the first value
-/// that cannot be the default, so the unit chip does not flip to `px` under a user
-/// who set `%`.
+/// information about the ink (`Em(0.02)` and `Px(0.32)` differ at 24pt). It hands
+/// back the first value that cannot be the default, so the unit chip does not flip
+/// to `px` under a user who set `%`.
 fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> Option<A> {
     if !values
         .iter()
@@ -4483,10 +4258,8 @@ fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> O
     {
         return None;
     }
-    // `Spans::values_in` answers in document order, so the first value may be the
-    // node default. `Length::ZERO` is `Px(0.0)`, every one of these attributes'
-    // default, so a `Px(0.0)` may be nobody's choice while an `Em(0.0)` always is;
-    // where both are explicit this is a tie-break.
+    // `Length::ZERO` is `Px(0.0)`, these attributes' default, so a `Px(0.0)` may be
+    // nobody's choice while an `Em(0.0)` always is.
     let pick = values
         .iter()
         .position(|v| length_of(v) != Some(Length::ZERO))
@@ -4523,8 +4296,7 @@ fn decoration_attr(kind: CharAttrKind, d: Option<Decoration>) -> CharAttr {
 
 /// What a [`length_field`] produced.
 ///
-/// The response comes back too, because these fields owe a valve (preview, then
-/// one commit).
+/// The response comes back too, because these fields owe a valve.
 struct LengthEdit {
     /// The value to write: on the frame it changed, and again on the frame a scrub
     /// ended, which is the one the valve commits on.
@@ -4538,8 +4310,7 @@ struct LengthEdit {
 /// A `Length` field with a clickable unit, for the paragraph scope.
 ///
 /// `mixed` replaces the digits with a dash and nothing else ([`mixed_text`]): a
-/// scrub starts from the value at the range's start and makes the range uniform,
-/// and a unit click converts the shown value for every paragraph in the range.
+/// scrub starts from the value at the range's start and makes the range uniform.
 #[allow(clippy::too_many_arguments)]
 fn length_field(
     ui: &mut egui::Ui,
@@ -4551,7 +4322,6 @@ fn length_field(
     bounds: Bounds,
     tooltip: &str,
 ) -> LengthEdit {
-    // One [`Bounds`] in, with the px face derived from the font size.
     let (mut shown, scrub, typed) = match current {
         Length::Em(m) => (
             m * 100.0,
@@ -4576,9 +4346,8 @@ fn length_field(
         }),
         &mut shown,
         scrub,
-        // `mixed_text` last, so its dash wins over the number formatter. The parser
-        // is replaced because two units share the field: a `px` typed into its `%`
-        // face is a rejection, not a wrong number.
+        // `mixed_text` last, so its dash wins. The parser is replaced because two
+        // units share the field: a `px` typed into its `%` face is a rejection.
         |d| {
             mixed_text(
                 d.custom_formatter(ui::number(2))
@@ -4587,7 +4356,6 @@ fn length_field(
             )
         },
     );
-    // The field is labelled by a glyph alone, so the tooltip says which number it is.
     let resp = resp.on_hover_text(tooltip.to_string());
     if unit_clicked {
         return LengthEdit {
@@ -4597,10 +4365,8 @@ fn length_field(
         };
     }
     LengthEdit {
-        // A scrub reports on the frame it changes the value and again on the frame it
-        // ends: the release is the frame `edit_valve` commits on, and by then
-        // `value_field` has settled the number, so a changed-only gate would
-        // withhold it. A click is not a drag, so it reports nothing. Pinned by
+        // `edit_valve` commits on the release frame, when `value_field` has already
+        // settled the number. Pinned by
         // `a_scrub_reports_its_value_on_the_release_frame_and_a_click_reports_nothing`.
         next: (shown != before || resp.drag_stopped()).then(|| match current {
             Length::Em(_) => Length::Em(shown / 100.0),
@@ -4623,18 +4389,12 @@ struct OptionalLengthEdit {
 
 /// A `Length` field whose absent state means "the font decides".
 ///
-/// The suffix cycles `auto → px → % → auto`, so the `None` state is one of the
-/// units rather than a separate switch.
+/// The suffix cycles `auto → px → % → auto`. Reports as [`length_field`] does.
+/// `bounds` is the caller's because the offset is signed and the thickness is not;
+/// the model clamps too (`typography::canonical_decoration`).
 ///
-/// Reports on a frame the value changed and again on the frame the drag ends
-/// ([`length_field`]'s rule), not on every frame. `bounds` is the caller's because
-/// the offset is signed (positive-up) and the thickness is not; the model clamps
-/// too (`typography::canonical_decoration`).
-///
-/// `resolved` is what leaving "auto" seeds: a zero thickness is no line, so the
-/// click that means "show this in px" must not erase the underline. `None` for a
-/// caller with nothing to seed from, the offset field, whose sign convention differs
-/// from parley's; seeding zero there only puts the band on the baseline.
+/// `resolved` is what leaving "auto" seeds: a zero thickness is no line. `None` for
+/// the offset field, whose sign convention differs from parley's.
 #[allow(clippy::too_many_arguments)]
 fn optional_length_field(
     ui: &mut egui::Ui,
@@ -4647,16 +4407,14 @@ fn optional_length_field(
     tooltip: &str,
 ) -> OptionalLengthEdit {
     let (mut shown, scrub, unit, typed) = match current {
-        // The "auto" face's parse unit is arbitrary: its scrub range is zero-width
-        // and `next` is withheld while `current` is `None`.
+        // The parse unit is arbitrary: the scrub range is zero-width and `next` is
+        // withheld while `current` is `None`.
         None => (
             0.0,
             Scrub::whole(1.0).range(0.0..=0.0),
             "auto",
             expr::Unit::Px,
         ),
-        // Derived from the `%` face rather than hard-coded (see [`Bounds`]), so a
-        // unit click round-trips.
         Some(Length::Px(v)) => (
             v,
             Scrub::fine(0.1, 2).range(bounds.px(font_size)),
@@ -4678,13 +4436,11 @@ fn optional_length_field(
         Some(Suffix {
             text: unit,
             clickable: true,
-            // What clicking does, not what the field is. Three faces, not two:
-            // `next_optional_length` cycles px → % → the font's own.
             tooltip: "Click to cycle: px, %, or the font's own",
         }),
         &mut shown,
         scrub,
-        // Its own parser, as [`length_field`]'s; inert but harmless on the "auto" face.
+        // Its own parser, as [`length_field`]'s.
         |d| {
             let d = d.custom_parser(move |t| expr::eval_in(t, typed));
             if current.is_none() {
@@ -4693,7 +4449,6 @@ fn optional_length_field(
             d.custom_formatter(ui::number(2))
         },
     );
-    // The field is labelled by a glyph alone, so the tooltip says which number it is.
     let resp = resp.on_hover_text(tooltip.to_string());
     if unit_clicked {
         return OptionalLengthEdit {
@@ -4703,10 +4458,7 @@ fn optional_length_field(
         };
     }
     OptionalLengthEdit {
-        // Nothing to write while the field shows "auto". Otherwise `length_field`'s
-        // rule: report when the value changed and on the frame the drag ends, which
-        // is the frame `edit_valve` commits on. `current.is_some()` asks whether
-        // there is a value at all, the rest whether it has anything to say.
+        // Nothing to write while the field shows "auto"; otherwise `length_field`'s rule.
         next: (current.is_some() && (shown != before || resp.drag_stopped())).then(|| {
             Some(match current {
                 Some(Length::Em(_)) => Length::Em(shown / 100.0),
@@ -4721,8 +4473,7 @@ fn optional_length_field(
 /// A combo over a small `Copy` enum, returning the pick when it changed.
 ///
 /// Exposes the enum's own variants verbatim, so a variant added to the model
-/// reaches the panel. Used by the line-style picker; the wrapping controls are
-/// segmented tracks in `wrap_section`.
+/// reaches the panel. Used by the line-style picker.
 fn enum_combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -4758,13 +4509,9 @@ fn enum_combo<T: Copy + PartialEq>(
 /// auto → px → % → auto.
 ///
 /// Leaving "the font decides" seeds what the font was deciding
-/// ([`next_line_height`]'s rule), since a zero seed would remove the line.
-/// `resolved` is `None` for a caller with nothing measured (the offset field), and
-/// the zero fallback applies.
-///
-/// The `Px` face is the seeded one here, where line height's cycle
-/// (`auto → % → px → auto`) seeds an `Em`. A free function because it is the
-/// decision and the field around it needs a `Ui`.
+/// ([`next_line_height`]'s rule), since a zero seed would remove the line;
+/// `resolved` is `None` for the offset field. Unlike line height's
+/// `auto → % → px → auto`, the seeded face here is `Px`.
 fn next_optional_length(
     current: Option<Length>,
     font_size: f64,
@@ -4782,7 +4529,7 @@ fn next_optional_length(
 ///
 /// Leaving Auto seeds what Auto was worth (`resolved` is the shaped first line's
 /// height), so the click changes the unit and not the type; `120%` is the fallback
-/// for a node with nothing laid out. A free function so it can be tested headlessly.
+/// for a node with nothing laid out.
 fn next_line_height(
     current: Option<Length>,
     font_size: f64,
@@ -4790,7 +4537,6 @@ fn next_line_height(
 ) -> Option<Length> {
     match current {
         None => Some(Length::Em(match resolved {
-            // The multiple the face is actually giving.
             Some(px) if font_size > 0.0 => (px / font_size).max(0.0),
             _ => 1.2,
         })),
@@ -4802,7 +4548,7 @@ fn next_line_height(
 /// One layer's line height `current` moved into the state `like` names (Auto, a
 /// multiple or px), keeping what it draws where the state allows: the several-layer
 /// card's unit click, where `like` is the first layer's [`next_line_height`]. Auto
-/// reads the laid line as [`next_line_height`] does, 1.2 of the size with nothing laid.
+/// reads the laid line as [`next_line_height`] does.
 fn line_height_as(
     current: Option<Length>,
     font_size: f64,
@@ -4817,11 +4563,10 @@ fn line_height_as(
     Some(from.in_unit(unit, font_size))
 }
 
-/// A short prefix for an axis field — the tag itself, which is what a type
-/// designer calls it and what the file records.
+/// A short prefix for an axis field.
 fn axis_prefix(tag: Tag) -> &'static str {
-    // `Prefix::Text` wants a `'static str`, so the well-known tags get a name and
-    // the rest share a marker rather than leaking a string per frame.
+    // `Prefix::Text` wants a `'static str`: the rest share a marker rather than
+    // leaking a string per frame.
     match tag.as_str() {
         "opsz" => "OS",
         "wdth" => "WD",
@@ -4839,8 +4584,7 @@ fn axis_prefix(tag: Tag) -> &'static str {
 /// for the axis row's hover — `None` for the ones that need no warning.
 ///
 /// Only `slnt`: `fvar` measures slant counter-clockwise, so a right-leaning
-/// oblique is `slnt −10`. It rides on the row's hover, being a fact about the
-/// format rather than the control.
+/// oblique is `slnt −10`.
 fn axis_sign_hint(tag: Tag) -> Option<&'static str> {
     match tag.as_str() {
         "slnt" => Some("counter-clockwise degrees, so a right-leaning oblique is negative"),
@@ -4860,21 +4604,16 @@ fn feature_rank(tag: Tag) -> u8 {
         "smcp" | "c2sc" | "case" => 3,
         _ if stylistic_set(tag).is_some() => 4,
         _ if character_variant(tag).is_some() => 5,
-        // Everything else the registry offers, then the mechanics and private
-        // tags — which are only on screen at all under *Show all features*.
         _ if registered(tag).is_some_and(|r| r.offered) => 6,
         _ => 7,
     }
 }
 
-/// One tag from the OpenType feature registry: the registry's own name for it,
-/// one line saying what it does, and whether the registry's *UI suggestion* says
-/// a user should be choosing it.
+/// One tag from the OpenType feature registry: its name, one line saying what it
+/// does, and whether the registry's *UI suggestion* says a user should choose it.
 struct Registered {
     name: &'static str,
-    /// For the row's hover. `""` where there is nothing to say that is not
-    /// already in the name — every mechanic, since a switch nobody should be
-    /// touching does not want prose talking them into it.
+    /// For the row's hover. `""` for every mechanic.
     what: &'static str,
     offered: bool,
 }
@@ -4895,18 +4634,15 @@ fn registered(tag: Tag) -> Option<Registered> {
 
 /// `(tag, name, what it does, offered to the user)`.
 ///
-/// The registry fixes both the tag and its meaning, so a static table is
-/// completable: every individually registered tag (OpenType 1.9.1) is here, and one
-/// missing would be reported to the user as private. `ss01`–`ss20` and `cv01`–`cv99`
-/// are font-defined ([`ondin_core::text::FaceFeature`]) and resolved by
-/// [`feature_label`] first.
+/// Every individually registered tag (OpenType 1.9.1) is here; one missing would be
+/// reported to the user as private. `ss01`–`ss20` and `cv01`–`cv99` are font-defined
+/// ([`ondin_core::text::FaceFeature`]) and resolved by [`feature_label`] first.
 ///
-/// Names are the registry's *Friendly name* in sentence case, like the font-supplied
-/// labels. `offered` follows the registry's UI suggestion: withheld are the
-/// required features (`ccmp`, `rvrn`), those a shaper applies per script (`init`,
-/// `medi`, `fina`, `isol`, `mark`, `mkmk`, `curs`, `dist`, `locl`, `rlig`, `rclt`)
-/// and corollaries (`numr`, `dnom` under `frac`). Four departures, each because the
-/// switch would be a lie:
+/// Names are the registry's *Friendly name* in sentence case. `offered` follows the
+/// registry's UI suggestion: withheld are the required features (`ccmp`, `rvrn`),
+/// those a shaper applies per script (`init`, `medi`, `fina`, `isol`, `mark`,
+/// `mkmk`, `curs`, `dist`, `locl`, `rlig`, `rclt`) and corollaries (`numr`, `dnom`
+/// under `frac`). Four departures, each because the switch would be a lie:
 ///
 /// - The vertical-writing features (`vert`, `vrt2`, `vrtr`, `valt`, `vhal`, `vpal`,
 ///   `vchw`, `vkrn`, `vapk`, `vkna`): there is no vertical writing mode.
@@ -4915,7 +4651,7 @@ fn registered(tag: Tag) -> Option<Registered> {
 /// - `size` carries a tracking curve; optical size lives on the `opsz` axis row.
 const REGISTRY: &[(&str, &str, &str, bool)] = &[
     // ---- Offered: the registry says a user may choose these ----------------
-    // Figures and numbers, which is where the list's highest-value entries are.
+    // Figures and numbers.
     (
         "afrc",
         "Alternative fractions",
@@ -5119,8 +4855,7 @@ const REGISTRY: &[(&str, &str, &str, bool)] = &[
         "Glyphs drawn small enough to set as ruby annotation",
         true,
     ),
-    // Line and paragraph fitting. The registry offers all three; nothing in this
-    // app applies them for you, which is the difference between these and `numr`.
+    // Line and paragraph fitting; nothing in this app applies them for you.
     (
         "falt",
         "Final glyph on line alternates",
@@ -5288,8 +5023,8 @@ const REGISTRY: &[(&str, &str, &str, bool)] = &[
         true,
     ),
     // ---- Withheld: required, or applied by the shaper, or by another feature -
-    // No prose on any of these: the row exists so that *Show all features* is a
-    // complete list, not to talk anyone into switching one.
+    // No prose: these exist so that *Show all features* is a complete list,
+    // not to talk anyone into switching one.
     ("aalt", "Access all alternates", "", false),
     ("abvf", "Above-base forms", "", false),
     ("abvm", "Above-base mark positioning", "", false),
@@ -5340,8 +5075,8 @@ const REGISTRY: &[(&str, &str, &str, bool)] = &[
     ("tjmo", "Trailing jamo forms", "", false),
     ("vatu", "Vattu variants", "", false),
     ("vjmo", "Vowel jamo forms", "", false),
-    // Vertical writing, which this app does not have. Switching one of these on
-    // in horizontal text substitutes rotated or re-spaced glyphs into it.
+    // Vertical writing, which this app does not have: switching one on in
+    // horizontal text only mis-sets it.
     ("valt", "Alternate vertical metrics", "", false),
     (
         "vapk",
@@ -5367,16 +5102,14 @@ struct FeatureLabel {
     hover: String,
     /// Whether it belongs in the list, or behind *Show all features*.
     offered: bool,
-    /// What the feature's named values are called, in value order: index `k` is
-    /// `FeatureSetting::value = k + 1`. Empty for the on/off features. More than
-    /// one entry makes the row a dropdown rather than a switch.
+    /// The feature's named values in order: index `k` is `FeatureSetting::value =
+    /// k + 1`. Empty for on/off features; more than one entry makes a dropdown.
     values: Vec<String>,
 }
 
 /// How lit the loading dot is at `t` seconds, on 0.0–1.0.
 ///
-/// A raised cosine rather than `sin`, so the breath starts at the trough: a dot
-/// that appears at full brightness and fades reads as something switching off.
+/// A raised cosine rather than `sin`, so the breath starts at the trough.
 fn loading_dot_phase(t: f64) -> f32 {
     let turns = t / LOADING_DOT_PERIOD * std::f64::consts::TAU;
     ((1.0 - turns.cos()) * 0.5) as f32
@@ -5401,9 +5134,7 @@ fn paint_loading_dot(ui: &egui::Ui, centre: egui::Pos2) {
 /// where it would be a control that cannot change anything.
 ///
 /// `hidden` is not a property of the face: touching a withheld feature moves it
-/// out of the hidden count, so expanded the way back is unconditional (the user
-/// must be able to leave the mode). Collapsed, the offer is real only if
-/// something is still hidden.
+/// out of the count, so the way back when expanded is unconditional.
 fn features_reveal(show_all: bool, hidden: usize) -> Option<String> {
     match (show_all, hidden) {
         (true, _) => Some("Show fewer features".to_string()),
@@ -5416,10 +5147,9 @@ fn features_reveal(show_all: bool, hidden: usize) -> Option<String> {
 /// value (a `cvXX` choice). Returns the value to write when the user picked a
 /// different one.
 ///
-/// A dropdown under the name, taking the whole width, since font-supplied value
-/// names are unbounded. `Off` is an item in the list rather than a switch beside
-/// it: `FeatureSetting::value` is one number (`0` off, `k` the k-th named value),
-/// so two controls would write one field.
+/// A dropdown under the name, since font-supplied value names are unbounded. `Off`
+/// is an item in the list: `FeatureSetting::value` is one number (`0` off, `k` the
+/// k-th named value), so two controls would write one field.
 fn feature_choice_row(
     ui: &mut egui::Ui,
     tag: Tag,
@@ -5429,9 +5159,9 @@ fn feature_choice_row(
     let mut pick = None;
     ui.scope(|ui| {
         // Every gap is allocated and `item_spacing` is zero: egui pays a widget's
-        // spacing on both sides, so it cannot express "tighter inside than outside".
+        // spacing on both sides, so it cannot be tighter inside than outside.
         ui.spacing_mut().item_spacing.y = 0.0;
-        // Painted rather than a `Label`, to share the switch rows' baseline and left edge.
+        // Painted, to share the switch rows' baseline and left edge.
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), FEATURE_ROW_H),
             egui::Sense::empty(),
@@ -5445,7 +5175,6 @@ fn feature_choice_row(
         );
         resp.on_hover_text(label.hover.as_str());
         ui.allocate_space(egui::vec2(0.0, CHOICE_LABEL_GAP));
-        // `CELL` whole: a combo strokes inside its own rect.
         ui.spacing_mut().interact_size.y = CELL;
         ui.spacing_mut().button_padding.y = 0.0;
         egui::ComboBox::from_id_salt(("type-feature-value", tag.to_string()))
@@ -5477,8 +5206,7 @@ const CHOICE_ROW_TAIL: f32 = 6.0;
 
 /// The values a [`feature_choice_row`]'s list offers, as `(value, name)`.
 ///
-/// The `+ 1` lives here and nowhere else: index `k` of the labels is the value
-/// `k + 1`, and `0` is off.
+/// The only place the `+ 1` lives: index `k` of the labels is the value `k + 1`.
 fn feature_values(label: &FeatureLabel) -> impl Iterator<Item = (u16, &str)> {
     label
         .values
@@ -5489,8 +5217,8 @@ fn feature_values(label: &FeatureLabel) -> impl Iterator<Item = (u16, &str)> {
 
 /// What the closed dropdown of a [`feature_choice_row`] shows.
 ///
-/// A value the face does not offer is shown as the number it is, not clamped or
-/// hidden behind "Off", so the row never misreports the file.
+/// A value the face does not offer shows as its number, so the row never
+/// misreports the file.
 fn feature_value_label(label: &FeatureLabel, value: u16) -> String {
     if value == 0 {
         return FEATURE_OFF.to_string();
@@ -5534,8 +5262,7 @@ fn feature_label(f: &FaceFeature) -> FeatureLabel {
         hover.push_str(" — ");
         hover.push_str(&what);
     }
-    // A declared-but-unnamed value is "Alternate 2", not a gap: the number is what
-    // gets written to the document.
+    // A declared-but-unnamed value is "Alternate 2", not a gap.
     let values = f
         .values
         .iter()
@@ -5558,8 +5285,7 @@ const ALIGN_GLYPHS: [&str; 4] = [
     icon::TEXT_ALIGN_JUSTIFY,
 ];
 
-/// The glyphs the three vertical-alignment cells show, in [`VerticalAlign::ALL`]
-/// order. The layer-align glyphs, since these push the box's contents to an edge.
+/// The glyphs the three vertical-alignment cells show, in [`VerticalAlign::ALL`] order.
 const VALIGN_GLYPHS: [&str; 3] = [
     icon::ALIGN_TOP,
     icon::ALIGN_CENTER_VERTICAL,
@@ -5598,8 +5324,7 @@ const LANGUAGES: &[(&str, &str)] = &[
 ///
 /// Only the `%` end is a number; the `px` end is derived from it
 /// (`px = pct/100 × font_size`, exactly [`ondin_core::Length::in_unit`]), so a
-/// value legal at one end converts to a legal value at the other and a unit click
-/// cannot change it.
+/// unit click cannot change a legal value.
 #[derive(Clone)]
 struct Bounds {
     pct: std::ops::RangeInclusive<f64>,
@@ -5618,7 +5343,7 @@ impl Bounds {
     const PARAGRAPH_SPACING: Bounds = Bounds {
         pct: 0.0..=MAX_PARAGRAPH_SPACING_PCT,
     };
-    /// The three indents (first-line, start, end): one quantity, each running both ways.
+    /// The three indents (first-line, start, end), each running both ways.
     const INDENT: Bounds = Bounds {
         pct: -MAX_INDENT_PCT..=MAX_INDENT_PCT,
     };
@@ -5641,15 +5366,13 @@ impl Bounds {
         px_range_for(self.pct.clone(), font_size)
     }
 
-    /// The same range as an em multiple — what a `Length::Em` holds, where the
-    /// field shows it ×100. The `Alt`+arrow chords stop at these ends.
+    /// The same range as an em multiple; the `Alt`+arrow chords stop at these ends.
     fn em(&self) -> std::ops::RangeInclusive<f64> {
         (self.pct.start() / 100.0)..=(self.pct.end() / 100.0)
     }
 }
 
-/// A `%` field range expressed in px at `font_size` — the one derivation every
-/// `Length` field in this panel bounds its px face with.
+/// A `%` field range expressed in px at `font_size`.
 ///
 /// The font size is floored at 1: a mixed selection can report 0
 /// (`TypeSubject::font_size`), and a `0.0..=0.0` range cannot be typed into.
@@ -5661,10 +5384,8 @@ fn px_range_for(
     (pct.start() / 100.0 * fs)..=(pct.end() / 100.0 * fs)
 }
 
-/// How much one press of `Ctrl+Shift+.` / `,` moves the font size
+/// How much one press of `Ctrl+Shift+.` / `,` moves the font size, in px
 /// (`docs/shortcuts.md` §10).
-///
-/// Two px, matching the unit the size field shows.
 const FONT_SIZE_STEP: f64 = 2.0;
 /// One press of `Alt+←`/`→` on letter spacing, per unit: `0.01em` is the `1%` the
 /// field displays; px tracking is the finer adjustment.
@@ -5688,16 +5409,15 @@ fn step_length(current: Length, step: i8, em: f64, px: f64) -> Length {
 /// A chord's stepped value, bounded by `range` widened to admit `from`.
 ///
 /// A bare `clamp` would let the increase key decrease a stored out-of-range value
-/// (500% tracking snapping to the 200% cap). Widened, it is exactly `clamp` inside
-/// the range, moves freely toward it from outside, and is pinned at `from` going
-/// away. Skipping the clamp when out of range would leave no cap at all.
+/// (500% tracking snapping to the 200% cap). Widened, it moves freely toward the
+/// range from outside and is pinned at `from` going away.
 fn stepped_into(from: f64, next: f64, range: std::ops::RangeInclusive<f64>) -> f64 {
     next.clamp(range.start().min(from), range.end().max(from))
 }
 
 /// Field bounds, all `%`: caps on what can be typed or scrubbed, not on the model.
-/// The px face is derived ([`px_range_for`]). One constant per quantity, even where
-/// several hold the same number, so changing one field's cap moves only that field.
+/// One constant per quantity, even where several hold the same number, so changing
+/// one field's cap moves only that field.
 const MIN_LINE_HEIGHT_PCT: f64 = 0.0;
 const MAX_LINE_HEIGHT_PCT: f64 = 1000.0;
 const MIN_TRACKING_PCT: f64 = -50.0;
@@ -5939,19 +5659,15 @@ mod tests {
         }
     }
 
-    /// The reveal label shows an arrow, not an I-beam, under `selectable(false)`;
-    /// a hover cursor would outrank it but the app keeps the arrow over chrome.
-    /// The pointer is aimed at the response's rect from the previous frame.
+    /// The reveal label shows an arrow, not an I-beam, under `selectable(false)`.
     #[test]
     fn the_features_reveal_asks_for_an_arrow_and_a_bare_label_asks_for_an_i_beam() {
         let hovered = |selectable: bool, hover_cursor: bool| {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
-            // One pass to make the fonts available, since the label measures a galley.
             let _ = ctx.run_ui(Default::default(), |_| {});
             let mut icon = egui::CursorIcon::Default;
             let mut at = egui::Pos2::ZERO;
-            // A widget's interaction state is last frame's, so pump a few.
             for _ in 0..5 {
                 let input = egui::RawInput {
                     events: vec![egui::Event::PointerMoved(at)],
@@ -6029,7 +5745,6 @@ mod tests {
     /// `CloseOnClickOutside` (egui's default closes it) and still closes on a pick.
     #[test]
     fn a_combo_survives_a_click_in_its_search_field_but_not_a_pick() {
-        // `true` when the popup was still drawing two frames after the click.
         let still_open = |close_outside: bool, hit_row: bool| {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
@@ -6181,9 +5896,7 @@ mod tests {
         assert!(feature_label(&face_feature("liga")).values.is_empty());
     }
 
-    /// A choice row is tighter inside than outside, measured off the ink and the
-    /// control rather than the two constants; the list's 1px spacing is set because
-    /// the row is only drawn inside it.
+    /// A choice row is tighter inside than outside, measured off the ink and the control.
     #[test]
     fn a_choice_row_groups_its_label_with_its_control() {
         let ctx = egui::Context::default();
@@ -6213,7 +5926,6 @@ mod tests {
                 })
                 .unwrap_or_else(|| panic!("no galley for {text:?}"))
         };
-        // The dropdown's own painted frame — the one shape as wide as the list.
         let combo = out
             .shapes
             .iter()
@@ -6226,7 +5938,6 @@ mod tests {
             .expect("the dropdown paints a frame the width of the list");
         let inside = combo.top() - galley("Capital Eng").bottom();
         let below = galley("Small caps").top() - combo.bottom();
-        // Half again, not merely more: one point of difference reads as two loose halves.
         assert!(
             below >= inside * 1.5,
             "the row's halves are {inside} apart and the next row is {below} away: \
@@ -6286,7 +5997,7 @@ mod tests {
     /// flip: retyping `qwid` as `qwix` in `REGISTRY` → fails at the set-difference assertion
     #[test]
     fn the_feature_registry_is_the_whole_registry_and_says_each_tag_once() {
-        /// Every tag the table must hold, sorted so a substitution names both strings.
+        /// Every tag the table must hold, sorted.
         const EXPECTED: [&str; 124] = [
             "aalt", "abvf", "abvm", "abvs", "afrc", "akhn", "apkn", "blwf", "blwm", "blws", "c2pc",
             "c2sc", "calt", "case", "ccmp", "cfar", "chws", "cjct", "clig", "cpct", "cpsp", "cswh",
@@ -6307,7 +6018,6 @@ mod tests {
         let before = tags.len();
         tags.dedup();
         assert_eq!(before, tags.len(), "a tag is listed twice");
-        // The two differences, not the two lists: `assert_eq!` would bury the moved tag.
         let gone: Vec<&str> = EXPECTED
             .iter()
             .copied()
@@ -6330,7 +6040,6 @@ mod tests {
                 "{tag} is not a four-byte tag"
             );
             assert!(!name.is_empty(), "{tag} has no name");
-            // An offered feature says what it does; a withheld one carries no prose.
             assert_eq!(
                 *offered,
                 !what.is_empty(),
@@ -6347,17 +6056,13 @@ mod tests {
     /// Leaving Auto seeds the multiple the face was already giving, so the unit click does not re-space the lines.
     #[test]
     fn leaving_auto_seeds_the_line_height_the_font_was_giving() {
-        // 24.2 on a 20px face is 121%, which is about Inter's.
         let next = next_line_height(None, 20.0, Some(24.2));
         assert_eq!(next, Some(Length::Em(1.21)));
-        // Nothing laid out: the round number is the fallback.
         assert_eq!(next_line_height(None, 20.0, None), Some(Length::Em(1.2)));
-        // A zero font size cannot be divided by.
         assert_eq!(
             next_line_height(None, 0.0, Some(24.2)),
             Some(Length::Em(1.2))
         );
-        // The rest of the cycle is unchanged: % → px resolves, px → auto clears.
         assert_eq!(
             next_line_height(Some(Length::Em(1.5)), 20.0, Some(30.0)),
             Some(Length::Px(30.0))
@@ -6373,7 +6078,6 @@ mod tests {
     /// flip: `Length::Em(v) => Length::Px(v + d * em)` in `step_length` → fails at the first assertion
     #[test]
     fn a_chord_steps_a_length_without_changing_its_unit() {
-        // `2%` is `Em(0.02)`, since the field shows an em ×100.
         assert_eq!(
             step_length(Length::Em(0.02), 1, TRACKING_STEP_EM, TRACKING_STEP_PX),
             Length::Em(0.03),
@@ -6385,7 +6089,6 @@ mod tests {
             "and one of 0.4px stays absolute"
         );
 
-        // Down, and across zero, which is where a sign slip would show.
         assert_eq!(
             step_length(Length::Em(0.01), -2, TRACKING_STEP_EM, TRACKING_STEP_PX),
             Length::Em(-0.01),
@@ -6398,7 +6101,6 @@ mod tests {
              conversion comes through"
         );
 
-        // Leading's constants: the unit rule is the function's, the magnitudes the caller's.
         assert_eq!(
             step_length(Length::Em(1.2), 1, LEADING_STEP_EM, LEADING_STEP_PX),
             Length::Em(1.3),
@@ -6410,7 +6112,6 @@ mod tests {
             "and a px is a px"
         );
 
-        // A step of zero is a step of zero — the identity, in the same unit.
         for l in [Length::Em(0.02), Length::Px(0.4)] {
             assert_eq!(
                 step_length(l, 0, TRACKING_STEP_EM, TRACKING_STEP_PX),
@@ -6421,13 +6122,10 @@ mod tests {
     }
 
     /// Leaving *Font* on a decoration thickness seeds the face's own thickness in px, not a zero-height band.
-    /// The `None` fallback stays zero for the offset field, whose metric has the opposite sign. The cycle
-    /// here runs `auto → px → %`, unlike line height's.
     ///
     /// flip: seeding `Px(0.0)` in `next_optional_length` → fails at the first assertion
     #[test]
     fn leaving_the_font_seeds_the_thickness_the_face_was_drawing() {
-        // Inter's underline size at 20pt.
         let inter = 1.367_187_5;
         assert_eq!(
             next_optional_length(None, 20.0, Some(inter)),
@@ -6439,7 +6137,6 @@ mod tests {
             Some(Length::Px(0.0)),
             "a caller with nothing to seed from still seeds zero, deliberately"
         );
-        // The rest of the cycle is untouched: px → % converts, % → auto clears.
         assert_eq!(
             next_optional_length(Some(Length::Px(10.0)), 20.0, Some(inter)),
             Some(Length::Em(0.5))
@@ -6581,7 +6278,6 @@ mod tests {
             rect.width() > 0.0 && rect.height() > 0.0,
             "an empty rect would forgive every click, or none: {rect:?}"
         );
-        // The anchor the popup computes: right-aligned, just below.
         let anchor = egui::pos2(rect.right() - MENU_W, rect.bottom() + 6.0);
         assert!(anchor.y > rect.top(), "the popup hangs below the button");
         assert!(
@@ -6590,18 +6286,15 @@ mod tests {
         );
     }
 
-    /// The alignment row sits on the column grid of the fields above it: track and
-    /// button edges on the field edges and the margin, cells within a sanity bound
-    /// of the button. Measured off the painted rects.
+    /// The alignment row's track and button edges sit on the field edges and the
+    /// margin above it, measured off the painted rects.
     #[test]
     fn the_alignment_row_lines_up_with_the_field_columns_above_it() {
-        // The Type card's content width: 284 wide, `ui::CARD_MARGIN_X` a side.
         const CARD_INNER: f32 = 284.0 - ui::CARD_MARGIN_X * 2.0;
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // `inspector_type` gives each paired field `half` and separates them by `GAP`.
         let half = (CARD_INNER - GAP) / 2.0;
         let field_a_right = half;
         let field_b_left = half + GAP;
@@ -6614,7 +6307,7 @@ mod tests {
             let vertical_w = CARD_INNER - horizontal_w - ROW_H - GAP * 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                // Cell 0 selected, so `segmented` paints a rect; resting cells draw only a glyph.
+                // Cell 0 selected, so `segmented` paints a rect.
                 segmented(ui, horizontal_w, SEG_CELL_H, 4, 0, |_, _, _, _| {});
                 segmented(ui, vertical_w, SEG_CELL_H, 3, 0, |_, _, _, _| {});
                 ui::field_button(
@@ -6628,7 +6321,6 @@ mod tests {
         });
         for c in &out.shapes {
             if let egui::Shape::Rect(r) = &c.shape {
-                // A raised cell is `SEG_CELL_H` less the hairline given up on each side.
                 if (r.rect.height() - (SEG_CELL_H - 2.0)).abs() < 0.5 {
                     cells.push(r.rect);
                 } else if (r.rect.height() - ROW_H).abs() < 0.5
@@ -6639,7 +6331,6 @@ mod tests {
                 }
             }
         }
-        // Two tracks and the button's ground, all `ROW_H` tall.
         assert_eq!(tracks.len(), 3, "grounds at row height: {tracks:?}");
         let (h_track, v_track, button) = (tracks[0], tracks[1], tracks[2]);
 
@@ -6668,7 +6359,6 @@ mod tests {
                 "track {i}'s painted cell is {}pt where its width implies {derived}pt",
                 cell.width()
             );
-            // A sanity bound on the module; the assertion above pins the arithmetic.
             assert!(
                 (cell.width() - SEG_CELL).abs() < 2.0,
                 "track {i}'s cell came out {}pt, more than two points off the \
@@ -6678,10 +6368,9 @@ mod tests {
         }
     }
 
-    /// The card's height does not ratchet down as tabs are visited. A `ScrollArea`
-    /// inside an `Area` sizes from the area's previous-frame size, so each short tab
-    /// shrinks it; pinning an explicit `max_rect` cuts the loop. Driven tall, short,
-    /// tall, since an `Area`'s first frame is always right.
+    /// The card's height does not ratchet down as tabs are visited: pinning an
+    /// explicit `max_rect` cuts the loop. Driven tall, short, tall, since an
+    /// `Area`'s first frame is always right.
     #[test]
     fn a_short_tab_does_not_shorten_the_card_for_the_next_tall_one() {
         const CAP: f32 = 400.0;
@@ -6689,7 +6378,6 @@ mod tests {
         const SHORT: usize = 3;
         const ROW: f32 = 20.0;
 
-        // One frame of a card whose body is `rows` tall; returns the body's height.
         fn frame(ctx: &egui::Context, rows: usize, pinned: bool) -> f32 {
             let mut got = 0.0;
             let _ = ctx.run_ui(Default::default(), |ui| {
@@ -6732,7 +6420,6 @@ mod tests {
         for pinned in [false, true] {
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
-            // Two frames per phase: the first settles the `Area`'s size.
             let mut tall_first = 0.0;
             for _ in 0..2 {
                 tall_first = frame(&ctx, TALL, pinned);
@@ -6757,7 +6444,6 @@ mod tests {
                      {tall_first} — the short tab in between shortened it"
                 );
             } else {
-                // The unpinned form still ratchets; if not, egui changed.
                 assert!(
                     tall_again < tall_first - 1.0,
                     "expected the unpinned form to ratchet ({tall_first} → \
@@ -6769,8 +6455,7 @@ mod tests {
     }
 
     /// The unit brightens on hover and the colour is the one drawn: `Painter::galley`'s
-    /// colour is a fallback used only where a section is `Color32::PLACEHOLDER`, so
-    /// both the baked and the fallback colour are asserted.
+    /// colour is only a fallback for `Color32::PLACEHOLDER` sections, so both are asserted.
     #[test]
     fn hovering_the_unit_changes_the_colour_it_is_actually_drawn_in() {
         let ctx = egui::Context::default();
@@ -6778,7 +6463,6 @@ mod tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         const W: f32 = 130.0;
 
-        // The unit's `(fallback, baked)` pair, with the pointer wherever `at` says.
         let ink = |at: Option<egui::Pos2>| -> (egui::Color32, egui::Color32) {
             let mut input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -6789,7 +6473,6 @@ mod tests {
             };
             input.events = at.map(egui::Event::PointerMoved).into_iter().collect();
             let mut found = None;
-            // Twice: interaction state is last frame's.
             for _ in 0..2 {
                 let mut v = 120.0_f64;
                 let out = ctx.run_ui(input.clone(), |ui| {
@@ -6819,7 +6502,6 @@ mod tests {
             found.expect("the unit is drawn")
         };
 
-        // The unit sits against the field's right edge.
         let (rest_fallback, rest_baked) = ink(None);
         let (hot_fallback, hot_baked) = ink(Some(egui::pos2(W - 8.0, ROW_H / 2.0)));
 
@@ -6844,7 +6526,6 @@ mod tests {
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
         const W: f32 = 200.0;
-        // Press in the middle of the rail (a press outside is not a grab), drag to `x`.
         let dragged_to = |x: f32| -> f64 {
             let mut value = 400.0_f64;
             let y = ui::SLIDER_H / 2.0;
@@ -6885,8 +6566,7 @@ mod tests {
     }
 
     /// A scrub reports its value again on the frame it ends (the frame the valve
-    /// commits on), and a bare click reports nothing; the click half fails against
-    /// an unconditional report.
+    /// commits on), and a bare click reports nothing.
     #[test]
     fn a_scrub_reports_its_value_on_the_release_frame_and_a_click_reports_nothing() {
         let ctx = egui::Context::default();
@@ -6919,7 +6599,6 @@ mod tests {
                 out = Some((e.next, e.resp.dragged(), e.resp.drag_stopped()));
             });
             let (next, dragged, drag_stopped) = out.unwrap();
-            // The preview feeds each reported value back as the next frame's `current`.
             if let Some(n) = next {
                 *current = n;
             }
@@ -6932,12 +6611,10 @@ mod tests {
             pressed,
             modifiers: Default::default(),
         };
-        // `edit_valve` commits on any frame that is not a dragged one and has a value.
         let commits = |(next, dragged, drag_stopped): (Option<Length>, bool, bool)| {
             next.is_some() && !dragged && drag_stopped
         };
 
-        // A real scrub: press, four frames of motion, release without moving.
         let start = at(W / 2.0);
         let mut current = Length::Px(10.0);
         frame(vec![egui::Event::PointerMoved(start)], &mut current);
@@ -7031,7 +6708,6 @@ mod tests {
         let start = at(W / 2.0);
         let mut current = Some(Length::Px(4.0));
 
-        // The idle frame: settled, nothing touched, a value present.
         frame(vec![egui::Event::PointerMoved(start)], &mut current);
         let idle = frame(Vec::new(), &mut current);
         assert!(
@@ -7087,7 +6763,6 @@ mod tests {
                 ui.spacing_mut().item_spacing.x = GAP;
                 for (unit, prefix) in [
                     ("%", Prefix::Icon(icon::ARROWS_VERTICAL)),
-                    // The widest unit any field shows.
                     ("auto", Prefix::Icon(icon::TEXT_AA)),
                 ] {
                     let mut v = 120.0_f64;
@@ -7132,14 +6807,12 @@ mod tests {
                 unit.right(),
                 frame.right()
             );
-            // The chip carries `SUFFIX_CHIP_PAD` past the text.
             assert!(
                 (2.0..12.0).contains(&inset),
                 "field {i}'s unit is {inset}pt from the border — it should tuck \
                  against the right edge, not float in the middle"
             );
         }
-        // And the pair fills the row it was given.
         let right = frames[1].right() - frames[0].left();
         assert!(
             (right - W).abs() < 0.5,
@@ -7147,8 +6820,7 @@ mod tests {
         );
     }
 
-    /// No ink lands right of the card's inner edge. Asserted on the painted shapes,
-    /// since a `Ui`'s `min_rect` reports the allocation, not what the contents did.
+    /// No ink lands right of the card's inner edge, asserted on the painted shapes.
     #[test]
     fn nothing_in_the_popup_paints_past_the_card() {
         let ctx = egui::Context::default();
@@ -7235,7 +6907,6 @@ mod tests {
                 let _ = reset_slot(ui, true, "Back to the font's default");
             });
         });
-        // Half a point of tolerance for hairlines, which egui strokes on the boundary.
         let edge = MENU_INNER + 0.5;
         let over: Vec<f32> = out
             .shapes
@@ -7250,8 +6921,7 @@ mod tests {
         );
     }
 
-    /// A subject over the whole of an eight-byte node, with `style` as its
-    /// defaults and `spans` as its overrides.
+    /// A subject over the whole of an eight-byte node.
     fn subject_of(style: TextStyle, spans: CharSpans) -> TypeSubject {
         TypeSubject {
             id: NodeId::from_wire("1:1").expect("a well-formed id"),
@@ -7264,7 +6934,6 @@ mod tests {
             line_height: None,
             decoration_sizes: None,
             range: 0..8,
-            // Byte 0, as `read` gives a subject with no live session.
             resolve_at: Some(0),
             partial: false,
             para_spans: ParaSpans::default(),
@@ -7274,8 +6943,7 @@ mod tests {
         }
     }
 
-    /// `subject_of` over some of a node's paragraphs, as a live session with the
-    /// caret in one produces; `para_range` is the already-snapped range.
+    /// `subject_of` over some of a node's paragraphs; `para_range` is already snapped.
     fn para_subject_of(
         paragraph: ParagraphStyle,
         para_spans: ParaSpans,
@@ -7296,7 +6964,6 @@ mod tests {
         let defaults = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
         spans.set(0..4, ParaAttr::IndentStart(Length::Px(40.0)), &defaults);
-        // A different attribute must survive.
         spans.set(4..8, ParaAttr::Spacing(Length::Px(12.0)), &defaults);
         let subject = para_subject_of(defaults, spans, 0..8);
         assert!(!subject.para_partial, "the precondition: no live session");
@@ -7331,7 +6998,6 @@ mod tests {
         let subject = para_subject_of(defaults, ParaSpans::default(), 0..8);
         let (_, changes) = para_attrs_tx(&subject, vec![ParaAttr::Indent(Length::Px(20.0))]);
         assert!(!changes);
-        // Canonicalization is in the path, so a value that only looks different is no change.
         let (_, changes) =
             para_attrs_tx(&subject, vec![ParaAttr::Indent(Length::Px(20.000000001))]);
         assert!(
@@ -7345,11 +7011,9 @@ mod tests {
     fn a_paragraph_field_reads_mixed_over_paragraphs_that_disagree() {
         let defaults = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
-        // Paragraph two is indented, paragraph one is not.
         spans.set(4..8, ParaAttr::IndentStart(Length::Px(40.0)), &defaults);
 
         let both = para_subject_of(defaults.clone(), spans.clone(), 0..8);
-        // Over the whole node with no session `partial` is false: the next write flattens.
         assert!(!both.para_mixed(ParaAttrKind::IndentStart));
 
         let first = para_subject_of(defaults.clone(), spans.clone(), 0..4);
@@ -7361,7 +7025,6 @@ mod tests {
         assert!(!second.para_mixed(ParaAttrKind::IndentStart));
         assert_eq!(second.shown_paragraph().indent_start, Length::Px(40.0));
 
-        // A live selection reaching both is mixed and still shows the start's value.
         let mut across = para_subject_of(defaults, spans, 0..8);
         across.para_partial = true;
         assert!(across.para_mixed(ParaAttrKind::IndentStart));
@@ -7373,8 +7036,7 @@ mod tests {
     }
 
     /// A letter spacing of zero everywhere is not *Mixed* whatever the zeroes' units, and
-    /// comes back in the unit the user chose so the chip does not flip. The first
-    /// assertion guards the fixture; both orderings of the explicit run are covered.
+    /// comes back in the unit the user chose so the chip does not flip.
     ///
     /// flip: deleting `shared`'s `or_else(agreed_zero(…))` arm → fails at the `mixed` assertion
     /// flip: `.last()` in place of the non-default pick → fails at the `Px(0.0)` against `Em(0.0)` assertion
@@ -7448,7 +7110,6 @@ mod tests {
     fn the_hanging_pair_has_something_to_do_when_the_paragraphs_disagree() {
         let defaults = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
-        // Not the first paragraph.
         spans.set(4..8, ParaAttr::Hanging(true), &defaults);
         let subject = para_subject_of(defaults.clone(), spans, 0..8);
 
@@ -7465,7 +7126,6 @@ mod tests {
             subject.para_ragged(ParaAttrKind::Hanging),
             "but there *is* something to flatten, which is what the click must fire on"
         );
-        // The write flattens: the override goes, the default stays.
         let (tx, changes) = para_attrs_tx(&subject, vec![ParaAttr::Hanging(false)]);
         assert!(
             changes,
@@ -7479,7 +7139,6 @@ mod tests {
             written.as_slice()
         );
 
-        // With nothing overridden a click on the lit button commits nothing.
         let plain = para_subject_of(defaults, ParaSpans::default(), 0..8);
         assert!(!plain.para_ragged(ParaAttrKind::Hanging));
         let (_, changes) = para_attrs_tx(&plain, vec![ParaAttr::Hanging(false)]);
@@ -7547,7 +7206,6 @@ mod tests {
             Some(CharAttr::Color(None)),
             "the reset writes the inherited state, not a missing attribute"
         );
-        // A decoration slot on text with no decoration has nothing to colour.
         assert!(
             char_color_attr(
                 &subject,
@@ -7594,14 +7252,13 @@ mod tests {
         assert!(subject.text_ramp().is_none());
         assert_eq!(subject.text_color(), last);
 
-        // No visible fill lands on black, matching `scene.rs`'s stand-in.
         subject.text_paint = None;
         assert!(subject.text_ramp().is_none());
         assert_eq!(subject.text_color(), Color::BLACK);
     }
 
-    /// The underline's colour as the resulting transaction leaves it: `Ok` of the
-    /// node's default, and whether any span still overrides it.
+    /// The underline's colour as the transaction leaves it: the node's default, and
+    /// whether any span still overrides it.
     fn underline_after(tx: &Transaction) -> (Option<Color>, bool) {
         let mut default = None;
         let mut overridden = false;
@@ -7614,7 +7271,6 @@ mod tests {
                     };
                 }
                 Operation::SetTextSpans { spans, .. } => {
-                    // A span still disagreeing with the default is "the red survived".
                     overridden =
                         spans.shared_in(&TextStyle::default(), CharAttrKind::Underline, 0..8)
                             != Some(CharAttr::Underline(None));
@@ -7640,7 +7296,7 @@ mod tests {
         assert!(changes, "clearing a colour that is set is not a no-op");
         assert_eq!(underline_after(&tx), (None, false));
 
-        // Red as a span the panel cannot see through `shown()`, which reads byte 0.
+        // Red as a span `shown()` cannot see, since it reads byte 0.
         let mut spans = CharSpans::default();
         spans.set(
             4..8,
@@ -7659,8 +7315,7 @@ mod tests {
         assert_eq!(underline_after(&tx), (None, false));
     }
 
-    /// A colour in a span that misses byte 0 still lights the reset: `ragged` is
-    /// the second enabling term, since the shown value reads byte 0.
+    /// A colour in a span that misses byte 0 still lights the reset (`ragged`).
     #[test]
     fn a_colour_hiding_in_a_span_still_lights_the_reset() {
         let mut spans = CharSpans::default();
@@ -7690,7 +7345,6 @@ mod tests {
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // `segmented` divides the track with 2px padding a side and 2px between cells.
         let track = MENU_INNER - CLOSE_BUTTON_W - COL_GAP;
         let cells = TypeTab::ALL.len() as f32;
         let cell_w = (track - 4.0 - 2.0 * (cells - 1.0)) / cells;
@@ -7755,13 +7409,11 @@ mod tests {
     }
 
     /// Every `Length` field's two ends bound the same quantity, so the unit chip
-    /// cannot change the value it converts. Driven through `Length::in_unit` at three
-    /// font sizes; scope is the ranges, not the fields' call sites.
+    /// cannot change the value it converts; scope is the ranges, not the call sites.
     ///
     /// flip: hard-coding `Bounds::px` to `-10_000.0..=10_000.0` → fails at the `Bounds` derivation assertion
     #[test]
     fn both_ends_of_every_length_field_bound_the_same_quantity() {
-        // `Bounds` must have no px face of its own.
         for (name, b) in [
             ("TRACKING", &Bounds::TRACKING),
             ("SIGNED_TRACKING", &Bounds::SIGNED_TRACKING),
@@ -7778,8 +7430,7 @@ mod tests {
                     "{name} @{font_size}pt must derive its px face, not carry one"
                 );
             }
-            // The chords' em face is the `%` face over a hundred. Flip: `em` returning
-            // the `%` range undivided fails here on `TRACKING`.
+            // flip: `em` returning the `%` range undivided → fails here on `TRACKING`.
             let em = b.em();
             assert_eq!(
                 (*em.start() * 100.0, *em.end() * 100.0),
@@ -7788,7 +7439,6 @@ mod tests {
             );
         }
 
-        // Every pct range the panel hands a `Length` field, read off the `Bounds` itself.
         let ranges: Vec<(&str, std::ops::RangeInclusive<f64>)> = vec![
             ("letter/word spacing", Bounds::TRACKING.pct.clone()),
             ("baseline shift", Bounds::SIGNED_TRACKING.pct.clone()),
@@ -7822,7 +7472,6 @@ mod tests {
                     );
                 }
 
-                // The other direction: a px end converted to % must land inside the % face.
                 for end in [*px.start(), *px.end()] {
                     let converted = Length::Px(end).in_unit(LengthUnit::Em, font_size);
                     let Length::Em(m) = converted else {
@@ -7852,8 +7501,8 @@ mod tests {
         );
     }
 
-    /// Each bound carries its field's sign rule. Scope is the constants, not the
-    /// call sites; the model's own floor (`typography::canonical_decoration`) is the second defence.
+    /// Each bound carries its field's sign rule; the model's own floor
+    /// (`typography::canonical_decoration`) is the second defence.
     #[test]
     fn an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways() {
         for (name, b) in [
@@ -7879,10 +7528,9 @@ mod tests {
     }
 }
 
-/// The egui behaviour `cancel_gesture` works around: egui clears `dragged` on the
-/// release of any button, so a right-click whose press and release land in one frame
-/// takes the drag away before the cancel sees it. The gate itself is pinned in
-/// `canvas::headless_app_tests::cancelling_needs_a_witness_and_our_two_do_not_blink`.
+/// The egui behaviour `cancel_gesture` works around: a right-click whose press and
+/// release land in one frame takes the drag away before the cancel sees it. The gate
+/// is pinned in `canvas::headless_app_tests::cancelling_needs_a_witness_and_our_two_do_not_blink`.
 #[cfg(test)]
 mod cancel_gate {
     use eframe::egui;
@@ -8039,9 +7687,6 @@ mod loading_dot_tests {
 
 /// The panel tests' one text fixture: a headless app holding a single `Auto`
 /// text node of `content` in Inter at 20pt, selected, and its id.
-///
-/// `wrap_gate_tests::app_wrapping` stays its own: it takes the paragraph's wrap
-/// and keeps the default style.
 #[cfg(test)]
 fn app_with_text_of(content: &str) -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
     use ondin_core::{Document, Operation, Transaction};
@@ -8209,8 +7854,7 @@ mod several_layer_tests {
         assert!(!faces_disagree(&variants, &both), "one face read as two");
     }
 
-    /// Auto layers laid at different heights read mixed; an agreeing pair reads
-    /// one value. Laid lines are set by hand (nothing is shaped in a unit test).
+    /// Auto layers laid at different heights read mixed; an agreeing pair reads one value.
     ///
     /// flip: `line_height_mixed` answering `self.mixed(..)` alone → fails at "24 and 38".
     #[test]
@@ -8243,7 +7887,6 @@ mod several_layer_tests {
             assert_eq!(s.font_size, 24.0, "{id:?} never took the size");
             assert_eq!(s.weight, weight, "{id:?} lost its own weight");
         }
-        // One step: undo puts all three back.
         app.undo();
         let sizes: Vec<f64> = texts.iter().map(|id| style(&app, *id).font_size).collect();
         assert_eq!(sizes, [20.0, 20.0, 32.0]);
@@ -8333,7 +7976,6 @@ mod several_layer_tests {
                 coords: vec![axis(b"GRAD", 50.0)],
             },
         );
-        // As sets: the stored order is not the question.
         let has = |i: usize, want: &[AxisSetting]| {
             let got = style(&app, texts[i]).variations;
             got.len() == want.len() && want.iter().all(|a| got.contains(a))
@@ -8450,8 +8092,7 @@ mod several_layer_tests {
             row
         };
         let row = frame(&mut app, Vec::new());
-        // The vertical track follows the horizontal one and a gap; its third of
-        // three cells is *Bottom*.
+        // The vertical track's third cell is *Bottom*.
         let start = row.left() + (row.width() - GAP) / 2.0 + GAP;
         let at = egui::pos2(start + (row.right() - start) * 5.0 / 6.0, row.center().y);
         frame(&mut app, vec![egui::Event::PointerMoved(at)]);
@@ -8587,7 +8228,6 @@ mod several_layer_tests {
             "every layer at 30px"
         );
 
-        // The first layer in %: the typed number is px all the same.
         let mut first = style(&app, texts[0]);
         first.line_height = Some(Length::Em(1.5));
         app.commit_edit(Transaction(vec![Operation::SetTextStyle {
@@ -8670,7 +8310,6 @@ mod several_layer_tests {
             aligns[..2].iter().all(|a| *a != TextAlign::Center),
             "{aligns:?}"
         );
-        // The second of four cells.
         let at = egui::pos2(track.left() + track.width() * 0.375, track.center().y);
         frame(&mut app, vec![egui::Event::PointerMoved(at)]);
         for pressed in [true, false] {
@@ -8712,8 +8351,8 @@ const TEST_AREA: egui::Rect = egui::Rect {
     max: egui::pos2(400.0, 600.0),
 };
 
-/// The Type panel's size field, driven through real pointer and key events:
-/// the tests pin which frame the valve commits on, which `char_attrs_tx` cannot show.
+/// The Type panel's size field, driven through real pointer and key events to pin
+/// which frame the valve commits on.
 #[cfg(test)]
 mod char_valve_tests {
     use super::*;
@@ -8877,7 +8516,7 @@ mod char_valve_tests {
 #[cfg(test)]
 mod skip_ink_tests {
     //! The skip-ink toggle beside the underline's line style, driven through the
-    //! real `decoration_section` on a headless app: the wiring is what can go missing.
+    //! real `decoration_section` on a headless app.
 
     use super::*;
     use crate::app::OndinApp;
@@ -9194,7 +8833,6 @@ mod skip_ink_tests {
             "the alignment is still the copy's own"
         );
 
-        // The reset built from `unstyled_marks`, whatever the style.
         let old = app.unstyled_marks(copy).size.expect("the size differs");
         assert!(app.session.commit(old.tx));
         assert_eq!(
@@ -9244,8 +8882,7 @@ mod skip_ink_tests {
             assert_eq!(tracking(&app, id), stored, "fixture: {name}");
             let depth = app.session.history.undo_depth();
 
-            // Two idle frames, because a widget's state is last frame's: the first
-            // could not have committed anything it had not yet drawn.
+            // Two idle frames: the first could not commit what it had not yet drawn.
             for _ in 0..2 {
                 let subject = TypeSubject::of(&app, id).expect("a subject");
                 let input = egui::RawInput {
@@ -9285,10 +8922,9 @@ mod skip_ink_tests {
         })
     }
 
-    /// The smallest rectangle painted under `at`, with its fill — the button's own
-    /// box and ground. The ground is what `FieldButton::On` changes and the only
-    /// thing on screen that says which state the toggle is in. `min_by` keeps the
-    /// fill over the same-rect stroke `button_face` paints after it.
+    /// The smallest rectangle painted under `at`, with its fill: the button's box
+    /// and ground, which is what `FieldButton::On` changes. `min_by` keeps the fill
+    /// over the same-rect stroke `button_face` paints after it.
     fn button_box(out: &egui::FullOutput, at: egui::Pos2) -> Option<(egui::Rect, egui::Color32)> {
         out.shapes
             .iter()
@@ -9307,14 +8943,13 @@ mod skip_ink_tests {
 
     /// The toggle is there for an underline, lit while skipping is on, drawn in a different ground when off, and clicking it reaches the document.
     ///
-    /// The grounds are sampled on the frame after each click with the pointer resting on the button: `frame` reads the subject before running the UI.
+    /// The grounds are sampled on the frame after each click, since `frame` reads the subject before running the UI.
     ///
     /// flips: `FieldButton::Off` passed unconditionally → fails at the two grounds being equal; `d.skip_ink = false` instead of negating → only the second click fails; the dropdown left at the full `MENU_INNER` → fails at the box inside the card.
     #[test]
     fn the_skip_ink_toggle_reports_its_state_and_writes_it() {
         let (ctx, mut app, id) = app_with(CharAttr::Underline(Some(Decoration::default())));
 
-        // Warm-up: egui resolves a press against the previous frame's rects.
         let out = frame(&ctx, &mut app, id, Vec::new());
         let ink = toggle_ink(&out).expect("an underline gets the skip-ink toggle");
         let at = ink.center();
@@ -9345,13 +8980,11 @@ mod skip_ink_tests {
             "on and off have to look different or the toggle is invisible"
         );
 
-        // And back: the assertion a `= false` write fails.
         let _ = frame(&ctx, &mut app, id, click(at));
         assert!(
             underline_of(&app, id).skip_ink,
             "clicking it again turns skipping back on"
         );
-        // Nothing else about the decoration moved: the toggle writes one field.
         let d = underline_of(&app, id);
         assert_eq!(
             (d.thickness, d.offset, d.style, d.color),
@@ -9361,7 +8994,6 @@ mod skip_ink_tests {
     }
 
     /// A strikethrough gets no skip-ink toggle, since `text::skip_ink` ignores the flag there.
-    /// The wavy prefix must be present, or the absence could be a section that bailed early.
     ///
     /// flip: dropping the `under.is_some()` guard → fails at the toggle being present.
     #[test]
@@ -9376,7 +9008,7 @@ mod skip_ink_tests {
                 _ => None,
             })
             .collect();
-        // `starts_with`: the dropdown lays prefix and word out as one galley, the toggle is its own.
+        // The dropdown lays prefix and word out as one galley, hence `starts_with`.
         assert!(
             glyphs.iter().any(|g| g.starts_with(icon::WAVE_SINE)),
             "the fixture has to reach the line-style row for its absence to mean \
@@ -9412,9 +9044,8 @@ mod skip_ink_tests {
 mod family_repick_tests {
     //! Re-picking the family you are already in is a no-op, not a reset.
     //!
-    //! Asserted on `family_actually_changed` rather than by clicking a row inside
-    //! the `ComboBox` popup. Its `mixed` arm is the case a bare `!=` gets wrong:
-    //! over a disagreeing selection, re-picking one member's family is a real edit.
+    //! Asserted on `family_actually_changed`; its `mixed` arm is the case a bare `!=`
+    //! gets wrong.
 
     use super::family_actually_changed;
 
@@ -9449,7 +9080,7 @@ mod family_repick_tests {
 }
 
 /// The variable-axis number field, driven through real pointer events; `undo_depth`
-/// after a frame is the witness for how many commits a gesture makes.
+/// counts a gesture's commits.
 #[cfg(test)]
 mod axis_valve_tests {
     use super::*;
@@ -9540,7 +9171,6 @@ mod axis_valve_tests {
         events: Vec<egui::Event>,
     ) -> egui::Rect {
         let subject = TypeSubject::of(app, id).expect("a subject");
-        // Read through `shown`, so during a drag it is the preview's coordinate, not the committed one.
         let coords = attr!(&subject, Variations, Variations);
         let mut out = egui::Rect::NOTHING;
         let _ = ctx.run_ui(
@@ -9573,7 +9203,6 @@ mod axis_valve_tests {
     #[test]
     fn a_prefix_strip_scrub_on_an_axis_field_is_one_undo_step() {
         let (ctx, mut app, id, _) = app_with_wght(403.0);
-        // Two settling frames: interaction state is last frame's.
         let mut at = egui::Pos2::ZERO;
         for _ in 0..2 {
             at = frame(&ctx, &mut app, id, true, Vec::new()).center();
@@ -9630,7 +9259,6 @@ mod axis_valve_tests {
             for _ in 0..2 {
                 at = frame(&ctx, &mut app, id, true, Vec::new()).center();
             }
-            // Click, release, type over the selected digits, click away to confirm.
             frame(
                 &ctx,
                 &mut app,
@@ -9660,7 +9288,7 @@ mod axis_valve_tests {
 
     /// The reset slot writes immediately and drops the coordinate rather than writing the default (`Some(400.0)`).
     ///
-    /// Coverage gap: removing the reset arm's `return` stays green, since the reset frame is not engaged; the `return` guards a reset clicked during a scrub, which is not staged here.
+    /// Coverage gap: removing the reset arm's `return` stays green; it guards a reset clicked during a scrub, which is not staged here.
     #[test]
     fn the_reset_slot_drops_the_coordinate_rather_than_writing_the_default() {
         let (ctx, mut app, id, _) = app_with_wght(403.0);
@@ -9674,7 +9302,6 @@ mod axis_valve_tests {
             "the fixture: there is a coordinate to drop"
         );
 
-        // The reset slot sits to the right of the 120pt field, inside the row's rect.
         let slot = egui::pos2(at.x + 76.0, at.y);
         frame(
             &ctx,
@@ -9773,7 +9400,7 @@ mod axis_valve_tests {
             v
         }
 
-        // A sub-range spanning the word boundary: bytes 3..8 hold both weights.
+        // Bytes 3..8 span the word boundary and hold both weights.
         {
             let editor = &mut app.text.as_mut().expect("a live session").editor;
             editor.select_all();
@@ -9834,7 +9461,7 @@ mod axis_valve_tests {
 #[cfg(test)]
 mod bare_caret_readout_tests {
     //! A bare caret's character fields describe the run typing will inherit; the
-    //! write is untouched (it sets the node's default and drops that attribute's overrides).
+    //! write still sets the node's default.
 
     use super::*;
     use crate::app::OndinApp;
@@ -9906,7 +9533,7 @@ mod bare_caret_readout_tests {
         }
     }
 
-    /// The field shows what the next keystroke will produce: inside the styled run, at its boundary (`Spans::edited` joins the run ending at the caret), past it, and at byte 0, where typing takes the node default.
+    /// The field shows what the next keystroke will produce: inside the styled run, at its boundary (`Spans::edited` joins the run ending there), past it, and at byte 0.
     ///
     /// flip: `resolve_at` returning `Some(self.range.start)` for every case → fails at "the caret is in 16pt text" (40 against 16).
     #[test]
@@ -9943,7 +9570,6 @@ mod bare_caret_readout_tests {
     fn a_selection_and_an_unedited_node_are_unmoved() {
         let (_ctx, mut app, id) = app_with_ragged_text();
 
-        // No session: the whole node, resolved at byte 0, which is the 40pt run.
         let subject = TypeSubject::of(&app, id).expect("a subject");
         assert_eq!(subject.resolve_at, Some(0));
         assert!(matches!(
@@ -9951,7 +9577,6 @@ mod bare_caret_readout_tests {
             CharAttr::Size(v) if v == 40.0
         ));
 
-        // 6..11 is all 16pt, so `shared` answers; 3..8 is ragged and consults the resolve point.
         app.begin_edit_text(Some(id), None);
         let editor = &mut app.text.as_mut().expect("a live session").editor;
         editor.select_all();
@@ -9984,20 +9609,19 @@ mod bare_caret_readout_tests {
 
 #[cfg(test)]
 mod type_popup_readout_tests {
-    //! Two Character-tab controls against the panel's own tables: the *Show all
-    //! features* offer counts only rows the click adds (the search needle applies),
-    //! and the Language field reads its name, not its tag. They share a headless
-    //! app with one text node.
+    //! Two Character-tab controls: the *Show all features* offer counts only rows
+    //! the click adds (the search needle applies), and the Language field reads its
+    //! name, not its tag.
     //!
-    //! `features_section` is driven directly with a hand-built `&[FaceFeature]`,
-    //! since `text::family_features` is empty headlessly and the section would not draw.
+    //! `features_section` is driven with a hand-built `&[FaceFeature]`, since
+    //! `text::family_features` is empty headlessly.
 
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::NodeId;
 
     /// A face offering `liga`, plus 43 withheld private features (`Zk01`..`Zk43`;
-    /// `cvNN` tags would be offered, not withheld, via `font_defined`).
+    /// `cvNN` tags would be offered).
     fn a_face_with_43_withheld() -> Vec<FaceFeature> {
         let mut out = vec![FaceFeature {
             tag: Tag::parse("liga").unwrap(),
@@ -10051,7 +9675,6 @@ mod type_popup_readout_tests {
     }
 
     /// With a needle only an offered feature matches, the reveal is absent, since clicking it would add nothing.
-    /// The first assertion is the control and fixture check: the reveal is drawn and sees 43 withheld features.
     ///
     /// flip: counting `hidden` over `!shown(t, l)` alone → fails the second assertion (`Some("Show all features (43 more)")`).
     #[test]
@@ -10065,7 +9688,6 @@ mod type_popup_readout_tests {
             "the fixture must reach the state: 43 withheld features and an offer to show them"
         );
 
-        // `liga` is offered already, so none of the 43 survives the needle.
         app.feature_filter = "liga".into();
         assert_eq!(
             reveal(&ctx, &mut app, id, &available),
@@ -10140,7 +9762,6 @@ mod type_popup_readout_tests {
         let (ctx, mut app, id) = app_with_gypsy();
         let available = a_face_with_43_withheld();
 
-        // `zk4` matches `Zk40`..`Zk43` by name and nothing else.
         app.feature_filter = "zk4".into();
         assert_eq!(
             reveal(&ctx, &mut app, id, &available).as_deref(),
@@ -10153,8 +9774,8 @@ mod type_popup_readout_tests {
 #[cfg(test)]
 mod feature_mixed_tests {
     //! The OpenType section over a selection whose runs disagree: a feature row
-    //! reads "Mixed" and a toggle writes only the tag it names. Mixed is per tag,
-    //! not per attribute (`TypeSubject::feature_mixed`, through `CharSpans::values_in`).
+    //! reads "Mixed" per tag (`TypeSubject::feature_mixed`) and a toggle writes only
+    //! the tag it names.
 
     use super::*;
     use crate::app::OndinApp;
@@ -10254,7 +9875,7 @@ mod feature_mixed_tests {
             .collect()
     }
 
-    /// A tag the runs disagree about is mixed; one they agree about is not (the `liga` half is the load-bearing control).
+    /// A tag the runs disagree about is mixed; one they agree about is not.
     ///
     /// flip: `feature_mixed` returning `self.mixed(CharAttrKind::Features)` → fails at the `liga` assertion; `tnum` stays green.
     #[test]
@@ -10282,7 +9903,7 @@ mod feature_mixed_tests {
         );
     }
 
-    /// Toggling one tag leaves every other tag in every run alone; the `tnum` assertion comes first, `liga` changing is the control.
+    /// Toggling one tag leaves every other tag in every run alone.
     ///
     /// flip: `write_feature_tag`'s partial arm replaced by `apply_char_attrs(subject, vec![CharAttr::Features(merge(&set))])` → fails at `tnum` (`[0]` for `[0, 0]`: the two runs collapse into one).
     #[test]
@@ -10297,7 +9918,7 @@ mod feature_mixed_tests {
             "fixture: the second run carries tnum and the first does not"
         );
 
-        // Turn `liga` off across the selection, then land the session: spans live in the editor until it closes.
+        // Spans live in the editor until the session closes.
         app.write_feature_tag(&subject, tag("liga"), 0);
         app.finish_text_edit();
 
@@ -10322,7 +9943,7 @@ mod valve_arm_tests {
 
     /// A control reporting `changed()` while unfocused and undragged commits nothing.
     /// The fixture is a ranged `DragValue` without the app's `clamp_existing_to_range(false)`
-    /// opt-out, so egui's clamp reports a change; it asserts that state before the valve's answer.
+    /// opt-out, so egui's clamp reports a change.
     ///
     /// flip: restoring the `else if resp.changed() && !resp.lost_focus()` arm → fails at "no undo step" (1 against 0).
     #[test]
@@ -10330,9 +9951,7 @@ mod valve_arm_tests {
         let (ctx, mut app, id) = app_with_text();
         let before = app.session.history.undo_depth();
 
-        // 5000 is outside the field's range, which makes egui rewrite it and call that a change.
         let mut out_of_range = 5000.0_f64;
-        // Every frame is recorded: egui rewrites on the first frame it meets the value.
         let mut states = Vec::new();
         for _ in 0..3 {
             let subject = TypeSubject::of(&app, id).expect("a subject");
@@ -10342,7 +9961,6 @@ mod valve_arm_tests {
                     ..Default::default()
                 },
                 |ui| {
-                    // No `clamp_existing_to_range(false)`: egui's default.
                     let resp = ui.add(egui::DragValue::new(&mut out_of_range).range(
                         ondin_core::typography::MIN_FONT_SIZE
                             ..=ondin_core::typography::MAX_FONT_SIZE,
@@ -10371,8 +9989,8 @@ mod valve_arm_tests {
         assert_eq!(size, 20.0, "and does not write its rewritten value either");
     }
 
-    /// A held `Alt`+`→` stops at `MAX_TRACKING_PCT` and `Alt`+`←` at the min, in px and em, with an ordinary-step control.
-    /// The bound sits at the chord arm, not in `TextStyle::set`, since a file may legally hold any finite value.
+    /// A held `Alt`+`→` stops at `MAX_TRACKING_PCT` and `Alt`+`←` at the min, in px and em.
+    /// The bound sits at the chord arm, not in `TextStyle::set`: a file may hold any finite value.
     ///
     /// flip: the `(Em, Em)` arm of `OndinApp::text_chord` returning the stepped value instead of `stepped_into` → fails at "the em face stops at the same percentage" (`Em(4.0)` for `Em(2.0)`); the px assertions do not bite.
     #[test]
@@ -10385,7 +10003,7 @@ mod valve_arm_tests {
              live session, so without this the test would be about nothing"
         );
 
-        // Read through `TypeSubject`: with a live session the write can land in the editor, not the node.
+        // With a live session the write lands in the editor, not the node.
         let tracking = |app: &OndinApp| {
             let subject = TypeSubject::of(app, id).expect("a subject");
             match subject.shown(CharAttrKind::LetterSpacing) {
@@ -10394,7 +10012,6 @@ mod valve_arm_tests {
             }
         };
 
-        // The stored default is `Px(0.0)`; the px cap derives from the `%` one via `px_range_for` (`-10..=40` at 20pt).
         let px_cap = px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, 20.0);
         assert!(
             matches!(tracking(&app), Length::Px(v) if v == 0.0),
@@ -10402,7 +10019,6 @@ mod valve_arm_tests {
             tracking(&app)
         );
 
-        // Far past the cap in both directions: the step is small.
         for _ in 0..400 {
             app.text_chord(TextChord::Tracking(1));
         }
@@ -10420,7 +10036,6 @@ mod valve_arm_tests {
             "and at the other end, which is not the negation of the first"
         );
 
-        // The em face is the other arm of the clamp; its cap is the constant itself.
         let (_ctx, mut app, id) = app_with_text();
         app.begin_edit_text(Some(id), None);
         let subject = TypeSubject::of(&app, id).expect("a subject");
@@ -10438,7 +10053,6 @@ mod valve_arm_tests {
             Length::Em(MAX_TRACKING_PCT / 100.0),
             "the em face stops at the same percentage"
         );
-        // The em floor is not the negation of the cap (−50 against 200).
         for _ in 0..800 {
             app.text_chord(TextChord::Tracking(-1));
         }
@@ -10448,7 +10062,6 @@ mod valve_arm_tests {
             "and at the em floor, which is not the negation of the em cap"
         );
 
-        // Control: one press from zero is an ordinary step.
         let (_ctx, mut app, id) = app_with_text();
         app.begin_edit_text(Some(id), None);
         app.text_chord(TextChord::Tracking(1));
@@ -10488,7 +10101,6 @@ mod valve_arm_tests {
              {at_floor:?}"
         );
 
-        // Control: one press up is an ordinary step, so the floor is a clamp.
         let before = leading(&app);
         app.text_chord(TextChord::Leading(1));
         assert_ne!(
@@ -10497,7 +10109,6 @@ mod valve_arm_tests {
             "control: the chord still moves away from the floor"
         );
 
-        // The ceiling in both units: the floor is 0 in either scale, the cap is where they differ.
         // From the floor, 400 presses of `LEADING_STEP_PX` pass the px cap at 20pt (200).
         assert!(
             matches!(leading(&app), Some(Length::Px(_))),
@@ -10531,7 +10142,6 @@ mod valve_arm_tests {
     }
 
     /// A chord does not rewrite a stored out-of-range tracking: `Alt`+`→` on a stored `Em(5.0)` leaves it, `Alt`+`←` walks it back toward the range.
-    /// The fixture writes through `apply_char_attrs`, since seeding with the chord would clamp.
     ///
     /// flips: an unconditional clamp → fails at the second assertion (`Em(2.0)` for `Em(5.0)`); skipping the clamp when the value starts out of range → also fails there (`Em(5.01)`). The third assertion is reached by neither.
     #[test]
@@ -10571,7 +10181,6 @@ mod valve_arm_tests {
              direction that has somewhere to go"
         );
 
-        // The third behaviour: once inside, the ordinary cap applies again.
         for _ in 0..1200 {
             app.text_chord(TextChord::Tracking(-1));
         }
@@ -10721,19 +10330,17 @@ mod wrap_gate_tests {
     }
 
     /// Cells of the three strips with the section drawn at `MENU_INNER` in a 400×600 area, each not the current one.
-    /// The Wrap strip's left cell is `NoWrap` (`WrapMode::ALL` puts the inert cell first).
     const WRAP_OFF: egui::Pos2 = egui::pos2(120.0, 30.0);
     const WRAP_ON: egui::Pos2 = egui::pos2(200.0, 30.0);
     const WORD_BREAK_BREAK_ALL: egui::Pos2 = egui::pos2(120.0, 84.0);
     const LONG_WORDS_BREAK_WORD: egui::Pos2 = egui::pos2(120.0, 124.0);
 
     /// `NoWrap` dims Word break and Long words without resetting them, and nothing else.
-    /// Clicking the Wrap strip itself is the control: without it the "click did nothing" assertions pass against an empty `ui`.
+    /// Clicking the Wrap strip itself is the control, or the "click did nothing" assertions pass against an empty `ui`.
     ///
     /// flips: removing `if !wraps { ui.disable(); }` → the two `NoWrap` click assertions fail, Word break first; inverting it to `if wraps` → the `Wrap` half fails at the first assertion.
     #[test]
     fn nowrap_kills_word_break_and_long_words_and_nothing_else() {
-        // The positive half: with wrapping on, both strips take a click.
         let (ctx, mut app, id) = app_wrapping(WrapMode::Wrap);
         click(&ctx, &mut app, id, WORD_BREAK_BREAK_ALL);
         assert_eq!(
@@ -10749,7 +10356,6 @@ mod wrap_gate_tests {
             "and so does Long words"
         );
 
-        // Dimmed, not reset: switching to NoWrap keeps what was stored.
         click(&ctx, &mut app, id, WRAP_OFF);
         assert_eq!(para(&app, id).wrap, WrapMode::NoWrap, "the mode switched");
         assert_eq!(
@@ -10758,7 +10364,6 @@ mod wrap_gate_tests {
             "and the stored value survived the trip — dimmed is not reset"
         );
 
-        // The negative half, on a fixture that starts in the mode.
         let (ctx, mut app, id) = app_wrapping(WrapMode::NoWrap);
         let before = para(&app, id);
         click(&ctx, &mut app, id, WORD_BREAK_BREAK_ALL);
@@ -10774,7 +10379,6 @@ mod wrap_gate_tests {
             "and neither does a Long words click"
         );
 
-        // Control: the gate must stop at those two.
         click(&ctx, &mut app, id, WRAP_ON);
         assert_eq!(
             para(&app, id).wrap,
@@ -10792,8 +10396,8 @@ mod instance_mark_tests {
     use crate::app::OndinApp;
     use ondin_core::{NodeId, Operation, Transaction};
 
-    /// A text inside a main group *Label*, an instance of it, and the instance's
-    /// copy of the text: `(ctx, app, main's text, copy)`.
+    /// A text in a main group *Label* and the instance's copy of it:
+    /// `(ctx, app, main's text, copy)`.
     fn instance() -> (egui::Context, OndinApp, NodeId, NodeId) {
         let (ctx, mut app, text) = super::app_with_text();
         let group = app.session.ids.mint();
@@ -10882,8 +10486,7 @@ mod instance_mark_tests {
         })
     }
 
-    /// Every painted text with its rect and colour, and every override dot's
-    /// centre (via `ui::painted_override_dots`).
+    /// Every painted text with its rect and colour, and every override dot's centre.
     #[allow(clippy::type_complexity)]
     fn painted(
         out: &egui::FullOutput,
@@ -10978,7 +10581,7 @@ mod instance_mark_tests {
         assert_eq!(dots.len(), 1, "one dot: {dots:?}");
         let (case_at, case_ink) = ink("CASE");
         assert_eq!(case_ink, theme::text::STRONG, "Case is overridden");
-        // Language's ink is in the galley, not `fallback_color`; the one dot being Case's says Language follows.
+        // Language's ink is in the galley, not `fallback_color`.
         assert!(
             (dots[0].y - case_at.center().y).abs() < 8.0 && ink("LANGUAGE").0.top() > dots[0].y,
             "the dot is Case's: {dots:?} beside {case_at:?}"
@@ -11025,12 +10628,10 @@ mod instance_mark_tests {
 
     // --- the popup's other resets, clicked through ---------
     //
-    // Each test draws the real section over the copy, clicks its reset, and asserts
-    // the copy equals its main there and `reset::overrides` finds nothing left
-    // (a reset writing the main's values in another order leaves an override).
+    // Each test clicks the real section's reset and asserts the copy equals its main
+    // and `reset::overrides` finds nothing left.
 
-    /// A synthetic `fvar` axis, so the sections that need a font's axes draw
-    /// without one loaded.
+    /// A synthetic `fvar` axis, so the axis sections draw without a font loaded.
     fn font_axis(tag: Tag, min: f64, default: f64, max: f64) -> FontAxis {
         FontAxis {
             tag,
@@ -11095,7 +10696,7 @@ mod instance_mark_tests {
     const WGHT: Tag = Tag::new(*b"wght");
     const GRAD: Tag = Tag::new(*b"GRAD");
 
-    /// The Optical size reset writes the main's coordinates in the main's order (`[opsz 14, wght 700]`, not the copy's appended `[wght 700, opsz 20]`), so the copy follows again.
+    /// The Optical size reset writes the main's coordinates in the main's order, not the copy's appended one, so the copy follows again.
     ///
     /// flip: the `put` back to `retain` + `push` → fails at "the main's list, in its order".
     #[test]
@@ -11294,7 +10895,7 @@ mod instance_mark_tests {
     }
 
     /// The family dropdown's first row (*Reset to main · Inter*) puts the main's family back.
-    /// The variant dropdown's reset row is not driven: it needs a family with two faces, which the headless app may lack.
+    /// The variant dropdown's reset row is not driven: it needs a family with two faces.
     ///
     /// flip: the row's `commit_reset` dropped (early `return` kept) → fails at "the main's family".
     #[test]

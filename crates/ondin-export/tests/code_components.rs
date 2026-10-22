@@ -487,8 +487,23 @@ fn a_set_is_one_component_choosing_its_variant_by_a_union_prop() {
     );
 }
 
-/// Mains *Star* and *Heart*, a *Card* main whose *Icon* slot shows Star and is
-/// bound to a swap property, and an instance of Card whose slot shows Heart.
+const RED: Color = Color::from_rgba8(200, 30, 40, 255);
+const BLUE: Color = Color::from_rgba8(0, 90, 200, 255);
+
+/// One solid fill on `id`.
+fn paint(id: NodeId, c: Color) -> Operation {
+    Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(c).into(),
+            visible: true,
+        }]),
+    }
+}
+
+/// Mains *Star* (a red dot) and *Heart* (a blue one, placed apart), a *Card*
+/// main whose *Icon* slot shows Star and is bound to a swap property, and an
+/// instance of Card whose slot shows Heart.
 fn swap_card() -> (Document, NodeId) {
     let mut ids = IdSource::new(0x5A);
     let root = ids.mint();
@@ -530,6 +545,9 @@ fn swap_card() -> (Document, NodeId) {
             id: slot_dot,
             link: Some(star_dot),
         },
+        paint(star_dot, RED),
+        paint(slot_dot, RED),
+        paint(heart_dot, BLUE),
     ]))
     .unwrap();
     let (tx, _) = variant::define(&doc, &mut ids, card, "Icon", PropKind::Swap, vec![slot])
@@ -559,6 +577,7 @@ fn swap_card() -> (Document, NodeId) {
             id: inst_dot,
             link: Some(slot_dot),
         },
+        paint(inst_dot, RED),
     ]))
     .unwrap();
     // The swap, with the rewrite of the slot's contents the commit adds to it.

@@ -11,9 +11,8 @@ use crate::item::Keyed;
 use kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use serde::{Deserialize, Serialize};
 
-// The text attribute model lives in `typography.rs` — three scopes, three types
-// (§5.4) — and is re-exported here so `node::TextStyle` still names the thing a
-// text node carries.
+// The text attribute model lives in `typography.rs` (§5.4); re-exported so
+// `node::TextStyle` names what a text node carries.
 pub use crate::typography::{
     BlockStyle, BoxTrim, CharAttr, CharAttrKind, CharSpan, CharSpans, Decoration, JustifyLast,
     Length, LengthUnit, LineStyle, OverflowWrap, ParaAttr, ParaAttrKind, ParaSpan, ParaSpans,
@@ -24,15 +23,9 @@ pub use crate::typography::{
 /// A single node in the document tree.
 ///
 /// **Constructed by struct literal, inside this crate only** — the fields are
-/// `pub(crate)` (invariant 2) and there is deliberately no constructor. There
-/// used to be one, `Node::from_parts`, and it grew from eleven positional
-/// arguments to thirteen, three of them consecutive bare `bool`s; §15 D41 and
-/// D60 both recorded the run getting longer and asked for a parts struct before
-/// a fourth bool arrived. A named-field literal *is* that parts struct, and two
-/// of the five sites (`Document::new`, `Document::op_create`) were already
-/// written that way — so the answer was to delete the second door rather than
-/// widen it (§15 D240). A new field still breaks every site, which is the
-/// property the constructor was there for.
+/// `pub(crate)` (invariant 2) and there is deliberately no constructor: a
+/// named-field literal is the parts struct a long positional constructor would
+/// need, and a new field still breaks every site.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Node {
     pub(crate) id: NodeId,
@@ -43,205 +36,109 @@ pub struct Node {
     /// LOCAL to parent. Translation, rotation, skew and flip — never scale
     /// (§5.6).
     ///
-    /// Scale is the one component kept out, so that a layer's size is one number
-    /// in one place (its geometry) and a stroke does not thicken when a group is
-    /// resized. Skew has no geometry field it could live in instead, so it lives
-    /// here; `build::Basis` is the split that enforces the division, and the one
-    /// thing that may read a basis back apart.
+    /// Scale is kept out so a layer's size is one number in one place (its
+    /// geometry) and a stroke does not thicken when a group is resized.
+    /// `build::Basis` enforces the split.
     pub(crate) transform: Affine,
     pub(crate) name: String,
     pub(crate) visible: bool,
     pub(crate) locked: bool,
-    /// Whether resizing this node holds its aspect ratio: a handle drag keeps
-    /// the proportions as though Shift were held (`canvas::keep_ratio`), and the
-    /// Transform panel's W and H scale together.
-    ///
-    /// Nothing to do with `locked` above, which locks the *layer* against being
-    /// edited at all. This one constrains how an edit that is allowed behaves,
-    /// and the two are independent in both directions.
-    ///
-    /// Meaningful on anything resizable and simply inert on the rest — unlike
-    /// `clip` there is no kind gate, because there is no kind for which "keep
-    /// the ratio" would mean the wrong thing rather than nothing.
+    /// Whether resizing holds the aspect ratio (`canvas::keep_ratio`, the
+    /// Transform panel's W and H). Independent of `locked`, which refuses edits.
     pub(crate) proportions_locked: bool,
     /// 0.0..=1.0.
     pub(crate) opacity: f32,
     /// Whether this node clips what its children draw to its own frame.
-    ///
-    /// Node-level rather than a field of `NodeKind::Artboard`, for the same
-    /// reason `visible`/`locked`/`opacity` are: it is a property of the *layer*,
-    /// and the one container that honours it today is not obviously the last one
-    /// that will (a clipping group is the same switch). Ignored by every kind
-    /// that has no frame to clip to.
+    /// Node-level like `visible`/`locked`; ignored by kinds with no frame.
     pub(crate) clip: bool,
     /// Whether this node is a **mask**: it draws nothing itself, and its outline
-    /// clips the siblings painted above it.
-    ///
-    /// The scope is a *run* of siblings — everything after this node in the
-    /// parent's child list, up to the next mask or the end of it — which is
-    /// Figma's rule and the reason a second mask below simply starts a second
-    /// run instead of nesting inside the first.
-    ///
-    /// **Node-level like [`Self::clip`], and for the same reason**, but they are
-    /// not the same switch and must not be confused: `clip` cuts a container's
-    /// *children* to its own frame, this cuts its *siblings* to its own outline.
-    /// A frame can do the first and cannot do the second
+    /// clips the *run* of siblings painted above it, up to the next mask. Unlike
+    /// [`Self::clip`], which cuts children; a frame cannot do it
     /// ([`NodeKind::can_mask`]).
     pub(crate) mask: bool,
-    /// *How* this node masks, when [`Self::mask`] says it does.
-    ///
-    /// **A field beside the flag rather than a payload inside it**, so the mode
-    /// survives the mask being switched off and on. A designer who has set a mask
-    /// to `Alpha`, released it to look underneath and put it back should get the
-    /// alpha mask back; an `Option<MaskMode>` has nowhere to keep that while the
-    /// mask is off, which quietly makes the toggle destructive.
-    ///
-    /// Inert while `mask` is false, exactly as [`Self::clip`] is inert on a kind
-    /// with no frame.
+    /// *How* this node masks. A field beside the flag so the mode survives the
+    /// mask being switched off and on; inert while `mask` is false.
     pub(crate) mask_mode: MaskMode,
-    /// How this node's geometry decides its own interior (§15 D239).
-    ///
-    /// **On the node rather than on a [`Fill`], though SVG puts it on the paint.**
-    /// It is a property of the *geometry*: the hit test asks it, the mask asks it
-    /// when this node clips, and a node with no fill at all still has an inside. A
-    /// per-fill rule would let two fills of one shape disagree about what the shape
-    /// is, which is not a question anyone has.
-    ///
-    /// Defaulted, so every file written before it existed reads back unchanged.
+    /// How this node's geometry decides its own interior (§15 D239). On the node
+    /// rather than on a [`Fill`]: the hit test and the mask ask it, and a node
+    /// with no fill still has an inside.
     pub(crate) fill_rule: FillRule,
     /// Meaningful for shape/text kinds; empty for Root/Group/Artboard.
     pub(crate) paint: Paint,
-    /// The effect stack (§5.3a) — shadows, blur and colour filters, in
-    /// compositing order.
+    /// The effect stack (§5.3a), in compositing order.
     ///
-    /// **Unlike [`Self::paint`] this is meaningful on a container**, and that is
-    /// the whole reason it is a node field rather than something inside
-    /// [`Paint`]: a drop shadow on a group, or a blur over a whole frame, is one
-    /// of the commonest things anyone does with an effect, and neither has a fill
-    /// it could have hung from. A `Group` with no paint at all still composites,
-    /// which is exactly what an effect needs.
-    ///
-    /// **Empty on every node until someone adds one**, like [`Self::exports`] —
-    /// skipped by the save format and by every walk that has nothing to do. The
-    /// difference from `exports` is that these do affect what is drawn, so
-    /// `Operation::SetEffects` answers `true` to `changes_ink`, and an effect
-    /// that reaches outside its layer widens the cached bounds
-    /// ([`crate::effect::stack_escape`]).
+    /// A node field rather than part of [`Paint`] because it is meaningful on a
+    /// container. It affects what is drawn, so `Operation::SetEffects` answers
+    /// `true` to `changes_ink`, and an effect reaching outside its layer widens
+    /// the cached bounds ([`crate::effect::stack_escape`]).
     pub(crate) effects: Vec<Keyed<crate::effect::Effect>>,
-    /// Where this node's transforms turn and mirror about, or `None` for the
-    /// centre of its own box.
-    ///
-    /// `None` rather than a stored centre, so that "the user has not moved it"
-    /// is a state the model can *say* — which is what lets the canvas show the
-    /// marker only when it is somewhere unexpected, and what keeps the field out
-    /// of every saved file that never touched it.
+    /// Where this node's transforms turn and mirror about; `None` is the centre
+    /// of its own box, so "not moved" is a state the model can say.
     pub(crate) pivot: Option<Pivot>,
-    /// The files this layer produces — the Export panel's list (§7).
-    ///
-    /// **Empty on every node until someone adds one**, and empty is the state
-    /// that costs nothing: it is skipped by the save format, ignored by every
-    /// walk, and read only by the export path. Nothing here affects what is
-    /// drawn, which is why `Operation::SetExports` answers `false` to
+    /// The files this layer produces — the Export panel's list (§7). Read only
+    /// by the export path, so `Operation::SetExports` answers `false` to
     /// `changes_ink`.
     pub(crate) exports: Vec<Keyed<crate::export::ExportSpec>>,
-    /// The columns and rows drawn over this layer (`crate::layout`).
-    ///
-    /// **Empty on every node until someone adds one**, on exactly [`Self::exports`]'
-    /// terms — skipped by the save format, ignored by every walk — and chrome for
-    /// the same reason, so `Operation::SetLayoutGrids` answers `false` to
-    /// `changes_ink` too. Nothing about a grid reaches the scene, the export
-    /// writers or the snapshot.
-    ///
-    /// ⚠️ **Node-level, and offered only on a frame**, which is [`Self::clip`]'s
-    /// arrangement rather than a disagreement with it: the field is a property of
-    /// the layer and inert anywhere the app does not offer it. What confines the
-    /// offer is that a grid is measured against an **authored** size —
-    /// `NodeKind::Artboard` has one, and a group's box is derived from its
-    /// contents, so a grid on a group would move whenever a child did.
+    /// The columns and rows drawn over this layer (`crate::layout`); chrome, so
+    /// `Operation::SetLayoutGrids` answers `false` to `changes_ink`. Offered only
+    /// on a frame: a group's box is derived from its contents, so a grid on it
+    /// would move whenever a child did.
     pub(crate) grids: Vec<Keyed<crate::layout::LayoutGrid>>,
-    /// This layer's CSS insets and auto margins inside its frame (`crate::container`,
-    /// §15 D871) — unset on every layer until somebody pins one.
-    ///
-    /// **Specified, never used**: the insets are what the user set, and where the
-    /// layer is drawn is derived from them in [`crate::Resolved`] (§15 D868). Inert
-    /// outside a frame and on a kind that takes no insets, on `grids`' terms: the
-    /// model stores it and the layout pass asks the parent and the kind first.
+    /// This layer's CSS insets and auto margins inside its frame
+    /// (`crate::container`). **Specified, never used**: where the layer is drawn
+    /// is derived in [`crate::Resolved`]. Inert outside a frame.
     pub(crate) insets: crate::container::Insets,
-    /// How this layer lays out its children — CSS `display` (`crate::container`,
-    /// §15 D867). `None` on every layer until somebody gives one a layout, and read
-    /// only on a frame or a group (§15 D869); inert anywhere else, `grids`' terms.
+    /// How this layer lays out its children — CSS `display` (`crate::container`).
+    /// Read only on a frame or a group.
     pub(crate) display: Option<crate::container::Display>,
-    /// This layer's properties as a layout item — CSS's `flex-*`,
-    /// `grid-column`/`grid-row`, the self-alignments and sizes
-    /// (`crate::container::LayoutItem`). At CSS's defaults on every layer until
-    /// set; read only when its parent has a `display`.
+    /// This layer's properties as a layout item (`crate::container::LayoutItem`).
+    /// Read only when its parent has a `display`.
     pub(crate) item: crate::container::LayoutItem,
-    /// Whether this layer is a **main component** (§5.3d, §15 D978) — the source
-    /// its instances are linked copies of. Only on an `Artboard` or a `Group`, and
-    /// never on a layer that is itself linked or sits inside a main or an
-    /// instance; `Document::apply` and the loader refuse the rest
-    /// (`crate::component::check`).
+    /// Whether this layer is a **main component** (§5.3d), the source its
+    /// instances are copies of. Only on an `Artboard` or a `Group` that is not
+    /// itself linked or inside a main or instance (`crate::component::check`).
     pub(crate) component: bool,
-    /// The node this one was **copied from**, when it is part of an instance
-    /// (§5.3d, §15 D978) — one level up: a main component's node, or a node of a
-    /// nested instance inside an outer main. `None` for every ordinary layer and for
-    /// an instance's local additions. The first reference from one node to another
-    /// (a guide's owner, the only earlier one, runs from a guide), and checked the
-    /// way that one is: after the last op of every transaction
-    /// (`crate::component::check`).
+    /// The node this one was **copied from**, when part of an instance (§5.3d):
+    /// a main's node, or a node of a nested instance inside an outer main.
+    /// Checked after the last op of every transaction (`crate::component::check`).
     pub(crate) link: Option<NodeId>,
-    /// The main whose **contents** this nested copy shows instead of its link's —
-    /// an **instance swap** (§15 D983). Only on a copy inside an outer instance
-    /// (linked to a nested instance, never straight to a main), and `None`
-    /// everywhere else: [`Self::link`] keeps the slot's identity, so the copy
-    /// still takes its placement, size and visibility from the slot, and
-    /// everything else — its own fields and its children — from this main
-    /// (`crate::swap`).
+    /// The main whose **contents** this nested copy shows instead of its link's
+    /// (an instance swap). [`Self::link`] keeps the slot's identity, so placement,
+    /// size and visibility come from the slot (`crate::swap`).
     pub(crate) swap: Option<NodeId>,
-    /// This frame's **variant properties**, when it is a component set (§5.3d
-    /// step 7, §15 D982) — every main directly inside it is a variant. `None` on
-    /// every other layer. A set is a frame and never a main itself.
+    /// This frame's **variant properties**, when it is a component set (§5.3d);
+    /// every main directly inside it is a variant.
     pub(crate) set: Option<crate::variant::VariantSet>,
-    /// This main's **values**, one per property of the set around it, in the set's
-    /// order — empty on everything that is not a variant (§15 D982). The variant's
-    /// name is derived from them (`crate::variant::settle`).
+    /// This main's **values**, one per property of its set; the variant's name
+    /// is derived from them (`crate::variant::settle`).
     pub(crate) variant: Vec<String>,
-    /// The **component properties** this main or set defines (§15 D982) — each a
-    /// view over a field of the layers it is bound to. Empty everywhere else, and
-    /// on a variant, whose properties are its set's.
+    /// The **component properties** this main or set defines. Empty on a
+    /// variant, whose properties are its set's.
     pub(crate) props: Vec<Keyed<crate::variant::Property>>,
-    /// Where this node was **vendored from**, when it is part of a kit main in the
-    /// document's vault (§5.3e, §15 D1012) — the kit, the node there, the version.
-    /// `None` on every node outside the vault, and a copy of a vendored node never
-    /// keeps it (`remap_subtree`): only the kit verbs write one
-    /// (`crate::kit::check`).
+    /// Where this node was **vendored from**, when part of a kit main in the
+    /// document's vault (§5.3e). A copy never keeps it (`remap_subtree`); only
+    /// the kit verbs write one (`crate::kit::check`).
     pub(crate) origin: Option<crate::kit::Origin>,
-    /// The **mode** this frame sets for itself and everything under it (§5.3f,
-    /// D1038 (b)) — `None` to inherit from the nearest ancestor frame that sets
-    /// one, else the document's default. Only on an `Artboard`: a group never
-    /// sets a mode (`crate::variable::check`).
+    /// The **mode** this frame sets for itself and everything under it (§5.3f);
+    /// `None` inherits. Only on an `Artboard` (`crate::variable::check`).
     pub(crate) mode: Option<crate::variable::ModeId>,
-    /// The variables this rectangle's corners are bound to (§15 D1039), all
-    /// `None` on every other layer.
+    /// The variables this rectangle's corners are bound to.
     pub(crate) corner_vars: crate::variable::CornerVars,
-    /// The variables this container's gaps and padding are bound to (§15 D1058),
-    /// all `None` on a layer with no layout.
+    /// The variables this container's gaps and padding are bound to.
     pub(crate) spacing_vars: crate::variable::SpacingVars,
-    /// The boolean variable this layer's visibility is bound to (§15 D1059),
-    /// `visible` its literal, never read while bound.
+    /// The boolean variable this layer's visibility is bound to; `visible` is
+    /// its literal, never read while bound.
     pub(crate) visible_var: Option<crate::variable::VarId>,
-    /// The number variables this layer's width and height are bound to (§15
-    /// D1061), all `None` on a kind with no stored size.
+    /// The number variables this layer's width and height are bound to.
     pub(crate) size_vars: crate::variable::SizeVars,
-    /// The string variables this text's content and family are bound to (§15
-    /// D1069), both `None` on every other kind.
+    /// The string variables this text's content and family are bound to.
     pub(crate) text_vars: crate::variable::TextVars,
-    /// The number variable this layer's opacity is bound to (§15 D1072), read
-    /// as a percentage; `opacity` its literal, 0 while bound and never drawn.
+    /// The number variable this layer's opacity is bound to, read as a
+    /// percentage; `opacity` is its literal, 0 while bound and never drawn.
     pub(crate) opacity_var: Option<crate::variable::VarId>,
-    /// The styles this layer's fills, strokes and effects are bound to (§5.3f,
-    /// §15 D1062) — the lists themselves hold the style's values, written there
-    /// by the commit (`crate::style::settle`).
+    /// The styles this layer's fills, strokes and effects are bound to (§5.3f) —
+    /// the lists hold the style's values, written there by the commit
+    /// (`crate::style::settle`).
     pub(crate) styles: crate::style::StyleRefs,
 }
 
@@ -249,24 +146,21 @@ impl Node {
     pub fn id(&self) -> NodeId {
         self.id
     }
-    /// Whether this layer is a main component (§15 D978).
+    /// Whether this layer is a main component.
     pub fn component(&self) -> bool {
         self.component
     }
-    /// The node this one was copied from, if it is part of an instance (§15 D978).
+    /// The node this one was copied from, if it is part of an instance.
     pub fn link(&self) -> Option<NodeId> {
         self.link
     }
-    /// The main this nested copy's contents are swapped to, if any (§15 D983).
+    /// The main this nested copy's contents are swapped to, if any.
     pub fn swap(&self) -> Option<NodeId> {
         self.swap
     }
-    /// Make this freshly remapped node a **linked copy** of `source`: linked to
-    /// it, and none of what makes a main a main — the flag, a variant's values, a
-    /// component's properties (§15 D978, D982). Every door that makes an instance
-    /// node goes through here, so a new main-only field is cleared in one place.
-    /// A swap is cleared too: a copy of a swapped node shows what it shows by
-    /// following it, one link up (§15 D983).
+    /// Make this freshly remapped node a **linked copy** of `source`, clearing
+    /// everything main-only (and any swap) in one place for every door that makes
+    /// an instance node.
     pub(crate) fn make_copy_of(&mut self, source: NodeId) {
         self.link = Some(source);
         self.swap = None;
@@ -275,7 +169,7 @@ impl Node {
         self.variant.clear();
         self.props.clear();
     }
-    /// The variant properties, if this frame is a component set (§15 D982).
+    /// The variant properties, if this frame is a component set.
     pub fn set(&self) -> Option<&crate::variant::VariantSet> {
         self.set.as_ref()
     }
@@ -283,11 +177,11 @@ impl Node {
     pub fn variant(&self) -> &[String] {
         &self.variant
     }
-    /// The component properties this main or set defines (§15 D982).
+    /// The component properties this main or set defines.
     pub fn props(&self) -> &[Keyed<crate::variant::Property>] {
         &self.props
     }
-    /// Where this node was vendored from, when it is in the vault (§15 D1012).
+    /// Where this node was vendored from, when it is in the vault.
     pub fn origin(&self) -> Option<&crate::kit::Origin> {
         self.origin.as_ref()
     }
@@ -296,46 +190,40 @@ impl Node {
     pub fn mode(&self) -> Option<crate::variable::ModeId> {
         self.mode
     }
-    /// The variables this rectangle's corners are bound to (§15 D1039).
+    /// The variables this rectangle's corners are bound to.
     pub fn corner_vars(&self) -> crate::variable::CornerVars {
         self.corner_vars
     }
-    /// The variables this container's gaps and padding are bound to (§15 D1058).
+    /// The variables this container's gaps and padding are bound to.
     pub fn spacing_vars(&self) -> crate::variable::SpacingVars {
         self.spacing_vars
     }
-    /// The boolean variable this layer's visibility is bound to (§15 D1059).
-    /// Whether the layer *is* shown is [`crate::Document::shown`]; [`Self::visible`]
-    /// is the literal.
+    /// The boolean variable this layer's visibility is bound to; whether it is
+    /// shown is [`crate::Document::shown`], not [`Self::visible`].
     pub fn visible_var(&self) -> Option<crate::variable::VarId> {
         self.visible_var
     }
-    /// The variables this layer's width and height are bound to (§15 D1061).
-    /// The size it is drawn at is [`crate::Document::resolved_kind`]'s; the
-    /// kind's own `size` is the literal, 0 on a bound axis.
+    /// The variables this layer's width and height are bound to; the size drawn
+    /// is [`crate::Document::resolved_kind`]'s, the kind's `size` the literal.
     pub fn size_vars(&self) -> crate::variable::SizeVars {
         self.size_vars
     }
-    /// The variables this text's content and family are bound to (§15 D1069).
-    /// What it is drawn with is [`crate::Document::resolved_kind`]'s; the kind's
-    /// own content and family are the literals, empty where bound.
+    /// The variables this text's content and family are bound to; what is drawn
+    /// is [`crate::Document::resolved_kind`]'s.
     pub fn text_vars(&self) -> crate::variable::TextVars {
         self.text_vars
     }
-    /// The variable this layer's opacity is bound to (§15 D1072). The opacity it
-    /// is drawn at is [`crate::Document::drawn_opacity`]'s; [`Self::opacity`] is
-    /// the literal, 0 while bound.
+    /// The variable this layer's opacity is bound to; the opacity drawn is
+    /// [`crate::Document::drawn_opacity`]'s, [`Self::opacity`] the literal.
     pub fn opacity_var(&self) -> Option<crate::variable::VarId> {
         self.opacity_var
     }
-    /// The styles this layer's cards are bound to (§15 D1062).
+    /// The styles this layer's cards are bound to.
     pub fn styles(&self) -> crate::style::StyleRefs {
         self.styles
     }
-    /// Whether any field of this node reads a variable — a bound fill, stroke,
-    /// stroke width, corner, gap, padding, visibility, width, height, content,
-    /// family, opacity or effect number. What a variable's edit dirties
-    /// (`Document::bound_nodes`).
+    /// Whether any field of this node reads a variable; what a variable's edit
+    /// dirties (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self
@@ -354,16 +242,10 @@ impl Node {
                 .iter()
                 .any(|e| e.vars.iter().any(Option::is_some))
     }
-    /// Refuse a node whose keyed lists repeat an item id within one list (§15
-    /// D980) — `Document::apply`'s post-condition and the loader's check. Across
-    /// lists and across nodes an id may repeat: duplication copies them.
-    ///
-    /// **Six lists, not five**: the component properties (`props`, §15 D982) are
-    /// keyed too, and every edit of one finds it by id (`variant::edit_property`).
-    /// They were missing here, so *Combine as variants* could leave a set holding
-    /// one id twice — every rename or delete of the second property then hit the
-    /// first (`[R1-L2-02]`). Files a build before the fix saved that way are
-    /// re-keyed on load rather than refused (`io::schema`, `item::rekey_repeats`).
+    /// Refuse a node whose keyed lists (`props` included) repeat an item id
+    /// within one list — `Document::apply`'s post-condition and the loader's
+    /// check. Across lists and nodes an id may repeat. Files saved with a repeat
+    /// are re-keyed on load (`item::rekey_repeats`).
     pub(crate) fn check_item_ids(&self) -> Result<(), crate::op::OpError> {
         use crate::item::first_duplicate;
         let dup = first_duplicate(&self.paint.fills)
@@ -392,8 +274,8 @@ impl Node {
         self.transform
     }
     /// This node with `transform` in place of its own, everything else the same
-    /// — for comparing a node's content wherever it sits (the app's picker
-    /// pictures, §15 D1035). Not a write: the document is changed by ops only.
+    /// — for comparing a node's content wherever it sits. Not a write: the
+    /// document is changed by ops only.
     pub fn with_transform(&self, transform: Affine) -> Node {
         Node {
             transform,
@@ -403,9 +285,8 @@ impl Node {
     pub fn name(&self) -> &str {
         &self.name
     }
-    /// The stored visibility — **the literal**, which a layer whose visibility is
-    /// bound to a variable does not draw by (§15 D1059). Whether it is drawn is
-    /// [`crate::Document::shown`].
+    /// The stored visibility — **the literal**, which a layer bound to a variable
+    /// does not draw by. Whether it is drawn is [`crate::Document::shown`].
     pub fn visible(&self) -> bool {
         self.visible
     }
@@ -418,8 +299,8 @@ impl Node {
     pub fn proportions_locked(&self) -> bool {
         self.proportions_locked
     }
-    /// The literal opacity — 0 while [`Self::opacity_var`] binds it (§15 D1072);
-    /// what the layer is drawn at is [`crate::Document::drawn_opacity`].
+    /// The literal opacity — 0 while [`Self::opacity_var`] binds it; what the
+    /// layer is drawn at is [`crate::Document::drawn_opacity`].
     pub fn opacity(&self) -> f32 {
         self.opacity
     }
@@ -441,19 +322,10 @@ impl Node {
     /// How this node's geometry decides its interior (§15 D239) — the **effective**
     /// rule, which for one kind is not the stored one.
     ///
-    /// ⚠️ **A `Boolean` with [`BoolOp::Exclude`] is always even-odd, whatever the
-    /// field says**, and deriving it here rather than storing it is what makes the
-    /// change safe for documents that already exist. An `Exclude`'s outline is its
-    /// operands concatenated — that *is* the symmetric difference, read even-odd —
-    /// so a file written before this field existed has no key, would default to
-    /// non-zero, and would draw its exclusion as a **union**. Every such file is
-    /// correct without being touched, because the rule is a consequence of the
-    /// operation rather than a choice about it.
-    ///
-    /// It also means no migration, no `SetFillRule` inside `build::boolean`, and
-    /// nothing for a directly-constructed test fixture to remember. The stored field
-    /// is what a *user* set on a shape, and is what [`crate::io`] writes; this is
-    /// what every consumer asks.
+    /// A `Boolean` with [`BoolOp::Exclude`] is always even-odd, whatever the
+    /// field says: its outline is its operands concatenated, a symmetric
+    /// difference only when read even-odd. The stored field is what a *user* set
+    /// and [`crate::io`] writes; every consumer asks this.
     pub fn fill_rule(&self) -> FillRule {
         match self.kind {
             NodeKind::Boolean {
@@ -502,67 +374,46 @@ impl Node {
 
 /// How a [`Node::mask`] decides what survives of the layers it masks.
 ///
-/// **Two, and the pair is a real choice rather than a setting**: one asks *where*
-/// the mask is and the other asks *how much of it* is there.
+/// One mode asks *where* the mask is, the other *how much of it* is there.
 ///
-/// The third mode every other editor offers — **luminance**, where the mask's
-/// brightness is the amount — is deliberately absent, and it is a dependency
-/// limit rather than a design one. `vello_cpu` has `Mask::new_luminance` and the
-/// GPU backend has nothing equivalent: vello's `push_layer` takes no mask, and no
-/// Porter-Duff compose or blend mode moves colour into alpha, so the conversion
-/// is not expressible in the compositor at all. Shipping it would mean the canvas
-/// and the export disagreeing, which is the one thing §3 exists to prevent. See
-/// §15 for the measurement and what it would cost to close.
+/// **Luminance** (brightness is the amount) is absent because the GPU backend
+/// cannot express it: vello's `push_layer` takes no mask and no compose or blend
+/// mode moves colour into alpha, while `vello_cpu` could. Shipping it would make
+/// the canvas and the export disagree, which §3 exists to prevent.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MaskMode {
     /// The mask's **outline** clips: a hard edge, and everything inside it
     /// survives whole. Figma's *vector mask*.
     ///
     /// The default, and the cheaper of the two — one clip layer, where `Alpha`
-    /// needs two and an offscreen composite. It is also what every mask made
-    /// before this mode existed meant, which is what keeps the field out of
-    /// existing files.
+    /// needs two and an offscreen composite.
     #[default]
     Shape,
-    /// The mask's own **alpha** is the amount that survives, per pixel. A
-    /// gradient fading to transparent fades what it masks; a photograph with an
-    /// alpha channel cuts to its own edges.
-    ///
-    /// The mask's *colour* is not read — only its alpha — which is the difference
-    /// between this and the luminance mode that is not here.
+    /// The mask's own **alpha** is the amount that survives, per pixel; its
+    /// colour is not read.
     Alpha,
 }
 
 /// How a path's interior is decided where it crosses itself or another subpath
 /// (§15 D239).
 ///
-/// **The rule SVG and every drawing tool has, and this model did not.** A closed
-/// path with more than one subpath, or one that crosses itself, does not say on its
-/// own which parts are inside; the two answers are counting *turns* about the point
-/// and counting *crossings* to infinity, and they differ exactly where a subpath
-/// overlaps another wound the same way.
+/// Non-zero counts *turns* about the point, even-odd counts *crossings* to
+/// infinity; they differ where a subpath overlaps another wound the same way.
 ///
-/// ⚠️ **It is the fix for `Exclude`, not a decoration.** A symmetric difference *is*
-/// the even-odd reading of its operands concatenated — a point is in it when an odd
-/// number of operands cover it, which is what an odd crossing count means — so with
-/// this field a boolean `Exclude` needs **no path arithmetic at all** and is exact.
-/// Measured before it was built: the fold flo_curves performs is wrong by up to
-/// 12,374 area units of 69,810 on a fourteen-circle ring, where the even-odd reading
-/// of the same operands is accurate to within the referee's own sampling noise.
+/// It is what makes a boolean `Exclude` exact: a symmetric difference is the
+/// even-odd reading of its operands concatenated, so no path arithmetic is
+/// needed (the flo_curves fold is visibly wrong on a ring of overlapping circles).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FillRule {
     /// A point is inside when the path winds about it a non-zero number of times.
+    /// Two overlapping subpaths wound the same way fill solid.
     ///
-    /// **The default, and what every path in every file written before this field
-    /// existed meant** — which is what keeps the field out of those files, exactly
-    /// as [`MaskMode::Shape`] does for masks. Two overlapping subpaths wound the
-    /// same way fill solid.
+    /// The default, which keeps the field out of files that never set it.
     #[default]
     NonZero,
     /// A point is inside when a ray from it crosses the path an odd number of times.
-    ///
-    /// Two overlapping subpaths cancel where they meet, which is what makes this the
-    /// symmetric difference and what makes a hole a hole regardless of its winding.
+    /// Overlapping subpaths cancel where they meet, and a hole is a hole whatever
+    /// its winding.
     EvenOdd,
 }
 
@@ -577,12 +428,9 @@ impl FillRule {
 
     /// Whether `path` contains `p`, under this rule.
     ///
-    /// **`BezPath::contains` is non-zero and nothing said so**, which is the trap
-    /// this exists to close: kurbo's containment is `winding(p) != 0`, so a boolean
-    /// hit-tested with it under an even-odd fill would be clickable in the holes it
-    /// does not draw. Even-odd is the *parity* of the same winding number — each
-    /// crossing moves it by one, so an odd winding is an odd crossing count — which
-    /// is why this needs no second traversal.
+    /// `BezPath::contains` is always non-zero, so hit-testing a boolean with it
+    /// under an even-odd fill would be clickable in holes it does not draw.
+    /// Even-odd is the parity of the same winding number, so no second traversal.
     pub fn contains(self, path: &BezPath, p: Point) -> bool {
         use kurbo::Shape;
         match self {
@@ -615,15 +463,12 @@ impl MaskMode {
 /// A node's transform origin, in the node's own local space.
 ///
 /// **Normalized where the box is authored, absolute where it is emergent.** A
-/// rectangle's box is a field, so a pivot two thirds along it should stay two
-/// thirds along it when the field changes — that is what a fraction means and it
-/// is what a designer expects of a resize. A group's box is the union of its
-/// children and a line's is degenerate, so there is no authored extent for a
-/// fraction to be *of*: editing one child would slide the pivot out from under
-/// everything else in the group. Those kinds store the point itself.
+/// rectangle's pivot stays proportionally placed when its size changes. A group's
+/// box is the union of its children and a line's is degenerate, so there is no
+/// authored extent for a fraction to be *of*; those kinds store the point itself.
 ///
-/// Which variant a kind gets is [`crate::geometry::pivot_for`]'s decision, made
-/// once from `resizable_size`, so the two halves of the rule cannot drift apart.
+/// [`crate::geometry::pivot_for`] decides which variant a kind gets, once, from
+/// `resizable_size`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Pivot {
     /// A fraction of the node's own box: `(0, 0)` its top-left, `(1, 1)` its
@@ -636,18 +481,12 @@ pub enum Pivot {
 impl Pivot {
     /// Invariant 8's predicate for this field (§15 D639).
     ///
-    /// A pivot is two coordinates like any other, and the operation layer is
-    /// where a non-finite one has to be refused — `serde_json` writes a `NaN`
-    /// `f64` as `null` and then refuses `null` where an `f64` is wanted, so a
-    /// document that accepts one saves cleanly and never opens again. That is
-    /// `[S2.2-L1-06]`, and the same terminal shape as `[A1-L2-01]`'s transform.
-    ///
-    /// ⚠️ **The arithmetic downstream is already safe and that is not the
-    /// question.** `geometry::pivot_for` falls back below `MIN_EXTENT` and
-    /// `canvas::origin_pivot` has its own floor, so nothing here divides by a
-    /// zero extent; what neither guards is a coordinate that was never finite to
-    /// begin with, which arrives from a singular world transform through
-    /// `canvas::pivot_at` and from any hand-authored write.
+    /// The operation layer must refuse a non-finite pivot: `serde_json` writes
+    /// `NaN` as `null` and then refuses `null` where an `f64` is wanted, so such a
+    /// document saves cleanly and never opens again. The downstream division is
+    /// already floored; what nothing else guards is a coordinate that was never
+    /// finite, from a singular world transform (`canvas::pivot_at`) or a
+    /// hand-authored write.
     #[must_use]
     pub fn is_finite(&self) -> bool {
         match self {
@@ -659,14 +498,8 @@ impl Pivot {
 
 /// Which boolean a [`NodeKind::Boolean`] container performs on its children.
 ///
-/// The four Figma offers, and the same four every vector editor does — the set is
-/// not really a choice: they are the four functions of two winding numbers that
-/// produce a region.
-///
-/// **Order is layer order** for the two that are not commutative. `Subtract` is the
-/// bottom child less everything above it, and children are stored bottom-first
-/// (child index 0 paints first), so the layer list reads the same way the operation
-/// does.
+/// **Order is layer order** for the non-commutative `Subtract`: the bottom child
+/// less everything above it, children being stored bottom-first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoolOp {
     /// Everything covered by any child.
@@ -703,10 +536,8 @@ impl BoolOp {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeKind {
     Root,
-    /// A frame. **Its fill is [`Node::paint`]'s fill list, like every other
-    /// painted layer's** — it used to be an `Option<Brush>` field right here, one
-    /// ground or none, and that one field is what made every fill verb in the
-    /// workspace carry a frame-shaped special case (§15 D400).
+    /// A frame. Its fill is [`Node::paint`]'s fill list, like every painted
+    /// layer's.
     Artboard {
         size: Size,
     },
@@ -743,26 +574,12 @@ pub enum NodeKind {
     },
     /// An authored outline, plus a rounding radius per **anchor** of it.
     ///
-    /// **The radii are a parallel list, indexed by
-    /// [`crate::geometry::anchor_runs`]' order** — the one place that order is
-    /// defined, precisely so the app and the file cannot number the same path
-    /// differently. `corner_radii[i]` rounds anchor `i`; entries past the end are
-    /// zero, so the list is trimmed of trailing zeros and an unrounded path
-    /// carries none at all (`skip_serializing_if`, which keeps every existing
-    /// file byte-identical — invariant 9).
-    ///
-    /// **A parallel list is the cost of `BezPath` over a vector network** (§15
-    /// D114, D119). A network would give each anchor an identity to hang a radius
-    /// on; here the identity *is* the index, so every edit that inserts or removes
-    /// an anchor has to renumber this in step. That is why the app carries the
-    /// radius **on** its anchor struct (`preview::PenAnchor::radius`) and only
-    /// flattens back to this list at the model boundary: moving, deleting or
-    /// reordering an anchor then carries its radius automatically, and there is
-    /// no second list to keep aligned by hand.
-    ///
-    /// Resolved into geometry at read time by [`crate::geometry::local_path`],
-    /// the way a `Rect`'s `corner_radii` already are — never baked, so scrubbing
-    /// the value up and down is lossless.
+    /// The radii are a parallel list indexed by [`crate::geometry::anchor_runs`]'
+    /// order; entries past the end are zero, so an unrounded path carries none
+    /// (invariant 9). An anchor's identity is its index (§15 D114), so the app
+    /// carries the radius on its anchor struct (`preview::PenAnchor::radius`) and
+    /// flattens to this list only at the model boundary. Resolved at read time by
+    /// [`crate::geometry::local_path`], never baked.
     Path {
         path: BezPath,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -770,22 +587,10 @@ pub enum NodeKind {
     },
     /// A container whose children are combined into one outline (`boolean.rs`).
     ///
-    /// **Non-destructive, like Figma's**: the children stay in the tree, keep their
-    /// own transforms and geometry, and remain selectable and editable — the result
-    /// is *derived*, re-evaluated whenever anything under here changes. That is the
-    /// whole reason it is a container rather than an operation that rewrites a
-    /// `Path` and throws the operands away.
-    ///
-    /// The outline itself is **not** stored, and could not be: it is a function of
-    /// the whole subtree, so it cannot come out of
-    /// [`crate::geometry::local_path`] the way every other shape's does. It lives in
-    /// [`crate::Resolved`] instead, cached per node and invalidated by the dirty
-    /// set — exactly the arrangement a `Text` node's shaped layout already has, and
-    /// for exactly the same reason.
-    ///
-    /// It carries no `size`: the box is whatever the combined outline turns out to
-    /// be. So there is nothing here for a resize handle to write, and a boolean is
-    /// scaled the way a group is — by scaling what is inside it.
+    /// **Non-destructive**: the children stay in the tree and the result is
+    /// *derived*. The outline is not stored; it lives in [`crate::Resolved`],
+    /// cached and invalidated by the dirty set. It carries no `size`; a boolean
+    /// is scaled by scaling what is inside it.
     Boolean {
         op: BoolOp,
     },
@@ -797,16 +602,10 @@ pub enum NodeKind {
     /// gesture writes, not a style anything reads through a span.
     Text {
         content: String,
-        /// **Boxed**, and since §15 D405 not the only field here that is — see
-        /// `on_path` below, which is boxed for exactly this reason and measured
-        /// the same way. Measured: `TextStyle` is
-        /// 288 bytes where the whole of `NodeKind`'s next-largest variant is 176,
-        /// and a Rust enum is as large as its largest variant — so unboxed it made
-        /// *every* node in the document, a line and a rect included, 288 bytes
-        /// bigger than it needs to be (`Node` went 344 → 624). One pointer
-        /// indirection on read, paid only by text nodes, buys that back.
-        ///
-        /// Transparent on disk: `Box<T>` serializes as `T`.
+        /// **Boxed**, as is `on_path`: an enum is as large as its largest variant,
+        /// and an unboxed `TextStyle` (288 bytes against 176 for the next-largest
+        /// variant) would make every node in the document that much bigger. Only
+        /// text nodes pay the indirection. Transparent on disk.
         style: Box<TextStyle>,
         #[serde(default, skip_serializing_if = "CharSpans::is_empty")]
         spans: CharSpans,
@@ -823,71 +622,21 @@ pub enum NodeKind {
         /// The rail this text is set along, in the node's **own local space**, or
         /// `None` for ordinary horizontal type.
         ///
-        /// **The path belongs to the text node rather than being referenced from
-        /// it.** The two alternatives were a container kind holding both (the
-        /// `Boolean` shape) and an `Option<NodeId>` pointing at a sibling (SVG's
-        /// `<textPath href>` shape). Both were declined: a container puts itself
-        /// between every existing text feature and the node it edits, and an id
-        /// would be the **first cross-node reference in this model** — nothing
-        /// here references anything — so it would have to invent dangling,
-        /// delete, duplicate and cross-document-paste semantics that no other
-        /// field needs. Applying a path consumes the layer it came from and
-        /// *Detach* gives it back, which is what Illustrator and Affinity both
-        /// do (§15 D405).
-        ///
-        /// **Not `Option<BezPath>` but `Option<Box<BezPath>>`**, for the reason
-        /// [`TextStyle`] is boxed above, and measured the same way rather than
-        /// assumed: this variant *is* `NodeKind`'s largest — its payload is
-        /// **200** bytes, which is `NodeKind`'s whole size — and unboxed the rail
-        /// would take it to **216**. A Rust enum is as large as its largest
-        /// variant, so that is 16 bytes on *every* node in the document, a line
-        /// and a rect included, to serve the few that are on a curve. One
-        /// indirection, paid only by type on a path, buys it back: `Option<Box<_>>`
-        /// is 8 bytes where `Option<BezPath>` is 24.
-        ///
-        /// Transparent on disk (`Box<T>` serializes as `T`), and absent from
-        /// every existing file, so invariant 9 holds byte-for-byte.
+        /// The path belongs to the text node rather than being referenced by id,
+        /// which would be the model's first cross-node reference (§15 D405).
+        /// Boxed like [`TextStyle`]: this is `NodeKind`'s largest variant.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_path: Option<Box<BezPath>>,
-        /// Whether the type runs along the rail the *other* way — the flip every
-        /// tool with type on a path has (§15 D406).
-        ///
-        /// **One flag for both halves, because they are one gesture.** Flipping
-        /// reverses the direction the text runs *and* puts it on the other side of
-        /// the curve, and those are not two settings: traversing the rail
-        /// backwards negates the tangent, which negates the normal with it, so the
-        /// text reverses and changes sides together. That is what a designer means
-        /// by "the other side" — text around the bottom of a badge has to read
-        /// left-to-right, which it only does if the direction flips too.
-        ///
-        /// ⚠️ **A field beside [`Self::Text::on_path`] rather than a payload inside
-        /// it**, exactly as [`Node::mask_mode`] sits beside [`Node::mask`] and for
-        /// the same reason: a flip kept inside the `Option` has nowhere to live
-        /// while the rail is off, so *Detach from path* would silently discard it
-        /// and putting the text back on a curve would come back the wrong way
-        /// round. Inert while `on_path` is `None`.
+        /// Whether the type runs along the rail the *other* way (§15 D406): one
+        /// flag, since reversing the tangent reverses the normal with it.
+        /// Beside [`Self::Text::on_path`] so *Detach from path* does not discard
+        /// it; inert while `on_path` is `None`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         on_path_flip: bool,
         /// Where along the rail the type starts, as a **fraction of the rail's
-        /// length** (§15 D409).
-        ///
-        /// **Because a rail has a start and nobody can see where it is.** Without
-        /// this the type always began at the path's own first point, which for a
-        /// triangle drawn from any corner is some other corner: reported as
-        /// *"I click on the base, and it always starts the text on the right edge,
-        /// at the top"*. The Text tool's click sets this from where the pointer
-        /// was, so the type begins under the mark that offered it.
-        ///
-        /// **A fraction rather than a distance**, so it survives the rail being
-        /// scaled: a resize handle scales the curve (§15 D405), and an absolute
-        /// offset would slide the type toward the start as the rail grew under it.
-        /// It is also the unit the SVG writer already emits, `startOffset` in
-        /// percent.
-        ///
-        /// **Composed with [`crate::ParagraphStyle::align`], not replacing it.**
-        /// Alignment says where the text sits relative to the whole rail and this
-        /// nudges it from there, so a centred node clicked at its middle stays
-        /// centred. Inert while `on_path` is `None`, like the flip beside it.
+        /// length** (§15 D409), so it survives the rail being scaled. Composed
+        /// with [`crate::ParagraphStyle::align`], not replacing it. Inert while
+        /// `on_path` is `None`.
         #[serde(default, skip_serializing_if = "is_zero")]
         on_path_offset: f64,
     },
@@ -900,10 +649,9 @@ fn is_zero(v: &f64) -> bool {
 
 /// Whether every coordinate in a path is finite.
 ///
-/// **Every point of every element, not just the endpoints.** A `CurveTo`'s
-/// control points are written to the file exactly as its endpoint is, so a NaN
-/// in one of them is the same unopenable document; kurbo's `PathEl` is matched
-/// exhaustively here so a new element cannot be added past this quietly.
+/// Checks every point of every element, control points included, since a NaN in
+/// one is the same unopenable document. `PathEl` is matched exhaustively so a new
+/// element cannot slip past.
 pub(crate) fn path_is_finite(path: &BezPath) -> bool {
     let finite = |p: &Point| p.x.is_finite() && p.y.is_finite();
     path.elements().iter().all(|el| match el {
@@ -924,11 +672,9 @@ fn is_default_block(b: &BlockStyle) -> bool {
 
 /// Everything one text node's layout depends on, borrowed from its `NodeKind`.
 ///
-/// **One argument instead of five.** `text::layout`, `measure`, `local_bounds`
-/// and the two render paths all need the same set, and the set grew from two
-/// fields to five when the attribute model landed; threading them positionally
-/// was how a call site ended up passing the paragraph style where the block one
-/// belonged. [`TextRef::of`] is the single place a `NodeKind` is taken apart.
+/// One argument instead of several for `text::layout`, `measure`, `local_bounds`
+/// and the render paths, so none passes the wrong style positionally.
+/// [`TextRef::of`] is the single place a `NodeKind` is taken apart.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextRef<'a> {
     pub content: &'a str,
@@ -940,13 +686,9 @@ pub struct TextRef<'a> {
     pub sizing: &'a TextSizing,
     /// The rail, if this node is set along one ([`NodeKind::Text::on_path`]).
     ///
-    /// **Here rather than as a second argument to `text::layout`**, and that is
-    /// the whole of what keeps one drawing: [`TextRef::of`] is the single place a
-    /// `NodeKind` is taken apart, so every consumer that already asks it a
-    /// question — the renderer, the hit test, `geometry::local_bounds`, the SVG
-    /// writer, the live edit session — bends without being told to. A parameter
-    /// beside the parts is how the caret would come to sit where the text used
-    /// to be.
+    /// Here rather than a second argument to `text::layout`, so every consumer of
+    /// [`TextRef::of`] — renderer, hit test, bounds, SVG writer, edit session —
+    /// bends along it without being told to.
     pub on_path: Option<&'a BezPath>,
     /// Whether the rail is traversed backwards ([`NodeKind::Text::on_path_flip`]).
     pub on_path_flip: bool,
@@ -989,8 +731,8 @@ impl<'a> TextRef<'a> {
 
 impl NodeKind {
     /// The stored `size` of a frame, rectangle, ellipse, polygon or star — the
-    /// five kinds whose width and height bind (§15 D1061) — and `None` for every
-    /// other kind, a text box included: its size is its sizing mode's.
+    /// five kinds whose width and height bind — and `None` for every other kind,
+    /// a text box included: its size is its sizing mode's.
     pub fn box_size(&self) -> Option<Size> {
         match self {
             NodeKind::Artboard { size }
@@ -1016,28 +758,15 @@ impl NodeKind {
 
     /// Whether every **geometry** number in this kind is finite (§15 D421).
     ///
-    /// ⚠️ **A non-finite number here makes the document permanently unopenable,
-    /// and nothing anywhere said so until this existed.** `serde_json` writes a
-    /// non-finite `f64` as `null`, and the reader has no arm for `null` where it
-    /// wants an `f64` — so `apply` succeeds, `save` succeeds, and `load` fails
-    /// forever with *"invalid type: null, expected f64"*. Nothing surfaces an
-    /// error at any point in between, and the corrupting write is the one
-    /// autosave and the crash snapshot both make, so the user need never press
-    /// Ctrl+S.
+    /// A non-finite number here makes the document permanently unopenable:
+    /// `serde_json` writes it as `null` and the reader refuses `null` where an
+    /// `f64` is wanted, so `apply` and `save` succeed and `load` fails forever.
+    /// An SVG import reaches it (`L 1e999 10` parses to infinity through
+    /// `BezPath::from_svg`).
     ///
-    /// **The reachable route is an ordinary import.** `<path d="M 0 0 L 1e999 10
-    /// Z"/>` parses to `f64::INFINITY`: `svg_in::parse_len` filters for finite
-    /// and `numbers()`/`BezPath::from_svg` do not, so the guard existed on the
-    /// one attribute path and the *geometry* paths went round it. Measured end
-    /// to end.
-    ///
-    /// **Geometry only, and the scope is deliberate rather than complete.** The
-    /// same `null` mechanism reaches every other `f64` a node carries — a text
-    /// style's size, a gradient stop's offset, an export scale — and those are
-    /// written by ops of their own with their own guards to add. This is the
-    /// surface the measured route reaches; the rest is a queue, not a claim.
-    /// [`crate::Node::transform`] is checked separately, by `op_set_transform`,
-    /// because it is a field of the node rather than of the kind.
+    /// Geometry only; other `f64`s a node carries are guarded by their own ops.
+    /// [`crate::Node::transform`] is checked by `op_set_transform`, being a field
+    /// of the node rather than of the kind.
     pub fn geometry_is_finite(&self) -> bool {
         fn size(s: &Size) -> bool {
             s.width.is_finite() && s.height.is_finite()
@@ -1090,23 +819,14 @@ impl NodeKind {
     /// Whether this kind has a frame to clip its children to, i.e. whether
     /// [`Node::clip`] means anything on it.
     ///
-    /// Only artboards today. **Three places ask, and they are the *format's* two
-    /// ends plus the default** (§15 D663): `op_create`, which seeds a new node's
-    /// `clip` from it; the DTO projection, which keeps the flag out of the file;
-    /// and the loader, which keeps it out of a document read from one.
+    /// Only artboards today. Three places ask: `op_create`, which seeds a new
+    /// node's `clip` from it; the DTO projection, which keeps the flag out of the
+    /// file; and the loader, which keeps it out of a document read from one (§15 D663).
     ///
-    /// 🚨 **This said *"the scene walk, the SVG writer, and the loader"* until
-    /// 2026-09-09, and two of those three were false** — as was `architecture.md`
-    /// §5.3, which drew the stronger conclusion that *"the flag cannot be set on a
-    /// kind that would ignore it"*. It can, deliberately: §15 **D282** decided
-    /// that an inert `clip` is a switch nothing reads, so dragging a shape through
-    /// a frame and back keeps its setting. **What the readers actually ask is
-    /// [`Node::clip`]**, and where they narrow it at all they narrow it with an
-    /// `Artboard` match arm rather than with this predicate — while
-    /// `scene::bounds_cover_subtree`, `canvas`'s copy of it, `menu`'s `clips:` row
-    /// and `svg::split_clip` do not narrow it at all. A repair that trusted this
-    /// sentence and removed the loader's normalization would have culled a group's
-    /// children against the group's own bounds.
+    /// The flag can still be set on a kind that ignores it (§15 D282: dragging a
+    /// shape through a frame and back keeps its setting). The scene walk and the
+    /// other readers ask [`Node::clip`], not this predicate, so removing the
+    /// loader's normalization would cull a group's children against its own bounds.
     pub fn clips_children(&self) -> bool {
         matches!(self, NodeKind::Artboard { .. })
     }
@@ -1114,32 +834,17 @@ impl NodeKind {
     /// Whether this kind can be used as a **mask**, i.e. whether [`Node::mask`]
     /// means anything on it.
     ///
-    /// [`Self::takes_paint`], minus a frame, plus `Group` — and the two
-    /// exclusions are the whole of the rule:
+    /// [`Self::takes_paint`], minus a frame, plus `Group`: `Root` is not a layer,
+    /// and a frame is a page that already carries the other clip
+    /// ([`Self::clips_children`]), so it must not grow a second clip control.
     ///
-    /// - **`Root` is not a layer.** It has no siblings to clip and no transform
-    ///   anyone authored.
-    /// - **A frame is a page.** It already carries the other clip
-    ///   ([`Self::clips_children`]), and a page that also cut the pages after it
-    ///   down to its own box is not a thing anyone means to ask for — the two
-    ///   switches would sit on one layer looking like a pair. Figma allows it;
-    ///   here the layers panel is the tell, since a frame's row already spends
-    ///   its one badge slot on `800 × 600`.
+    /// Everything else has an outline for `Resolved::mask_path` to derive: a
+    /// shape's from its kind, a boolean's from the cache, a text node's from its
+    /// glyphs, a group's from its contents unioned. One predicate because the
+    /// loader, the inspector and the op layer all ask.
     ///
-    /// Everything else has an outline for `Resolved::mask_path` to derive:
-    /// a shape's from its kind, a boolean's from the cache, a text node's from
-    /// its glyphs, a group's from its contents unioned.
-    ///
-    /// Spelled here beside `clips_children` because the loader, the inspector
-    /// and the op layer all have to ask it, and three lists of kinds would drift
-    /// the first time a kind was added.
-    ///
-    /// ⚠️ **The `Artboard` exclusion is written out rather than inherited, and it
-    /// stopped being free on 2026-09-01.** This was `takes_paint() || Group` while
-    /// `takes_paint` answered `false` for a frame; giving frames a real fill list
-    /// (§15 D400) made that spelling silently hand every frame a mask switch it
-    /// must not have. Nothing would have failed — a frame would simply have grown
-    /// a second clip control beside `clips_children`.
+    /// The `Artboard` exclusion is written out rather than inherited from
+    /// `takes_paint`, which answers `true` for a frame.
     pub fn can_mask(&self) -> bool {
         !matches!(self, NodeKind::Artboard { .. })
             && (self.takes_paint() || matches!(self, NodeKind::Group))
@@ -1148,31 +853,16 @@ impl NodeKind {
     /// Whether this kind draws its own fills and strokes, i.e. whether
     /// [`Node::paint`] means anything on it.
     ///
-    /// The two containers with no outline do not: `Root` is not a layer, and a
-    /// `Group` is organisation. Everything with an outline does, **a frame
-    /// included** — its outline is its own box ([`crate::geometry::local_path`])
-    /// and it fills and strokes along it like any other shape.
-    ///
-    /// Spelled here rather than in the inspector because a bulk paint edit over
-    /// a selection has to ask the same question the panel does — "which of these
-    /// can take a colour at all" — and two lists of kinds would drift the first
-    /// time a kind was added.
-    ///
-    /// ⚠️ **A frame joined this list on 2026-09-01 and it used to be the whole
-    /// answer to a different question too** (§15 D400). Two predicates read it as
-    /// a base and each has since been made to say what it means on its own:
-    /// [`Self::can_mask`] excludes a frame explicitly, and `takes_stroke` — which
-    /// existed only to add the frame this list was missing — is gone. Where a
-    /// frame is now the odd one out, say so at the site.
+    /// `Root` (not a layer) and `Group` (organisation) do not; everything with an
+    /// outline does, a frame included — its outline is its own box
+    /// ([`crate::geometry::local_path`]). One predicate because a bulk paint edit
+    /// over a selection asks what the panel asks. Where a frame is the odd one
+    /// out, as in [`Self::can_mask`], say so at the site.
     pub fn takes_paint(&self) -> bool {
         matches!(
             self,
-            // **A frame paints like a shape**, which is what its own box being a
-            // real outline means: one fill list, one stroke list, a `+` on each
-            // and a reorder grip on both (§15 D400). The one thing that is still
-            // a frame's own is *where* the ink lands — its fills sit behind its
-            // children and its strokes over them, outside its clip (§15 D144) —
-            // and that is the scene walk's business, not this predicate's.
+            // A frame paints like a shape; where its ink lands (fills behind its
+            // children, strokes over them) is the scene walk's business (§15 D144).
             NodeKind::Artboard { .. }
                 | NodeKind::Rect { .. }
                 | NodeKind::Ellipse { .. }
@@ -1181,12 +871,8 @@ impl NodeKind {
                 | NodeKind::Line { .. }
                 | NodeKind::Path { .. }
                 | NodeKind::Text { .. }
-                // **The one container that paints.** Every other container is
-                // excluded for having no outline; a boolean's outline is the entire
-                // point of it, and its fills and strokes are what the operation
-                // produces. Missed on the first pass, and the symptom was exact:
-                // `build::boolean` inherits the bottom operand's paint, and the
-                // transaction came back `WrongKindForOp`.
+                // The one container that paints: `build::boolean` inherits the
+                // bottom operand's paint.
                 | NodeKind::Boolean { .. }
         )
     }
@@ -1195,9 +881,7 @@ impl NodeKind {
     pub fn default_name(&self) -> &'static str {
         match self {
             NodeKind::Root => "Root",
-            // "Frame" is what the UI calls this everywhere the user can see —
-            // the tool, the tooltips, the inspector. The variant keeps the
-            // older name because it is also the tag in the save format.
+            // The UI says "Frame"; the variant name is the save-format tag.
             NodeKind::Artboard { .. } => "Frame",
             NodeKind::Group => "Group",
             NodeKind::Rect { .. } => "Rectangle",
@@ -1207,25 +891,18 @@ impl NodeKind {
             NodeKind::Line { .. } => "Line",
             NodeKind::Path { .. } => "Path",
             NodeKind::Text { .. } => "Text",
-            // Named for the operation, as Figma does: the layer list is where you
-            // read what a boolean group is doing, and "Boolean" alone would make
-            // four different shapes share one name.
+            // Named for the operation, so the layer list says what it does.
             NodeKind::Boolean { op } => op.label(),
         }
     }
 }
 
-/// Fills + strokes. **As many of each as the layer carries**, painted in list
+/// Fills + strokes, as many of each as the layer carries, painted in list
 /// order: every visible fill, then every visible stroke, so the last element of
-/// each list is the one on top (§5.3).
+/// each list is on top (§5.3).
 ///
-/// Two stacks rather than one interleaved appearance list, which is affordable
-/// only because [`StrokeAlign::Outside`] covers the outlined-text case that would
-/// otherwise need a stroke *under* a fill.
-///
-/// (This said "v1 uses 0..=1 of each; `Vec` is forward-compat" while the panels
-/// could already add a second row and the scene walk drew only the first — so a
-/// second stroke widened the cached world bounds and painted nothing. See §15 D56.)
+/// Two stacks rather than one interleaved list, which [`StrokeAlign::Outside`]
+/// makes affordable by covering outlined text.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Paint {
     pub fills: Vec<Keyed<Fill>>,
@@ -1236,17 +913,10 @@ impl Paint {
     /// The index of the first **visible image fill**, i.e. "is this layer a
     /// picture" and, if so, which fill is the picture.
     ///
-    /// **Here rather than in the app, because core now asks it too.** It was
-    /// `tools::croppable_fill` and had sixteen callers on that side — the crop
-    /// mode, the double-click that opens it, the context menu, the inspector's
-    /// Asset card — and `build::mask_target` made it a question the *model* has,
-    /// namely which of a set of layers is the photograph and which is the shape.
-    /// That app-side function is now one line onto this, so there is still one
-    /// spelling of the rule and the sixteen call sites did not move.
-    ///
-    /// **Visible, and the first one.** A hidden image fill is not a picture the
-    /// user is looking at, and the first is the one every consumer means: the
-    /// crop mode edits it and the mask rule is only asking a yes/no.
+    /// In core because `build::mask_target` asks it too; the app's
+    /// `tools::croppable_fill` is one line onto this. Visible, and the first: a
+    /// hidden image fill is not a picture the user is looking at, and the crop
+    /// mode edits the first.
     pub fn image_fill(&self) -> Option<usize> {
         self.fills
             .iter()
@@ -1256,7 +926,7 @@ impl Paint {
 
 /// One fill. Its brush may be bound to a colour variable
 /// ([`BrushSource`](crate::BrushSource)), which binds the **whole solid paint**,
-/// never a gradient stop (D1038).
+/// never a gradient stop.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fill {
     pub brush: crate::variable::BrushSource,
@@ -1267,12 +937,11 @@ pub struct Fill {
 pub struct Stroke {
     /// Bindable as a fill's is.
     pub brush: crate::variable::BrushSource,
-    /// The literal width — 0 while [`Self::width_var`] binds it (§15 D1073);
-    /// what the stroke is drawn at is [`crate::Document::resolved_paint`]'s.
+    /// The literal width — 0 while [`Self::width_var`] binds it; what the stroke
+    /// is drawn at is [`crate::Document::resolved_paint`]'s.
     pub width: f64,
-    /// The number variable the width is bound to (§15 D1073), **in the item**,
-    /// as the brush's binding is, so a stroke style, a reorder and a copy carry
-    /// it with the stroke. Absent when unbound; new in v8, still unreleased.
+    /// The number variable the width is bound to, kept in the item as the
+    /// brush's binding is, so a stroke style, a reorder and a copy carry it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width_var: Option<crate::variable::VarId>,
     pub join: kurbo::Join,
@@ -1280,47 +949,36 @@ pub struct Stroke {
     /// The dash pattern, as kurbo and `stroke-dasharray` take it: on, off, on…
     /// Empty is a solid stroke.
     ///
-    /// **The single source of truth for the pattern, and the only thing the
-    /// dash UI stores.** A dotted stroke is a *zero-length* dash — `[0, s]` —
-    /// which makes `s` unambiguously the centre-to-centre spacing, and which is
-    /// how [`Stroke::dash_style`] can classify the pattern back into the panel's
-    /// four cells without storing a mode beside it. The two width-dependent
-    /// consequences of that choice — a zero-length dash vanishes under
-    /// `Cap::Butt`, and a fitted pattern depends on the path — are resolved at
-    /// the render boundary, where the width and the path are both to hand
-    /// (§6.3). Storing derived numbers here instead would go stale the moment
-    /// the width was scrubbed.
+    /// The single source of truth for the pattern. A dotted stroke is a
+    /// *zero-length* dash — `[0, s]` — so `s` is the centre-to-centre spacing and
+    /// [`Stroke::dash_style`] classifies the pattern without a stored mode. The
+    /// width-dependent consequences (a zero-length dash vanishes under
+    /// `Cap::Butt`; a fitted pattern depends on the path) are resolved at the
+    /// render boundary (§6.3), since derived numbers stored here would go stale
+    /// when the width is scrubbed.
     pub dashes: Vec<f64>,
     pub dash_offset: f64,
     /// Which side of the outline the width is laid on.
     ///
-    /// Defaulted rather than schema-versioned: it is a purely additive field, so
-    /// a v1 file loads as `Center`, which is what it drew as. See §5.11.
+    /// Defaulted rather than schema-versioned: additive, so a v1 file loads as
+    /// `Center`, which is what it drew as. See §5.11.
     #[serde(default)]
     pub align: StrokeAlign,
-    /// Which of a box's four sides the stroke occupies. Additive like `align`,
-    /// and for the same reason: every existing file means [`StrokeSides::All`],
-    /// which is the default and is exactly how those files drew.
+    /// Which of a box's four sides the stroke occupies. Additive like `align`:
+    /// the default [`StrokeSides::All`] is how existing files drew.
     #[serde(default, skip_serializing_if = "StrokeSides::is_all")]
     pub sides: StrokeSides,
     /// Mitre limit as the **ratio** kurbo takes and `stroke-miterlimit` emits,
-    /// not the angle the panel shows.
-    ///
-    /// Stored in the renderer's own unit deliberately. The UI works in degrees,
-    /// because "corners sharper than this get bevelled" is the question a
-    /// designer is actually asking, but converting at the UI edge once beats
-    /// converting on every render *and* every export — and beats writing
-    /// `3.9998` into files, which is what round-tripping 28.96° through degrees
-    /// produces.
+    /// not the angle the panel shows. Converting at the UI edge once beats
+    /// converting on every render and export, and avoids writing `3.9998` into
+    /// files by round-tripping 28.96° through degrees.
     #[serde(default = "default_miter_limit")]
     pub miter_limit: f64,
     /// Scale the dash pattern so a whole number of periods fits the outline —
     /// the "fit to corners" toggle.
     ///
-    /// A flag rather than a one-off recompute written back into `dashes`. Write
-    /// back and the toggle is true only until the shape next changes size,
-    /// while still reading as on; a flag honoured at the render boundary stays
-    /// true across a resize and keeps the typed numbers visible in the fields.
+    /// A flag rather than a recompute written back into `dashes`, which would go
+    /// stale on the next resize while still reading as on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dash_fit: bool,
     pub visible: bool,
@@ -1335,9 +993,8 @@ fn default_miter_limit() -> f64 {
 /// The mitre ratio a limiting **angle** implies, and its inverse.
 ///
 /// `ratio = 1 / sin(θ/2)` — the length of the spike a corner of `θ` would throw,
-/// in stroke widths. The pair lives here rather than in the panel because the
-/// stored value is the ratio (see [`Stroke::miter_limit`]) and both directions
-/// are needed to show it as an angle.
+/// in stroke widths. Both directions are needed to show the stored ratio (see
+/// [`Stroke::miter_limit`]) as an angle.
 pub fn miter_ratio_of_degrees(degrees: f64) -> f64 {
     let half = (degrees.clamp(MIN_MITER_DEGREES, 180.0) * 0.5).to_radians();
     (1.0 / half.sin()).max(1.0)
@@ -1348,28 +1005,23 @@ pub fn miter_degrees_of_ratio(ratio: f64) -> f64 {
     2.0 * (1.0 / ratio.max(1.0)).clamp(0.0, 1.0).asin().to_degrees()
 }
 
-/// Sharpest angle the mitre field will accept. The ratio goes to infinity as the
-/// angle goes to zero, so the low end needs a floor or the field is a way to ask
-/// for an unbounded spike; 1° is ratio ≈ 114.6, far past any shape that is not a
-/// hairline.
+/// Sharpest angle the mitre field will accept: the ratio goes to infinity as the
+/// angle goes to zero, so the low end needs a floor.
 pub const MIN_MITER_DEGREES: f64 = 1.0;
 
 /// Which sides of a box's outline a stroke occupies — CSS's `border-top` and
 /// friends.
 ///
-/// **Only a box has four nameable sides.** [`NodeKind::Rect`] does; an ellipse,
-/// a polygon, a star and a path do not, and neither does a line. Anywhere else
-/// the stroke is the whole outline whatever this says, which is the same bargain
-/// [`StrokeAlign`] makes on an open path — the control is gated in the panel
-/// rather than the value being silently rewritten.
+/// Only a box ([`NodeKind::Rect`]) has four nameable sides. Anywhere else the
+/// stroke is the whole outline whatever this says; the control is gated in the
+/// panel rather than the value being rewritten.
 ///
-/// A side stroke stops being the closed outline, so the scene walk and the SVG
-/// writer emit an **open** path per side, with each corner arc split at its
-/// midpoint so a rounded rect's top edge owns half of each top corner (§6.3).
+/// A side stroke is no longer the closed outline, so the scene walk and the SVG
+/// writer emit an **open** path per side, each corner arc split at its midpoint
+/// (§6.3).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum StrokeSides {
-    /// The closed outline — what every stroke was before this field existed, and
-    /// what a file without it still means.
+    /// The closed outline, which a file without the field still means.
     #[default]
     All,
     Top,
@@ -1419,10 +1071,9 @@ impl StrokeSides {
     /// The width each named side carries, given the stroke's own `width` —
     /// `None` for a side the stroke does not reach.
     ///
-    /// `All` answers `None` four times, because it is not drawn side by side at
-    /// all: it is the one case that keeps the closed outline, and a caller that
-    /// treated four full-width sides as equivalent would lose the join at every
-    /// corner. [`StrokeSides::per_side`] is the question with that case excluded.
+    /// `All` answers `None` four times: it keeps the closed outline, and four
+    /// full-width sides would lose the join at every corner.
+    /// [`StrokeSides::per_side`] excludes that case.
     pub fn widths(self, width: f64) -> [Option<f64>; 4] {
         let one = |side: Side| {
             Side::ALL.map(|s| (s == side).then_some(width)) // [top, right, bottom, left]
@@ -1459,12 +1110,10 @@ impl StrokeSides {
 
     /// The widest side, which is what bounds and hit-testing have to allow for.
     ///
-    /// Deliberately one number for all four sides rather than per-side insets:
-    /// bounds may be generous and must never be tight, and the callers
+    /// One number for all four sides rather than per-side insets: bounds may be
+    /// generous but never tight, and the callers
     /// ([`crate::geometry::world_bounds_of_parts`], the hit-test tolerance)
-    /// inflate a rect uniformly. A top-only stroke therefore reports a box a
-    /// little larger than its ink on three sides, which costs a slightly wide
-    /// selection rect and cannot cost a missed hit.
+    /// inflate uniformly.
     pub fn max_width(self, width: f64) -> f64 {
         match self {
             StrokeSides::All => width,
@@ -1498,12 +1147,8 @@ impl StrokeSides {
 
 /// How a stroke's dash pattern reads back into the panel's four cells.
 ///
-/// **Classified from `dashes`, not stored.** The classification this replaced
-/// compared the first dash against `width * 1.5`, which worked only while the
-/// numbers were derived from the width — a typed 12-long dash on a 9px stroke
-/// came back as *dotted*. This one is invariant under width: a dotted stroke is
-/// a zero-length dash, which is the shape of the value rather than its size, so
-/// there is no stored mode to drift from the pattern it names.
+/// Classified from `dashes`, not stored, and invariant under width: a dotted
+/// stroke is a zero-length dash, so no stored mode can drift from the pattern.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DashStyle {
     #[default]
@@ -1545,10 +1190,8 @@ impl Stroke {
 
     /// A dotted stroke's centre-to-centre spacing, whatever its cap.
     ///
-    /// The *period* rather than the gap, which is what makes the field mean one
-    /// thing: with a zero-length dash the two coincide, and the substitution the
-    /// renderer makes for a square dot preserves the period rather than the gap
-    /// precisely so this stays true (§6.3).
+    /// The *period* rather than the gap: with a zero-length dash they coincide,
+    /// and the renderer's square-dot substitution preserves the period (§6.3).
     pub fn dot_spacing(&self) -> f64 {
         self.dashes.iter().take(2).sum()
     }
@@ -1585,13 +1228,12 @@ impl Default for Stroke {
 
 /// Which side of a shape's outline a stroke's width occupies.
 ///
-/// Not a renderer concept — no 2D backend in the stack (vello, vello_cpu, SVG)
-/// has stroke alignment, and all three build it the same way: stroke at twice
-/// the width and clip to the side you want. That construction lives in
-/// `ondin-render`'s scene walk and the SVG writer, from this one field.
+/// Not a renderer concept: no backend (vello, vello_cpu, SVG) has stroke
+/// alignment, so `ondin-render`'s scene walk and the SVG writer build it by
+/// stroking at twice the width and clipping to the wanted side.
 ///
-/// Only meaningful for closed shapes; an open path has no inside, so `Line` and
-/// unclosed `Path` nodes draw centred whatever this says.
+/// Only meaningful for closed shapes; `Line` and unclosed `Path` nodes draw
+/// centred whatever this says.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StrokeAlign {
     /// Straddles the outline, half either side. The only alignment SVG and every
@@ -1618,11 +1260,9 @@ impl StrokeAlign {
 
 /// How a text node's box is decided.
 ///
-/// **Three states, not two.** Auto width and auto height are genuinely different
-/// things — one refuses to wrap at all, the other wraps at a width the user set
-/// and grows downwards — and collapsing them into one `Auto` meant a node that
-/// wrapped could not also grow. `Auto` and `Fixed` keep their names (and so their
-/// bytes) because every file written before this held one of the two.
+/// Three states: auto width never wraps, auto height wraps at a set width and
+/// grows downwards. `Auto` and `Fixed` keep their names, and so their bytes, in
+/// existing files.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum TextSizing {
     /// No wrapping; the box grows to the shaped width *and* height.
@@ -1674,32 +1314,21 @@ impl TextSizing {
 }
 
 /// One sample of every `NodeKind`, and the tripwire that keeps the list whole
-/// (§15 D668, `[S2.1-L6-04]`).
+/// (§15 D668).
 ///
-/// `NodeKind` is the only kind-like enum in this crate with no `ALL`: `MaskMode`,
-/// `BoolOp`, `DashStyle` and `Side` all have one, and its variants carry payloads,
-/// so it cannot. Six `matches!` predicates decide real behaviour from it and
-/// every one of them answers `false` for a variant nobody added to it — with all
-/// six gates green, because a `matches!` arm nobody wrote is not a compile error.
-/// The codebase has paid for that twice already, and both times the note is still
-/// at the site: `resolve::is_indexed`'s *"left out at first, and the symptom was a
-/// boolean that could be selected from the layers tree and not from the canvas"*,
-/// and `takes_paint`'s *"the transaction came back `WrongKindForOp`"*.
+/// `NodeKind` has no `ALL` because its variants carry payloads. Six `matches!`
+/// predicates decide behaviour from it, and each answers `false` for a variant
+/// nobody added to it, with every gate green.
 #[cfg(test)]
 pub(crate) mod kind_fixture {
     use super::*;
 
     /// The variant's name, from an exhaustive `match`.
     ///
-    /// 🚨 **This function is the gate and the only one there is.** It has no
-    /// wildcard, so a twelfth `NodeKind` does not compile here — and the compiler
-    /// error is what sends the author to `all` below, which is the list every
-    /// membership test iterates. **A new arm here needs a new sample there**;
-    /// nothing checks that pairing, so it is stated at the point the error lands
-    /// rather than in a doc nobody is reading at the time.
-    ///
-    /// It is also the label the assertions compare, so a set is read as names
-    /// rather than as `Debug` output over payloads that are irrelevant to it.
+    /// The gate: it has no wildcard, so a new `NodeKind` does not compile here,
+    /// and the error sends the author to `all` below. **A new arm here needs a
+    /// new sample there**; nothing checks that pairing. Also the label the
+    /// assertions compare.
     pub(crate) fn tag(kind: &NodeKind) -> &'static str {
         match kind {
             NodeKind::Root => "Root",
@@ -1762,14 +1391,9 @@ pub(crate) mod kind_fixture {
     }
 
     /// `pred`'s membership as two lists of names: what it accepts, and **what it
-    /// rejects**.
-    ///
-    /// 🚨 **The second list is the whole point of the matrix.** Asserting only the
-    /// accepted set converts nothing: a twelfth variant answers `false`, the
-    /// accepted set is unchanged and the test stays green — which is the failure
-    /// being guarded against, reproduced inside the guard. Spelling the rejected
-    /// set means the new name has to land in one list or the other, and either way
-    /// an assertion goes red naming the predicate it belongs to.
+    /// rejects**. The rejected list is the point: a new variant answers `false`
+    /// and leaves the accepted set unchanged, so only a spelled-out rejected set
+    /// goes red for it.
     pub(crate) fn split(
         pred: impl Fn(&NodeKind) -> bool,
     ) -> (Vec<&'static str>, Vec<&'static str>) {
@@ -1790,17 +1414,10 @@ pub(crate) mod kind_fixture {
 mod kind_predicate_tests {
     use super::kind_fixture::{all, split, tag};
 
-    /// The fixture describes each variant once — the one thing about it that can
-    /// be checked without a second enumeration to check it against.
+    /// The fixture samples each variant once. It cannot check completeness; only
+    /// the compile error in `tag` does.
     ///
-    /// ⚠️ **It does not check that the fixture is *complete*, and cannot.** A
-    /// variant added to `tag`'s `match` and forgotten here leaves eleven distinct
-    /// names for twelve variants and nothing in the crate disagrees; the compile
-    /// error in `tag` is the only thing that ever says so, which is why that is
-    /// where the instruction lives.
-    ///
-    /// **Flip:** duplicate any entry of `all()` and this fails, naming the
-    /// repeated tag.
+    /// flip: duplicate an entry of `all()` → fails at the assert, naming the tag.
     #[test]
     fn the_fixture_holds_each_kind_once() {
         let mut names: Vec<&str> = all().iter().map(tag).collect();
@@ -1813,26 +1430,13 @@ mod kind_predicate_tests {
     /// The six `matches!`-over-`NodeKind` predicates, each as the pair of sets it
     /// actually divides the enum into.
     ///
-    /// One test rather than six, because the *comparison* is half of what is worth
-    /// asserting: `is_indexed` and `takes_paint` have identical membership today,
-    /// spelled twice in two modules for two unrelated reasons, and `takes_paint`'s
-    /// own doc predicts they will drift. Side by side, a change to one that was
-    /// meant for both is visible in the diff.
+    /// One test rather than six, so `is_indexed` and `takes_paint` (identical
+    /// membership, spelled in two modules) are compared side by side.
     ///
-    /// **Three flips, all three predicted correctly.** Deleting
-    /// `NodeKind::Boolean { .. }` from `resolve::is_indexed` fails on the
-    /// `is_indexed` pair — which is the regression the comment at that site
-    /// records, now a red test instead of a canvas nobody can click. Deleting
-    /// `Artboard` from `stroke_sides_apply` fails there and nowhere else.
-    ///
-    /// ⚠️ **The third is the one that matters and it is a flip of the *expectation*,
-    /// because the case cannot be reached from the code.** What is being guarded
-    /// against is a twelfth variant, and simulating one means adding one. So the
-    /// shape was reproduced instead: `Root` is rejected by all six predicates, i.e.
-    /// it is exactly what a new variant looks like here — removing `"Root"` from
-    /// `clips_children`'s rejected list fails with the actual list naming it and
-    /// the expected one not. That is the whole mechanism, and it is why the
-    /// rejected sets are spelled out at all.
+    /// flip: delete `NodeKind::Boolean { .. }` from `resolve::is_indexed` → fails
+    /// at the `is_indexed` assertion. flip: remove `"Root"` from `clips_children`'s
+    /// rejected list → fails there; `Root` is rejected by all six, which is what a
+    /// new variant looks like here.
     #[test]
     fn every_kind_predicate_divides_the_enum_where_it_says_it_does() {
         assert_eq!(

@@ -5,26 +5,12 @@
 //! from / written to the owning process's session state, never the Document.
 //! Handlers are implemented at M6.
 //!
-//! 🚨 **The tool names below used to be prose here, and nothing compared them
-//! with §8.4** (§15 D726, `[S22-L3-06]`). Two copies of one list, identical name
-//! for name and phase for phase on the day the finding was written — and the
-//! window in which they can drift is the *whole* of the time nobody is reading
-//! this file: `roadmap.md` files M6 under *Later · Post-v1* and §15 D4 defers
-//! `serve`/`mcp-proxy` until the editor is feature-complete. So the copy that is
-//! **not** the design would sit here unread across every milestone in which the
-//! tool list is most likely to change, and would read as the design to anyone who
-//! opened the crate.
-//!
-//! ⚠️ **`cargo doc` cannot help, and it is worth saying why**, because this crate
-//! *is* one of the targets it reads: a prose list of tool names contains no
-//! `[link]`, so the one gate that reads doc comments has nothing to resolve. The
-//! list had to stop being prose before anything could check it. **A count — or a
-//! list — written in a comment is a gate nobody built.**
+//! The tool names are constants rather than prose so a test can compare them with
+//! §8.4; a list written in a comment is a gate nobody built, and this copy would
+//! otherwise sit unread, drifting from the design, until the handlers land.
 
-/// Phase 1 — read/export, ship first (§8.4).
-///
-/// **The list, in the order §8.4 gives it**, so a diff against the design is a
-/// diff and not a set comparison that hides a reordering.
+/// Phase 1 — read/export, ship first (§8.4), in the order §8.4 gives it so a
+/// reordering shows as a diff.
 pub const PHASE_1: [&str; 12] = [
     "get_document",
     "get_node",
@@ -81,12 +67,11 @@ pub const PHASE_2: [&str; 33] = [
 ];
 
 /// Phase 3 — components, variables and styles, through the verbs rather than
-/// the raw ops (§8.4, §15 D1095).
+/// the raw ops (§8.4).
 ///
-/// **Verbs, because the ops alone are refused or wrong**: a `Set*Vars` op writes
-/// the binding and not the literal beside it (a colour's binding is a
-/// `BrushSource` inside the paint list instead), and removing a variable, a mode
-/// or a style still in use is refused at the commit. `create_instance`, `add_variable`,
+/// Verbs, because the ops alone are refused or wrong: a `Set*Vars` op writes the
+/// binding and not the literal beside it, and removing a variable, mode or style
+/// still in use is refused at the commit. `create_instance`, `add_variable`,
 /// `add_mode` and `add_style` return the new ids.
 pub const PHASE_3: [&str; 23] = [
     "make_component",
@@ -114,13 +99,12 @@ pub const PHASE_3: [&str; 23] = [
     "apply_style",
 ];
 
-/// Phase 4 — kits and the library, the app's own actions (§8.4, §15 D1096).
+/// Phase 4 — kits and the library, the app's own actions (§8.4).
 ///
-/// How an agent builds a design system (`make_kit`, `publish_kit`) and uses one
-/// (`list_kits` through `accept_kit_updates`). `make_kit`, `publish_kit` and
-/// `stop_sharing_kit` write the kit mark, which is document metadata rather
-/// than an operation, so `undo` reverts none of them. `insert_from_kit` returns
-/// the new instance's id and `create_document` the new file's path.
+/// `make_kit`, `publish_kit` and `stop_sharing_kit` write the kit mark, which is
+/// document metadata rather than an operation, so `undo` reverts none of them.
+/// `insert_from_kit` returns the new instance's id and `create_document` the new
+/// file's path.
 pub const PHASE_4: [&str; 12] = [
     "list_documents",
     "create_document",
@@ -140,27 +124,17 @@ pub const PHASE_4: [&str; 12] = [
 mod tests {
     use super::{PHASE_1, PHASE_2, PHASE_3, PHASE_4};
 
-    /// `docs/design/mcp.md` (§8), embedded at compile time.
-    ///
-    /// **`include_str!` rather than a path read, and that is the half that makes
-    /// this a gate.** A runtime `fs::read` would depend on the working directory
-    /// and, worse, would not tell cargo that this test target depends on the
-    /// document — so editing §8.4 would leave a stale binary passing. `include_str!`
-    /// registers the dependency, so a change to the design rebuilds and re-runs
-    /// this.
+    /// `docs/design/mcp.md` (§8), embedded at compile time. `include_str!` rather
+    /// than a runtime read, so cargo knows the test depends on the document and
+    /// editing §8.4 rebuilds and re-runs it.
     const ARCHITECTURE: &str = include_str!("../../../docs/design/mcp.md");
 
     /// The tool names §8.4 lists under a paragraph starting with `prefix`.
     ///
-    /// **Parsed from the backticks, with any signature dropped at the `(`** —
-    /// §8.4 writes `get_document() -> Snapshot` and `group(ids)` where this crate
-    /// writes bare names, and a comparison that demanded the same *spelling*
-    /// would fail on a difference that is not one. What has to agree is the set of
-    /// names and their order.
-    ///
-    /// The paragraph ends at the first blank line, which is what keeps the
-    /// *Selection* and *Notes* paragraphs below — both of which contain backticked
-    /// names — out of the answer.
+    /// Parsed from the backticks, with any signature dropped at the `(`: §8.4
+    /// writes `group(ids)` where this crate writes bare names. The paragraph ends
+    /// at the first blank line, which keeps the *Selection* and *Notes* paragraphs
+    /// below it, which also contain backticked names, out of the answer.
     fn listed(prefix: &str) -> Vec<String> {
         let section = ARCHITECTURE
             .split_once("\n### 8.4 Tools\n")
@@ -181,33 +155,15 @@ mod tests {
             .collect()
     }
 
-    /// **The crate's tool list is §8.4's tool list** (§15 D726, `[S22-L3-06]`).
+    /// The crate's tool list is §8.4's tool list, compared in order (§8.4 gives the
+    /// order it wants shipped; a set comparison would hide a reordering). The
+    /// parsed list is asserted non-empty first: a renamed heading or reflowed
+    /// paragraph yields an empty list, and empty against empty is a green test
+    /// about nothing.
     ///
-    /// Two copies of one list with nothing between them is the shape this project
-    /// keeps meeting — *a rule with one statement and more than one
-    /// implementation* — and here the second copy sits in a crate no handler will
-    /// be written in for three milestones. This is the comparison that did not
-    /// exist.
-    ///
-    /// ⚠️ **Ordered, not set-compared.** §8.4 gives Phase 1 in the order it wants
-    /// shipped; a set comparison would call a reordered list identical and lose
-    /// exactly the information the phases carry.
-    ///
-    /// **The fixture is asserted non-empty first**, because every failure mode of
-    /// the parser above — a renamed heading, a reflowed paragraph, a `###` that
-    /// became `####` — produces an *empty* list, and an empty list compared with
-    /// an empty list is a green test about nothing. That is this project's
-    /// vacuity trap in its purest form: the gate would go quiet at the exact
-    /// moment the document it watches was edited.
-    ///
-    /// ⚠️ **Flip-checked in both directions, and the second is the one that
-    /// matters.** Renaming one entry (`set_name` → `set_name_TYPO`) is red at the
-    /// comparison, as predicted. Rewording the *heading* this parser looks for
-    /// (`ship first` → `shipped first`) is red at `listed`'s own panic —
-    /// **loudly, not quietly** — which is what the `expect` and the non-empty
-    /// assertion are between them for. A gate that reads a prose document has two
-    /// ways to fail and only one of them is the interesting one; the other is
-    /// silence.
+    /// flip: renaming one entry (`set_name` → `set_name_TYPO`) → fails at the
+    /// `assert_eq!`; rewording the heading (`ship first` → `shipped first`) →
+    /// fails at `listed`'s panic, loudly rather than quietly.
     #[test]
     fn the_tool_list_here_is_the_one_the_design_specifies() {
         for (prefix, ours) in [

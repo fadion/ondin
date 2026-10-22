@@ -30,19 +30,11 @@ pub(crate) struct DocumentDto {
     /// The document's library identity — typed name, project, creation stamp
     /// (§5.11a, [`crate::meta`]).
     ///
-    /// **Additive in the strongest form, like `NodeDto::pivot`**: every field is
-    /// optional *and* the whole block is skipped when nothing is set, so a
-    /// document that has never been through the library is written byte-for-byte
-    /// as it was before this field existed and no version bump is owed.
+    /// Additive: every field is optional and an empty block is skipped, so an
+    /// older document is written unchanged and no version bump is owed.
     ///
-    /// ⚠️ **At the top on purpose, beside `schema_version`, and the reason is
-    /// reading rather than diffing.** The dashboard scans a folder of documents
-    /// to list them, and all it wants from each is this block — while the thing
-    /// it would have to read past to reach it is the node array and then an
-    /// image table that can be megabytes. A first draft put it last, on the
-    /// diff argument that keeps `images` last; that argument is real for a table
-    /// that must not move, and worth nothing for four short lines whose whole
-    /// purpose is to be read without the rest of the file.
+    /// At the top, beside `schema_version`, so the dashboard can read it without
+    /// reading past the nodes and the image table.
     #[serde(default, skip_serializing_if = "DocumentMeta::is_empty")]
     pub meta: DocumentMeta,
     pub root: String,
@@ -54,43 +46,29 @@ pub(crate) struct DocumentDto {
     /// Sorted by node id on save for byte-stable output (invariant 9).
     pub nodes: Vec<NodeDto>,
     /// The ground behind and around the frames (§15 D18). Defaulted rather than
-    /// schema-versioned, on the same grounds as `clip` below: it is purely
-    /// additive, and a file written before the ground was saved was drawn on
-    /// the default, which is exactly what the default reproduces. See §5.11.
+    /// versioned: a file written before it was saved was drawn on the default.
     #[serde(default = "default_ground")]
     pub canvas_background: Color,
-    /// Ruler guides, sorted by id on save (invariant 9). Additive in the same
-    /// way as `canvas_background`: a file written before guides existed had
-    /// none, which is what the empty default reproduces.
+    /// Ruler guides, sorted by id on save (invariant 9). A file without the key
+    /// loads with none.
     #[serde(default)]
     pub guides: Vec<GuideDto>,
     /// The variables and the mode list (§5.3f, §15 D1039), absent in a document
-    /// that has neither — so such a document is written as it was before v7 but
-    /// for its version number.
-    /// Above the images for their diff reason: a variable edit is small and
-    /// frequent, the table below it large and still.
+    /// that has neither. Above the images for their diff reason.
     #[serde(default, skip_serializing_if = "VariablesDto::is_empty")]
     pub variables: VariablesDto,
     /// The styles (§15 D1062), sorted by id on save (invariant 9), absent in a
-    /// document with none. New in v8 — the version D1058 opened, unreleased when
-    /// this joined it, as `size_vars` did.
+    /// document with none. New in v8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub styles: Vec<crate::style::Style>,
     /// The image table, sorted by id on save (invariant 9).
     ///
-    /// **Last, and that is a decision about diffs rather than about serde.** An
-    /// embedded image is by far the largest thing in the file and the least
-    /// likely to change, so keeping it below the tree means a geometry edit
-    /// produces a diff nowhere near it and the image lines stay byte-identical
-    /// between saves. `skip_serializing_if` follows `GuideDto::owner`: a document
-    /// with no images is written byte-for-byte as it was before this field
-    /// existed.
+    /// Near the end for diffs: an embedded image is the largest and least-changing
+    /// part of the file, so a geometry edit's diff stays away from it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageDto>,
-    /// What a kit last published (§5.3e, §15 D1012) — absent in every document
-    /// that has not. **After the images**, at the very end, for `images`' diff
-    /// reason: it changes only at a publish, and it can hold a copy of every
-    /// main.
+    /// What a kit last published (§5.3e, §15 D1012), absent in every document that
+    /// has not. Last, for `images`' diff reason: it can hold a copy of every main.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<PublishedDto>,
 }
@@ -98,10 +76,9 @@ pub(crate) struct DocumentDto {
 /// A kit's published state on disk: a whole document, in this same form, and
 /// the frame each published main sat in.
 ///
-/// ⚠️ **A migration that reshapes a document must reshape this one too** — the
-/// ladder (`io::migrate`) walks the outer value, and the nested `document` is a
-/// document of the same version that the ladder does not yet descend into. None
-/// has had to, since this arrived with v6.
+/// A migration that reshapes a document must reshape this one too: the ladder
+/// (`io::migrate`) walks the outer value and does not descend into the nested
+/// `document`.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct PublishedDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -112,17 +89,16 @@ pub(crate) struct PublishedDto {
     pub name: Option<String>,
 }
 
-/// The variables table on disk: the modes **in their order** — the first is the
-/// default (D1038 (a)) — and the variables sorted by id (invariant 9), each with
-/// its cells keyed by mode id.
+/// The variables table on disk: the modes in their order (the first is the
+/// default) and the variables sorted by id (invariant 9), cells keyed by mode id.
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct VariablesDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub modes: Vec<crate::variable::Mode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vars: Vec<crate::variable::Variable>,
-    /// The kits' modes and mappings, by kit id (§15 D1064) — a `BTreeMap`, so in
-    /// order. New in v8, unreleased when it joined, as `styles` did.
+    /// The kits' modes and mappings, by kit id (§15 D1064); a `BTreeMap`, so in
+    /// order. New in v8.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub kits: std::collections::BTreeMap<String, crate::variable::KitModes>,
 }
@@ -168,11 +144,8 @@ pub(crate) struct GroupDto {
 
 /// One image table entry on disk.
 ///
-/// **The bytes are base64 rather than serde's own array-of-numbers.** `Vec<u8>`
-/// through serde_json is `[137,80,78,71,…]` — four to six text bytes per byte,
-/// pretty-printed one number per line. Base64 is 1.33× the binary and one line,
-/// which is the difference between a 300 KB photograph costing 400 KB in the file
-/// and costing well over a megabyte across a hundred thousand lines.
+/// The bytes are base64 rather than serde's array of numbers, which costs four to
+/// six text bytes per byte and one line each.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct ImageDto {
     pub id: String,
@@ -213,12 +186,8 @@ pub(crate) struct GuideDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Color>,
     /// The frame this guide is scoped to, absent for a canvas-wide one (§5.5).
-    ///
-    /// Purely additive, so no version bump: every guide in every file written
-    /// before scoping existed ran the whole canvas, which is exactly what a
-    /// missing key means. `skip_serializing_if` follows `NodeDto::pivot` rather
-    /// than the weaker `default =` shape, so a document with no scoped guide is
-    /// written byte-for-byte as it was before the field existed (invariant 9).
+    /// Additive: a missing key means canvas-wide, as in every earlier file, and
+    /// skipping it keeps unscoped documents byte-identical (invariant 9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
 }
@@ -234,85 +203,55 @@ pub(crate) struct NodeDto {
     pub name: String,
     pub visible: bool,
     pub locked: bool,
-    /// Whether a resize of the node holds its aspect ratio (§5.3). Defaulted
-    /// rather than schema-versioned: it is purely additive, and every file
-    /// written while the lock was session state meant "unlocked", which is what
-    /// `false` reproduces. See §5.11.
+    /// Whether a resize holds the aspect ratio (§5.3). Defaulted, not versioned:
+    /// earlier files meant "unlocked", which `false` reproduces.
     #[serde(default)]
     pub proportions_locked: bool,
     pub opacity: f32,
-    /// Whether the node clips its children (§5.3). Defaulted rather than
-    /// schema-versioned: it is purely additive, and a v2 file's frames all
-    /// clipped, which is what `true` reproduces. See §5.11.
+    /// Whether the node clips its children (§5.3). Defaulted, not versioned: a v2
+    /// file's frames all clipped, which `true` reproduces.
     #[serde(default = "clips_by_default")]
     pub clip: bool,
-    /// Whether the node masks the siblings above it (§5.3). Purely additive, so
-    /// no version bump — and unlike `clip` it defaults to *off*, because a file
-    /// written before masks existed had none: `false` is what every one of those
-    /// nodes meant, and no default function is needed to say so.
-    /// `skip_serializing_if` keeps the key out of every document with no mask in
-    /// it, so the field changed no existing file's bytes (invariant 9). See
-    /// §5.11.
+    /// Whether the node masks the siblings above it (§5.3). Additive; unlike
+    /// `clip` it defaults to off, and is skipped when off (invariant 9).
     #[serde(default, skip_serializing_if = "is_false")]
     pub mask: bool,
-    /// *How* the node masks (§5.3). Additive on `mask`'s own terms and skipped at
-    /// its default, so a document whose masks are all shape masks — which is
-    /// every document written before the mode existed — carries no key and no
-    /// bytes change (invariant 9).
+    /// How the node masks (§5.3). Additive and skipped at its default: every
+    /// earlier file's masks are shape masks (invariant 9).
     #[serde(default, skip_serializing_if = "is_shape_mask")]
     pub mask_mode: MaskMode,
-    /// How the node's geometry decides its interior (§15 D239). Additive on the
-    /// same terms as `mask_mode` and skipped at its default, so every document
-    /// written before the rule existed — all of which meant non-zero — carries no
-    /// key and no bytes change (invariant 9).
+    /// How the node's geometry decides its interior (§15 D239). Additive and
+    /// skipped at its default: every earlier file meant non-zero (invariant 9).
     #[serde(default, skip_serializing_if = "is_nonzero_fill")]
     pub fill_rule: FillRule,
     pub paint: Paint,
-    /// The node's transform origin (§5.3), absent for one still on its box's
-    /// centre. Purely additive, so no version bump: a file written before pivots
-    /// existed has no entry, and `None` is exactly the centre those files' nodes
-    /// rotated and mirrored about. `skip_serializing_if` keeps it out of every
-    /// document that never moved one, so adding the field changed no existing
-    /// file's bytes (invariant 9). See §5.11.
+    /// The node's transform origin (§5.3), absent for one on its box's centre,
+    /// which is what earlier files meant. Additive and skipped when `None`
+    /// (invariant 9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pivot: Option<Pivot>,
-    /// The files this layer produces (§7), absent for one nobody has set up to
-    /// export. Purely additive, so no version bump, and on the same terms as
-    /// `pivot` above: a file written before export settings existed has no
-    /// entry, and an empty list is exactly what those layers meant.
-    /// `skip_serializing_if` keeps the key out of every document that never
-    /// added one, so the field changed no existing file's bytes (invariant 9).
-    /// See §5.11.
+    /// The files this layer produces (§7), absent when empty. Additive and
+    /// skipped when empty (invariant 9).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exports: Vec<Keyed<ExportSpec>>,
-    /// The effect stack (§5.3a), absent for a layer carrying none. Purely
-    /// additive on the same terms as `exports` above — a file written before
-    /// effects existed has no entry, and an empty stack is exactly what those
-    /// layers meant, so no version bump and no existing file's bytes change
-    /// (invariant 9).
+    /// The effect stack (§5.3a), absent when empty. Additive, as `exports`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<Keyed<Effect>>,
-    /// The layout grids drawn over this layer (`crate::layout`), absent for one
-    /// carrying none. Additive on `exports`' terms exactly — no version bump, no
-    /// existing file's bytes changed (invariant 9).
+    /// The layout grids drawn over this layer (`crate::layout`), absent when
+    /// empty. Additive, as `exports`.
     ///
-    /// ⚠️ **Not normalized away on a kind that cannot be a frame**, unlike `clip`
-    /// and `mask` above. Those two are booleans that would *change behaviour* on
-    /// the wrong kind, so a stale one has to be neutralised; a grid list is read
-    /// by one panel and one overlay, both of which ask the kind first, so the
-    /// worst a stray one costs is bytes — and dropping it would silently delete
-    /// something a later version might have a use for.
+    /// Not normalized away on a kind that cannot be a frame, unlike `clip` and
+    /// `mask`: those would change behaviour on the wrong kind, while a stray grid
+    /// list is only ignored and dropping it would delete data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grids: Vec<Keyed<crate::layout::LayoutGrid>>,
     /// The layer's CSS insets inside its frame (`crate::container`), absent when
-    /// none is set — additive on `grids`' terms, no version bump and no existing
-    /// file's bytes changed (§5.11, §15 D868: the default is exactly what every
-    /// earlier file means). Kept, not normalized away, on a layer where they are
-    /// inert, for `grids`' reason.
+    /// unset. Additive (§5.11, §15 D868); kept on a layer where they are inert,
+    /// for `grids`' reason.
     #[serde(default, skip_serializing_if = "crate::container::Insets::is_unset")]
     pub insets: crate::container::Insets,
     /// The layer's layout (`crate::container::Display`), absent for a container
-    /// with none — additive on `insets`' terms, no version bump.
+    /// with none. Additive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<crate::container::Display>,
     /// The layer's layout-item properties, absent at CSS's defaults.
@@ -321,9 +260,9 @@ pub(crate) struct NodeDto {
         skip_serializing_if = "crate::container::LayoutItem::is_default"
     )]
     pub item: crate::container::LayoutItem,
-    /// Whether the layer is a main component (§15 D978), absent when not. Additive,
-    /// but it arrived with schema v5 so that an older build refuses a file holding
-    /// components rather than silently dropping them (§5.3d).
+    /// Whether the layer is a main component (§15 D978), absent when not. Arrived
+    /// with schema v5 so an older build refuses a file holding components rather
+    /// than silently dropping them (§5.3d).
     #[serde(default, skip_serializing_if = "is_false")]
     pub component: bool,
     /// The node this one was copied from, as a wire id (§15 D978), absent for a
@@ -332,13 +271,12 @@ pub(crate) struct NodeDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
     /// The main a nested copy's contents are swapped to, as a wire id (§15 D983),
-    /// absent on every layer not swapped. Part of v5 unbumped, as `set` is — no
-    /// release has written v5. Checked on load with the links.
+    /// absent on every layer not swapped. Part of v5. Checked on load with the
+    /// links.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub swap: Option<String>,
     /// A component set's variant properties (§15 D982), absent on every other
-    /// layer. Part of v5 — no release went out between v5's components and these
-    /// (`v0.4.1` predates both), so no released v5 reader would drop them.
+    /// layer. Part of v5.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub set: Option<crate::variant::VariantSet>,
     /// A variant's values, absent on everything that is not one (§15 D982).
@@ -368,19 +306,15 @@ pub(crate) struct NodeDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_var: Option<crate::variable::VarId>,
     /// The number variables a layer's width and height are bound to (§15
-    /// D1061), absent when neither is. New in v8 — the version D1058 opened,
-    /// unreleased when this joined it, so no released build reads v8 without it
-    /// (a local build of D1058's or D1059's commit would drop it in silence).
+    /// D1061), absent when neither is. New in v8.
     #[serde(default, skip_serializing_if = "no_size_vars")]
     pub size_vars: crate::variable::SizeVars,
     /// The string variables a text's content and family are bound to (§15
-    /// D1069), absent when neither is. New in v8, as `size_vars` is — still
-    /// unreleased when this joined it.
+    /// D1069), absent when neither is. New in v8.
     #[serde(default, skip_serializing_if = "no_text_vars")]
     pub text_vars: crate::variable::TextVars,
     /// The number variable a layer's opacity is bound to (§15 D1072), absent
-    /// when unbound. New in v8, as `size_vars` is — v8 still unreleased (v0.5.0
-    /// wrote v5) when this joined it.
+    /// when unbound. New in v8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opacity_var: Option<crate::variable::VarId>,
     /// The styles a layer's fills, strokes and effects are bound to (§15
@@ -428,13 +362,9 @@ fn is_nonzero_fill(r: &FillRule) -> bool {
 impl NodeDto {
     /// Project one node to its DTO.
     ///
-    /// **Lifted out of [`DocumentDto::from_document`]'s map so the clipboard can
-    /// reach it** (`crate::io::clip`, §15 D823). A copied subtree crossing
-    /// between two `ondin` windows is the same bytes as a saved one, and the
-    /// alternative was a second projection beside this one — which would have put
-    /// the `clip` normalization below, and every rule like it, in two places that
-    /// nothing compares. The document schema is the format; the clipboard is a
-    /// second *reader* of it, not a second format.
+    /// Shared with the clipboard (`crate::io::clip`, §15 D823): a copied subtree is
+    /// the same wire form as a saved one, so there is one projection and one set
+    /// of normalization rules.
     pub(crate) fn from_node(n: &Node) -> Self {
         Self {
             id: n.id().to_wire(),
@@ -447,36 +377,16 @@ impl NodeDto {
             locked: n.locked(),
             proportions_locked: n.proportions_locked(),
             opacity: n.opacity(),
-            // ⚠️ **Normalized on the way *out* as well as on the way in**
-            // (§15 D663, `[S1.1-L1-06]`), which is what stops a document's
-            // bytes moving on its first open-and-save with no edit made.
-            // `op_set_clip` deliberately accepts the flag on a kind that
-            // cannot honour it — §15 D282: *"an inert `clip` is a switch
-            // nothing reads"*, so dragging a shape through a frame and back
-            // keeps its setting — and `into_node` zeroes it on load. Both
-            // halves are right on their own and the pair was not: a `.ondin`
-            // holding `"clip": true` on a `Group` loaded as `false` and saved
-            // back one byte **longer**, silently, for every such group —
-            // `clip` carries a named serde default and no
-            // `skip_serializing_if`, so the key is always written and
-            // `"clip":true` (4) becomes `"clip":false` (5). ⚠️ This comment
-            // said *shorter* until `arch-scribe` read the DTO; the direction
-            // is not what makes it a defect and is exactly why it went
-            // unchecked.
-            //
-            // Fixed here rather than at either end. The loader's
-            // normalization **stays** — it is the guard against a hand-edited
-            // or foreign file — and this is the projection saying what the
-            // format's `clip` actually means, which is *"clips its
-            // children"*. The model is untouched, so D282's property is
-            // untouched.
+            // Normalized on the way out as well as in (§15 D663): `op_set_clip`
+            // accepts the flag on a kind that cannot honour it and `into_node`
+            // zeroes it on load, so without this a document's bytes move on
+            // open-and-save. The loader's normalization stays as the guard
+            // against a hand-edited file.
             clip: n.clip() && n.kind().clips_children(),
             mask: n.mask(),
             mask_mode: n.mask_mode(),
-            // **The stored field, not `fill_rule()`** — that accessor answers
-            // the *effective* rule and would write `EvenOdd` into every
-            // `Exclude`, changing the bytes of files that are already correct
-            // (§15 D239, invariant 9).
+            // The stored field, not `fill_rule()`, which answers the effective
+            // rule and would write `EvenOdd` into every `Exclude` (invariant 9).
             fill_rule: n.fill_rule,
             paint: n.paint().clone(),
             pivot: n.pivot(),
@@ -512,11 +422,7 @@ impl NodeDto {
     /// Rebuild one node from its DTO, normalizing the flags a foreign or
     /// hand-edited file can state on a kind that cannot honour them.
     ///
-    /// **Every rule here is a rule about the format rather than about a
-    /// document**, which is why it is reachable from the clipboard: a subtree
-    /// arriving from another window has been through exactly the same wire form
-    /// as one arriving from disk, and has exactly the same claim on being
-    /// repaired rather than trusted.
+    /// Every rule here is about the format, which is why the clipboard shares it.
     pub(crate) fn into_node(self) -> Result<Node, IoError> {
         let id = parse_id(&self.id)?;
         let parent = self.parent.as_deref().map(parse_id).transpose()?;
@@ -527,16 +433,11 @@ impl NodeDto {
             .iter()
             .map(|c| parse_id(c))
             .collect::<Result<Vec<_>, _>>()?;
-        // The flag is kept inert on kinds with no frame to clip to, so a
-        // pre-`clip` file (where the default says "yes") does not arrive
-        // with every group and rectangle claiming to clip.
+        // Inert on kinds with no frame to clip to, so a pre-`clip` file (default
+        // "yes") does not arrive with every group claiming to clip.
         let clip = self.clip && self.kind.clips_children();
-        // Kept inert on the kinds that cannot be one, the same way `clip` is
-        // above. Nothing writes a mask onto a frame or the root, so this
-        // guards against a hand-edited or future file rather than against
-        // our own default — but a mask flag on a frame would be a switch the
-        // inspector cannot show and the walk would have to decide about
-        // anyway.
+        // Inert on kinds that cannot be a mask, like `clip`; guards against a
+        // hand-edited or future file.
         let mask = self.mask && self.kind.can_mask();
         Ok(Node {
             id,
@@ -548,21 +449,10 @@ impl NodeDto {
             visible: self.visible,
             locked: self.locked,
             proportions_locked: self.proportions_locked,
-            // ⚠️ **Clamped, not refused**, which is §5.11's own asymmetry
-            // rather than a new one: a text span reaching past its content is
-            // clamped in `normalize_kind` for exactly this reason, that a
-            // recoverable file should stay openable. A hand-edited or
-            // third-party `"opacity": 5.0` used to load into a state
-            // `op_set_opacity` and `op_insert_subtree` both refuse with
-            // `BadOpacity` — the two doors disagreeing about one field. The
-            // range is `crate::build::valid_opacity`'s, so there is one
-            // answer rather than two spellings of it.
-            //
-            // `f32::clamp` returns `NaN` for a `NaN` input, so the finite
-            // test is not decoration — though a `NaN` cannot actually arrive
-            // here, since serde would have refused `null` for an `f32` one
-            // step earlier. Written as a fact about the function rather than
-            // as a fact about today's DTO.
+            // Clamped, not refused (§5.11): a recoverable file stays openable, and
+            // the range is `crate::build::valid_opacity`'s so the operations and
+            // the loader agree. `f32::clamp` passes `NaN` through, so the finite
+            // test stays even though serde refuses `null` for an `f32`.
             opacity: if self.opacity.is_finite() {
                 self.opacity.clamp(0.0, 1.0)
             } else {
@@ -570,20 +460,14 @@ impl NodeDto {
             },
             clip,
             mask,
-            // Not gated on `mask`: the mode is remembered while the mask is
-            // off, which is the whole reason it is a field beside the flag.
+            // Not gated on `mask`: the mode is remembered while the mask is off.
             mask_mode: self.mask_mode,
             fill_rule: self.fill_rule,
             paint: self.paint,
             pivot: self.pivot,
-            // ⚠️ **Dropped rather than refused, which is this file's own rule
-            // for a value that is decoration** (§15 D492). `op_set_exports`
-            // rejects a scale or a quality that cannot be one; a file written
-            // by an older build, another tool, or a hand edit can still carry
-            // one, and refusing the whole document over an export preset would
-            // lose the artwork to save the recipe. An unusable spec is not
-            // repaired either — `Width(0)` has no defensible non-zero reading —
-            // so it goes, and the panel shows one row fewer.
+            // Dropped rather than refused (§15 D492): refusing the document over
+            // an export preset would lose the artwork to save the recipe, and an
+            // unusable spec such as `Width(0)` has no defensible repair.
             exports: self
                 .exports
                 .into_iter()
@@ -599,11 +483,9 @@ impl NodeDto {
             swap,
             set: self.set,
             variant: self.variant,
-            // ⚠️ **Re-keyed rather than refused** (`[R1-L2-02]`): a build before
-            // `check_item_ids` learnt this list saved sets holding one property id
-            // twice (*Combine as variants* made them), and refusing the file would
-            // lose the artwork over a defect the app itself wrote. Deterministic —
-            // a function of the list — so the same bytes still give one document.
+            // Re-keyed rather than refused: earlier builds saved sets with a
+            // repeated property id, and refusing would lose the artwork. It is a
+            // function of the list, so the same bytes give one document.
             props: crate::item::rekey_repeats(self.props),
             origin: self
                 .origin
@@ -668,10 +550,7 @@ impl ImageDto {
             )));
         }
         let source = match self.source {
-            // `.into()` is the `Vec<u8>` → `Arc<[u8]>` move the table's own type
-            // now asks for (§15 D301). It reallocates once, here, at load — the
-            // one place in the app where a copy of the bytes is unavoidable
-            // anyway, since base64 decoding produces the `Vec`.
+            // `.into()` is the `Vec<u8>` → `Arc<[u8]>` move; the one copy at load.
             ImageSourceDto::Embedded { data } => ImageSource::Embedded(
                 BASE64
                     .decode(&data)
@@ -716,8 +595,7 @@ impl DocumentDto {
             .images()
             .map(|(id, entry)| ImageDto::from_entry(id, entry))
             .collect();
-        // A `FxHashMap` has no order at all, so this sort is not tidiness — it is
-        // the whole of invariant 9 for the table.
+        // A `FxHashMap` has no order, so this sort is invariant 9 for the table.
         images.sort_by(|a, b| a.id.cmp(&b.id));
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
@@ -762,17 +640,9 @@ impl DocumentDto {
         }
 
         // Guides are checked for a parseable id, a finite position and a live
-        // owner. There is no tree for one to corrupt, and a guide off the side of
-        // the artwork is a perfectly ordinary thing to have — but a NaN would sit
-        // in every distance comparison the hit test makes and never match.
-        //
-        // **The owner is the one reference a guide has**, and a dangling one is
-        // not survivable by ignoring it: a scoped guide's `position` is read in
-        // its owner's space, so with no owner it has no place, and every drawing
-        // and snapping site would need a fallback for a state the model refuses
-        // to produce (`Document::check_guide_owner`). Rejected here rather than
-        // silently promoted to a global guide, which would move the line to a
-        // coordinate the user never chose.
+        // owner. A dangling owner is rejected rather than promoted to a global
+        // guide, which would move the line to a coordinate the user never chose
+        // (`Document::check_guide_owner`).
         let mut seen_guides: FxHashSet<GuideId> = FxHashSet::default();
         let mut guides = Vec::with_capacity(self.guides.len());
         for dto in self.guides {
@@ -808,11 +678,9 @@ impl DocumentDto {
             });
         }
 
-        // **A dangling reference is not checked here, and that is deliberate.** A
-        // fill naming an id the table does not carry is the missing-image state
-        // the renderer has to draw anyway — a linked file that moved — so
-        // refusing to load would turn a picture that needs relinking into a
-        // document that cannot be opened at all.
+        // A dangling image reference is deliberately not checked: it is the
+        // missing-image state the renderer draws anyway, and refusing would make a
+        // picture needing relinking into an unopenable document.
         let mut images: FxHashMap<ImageId, ImageEntry> = FxHashMap::default();
         for dto in self.images {
             let (id, entry) = dto.into_entry()?;
@@ -823,10 +691,9 @@ impl DocumentDto {
 
         verify_integrity(&nodes, root, vault)?;
 
-        // The variables rules (§5.3f, §15 D1039), the post-condition `apply`
-        // holds, over the table and every binding. **Refused, not repaired**, as a
-        // dangling component link is: a binding to nothing has no value to draw,
-        // and dropping it would hand the layer a literal nobody chose.
+        // The variables rules (§5.3f, §15 D1039), `apply`'s post-condition. Refused,
+        // not repaired: dropping a dangling binding would hand the layer a literal
+        // nobody chose.
         let variables = self.variables.into_table()?;
         let in_vault = |id: NodeId| {
             let mut cursor = Some(id);
@@ -842,10 +709,9 @@ impl DocumentDto {
         crate::variable::check(&variables, nodes.values(), in_vault)
             .map_err(|rule| IoError::Integrity(rule.to_string()))?;
 
-        // And the style rules (§15 D1062), refused rather than repaired for the
-        // same reason. A layer whose list differs from its style's loads as
-        // written, and the next commit that runs `style::settle` puts it back —
-        // unless that commit's own edit wrote the slot, which detaches it.
+        // The style rules (§15 D1062), refused for the same reason. A layer whose
+        // list differs from its style's loads as written; the next
+        // `style::settle` puts it back unless that edit wrote the slot.
         let mut styles = Vec::with_capacity(self.styles.len());
         for s in self.styles {
             if styles.iter().any(|t: &crate::style::Style| t.id == s.id) {
@@ -857,10 +723,8 @@ impl DocumentDto {
         crate::style::check(&styles, &variables, nodes.values(), in_vault)
             .map_err(|rule| IoError::Integrity(rule.to_string()))?;
 
-        // The published state is a document of its own, held to the same rules
-        // by the same loader (§15 D1012) — but one level deep only: a frozen copy
-        // never carries a frozen copy, and refusing one here bounds the
-        // recursion a hand-made file could ask for.
+        // The published state is a document of its own, held to the same rules,
+        // one level deep only: refusing a nested one bounds the recursion.
         let published = match self.published {
             None => None,
             Some(p) => {
@@ -887,19 +751,12 @@ impl DocumentDto {
             images,
             variables,
             styles,
-            // ⚠️ **Taken as it was written, with nothing filled in.** A loader
-            // that minted a missing id would make `load` non-deterministic —
-            // reading the same bytes twice would give two documents that
-            // disagree — so a pre-library file arrives with an empty block and
-            // the app mints its identity the first time the library saves it
-            // (`crate::meta::DocumentMeta::id`).
-            //
-            // ⚠️ **`sanitized` takes nothing *away* that the app could not have
-            // put there, and it is the boundary the whole class is closed at.**
-            // The id is joined as a path component by three separate writers; a
-            // check at each of them is three chances to miss the fourth. See
-            // [`DocumentMeta::is_wellformed_id`] — and note this is still
-            // deterministic, because it is a function of the bytes alone.
+            // Taken as written, with nothing minted: a loader that filled in a
+            // missing id would make `load` non-deterministic, so the library mints
+            // it at first save (`crate::meta::DocumentMeta::id`). `sanitized` is
+            // the boundary where an unsafe id (joined as a path component by
+            // several writers) is closed off; see
+            // [`DocumentMeta::is_wellformed_id`].
             self.meta.sanitized(),
             published,
         ))
@@ -909,14 +766,9 @@ impl DocumentDto {
 /// Re-establish the invariants a derived `Deserialize` cannot.
 ///
 /// `Spans` guarantees sorted, non-overlapping, non-default, in-range spans (see
-/// `typography.rs`) — for the character list and the paragraph one alike, since
-/// they are one type — and every one of those is established by its own
-/// `set`/`normalize` rather than by the type's shape, so a file is the one place
-/// a span list can arrive having skipped them. Normalizing here rather than
-/// rejecting is deliberate: a span reaching past the end of its content is a
-/// hand-edit or an older writer's rounding, not a corrupt tree, and clamping it
-/// loses nothing a designer would notice. The tree checks below are the ones that
-/// must refuse.
+/// `typography.rs`) through its own `set`/`normalize`, not its shape, so a file is
+/// where a list can arrive unnormalized. Clamping rather than rejecting is
+/// deliberate: an overlong span is a hand-edit, not a corrupt tree.
 fn normalize_kind(kind: NodeKind) -> NodeKind {
     match kind {
         NodeKind::Text {
@@ -933,12 +785,9 @@ fn normalize_kind(kind: NodeKind) -> NodeKind {
         } => {
             let spans = spans.clamped(&content, &style);
             let para_spans = para_spans.clamped(&content, &paragraph);
-            // **Not normalized, and there is nothing here it could be clamped
-            // against.** A rail is geometry in the node's own space, exactly like
-            // `NodeKind::Path`'s own `path`, which this function also leaves alone;
-            // an empty or zero-length one is refused by `text::PathWarp::of` at
-            // layout time rather than rewritten on the way in, so a file that
-            // carries one opens as ordinary horizontal type instead of failing.
+            // The rail is not normalized: it is geometry like `NodeKind::Path`'s
+            // `path`, and `text::PathWarp::of` refuses a degenerate one at layout,
+            // so the file opens as horizontal type.
             NodeKind::Text {
                 content,
                 style,
@@ -948,12 +797,9 @@ fn normalize_kind(kind: NodeKind) -> NodeKind {
                 block,
                 sizing,
                 on_path,
-                // Carried, not normalized — and inert rather than wrong when a
-                // hand-written file sets either with no `on_path` beside it, which
-                // is the whole reason they are fields of their own. An offset
-                // outside `0..1` is not clamped either: `PathWarp` takes it modulo
-                // the rail on a closed one and past the end on an open one, both of
-                // which are answers rather than errors.
+                // Carried, not normalized: inert without `on_path`, and an offset
+                // outside `0..1` is an answer to `PathWarp` (modulo on a closed
+                // rail, past the end on an open one), not an error.
                 on_path_flip,
                 on_path_offset,
             }
@@ -983,33 +829,14 @@ fn parse_id(s: &str) -> Result<NodeId, IoError> {
 /// hand-edited file could satisfy parent/child consistency and still loop the
 /// tree walks forever, since those walk `children` without a visited set.
 ///
-/// ⚠️ **There is deliberately no finiteness check here, and it took a measurement
-/// to know that.** The review asked for one — a file already damaged by a build
-/// that let a `NaN` through should be *reported* rather than dying inside serde.
-/// It cannot be, because **no JSON input can produce a non-finite `f64` in the
-/// first place**: `serde_json` writes one as `null`, refuses `null` where an
-/// `f64` is wanted, and refuses an overflowing literal like `1e999` with
-/// *"number out of range"*. Both die at `from_value`, one function above this,
-/// so a check here is unreachable by construction rather than merely untested.
-/// The whole of the protection is therefore at the operation
-/// (`OpError::NonFinite`), which is where invariant 8 puts it anyway. What such
-/// a file *does* get is serde's own message, which names neither the node nor
-/// the field; improving that would mean a custom deserializer for every float
-/// on the DTO, and is a decision rather than a fix.
+/// There is deliberately no finiteness check: no JSON input can produce a
+/// non-finite `f64` (serde_json refuses `null` and `1e999` at `from_value`), so
+/// the protection is at the operation (`OpError::NonFinite`).
 ///
-/// ⚠️ **(6) is the one that is about the *stack* rather than about the tree, and
-/// it was missing.** Every check above bounds a shape; none of them bounded a
-/// depth, and the walks §5.11 delegates safety to — `subtree_ids`, `paint_path`,
-/// `resolve` — are recursive. A ~2,000-deep document of nested groups (about
-/// 900 KB, a one-line generator or an imported SVG of nested `<g>`s) passed all
-/// five and then killed the process with `STATUS_STACK_OVERFLOW` inside
-/// `Resolved::rebuild`. **A stack overflow is not a panic**: `catch_unwind`
-/// cannot see it, no `Failed` memo records it, and every unsaved edit in the
-/// session goes with it. And it is reachable without the user doing anything —
-/// `library::cover::rasterize` loads and rebuilds *every* document the dashboard
-/// grid draws, and the dashboard is the landing screen, so one such file in the
-/// synced base folder crashes the app at launch with nothing on screen naming
-/// the file.
+/// (6) bounds the stack, not the shape: the recursive walks (`subtree_ids`,
+/// `paint_path`, `resolve`) overflow the stack on a deeply nested file, which
+/// `catch_unwind` cannot see, and the dashboard's cover rasterizer loads every
+/// document at launch.
 fn verify_integrity(
     nodes: &FxHashMap<NodeId, Node>,
     root: NodeId,
@@ -1080,21 +907,10 @@ fn verify_integrity(
     // Reachability, and depth with it. The visited guard makes this terminate on
     // any input, so a malformed file is rejected instead of hanging the loader.
     //
-    // **The depth rides along on the walk that was already here**, which is why
-    // check (6) costs nothing: this loop visits every node exactly once and the
-    // only new state is a `u32` per stack entry. It is an explicit stack rather
-    // than recursion, so *this* walk was never the one at risk — the walks it
-    // certifies are.
-    //
-    // **And check (7) rides along the same way**: no frame under a boolean or a
-    // mask at any depth (§15 D876). It is an ancestor rule, so the pairwise
-    // `check_child_kind` above cannot see it, and the flag each stack entry
-    // carries is "something above here bars frames".
-    //
-    // **From both roots** (§15 D1012): the vault's nodes hang from a second root
-    // beside the document's, so "reachable" means reachable from either. Its
-    // shape — parentless, a `Root`, not the document's own — is `kit::check`'s,
-    // below; here it only has to exist before the walk starts from it.
+    // Checks (6) and (7) ride along on this explicit-stack walk. (7) is an
+    // ancestor rule the pairwise `check_child_kind` cannot see; each entry's flag
+    // is "something above here bars frames". The walk starts from both roots
+    // (§15 D1012); the vault's shape is `kit::check`'s, below.
     let mut visited: FxHashSet<NodeId> = FxHashSet::default();
     let mut stack = vec![(root, 0usize, false)];
     visited.insert(root);
@@ -1139,10 +955,9 @@ fn verify_integrity(
         )));
     }
 
-    // The component rules (§15 D978), after the tree is known to be a tree — the
+    // The component rules (§15 D978), after the tree is known to be a tree: the
     // ancestor walks in `component::check` assume parents resolve and end. A link
-    // to nothing is refused rather than dropped, a guide owner's answer (§5.11):
-    // dropping it would turn an instance into a detached copy without a word.
+    // to nothing is refused, since dropping it would silently detach an instance.
     crate::component::check(nodes)
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
     // And the vault's (§15 D1012), `Document::apply`'s post-condition at this door.

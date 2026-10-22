@@ -40,13 +40,31 @@ pub(crate) struct Page {
     pub components: Vec<Component>,
 }
 
-/// A main written as a component.
+/// A main, or a component set, written as a component.
 pub(crate) struct Component {
     /// Its name as code reads it, unique in the export.
     pub name: String,
-    pub root: Element,
+    /// Each variant's tree with the variant values it is drawn for, the default
+    /// variant's last and drawn for any others. A main outside a set has one
+    /// tree, drawn always.
+    pub bodies: Vec<(Vec<(String, String)>, Element)>,
+    /// Its variant properties: the name code reads each by, its values and the
+    /// default variant's value.
+    pub choices: Vec<(String, Vec<String>, String)>,
     /// Its properties, each with the main's own value as the default.
     pub props: Vec<(String, Arg)>,
+}
+
+impl Component {
+    /// The page as a component of one tree and no properties, named `App`.
+    pub fn page(root: Element) -> Self {
+        Component {
+            name: "App".into(),
+            bodies: vec![(Vec::new(), root)],
+            choices: Vec::new(),
+            props: Vec::new(),
+        }
+    }
 }
 
 /// What [`Walk::bound`] knows of a property while its main is written.
@@ -124,13 +142,13 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
                     let mut around = Element::new("div", walk.classes.mint("mode", "mode"));
                     around.set("display", "contents");
                     around.attrs.push(("data-mode", mode.to_string()));
-                    around.children.push(Child::Element(el));
+                    around.children.push(Child::Element(Box::new(el)));
                     el = around;
                 } else {
                     el.attrs.push(("data-mode", mode.to_string()));
                 }
             }
-            root.children.push(Child::Element(el));
+            root.children.push(Child::Element(Box::new(el)));
         }
     }
     let tokens = walk.tokens.css(doc);
@@ -160,15 +178,24 @@ struct Walk<'a> {
 /// The components made so far.
 #[derive(Default)]
 struct Components {
-    by_main: HashMap<NodeId, Signature>,
+    /// By owner: the set for a variant, else the main.
+    by_owner: HashMap<NodeId, Signature>,
     /// In the order finished, so a component comes after those it uses.
     list: Vec<Component>,
     /// Component names taken; `App` is the page's.
     names: HashSet<String>,
 }
 
-/// A component's name and, per property item, its name in code and its default.
-type Signature = (String, Vec<(ItemId, String, Arg)>);
+/// What a use of a component needs to know of it.
+#[derive(Clone)]
+struct Signature {
+    name: String,
+    /// Per property item, its name in code and its default.
+    props: Vec<(ItemId, String, Arg)>,
+    /// Per variant property, in the set's order, its name in code and the
+    /// default variant's value.
+    choices: Vec<(String, String)>,
+}
 
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
 fn label(node: &Node) -> String {
@@ -228,11 +255,21 @@ impl Walk<'_> {
         if doc.in_vault(main) {
             return Some("its main is from a kit, which is written out as layers".into());
         }
-        if variant::set_of(doc, main).is_some() {
-            return Some("a variant, which is written out as layers".into());
-        }
-        if self.css_blocker(doc.get(main)?).is_some() {
-            return Some("its main is drawn as a picture".into());
+        // Every variant is a tree of the component, so each must be a CSS root.
+        let trees = match variant::set_of(doc, main) {
+            Some(set) => {
+                let values = doc.get(main)?.variant();
+                if variant::find_variant(doc, set, values) != Some(main) {
+                    return Some("its variant has the values of another, which is written".into());
+                }
+                variant::variants(doc, set)
+            }
+            None => vec![main],
+        };
+        for t in trees {
+            if self.css_blocker(doc.get(t)?).is_some() {
+                return Some("its main is drawn as a picture".into());
+            }
         }
         const OVERRIDES: &str = "inlined because of overrides; make it a property to keep the link";
         let mut at = root;
@@ -282,18 +319,24 @@ impl Walk<'_> {
     }
 
     /// The instance at `node` as a use of its main's component, placed as `place`
-    /// says, with the properties it sets apart from the main.
+    /// says, with the variant and the properties it sets apart from the defaults.
     fn instance(&mut self, node: &Node, place: Place) -> Element {
         let doc = self.doc;
         let main = component::main_of(doc, node.id()).expect("checked by why_inline");
-        let (name, defaults) = self.component(main);
+        let sig = self.component(main);
         let kind = self.res.used_kind_of(node).clone();
         let mut el = Element::new("div", self.classes.mint(node.name(), kind.default_name()));
         let bx = self.box_rect(node);
         self.place(&mut el, node, &kind, bx, place);
         let mut args = Vec::new();
+        let values = doc.get(main).map(Node::variant).unwrap_or_default();
+        for ((prop, default), value) in sig.choices.iter().zip(values) {
+            if value != default {
+                args.push((prop.clone(), Arg::Text(value.clone())));
+            }
+        }
         for p in variant::instance_properties(doc, node.id()).iter() {
-            let Some((_, prop, default)) = defaults.iter().find(|(id, ..)| *id == p.id) else {
+            let Some((_, prop, default)) = sig.props.iter().find(|(id, ..)| *id == p.id) else {
                 continue;
             };
             let value = variant::counterparts(doc, node.id(), p)
@@ -305,36 +348,71 @@ impl Walk<'_> {
             }
         }
         el.instance = Some(Instance {
-            component: name,
+            component: sig.name,
             args,
         });
         el
     }
 
-    /// The component written from `main`, made the first time it is asked for:
-    /// its name and, by property, the name code reads it by and its default.
+    /// The component written from `main`, or from the set it is a variant of,
+    /// made the first time it is asked for.
     fn component(&mut self, main: NodeId) -> Signature {
         let doc = self.doc;
+        let owner_id = variant::owner_of_main(doc, main).unwrap_or(main);
         let comps = self.components.as_mut().expect("components are on");
-        if let Some(sig) = comps.by_main.get(&main) {
+        if let Some(sig) = comps.by_owner.get(&owner_id) {
             return sig.clone();
         }
-        let node = doc.get(main).expect("a main in the document");
-        let name = unique(component_name(node.name()), &mut comps.names);
+        let owner = doc.get(owner_id).expect("a main in the document");
+        let name = unique(component_name(owner.name()), &mut comps.names);
 
-        let mut bound = HashMap::new();
-        let mut props = Vec::new();
         // What a component's props object already holds.
         let mut taken: HashSet<String> = ["className", "key", "ref", "children"]
             .map(String::from)
             .into();
-        for p in node.props() {
+        // The variants, the first of any that share their values, and the default.
+        let (trees, default) = match owner.set() {
+            Some(_) => {
+                let mut seen = HashSet::new();
+                let trees: Vec<NodeId> = variant::variants(doc, owner_id)
+                    .into_iter()
+                    .filter(|v| seen.insert(doc.get(*v).map(|n| n.variant().to_vec())))
+                    .collect();
+                let default = ondin_core::kit::default_variant(doc, owner_id)
+                    .filter(|d| trees.contains(d))
+                    .unwrap_or(main);
+                (trees, default)
+            }
+            None => (vec![main], main),
+        };
+        let default_values = doc.get(default).map(Node::variant).unwrap_or_default();
+        let choices: Vec<(String, Vec<String>, String)> = owner
+            .set()
+            .map(|s| s.props.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .zip(default_values)
+            .map(|(vp, d)| {
+                (
+                    unique(prop_name(&vp.name), &mut taken),
+                    vp.values.clone(),
+                    d.clone(),
+                )
+            })
+            .collect();
+
+        let mut bound = HashMap::new();
+        let mut props = Vec::new();
+        for p in owner.props() {
             if !matches!(p.kind, PropKind::Boolean | PropKind::Text) {
                 continue;
             }
+            // The default variant's value, where the property reaches it.
             let Some(default) = p
                 .bound
-                .first()
+                .iter()
+                .find(|b| under(doc, **b, default))
+                .or(p.bound.first())
                 .and_then(|b| variant::field_value(doc, *b, p.kind))
                 .and_then(arg)
             else {
@@ -359,13 +437,35 @@ impl Walk<'_> {
             }
             props.push((p.id, prop, default));
         }
-        let sig = (name.clone(), props);
-        comps.by_main.insert(main, sig.clone());
+        let sig = Signature {
+            name: name.clone(),
+            props,
+            choices: choices
+                .iter()
+                .map(|(p, _, d)| (p.clone(), d.clone()))
+                .collect(),
+        };
+        let comps = self.components.as_mut().expect("components are on");
+        comps.by_owner.insert(owner_id, sig.clone());
 
+        // One file's classes across every variant's tree.
         let classes = std::mem::take(&mut self.classes);
         let outer = std::mem::replace(&mut self.bound, bound);
-        let mut root = self.css_element(node, Place::Root);
-        root.takes_class = true;
+        let mut bodies = Vec::new();
+        for t in trees.iter().filter(|t| **t != default).chain([&default]) {
+            let Some(node) = doc.get(*t) else { continue };
+            let mut root = self.css_element(node, Place::Root);
+            root.takes_class = true;
+            let when = match *t == default {
+                true => Vec::new(),
+                false => choices
+                    .iter()
+                    .zip(node.variant())
+                    .map(|((p, ..), v)| (p.clone(), v.clone()))
+                    .collect(),
+            };
+            bodies.push((when, root));
+        }
         self.bound = outer;
         self.classes = classes;
 
@@ -373,9 +473,10 @@ impl Walk<'_> {
         let comps = self.components.as_mut().expect("components are on");
         comps.list.push(Component {
             name,
-            root,
+            bodies,
+            choices,
             props: sig
-                .1
+                .props
                 .iter()
                 .map(|(_, p, d)| (p.clone(), d.clone()))
                 .collect(),
@@ -668,7 +769,7 @@ impl Walk<'_> {
                 }
             };
             if let Some(e) = self.node(*child, place) {
-                el.children.push(Child::Element(e));
+                el.children.push(Child::Element(Box::new(e)));
             }
         }
         el
@@ -1253,14 +1354,14 @@ impl Walk<'_> {
                     );
                     span.style = own;
                     span.children.push(Child::Text(text));
-                    p.children.push(Child::Element(span));
+                    p.children.push(Child::Element(Box::new(span)));
                 }
             }
             // An empty paragraph still takes a line.
             if p.children.is_empty() {
                 p.children.push(Child::Break);
             }
-            el.children.push(Child::Element(p));
+            el.children.push(Child::Element(Box::new(p)));
             start = end + 1;
             first = false;
         }
@@ -1340,7 +1441,7 @@ impl Walk<'_> {
                 let origin = bx.map(|b| b.origin().to_vec2()).unwrap_or_default();
                 let to_box = Affine::translate(-origin) * world.inverse() * at_ink;
                 set_transform(&mut pic, to_box);
-                holder.children.push(Child::Element(pic));
+                holder.children.push(Child::Element(Box::new(pic)));
                 Some(holder)
             }
         }
@@ -1486,6 +1587,18 @@ fn kind_word(node: &Node) -> &'static str {
         NodeKind::Group => "group",
         _ => "layer",
     }
+}
+
+/// Whether `id` is `ancestor` or below it.
+fn under(doc: &Document, id: NodeId, ancestor: NodeId) -> bool {
+    let mut at = Some(id);
+    while let Some(a) = at {
+        if a == ancestor {
+            return true;
+        }
+        at = doc.get(a).and_then(Node::parent);
+    }
+    false
 }
 
 /// A property value as an argument; a swap is not one.

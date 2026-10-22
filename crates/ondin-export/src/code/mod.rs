@@ -205,23 +205,27 @@ pub(crate) fn stylesheet(root: &dom::Element, up: &str) -> String {
     css.replace("url(\"assets/", &format!("url(\"{up}assets/"))
 }
 
-/// The components `root`'s subtree uses and the pictures it links, each once,
-/// in document order.
-pub(crate) fn references(root: &dom::Element) -> (Vec<String>, Vec<String>) {
+/// The components the trees under `roots` use and the pictures they link, each
+/// once, in document order.
+pub(crate) fn references<'a>(
+    roots: impl IntoIterator<Item = &'a dom::Element>,
+) -> (Vec<String>, Vec<String>) {
     let mut uses = Vec::new();
     let mut images = Vec::new();
-    root.each(&mut |e| {
-        if let Some(i) = &e.instance
-            && !uses.contains(&i.component)
-        {
-            uses.push(i.component.clone());
-        }
-        if e.tag == "img"
-            && let Some((_, src)) = e.attrs.iter().find(|(k, _)| *k == "src")
-            && !images.contains(src)
-        {
-            images.push(src.clone());
-        }
+    roots.into_iter().for_each(|root| {
+        root.each(&mut |e| {
+            if let Some(i) = &e.instance
+                && !uses.contains(&i.component)
+            {
+                uses.push(i.component.clone());
+            }
+            if e.tag == "img"
+                && let Some((_, src)) = e.attrs.iter().find(|(k, _)| *k == "src")
+                && !images.contains(src)
+            {
+                images.push(src.clone());
+            }
+        })
     });
     (uses, images)
 }

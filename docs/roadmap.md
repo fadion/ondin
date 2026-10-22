@@ -34,12 +34,13 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 (`export.md`, *Code export*).
 
 - **The components still written out as layers** (D1098 (9)):
-  - a component set as one component with union props: trees merged by name path with
-    conditional classes, else a switch;
   - swap properties as child props;
   - nested (*shown from nested*) properties;
   - kit components, under a folder named for the kit;
   - instances whose root sets a mode.
+- **Merging a set's variant trees** that match by name path into one tree with conditional
+  classes (D1098 (9)). Each variant is its own tree behind a condition now, which is exact but
+  long.
 - **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
   has not run on CI's Linux and macOS legs; unverified until it does. It covers only the HTML

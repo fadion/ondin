@@ -1,12 +1,13 @@
 //! The React emitter: TypeScript components, each with a CSS module.
 //!
-//! `App.tsx` is the page; each main an instance on it uses becomes
-//! `components/<Name>.tsx` beside `<Name>.module.css`, its boolean and text
-//! properties typed props defaulting to the main's values. A component's root
+//! `App.tsx` is the page; each main an instance on it uses, or the set it is a
+//! variant of, becomes `components/<Name>.tsx` beside `<Name>.module.css`: its
+//! variant properties string unions, its boolean and text properties typed
+//! props, each defaulting to the default variant's value. A component's root
 //! takes a `className`, which its user places it with. `base.css` holds the page
 //! reset every file imports, and `tokens.css` the variables.
 
-use super::dom::{Arg, Element, Syntax};
+use super::dom::{Arg, Syntax};
 use super::jsx::{asset_binding, js_string};
 use super::walk::{self, Component};
 use super::{BASE_CSS, CodeExport, CodeFile};
@@ -17,10 +18,11 @@ use std::fmt::Write as _;
 pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport {
     let page = walk::page(doc, res, origins, true);
     let tokens = page.tokens.is_some();
+    let app = Component::page(page.root.clone());
     let mut files = vec![
         CodeFile {
             path: "App.tsx".into(),
-            bytes: module("App", &page.root, &[], tokens, "./").into_bytes(),
+            bytes: module(&app, tokens, "./").into_bytes(),
         },
         CodeFile {
             path: "App.module.css".into(),
@@ -32,29 +34,37 @@ pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExpor
         },
     ];
     for c in &page.components {
-        files.push(component_file(c, tokens));
+        files.push(CodeFile {
+            path: format!("components/{}.tsx", c.name),
+            bytes: module(c, tokens, "../").into_bytes(),
+        });
     }
     for c in &page.components {
+        let css: String = c
+            .bodies
+            .iter()
+            .map(|(_, root)| super::stylesheet(root, "../"))
+            .collect();
         files.push(CodeFile {
             path: format!("components/{}.module.css", c.name),
-            bytes: super::stylesheet(&c.root, "../").into_bytes(),
+            bytes: css.into_bytes(),
         });
     }
     super::finish(files, page)
 }
 
-fn component_file(c: &Component, tokens: bool) -> CodeFile {
-    CodeFile {
-        path: format!("components/{}.tsx", c.name),
-        bytes: module(&c.name, &c.root, &c.props, tokens, "../").into_bytes(),
-    }
-}
-
 /// One `.tsx` file: imports, the props interface for a component, and the
-/// function returning `root`. `up` reaches the export's top folder from the file.
-fn module(name: &str, root: &Element, props: &[(String, Arg)], tokens: bool, up: &str) -> String {
+/// function returning its tree — each variant's under the condition it is drawn
+/// for. `up` reaches the export's top folder from the file.
+fn module(c: &Component, tokens: bool, up: &str) -> String {
+    let Component {
+        name,
+        bodies,
+        choices,
+        props,
+    } = c;
     let is_app = name == "App";
-    let (uses, images) = super::references(root);
+    let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
     let mut out = String::new();
     let _ = writeln!(out, "import \"{up}base.css\";");
     if tokens {
@@ -79,6 +89,10 @@ fn module(name: &str, root: &Element, props: &[(String, Arg)], tokens: bool, up:
     } else {
         let _ = writeln!(out, "export interface {name}Props {{");
         let _ = writeln!(out, "  className?: string;");
+        for (p, values, _) in choices {
+            let union: Vec<String> = values.iter().map(|v| js_string(v)).collect();
+            let _ = writeln!(out, "  {p}?: {};", union.join(" | "));
+        }
         for (p, d) in props {
             let ty = match d {
                 Arg::Bool(_) => "boolean",
@@ -88,6 +102,11 @@ fn module(name: &str, root: &Element, props: &[(String, Arg)], tokens: bool, up:
         }
         out.push_str("}\n\n");
         let mut params = vec!["className".to_string()];
+        params.extend(
+            choices
+                .iter()
+                .map(|(p, _, d)| format!("{p} = {}", js_string(d))),
+        );
         params.extend(props.iter().map(|(p, d)| match d {
             Arg::Bool(b) => format!("{p} = {b}"),
             Arg::Text(t) => format!("{p} = {}", js_string(t)),
@@ -98,9 +117,23 @@ fn module(name: &str, root: &Element, props: &[(String, Arg)], tokens: bool, up:
             params.join(", ")
         );
     }
-    out.push_str("  return (\n");
-    root.markup(&mut out, 2, Syntax::Jsx);
-    out.push_str("  );\n}\n");
+    for (when, root) in bodies {
+        if when.is_empty() {
+            out.push_str("  return (\n");
+            root.markup(&mut out, 2, Syntax::Jsx);
+            out.push_str("  );\n");
+        } else {
+            let cond: Vec<String> = when
+                .iter()
+                .map(|(p, v)| format!("{p} === {}", js_string(v)))
+                .collect();
+            let _ = writeln!(out, "  if ({}) {{", cond.join(" && "));
+            out.push_str("    return (\n");
+            root.markup(&mut out, 3, Syntax::Jsx);
+            out.push_str("    );\n  }\n");
+        }
+    }
+    out.push_str("}\n");
     out
 }
 

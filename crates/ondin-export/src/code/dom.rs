@@ -23,6 +23,9 @@ pub(crate) struct Element {
     pub shown_by: Option<String>,
     /// A component's root, which takes the class its user places it with.
     pub takes_class: bool,
+    /// The Vue directive choosing this variant's tree (`v-if="…"`, `v-else`),
+    /// written whole.
+    pub branch: Option<String>,
 }
 
 /// A use of a component: its name and the properties it sets.
@@ -42,7 +45,7 @@ pub(crate) enum Arg {
 /// What an element holds.
 #[derive(Debug, Clone)]
 pub(crate) enum Child {
-    Element(Element),
+    Element(Box<Element>),
     /// Character data, escaped when printed.
     Text(String),
     /// A line break, which an empty paragraph holds to take its line.
@@ -223,6 +226,9 @@ impl Element {
             }
         }
         if syntax == Syntax::Vue {
+            if let Some(b) = &self.branch {
+                let _ = write!(out, " {b}");
+            }
             if let Some(prop) = &self.shown_by {
                 let _ = write!(out, " v-if=\"{prop}\"");
             }

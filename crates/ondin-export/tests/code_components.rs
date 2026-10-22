@@ -346,3 +346,143 @@ fn a_vue_page_never_shares_a_class_with_a_component_root_it_uses() {
     assert!(app.contains("<div class=\"card-3\">"), "{app}");
     assert!(app.contains("\n.card-3 {"), "its rule moved with it: {app}");
 }
+
+/// A *Button* set with a *Size* property (*Small*, the default as the topmost,
+/// and *Large*) and a *Label* text property bound in both, and an instance of
+/// *Large* labelled *Go*.
+fn button_set() -> (Document, NodeId) {
+    use ondin_core::variant::{VariantProp, VariantSet};
+    let mut ids = IdSource::new(0xB7);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [set, small, small_label, large, large_label] = [(); 5].map(|_| ids.mint());
+    let frame = |w, h| NodeKind::Artboard {
+        size: Size::new(w, h),
+    };
+    doc.apply(&Transaction(vec![
+        create(set, (root, 0), frame(200.0, 120.0), (0.0, 0.0), "Button"),
+        Operation::SetVariantSet {
+            id: set,
+            set: Some(VariantSet {
+                props: vec![VariantProp {
+                    name: "Size".into(),
+                    values: vec!["Small".into(), "Large".into()],
+                }],
+            }),
+        },
+        create(small, (set, 0), frame(80.0, 30.0), (10.0, 10.0), "Small"),
+        create(small_label, (small, 0), text("Label"), (8.0, 6.0), "Label"),
+        create(large, (set, 1), frame(120.0, 40.0), (10.0, 60.0), "Large"),
+        create(
+            large_label,
+            (large, 0),
+            text("Label"),
+            (12.0, 10.0),
+            "Label",
+        ),
+    ]))
+    .unwrap();
+    for (v, values) in [(small, "Small"), (large, "Large")] {
+        doc.apply(&Transaction(vec![
+            Operation::SetComponent {
+                id: v,
+                component: true,
+            },
+            Operation::SetVariant {
+                id: v,
+                values: vec![values.into()],
+            },
+        ]))
+        .unwrap();
+    }
+    let (tx, _) = variant::define(
+        &doc,
+        &mut ids,
+        set,
+        "Label",
+        PropKind::Text,
+        vec![small_label, large_label],
+    )
+    .expect("a property");
+    doc.apply(&tx).unwrap();
+
+    let [inst, inst_label] = [(); 2].map(|_| ids.mint());
+    doc.apply(&Transaction(vec![
+        create(inst, (root, 1), frame(120.0, 40.0), (0.0, 200.0), "Large"),
+        create(inst_label, (inst, 0), text("Label"), (12.0, 10.0), "Label"),
+        Operation::SetLink {
+            id: inst,
+            link: Some(large),
+        },
+        Operation::SetLink {
+            id: inst_label,
+            link: Some(large_label),
+        },
+    ]))
+    .unwrap();
+    let p = &variant::instance_properties(&doc, inst)[0];
+    let ops = variant::set_property(&doc, &[inst], p, &PropValue::Text("Go".into()));
+    doc.apply(&Transaction(ops)).unwrap();
+    (doc, inst)
+}
+
+/// A set is one component: its variant property a string union defaulting to the
+/// default variant's value, each other variant's tree behind its condition and
+/// the default's last; the use names the variant it shows.
+/// flip: `vue::keep_uses_apart` doing nothing → fails at "a use's class is none
+/// of the used file's".
+#[test]
+fn a_set_is_one_component_choosing_its_variant_by_a_union_prop() {
+    let (doc, inst) = button_set();
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &[inst]);
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+
+    let button = file(&out, "components/Button.tsx");
+    assert!(
+        button.contains("  size?: \"Small\" | \"Large\";\n  label?: string;"),
+        "{button}"
+    );
+    assert!(
+        button.contains("function Button({ className, size = \"Small\", label = \"Label\" }"),
+        "{button}"
+    );
+    let large = button
+        .find("  if (size === \"Large\") {\n    return (\n      <div className={`${styles.large}")
+        .expect(&button);
+    let small = button
+        .find("  return (\n    <div className={`${styles.small}")
+        .expect(&button);
+    assert!(
+        large < small,
+        "the default's tree is the fallback: {button}"
+    );
+    assert_eq!(button.matches(">{label}</p>").count(), 2, "{button}");
+    let css = file(&out, "components/Button.module.css");
+    assert!(
+        css.contains(".small {") && css.contains(".large {"),
+        "{css}"
+    );
+
+    let app = file(&out, "App.tsx");
+    assert!(
+        app.contains("<Button className={styles.large} size=\"Large\" label=\"Go\" />"),
+        "{app}"
+    );
+
+    let out = vue_of(&doc, &res, &[inst]);
+    let button = file(&out, "components/Button.vue");
+    assert!(
+        button.contains("<div class=\"large\" v-if=\"size === 'Large'\">"),
+        "{button}"
+    );
+    assert!(button.contains("<div class=\"small\" v-else>"), "{button}");
+    assert!(button.contains("    size: \"Small\",\n"), "{button}");
+    // `large` is a class of the Large tree, and a use's class lands on whichever
+    // tree is drawn, where Button's own `.large` rule would reach it.
+    let app = file(&out, "App.vue");
+    assert!(
+        app.contains("<Button class=\"large-2\" size=\"Large\" label=\"Go\" />"),
+        "a use's class is none of the used file's: {app}"
+    );
+}

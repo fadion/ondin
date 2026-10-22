@@ -189,13 +189,38 @@ mod tests {
         assert_eq!(readout(VISIBLE_AT_ZOOM), 800);
     }
 
-    /// A cell is at least 8 device pixels across once the grid appears.
+    /// At the threshold the drawn lattice steps one world unit, which the camera
+    /// makes [`VISIBLE_AT_ZOOM`] device pixels at every display scale.
+    ///
+    /// flip: stepping the vertical loop by two units in `draw_pixel_grid` → fails at
+    /// "a cell is one world unit".
     #[test]
-    fn a_cell_is_wide_enough_to_read_at_the_threshold() {
-        let device_px_per_cell = VISIBLE_AT_ZOOM;
-        assert!(device_px_per_cell >= 8.0);
-        // At 150% display scaling it is still over five points.
-        assert!(device_px_per_cell / 1.5 >= 5.0);
+    fn a_cell_is_one_world_unit_and_wide_enough_to_read_at_the_threshold() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.show_grid = true;
+        app.show_rulers = false;
+        app.session.camera.zoom = VISIBLE_AT_ZOOM;
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
+        for ppp in [1.0f32, 1.25, 1.5, 2.0] {
+            let mut xs: Vec<f32> = grid_lines(&app, &ctx, rect, ppp)
+                .iter()
+                .filter(|p| (p[0].x - p[1].x).abs() < 0.01)
+                .map(|p| p[0].x)
+                .collect();
+            xs.sort_by(f32::total_cmp);
+            assert!(
+                xs.len() > 8,
+                "fixture: a lattice at {ppp}, got {}",
+                xs.len()
+            );
+            for gap in xs.windows(2).map(|w| (w[1] - w[0]) * ppp) {
+                assert!(
+                    (gap - VISIBLE_AT_ZOOM as f32).abs() < 1e-3,
+                    "a cell is one world unit: {gap} device px at {ppp}"
+                );
+            }
+        }
     }
 
     /// `rulers::snap_across_axis` covers whole pixels at one device pixel (wants a

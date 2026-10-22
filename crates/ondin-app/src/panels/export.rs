@@ -1,23 +1,14 @@
 //! The inspector's **Export** panel (§7, §9.4) — the list of files a layer
 //! produces, and the button that produces them.
 //!
-//! **The panel is the feature, and since 2026-08-22 it is the only door.**
-//! *Export as…* on the context menu asked every question every time and forgot the
-//! answers, which made producing the same asset set twice a chore rather than a
-//! keystroke; here the answers live on the layer, are saved with the document and
-//! are read by the CLI. The two ran side by side for two days as "repeatable" and
-//! "this once, somewhere else" — then the second was removed, this panel's own
-//! button having made it the slower route to the same file (§15 D264).
+//! The panel is the only door to exporting: the answers live on the layer, are saved
+//! with the document and are read by the CLI. So a bug in `run_export`, in `plan`,
+//! or in seeding a first spec has no fallback path a user can reach.
 //!
-//! ⚠️ **So there is nothing behind this.** A layer with no export spec shows a
-//! collapsed card and a `+`, which is one step more than the removed row asked for,
-//! and that cost was taken knowingly — but it means a bug in `run_export`, in
-//! `plan`, or in seeding a first spec has no fallback path a user can reach.
-//!
-//! **Nothing here interprets a spec.** `ondin_export::plan` turns the saved
-//! settings into filenames, pixel sizes and bytes; this module is the controls
-//! that edit them and the dialogs that choose where they land. That division is
-//! what lets `ondin export --all` produce the same files with no window.
+//! Nothing here interprets a spec. `ondin_export::plan` turns the saved settings
+//! into filenames, pixel sizes and bytes; this module is the controls that edit them
+//! and the dialogs that choose where they land. That division is what lets
+//! `ondin export --all` produce the same files with no window.
 
 use crate::app::OndinApp;
 use crate::theme::{self, icon};
@@ -27,79 +18,43 @@ use ondin_core::{
 };
 use ondin_export::{PlanOptions, PlannedFile};
 
-/// The row is the design's `74px 1fr 28px 28px` at a 7pt pitch, in a 256pt card.
+/// The scale cell of the design's `74px 1fr 28px 28px` row (7pt pitch, 256pt card).
 ///
-/// **74 is the design's and it clears the measurement**, which the 62 this started
-/// at did not: a `ComboBox` spends `icon_spacing + icon_width + 2·button_padding.x`
-/// = **35pt** beside its text and lays that text out in `TextStyle::Button` rather
-/// than in the 11.5 the row uses, so `0.75x` wants 67 and `1024h` wants 71. A combo
-/// asked for less does not clip — egui takes `max(content, width − padding)`, so it
-/// comes out **wider than asked** and squeezes whatever is beside it, which is why
-/// `the_export_row_fits_the_card` is a test and not a comment.
-///
-/// The format cell is `1fr`, so it is computed from what is left rather than
-/// declared here.
+/// A `ComboBox` spends 35pt beside its text and lays it out in `TextStyle::Button`,
+/// so `0.75x` wants 67 and `1024h` wants 71. A combo asked for less comes out wider
+/// than asked and squeezes its neighbours (`the_export_row_fits_the_card`). The
+/// format cell is `1fr`, computed from what is left.
 const SCALE_W: f32 = 74.0;
 /// The height of everything on the row, and the side of its two square buttons.
 const CELL: f32 = 28.0;
-/// Between two controls side by side — the design's card gap, and the one the
-/// settings popover matches across, exactly as the type popup matches the card it
-/// hangs from (`typography::COL_GAP`).
+/// Between two controls side by side — the design's card gap, which the settings
+/// popover matches (`typography::COL_GAP`).
 const PITCH: f32 = 7.0;
-/// An instance's row's trailing slot (§15 D981, 4D — *"always reserved, 14px"*),
-/// `component::item_slot`'s width.
+/// An instance's row's trailing slot, `component::item_slot`'s width (§15 D981).
 const SLOT_W: f32 = 14.0;
 /// Between a row and the size line under it.
 ///
-/// **3, which is tighter than anything else in the card**, and that is the point:
-/// the line is an annotation on the row above it rather than a row of its own, so
-/// it has to sit closer to what it describes than that pair sits to the next one.
-/// It came down 8 → 5 → 3 by being looked at, and the last step was the one that
-/// settled which of the pair should move: [`ROW_UNIT_GAP`] reads as the ordinary
-/// distance between two fields, so the caption is what gets compressed against its
-/// row rather than the rows being pushed apart to make room for it.
+/// Tighter than anything else in the card: the line annotates the row above it, so
+/// it sits closer to that row than the pair sits to the next ([`ROW_UNIT_GAP`]).
 const ROW_LINE_GAP: f32 = 3.0;
 /// Between one export and the next.
 ///
-/// **6, which is *below* the card's own row gap** — so the rows are laid out in a
-/// region of their own with the pitch taken to zero, because a scope can add to a
-/// spacing and not subtract from one.
-///
-/// This started at `CARD_ROW_GAP * 2` — `paint_unit`'s doubling, and the 18 two
-/// stroke entries sit at — and came down twice on the machine, to 15 and then to
-/// here. The doubling was the wrong rule to borrow rather than the wrong number: it
-/// is sized for an entry of two *controls*, where an export is a control and the
-/// caption belonging to it, so what has to be legible is not "these are two
-/// entries" but "this caption goes with the row above it". That reading is carried
-/// by [`ROW_LINE_GAP`] being the tighter of the two, which is a *relationship*
-/// rather than a distance — and it survives at 3 against 6.
-///
-/// **This is the number that stopped moving**, which is why the last adjustment
-/// was made to the other one: at 6 two export rows sit the ordinary field-to-field
-/// distance apart, the same as any two stacked controls elsewhere, so the list
-/// reads as a list and the caption is the thing that has to earn its place inside
-/// it.
-///
-/// **It is the gap between two *units*, so a row with no caption does not use
-/// it** — it spends [`ROW_LINE_GAP`] here as well and comes to the card's own
-/// pitch. That is the multi-selection case, where there is no single size to
-/// report and every row is one line tall; six between two bare controls reads as
-/// crowding rather than as grouping, because there is nothing left to group. See
-/// `export_row`'s tail.
+/// Below the card's own row gap, so the rows are laid out in a region of their own
+/// with the pitch taken to zero (a scope can add to a spacing, not subtract). It is
+/// the gap between two units, so a row with no caption spends [`ROW_LINE_GAP`]
+/// instead, coming to the card's pitch: that is the multi-selection case, where six
+/// between two bare controls would read as crowding. See `export_row`'s tail.
 const ROW_UNIT_GAP: f32 = 6.0;
-/// The grouping the pair above is *for*: an export's two halves have to sit closer
-/// to each other than one export sits to the next, or the size line reads as
-/// belonging to the row below it. Checked at compile time, because it is a
-/// relationship between two constants and there is nothing to run.
+/// An export's two halves sit closer than one export sits to the next, or the size
+/// line reads as belonging to the row below it.
 const _: () = assert!(ROW_LINE_GAP < ROW_UNIT_GAP);
 /// The size line's ink — the design's 34%, quieter than `text::FAINT` (38%),
 /// because it annotates a control rather than labelling one.
 const SIZE_INK: egui::Color32 = theme::color::text_a(87);
 /// The collapse key the Preview section shares with the panel list.
 ///
-/// A `&'static str` because `collapsed_panels` is keyed by title, and the key is
-/// *not* a panel title any more — the section lives inside the Export card. Named
-/// so the two places that read it cannot drift apart on a spelling.
+/// `collapsed_panels` is keyed by title, but the section now lives inside the Export
+/// card, so the key is named for the two places that read it.
 const PREVIEW: &str = "Preview";
 /// The clear space round the previewed image inside its checkerboard.
 const PREVIEW_INSET: f32 = 10.0;
@@ -107,30 +62,18 @@ const PREVIEW_INSET: f32 = 10.0;
 // --- the settings popover ---------------------------------------------------
 //
 // The shared popover language: 272 wide, 11 of padding, 26pt controls, 9.5pt
-// small-caps section labels. The same numbers `typography.rs` and
-// `stroke_menu_popup` carry, which is three copies of one card — worth
-// promoting into `ui.rs`, and not inside a change that is also moving the
-// panel behind it.
+// small-caps section labels, as in `typography.rs` and `stroke_menu_popup`.
 
 /// The card's width, shared with every other popover in the inspector.
 const POP_W: f32 = crate::app::POPOVER_W;
 const POP_PAD: f32 = 11.0;
-/// The room inside the padding **and the border** — `POP_W` is the width the card
+/// The room inside the padding and the border — `POP_W` is the width the card
 /// paints, not the room in it (§15 D307).
-///
-/// This one was the eighth site of eight and was found *after* the other seven
-/// were converted, by reading the sweep rather than by anything failing: the
-/// assertion that pins a card's painted width drives `menu_frame` directly, so it
-/// cannot see a call site that computes its own inner width. Two popovers hang off
-/// the export panel and only the one beside this was threaded.
 const POP_INNER: f32 = ui::menu_inner_w(POP_W, POP_PAD);
-/// A control inside the popover — **26, against the card's 28**.
-///
-/// The same bargain `typography::CELL` makes and for the same reason: a card of
-/// three rows against a popover of four sections, where the compression is what
-/// keeps the second from towering over the first.
+/// A control inside the popover — 26, against the card's 28, so a popover of four
+/// sections does not tower over a card of three rows (as `typography::CELL`).
 const POP_CELL: f32 = 26.0;
-/// Between one labelled section and the next — the shared one (§15 D275).
+/// Between one labelled section and the next — the shared one.
 const SECTION_GAP: f32 = ui::POPOVER_SECTION_GAP;
 /// Between a section's label and its control — the design's, for both popovers.
 const LABEL_GAP: f32 = 5.0;
@@ -139,12 +82,9 @@ const CLOSE_W: f32 = 18.0;
 
 /// One labelled block of the popover: a small-caps eyebrow, then its control.
 ///
-/// **A `scope`, so the card's two vertical gaps are two numbers rather than one**
-/// — `typography::section`'s reasoning verbatim, and the reason it is copied
-/// rather than shared is that its constants are private to that module. Left to a
-/// single spacing the label floats equidistant between its own control and the
-/// section above, which is the reading that makes four sections look like eight
-/// loose rows.
+/// A `scope`, so the card's two vertical gaps are two numbers: with a single
+/// spacing the label floats equidistant between its own control and the section
+/// above. Copied from `typography::section`, whose constants are private.
 fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = LABEL_GAP;
@@ -189,10 +129,9 @@ impl NamePart {
 
 /// What a cached preview was built from.
 ///
-/// **Three terms, and the revision is the one that is easy to leave out.** A
-/// preview keyed only by layer and spec survives every edit to the artwork it is a
-/// picture of, which is worse than having no preview at all — it is a *confident*
-/// picture of something that is no longer there.
+/// The revision is the term that is easy to leave out: a preview keyed only by layer
+/// and spec survives every edit to the artwork, a confident picture of something no
+/// longer there.
 #[derive(PartialEq)]
 pub(crate) struct PreviewKey {
     node: NodeId,
@@ -212,19 +151,12 @@ pub(crate) struct ExportPreview {
 }
 
 /// What an SVG export could not say exactly, as a clause to hang off a message —
-/// `None` when the file is the document (§15 D780, `[S8.1-L7-05]`).
+/// `None` when the file is the document (§15 D780).
 ///
-/// **Deliberately the same two-clause shape as the paste message** on the reader's
-/// side (`canvas.rs`'s *"Pasted SVG — 3 layers, skipped foreignObject"*), because
-/// the two ends of a round trip are read by the same person and a second vocabulary
-/// for the same idea is a second thing to learn. Sorted for the same reason it is
-/// sorted there: the order features are *met* is an accident of the document.
-///
-/// 🚨 **Two clauses and not one**, which is `Import`'s own argument carried over:
-/// *approximated* means the drawing differs and *round-trip* means the drawing is
-/// right but re-opening the file gives a different document. A user told their
-/// image fill was "approximated", over an export that looks perfect in a browser,
-/// goes looking for a bug that is not there.
+/// The same two-clause shape as the SVG paste message in `canvas.rs`, sorted because
+/// the order features are met is an accident of the document. Two clauses, not one:
+/// *approximated* means the drawing differs, *round-trip* means the drawing is right
+/// but re-opening the file gives a different document.
 pub(crate) fn fidelity_clauses(out: &ondin_export::svg::Export) -> Option<String> {
     let mut parts = Vec::new();
     let mut say = |label: &str, list: &[String]| {
@@ -241,9 +173,7 @@ pub(crate) fn fidelity_clauses(out: &ondin_export::svg::Export) -> Option<String
 
 /// `84 KB`, `1.2 MB` — what a file size is worth saying to a designer.
 ///
-/// **1024, not 1000.** Every file browser this number will be compared against on
-/// Windows and macOS uses binary units under those labels, and a preview that
-/// disagreed with Explorer by 2.4% would read as the preview being wrong.
+/// 1024, not 1000: file browsers use binary units under these labels.
 fn human_bytes(n: usize) -> String {
     const KB: usize = 1024;
     match n {
@@ -256,12 +186,9 @@ fn human_bytes(n: usize) -> String {
 impl OndinApp {
     /// The layers an export acts on: the selection, in document order.
     ///
-    /// **`build::in_document_order`, for both of its halves** — a selection
-    /// holding a group and something inside it would plan that child twice, and a
-    /// selection picked front-to-back would come out restacked in any file that
-    /// held more than one of them (§15 D267). The same filter the two *Copy as*
-    /// rows apply, and for the same reasons — it was *Export as…*'s too, until that
-    /// row was removed (§15 D264).
+    /// `build::in_document_order` drops a child selected with its group (it would be
+    /// planned twice) and restores document order (§15 D267). The two *Copy as* rows
+    /// apply the same filter.
     pub(crate) fn export_subjects(&self) -> Vec<NodeId> {
         ondin_core::build::in_document_order(&self.session.doc, self.session.selection.ids())
     }
@@ -269,19 +196,16 @@ impl OndinApp {
     /// Whether the selection has moved since the Export panel last read it — the
     /// edge `sync_paint_collapse` re-asserts the resting collapse state on.
     ///
-    /// Its own entry in `OndinApp::synced_selection`, for the reason given there:
-    /// consuming one edge from two callers loses it for one of them.
+    /// Its own entry in `OndinApp::synced_selection`: one edge consumed by two
+    /// callers is lost to one of them.
     fn export_subject_changed(&mut self) -> bool {
         self.subject_changed("Export")
     }
 
     /// The list every subject agrees on, or `None` when they disagree.
     ///
-    /// **The committed document, not `display_node`.** Every other panel reads
-    /// through the preview so its controls follow a gesture in flight; this one
-    /// cannot, because `Operation::SetExports` is a no-op in `RenderOverrides` —
-    /// there is nothing about an export setting to preview. Reading the committed
-    /// node is therefore not a shortcut but the only honest source.
+    /// Reads the committed document, not `display_node`: `Operation::SetExports` is a
+    /// no-op in `RenderOverrides`, so there is nothing to preview.
     fn shared_exports(&self, subjects: &[NodeId]) -> Option<Vec<ExportSpec>> {
         self.shared_exports_keyed(subjects)
             .map(|l| ondin_core::item::values(&l))
@@ -302,7 +226,7 @@ impl OndinApp {
     /// with its own item ids (`ondin_core::item::retarget`, §15 D980), as one step.
     ///
     /// `pub(super)` for `inspector::paint_write_tests`' table of the five list
-    /// writers (`[R2-L6-03]`), as are [`Self::exports_tx`] and
+    /// writers, as are [`Self::exports_tx`] and
     /// [`Self::append_exports`].
     pub(super) fn retarget_exports(
         &mut self,
@@ -326,22 +250,17 @@ impl OndinApp {
 
     /// Write one list to every subject, as a single undoable step.
     ///
-    /// One transaction rather than one per layer: adding a 2× PNG to thirty icons
-    /// is one act and has to undo as one.
+    /// One transaction rather than one per layer, so it undoes as one.
     ///
-    /// **A wholesale replacement** — the mixed row's override, a paste, a preset —
-    /// so each subject keeps its own item ids by position
+    /// A wholesale replacement (the mixed row's override, a paste, a preset): each
+    /// subject keeps its own item ids by position
     /// (`ondin_core::item::rekey_by_position`); a row edit of a shared list goes
     /// through [`Self::retarget_exports`] instead.
     fn write_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
         let tx = self.exports_tx(subjects, specs);
         if !tx.0.is_empty() {
-            // Through the panel committer like every other inspector control, and
-            // it costs nothing to be right about: `edit_note` returns early for a
-            // transaction whose `changes_ink` is false, so an export edit does not
-            // arm the chrome hide — which is what it should not do, since nothing
-            // it changes is drawn. The exception is in the mechanism rather than in
-            // a second committer.
+            // `edit_note` returns early for a transaction whose `changes_ink` is
+            // false, so an export edit does not arm the chrome hide.
             self.commit_edit(tx);
         }
     }
@@ -371,18 +290,14 @@ impl OndinApp {
 
     /// Append `specs` to whatever each subject already has.
     ///
-    /// **The `+`'s edit over a selection that *agrees***, where a disagreeing one
-    /// goes through [`Self::write_exports`] instead: appending there is
-    /// well-defined and still leaves the layers disagreeing, which is a state the
-    /// card cannot be edited out of (`export_mixed_row`). Each subject is read
-    /// separately all the same, because "whatever each already has" is the honest
-    /// spelling of an append and costs nothing when they match.
+    /// The `+`'s edit over a selection that agrees; a disagreeing one goes through
+    /// [`Self::write_exports`], since appending there would leave the layers
+    /// disagreeing, a state the card cannot be edited out of (`export_mixed_row`).
     pub(super) fn append_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
         let session = &mut self.session;
-        // An item added to an existing list is minted (§15 D980) — **once, for
-        // every subject** (§15 D1003 (6), `[X1-L1-01]`): minted per subject, a main
-        // and its instance given an export together got two items, the instance's
-        // a local addition its main's later edits skipped.
+        // Items are minted once for every subject (§15 D980, D1003): minted per
+        // subject, a main and its instance would get two items, and the instance's
+        // would be a local addition its main's later edits skip.
         let added: Vec<Keyed<ExportSpec>> = specs
             .iter()
             .map(|s| Keyed::new(session.ids.mint_item(), s.clone()))
@@ -400,11 +315,8 @@ impl OndinApp {
             })
             .collect();
         if !ops.is_empty() {
-            // Through the panel committer, like `write_exports` beside it and every
-            // other inspector control — the two halves of one button must not
-            // disagree about the seam they commit on. It is the same commit either
-            // way today: `note_edit` returns early for a transaction whose
-            // `changes_ink` is false, and nothing a `SetExports` carries is drawn.
+            // Through the panel committer, like `write_exports`: the two halves of
+            // one button must commit on the same seam.
             self.commit_edit(Transaction(ops));
         }
     }
@@ -421,12 +333,8 @@ impl OndinApp {
             self.export_menu = false;
         }
         let shared = self.shared_exports_keyed(&subjects);
-        // **Closed when the layer exports nothing, exactly as Fill and Stroke
-        // are.** A card whose whole body is the words "No exports" is a row of
-        // chrome saying nothing, and every layer in a fresh document is in that
-        // state — so the resting inspector would grow a dead card per selection.
-        // The `+` in the header opens it, which is why the header keeps its action
-        // while collapsed.
+        // Closed when the layer exports nothing, as Fill and Stroke are; the `+` in
+        // the header opens it, so the header keeps its action while collapsed.
         let fresh = self.export_subject_changed();
         // An instance's ghost rows are something to show (§15 D981).
         let ghosts = match subjects.as_slice() {
@@ -438,10 +346,8 @@ impl OndinApp {
             shared.as_ref().is_some_and(Vec::is_empty) && !ghosts,
             fresh,
         );
-        // **Three tooltips, because the `+` does two different things** — and the
-        // one it does over a disagreeing selection is the destructive one, so it
-        // has to say so before the click rather than in the card afterwards
-        // (`export_mixed_row`).
+        // Three tooltips: over a disagreeing selection the `+` is destructive, and
+        // says so before the click (`export_mixed_row`).
         let mixed = shared.is_none();
         let action = Some(ui::HeadAction::new(
             icon::PLUS,
@@ -451,21 +357,18 @@ impl OndinApp {
                 (_, true) => "Replace every selected layer's exports with one",
             },
         ));
-        // Read before the body, because the body may edit the list under it and
-        // the button below has to describe what is *there* rather than what was.
+        // Read before the body, which may edit the list under it.
         let add = self.panel(ui, "Export", action, |app, ui| {
             let Some(specs) = shared.clone() else {
                 app.export_mixed_row(ui);
                 app.export_buttons(ui, &subjects);
                 return;
             };
-            // One subject's box sizes every row; over a multi-selection there is
-            // no single answer, so the size cell says so rather than picking a
-            // member's arbitrarily (`export_row`).
+            // One subject's box sizes every row; over a multi-selection the size
+            // cell says there is no single answer (`export_row`).
             let sizing = (subjects.len() == 1).then(|| subjects[0]);
             // One instance's list read against its source's (§15 D981): each row's
-            // trailing slot, and the ghost rows of the exports it removed — which
-            // an instance that removed them all still has.
+            // trailing slot, and the ghost rows of the exports it removed.
             let source = sizing.and_then(|id| app.source_list(id, |n| n.exports()));
             if specs.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
@@ -482,12 +385,9 @@ impl OndinApp {
                 .map(|s| ondin_core::reset::item_states(s, &specs));
             let mut reset = None;
             let mut restore = false;
-            // **The rows are their own zero-spacing region**, because the gap
-            // between two exports is *smaller* than the card's own row gap and a
-            // scope cannot subtract: the card places its children 9 apart, so 6 can
-            // only be had by taking the pitch to zero here and allocating it. The
-            // trailing leak `paint_unit` warns about is zero for the same reason,
-            // which is what leaves the button below at the card's ordinary 9.
+            // A zero-spacing region: the gap between exports is smaller than the
+            // card's own row gap and a scope cannot subtract, so it is allocated.
+            // That also leaves no trailing leak (`paint_unit`) above the button.
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, spec) in specs.iter().enumerate() {
@@ -516,14 +416,10 @@ impl OndinApp {
                     }
                 }
             });
-            // **Written whole, not retargeted**: a restored export is the main's by
-            // its id or it is a local addition that looks like one, and the source
-            // exists for one subject only, so there is nothing to retarget across
-            // (`item::retarget` minted for an item the anchor lacked until §15
-            // D1003 (6) — the Effects card's restore went that way first).
-            // The rows' own edits stand down that frame, so nothing writes twice. A
-            // ghost row's restore is the whole list back as the main has it (§15
-            // D994); a row's ↺ is that item.
+            // Written whole, not retargeted: the source exists for one subject only,
+            // so there is nothing to retarget across. The rows' own edits stand down
+            // that frame. A ghost row's restore is the whole list back as the main
+            // has it (§15 D994); a row's ↺ is that item.
             let list = match (restore, reset, source.as_deref()) {
                 (true, _, Some(src)) => Some(src.to_vec()),
                 (false, Some(item), Some(src)) => {
@@ -537,10 +433,8 @@ impl OndinApp {
             }
             if let Some(i) = removed {
                 next.remove(i);
-                // The open block and the buffer are keyed by index, so both are
-                // dropped rather than left pointing at whatever slid up into the
-                // slot — the housekeeping `forget_stroke_chrome` does for the
-                // stroke rows, in the one place this list can shrink.
+                // The open block and the buffers are keyed by index; drop them rather
+                // than point at whatever slid up (cf. `forget_stroke_chrome`).
                 app.export_row_open = None;
                 app.export_prefix_text = None;
                 app.export_suffix_text = None;
@@ -550,68 +444,48 @@ impl OndinApp {
                 app.retarget_exports(&subjects, &specs, &next);
             }
             app.export_buttons(ui, &subjects);
-            // **Inside the card, not a card of its own.** A preview belongs to the
-            // export set it is a preview *of*, and a second floating card under it
-            // read as a second feature; its own caret is what still lets the cost
-            // be turned off, which is the only thing the separate card was buying.
+            // Inside the card, not a card of its own; its caret still turns the cost off.
             app.inspector_export_preview(ui, &subjects);
         });
         if add {
             let seed = self.next_export_spec(&subjects);
             match mixed {
-                // **Over a disagreement the `+` overrides rather than appends**, so
-                // one click leaves a selection that agrees and a list to edit.
-                // Appending to each layer's own list was the careful answer and it
-                // is a dead end: the layers still disagree, so the card still shows
-                // the same sentence and there is no way out of the state from
-                // inside it (`export_mixed_row`).
+                // Over a disagreement the `+` overrides rather than appends: the
+                // layers would still disagree, with no way out (`export_mixed_row`).
                 true => self.write_exports(&subjects, &[seed]),
                 false => self.append_exports(&subjects, &[seed]),
             }
-            // The panel may be shut — it is, on every layer that had no exports a
-            // moment ago — and a `+` that adds a row you cannot see is a button
-            // that does nothing. `inspector_fill`'s call, for its reason.
+            // The panel may be shut (it is, on a layer with no exports); a `+` that
+            // adds an unseen row does nothing.
             self.open_paint_panel("Export");
         }
     }
 
     /// The **Preview** section: what the first export actually comes out as.
     ///
-    /// **Rendered only while the section is open, and at most once per edit.** A
-    /// preview is a real render and a real encode — the only place in the panel
-    /// that costs anything — so doing it per frame is out of the question and doing
-    /// it per *change* is exactly affordable. `EditorSession::revision` is the
-    /// third term of the cache key beside the layer and the spec, because a
-    /// preview of a shape that has since been recoloured is worse than none.
+    /// Rendered only while the section is open, and at most once per edit: a preview
+    /// is a real render and encode. `EditorSession::revision` is the cache key's
+    /// third term beside the layer and the spec. Collapsed by default, which is also
+    /// the switch that turns the cost on.
     ///
-    /// **Collapsed by default**, which Figma's is too, and here it is also the
-    /// switch that turns the cost on.
-    ///
-    /// One layer only. Over a multi-selection there is no single subject to show,
-    /// and thirty thumbnails is a different panel.
+    /// One layer only; a multi-selection has no single subject to show.
     fn inspector_export_preview(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
         let [subject] = subjects else { return };
         let (subject, spec) = match self.shared_exports(subjects) {
-            // The row whose settings are open, else the first — so opening a row's
-            // block and turning its knobs previews *that* row.
+            // The row whose settings are open, else the first.
             Some(specs) if !specs.is_empty() => {
                 let i = self.export_row_open.unwrap_or(0).min(specs.len() - 1);
                 (*subject, specs[i].clone())
             }
             _ => return,
         };
-        // **Closing the section frees the texture.** A 4-megapixel preview is 16 MB
-        // of GPU memory held for a card nobody is looking at, and the section is
-        // rebuilt from scratch on the next edit anyway — so there is nothing to
-        // keep it for.
+        // Closing the section frees the texture.
         let open = !self.collapsed_panels.contains(PREVIEW);
         if !open {
             self.export_preview = None;
         }
-        // **A section inside the card, not a card of its own** — so the header is
-        // `section_head` rather than `panel`, drawn at the card's own left edge
-        // with no second ground behind it. The caret still does the one thing the
-        // separate card was for: opening it is what turns the render on.
+        // A section inside the card: `section_head` rather than `panel`, with no
+        // second ground behind it.
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = ROW_LINE_GAP;
             if ui::section_head(ui, "Preview", open, None, true).toggled {
@@ -635,16 +509,13 @@ impl OndinApp {
                 return;
             };
             if let Some(tex) = &preview.texture {
-                // Fit the width, never magnify: an 8px icon blown up to 256 is a
-                // picture of the resampler rather than of the export.
+                // Fit the width, never magnify.
                 let (w, h) = (preview.pixels.0 as f32, preview.pixels.1 as f32);
                 let avail = ui.available_width();
                 let scale = (avail / w).min(1.0);
                 let shown = egui::vec2(w * scale, h * scale);
-                // **On the checkerboard, inset from it** — the design's frame, and
-                // it is the only way a transparent export can be told from a white
-                // one. The ground spans the card so a narrow icon still reads as a
-                // picture on a surface rather than as a floating thumbnail.
+                // On the checkerboard, inset from it (the design's frame): the only
+                // way a transparent export differs from a white one.
                 let (ground, _) = ui.allocate_exact_size(
                     egui::vec2(avail, shown.y + PREVIEW_INSET * 2.0),
                     egui::Sense::empty(),
@@ -678,13 +549,11 @@ impl OndinApp {
         key: PreviewKey,
     ) -> Option<ExportPreview> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        // **No raster for an SVG, deliberately.** Rasterizing the markup to show it
-        // would be previewing something other than the file, and the one thing
-        // worth knowing about a vector export is a number.
+        // No raster for an SVG: rasterizing it would preview something other than
+        // the file.
         if !key.spec.format.is_raster() {
-            // **The reported form** (§15 D780): the card is what a user reads
-            // *before* exporting, which is the one moment a fidelity note can
-            // still change what they do.
+            // The reported form (§15 D780): the card is read before exporting, when
+            // a fidelity note can still change what the user does.
             let out = ondin_export::svg::svg_of_reported(doc, res, &[key.node]);
             let note = fidelity_clauses(&out);
             let bytes = out.svg.into_bytes();
@@ -702,56 +571,31 @@ impl OndinApp {
 
         let (size, clamped) = ondin_export::plan::raster_size(res, key.node, &key.spec);
         let (w, h) = size?;
-        // **The cap is on the preview, not on the export.** A 4× of a large frame
-        // is a perfectly reasonable file and an unreasonable thing to rebuild on
-        // every edit, so past this the section reports the size it *would* be and
-        // renders nothing. Stating the number beats a progress bar that never ends.
+        // The cap is on the preview, not the export: past it the section reports the
+        // size it would be and renders nothing.
         const MAX_PREVIEW_PX: u64 = 4_000_000;
-        // ⚠️ **Measured against the size the raster will *be*, not the size the
-        // plan reports.** `plan::raster_size` answers the framed size, and
-        // `raster_of` then pads it to a square *after* this guard has passed —
-        // so a 32768×120 layer with *Pad out to a square* on came through here at
-        // 3.9 M pixels, well under the cap, and asked for a 32768² buffer of 4 GB
-        // on the UI thread. The same raster is what a 4096×15 banner at 8× makes,
-        // which is an ordinary export set rather than a contrived one.
-        //
-        // **An area cap cannot see either of the raster path's failures on its
-        // own**, which is the shape worth remembering: they are a *per-side* and
-        // a *longest-side* limit, and any area admits any aspect ratio thin
-        // enough. Squaring the pair first is what turns the second one into an
-        // area question. The first is now `MAX_RASTER_SIDE`'s job — it used to be
-        // the value `vello_cpu` panics at, so this preview reached that too.
+        // Measured against the size the raster will be, not `plan::raster_size`'s:
+        // `raster_of` pads to a square after this guard, so a 32768×120 layer with
+        // *Pad out to a square* would pass the area cap and ask for a 4 GB buffer.
         let (pw, ph) = match key.spec.pad_square {
             true => (w.max(h), w.max(h)),
             false => (w, h),
         };
-        //
-        // ⚠️ **And a per-side test beside the area one, because a texture has
-        // both.** `ctx.load_texture` panics outright past
-        // `Context::max_texture_side` — *"Texture "export-preview" has size
-        // 32768x120, but the maximum texture side is 2048"* — and a 32768×120
-        // raster is 3.9 M pixels, under the cap, so the area test waves it
-        // through. That is the same shape as the pad above and was found the same
-        // way: by writing the pad's control and watching it crash. The number is
-        // the **device's**, read off the context rather than written here, since
-        // it is whatever wgpu reports on the machine the app is running on.
+        // A per-side test beside the area one: `ctx.load_texture` panics past
+        // `max_texture_side`, and a thin raster is under any area cap. The limit is
+        // the device's, read off the context.
         let side = ctx.input(|i| i.max_texture_side) as u64;
         if pw as u64 * ph as u64 > MAX_PREVIEW_PX || pw as u64 > side || ph as u64 > side {
             return Some(ExportPreview {
                 key,
                 texture: None,
-                // The padded pair, because that is the file the row is about and
-                // reporting 32768×120 for a 32768² export would be describing a
-                // step the export does not stop at.
+                // The padded pair: that is the file the row is about.
                 pixels: (pw, ph),
                 summary: format!("{pw}×{ph} — too large to preview here"),
             });
         }
 
-        // **Rasterized once**, then both encoded and drawn. Going through
-        // `plan::render` for the byte count and `raster_of` for the texture would
-        // render the same thing twice per edit, which is the one cost this section
-        // has to keep down.
+        // Rasterized once, then both encoded and drawn, not rendered twice per edit.
         let opts = ondin_export::plan::raster_opts(doc, res, key.node, &key.spec);
         let raster = ondin_export::png::raster_of(doc, res, &[key.node], &opts)?;
         let bytes = match key.spec.format {
@@ -786,28 +630,13 @@ impl OndinApp {
 
     /// What the `+` adds.
     ///
-    /// **1×, 2×, 3×, then 4× for ever after** — the icon workflow, where the same
-    /// drawing is wanted at several densities and the second and third clicks
-    /// should not both have to be corrected. The cap is not a fallback: past 3×
-    /// the list is no longer a density ladder, so climbing further would be the
-    /// panel inventing sizes rather than following one.
+    /// 1×, 2×, 3×, then 4× for ever after (the icon workflow); chosen by counting
+    /// the rows, not by the first multiplier not yet used.
     ///
-    /// **The first row is 1× no matter what**, which is the fix this rule was
-    /// re-cut around. It used to pick the first multiplier *not already spoken
-    /// for*, which is a different question and answers it wrong at both ends: the
-    /// first click on a fresh layer took 1× only because nothing had claimed it
-    /// yet, and a list already holding a 1× and a 2× — however it got there — was
-    /// handed a 3× as its *second* row. Counting the rows is what the design
-    /// actually says, so that is what is counted.
-    ///
-    /// The **format** is inherited from the last row, because a list that is all
-    /// JPEG is a decision about the whole list rather than about one entry — and
-    /// PNG whenever there is nothing to inherit from, including a selection that
-    /// disagrees.
-    ///
-    /// A repeat is not a hazard on disk: `plan::de_collide` gives a second file of
-    /// the same name its ` (2)`, so nothing is overwritten if the ladder is
-    /// climbed past its cap or a row is edited back onto another.
+    /// The format is inherited from the last row, since a list that is all JPEG is a
+    /// decision about the whole list; PNG when there is nothing to inherit,
+    /// including a selection that disagrees. A repeated name is safe on disk:
+    /// `plan::de_collide` gives the second file its ` (2)`.
     fn next_export_spec(&self, subjects: &[NodeId]) -> ExportSpec {
         let existing = self.shared_exports(subjects).unwrap_or_default();
         let format = existing.last().map_or(ExportFormat::Png, |s| s.format);
@@ -816,21 +645,9 @@ impl OndinApp {
 
     /// What a selection whose layers export differently shows instead of rows.
     ///
-    /// **It offers no list to edit, and one line saying what the `+` will do**,
-    /// which is the same answer the Fill panel gives — the difference being that
-    /// here the header's `+` still works.
-    ///
-    /// **"Add to override", because that is what it now does**: the `+` replaces
-    /// every selected layer's list with the one export it adds, so the state
-    /// resolves in one click and the rows appear. It used to *append* to each
-    /// layer's own list, which is the answer that never leaves this state — thirty
-    /// layers that disagreed still disagree afterwards, and the card says the same
-    /// sentence back at you with one more file per layer to show for it. The
-    /// destruction that reading was avoiding is real and is what Undo is for; the
-    /// dead end was not.
-    ///
-    /// Two lines came down to one for the same reason: with the verb in the
-    /// sentence — *add to override* — the second line had nothing left to say.
+    /// It offers no list to edit, and one line saying what the `+` will do: it
+    /// replaces every selected layer's list with the one export it adds, so the
+    /// state resolves in one click. Appending would never leave this state.
     fn export_mixed_row(&mut self, ui: &mut egui::Ui) {
         ui.label(
             egui::RichText::new("Mixed exports. Add to override.")
@@ -866,25 +683,17 @@ impl OndinApp {
         ));
         let open = self.export_row_open == Some(index);
         let mut head = None;
-        // **The row and its size line are one unit, and one unit sits further from
-        // the next than its two halves sit from each other** — `paint_unit`'s
-        // arrangement, so an export reads as one entry and two exports read as two.
-        //
-        // **`item_spacing` is zero and both gaps are allocated**, which is that
-        // function's hard-won detail rather than tidiness (§15 D195): egui advances
-        // its cursor past a widget by the spacing in effect *when that widget is
-        // placed*, so a spacing set for the two lines is also spent after the last
-        // of them — which is why the unit boundary measured 15 rather than the 9 it
-        // was written as.
+        // The row and its size line are one unit, further from the next unit than
+        // its halves are from each other (`paint_unit`). `item_spacing` is zero and
+        // both gaps are allocated: egui spends the spacing in effect when a widget is
+        // placed after it, so a spacing set for the two lines is also spent after the
+        // last of them (§15 D195).
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = PITCH;
-                // A `ComboBox` sizes its own height from `interact_size.y` plus
-                // `button_padding`, so without this it comes out 26 against the 28px
-                // controls beside it and sits a pixel off their baseline — the same
-                // correction the stroke row's alignment combo carries, and for the same
-                // reason: a combo strokes its border *inside* the rect it fills.
+                // Without this a `ComboBox` comes out 26 against the 28px controls
+                // beside it, as in the stroke row's alignment combo.
                 ui.scope(|ui| {
                     ui.spacing_mut().interact_size.y = CELL;
                     ui.spacing_mut().button_padding.y = 0.0;
@@ -903,23 +712,17 @@ impl OndinApp {
                                 let s = ExportScale::Times(n);
                                 ui.selectable_value(&mut scale, s, s.label());
                             }
-                            // Figma's two fixed sizes, under a rule because they answer
-                            // a different question: a multiplier is "the same drawing,
-                            // denser", these are "whatever it takes to be this big".
-                            // The exact number is typed in the settings block, which is
-                            // also the only place a value not in this list can be set.
+                            // Fixed sizes sit under a rule: a multiplier is "denser",
+                            // these are "this big". Other values are typed in the
+                            // settings block.
                             super::inspector::popup_rule(ui);
                             for s in [ExportScale::Width(512), ExportScale::Height(512)] {
                                 ui.selectable_value(&mut scale, s, s.label());
                             }
                         });
                     } else {
-                        // **Dimmed and still there, holding its value.** SVG has no
-                        // pixels for a multiplier to multiply, and the two wrong
-                        // answers are hiding the control — which moves everything
-                        // beside it as the format changes — and silently resetting the
-                        // scale, which loses a setting the moment you look at what a
-                        // layer would export as vector.
+                        // Dimmed and still there, holding its value: hiding it would
+                        // move its neighbours, resetting it would lose the setting.
                         combo
                             .show_ui(ui, |ui| {
                                 ui.label(
@@ -938,10 +741,7 @@ impl OndinApp {
                         });
                     }
 
-                    // **The format cell takes what is left**, where the scale's is
-                    // fixed: the design's `74px 1fr 28px 28px`. It is the wider of the
-                    // two because it carries a leading glyph as well as its word, and
-                    // because a scale reads as a number where a format reads as a name.
+                    // The format cell takes what is left (the design's `1fr`).
                     let mut format = spec.format;
                     let format_w = ui.available_width() - CELL * 2.0 - PITCH * 2.0 - slot;
                     egui::ComboBox::from_id_salt(("export-format", index))
@@ -978,22 +778,16 @@ impl OndinApp {
                     self.export_row_open = (!open).then_some(index);
                     self.export_prefix_text = None;
                     self.export_suffix_text = None;
-                    // **The panel's two popovers are exclusive**, which the rest of the
-                    // inspector's are not — and the difference is the lane. A stroke
-                    // popover and a type popover hang from different cards and
-                    // `popover_anchor` gives them different heights; these two hang
-                    // from the same card a few points apart, so both open is one card
-                    // covering the other with no way to reach the one underneath.
+                    // The panel's two popovers are exclusive: they hang from the same
+                    // card a few points apart, so both open would cover one another.
                     self.export_menu = false;
                 }
                 head = Some(more);
                 if let Some(state) = item {
                     out.reset = super::component::item_slot(ui, state, hot);
                 }
-                // **An ✕, not a minus.** The design changed it, and the two glyphs are
-                // not interchangeable here: `MINUS` is the *off* mark in this app's
-                // switches (`ui::toggle_row`, the decoration track), so a row ending in
-                // one reads as a state rather than as a verb.
+                // An ✕, not a minus: `MINUS` is the off mark in this app's switches, so
+                // it would read as a state rather than a verb.
                 if ui::field_button(ui, icon::X, CELL, 14.0, ui::FieldButton::Off)
                     .on_hover_text("Remove this export")
                     .clicked()
@@ -1001,25 +795,16 @@ impl OndinApp {
                     out.remove = true;
                 }
             });
-            // **The size the row will produce, on a line of its own.** It had been a
-            // tooltip, because a number that can be five characters or eleven has no
-            // fixed *cell* it can honestly live in — a second line has no such limit,
-            // and the answer to "why is my icon 47 pixels" is worth reading without
-            // hovering. Blank over a multi-selection, where there is no single answer
-            // (`export_size_label`), and the line goes with it rather than sitting
-            // empty.
+            // The size the row will produce, on a line of its own: its width varies,
+            // so it has no fixed cell. Blank, and the line absent, over a
+            // multi-selection (`export_size_label`).
             let size = self.export_size_label(spec, sizing);
             let lined = !size.is_empty();
             if lined {
                 ui.allocate_space(egui::vec2(0.0, ROW_LINE_GAP));
-                // **`interact_size.y` is a *minimum* row height, and the theme's is
-                // 24.** A `horizontal` of two small labels therefore comes out 24
-                // tall with 13pt of ink centred in it — five points of nothing above
-                // and five below, which land on top of the gaps either side and made
-                // an 8 read as 13 and an 18 as 23. Zeroed here so the line is exactly
-                // as tall as its ink and the two numbers above mean what they say.
-                // The row above needs no such thing: its controls are 28, so the
-                // minimum never bites.
+                // `interact_size.y` is a minimum row height (24 in the theme); zeroed
+                // so the line is exactly as tall as its ink and the gaps mean what
+                // they say.
                 ui.scope(|ui| {
                     ui.spacing_mut().interact_size.y = 0.0;
                     ui.horizontal(|ui| {
@@ -1031,20 +816,10 @@ impl OndinApp {
                 });
             }
             // The whole gap, not a remainder: the region these units sit in has its
-            // pitch at zero (see the loop). The *last* row allocates none at all, so
-            // what separates the list from the button below it is the card's own
-            // row gap, like every other card's tail.
-            //
-            // **A row that drew no size line spends that line's gap here instead**,
-            // which is the 3 a multi-selection's list was missing: [`ROW_UNIT_GAP`]
-            // is the distance between two *units*, and it is tight — below the
-            // card's own pitch — because a unit is two lines tall and needs the
-            // contrast to read as one thing. Strip the caption and there is no unit
-            // left to hold together, so six points between two bare 28pt controls
-            // is just crowding. The sum is written out rather than borrowed from
-            // `ui::CARD_ROW_GAP` — which it happens to equal today — because it is
-            // this list's two numbers that decide it; that they land on the card's
-            // own pitch is the corroboration, not the derivation.
+            // pitch at zero (see the loop). The last row allocates none, so the card's
+            // own row gap separates the list from the button below. A row with no size
+            // line spends that line's gap too ([`ROW_UNIT_GAP`] is for two-line
+            // units); the sum is deliberately not `ui::CARD_ROW_GAP`.
             if !last {
                 ui.allocate_space(egui::vec2(
                     0.0,
@@ -1066,10 +841,8 @@ impl OndinApp {
 
     /// `192×96`, or the reason there is no number.
     ///
-    /// **Blank over a multi-selection rather than a guess.** `Width(512)` is a
-    /// different multiplier on every differently-shaped layer, so one number for
-    /// thirty icons would be true of at most one of them — and the row that
-    /// carries it is the same row for all thirty.
+    /// Blank over a multi-selection rather than a guess: `Width(512)` is a different
+    /// multiplier on every differently-shaped layer.
     fn export_size_label(&self, spec: &ExportSpec, sizing: Option<NodeId>) -> String {
         if !spec.format.is_raster() {
             return String::new();
@@ -1087,32 +860,21 @@ impl OndinApp {
     /// One row's settings, in a card beside the panel — everything that did not
     /// fit on the row.
     ///
-    /// **A popover, and it replaced an inline block.** The block was the call
-    /// `stroke_sides_row` makes, and it was the wrong one here: this card carries
-    /// four labelled sections where that row carries one, so opening it pushed the
-    /// export button and every row under it down the column — the exact thing
-    /// `stroke_menu_popup` cites for going the other way. It is also the shape the
-    /// rest of the inspector uses for "the rest of this control's settings", and a
-    /// panel that invented a second shape for it would read as a different app.
-    ///
-    /// The shell is the shared one: `POPOVER_W` wide, `menu_frame`'s padding,
-    /// `popover_anchor`'s lane to the left of the inspector, and the six-term
-    /// click-away rule every other card here obeys.
+    /// A popover rather than an inline block, which would push the export button and
+    /// every row under it down the column. The shell is the shared one: `POPOVER_W`
+    /// wide, `menu_frame`'s padding, `popover_anchor`'s lane, and the click-away rule
+    /// every other card obeys.
     fn export_settings_popup(
         &mut self,
         ui: &mut egui::Ui,
         index: usize,
         spec: &ExportSpec,
-        // The one subject, or `None` over a multi-selection — the same value
-        // `export_row` reads for its size line, threaded down because the
-        // background chip owes the same honesty (§15 D657).
+        // The one subject, or `None` over a multi-selection (§15 D657).
         sizing: Option<NodeId>,
         head: &egui::Response,
     ) -> Option<ExportSpec> {
-        // **Only ever `Some` on a frame the edit is *finished*.** The one
-        // scrubbable control here holds its in-flight value itself
-        // (`export_quality_field`), so nothing that reaches this return needs a
-        // valve or a run behind it — every edit that gets out is a decision.
+        // Only `Some` on a frame the edit is finished: the one scrubbable control
+        // holds its in-flight value itself (`export_quality_field`).
         let mut out: Option<ExportSpec> = None;
         let mut close = false;
         let ctx = ui.ctx().clone();
@@ -1120,8 +882,7 @@ impl OndinApp {
         let menu = egui::Area::new(egui::Id::new(("export-settings", index)))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor)
-            // The anchor is where the card *wants* to be; this keeps it on screen
-            // when the row it hangs from is near the bottom of a long panel.
+            // Keeps the card on screen when its row is near the bottom.
             .constrain_to(ctx.input(|i| i.content_rect()).shrink(12.0))
             .show(&ctx, |ui| {
                 ui::menu_frame(POP_PAD).show(ui, |ui| {
@@ -1141,10 +902,7 @@ impl OndinApp {
                         });
                     });
 
-                    // --- prefix, then suffix -----------------------------------
-                    //
-                    // Both, and in the order they appear in the filename, which is
-                    // the only order either could be in.
+                    // --- prefix, then suffix (filename order) ------------------
                     if let Some(text) = self.name_part_field(
                         ui,
                         index,
@@ -1160,10 +918,8 @@ impl OndinApp {
                         index,
                         NamePart::Suffix,
                         &spec.suffix,
-                        // **The hint is the marker the scale derives**, so an
-                        // untouched field says what the file will actually be
-                        // called rather than showing a generic example. At 1× there
-                        // is no marker and the field explains itself instead.
+                        // The hint is the marker the scale derives; at 1× there is
+                        // none and the field explains itself instead.
                         &match spec.effective_suffix() {
                             s if s.is_empty() => "e.g. -dark".to_string(),
                             s => s,
@@ -1173,14 +929,7 @@ impl OndinApp {
                         edit(&mut out, spec).suffix = text;
                     }
 
-                    // --- quality, JPEG only ------------------------------------
-                    //
-                    // **Not in the mock's list until it was asked for, and named
-                    // for its format.** "Quality" beside a Background and a Prefix
-                    // reads as a general knob; only JPEG has one, and the row
-                    // appears only when the format does — so the label says which.
-                    // Placed after the suffix because the three above it are about
-                    // the *name* and everything below is about the *picture*.
+                    // --- quality, JPEG only (labelled for its format) ----------
                     if spec.format == ExportFormat::Jpeg {
                         section(ui, "JPEG quality", |ui| {
                             if let Some(q) = self.export_quality_field(ui, index, spec) {
@@ -1191,13 +940,8 @@ impl OndinApp {
 
                     // --- background --------------------------------------------
                     //
-                    // **The row says what the setting *is*, not what it resolves
-                    // to.** It read "White (no alpha)" for a Transparent JPEG,
-                    // which was meant as honesty and lands as a control disagreeing
-                    // with the list it was picked from — you choose Transparent and
-                    // the field says White. The substitution is real and still
-                    // stated, in the tooltip, where it explains rather than
-                    // contradicts.
+                    // The row says what the setting is, not what it resolves to; the
+                    // JPEG substitution is stated in the tooltip.
                     section(ui, "Background", |ui| {
                         ui.scope(|ui| {
                             ui.spacing_mut().interact_size.y = POP_CELL;
@@ -1225,14 +969,9 @@ impl OndinApp {
                                         ExportBackground::Frame,
                                         "Frame's own",
                                     );
-                                    // **White, not "Colour".** The model carries any
-                                    // colour and the CLI can write one, but there is
-                                    // nowhere yet to *pick* one — the picker targets
-                                    // a paint slot on a node, and an export
-                                    // background is neither. A row named for a
-                                    // choice that cannot be made is worse than the
-                                    // one value that is actually wanted, which is
-                                    // the matte a JPEG already resolves to.
+                                    // White, not "Colour": the model carries any
+                                    // colour but the picker targets a paint slot on
+                                    // a node, so none can be picked here.
                                     ui.selectable_value(
                                         &mut bg,
                                         ExportBackground::Solid(ondin_core::peniko::Color::WHITE),
@@ -1244,11 +983,8 @@ impl OndinApp {
                                     (ExportBackground::Transparent, false) => {
                                         "JPEG has no alpha — this exports on white"
                                     }
-                                    // **Plural where the answer is plural** (§15
-                                    // D657): over a multi-selection the chip goes
-                                    // muted because there is no one colour, and a
-                                    // tooltip still saying *"the nearest frame's"*
-                                    // would read as the setting having failed.
+                                    // Plural where the answer is plural (§15 D657):
+                                    // the chip is muted over a multi-selection.
                                     (ExportBackground::Frame, _) if sizing.is_none() => {
                                         "Each layer's own nearest frame — no single colour to show"
                                     }
@@ -1263,16 +999,7 @@ impl OndinApp {
                         });
                     });
 
-                    // --- the two switches --------------------------------------
-                    //
-                    // **At the card's own section gap, not a tighter one.** They
-                    // had a scope of their own on the reasoning that two switches
-                    // are one section — but they carry no shared label, so nothing
-                    // on screen said which section they were, and the tighter pitch
-                    // read as the pair being crowded against a card that was
-                    // otherwise evenly spaced. Asked for directly: the same
-                    // distance between them as between the first of them and the
-                    // Background dropdown above.
+                    // --- the two switches, at the card's own section gap -------
                     {
                         let size = egui::vec2(POP_INNER, POP_CELL);
                         let trim = ui::toggle_row(
@@ -1305,10 +1032,8 @@ impl OndinApp {
             })
             .response;
 
-        // The panel's one click-away rule (`panels::dismissed_by_click`), whole
-        // rather than hand-rolled — all but one of its terms was paid for by a
-        // report (§15 D82; `panels::mod`'s dismissal comment keeps the count), and
-        // a popover re-deriving three of them is how the next one comes back.
+        // The panel's one click-away rule (`panels::dismissed_by_click`), whole rather
+        // than hand-rolled (§15 D82).
         let over_overlay = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
@@ -1321,10 +1046,8 @@ impl OndinApp {
         let press_away = super::press_began_away(&ctx, menu.layer_id.id, menu.rect, head.rect);
         if close
             || super::dismissed_by_click(super::ClickAway {
-                // The primary button only: this card holds a scrubbable field (the
-                // JPEG quality), a scrub is cancelled with a right-click wherever
-                // the pointer has been dragged to, and read as `any_click` that
-                // cancel is also a click on the page.
+                // Primary only: a scrub (the JPEG quality) is cancelled with a
+                // right-click, which `any_click` would read as a click on the page.
                 clicked: ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)),
                 over_overlay,
                 on_menu: menu.contains_pointer(),
@@ -1344,25 +1067,15 @@ impl OndinApp {
     /// The JPEG quality field. `Some` on the frame the edit is finished — never
     /// while the pointer still holds it.
     ///
-    /// **A hand-wound scrub, because neither shared committer works here.** A
-    /// value field normally goes through `edit_valve`, which previews every frame
-    /// and commits once on release; but `RenderOverrides` absorbs `SetExports` as
-    /// a no-op by design, so there is nothing to preview — the field re-read the
-    /// committed quality on every frame of the drag and the number would not move
-    /// at all. `commit_run` is the other end and gives up the opposite half: it
-    /// commits every frame, and `cancel_gesture` undoes a scrub by *dropping the
-    /// preview*, so a right-click left the scrubbed value standing. Both were
-    /// shipped and both were reported.
+    /// A hand-wound scrub, because neither shared committer works: `edit_valve`
+    /// previews through `RenderOverrides`, which absorbs `SetExports` as a no-op (the
+    /// number would not move), and `commit_run` commits every frame while
+    /// `cancel_gesture` only drops the preview (a cancel would leave the value).
     ///
-    /// So the in-flight value lives here instead, in `export_quality_scrub`: the
-    /// field reads it while the drag is on, the release commits it once, and a
-    /// cancel drops it — which is `session_scrub`'s arrangement for the one other
-    /// scrub in the app that previews through something other than the overrides.
-    ///
-    /// **The cancel is checked before the buffer is read, not after.** On the frame
-    /// a gesture is called off, egui may still report a `changed()` from the motion
-    /// that frame; reading the buffer first and clearing it after would commit that
-    /// last movement, which is the whole of what the cancel is for.
+    /// The in-flight value lives in `export_quality_scrub`: the field reads it during
+    /// the drag, the release commits it once, a cancel drops it (as `session_scrub`).
+    /// The cancel is checked before the buffer is read: on that frame egui may still
+    /// report a `changed()`, which would commit the last movement.
     fn export_quality_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1383,15 +1096,8 @@ impl OndinApp {
             egui::vec2(POP_INNER, POP_CELL),
             Prefix::Icon(icon::GAUGE),
             &mut q,
-            // **0.25 — a quarter of what the panel's other 0–100 fields ask for,
-            // and deliberately.** It shipped at 1.0, which crossed the whole range
-            // in 200pt ("0 to 100 in about 250px"); 0.5 matched opacity, which is
-            // the consistent answer and still too fast for this one. A quality is
-            // not a percentage of anything the eye is watching — nothing moves as
-            // you drag it — so the useful travel is the band between about 60 and
-            // 95, and a rate that crosses 1 to 100 in 800pt puts that band under a
-            // hand's width. The number was set by feel, on the machine, which is
-            // the only way a scrub rate ever is.
+            // 0.25, slower than the panel's other 0–100 fields: nothing visibly moves
+            // while dragging, and the useful band is about 60–95.
             Scrub::whole(0.25).range(1.0..=100.0),
             |d| d.custom_formatter(ui::number(0)),
         )
@@ -1421,9 +1127,8 @@ impl OndinApp {
     /// One of the two name fields in the settings card, and the buffering both
     /// need. `Some` on the frame the edit is finished.
     ///
-    /// **One function for the pair**, because they differ in three strings and
-    /// nothing else — two copies of this would be two places for the
-    /// commit-on-blur rule to drift.
+    /// One function for the pair, which differ in three strings: the commit-on-blur
+    /// rule lives once.
     fn name_part_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -1462,18 +1167,14 @@ impl OndinApp {
                     NamePart::Suffix => &mut self.export_suffix_text,
                 } = Some((index, text.clone()));
             }
-            // **Committed on losing focus, not per keystroke**, which is
-            // `stroke_dash_text`'s reason: typing `hero/` passes through `h`, `he`,
-            // `her` — four undo steps for one name.
+            // Committed on losing focus, not per keystroke (one undo step per name).
             if editing && resp.lost_focus() {
                 *match part {
                     NamePart::Prefix => &mut self.export_prefix_text,
                     NamePart::Suffix => &mut self.export_suffix_text,
                 } = None;
-                // **`Escape` abandons the name** (§15 D808,
-                // `crate::ui::defocus_commits`), and the buffer above goes either
-                // way — a prefix left half-typed in the buffer would reappear on
-                // the next click into the field.
+                // `Escape` abandons the name (§15 D808, `crate::ui::defocus_commits`);
+                // the buffer goes either way.
                 if text != current && crate::ui::defocus_commits(&resp) {
                     out = Some(text.clone());
                 }
@@ -1486,8 +1187,8 @@ impl OndinApp {
     /// What the background dropdown reads — the *effective* value, so a JPEG says
     /// white rather than claiming a transparency it cannot carry.
     ///
-    /// The stored setting is untouched by this: switching a JPEG back to PNG shows
-    /// Transparent again, because that is what the file has always said.
+    /// The stored setting is untouched: switching a JPEG back to PNG shows
+    /// Transparent again.
     fn background_label(&self, spec: &ExportSpec) -> &'static str {
         match spec.background {
             ExportBackground::Solid(_) => "White",
@@ -1498,33 +1199,14 @@ impl OndinApp {
     /// The colour of the chip in front of that label — the colour that will
     /// actually be behind the export.
     ///
-    /// **Resolved through `plan::background_color`, not read off the setting**,
-    /// which is what makes it worth drawing at all: *Frame's own* is a different
-    /// colour on every layer and no colour at all on one outside a frame, and a
-    /// chip that showed a fixed grey for it would be a swatch of nothing. A
-    /// transparent export gets the muted ink, which is this panel's word for
-    /// "there is nothing here" rather than a colour claim.
-    ///
-    /// **Not the design's checkerboard.** That is the right drawing for
-    /// transparency and it is a tiled pattern rather than a glyph, so it wants a
-    /// painter and a rect where this has a `WidgetText`; a chip is what a
-    /// `ComboBox`'s selected text can carry today.
+    /// Resolved through `plan::background_color`, not read off the setting: *Frame's
+    /// own* differs per layer and is nothing outside a frame. A transparent export
+    /// gets the muted ink. It is a chip, not the checkerboard, because a
+    /// `ComboBox`'s selected text can carry a glyph but not a painter.
     fn background_swatch(&self, spec: &ExportSpec, sizing: Option<NodeId>) -> egui::Color32 {
-        // ⚠️ **Blank over a multi-selection rather than a guess** (§15 D657,
-        // `[S8.3-L2-06]`), which is the panel's own rule stated twice in this file
-        // and broken here. `export_size_label` one control away: *"`Width(512)` is
-        // a different multiplier on every differently-shaped layer, so one number
-        // for thirty icons would be true of at most one of them — and the row that
-        // carries it is the same row for all thirty."* This resolved the chip from
-        // `export_subjects().first()`, so two rects in two frames — one white, one
-        // black — painted **white** and exported one of each, with the tooltip
-        // reading *"the nearest frame's background"*, singular, and nothing on
-        // screen saying the answer was per-layer.
-        //
-        // **Only `Frame` varies per layer**, which is why this is a `match` and not
-        // a gate on `sizing`: `Solid` and `Transparent` are properties of the spec,
-        // so they are exactly as true of thirty layers as of one and the chip
-        // should keep showing them.
+        // Blank over a multi-selection rather than a guess (§15 D657). Only `Frame`
+        // varies per layer, so this is a `match` and not a gate on `sizing`:
+        // `Solid` and `Transparent` hold for any number of layers.
         let resolved = match (spec.background, sizing) {
             (ExportBackground::Frame, None) => None,
             (_, subject) => subject
@@ -1542,32 +1224,21 @@ impl OndinApp {
 
     /// The one or two buttons under the list.
     ///
-    /// **The zip button appears exactly when there is more than one file** —
-    /// several layers, or one layer with several specs — because a zip of one file
-    /// is a thing you have to unpack to get back what you already had. That is
-    /// also the boundary the destination dialog turns on: one file gets a save
-    /// dialog with a name in it, several get a folder.
+    /// The zip button appears exactly when there is more than one file (several
+    /// layers, or one layer with several specs), which is also where the destination
+    /// dialog turns: one file gets a save dialog, several get a folder.
     fn export_buttons(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
         let files = self.export_plan(subjects);
         if files.is_empty() {
-            // **The menu is drawn by this function, so it has to be closed by it.**
-            // Anything that stops the button row appearing — a collapsed panel, a
-            // selection with nothing to export — would otherwise leave the popover
-            // flagged open with nothing on screen to dismiss it, and it would come
-            // back the next time the row did.
+            // The menu is drawn here, so it is closed here: otherwise it stays
+            // flagged open with nothing on screen to dismiss it.
             self.export_menu = false;
             return;
         }
-        // No `add_space` before it: `ui::CARD_ROW_GAP` is already the distance
-        // every child of a card sits from the next, and the design's export card
-        // puts the button row at exactly that. A hand-rolled gap here is the same
-        // number written twice, which is how a panel comes to disagree with its
-        // neighbours by a point (§15 D180).
+        // No `add_space` before it: `ui::CARD_ROW_GAP` already separates a card's
+        // children (§15 D180).
         let label = match (subjects.len(), self.session.doc.get(subjects[0])) {
-            // **The layer's name, where the mock draws "Export selection".** The
-            // static label is what a mock can say; naming the subject is what makes
-            // the button worth reading before pressing it, and it is the thing the
-            // report singled out Figma for getting right.
+            // The layer's name, so the button is worth reading before pressing.
             (1, Some(n)) => format!("Export {}", n.name()),
             (n, _) => format!("Export {n} layers"),
         };
@@ -1583,17 +1254,8 @@ impl OndinApp {
                 ui::FieldButton::Off,
                 egui::vec2(w, CELL),
             )
-            // **The name again, because the label is the one place in the panel
-            // that prints text the *document* supplies** — and `action_button`
-            // elides it, so `Export Ellipse 11312312 3123123132` says
-            // `Export Ellipse 1131…` and the button stops naming what it acts on.
-            // The tooltip said only the file count, so the name was recoverable
-            // nowhere: this is the affordance that was already there being asked
-            // to carry the half it was missing, rather than a wider card.
-            //
-            // Only in the single-layer arm. The other label is `Export 3 layers`,
-            // which this module wrote and which cannot elide, so repeating it
-            // would be noise on the common case.
+            // The name again: `action_button` elides a long layer name. Only in the
+            // single-layer arm; `Export 3 layers` cannot elide.
             .on_hover_text(match (subjects.len(), files.len()) {
                 (1, 1) => format!("{label} — 1 file"),
                 (1, n) => format!("{label} — {n} files, into a folder you pick"),
@@ -1639,19 +1301,10 @@ impl OndinApp {
         if let Some(head) = head {
             self.export_menu_popup(ui, &head, subjects);
         }
-        // **Escape closes both of this card's popovers** (§15 D801). They read no
-        // key at all until 2026-09-19, which is §15 D527's failure shape in the
-        // one region nobody had stood in: measured on a headless app, `Escape`
-        // left the popover up **and** paid out a rung of the ladder behind it, so
-        // the press did the one thing it should not and none of the thing it
-        // should. `key_pressed` rather than `consume_key`, matching the three
-        // inspector popovers — `OndinApp::a_popover_owns_escape` is what stops the
-        // ladder seeing it, so consuming here would make the same claim twice and
-        // in the place that is harder to find.
-        //
-        // Heard only when one of the two is open: this block runs whenever the
-        // card does, and a card with nothing open must not vouch for a Type
-        // popover nobody is drawing (§15 D847, `OndinApp::popover_heard`).
+        // Escape closes both of this card's popovers (§15 D801). `key_pressed` rather
+        // than `consume_key`: `OndinApp::a_popover_owns_escape` is what keeps the
+        // ladder from seeing it. Heard only when one is open, so a card with nothing
+        // open does not vouch for a Type popover nobody draws (§15 D847).
         if self.export_menu || self.export_row_open.is_some() {
             self.popover_heard = true;
         }
@@ -1664,19 +1317,9 @@ impl OndinApp {
     /// The panel's own menu: what to do with a set of settings, and the two
     /// switches that change what *every* export does.
     ///
-    /// **A popover, and so is its neighbour** — the difference between this and
-    /// [`Self::export_settings_popup`] is what each *holds*, not what shape it
-    /// takes. That one carries the values belonging to one row; this holds verbs
-    /// and preferences that belong to no row at all, and putting eleven of them in
-    /// the card would bury the button they sit under.
-    ///
-    /// ⚠️ **This paragraph said the opposite until 2026-08-22**, calling itself "a
-    /// popover rather than rows in the card, which is the opposite of the call
-    /// `Self::export_settings_block` makes". Both halves were stale: there is no
-    /// `export_settings_block`, and the inline block it named became a popover
-    /// itself — that function's own doc records the change ("a popover, and it
-    /// replaced an inline block"). Found by the rustdoc gate, which is the class of
-    /// drift it was added for (§15 D296).
+    /// A popover like [`Self::export_settings_popup`], but that one holds the values
+    /// of one row and this holds verbs and preferences that belong to no row;
+    /// eleven of them in the card would bury the button they sit under.
     fn export_menu_popup(&mut self, ui: &mut egui::Ui, head: &egui::Response, subjects: &[NodeId]) {
         if !self.export_menu {
             return;
@@ -1799,9 +1442,8 @@ impl OndinApp {
                     let folders = self.prefs.export_folders_from_names;
                     if ui::menu_row(
                         ui,
-                        // `FOLDER_SIMPLE`, not the `FOLDER_OPEN` two rows above:
-                        // that one is a folder being *entered*, this one a folder
-                        // being *made*.
+                        // `FOLDER_SIMPLE`, not `FOLDER_OPEN` two rows above: this
+                        // folder is being made, not entered.
                         ui::MenuRow::new(icon::FOLDER_SIMPLE, "Slashes in names make folders")
                             .checked(folders),
                         ui::MENU_ROW_H,
@@ -1814,13 +1456,9 @@ impl OndinApp {
                     let on_save = self.prefs.export_on_save;
                     if ui::menu_row(
                         ui,
-                        // **`ARROW_CLOCKWISE`, the design's, though the glyph is
-                        // already the Transform panel's rotation prefix.** This row
-                        // is *repetition* rather than rotation, and the two never
-                        // appear together — one is a menu in the export card, the
-                        // other a field prefix in Transform. What it must not be is
-                        // `FLOPPY_DISK`, which is *Save as a preset* four rows above
-                        // it in this same menu.
+                        // `ARROW_CLOCKWISE` (the design's) also prefixes Transform's
+                        // rotation, but the two never appear together; it must not
+                        // be `FLOPPY_DISK`, which is *Save as a preset* above.
                         ui::MenuRow::new(icon::ARROW_CLOCKWISE, "Re-export on save")
                             .checked(on_save),
                         ui::MENU_ROW_H,
@@ -1834,10 +1472,7 @@ impl OndinApp {
             })
             .response;
 
-        // The panel's one click-away rule (`panels::dismissed_by_click`). No
-        // scrubbable field in here, so the primary-button term is the only one that
-        // needed thought — and it is the same answer every other inspector popover
-        // gives, which is the point of the rule being shared.
+        // The panel's one click-away rule (`panels::dismissed_by_click`).
         let over_overlay = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
@@ -1848,10 +1483,8 @@ impl OndinApp {
             .is_some_and(|l| l.id == super::picker::layer_id());
         // Recorded every frame, never from inside the short-circuiting `||`.
         let press_away = super::press_began_away(&ctx, menu.layer_id.id, menu.rect, head.rect);
-        // **A verb closes it, a switch does not.** Every row above the last rule is
-        // an action that takes effect at once, so there is nothing left to look at;
-        // the two switches at the bottom are settings, and closing the card under
-        // the hand after one of them is what makes turning both a two-trip job.
+        // A verb closes it, a switch does not: closing after one switch would make
+        // turning both a two-trip job.
         if act.is_some_and(MenuAct::closes)
             || super::dismissed_by_click(super::ClickAway {
                 clicked: ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)),
@@ -1898,11 +1531,8 @@ impl OndinApp {
             }
             MenuAct::SavePreset => {
                 if let Some(specs) = current {
-                    // **Named from what it holds, so nothing has to be typed.** A
-                    // dialog asking for a name is the obvious design and it is a
-                    // modal in the middle of a two-click action; "PNG 1x, 2x" is
-                    // what the user would have typed anyway, and a second preset
-                    // with the same shape is the same preset.
+                    // Named from what it holds, so no modal is needed mid-action; a
+                    // second preset of the same shape is the same preset.
                     let name = preset_name(&specs);
                     if let Some(slot) = self
                         .prefs
@@ -1952,9 +1582,8 @@ impl OndinApp {
             subjects,
             PlanOptions {
                 folders_from_names: self.prefs.export_folders_from_names,
-                // The panel is where every row's own scale is set, so there is
-                // nothing here to override — the flag exists for the CLI, which has
-                // no rows (§15 D361).
+                // Every row carries its own scale; the override is for the CLI
+                // (§15 D361).
                 scale_override: None,
             },
         )
@@ -1962,17 +1591,11 @@ impl OndinApp {
 
     /// Render a plan and write it — to a file, into a folder, or into one archive.
     ///
-    /// **Three destinations, one boundary.** A plan of one file gets a save dialog
-    /// with the name already in it, because that is the only case where the user
-    /// has a filename to choose; anything larger gets a folder, because naming
-    /// each of nine files by hand is not a thing anyone wants to be offered. The
-    /// zip is the third and is asked for explicitly — its whole reason is that
-    /// *not* zipping is the default here, where Figma has no other option.
+    /// Three destinations: a plan of one file gets a save dialog with the name in
+    /// it, a larger one gets a folder, and the zip is asked for explicitly.
     ///
-    /// **The committed document and `Resolved`**, as every writer here is: they are
-    /// pure functions of the pair, so a gesture mid-drag cannot leak an uncommitted
-    /// position into a file. *Export as…* was written the same way and is gone; the
-    /// property belongs to the writers rather than to either door (§15 D264).
+    /// Reads the committed document and `Resolved`, as every writer does, so a
+    /// gesture mid-drag cannot leak an uncommitted position into a file.
     pub(crate) fn run_export(&mut self, files: Vec<PlannedFile>, zip: bool) {
         if files.is_empty() {
             return;
@@ -1986,12 +1609,9 @@ impl OndinApp {
                 .save_file()
                 .map(Destination::Archive),
             DialogKind::SaveFile => {
-                // **A planned path is not a file name** (§15 D656,
-                // `[S8.3-L1-10]`). With *Slashes in names make folders* on, a
-                // layer called `icons/close` plans `icons/close.png` — the `/` is
-                // the feature — and this handed that whole string to
-                // `set_file_name`, where the API wants a name. The folder half is
-                // a *location*, so it goes to `set_directory`.
+                // A planned path is not a file name (§15 D656): with *Slashes in
+                // names make folders* on, `icons/close.png`'s folder half is a
+                // location for `set_directory`.
                 let (dir, name) = save_dialog_target(&start, &files[0].path);
                 rfd::FileDialog::new()
                     .set_directory(dir)
@@ -2016,10 +1636,8 @@ impl OndinApp {
 
     /// Render and write, reporting what happened.
     ///
-    /// **A failure stops nothing that has already succeeded**, and is counted
-    /// rather than raised: half of an export set on disk with a message naming the
-    /// one that failed is more use than the whole run abandoned at file three,
-    /// where nothing says which three landed.
+    /// A failure stops nothing that has already succeeded, and is reported rather
+    /// than raised.
     fn write_export(&mut self, files: Vec<PlannedFile>, destination: Destination) {
         let mut rendered: Vec<(String, Vec<u8>)> = Vec::with_capacity(files.len());
         let mut skipped = 0usize;
@@ -2036,33 +1654,18 @@ impl OndinApp {
                 .fail("Nothing to export — none of that has any size");
             return;
         }
-        // **What the folder arm owes and the other two do not** (§15 D636,
-        // `[S8.3-L5-05]`). A *File* or an *Archive* was named in a save dialog, so
-        // the user has just been shown where it goes and warned by the OS if
-        // something is there. A *Folder* export can arrive with no dialog at all —
-        // `export_all`'s `(Some(dir), _)` arm takes `prefs.export_dir`, which is
-        // one global folder set by *any* previous export, and *Re-export on save*
-        // fires it on an **autosave**. Every same-named file in it is replaced by a
-        // bare `fs::write`, and the message said `Exported 1 file` and named
-        // nothing. *"No dialog when there is somewhere to put it"* is the feature;
-        // *"no dialog" never means "no idea"* is what this function's own door
-        // promises, and the two numbers below are what makes that true.
+        // The folder arm owes a replacement count (§15 D636): a File or Archive was
+        // named in a save dialog, but a Folder export can arrive with no dialog
+        // (`export_all` takes `prefs.export_dir`, and *Re-export on save* fires it
+        // on an autosave), replacing same-named files with a bare `fs::write`.
         let mut replaced = 0usize;
         let mut to_folder = false;
         let (written, failed, where_): (usize, Option<String>, std::path::PathBuf) =
             match destination {
                 Destination::File(path) => {
                     let dir = path.parent().map(Into::into).unwrap_or_default();
-                    // **The same line the folder arm has** (§15 D656,
-                    // `[S8.3-L1-10]`), and the two arms differed by exactly it:
-                    // a layer named `icons/close` exported fine as one of
-                    // several and failed with *"the system cannot find the path
-                    // specified"* on its own, so whether an export worked
-                    // depended on how many **other** layers were selected. Every
-                    // path this arm is given has just come out of a save dialog,
-                    // so normally the parent exists and this is a no-op; it is
-                    // not free of doubt, because the dialog was handed a name
-                    // that may itself carry a folder.
+                    // As the folder arm does (§15 D656): a name like `icons/close`
+                    // may carry a folder the save dialog did not create.
                     if let Some(parent) = path.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
@@ -2090,8 +1693,7 @@ impl OndinApp {
                         if let Some(parent) = path.parent() {
                             let _ = std::fs::create_dir_all(parent);
                         }
-                        // **Asked before the write, which is the whole of it**:
-                        // afterwards every one of these exists (§15 D636).
+                        // Asked before the write: afterwards it always exists.
                         let existed = path.exists();
                         match std::fs::write(&path, bytes) {
                             Ok(()) => {
@@ -2114,10 +1716,8 @@ impl OndinApp {
             self.prefs.export_dir = Some(where_.clone());
             self.prefs.save();
         }
-        // **The count first, the loss next, the path last**, because
-        // `OndinApp::status_bar` draws this with `.truncate()`: whatever falls off the
-        // end is what the reader can most afford to lose, and a folder they can
-        // re-derive from *Show in folder* beats a replacement count they cannot.
+        // The count first, the loss next, the path last: `OndinApp::status_bar`
+        // truncates, and the folder can be re-derived from *Show in folder*.
         let head = match (to_folder, replaced) {
             (false, _) => export_count(written),
             (true, 0) => export_count(written),
@@ -2137,9 +1737,8 @@ impl OndinApp {
     /// Whether anything in the document is set up to export — what dims *Export
     /// all* on the page menu.
     ///
-    /// **Stops at the first one**, unlike [`Self::exportable_layers`] which has to
-    /// find them all: the menu is rebuilt every frame it is open, and this is the
-    /// only question it needs answered.
+    /// Stops at the first one, unlike [`Self::exportable_layers`]: the menu asks
+    /// every frame it is open.
     pub(crate) fn document_exports_anything(&self) -> bool {
         let mut stack = vec![self.session.doc.root()];
         while let Some(id) = stack.pop() {
@@ -2156,9 +1755,8 @@ impl OndinApp {
 
     /// Every layer in the document that is set up to export, in document order.
     ///
-    /// **The whole document, not the selection**, which is what makes *Export all*
-    /// worth having: an asset set is spread over frames nobody wants to select
-    /// first, and the export settings on the layers already say which those are.
+    /// The whole document, not the selection: the export settings on the layers
+    /// already say which they are.
     pub(crate) fn exportable_layers(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
         let mut stack = vec![self.session.doc.root()];
@@ -2169,40 +1767,20 @@ impl OndinApp {
             if !node.exports().is_empty() {
                 out.push(id);
             }
-            // ⚠️ **This walk's order does not matter and there used to be a
-            // `.rev()` here claiming it did** (§15 D649, `[A7-L8-02]`): *"reversed,
-            // so the traversal comes out in document order … which nothing
-            // downstream would notice today and everything would inherit
-            // tomorrow"*. Both halves were false. `all_in_document_order` below
-            // collects its input into an `FxHashSet` on its first line and then
-            // walks the document from the root, so this order is **discarded**,
-            // and nothing inherits it today or tomorrow because the sort is
-            // unconditional. The danger was not the redundant call — it was a
-            // reader taking the *pattern* ("a `.rev()` on a `children()` extend is
-            // what makes a stack walk come out in document order") somewhere no
-            // sort follows. [`Self::document_exports_anything`] above writes the
-            // same walk without one, for the same reason.
+            // The walk's order is discarded: `all_in_document_order` below re-sorts
+            // from the root.
             stack.extend(node.children().iter().copied());
         }
-        // **`all_in_document_order`, not `in_document_order`** (§15 D516,
-        // `[S8.3-L1-02]`). The latter starts with `outermost`, which drops any id
-        // that has an ancestor in the set — right for the *selection* door, where
-        // a group and its child both picked would plan the child twice, and wrong
-        // here: an export spec on a nested layer is a deliberate instruction, and
-        // this function's own doc one line up says *every* layer in the document.
-        // Measured: a `Group` exporting PNG with a `Rect` inside it exporting PNG
-        // planned **one** file, and nothing said so.
+        // `all_in_document_order`, not `in_document_order` (§15 D516): the latter
+        // drops any id with an ancestor in the set, but an export spec on a nested
+        // layer is a deliberate instruction.
         ondin_core::build::all_in_document_order(&self.session.doc, &out)
     }
 
     /// Re-run every export in the document, into the folder the last one went to.
     ///
-    /// **No dialog when there is somewhere to put it**, which is the whole point:
-    /// Figma stores the settings and still asks where every single time, so
-    /// regenerating an asset set is a dialog and a folder walk rather than a
-    /// keystroke. The first run of a session asks; every one after it does not,
-    /// and the status line says where the files went so "no dialog" never means
-    /// "no idea".
+    /// No dialog when there is somewhere to put it. The first run of a session asks;
+    /// every one after it does not, and the status line says where the files went.
     pub(crate) fn export_all(&mut self, how: ExportAll) {
         let subjects = self.exportable_layers();
         if subjects.is_empty() {
@@ -2261,11 +1839,8 @@ impl OndinApp {
 
 /// What *Export all* does when it has never been told where to put things.
 ///
-/// **Two callers, two answers, and the difference is who asked.** A menu row or a
-/// chord is a person asking for an export, so a folder dialog is the right way to
-/// find out where; a save with the switch on is not, and a modal appearing on
-/// Ctrl+S because a preference is set is the thing that would make the switch not
-/// worth having.
+/// A menu row or a chord is a person asking, so a folder dialog is right; a save
+/// with the switch on must not raise a modal on Ctrl+S.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExportAll {
     /// Prompt for a folder if none is remembered.
@@ -2277,28 +1852,15 @@ pub(crate) enum ExportAll {
 /// Where an *Export all* is going, before anything opens a dialog or writes a
 /// file — [`OndinApp::export_all`]'s three-arm table, lifted.
 ///
-/// 🚨 **The decision it carries is *"Export on save must never open a modal"*,
-/// and it was fused to `rfd::FileDialog` and `std::fs::write`** (§15 D626,
-/// `[A5-L6-03]`). `export_all`'s own doc states the rule: *"a modal appearing on
-/// `Ctrl+S` because a preference is set is the thing that would make the switch
-/// not worth having."* Nothing tested it. Collapse the `Quietly` arm into the
-/// `Asking` one — or drop the `.filter(|d| d.is_dir())` so a deleted folder falls
-/// through — and every `Ctrl+S` with the preference on pops a native folder
-/// dialog, with the whole workspace green.
-///
-/// ⚠️ **`OndinApp::headless` does not dissolve this and §15 D303 says so in
-/// terms**: *"a headless app makes the method callable without making the call
-/// site observable … this is a door, not a licence."* Worse here — even a
-/// headless call would open a **real dialog** and write **real files**, so the
-/// decision cannot be observed at all until it is separated from the acting.
-/// §15 D269's prescribed lift, and `panels/export.rs` was the largest genuinely
-/// under-covered module in the workspace at 20.81%.
+/// The decision "Export on save must never open a modal" lives apart from
+/// `rfd::FileDialog` and `std::fs::write`, which even a headless app would drive
+/// for real (§15 D626). Collapsing the `Quietly` arm into `Asking`, or dropping the
+/// `is_dir` filter on the remembered folder, would pop a dialog on every Ctrl+S.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ExportRoute {
     /// Straight to the remembered folder, whoever asked.
     Write(std::path::PathBuf),
-    /// One sentence and nothing else — the silent arm, and the whole reason this
-    /// table exists.
+    /// One sentence and nothing else — the silent arm.
     SayNoDestination,
     /// Open the folder picker.
     AskForFolder,
@@ -2307,10 +1869,8 @@ pub(crate) enum ExportRoute {
 /// Which dialog an explicit *Export* opens: [`OndinApp::run_export`]'s
 /// `(zip, files.len())` table, lifted for [`ExportRoute`]'s reason (§15 D626).
 ///
-/// **The `files.len() == 1` boundary is the interesting one.** One file is a
-/// *Save as* with the file's own name and format filter already filled in; two is
-/// a folder pick, because there is no one name to offer. A `zip` overrides both,
-/// which is why it is matched first.
+/// One file is a *Save as* with its own name and format filter; more is a folder
+/// pick. A `zip` overrides both, so it is matched first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DialogKind {
     Archive,
@@ -2325,35 +1885,20 @@ pub(crate) fn export_destination(
 ) -> ExportRoute {
     match (remembered, how) {
         (Some(dir), _) => ExportRoute::Write(dir),
-        // **Silent rather than modal**, which is the whole difference between the
-        // two callers: a save that opened a folder dialog because the switch
-        // happens to be on would be the surprise the switch's own doc comment says
-        // it must not be. It says so once and the next explicit export teaches it
-        // where.
+        // Silent rather than modal: it says so once, and the next explicit export
+        // teaches it where.
         (None, ExportAll::Quietly) => ExportRoute::SayNoDestination,
         (None, ExportAll::Asking) => ExportRoute::AskForFolder,
     }
 }
 
-/// Where the one-file save dialog opens and what it proposes calling the file —
-/// splitting a **planned path** into the two things the dialog API actually wants
-/// (§15 D656, `[S8.3-L1-10]`).
+/// Splits a planned path into the directory and the file name the one-file save
+/// dialog wants (§15 D656): with *Slashes in names make folders* on, `icons/close`
+/// plans `icons/close.png`, whose folder half belongs in `set_directory`.
 ///
-/// A planned path may carry a `/`: with *Slashes in names make folders* on, a
-/// layer called `icons/close` plans `icons/close.png` and the separator is the
-/// feature (§15 D361's neighbour). `set_file_name` was given that whole string,
-/// which is a relative *path* where the API wants a name — so the folder half
-/// belongs in `set_directory` instead.
-///
-/// ⚠️ **The joined directory is used only if it already exists**, which is what
-/// keeps this deterministic. Platform dialogs differ on a `set_directory` that
-/// does not resolve — some fall back to the last-used folder, some to the home
-/// directory — and the export's own remembered folder is a better answer than
-/// whichever of those the machine picks. The folder is created on the write side
-/// regardless, so nothing is lost by starting one level up.
-///
-/// **Lifted out of `run_export` because that function opens a modal**, which no
-/// test can drive (§15 D269's shape). The arithmetic is the half worth asserting.
+/// The joined directory is used only if it already exists: platform dialogs differ
+/// on a `set_directory` that does not resolve, and the folder is created on the
+/// write side regardless. Lifted out of `run_export` because that opens a modal.
 fn save_dialog_target(start: &std::path::Path, planned: &str) -> (std::path::PathBuf, String) {
     let p = std::path::Path::new(planned);
     let name = p
@@ -2420,8 +1965,7 @@ fn preset_name(specs: &[ExportSpec]) -> String {
         }
         parts.push(match f.is_raster() {
             true => format!("{} {}", f.label(), scales.join(", ")),
-            // A vector file has no size, so listing one would be naming a setting
-            // the format ignores — the same thing the row's dimmed scale says.
+            // A vector file has no size to list, as the row's dimmed scale says.
             false => f.label().to_string(),
         });
     }
@@ -2448,14 +1992,11 @@ fn export_count(n: usize) -> String {
     }
 }
 
-/// The block's controls all edit *one* spec, and each of them has to start from
-/// the same copy — a second control writing a fresh clone of `spec` in the same
-/// frame would silently drop the first one's change.
+/// The popover's controls all edit one spec and must start from the same copy, or a
+/// second control's fresh clone would drop the first one's change.
 ///
-/// A free function rather than a closure over `out`, because a closure that both
-/// captures the buffer and returns a borrow of it cannot be spelled: the returned
-/// reference outlives the call, and the borrow checker has no way to know the
-/// closure is not called again while it is held.
+/// A free function because a closure that captures `out` and returns a borrow of it
+/// cannot be spelled.
 fn edit<'a>(out: &'a mut Option<ExportSpec>, spec: &ExportSpec) -> &'a mut ExportSpec {
     out.get_or_insert_with(|| spec.clone())
 }
@@ -2483,22 +2024,13 @@ enum QualityStep {
     Nothing,
 }
 
-/// The quality field's whole decision, as a function of its inputs and nothing
-/// else — so the two bugs it has already had are pinned against the inputs that
-/// caused them rather than against a drawn panel.
+/// The quality field's whole decision, as a function of its inputs alone.
 ///
-/// **The cancel is answered first**, before anything else is read: on the frame a
-/// gesture is called off egui may still report the motion that frame as a
-/// `changed()`, and letting that through commits the very movement the cancel
-/// exists to discard.
-///
-/// **A drag holds and never commits**, which is the other bug: committing every
-/// frame is what left a cancelled scrub with its scrubbed value, because
-/// `cancel_gesture` undoes a scrub by dropping a preview and this field has none.
-///
-/// **The release is recognised by the buffer, not by `drag_stopped()`** — that is
-/// not reported on every path out of a drag, and losing it strands the value
-/// uncommitted.
+/// The cancel is answered first: on that frame egui may still report a `changed()`,
+/// which would commit the movement the cancel discards. A drag holds and never
+/// commits, since `cancel_gesture` undoes a scrub by dropping a preview and this
+/// field has none. The release is recognised by the buffer, not `drag_stopped()`,
+/// which is not reported on every path out of a drag.
 fn quality_step(input: ScrubInput, value: f64, current: u8) -> QualityStep {
     let settled = value.round().clamp(1.0, 100.0) as u8;
     if input.cancelled {
@@ -2519,27 +2051,16 @@ fn quality_step(input: ScrubInput, value: f64, current: u8) -> QualityStep {
 /// The multiplier a list of `rows` exports gets for its next one: 1×, 2×, 3×,
 /// and 4× from there on.
 ///
-/// **A function of how many rows there are, and of nothing else** — not of which
-/// multipliers are free, which is the question this used to answer and the reason
-/// the first row was not reliably 1× (see [`OndinApp::next_export_spec`]). Free
-/// and testable because it is the whole of the rule: `OndinApp` cannot be built
-/// headlessly (§15 D35), so a ladder left inside the method is a ladder nothing
-/// can check.
+/// A function of how many rows there are, not of which multipliers are free (see
+/// [`OndinApp::next_export_spec`]); free so the rule is testable on its own.
 fn ladder_scale(rows: usize) -> ExportScale {
     ExportScale::Times(rows.min(3) as f32 + 1.0)
 }
 
-/// The settings button's state — the third one is the point.
-///
-/// [`ui::FieldButton::Set`] is what lets the block close without either losing a
-/// setting or lying about it: the border says there is something in there, the
-/// fill says it is not open. Without it the only honest options are refusing to
-/// collapse a row that has a suffix, or throwing the suffix away on collapse
-/// (§15 D72, where the stroke panel met the same thing).
+/// The settings button's state. [`ui::FieldButton::Set`] says there is something
+/// in a closed popover: the border marks content, the fill marks open (§15 D72).
 fn settings_button_state(spec: &ExportSpec, open: bool) -> ui::FieldButton {
-    // **Not the quality**, which is a setting every JPEG has rather than one a
-    // person went looking for — lighting the border on every JPEG row would make
-    // the mark mean "this is a JPEG" instead of "there is something in here".
+    // Not the quality: every JPEG has one, so the mark would mean "this is a JPEG".
     let at_rest = spec.prefix.is_empty()
         && spec.suffix.is_empty()
         && spec.background == ExportBackground::Transparent
@@ -2571,16 +2092,8 @@ fn pad_button_state(spec: &ExportSpec) -> ui::FieldButton {
 
 #[cfg(test)]
 mod tests {
-    //! The panel's decisions, as far as they can be reached without an app.
-    //!
-    //! What is pinned here is the free functions the panel's decisions were lifted
-    //! into — plus the one thing about the row that is arithmetic and
-    //! is otherwise checked by eye every time it changes: whether five cells and
-    //! four gaps fit the card they are drawn in.
-    //!
-    //! *The lift was originally forced — `OndinApp` could not be built in a test.
-    //! It can as of §15 D303, and the lift is kept because a decision reachable on
-    //! its own terms is the better shape, not because there is no other way in.*
+    //! The free functions the panel's decisions were lifted into, plus whether the
+    //! row's cells and gaps fit the card they are drawn in.
 
     use super::*;
     use ondin_core::ExportBackground;
@@ -2589,14 +2102,9 @@ mod tests {
         ExportSpec::new(format, scale)
     }
 
-    /// The row's cells have to fit the inspector's 256pt content width, and the
-    /// widest text each cell can hold has to fit *its* cell.
-    ///
-    /// **Aimed at the wrong-by-a-few-points failure, which is the one that
-    /// happens.** A row that overflows does not error — egui shrinks the last
-    /// item or clips it, so the symptom is a size label that quietly stops
-    /// appearing on exactly the rows where the number is longest. The constants
-    /// claim to have been measured; this is the measurement.
+    /// The row's cells fit the inspector's 256pt content width, and the widest text
+    /// each cell can hold fits its cell. An overflowing row does not error: egui
+    /// widens the combo and squeezes the size label.
     #[test]
     fn the_export_row_fits_the_card() {
         const CARD: f32 = 284.0 - ui::CARD_MARGIN_X * 2.0;
@@ -2616,28 +2124,11 @@ mod tests {
             })
         };
 
-        // **What a `ComboBox` spends beside its text, measured rather than
-        // reassembled from the style.** Adding up `icon_width` and
-        // `button_padding` gets 31 and leaving out `item_spacing` is the kind of
-        // guess that is wrong by exactly the amount that matters here. Laying one
-        // out with **no** `.width()` makes it size to its content, so the
-        // difference between the rect it takes and the text in it *is* the
-        // overhead, whatever egui spends it on.
-        // **What a `ComboBox` spends beside its text, off egui's own arithmetic**
-        // (`combo_box_dyn`): it lays the selected text out, then takes
-        // `galley + icon_spacing + icon_width`, floored at `width - 2·button_padding.x`,
-        // and paints that inside the padding. So the text fits its cell exactly
-        // when `galley + icon_spacing + icon_width ≤ width - 2·padding` — and when
-        // it does *not*, the combo comes out **wider than asked for** rather than
-        // clipping, which squeezes the size label beside it. That is the failure
-        // this is aimed at, and it is invisible in the source.
-        //
-        // **Measuring by laying one out does not work**, and the two ways it fails
-        // are worth writing down: with no `.width()` a combo takes
-        // `max(content, spacing.combo_width)`, so a short sample measures the
-        // minimum; and the selected text is laid out in `TextStyle::Button`, not in
-        // whatever font a probe reaches for, so subtracting the wrong measurement
-        // from the right one reports an overhead of 62.
+        // What a `ComboBox` spends beside its text, off egui's own arithmetic
+        // (`combo_box_dyn`): the text fits its cell when `galley + icon_spacing +
+        // icon_width ≤ width - 2·padding`, else the combo comes out wider than asked.
+        // Measuring by laying one out does not work: with no `.width()` a combo takes
+        // `max(content, spacing.combo_width)`, and its text uses `TextStyle::Button`.
         let style = ctx.style_of(egui::Theme::Dark);
         let overhead = style.spacing.icon_spacing
             + style.spacing.icon_width
@@ -2655,21 +2146,17 @@ mod tests {
             })
         };
 
-        // **What the dropdown offers, taken from the dropdown** — so adding an
-        // entry to `ExportScale::COMMON` re-runs this rather than quietly
-        // overflowing the cell. A value *typed* into the settings block can be
-        // wider (`1024h` wants 70.9) and is allowed to push the combo out by those
-        // three points; what must always fit is what a click can produce.
+        // Taken from the dropdown, so a new `ExportScale::COMMON` entry re-runs this.
+        // A typed value can be wider (`1024h` wants 70.9); what a click produces
+        // must fit.
         let widest_scale = ExportScale::COMMON
             .iter()
             .map(|n| ExportScale::Times(*n))
             .chain([ExportScale::Width(512), ExportScale::Height(512)])
             .map(|s| combo_text(&s.label()))
             .fold(0.0_f32, f32::max);
-        // **The format cell's text is not laid out in `TextStyle::Button`**, unlike
-        // the scale's: `ui::glyph_and_text` builds a `LayoutJob` with its own fonts
-        // — a 15pt icon, a 7pt lead, then the word at `proportional(12)`. Measuring
-        // it in Button would report a cell that fits and paint one that does not.
+        // The format cell's text is not in `TextStyle::Button`: `ui::glyph_and_text`
+        // builds its own `LayoutJob` (15pt icon, 7pt lead, word at `proportional(12)`).
         let widest_format = ExportFormat::ALL
             .iter()
             .map(|f| text_w(f.label(), 12.0))
@@ -2688,9 +2175,7 @@ mod tests {
             "the scale cell is {SCALE_W} and wants {:.1} ({widest_scale:.1} of text + {overhead:.1})",
             widest_scale + overhead
         );
-        // The format cell is `1fr` — what the row has left after the scale, the two
-        // buttons and the three gaps between the four cells — so what is asserted
-        // is that the leftover is enough, not that a constant is.
+        // The format cell is `1fr`: what is asserted is that the leftover is enough.
         let format_w = CARD - SCALE_W - CELL * 2.0 - PITCH * 3.0;
         let wants = widest_format + format_glyph + overhead;
         assert!(
@@ -2700,12 +2185,8 @@ mod tests {
         );
     }
 
-    /// The settings button's third state is the one that lets the block close
-    /// without either losing a setting or lying about it (§15 D72's shape).
-    ///
-    /// **Every arm, because the middle one is what the state exists for**: a spec
-    /// with a typed prefix and the popover shut must read differently from a spec
-    /// at rest with the popover shut, and those are the two that look alike.
+    /// A closed row with a typed setting reads differently from a row at rest, one
+    /// assertion per term of `at_rest`.
     #[test]
     fn a_closed_row_still_declares_a_setting() {
         let at_rest = spec(ExportFormat::Png, ExportScale::Times(2.0));
@@ -2727,9 +2208,7 @@ mod tests {
             ui::FieldButton::Set
         );
 
-        // **A JPEG at any quality is still at rest**: quality is a setting every
-        // JPEG has, so lighting the border on it would make the mark say "this is
-        // a JPEG" rather than "there is something in here".
+        // A JPEG at any quality is still at rest.
         let mut jpeg = spec(ExportFormat::Jpeg, ExportScale::Times(1.0));
         jpeg.quality = 30;
         assert_eq!(settings_button_state(&jpeg, false), ui::FieldButton::Off);
@@ -2742,45 +2221,20 @@ mod tests {
         trimmed.trim = true;
         assert_eq!(settings_button_state(&trimmed, false), ui::FieldButton::Set);
 
-        // ⚠️ **The fifth term, and it was the missing one** (§15 D653,
-        // `[S8.3-L6-08]`). `at_rest` is a conjunction of five and this test built
-        // four of them, so deleting `&& !spec.pad_square` from
-        // `settings_button_state` left every assertion above green — and a row
-        // with *Pad to a square* on, collapsed, was indistinguishable from a row
-        // at rest, which is precisely what §15 D72's third state exists to
-        // prevent. `pad_button_state` beside it is still tested by nothing.
+        // flip: delete `&& !spec.pad_square` in `settings_button_state` → fails at
+        // this assertion.
         let mut padded = at_rest;
         padded.pad_square = true;
         assert_eq!(settings_button_state(&padded, false), ui::FieldButton::Set);
     }
 
-    /// **The background chip goes muted over a multi-selection rather than
-    /// painting one member's frame** — §15 D657, `[S8.3-L2-06]`.
+    /// The background chip goes muted over a multi-selection of differing frames
+    /// rather than painting one member's, but keeps showing a `Solid` colour (§15
+    /// D657).
     ///
-    /// 🚨 **The panel states this rule twice and broke it one control away.**
-    /// `export_size_label`: *"Blank over a multi-selection rather than a guess.
-    /// `Width(512)` is a different multiplier on every differently-shaped layer,
-    /// so one number for thirty icons would be true of at most one of them — and
-    /// the row that carries it is the same row for all thirty."* `background_swatch`
-    /// resolved from `export_subjects().first()`, so two rects in two frames — one
-    /// white, one black, both set to *Frame's own* — painted **white** and exported
-    /// one of each. The tooltip beside it read *"the nearest frame's background"*,
-    /// singular, so nothing on screen said the answer was per-layer.
-    ///
-    /// ⚠️ **The last assertion is the guard against over-fixing, and it is the one
-    /// worth keeping.** Only `Frame` varies per layer; `Solid` and `Transparent`
-    /// are properties of the *spec* and are exactly as true of thirty layers as of
-    /// one, so muting them would be a second wrong answer in the other direction —
-    /// a chip that says nothing about a setting that does have a colour.
-    ///
-    /// ⚠️ **Flip run, two of them, both predicted right.** Deleting the
-    /// `(Frame, None) => None` arm fails the multi-selection assertion, white
-    /// against the muted ink. Gating the whole resolution on `sizing` instead —
-    /// `sizing.and_then(…)`, the obvious one-line spelling of "be honest over a
-    /// multi-selection" — leaves that green and fails the `Solid` assertion, muted
-    /// ink against white. **The two flips fail different assertions, which is why
-    /// both cases are here**; either one alone would bless one of the two wrong
-    /// answers.
+    /// flip: delete the `(Frame, None) => None` arm of `background_swatch` → fails at
+    /// the multi-selection assertion; gate the whole resolution on `sizing` → fails
+    /// at the `Solid` assertion.
     #[test]
     fn a_frame_background_chip_says_nothing_over_a_multi_selection() {
         let ctx = egui::Context::default();
@@ -2829,9 +2283,7 @@ mod tests {
         let mut framed = spec(ExportFormat::Png, ExportScale::Times(1.0));
         framed.background = ExportBackground::Frame;
 
-        // The fixture is in the state this is about: the two subjects really do
-        // resolve to different colours, so "one member's answer" is a wrong answer
-        // for the other.
+        // The two subjects really do resolve to different colours.
         let a = app.background_swatch(&framed, Some(kids[0]));
         let b = app.background_swatch(&framed, Some(kids[1]));
         assert_ne!(
@@ -2846,8 +2298,7 @@ mod tests {
             "and over both of them the chip says nothing rather than picking one"
         );
 
-        // The other two backgrounds are per-spec, so a multi-selection has one
-        // answer and the chip must keep showing it.
+        // The other backgrounds are per-spec: the chip keeps showing them.
         let mut solid = spec(ExportFormat::Png, ExportScale::Times(1.0));
         solid.background = ExportBackground::Solid(white);
         assert_eq!(
@@ -2857,35 +2308,11 @@ mod tests {
         );
     }
 
-    /// **A planned path splits into a folder and a name before it reaches the save
-    /// dialog, and the write side creates the folder either way** — §15 D656,
-    /// `[S8.3-L1-10]`.
+    /// A planned path splits into a folder and a name before it reaches the save
+    /// dialog, and the folder is used only when it already exists (§15 D656).
     ///
-    /// 🚨 **The two destination arms of `write_export` differed by exactly one
-    /// `create_dir_all` and nothing else**, so a layer named `icons/close` — which
-    /// plans `icons/close.png`, the `/` being the *Slashes in names make folders*
-    /// feature — exported fine as one of several (folder destination, directory
-    /// created) and failed with *"the system cannot find the path specified"* on
-    /// its own. Whether an export worked depended on how many **other** layers
-    /// were selected.
-    ///
-    /// The other half is the dialog: `set_file_name(files[0].path.clone())` handed
-    /// a relative *path* to an API that wants a name. What the Windows common
-    /// dialog makes of that is not asserted here and cannot be from a test — the
-    /// asymmetry is, and it holds however the dialog behaves.
-    ///
-    /// ⚠️ **The joined directory is used only when it already exists**, and that
-    /// is the case worth two assertions rather than one: a subfolder that has
-    /// never been exported to is the *ordinary* first run, and falling back to the
-    /// remembered folder is a better start than whatever a platform dialog does
-    /// with a path that does not resolve.
-    ///
-    /// ⚠️ **Flip run**, `(start, planned.to_string())` — the old behaviour.
-    /// Predicted failing assertion: "the name". The failing *assertion* is the
-    /// **existing-subfolder** one, both halves of it at once
-    /// (`(…, "icons/close.png")` against `(…\icons, "close.png")`) — the bare-name
-    /// case above is green under the old behaviour, which is exactly why the bug
-    /// survived: the only planned paths anyone tries by hand have no `/` in them.
+    /// flip: return `(start, planned.to_string())` from `save_dialog_target` → fails
+    /// at the existing-subfolder assertion; the bare-name case stays green.
     #[test]
     fn a_planned_path_reaches_the_save_dialog_as_a_folder_and_a_name() {
         let start = std::env::temp_dir().join(format!("ondin-dialog-{}", std::process::id()));
@@ -2905,8 +2332,7 @@ mod tests {
             "the `/` is a folder the user asked for, not part of the file's name"
         );
 
-        // The same path where that folder does *not* exist yet — the ordinary
-        // first run. The name is still split off; only the directory falls back.
+        // A folder not there yet (the ordinary first run): only the directory falls back.
         assert_eq!(
             save_dialog_target(&start, "badges/new/close.png"),
             (start.clone(), "close.png".to_string()),
@@ -2915,9 +2341,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&start);
     }
 
-    /// Trim is unavailable for a format with no pixels and **keeps its value while
-    /// it is** — so switching a trimmed PNG to SVG and back does not silently
-    /// clear it.
+    /// Trim is unavailable for a format with no pixels and keeps its value meanwhile.
     #[test]
     fn trim_is_unavailable_for_svg_without_being_cleared() {
         let mut s = spec(ExportFormat::Png, ExportScale::Times(1.0));
@@ -2951,28 +2375,14 @@ mod tests {
         assert_eq!(preset_name(&[]), "Empty");
     }
 
-    /// An export row and its size line sit `ROW_LINE_GAP` apart, and one export
-    /// sits twice the card's pitch from the next.
+    /// An export row and its size line sit `ROW_LINE_GAP` apart, and one export sits
+    /// `ROW_UNIT_GAP` from the next.
     ///
-    /// **Measured through egui rather than asserted about the constants**, because
-    /// the constants were right and the drawing was not. `Ui::horizontal` takes
-    /// `spacing.interact_size.y` as a *minimum* row height and the theme's is 24;
-    /// a line of 13pt ink therefore came out 24 tall with the ink centred, adding
-    /// five points at each end — so an 8 painted as 13 and an 18 as 23. Nothing
-    /// about that was visible in the constants.
-    ///
-    /// ⚠️ **Those two numbers are a museum piece and this paragraph asserted them
-    /// in the present tense until 2026-09-09.** `ROW_LINE_GAP` is **3.0** and
-    /// `ROW_UNIT_GAP` **6.0**; their own docs record the ladders 8 → 5 → 3 and
-    /// 18 → 15 → 6, so the 8 and the 18 are where those ladders started. The
-    /// mechanism is unchanged and the test reads both constants symbolically, so
-    /// it passed either way — which is how a sentence goes on naming a value
-    /// nothing in the file holds any more. Found by `arch-scribe` reading this
-    /// paragraph against `export.rs:58` and `:86` while writing §15 D654.
-    ///
-    /// The fixture is the layout code's own shape: a card at `CARD_ROW_GAP`
-    /// holding two units, each a zero-spacing scope of a 28pt row, an allocated
-    /// gap, the size line, and an allocated gap for all but the last.
+    /// Measured through egui, since `Ui::horizontal` takes the theme's 24pt
+    /// `interact_size.y` as a minimum height and pads a small line with ink centred.
+    /// The fixture replicates the layout code's shape (a card at `CARD_ROW_GAP`
+    /// holding two zero-spacing units); it cannot see `export_row` itself, which the
+    /// next test measures.
     #[test]
     fn an_export_row_and_its_size_line_sit_where_they_are_told() {
         let ctx = egui::Context::default();
@@ -2982,8 +2392,7 @@ mod tests {
         let mut rows: Vec<egui::Rect> = Vec::new();
         let mut lines: Vec<egui::Rect> = Vec::new();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            // The card's pitch, then the rows' own region at zero — which is what
-            // lets the gap between exports be *smaller* than the card's.
+            // The card's pitch, then the rows' own region at zero.
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -3015,13 +2424,8 @@ mod tests {
             });
         });
 
-        // **This one first, because it is what the other two rest on.** The gaps
-        // below are measured between *rects*, and a rect taller than its ink hides
-        // the difference: with the theme's 24pt minimum the line's rect still began
-        // 8 below the row and ended 18 above the next, while the number inside it
-        // floated five points in from each end — so both assertions passed and the
-        // panel was wrong by ten. A line that is its own ink is what makes a rect
-        // gap and a seen gap the same measurement.
+        // First, because the gaps below are measured between rects: a rect taller
+        // than its ink would hide the difference.
         assert!(
             lines[0].height() < 20.0,
             "the size line is {:.1} tall — `interact_size.y`'s 24pt minimum is back, \
@@ -3040,43 +2444,12 @@ mod tests {
         );
     }
 
-    /// **The gap `export_row` actually allocates after itself, measured on
-    /// `export_row`** — §15 D654, `[S8.3-L6-09]`.
+    /// The gap `export_row` allocates after itself, measured on `export_row`
+    /// (§15 D654): the same row laid out with `last` false and true differs by
+    /// exactly the trailing block, so the row's height and minimums cancel.
     ///
-    /// 🚨 **The test above never calls `export_row`.** It builds its own two-unit
-    /// column out of `ui.scope` / `ui.horizontal` / `ui.allocate_space` and
-    /// measures *that*, so what it proves is that egui behaves as the recipe
-    /// expects — it cannot see whether `export_row` follows the recipe. Swapping
-    /// the two arms of `export_row`'s trailing `match lined`, which undoes exactly
-    /// the correction `ROW_UNIT_GAP`'s doc records, leaves it green; so does
-    /// deleting the `if !last` block outright. That is CLAUDE.md's third vacuity
-    /// shape — *its fixture never reached the state it names* — with the twist
-    /// that the fixture reaches an accurate **copy** of the state, which is what
-    /// makes it read as covered. The replica is kept: it is the thing that caught
-    /// `interact_size.y`'s 24pt minimum, and that is a fact about egui rather than
-    /// about this function.
-    ///
-    /// ⚠️ **The finding's own cheap fix does not work and is worth saying so.** It
-    /// proposed adding an un-captioned case *to the replica*, *"with the same
-    /// teeth"*. It has none: the replica's arithmetic is the test's, so an
-    /// assertion over it is an assertion about the fixture. The only thing that
-    /// can see `export_row`'s allocation is `export_row`.
-    ///
-    /// **The gap is measured as a difference rather than read off**, which is what
-    /// makes it independent of everything else in the row: the same row laid out
-    /// with `last` false and with `last` true differs by exactly the block under
-    /// test, so the row's own height, the theme's minimums and the size line all
-    /// cancel.
-    ///
-    /// ⚠️ **Flip run, and the predicted site was wrong.** The mutation is the
-    /// finding's own — `match lined`'s two arms swapped — and it was expected to
-    /// bite on the *un-captioned* assertion, that being the arm the replica never
-    /// builds. It bites on the **captioned** one, at 9 against 6, simply because a
-    /// swap breaks both and that assertion is written first — a captioned row
-    /// allocating 9 where it asks for 6. The un-captioned assertion is what makes
-    /// the flip unrecoverable rather than what catches it.
-    /// Run in the same command: the replica above **stays green** under it, which
-    /// is the finding in one line.
+    /// flip: swap the arms of `export_row`'s trailing `match lined` → fails at the
+    /// captioned assertion (9 against 6); the replica test above stays green.
     #[test]
     fn export_rows_trailing_gap_is_the_one_the_unit_asks_for() {
         let ctx = egui::Context::default();
@@ -3099,9 +2472,8 @@ mod tests {
         ])));
         let s = spec(ExportFormat::Png, ExportScale::Times(1.0));
 
-        // One `export_row` in its own frame — two in one frame would clash ids —
-        // wrapped in a zero-pitch scope so the scope's rect is exactly what the
-        // row allocated, trailing gap included.
+        // One `export_row` per frame (two would clash ids), in a zero-pitch scope so
+        // its rect is exactly what the row allocated.
         let height = |app: &mut crate::app::OndinApp, sizing: Option<NodeId>, last: bool| -> f32 {
             let mut h = 0.0;
             let _ = ctx.run_ui(Default::default(), |ui| {
@@ -3117,8 +2489,7 @@ mod tests {
             h
         };
 
-        // The fixture is in both states it names: with a subject the row draws its
-        // size line and without one it does not, which is the `lined` this is about.
+        // Both states: with a subject the row draws a size line, without one not.
         assert!(
             !app.export_size_label(&s, Some(rect)).is_empty(),
             "fixture: one sized subject gives the row a size line"
@@ -3135,8 +2506,7 @@ mod tests {
             (lined - ROW_UNIT_GAP).abs() < 0.5,
             "a captioned row allocates {lined:.1} after itself, not {ROW_UNIT_GAP}"
         );
-        // **A row that drew no size line spends that line's gap here instead** —
-        // the 3 a multi-selection's list was missing.
+        // A row with no size line spends that line's gap too.
         assert!(
             (bare - (ROW_UNIT_GAP + ROW_LINE_GAP)).abs() < 0.5,
             "an un-captioned row allocates {bare:.1}, not {:.1}",
@@ -3144,15 +2514,8 @@ mod tests {
         );
     }
 
-    /// The quality field's state machine, which has been wrong twice — once in
-    /// each direction — and is the reason it is a function rather than four `if`s
-    /// inside a closure.
-    ///
-    /// **Every arm is aimed at a version that shipped.** `commit_run` committed on
-    /// the drag frames (arm 2) and so could not be cancelled (arm 1); `edit_valve`
-    /// held the value in a preview that a `SetExports` cannot carry, so the number
-    /// never moved under the hand at all — which is arm 2 read the other way, and
-    /// what the `Hold` return exists to fix.
+    /// The quality field's state machine: a drag holds, a release commits once, a
+    /// cancel commits nothing.
     #[test]
     fn a_quality_scrub_holds_commits_once_and_can_be_called_off() {
         let step = |cancelled, dragged, changed, was_held, v: f64| {
@@ -3178,9 +2541,7 @@ mod tests {
             QualityStep::Commit(41)
         );
 
-        // The right-click, on the frame it lands *and* on the release after it —
-        // egui reports the motion of that frame as a change, and taking it is
-        // exactly the bug.
+        // The right-click, on the frame it lands and on the release after it.
         assert_eq!(step(true, true, true, true, 41.0), QualityStep::Nothing);
         assert_eq!(step(true, false, true, true, 41.0), QualityStep::Nothing);
 
@@ -3196,12 +2557,8 @@ mod tests {
 
     /// The `+`'s ladder: 1×, 2×, 3×, then 4× for ever.
     ///
-    /// **Both ends, because each is a version that shipped.** The bottom is the
-    /// bug this was re-cut for — the rule used to pick the first multiplier not
-    /// already *used*, so the row a fresh layer got was 1× by luck rather than by
-    /// design, and any list that already held a 1× was handed a 3× for its second
-    /// row. The top is the cap, which an uncapped `1 + n` climbs correctly for
-    /// four rungs and then walks off — 5× and 6× against the six rows read here.
+    /// Both ends: the first row is 1×, and the cap holds where an uncapped `1 + n`
+    /// would walk off to 5× and 6×.
     #[test]
     fn the_add_button_climbs_one_two_three_and_then_stays_at_four() {
         let ladder: Vec<ExportScale> = (0..6).map(ladder_scale).collect();
@@ -3210,8 +2567,7 @@ mod tests {
             [1.0, 2.0, 3.0, 4.0, 4.0, 4.0].map(ExportScale::Times),
             "an empty list must get 1×, and the fourth row onwards 4×"
         );
-        // Every rung is a rung of the dropdown, so a row the `+` produced can be
-        // read back off the combo it sits in rather than looking like a typed one.
+        // Every rung is in the dropdown, so a `+` row is not mistaken for a typed one.
         for s in &ladder {
             let ExportScale::Times(n) = s else {
                 panic!("the ladder is multipliers")
@@ -3233,54 +2589,21 @@ mod tests {
         assert_eq!(human_bytes(1024 * 1024), "1.0 MB");
     }
 
-    /// **`[S8.3-L1-01]`'s loss: the preview's area cap could not see the pad.**
+    /// The preview declines a padded export on the size the file would be, and an
+    /// over-wide one on the device's texture side, whatever its area.
     ///
-    /// `plan::raster_size` answers the *framed* size and `raster_of` squares it
-    /// afterwards, so a 32768×120 layer with *Pad out to a square* came through
-    /// the guard at 3.9 M pixels — under the 4 M cap — and then asked for a
-    /// 32768² buffer, 4 GB, on the UI thread inside `eframe::App::update`. The
-    /// same raster is what a 4096×15 banner at 8× produces.
-    ///
-    /// ⚠️ **An area cap cannot guard the raster path's failures on its own**, and
-    /// that is the general fact rather than this bug: they are a *per-side* and a
-    /// *longest-side* limit, and any area admits any aspect ratio thin enough.
-    /// The ratio needed here is about 273:1.
-    ///
-    /// ⚠️ **The second half of this test was found by writing the first half's
-    /// control and watching it crash.** The banner *without* the pad is
-    /// 32768×120 — 3.9 M pixels, under the area cap — and `ctx.load_texture`
-    /// panics on it outright: *"Texture "export-preview" has size 32768x120, but
-    /// the maximum texture side is 2048"*. So the intended control was a second
-    /// instance of the same defect, by a second per-side limit that is the
-    /// **device's** rather than the raster path's. Both are guarded now, and the
-    /// control is a small layer instead.
-    ///
-    /// **Two flips, both run, one per half of the guard.** Dropping the pad
-    /// squaring fails at *"the same strip padded is 204.8× the pixels"* — with
-    /// the summary of the preview it built, `PNG · 2048×2048 · 21 KB`, in the
-    /// message. Dropping the per-side test fails inside **egui**, at
-    /// `context.rs:2331`, with the library's own words: *"Texture
-    /// "export-preview" has size 32768x120, but the maximum texture side is
-    /// 2048"*. Neither flip reaches the other's assertion.
-    ///
-    /// ⚠️ **Neither flip allocated anything alarming, and that is a fact about
-    /// the *test environment* rather than about the bug.** A headless context
-    /// reports a 2048 texture side, so the strip's square is 4.19 M pixels — 16
-    /// MB. On a real device that same square is 16384², and the banner's is
-    /// 32768²: 1 GB and 4 GB, on the UI thread, inside the frame callback.
+    /// flip: drop the pad squaring in `build_export_preview` → fails at "the same
+    /// strip padded is …× the pixels"; drop the per-side test → panics inside egui's
+    /// `load_texture`. Neither flip reaches the other's assertion.
     #[test]
     fn a_padded_export_is_declined_by_the_preview_on_the_size_it_would_be() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
         let parent = app.session.doc.root();
-        // ⚠️ **Sized off the device's own limit**, so the *pad* guard is what
-        // decides this one and the side guard cannot: a `side × 10` strip is
-        // inside the texture limit on both axes by construction, and its square
-        // is `side²` — 4.19 M at the 2048 a headless context reports, 268 M at a
-        // real device's 16384, and over the 4 M area cap either way. The banner
-        // below is the realistic case and trips *both* guards, so it cannot tell
-        // them apart; this one can.
+        // Sized off the device's own limit so the pad guard alone decides: a
+        // `side × 10` strip is inside the texture limit, and its square is over the
+        // area cap. The banner below trips both guards.
         let max_side = f64::from(ctx.input(|i| i.max_texture_side) as u32);
         let (banner, strip) = (app.session.ids.mint(), app.session.ids.mint());
         let rect = |id, w: f64, h: f64, index| ondin_core::Operation::CreateNode {
@@ -3294,8 +2617,7 @@ mod tests {
             transform: None,
             name: None,
         };
-        // A 4096×15 banner at 8× is a 32768×120 raster — an ordinary export set,
-        // not a contrived one.
+        // A 4096×15 banner at 8× is a 32768×120 raster.
         assert!(app.session.commit(ondin_core::Transaction(vec![
             rect(banner, 4096.0, 15.0, 0),
             rect(strip, max_side, 10.0, 1),
@@ -3348,44 +2670,16 @@ mod tests {
 
 #[cfg(test)]
 mod export_all_scope_tests {
-    //! **What *Export all* actually collects** — `[S8.3-L1-02]`, §15 D516.
+    //! What *Export all* collects and how it writes (§15 D516).
 
     use super::*;
 
-    /// **A layer with export settings inside another layer with export settings
-    /// is exported too.**
+    /// A layer with export settings inside another with export settings is exported
+    /// too: its spec is a deliberate instruction, and the group is a different file.
+    /// The planned names are asserted too, since a name collision is its own failure.
     ///
-    /// `exportable_layers` walks the whole tree and collects every node with a
-    /// non-empty `exports()` — correctly — and then handed the result to
-    /// `build::in_document_order`, whose first line is `outermost(doc, ids)`.
-    /// That filter drops any id with an ancestor in the set. It is right for
-    /// `export_subjects`, the *selection* door, where a group and its child both
-    /// picked would plan the child twice (§15 D267); it is wrong here, because an
-    /// export spec on a nested layer is a deliberate instruction and exporting
-    /// the group produces a **different file** from exporting the child. A banner
-    /// frame with an icon inside it exported separately is the workflow the panel
-    /// exists for.
-    ///
-    /// ⚠️ **Nothing reported the loss.** `write_export`'s `skipped` counter only
-    /// counts layers with no *bounds*, so the status line said *"Exported 1
-    /// file"* with no qualification, while the rect's settings sat in its own
-    /// Export card producing nothing.
-    ///
-    /// ⚠️ **The documentation was the correct half, which is why this is a code
-    /// fix.** `exportable_layers`' own doc says *"Every layer in the document
-    /// that is set up to export"*, the menu row says *"Every layer with export
-    /// settings, in one go"*, and `main.rs`'s `run_export_all` says *"the same
-    /// set and the same order the panel's Export all collects"*. All three
-    /// describe what a user expects; only `outermost` disagreed — **and the CLI
-    /// had the same defect through an independent copy of the walk, so the two
-    /// front ends agreed about the wrong answer, which is why nothing noticed.**
-    ///
-    /// The planned **filenames** are asserted rather than the count alone: two
-    /// files that collide on a name are a different failure from one file, and
-    /// `plan` is where that would show.
-    ///
-    /// **Flip run**, `in_document_order` restored: fails on *"both layers are
-    /// collected"* at one id against two — the predicted site.
+    /// flip: restore `in_document_order` in `exportable_layers` → fails at "both
+    /// layers are collected" (one id against two).
     #[test]
     fn a_nested_layers_export_settings_are_not_dropped_by_export_all() {
         let ctx = egui::Context::default();
@@ -3447,27 +2741,11 @@ mod export_all_scope_tests {
         assert_ne!(names[0], names[1], "under distinct names: {names:?}");
     }
 
-    /// **Document order among *siblings* comes from the sort, not from the walk**
-    /// — §15 D649, `[A7-L8-02]`.
+    /// Document order among siblings comes from the sort, not from the walk (§15
+    /// D649); three siblings is the smallest fixture where the orders differ.
     ///
-    /// The walk in `exportable_layers` used to push each parent's children
-    /// reversed, under a comment saying that is *"what makes the traversal come
-    /// out in document order"* and that everything *"would inherit"* it. Neither
-    /// held: `build::all_in_document_order` collects its input into an
-    /// `FxHashSet` on its first line and re-walks the document, so the order the
-    /// stack produced was thrown away. The `.rev()` was removed with the comment.
-    ///
-    /// ⚠️ **Siblings, not a parent and a child.** The test above already asserts a
-    /// nested pair comes out outermost-first, and that pair is in the same order
-    /// whichever way the children are pushed — so it could not have seen this at
-    /// all. Three siblings is the smallest fixture where the two orders differ.
-    ///
-    /// ⚠️ **Flip run, and the first one deliberately does not bite.** Putting the
-    /// `.rev()` back leaves this green, which is the claim: the walk's order is
-    /// unobservable. What bites is returning `out` from `exportable_layers`
-    /// instead of the sort — `[c, b, a]` against `[a, b, c]`, on the one
-    /// assertion — which is what says the sort is load-bearing rather than
-    /// decorative, and therefore what the removed comment should have said.
+    /// flip: return `out` from `exportable_layers` instead of the sorted list →
+    /// fails at the one assertion (`[c, b, a]` against `[a, b, c]`).
     #[test]
     fn export_all_collects_siblings_in_document_order() {
         let ctx = egui::Context::default();
@@ -3506,32 +2784,11 @@ mod export_all_scope_tests {
         );
     }
 
-    /// **Export on save never opens a modal** (§15 D626, `[A5-L6-03]`).
+    /// Export on save never opens a modal (§15 D626); the remembered-folder arm is
+    /// asserted for both `how` values, as it holds whoever asked.
     ///
-    /// 🚨 **The whole GUI export path had zero tests**, and this decision — the
-    /// one `export_all`'s own doc calls out, *"a modal appearing on `Ctrl+S`
-    /// because a preference is set is the thing that would make the switch not
-    /// worth having"* — was fused to `rfd::FileDialog`. Collapse the `Quietly` arm
-    /// into the `Asking` one and every save with the preference on pops a native
-    /// folder dialog, with nothing in the workspace failing. `facts.md` put
-    /// `panels/export.rs` at **20.81% over 1,432 lines** — the largest genuinely
-    /// under-covered module in the workspace.
-    ///
-    /// ⚠️ **`OndinApp::headless` does not reach this and §15 D303 says so**: even a
-    /// headless call would open a real dialog and write real files. The decision
-    /// had to be *lifted* before it could be observed at all, which is §15 D269's
-    /// prescription and is the shape this session has now applied four times.
-    ///
-    /// **The remembered-folder arm is asserted for both `how` values**, because
-    /// that is the arm's actual claim — *whoever asked* — and a table checked one
-    /// row per input would pass against a version that only wrote for `Asking`.
-    ///
-    /// **Flip-check, run**: `(None, Quietly)` mapped to `AskForFolder` fails at
-    /// *"a save must never ask"*; and dropping the `.filter(|d| d.is_dir())` at the
-    /// call site is the other half of the same failure — **it cannot be flipped
-    /// here**, because it lives in `export_all` and is a filesystem test rather
-    /// than a decision. That half is still uncovered, and this test does not
-    /// pretend to reach it.
+    /// flip: map `(None, Quietly)` to `AskForFolder` → fails at "a save must never
+    /// ask". The `is_dir` filter in `export_all` is not reached by this test.
     #[test]
     fn export_on_save_never_asks_for_a_folder() {
         let dir = std::path::PathBuf::from("/tmp/exports");
@@ -3557,18 +2814,9 @@ mod export_all_scope_tests {
         );
     }
 
-    /// **Which dialog an explicit export opens, at the boundary that decides it**
-    /// (§15 D626, `[A5-L6-03]`).
-    ///
-    /// One file is a *Save as* with that file's own name and format filter already
-    /// filled in; two is a folder pick, because there is no one name to offer. ⚠️
-    /// **Asserted from both sides of `files.len() == 1`**, which is the whole of
-    /// the second arm — a test at one count alone says nothing about a boundary.
-    ///
-    /// **A `zip` overrides both and is matched first**, so it is asserted at each
-    /// of the three counts: an archive of one file is still an archive, which is
-    /// the case a reordered match would get wrong and the only one where the two
-    /// tables disagree.
+    /// Which dialog an explicit export opens, asserted from both sides of
+    /// `files.len() == 1`; a `zip` is an archive at every count, which a reordered
+    /// match would get wrong for one file.
     #[test]
     fn one_file_saves_and_two_pick_a_folder_unless_it_is_an_archive() {
         assert_eq!(export_dialog(false, 1), DialogKind::SaveFile);
@@ -3581,58 +2829,19 @@ mod export_all_scope_tests {
                 "an archive of {n} file(s) is still an archive"
             );
         }
-        // `run_export` returns before this on an empty plan, so zero is not a
-        // reachable input — asserted anyway, because the arm it falls into is the
-        // folder pick and a reader should not have to work that out.
+        // Unreachable (`run_export` returns on an empty plan); it falls into the pick.
         assert_eq!(export_dialog(false, 0), DialogKind::PickFolder);
     }
 
-    /// **`write_export` writes the files and reports what happened** (§15 D626,
-    /// `[S8.3-L6-04]`).
+    /// `write_export` lands the bytes under the planned names, reports the layer
+    /// with no bounds as skipped, and remembers `prefs.export_dir` (§15 D626).
+    /// The empty group has settings and no extent, the only way to reach the
+    /// skipped arm. `OndinApp::headless` uses ephemeral prefs, so the user's
+    /// `prefs.json` is untouched.
     ///
-    /// 🚨 **None of the 27 `OndinApp` methods in this file had a test caller
-    /// anywhere in the workspace**, and the *tested* export walk is the wrong one:
-    /// `main.rs`'s `export_all_runs_the_documents_own_settings` drives
-    /// `run_export_all`, which **re-implements** the same walk. The panel's door
-    /// is the one a user reaches.
-    ///
-    /// **This one needs no dialog at all**, which is why the finding names it as
-    /// the place to start: `Destination` is constructed directly, and the whole
-    /// `(failed, skipped)` reporting table becomes assertable against a temp
-    /// folder.
-    ///
-    /// **Three things are asserted and each is a separate claim.** The bytes reach
-    /// disk under the planned names — the point of the function. The `skipped`
-    /// counter appears in the sentence — *"the one refusal both writers make"*, a
-    /// subject with no bounds at all, and it is reported rather than silent, which
-    /// is exactly what `[S8.3-L1-02]` found *missing* for a different loss. And
-    /// `prefs.export_dir` is remembered, which is what makes the *next* export
-    /// silent and is therefore the input to `export_destination` above.
-    ///
-    /// ⚠️ **The empty group is the fixture's own point.** It has export settings
-    /// and no extent, so `plan::render` refuses it — that is the only way to reach
-    /// the `(None, n)` arm, and a fixture of two ordinary rects would assert the
-    /// `(None, 0)` arm twice and call it coverage.
-    ///
-    /// ⚠️ **`write_export` calls `prefs.save()` and this test does not touch the
-    /// user's `prefs.json`**, because `OndinApp::headless` sets `Prefs::ephemeral`
-    /// and `save` returns on its first line. 🚨 **That is the injection point
-    /// `library::cache::LocalIndex` still lacks** — §15 D619 records the suite
-    /// editing the person's own *Recent searches* for exactly the want of it, and
-    /// `Prefs::save`'s own first-line comment gives the reason in the words that
-    /// entry needed: *"the damage is silent and permanent — the file it writes outlives
-    /// the test by however long it takes somebody to notice"*. **The shape already
-    /// exists in this codebase; one module has it and one does not.**
-    ///
-    /// **Flip-check, run**: the `None` arm counted as a success — `rendered.push`
-    /// with empty bytes instead of `skipped += 1` — fails at **`["Icon.png",
-    /// "Nothing.png"]`, 2 against 1**. ⚠️ **The predicted site was the sentence
-    /// and it bites two assertions earlier, on the files**, which is the sharper
-    /// result: the wrong version does not merely mis-report, it writes a
-    /// **zero-byte PNG** for a layer that has nothing in it. *A miscount here is
-    /// a file on the user's disk, not a wording.* Dropping the `if written > 0`
-    /// guard around the prefs write is invisible to this fixture, which always
-    /// writes something, and is called out rather than asserted.
+    /// flip: count the `None` arm of `write_export` as a success (push empty bytes
+    /// instead of `skipped += 1`) → fails at the files assertion (2 against 1), as
+    /// it writes a zero-byte PNG. The `if written > 0` guard is not reached.
     #[test]
     fn writing_an_export_lands_the_files_and_says_what_had_no_size() {
         let ctx = egui::Context::default();
@@ -3656,8 +2865,7 @@ mod export_all_scope_tests {
                 transform: None,
                 name: Some("Icon".into()),
             },
-            // Exports set, nothing inside — `plan::render` refuses it, which is
-            // the `skipped` arm and the only way to reach it.
+            // Exports set, nothing inside: `plan::render` refuses it.
             ondin_core::Operation::CreateNode {
                 id: empty,
                 parent,
@@ -3713,41 +2921,13 @@ mod export_all_scope_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **A folder export says how many files it replaced, and where** (§15 D636,
-    /// `[S8.3-L5-05]`).
+    /// A folder export says how many files it replaced and where, and only the
+    /// folder arm does (§15 D636). The same plan is written twice, since the count
+    /// is a difference: it must read no replacement, then one. A `Destination::File`
+    /// write is the control for the other arms.
     ///
-    /// The defect is the silence rather than the write. `export_all` takes
-    /// `prefs.export_dir` — **one global folder**, set by any previous export
-    /// including a single-file save dialog's parent — and when it is still a
-    /// directory it writes there with **no dialog**; *Re-export on save* then
-    /// fires that on an **autosave**. A designer who exported once into a folder
-    /// of hand-made assets has that folder's `logo.png` replaced every time a
-    /// different document saves itself, and the message said `Exported 1 file`
-    /// and named nothing.
-    ///
-    /// ⚠️ **Only the folder arm gains this**, and the asymmetry is the decision: a
-    /// *File* or an *Archive* was named in a save dialog a moment earlier, so the
-    /// user has been shown the path and warned by the OS. A folder export can
-    /// arrive with no dialog at all, which is what `export_all`'s doc calls the
-    /// feature — *"No dialog when there is somewhere to put it"* — and what makes
-    /// the report the whole of the promise.
-    ///
-    /// **The same plan written into the same folder twice, because the count is a
-    /// difference and not a property.** It must say `0 replaced` and then
-    /// `1 replaced`; asserting only the second would pass for a message that says
-    /// "replaced" always, and asserting only the first for one that never does. A
-    /// third write follows, into a `Destination::File`, and it is the control for
-    /// the *other two arms* rather than a third folder run.
-    ///
-    /// ⚠️ Flip-checked by moving the `path.exists()` read to **after** the write,
-    /// and **the failure is one run earlier than predicted**: red on the *first*
-    /// run, at `"Exported 1 file (1 replaced)"` for a file that was not there a
-    /// moment before. Every path exists once `fs::write` has returned, so the
-    /// count comes back as the *file* count and the report is wrong from the very
-    /// first export rather than drifting into wrongness. *That is the whole of why
-    /// the read is where it is*, and it is the one line in this change a reader
-    /// could move without noticing — which is why the `!contains("replaced")`
-    /// assertion is here at all.
+    /// flip: move the `path.exists()` read in `write_export` after the write → fails
+    /// on the first run at the `!contains("replaced")` assertion.
     #[test]
     fn a_folder_export_says_what_it_replaced_and_where() {
         let ctx = egui::Context::default();
@@ -3809,7 +2989,7 @@ mod export_all_scope_tests {
             "still naming where: {again:?}"
         );
 
-        // And a *File* export is unchanged, because its dialog already said where.
+        // A *File* export is unchanged: its dialog already said where.
         let one = dir.join("named.png");
         app.write_export(plan(&app), Destination::File(one));
         let file = app.session.status().text.clone();

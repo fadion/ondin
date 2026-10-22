@@ -1,58 +1,25 @@
 //! The one background thread every record this app keeps is written on
 //! (§15 D392, D393).
 //!
-//! **[`crate::atomic`] is *how* a record is written; this is *where*.** That
-//! module's rule is that a file worth an fsync is one nothing else can
-//! reconstruct — the document, its pinned versions, the project list, the
-//! preferences, the per-machine index, a crash snapshot. This one adds the
-//! second half of the same argument: the two of those that are written *on a
-//! timer, over a whole document* must not be written from the frame.
+//! [`crate::atomic`] is how a record is written; this is where. The two writes
+//! made on a timer over a whole document (autosave and the crash snapshot) must
+//! not run from the frame: `ondin_core::io::save` serialises every embedded
+//! picture, which costs over a second in a debug build at 60 MB.
 //!
-//! **Why a thread at all.** `ondin_core::io::save` serialises the whole
-//! document, every embedded picture base64'd into the JSON, and until 2026-08-30
-//! both the crash snapshot and the autosave ran straight from the frame that
-//! noticed their interval had elapsed. Measured at four sizes of embedded image
-//! rather than estimated: 1 MB of pictures costs 1.3 ms in release and 20 ms in
-//! debug, 20 MB costs 25 ms and 387 ms, and 60 MB costs 72 ms and **1.15 s**,
-//! before the disk write. So a photo-carrying document stalled the UI for a
-//! second or more every ten seconds for the snapshot and every thirty for the
-//! save, in the build anyone develops in — the two features that exist to
-//! protect work being the most expensive thing in the frame.
+//! Moving them is cheap because [`Document`] is cheap to clone: an
+//! `ImageSource::Embedded` holds an `Arc<[u8]>` (§15 D301), so the copy handed to
+//! the worker is a refcount bump per picture.
 //!
-//! **What makes moving them cheap is [`Document`] being cheap to clone.** An
-//! `ImageSource::Embedded` holds an `Arc<[u8]>` (§15 D301), so the copy handed
-//! to the worker is a refcount bump per picture and not the pictures. The frame
-//! keeps the clone and gives away the serialise, which is the right way round by
-//! three orders of magnitude.
+//! One worker serves both, in FIFO order, and the only other writer is the frame
+//! itself, which [`Writer::settle`]s first (see `OndinApp::save_file`). The FIFO
+//! also keeps a removal from being overtaken by the write it may be cancelling,
+//! so *Discard* and `OndinApp::drop_recovery` cannot resurrect a deleted
+//! snapshot. The write layer does not depend on the writer count: `atomic::temp_for`
+//! is unique per write, since a second Ondin process can race too (§15 D548).
 //!
-//! **One worker for both.** With one queue there is exactly one background
-//! writer of anything, in FIFO order, and the only other writer is the frame
-//! itself — which [`Writer::settle`]s first (see `OndinApp::save_file`).
-//!
-//! ⚠️ **That used to be load-bearing for [`crate::atomic`]'s temp-file scheme and
-//! is not any more (§15 D548).** `atomic::temp_for` derived the temp name from the
-//! target with no unique part, on the stated grounds that this app does not have
-//! two writers racing for one path — so a second thread here would have made that
-//! false the day it was added, and this paragraph was the thing holding it shut by
-//! hand. It was **already** false, for a reason no amount of care in this module
-//! could reach: nothing stops a second Ondin *process*, and `[A3-L5-04]` staged
-//! the torn document that follows. `temp_for` now carries a pid and a counter, so
-//! the write layer no longer depends on how many writers this one has. **The FIFO
-//! below still does**, which is why the queue is still the shape it is.
-//!
-//! ⚠️ **The FIFO is load-bearing a second time, for the snapshot.** A removal
-//! goes down the same queue as the write it may be cancelling, so *Discard* and
-//! `OndinApp::drop_recovery` cannot be overtaken by a write already in flight and
-//! resurrect the file they just deleted — which at the next launch is a question
-//! about work the user already dealt with.
-//!
-//! **The queue is drained, not polled for a picture.** Nothing a job reports
-//! changes what is on screen by itself: a [`Done`] moves the save dot and the
-//! bookkeeping behind it. It still calls `request_repaint`, for
-//! `crate::fonts::FontService::new`'s reason — eframe here is reactive, and the
-//! frame that would otherwise read the result is one that has to happen for some
-//! other reason. The save dot going from red to green is the one
-//! visible thing that would otherwise wait for a mouse to move.
+//! The queue is drained, not polled for a picture: a [`Done`] only moves the save
+//! dot and its bookkeeping. It still calls `request_repaint`, for
+//! `crate::fonts::FontService::new`'s reason, since eframe is reactive.
 
 use super::{recovery, store};
 use ondin_core::Document;
@@ -66,27 +33,23 @@ pub struct Writer {
     done: std::sync::mpsc::Receiver<Done>,
     /// Jobs sent and not yet answered.
     ///
-    /// **Counted here rather than derived from the channel**, because a
-    /// `Receiver` cannot say how many sends are still in the worker's hands —
-    /// which is the one question [`Self::settle`] exists to answer.
+    /// Counted here because a `Receiver` cannot say how many sends are still in
+    /// the worker's hands, which is what [`Self::settle`] needs.
     in_flight: usize,
     handle: Option<std::thread::JoinHandle<()>>,
     /// Answers this side made up, waiting to be drained with the worker's.
     ///
-    /// ⚠️ **A dead worker sends nothing, and silence is the one thing neither of
-    /// these features may do.** A [`Done`] is the only route to the status line —
-    /// to crash recovery's one-shot latch (`recovery::RecoveryState::warned`,
-    /// D377) and to a save's own failure message — so a worker that has panicked
-    /// would otherwise take both down without a word. Both places that can notice
-    /// put a failure here instead of shrugging.
+    /// A dead worker sends nothing, and a [`Done`] is the only route to the status
+    /// line (crash recovery's one-shot latch, `recovery::RecoveryState::warned`,
+    /// D377, and a save's failure message). Both places that notice a death put a
+    /// failure here instead of staying silent.
     reports: Vec<Done>,
 }
 
 /// One job on [`Writer`]'s queue.
 ///
-/// ⚠️ **The documents are boxed.** `Forget` is two strings and a `Document` is
-/// not, so every queued removal would otherwise carry a document's worth of
-/// stack — and removals are the common case at the end of a session.
+/// The documents are boxed so a queued `Forget` (two strings) does not carry a
+/// `Document`'s worth of stack.
 enum Job {
     /// Serialise `doc` and write it as the crash snapshot for `key`
     /// ([`recovery::write`]).
@@ -94,8 +57,7 @@ enum Job {
         root: PathBuf,
         key: String,
         doc: Box<Document>,
-        /// The revision `doc` was cloned at, handed back on success so the app
-        /// records what reached the disk rather than what it hoped would.
+        /// The revision `doc` was cloned at, handed back on success.
         at: u64,
     },
     /// [`recovery::remove`], on the queue so that it cannot overtake a snapshot.
@@ -104,43 +66,27 @@ enum Job {
     Document {
         path: PathBuf,
         doc: Box<Document>,
-        /// As `Snapshot`'s — and here it decides whether the session may be
-        /// marked clean at all, since an edit made while this was in flight
-        /// means the file is already behind.
+        /// As `Snapshot`'s; it also decides whether the session may be marked
+        /// clean, since an edit made in flight leaves the file behind.
         at: u64,
     },
 }
 
 /// The one document path the worker will panic on instead of writing.
 ///
-/// ⚠️ **The fault has to be injected, because no panic in the save path is
-/// known** — which is what kept `[S1.2-L1-04]` untested rather than unnoticed, and
-/// D392 recorded that neither of its failure arms had a test. What a test reaches
-/// through this is not "a panic" but its residue, and the residue is the whole
-/// mechanism: the thread gone, that job's `Done` never sent, and `in_flight`
-/// still counting it. A panic in `ondin_core::io::save`, in
-/// `store::write_document` or in `recovery::write` arrives here identically.
+/// The fault is injected because no panic in the save path is known. What a test
+/// reaches is its residue: the thread gone, that job's `Done` never sent, and
+/// `in_flight` still counting it, as a panic in `ondin_core::io::save`,
+/// `store::write_document` or `recovery::write` would leave it.
 ///
-/// ⚠️ **Keyed on a path rather than being a bare "next job" one-shot**, which is
-/// where this differs from `boolean::poison_next` and why. That one can be a
-/// global flag because nothing else evaluates a boolean concurrently; here the
-/// whole test binary is one process, a document write is the commonest job in it,
-/// and a one-shot would be consumed by whichever test happened to autosave next —
-/// arming the fault in one test and firing it in another. A path inside the test's
-/// own temp directory cannot be.
-///
-/// The panic message reaches the test's stderr, which is the ordinary cost of a
-/// synthetic panic here and cheaper than swapping the process-global panic hook
-/// out from under whatever tests are running beside it.
+/// Keyed on a path, not a one-shot "next job" flag: the test binary is one
+/// process and a one-shot would fire in whichever test autosaved next. The panic
+/// message reaching stderr is cheaper than swapping the global panic hook.
 #[cfg(test)]
 static POISONED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 /// Make the worker panic when it dequeues a `Job::Document` for `path`, rather
 /// than writing it. See `POISONED`.
-///
-/// Plain backticks throughout this item and the two below it, not `[links]` —
-/// §15 D319's convention: they are `#[cfg(test)]`, so `cargo doc` cannot see them
-/// and a link here is decoration no gate can validate.
 #[cfg(test)]
 pub fn poison_document(path: &Path) {
     if let Ok(mut poisoned) = POISONED.lock() {
@@ -150,18 +96,15 @@ pub fn poison_document(path: &Path) {
 
 /// What a finished job reports back.
 ///
-/// **Five variants and five readers, rather than one `Result` per job.** A
-/// snapshot failing and a save failing are different sentences in different
-/// places — one latches, one does not — and collapsing them would put a save's
-/// error behind crash recovery's one-shot warning, where the user would see it
-/// once and never again.
+/// Five variants rather than one `Result` per job: a snapshot failure latches
+/// and a save failure does not, and collapsing them would hide a save's error
+/// behind crash recovery's one-shot warning.
 pub enum Done {
     /// A snapshot capturing this revision is on disk.
     Snapshotted(u64),
     /// It is not, and this is why — for the latch, once.
     SnapshotFailed(String),
-    /// A removal finished. **Nothing reads this**; it exists so that
-    /// [`Writer::settle`] can count every job the queue has taken.
+    /// A removal finished. Nothing reads it; [`Writer::settle`] counts it.
     Forgot,
     /// The document at `path` now holds revision `at`.
     Saved { path: PathBuf, at: u64 },
@@ -172,9 +115,8 @@ pub enum Done {
 impl Writer {
     /// Start the worker.
     ///
-    /// Called on the first job and not before, so the app pays for a thread only
-    /// once a document has been edited — which is most sessions, and none of the
-    /// several hundred headless probes that never dirty anything.
+    /// Called on the first job, so the app pays for a thread only once a
+    /// document has been edited.
     pub fn spawn(ctx: &egui::Context) -> Self {
         let (tx, jobs) = std::sync::mpsc::channel::<Job>();
         let (report, done) = std::sync::mpsc::channel::<Done>();
@@ -249,19 +191,10 @@ impl Writer {
     }
 
     fn send(&mut self, job: Job) {
-        // A send fails only if the worker has died, which it does by panicking
-        // inside a job — nothing else ends it while this sender is alive.
-        //
-        // ⚠️ **Reported rather than dropped, and reported against the job that
-        // could not be sent**, because the two failures are not the same
-        // sentence. Either way it is not one write lost but every write of that
-        // kind this session will ever make: the worker cannot be restarted.
-        //
-        // An earlier draft shrugged, on the argument that the next `settle`
-        // would say so by finding the queue empty. That was wrong — `settle`
-        // finds it empty and says nothing to anybody, and a `Done` is the only
-        // thing either status line reads. `arch-scribe` caught it by reading the
-        // comment against what `settle` actually does.
+        // A send fails only if the worker died by panicking inside a job. It is
+        // reported against the job that could not be sent, not dropped: every
+        // write of that kind this session is lost, and `settle` finding an empty
+        // queue says nothing, so a `Done` is the only thing a status line reads.
         let failure = match &job {
             Job::Document { .. } => Done::SaveFailed(WORKER_STOPPED.to_string()),
             _ => Done::SnapshotFailed(WORKER_STOPPED.to_string()),
@@ -274,45 +207,30 @@ impl Writer {
 
     /// Everything the worker has finished, without waiting for what it has not.
     ///
-    /// ⚠️ **This reads `try_recv`'s error variant rather than collapsing it, and
-    /// until §15 D549 it did not (`[S1.2-L1-04]`).** `while let Ok(msg) =
-    /// try_recv()` leaves on `Empty` and on `Disconnected` alike, so the
-    /// once-per-frame path — the only one an ordinary editor session ever runs —
-    /// read a hung-up channel as an idle one. A worker that panicked inside a
-    /// `Job::Document` then took autosave down for the rest of the session in
-    /// silence: that job's `Done` never arrives, `EditorSession::saving` stays
-    /// `Some`, and `OndinApp::autosave_tick`'s `is_saving()` gate returns early on
-    /// every subsequent frame — so no further document job is ever queued and
-    /// [`Self::send`]'s failure report, which D392 names as the backstop, is never
-    /// reached. The save dot's tooltip reads *Saving…* forever while nothing is being saved.
-    /// [`Self::settle`] has always noticed; `settle` runs only from `save_file`,
-    /// `on_exit` and `relocate`, none of which happen on their own.
+    /// This reads `try_recv`'s error variant rather than collapsing it (§15 D549):
+    /// treating `Disconnected` as idle would let a worker that panicked in a
+    /// `Job::Document` disable autosave silently, since `EditorSession::saving`
+    /// stays `Some` and `OndinApp::autosave_tick`'s `is_saving()` gate returns
+    /// early on every frame, so [`Self::send`]'s failure report is never reached.
     pub fn drain(&mut self) -> Vec<Done> {
-        // This side's own answers first — see [`Self::reports`].
+        // This side's own answers first, see [`Self::reports`].
         let mut out: Vec<Done> = std::mem::take(&mut self.reports);
         loop {
             match self.done.try_recv() {
                 Ok(msg) => {
-                    // Saturating, though the count cannot go under: the worker
-                    // sends exactly one `Done` per job and nothing else holds the
-                    // sender. A wrong answer here is one line of bookkeeping; a
-                    // subtraction overflow is the app going down in a debug build,
-                    // and this runs on every frame of every editor session.
+                    // Saturating: an overflow would take a debug build down on
+                    // every frame, and the count should not go under anyway.
                     self.in_flight = self.in_flight.saturating_sub(1);
                     out.push(msg);
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                // The worker is gone and anything still counted died with it —
-                // [`Self::settle`]'s `Err(_)` arm, on the frame path, for its
-                // reasons: the count is all that is left of the lost job, so both
-                // failures are reported because this cannot tell which it was.
+                // The worker is gone and whatever was counted died with it;
+                // [`Self::settle`]'s `Err(_)` arm on the frame path, reporting both
+                // failures as it cannot tell which job it was.
                 //
-                // ⚠️ **`in_flight` is the latch and no new field is needed.**
-                // Clearing it to zero is what stops the next frame — and every
-                // frame after, since the channel stays disconnected forever —
-                // reporting the same death again. A `Disconnected` with nothing in
-                // flight is a worker that died *between* jobs, where no answer was
-                // owed and `send` will report on the next attempt.
+                // Zeroing `in_flight` is the latch that stops every later frame
+                // reporting the same death. `Disconnected` with nothing in flight
+                // is a death between jobs, which `send` reports on its next attempt.
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     if self.in_flight > 0 {
                         self.in_flight = 0;
@@ -326,22 +244,14 @@ impl Writer {
         out
     }
 
-    /// Everything the worker has finished **and everything still queued**,
-    /// blocking until the queue is empty.
+    /// Everything the worker has finished and everything still queued, blocking
+    /// until the queue is empty.
     ///
-    /// ⚠️ **For the way out of the process, for the frame that is about to write
-    /// the same file itself, and for tests — never for an ordinary frame.** The
-    /// whole point of this type is that a frame does not wait on a serialise.
-    /// The three that must are a deliberate close, where there is no next frame
-    /// to notice; `OndinApp::save_file`, which would otherwise be a second writer
-    /// racing the worker for one path; and a test asserting on the file.
-    ///
-    /// ⚠️ **That middle reason used to add *"and one temp file"* and no longer
-    /// can** (§15 D548): `atomic::temp_for` is unique per write, so the two do not
-    /// collide there any more. **The reason is unchanged in force and narrower in
-    /// kind** — an autosave taken at an older revision can still land *after* the
-    /// explicit save and put the earlier document on disk. Losing the temp-file
-    /// half of the argument is not a reason to relax this call.
+    /// Never for an ordinary frame, which must not wait on a serialise. Only a
+    /// deliberate close (no next frame to notice), `OndinApp::save_file` (an
+    /// autosave at an older revision could otherwise land after the explicit save
+    /// and put the earlier document on disk; §15 D548) and a test asserting on
+    /// the file.
     pub fn settle(&mut self) -> Vec<Done> {
         let mut out = self.drain();
         while self.in_flight > 0 {
@@ -350,18 +260,12 @@ impl Writer {
                     self.in_flight -= 1;
                     out.push(msg);
                 }
-                // The worker panicked *inside* a job, so that job's answer will
-                // never come. Nothing more is coming at all, and waiting would
-                // hang the close this is usually being called from — so the
-                // count is cleared and the loss is said out loud, for
-                // [`Self::reports`]' reason. This is the one arm that notices a
-                // death mid-job; `send` notices it on the next attempt, and
-                // after a close there may not be one.
-                //
-                // ⚠️ **Reported as *both*, because this arm cannot tell which
-                // job died.** The count is all that is left of it by here. Saying
-                // it twice is the safe direction: the alternative is a save that
-                // silently never happened, or crash recovery silently off.
+                // The worker panicked inside a job, so nothing more is coming and
+                // waiting would hang the close. The count is cleared and the loss
+                // reported, for [`Self::reports`]' reason; `send` would only notice
+                // on a next attempt that a close may never make. Reported as both
+                // kinds, as the count is all that is left of the job: saying it
+                // twice beats a silent lost save or silently disabled recovery.
                 Err(_) => {
                     self.in_flight = 0;
                     out.push(Done::SnapshotFailed(WORKER_DIED.to_string()));
@@ -376,14 +280,9 @@ impl Writer {
     /// Wait for the worker to stop, for a test that has queued a job
     /// `poison_document` will kill it on.
     ///
-    /// **Joined rather than slept on**, which is what makes such a fixture a
-    /// measurement instead of a race: after this returns the worker's
-    /// `Sender<Done>` has been dropped, so `try_recv` answers `Disconnected`
-    /// rather than `Empty` on the very next call — and `in_flight` still counts
-    /// the job that died, which together are the exact state
-    /// `Self::drain` was blind to. Taking the handle also means `Drop` has
-    /// nothing left to join, which is correct: the thread it would wait for has
-    /// already ended.
+    /// Joined rather than slept on, so the fixture is not a race: afterwards
+    /// `try_recv` answers `Disconnected` and `in_flight` still counts the dead
+    /// job. Taking the handle leaves `Drop` nothing to join.
     #[cfg(test)]
     pub fn wait_for_worker(&mut self) {
         if let Some(handle) = self.handle.take() {
@@ -392,29 +291,20 @@ impl Writer {
     }
 }
 
-/// What a failed `send` says. One string, because the two `Done`s it can become
-/// differ in where the message lands and not in what happened.
+/// What a failed `send` says; one string for both `Done`s it can become.
 const WORKER_STOPPED: &str = "the writer thread stopped and cannot be restarted this session";
 
 /// What a hang-up mid-job says.
 const WORKER_DIED: &str = "the writer thread stopped part-way through a write";
 
 impl Drop for Writer {
-    /// ⚠️ **Joins, which makes dropping the app a flush.** A write still in
-    /// progress when the process leaves is the one loss both of these features
-    /// exist to prevent. The wait is bounded by one document's serialise, and
-    /// only happens when something was actually in flight.
+    /// Joins, so dropping the app flushes a write still in progress; the wait is
+    /// bounded by one document's serialise.
     ///
-    /// ⚠️ **The backstop, not the primary — that is `eframe::App::on_exit`, and
-    /// getting the two the wrong way round is how this comment first read.** A
-    /// destructor is the *most* skippable of the three flushes, not the least:
-    /// eframe calls `std::process::exit(0)` when `run_and_return` is off, and
-    /// even with it on, eframe's own note at `native/run.rs`'s `exiting` says
-    /// that a macOS `Cmd-Q` reaches the loop's exit and then `run_app_on_demand`
-    /// *never returns* — so the app is never dropped and this never runs. Two
-    /// paths, not one. `on_exit` is reached on all of them, which is why the
-    /// order is: `on_exit` first, the close arms for the case that has already
-    /// decided, and this for whatever is left.
+    /// This is the backstop, not the primary (`eframe::App::on_exit`): eframe
+    /// calls `std::process::exit(0)` when `run_and_return` is off, and on macOS
+    /// `Cmd-Q` `run_app_on_demand` never returns, so the app is never dropped.
+    /// `on_exit` is reached on all paths, then the close arms, then this.
     fn drop(&mut self) {
         drop(self.tx.take());
         if let Some(handle) = self.handle.take() {

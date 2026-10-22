@@ -1,40 +1,31 @@
 //! Identity for the items in a layer's lists (§15 D980).
 //!
-//! Five lists on a node are edited as items — `Paint::fills`, `Paint::strokes`,
-//! `Node::effects`, `Node::exports` and `Node::grids` — and each item carries an
-//! [`ItemId`] beside it in a [`Keyed`] wrapper. The id is what lets an instance's
-//! fill follow its main component's fill **item by item** once an instance can add,
-//! delete and reorder items of its own (§5.3d): position cannot say which item is
-//! which after any of those.
+//! Five lists on a node (`Paint::fills`, `Paint::strokes`, `Node::effects`,
+//! `Node::exports`, `Node::grids`) are edited as items, each carrying an [`ItemId`]
+//! in a [`Keyed`] wrapper, so an instance's fill follows its main's item by item
+//! once it can add, delete and reorder its own (§5.3d).
 //!
-//! 🚨 **The id lives beside the item, never inside it.** `Fill`, `Stroke`, `Effect`,
-//! `ExportSpec` and `LayoutGrid` all derive `PartialEq`, and every *same look*
-//! comparison in the workspace — the inspector's *Mixed*, `changes_nothing`,
-//! `overwrites` and run merging — compares them. An id field inside the item would
-//! make two identical shadows unequal, silently. With the wrapper, `a.value == b.value`
-//! asks *same look* and `a == b` asks *same item, same look*; the five whole-list
-//! *Mixed* readings compare through [`same_values`]. Do not "simplify" the wrapper
-//! into a field.
+//! The id lives beside the item, never inside it: the item types derive `PartialEq`
+//! and every "same look" comparison uses it, which an id field would silently break.
+//! `a.value == b.value` asks same look, `a == b` same item and look; whole-list
+//! comparisons go through [`same_values`]. Do not "simplify" the wrapper into a field.
 //!
-//! ⚠️ **There is deliberately no `From<Vec<T>>`.** The tempting edit shape — clone the
-//! values out, change one, collect them back in — would re-key every item by
-//! position and quietly cut each one from its counterpart in the main. Every site
-//! that builds a keyed list says how: it keeps the ids it read ([`Keyed::map`]), it
-//! mints a fresh one for an item it adds ([`IdSource::mint_item`]), or it builds a
-//! list for a node that has never had one ([`keyed_by_position`]).
+//! There is deliberately no `From<Vec<T>>`: clone-edit-collect would re-key every
+//! item by position and cut it from its counterpart in the main. A site that builds
+//! a keyed list keeps the ids it read ([`Keyed::map`]), mints one for an added item
+//! ([`IdSource::mint_item`]), or numbers a list that never had ids
+//! ([`keyed_by_position`]).
 
 use crate::id::{IdSource, NodeId};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The identity of one item in one of a node's five item lists.
 ///
-/// A newtype over [`NodeId`], as `GuideId` is, minted from the same session
-/// stream by the caller (invariant 3 — `apply` never allocates). **Unique within
-/// its list, not across nodes**: duplicating a node copies its item ids verbatim,
-/// and that is the match — a copy's fill is its source's fill exactly when their
-/// ids agree. Minted from the global stream rather than a per-list counter so an
-/// item added locally to an instance and one added later to its main can never
-/// collide.
+/// A newtype over [`NodeId`], minted by the caller from the session stream
+/// (invariant 3 — `apply` never allocates). Unique within its list, not across
+/// nodes: duplicating a node copies its item ids, and equal ids are the match. The
+/// global stream, not a per-list counter, keeps an instance's local item from
+/// colliding with one later added to its main.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemId(pub NodeId);
 
@@ -43,10 +34,9 @@ impl ItemId {
     /// actor 0, seq = index. Deterministic, so a migrated document saves to the
     /// same bytes twice (invariant 9), and unique within the list it numbers.
     ///
-    /// ⚠️ **Actor 0 is improbable for a live session, not impossible** —
-    /// `session::random_actor` is an unguarded hash. What keeps a minted id off a
-    /// positional one is [`crate::reserve_existing_ids`] sweeping item ids too, so a
-    /// session whose actor happens to be 0 starts its seqs past every one in use.
+    /// A live session can in principle draw actor 0 (`session::random_actor` is an
+    /// unguarded hash); [`crate::reserve_existing_ids`] sweeps item ids too, so
+    /// such a session starts its seqs past every one in use.
     pub fn positional(index: usize) -> ItemId {
         ItemId(NodeId {
             actor: 0,
@@ -127,11 +117,9 @@ impl<T> std::ops::DerefMut for Keyed<T> {
 /// A list for a node that has never had one, keyed by position
 /// ([`ItemId::positional`]).
 ///
-/// **Only for a list built whole**: a new node, an import, a migration, a test.
-/// It is safe there because the ids are unique within the list and any item added
-/// later is minted. It is **not** safe for an item appended to an existing list —
-/// an instance that deleted its main's second fill and then added one positionally
-/// would take the deleted fill's id and be matched to it.
+/// Only for a list built whole (a new node, import, migration, test). Not for an
+/// item appended to an existing list: an instance that deleted its main's second
+/// fill and added one positionally would take the deleted fill's id.
 pub fn keyed_by_position<T>(items: impl IntoIterator<Item = T>) -> Vec<Keyed<T>> {
     items
         .into_iter()
@@ -155,28 +143,20 @@ pub fn values<T: Clone>(items: &[Keyed<T>]) -> Vec<T> {
 /// `target`, a list that **looks** like `anchor`, keeping `target`'s own ids.
 ///
 /// The multi-selection write: the inspector shows one list for several layers whose
-/// lists agree in value, the user edits it, and each layer receives the edit. Writing
-/// `edited` verbatim would give every layer the anchor's ids, and on an instance's
-/// child that cuts each item from its counterpart in the main. So an item of
-/// `edited` whose id is the anchor's item at position `p` takes the target's id at
-/// `p`; an item the anchor never had (a row the user added, which its caller
-/// minted) **keeps its own id on every target**, so one edit adding a row to
-/// several layers adds one item to all of them.
+/// lists agree in value, and each layer receives the edit. Writing `edited` verbatim
+/// would give every layer the anchor's ids and cut an instance's items from its
+/// main's. So an item whose id is the anchor's item at position `p` takes the
+/// target's id at `p`; an item the anchor never had (an added row, minted by the
+/// caller) keeps its own id on every target.
 ///
-/// **One shared id, not one per target** (§15 D1003 (6), `[X1-L1-01]`). This
-/// minted per target until the ruling, and over a main and its instance selected
-/// together that cut the instance's new row from the main's at birth: a local
-/// addition with its own id, a ghost row for the main's, and every later edit of
-/// the main's row skipping the copy (`propagate` stands down on a field the
-/// user's own transaction wrote). An id shared across nodes is how D980 spells a
-/// match, and between unlinked layers it costs nothing, since an id is unique
-/// within one list only. The one place an un-anchored id is **not** kept is a
-/// target already holding it, where it is minted after all — keeping it there
-/// would repeat an id in that list, which `apply` refuses.
+/// One shared id, not one per target (§15 D1003 (6)): minting per target cut an
+/// instance's new row from its main's when both were selected. An id shared across
+/// unlinked nodes costs nothing, since ids are unique within one list only. A
+/// target already holding the id mints instead, or `apply` would refuse the repeat.
 ///
-/// Callers pass lists that agree in value position by position; where they do not
-/// (a shorter target), an anchored item with no counterpart at its position keeps
-/// its id by the same rule as an added one.
+/// Callers pass lists that agree in value position by position; an anchored item
+/// with no counterpart (a shorter target) keeps its id by the same rule as an
+/// added one.
 pub fn retarget<T: Clone>(
     anchor: &[Keyed<T>],
     target: &[Keyed<T>],
@@ -201,20 +181,15 @@ pub fn retarget<T: Clone>(
 }
 
 /// `values` written over `own` **wholesale**, item `p` taking `own`'s id at `p` and
-/// anything past `own`'s end the id `fresh` holds for `p` — minted the first time
-/// any target of the write reaches that position, and the same for every target
-/// after it (§15 D1003 (6), `[X1-L1-01]`: a paste onto a main and its instance
-/// together gives each pasted item past the end one id on both, so the copy
-/// follows the main's later edit of it). Pass one [`PastTheEnd`] per write, never
-/// one per target.
+/// anything past `own`'s end the id `fresh` holds for `p`, minted the first time any
+/// target reaches that position and shared by every later target (§15 D1003 (6)).
+/// Pass one [`PastTheEnd`] per write, never one per target.
 ///
-/// For a replacement that is not an edit of the list it lands on — *Paste
-/// properties*, a panel clearing every fill — where there is no anchor to say which
-/// item became which, and keeping the ids by position is what lets an instance's
-/// child read the paste as overrides of its main's items rather than as every item
-/// deleted and new local ones added. ⚠️ **Not for an edit**: deleting the first of
-/// two items shifts the second into position 0, and this would hand it the deleted
-/// item's id. An edit goes through [`retarget`].
+/// For a replacement that is not an edit (*Paste properties*, clearing every fill),
+/// where no anchor says which item became which; keeping ids by position lets an
+/// instance read the paste as overrides of its main's items. Not for an edit:
+/// deleting the first of two items would hand the second the deleted item's id.
+/// An edit goes through [`retarget`].
 pub fn rekey_by_position<T>(
     own: &[Keyed<T>],
     values: impl IntoIterator<Item = T>,
@@ -232,12 +207,9 @@ pub fn rekey_by_position<T>(
 }
 
 /// The ids one wholesale write ([`rekey_by_position`]) gives the positions past a
-/// target's end, **one per position for the whole write**, shared by every target
-/// that reaches it (§15 D1003 (6)).
-///
-/// Unique within each list all the same: a target keeps its own ids below its
-/// end and takes these only at and past it, and each of these was minted fresh,
-/// so it is in no list yet.
+/// target's end, one per position for the whole write, shared by every target that
+/// reaches it. Still unique within each list: each is minted fresh and taken only
+/// at and past a target's end.
 #[derive(Debug, Default)]
 pub struct PastTheEnd(Vec<Option<ItemId>>);
 
@@ -253,14 +225,11 @@ impl PastTheEnd {
 
 /// `items` with every repeat of an id after its first given the lowest positional
 /// id ([`ItemId::positional`]) the list does not hold — the loader's repair for a
-/// property list a build before `[R1-L2-02]`'s fix saved with one id twice
-/// (*Combine as variants* made them). Refusing such a file would lose the
-/// document over a defect the app itself wrote.
+/// property list saved with one id twice by an older build. Refusing the file would
+/// lose a document over a defect the app wrote.
 ///
-/// **A function of the list alone**, never a minted id: the loader must give the
-/// same document for the same bytes (invariant 9; `io::schema`'s note on the
-/// document id it does not mint). A positional id is actor 0's, which
-/// [`crate::reserve_existing_ids`] sweeps past for any session that is.
+/// A function of the list alone, never a minted id: the same bytes must load to the
+/// same document (invariant 9).
 pub(crate) fn rekey_repeats<T>(mut items: Vec<Keyed<T>>) -> Vec<Keyed<T>> {
     let held: rustc_hash::FxHashSet<ItemId> = items.iter().map(|k| k.id).collect();
     let mut seen = rustc_hash::FxHashSet::default();
@@ -323,17 +292,12 @@ mod tests {
         assert!(!same_values(&a, &keyed_by_position([1])));
     }
 
-    /// The multi-selection write keeps each target's ids: an edited value lands on
-    /// the target's own item, a deleted one drops it, and an added one **keeps the
-    /// id its caller minted**, on this target as on every other (§15 D1003 (6),
-    /// `[X1-L1-01]` — it was minted fresh per target until the ruling, and this
-    /// test asserted that). A target that already holds the added id mints instead,
-    /// or its list would repeat one.
+    /// The multi-selection write keeps each target's ids, and an added item keeps
+    /// the id its caller minted unless the target already holds it.
     ///
-    /// Flips, run: writing `edited` verbatim (the anchor's ids) fails the first
-    /// assertion; minting for every un-anchored item (the rule before) fails *"an
-    /// added item keeps its id"*; keeping the id even where the target holds it
-    /// fails *"minted where the target holds it"*.
+    /// flip: writing `edited` verbatim → fails at the first id assertion; minting
+    /// for every un-anchored item → fails at "an added item keeps its id"; keeping
+    /// the id where the target holds it → fails at "minted where the target holds it".
     #[test]
     fn retarget_keeps_the_targets_ids_and_an_added_items_own() {
         let anchor = keyed_by_position(['a', 'b', 'c']);
@@ -360,11 +324,9 @@ mod tests {
         assert_eq!(first_duplicate(&out), None);
     }
 
-    /// A wholesale write gives the positions past each target's end **one id per
-    /// position across the write** (§15 D1003 (6)): a one-item and a two-item
-    /// target written three values share the id at position 2, and the one-item
-    /// target's position 1 is fresh, not the other's own item. Flip, run:
-    /// `PastTheEnd::at` minting on every call fails *"one id at position 2"*.
+    /// A wholesale write gives positions past each target's end one id per position
+    /// across the write. flip: `PastTheEnd::at` minting on every call → fails at
+    /// "one id at position 2".
     #[test]
     fn a_wholesale_write_shares_the_ids_past_the_end() {
         let mut ids = IdSource::new(0xAB);
@@ -385,16 +347,12 @@ mod tests {
         assert_eq!((first_duplicate(&s), first_duplicate(&l)), (None, None));
     }
 
-    /// The loader's repair (`[R1-L2-02]`): each repeat after the first takes the
-    /// lowest positional id the list does not already hold — **anywhere** in it,
-    /// so `0:0`, carried by an item *after* the repeats, is skipped and kept by
-    /// its own item. The first of the repeats keeps its id.
+    /// Each repeat takes the lowest positional id the list does not hold anywhere,
+    /// so `0:0`, carried by an item after the repeats, stays with its owner.
     ///
-    /// Flip, run: the `held` test dropped hands the first repeat `0:0` and
-    /// re-keys the later item that owned it, *its* id changing for no reason —
-    /// the equality fails with `[a, 0:0, 0:1, 0:2]`. (A first version of this
-    /// test put the positional item *before* the repeats, where `seen` already
-    /// covers it, and the same flip stayed green.)
+    /// flip: dropping the `held` test in `rekey_repeats` → fails at the equality
+    /// (`[a, 0:0, 0:1, 0:2]`). The positional item must follow the repeats, or
+    /// `seen` covers it and the flip stays green.
     #[test]
     fn rekey_repeats_takes_the_lowest_free_positional_id() {
         let mut ids = IdSource::new(0xAB);

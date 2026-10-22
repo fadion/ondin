@@ -1,26 +1,20 @@
 //! Every write the library makes: filing a new document, renaming one, moving
-//! it between projects, deleting it, and pinning a version (§9.5, §15 D364).
+//! it between projects, deleting it, and pinning a version (§9.5).
 //!
-//! **One rule holds all of these together — the file's metadata block is the
-//! record, and the path is a consequence of it.** A rename writes a new name
-//! into the document and *then* renames the file to match; a move writes a new
-//! project id and then moves the file into that project's folder. Doing it the
-//! other way round — deriving the name or the project from where the file sits —
-//! is what makes a library break the first time somebody drags something in
-//! Explorer.
+//! The file's metadata block is the record and the path is a consequence of it. A
+//! rename writes the new name into the document and then renames the file; a move
+//! writes the new project id and then moves the file. Deriving the name or
+//! project from where the file sits breaks the first time somebody drags
+//! something in Explorer.
 //!
-//! ⚠️ **So every operation here has two halves, and the second one may fail on
-//! its own.** A rename that writes the document and then cannot rename the file
-//! leaves a document called "My cool design" in `old-name.ondin`. That is the
-//! failure this module is *designed* to land on, because the dashboard reads the
-//! block: the entry shows the right name, the stem is merely stale, and the next
-//! rename fixes it. The opposite order fails into a file whose name and contents
+//! So every operation has two halves, and the second may fail on its own: a
+//! rename that cannot rename the file leaves "My cool design" in `old-name.ondin`.
+//! That is the failure to land on, because the dashboard reads the block and the
+//! next rename fixes the stem; the opposite order leaves a name and contents that
 //! disagree with nothing to say which is right.
 //!
-//! **Nothing here is undoable.** These are library actions, not document edits —
-//! see `ondin_core::meta` for why they are outside `apply` — so *Delete* moves
-//! to [`super::scan::TRASH_DIR`] rather than removing anything, and that is the
-//! only "undo" the library has.
+//! Nothing here is undoable (see `ondin_core::meta`): *Delete* moves to
+//! [`super::scan::TRASH_DIR`], the library's only "undo".
 
 use super::project::Project;
 use super::scan::{DOCUMENT_EXT, Entry, TRASH_DIR, VERSIONS_DIR};
@@ -38,9 +32,7 @@ fn doc_path(dir: &Path, stem: &str) -> PathBuf {
 /// Pick a stem free in `dir`, given the typed name.
 ///
 /// `keep` is the one existing file that does not count as a collision — the
-/// document being renamed. Without it, renaming "Landing v4" to "Landing v4"
-/// (or to anything that slugs the same, like "landing V4") would walk to
-/// `landing-v4-1` because the file being renamed is sitting there.
+/// document being renamed — so a rename to the same slug does not walk to `-1`.
 fn free_stem(dir: &Path, name: &str, keep: Option<&Path>) -> String {
     naming::unique_stem(name, &|stem| {
         let candidate = doc_path(dir, stem);
@@ -54,12 +46,9 @@ fn free_stem(dir: &Path, name: &str, keep: Option<&Path>) -> String {
 /// Write a document into the library for the first time: mint its identity,
 /// stamp it, name it, and save it.
 ///
-/// Used by *New file* and by *Import* alike — an imported `.ondin` is a document
-/// that has not been through the library, which is exactly the state a new one
-/// is in. **Only the fields that are missing are filled**, so importing a
-/// document that already carries a name and a creation date keeps both; what it
-/// always gets is a project (the one it was imported into) and, if it has none,
-/// an id.
+/// Used by *New file* and *Import* alike. Only missing fields are filled, so an
+/// imported document keeps its name and creation date; it always gets the project
+/// it was imported into and, if it has none, an id.
 ///
 /// Returns the path written.
 pub fn file_document(
@@ -91,15 +80,12 @@ pub fn file_document(
 
 /// Save a document over its existing path.
 ///
-/// Separate from [`file_document`] because it is the one write that must **not**
-/// touch the metadata: an autosave firing every thirty seconds is not the moment
-/// to re-decide a document's identity, and a save that could rename the file
-/// under the editor would be a bug nobody could reproduce.
+/// Separate from [`file_document`] because it must not touch the metadata: an
+/// autosave is not the moment to re-decide identity or rename the file under the
+/// editor.
 ///
-/// ⚠️ **Atomic** (`crate::atomic`, §15 D378), and this is the headline case: it
-/// was a plain `fs::write` until 2026-08-28, which truncates the user's document
-/// before writing a byte — so the window in which a crash left them with neither
-/// version was the whole of every save, autosave included.
+/// Atomic (`crate::atomic`): a plain write truncates the document before writing
+/// a byte, leaving a crash with neither version.
 pub fn write_document(path: &Path, doc: &Document) -> io::Result<()> {
     let bytes = ondin_core::io::save(doc).map_err(io::Error::other)?;
     crate::atomic::write(path, &bytes)
@@ -188,28 +174,16 @@ pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
 
 /// Copy a document into a new one, with a fresh identity.
 ///
-/// ⚠️ **A new id, deliberately.** A copy that kept the original's id would share
-/// its version history and its thumbnail — so pinning a version of the copy
-/// would appear in the original's history, and the two would fight over one
-/// cache entry. It is also the honest answer to what a duplicate *is*: a new
-/// document that happens to start out identical.
+/// A new id and creation stamp, deliberately: a copy that kept the original's id
+/// would share its version history and thumbnail cache entry.
 ///
-/// The creation stamp is new for the same reason.
+/// A kit's published state is left behind: it is the kit's last publish, the copy
+/// is no kit until made one, and a kept copy would make its first publish compare
+/// against a dead set of mains.
 ///
-/// **And a kit's published state is left behind** (§15 D1023, the kits QA
-/// review's finding): it is the kit's last publish, of the kit's identity, and
-/// the copy is no kit until it is made one. Kept, it carried a dead copy of every
-/// published main, and once the copy was made a kit its first publish compared
-/// against it — *Publish 0 components*, enabled only by the changed name.
-///
-/// **Not `ondin_core::copy_name`**, which answers a different question: that one
-/// numbers a name *within a set of siblings* and returns `None` for a name a
-/// person typed, because renaming somebody's "Hero content" to "Hero content 2"
-/// would be hostile. Every document name is one a person typed, so it would
-/// return `None` for all of them — and documents have no siblings to be unique
-/// among, since two of them may share a name outright. Appending " copy" is the
-/// whole rule here, and duplicating twice gives two documents that read alike
-/// and differ only in their file.
+/// Not `ondin_core::copy_name`, which numbers a name within a set of siblings and
+/// returns `None` for a name a person typed; every document name is one, and
+/// documents may share a name. Appending " copy" is the whole rule.
 pub fn duplicate(root: &Path, entry: &Entry, project: Option<&Project>) -> io::Result<PathBuf> {
     let mut doc = load(&entry.path)?;
     doc.set_meta(DocumentMeta::default());
@@ -220,38 +194,26 @@ pub fn duplicate(root: &Path, entry: &Entry, project: Option<&Project>) -> io::R
 
 /// Move a document to the trash.
 ///
-/// **Nothing is deleted, and nothing records where it came from.** Restoring
-/// files it back into its project's folder, which the block already names — so
-/// the trash needs no index of its own and cannot get out of step with one. The
-/// only thing lost is a document that was sitting somewhere its project did not
-/// account for, which comes back to its project's folder instead.
+/// Nothing is deleted, and nothing records where it came from: restoring files it
+/// into its project's folder, which the block already names, so the trash needs
+/// no index. A document that sat outside its project's folder comes back inside it.
 pub fn trash(root: &Path, entry: &Entry) -> io::Result<PathBuf> {
     let dir = root.join(TRASH_DIR);
     std::fs::create_dir_all(&dir)?;
     let target = doc_path(&dir, &free_stem(&dir, &entry.display_name(), None));
     std::fs::rename(&entry.path, &target)?;
-    // Best-effort: a stamp that could refuse to be written must not turn a
-    // delete into a failure. ⚠️ **But "errs towards purging it sooner" was the
-    // wrong direction and the reason this comment used to end there**: the
-    // architecture calls the trash the library's *only* undo, so a document
-    // that is silently permanently deleted on the next sweep is the one outcome
-    // this feature exists to prevent. The measured way for the stamp to fail — a
-    // read-only document — is now handled inside [`trash_stamp`]; what is left
-    // discarded here is the unmeasured remainder, and it is discarded because
-    // the delete itself has already succeeded and reporting it as a failure
-    // would be a lie about a file that has moved.
+    // Best-effort: the delete has already succeeded, so a stamp failure must not
+    // be reported as one. The known failure, a read-only document, is handled
+    // inside [`trash_stamp`].
     let _ = trash_stamp(&target);
     Ok(target)
 }
 
 /// Everything in the trash, oldest deletion first.
 ///
-/// Deletion time is the file's modification time, which `fs::rename` does *not*
-/// update — so this is really "when the document was last edited", and a
-/// document deleted today after a year untouched is a year old to
-/// [`purge_trash`]. ⚠️ **That is wrong and it is load-bearing**, so the trash's
-/// retention is applied from a stamp written on the way in rather than from
-/// this: see [`trash_stamp`].
+/// Sorted by modification time, which `fs::rename` does not update, so this is
+/// "when last edited" and retention is applied from the stamp written on the way
+/// in: see [`trash_stamp`].
 pub fn trashed(root: &Path) -> Vec<Entry> {
     let mut out = super::scan::scan_dir(&root.join(TRASH_DIR));
     out.sort_by_key(|e| e.modified);
@@ -260,16 +222,12 @@ pub fn trashed(root: &Path) -> Vec<Entry> {
 
 /// The moment a document entered the trash.
 ///
-/// **Written into the file's modification time on the way in**, because there is
-/// nowhere else for it to go: the metadata block may not carry a clock (§5.11a),
-/// a sidecar index is the thing [`trash`] exists without, and `fs::rename`
-/// preserves the original mtime. So `trash` stamps the moved file and this reads
-/// it back — the one place in the library where an mtime is written rather than
-/// merely read. §15 D432 is why a stamp that is refused is retried rather than
-/// shrugged off.
+/// Written into the file's modification time on the way in, because the metadata
+/// block may not carry a clock (§5.11a), the trash keeps no index, and
+/// `fs::rename` preserves the original mtime. A stamp that is refused is retried
+/// rather than shrugged off (§15 D432).
 fn trash_stamp(path: &Path) -> io::Result<()> {
-    // `File::set_times` needs the file open for writing; the times themselves
-    // are the current instant, which is what an explicit touch means.
+    // `File::set_times` needs the file open for writing.
     let touch = |p: &Path| -> io::Result<()> {
         let f = std::fs::OpenOptions::new().write(true).open(p)?;
         f.set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))
@@ -277,21 +235,12 @@ fn trash_stamp(path: &Path) -> io::Result<()> {
     let Err(refused) = touch(path) else {
         return Ok(());
     };
-    // ⚠️ **A read-only document, and the attribute is cleared for the length of
-    // the touch and put straight back.** Measured: `fs::rename` into `.trash` is
-    // *not* refused by the Windows read-only attribute and `fs::remove_file` is
-    // not refused by it either — Rust's implementation clears it and retries —
-    // so this open was the one step of the three that failed, and its result was
-    // the one being discarded. The stamp is the retention clock, so the file
-    // kept the mtime of its last edit and `purge_trash` deleted it permanently
-    // at the next sweep while the Trash screen said it was kept for 30 days.
-    //
-    // **Restored rather than left clear**, which is the difference from what
-    // `remove_file` does and the reason this is not two lines: a document is
-    // marked read-only to protect it, and the trash is the library's only undo —
-    // so restoring one must give back the file the user had, protection
-    // included. Setting permissions does not touch the mtime, so the stamp
-    // survives the second call.
+    // A read-only document: the attribute is cleared for the length of the touch
+    // and put straight back. The Windows read-only attribute refuses this open
+    // but not the rename into `.trash`; an unstamped file keeps its last-edit
+    // mtime and `purge_trash` would delete it at the next sweep. Restored rather
+    // than left clear, because restoring must give back the protected file the
+    // user had. Setting permissions does not touch the mtime.
     let original = std::fs::metadata(path)?.permissions();
     if !original.readonly() {
         return Err(refused);
@@ -300,27 +249,22 @@ fn trash_stamp(path: &Path) -> io::Result<()> {
     owner_may_write(&mut writable);
     std::fs::set_permissions(path, writable)?;
     let stamped = touch(path);
-    // The *original* object, not `set_readonly(true)`: on Unix that would mean
-    // 0o444 and drop write permission from a group that had it.
+    // The original object, not `set_readonly(true)`: on Unix that means 0o444.
     let _ = std::fs::set_permissions(path, original);
     stamped
 }
 
 /// Let the file's owner write it, changing nothing else about who may.
 ///
-/// ⚠️ **Not `Permissions::set_readonly(false)`**, which is the obvious spelling
-/// and is wrong off Windows: on Unix it means mode `0o666` whatever the file's
-/// mode was, so a briefly-writable file would also be briefly **world**-writable.
-/// The one bit [`trash_stamp`] needs is the owner's, and it needs it for the
-/// length of one `set_times`.
+/// Not `Permissions::set_readonly(false)`: on Unix that means mode `0o666`, so a
+/// briefly-writable file would also be briefly world-writable.
 #[cfg(unix)]
 fn owner_may_write(perms: &mut std::fs::Permissions) {
     use std::os::unix::fs::PermissionsExt;
     perms.set_mode(perms.mode() | 0o200);
 }
 
-/// Windows has one bit and this is it. See the Unix twin for why they are two
-/// functions.
+/// Windows has one bit and this is it; see the Unix twin.
 #[cfg(not(unix))]
 fn owner_may_write(perms: &mut std::fs::Permissions) {
     #[allow(clippy::permissions_set_readonly_false)]
@@ -343,44 +287,33 @@ pub fn purge_trash(root: &Path, keep_days: u64) -> usize {
 
 /// Copy a document's current bytes into its version history.
 ///
-/// `.versions/<document id>/<unix seconds>.ondin` — **keyed on the id rather
-/// than the stem**, so history survives a rename, which is the whole reason
-/// `DocumentMeta::id` exists.
+/// `.versions/<document id>/<unix seconds>.ondin` — keyed on the id rather than
+/// the stem, so history survives a rename.
 ///
-/// A document with no id yet has no history to pin to; that is not an error, it
-/// is a document that has never been filed, and the caller files it first.
+/// A document with no id yet has no history to pin to; that is not an error, and
+/// the caller files it first.
 ///
-/// ⚠️ **Read-then-[`crate::atomic::write`], not `fs::copy`** (§15 D378). This one
-/// nearly escaped the sweep on the grounds that it cannot destroy anything: the
-/// target is a fresh name that never collides, so a torn copy is a bad *new* file
-/// rather than a lost old one. That reasoning is right and the conclusion was
-/// wrong — [`versions`] lists this directory by the `ondin` extension, so a
-/// half-copied pin is **listed as a version**, offered for restore, and fails
-/// when taken. A version history with an entry that cannot be opened is worse
-/// than one with a gap, because only the second is honest about itself.
+/// Read-then-[`crate::atomic::write`], not `fs::copy`: [`versions`] lists the
+/// directory by extension, so a half-copied pin would be listed as a version and
+/// fail when restored.
 pub fn pin_version(root: &Path, entry: &Entry) -> io::Result<Option<PathBuf>> {
-    // ⚠️ **`is_minted`, not just `is_some`.** The id is joined as a directory
-    // name here, so a document asserting `"id": "../.."` in its own file would
-    // give *Pin version* full control of where the copy lands. See
-    // `library::ids::is_minted`; a malformed id reads as "not filed", which is
-    // the state this function already declines.
+    // `is_minted`, not just `is_some`: the id is joined as a directory name, so
+    // a document asserting `"id": "../.."` would control where the copy lands. A
+    // malformed id reads as "not filed".
     let Some(id) = entry.meta.id.as_deref().filter(|id| ids::is_minted(id)) else {
         return Ok(None);
     };
     let dir = root.join(VERSIONS_DIR).join(id);
     let stamp = clock::now();
     let mut target = dir.join(format!("{stamp}.{DOCUMENT_EXT}"));
-    // Two pins inside the same second — Ctrl+S twice — would otherwise silently
-    // overwrite the first. A suffix costs a filename and keeps both.
+    // Two pins inside the same second would otherwise overwrite the first.
     let mut n = 1;
     while target.exists() {
         target = dir.join(format!("{stamp}-{n}.{DOCUMENT_EXT}"));
         n += 1;
     }
-    // The bytes rather than the file, because `atomic::write` takes a slice —
-    // and it makes `dir` on the way, which is why the `create_dir_all` that used
-    // to stand above the collision loop is gone. `exists()` on a directory that
-    // is not there yet is `false`, which is the right answer for the loop.
+    // `atomic::write` takes a slice and makes `dir` on the way; `exists()` on a
+    // missing directory is `false`, the right answer for the loop above.
     let bytes = std::fs::read(&entry.path)?;
     crate::atomic::write(&target, &bytes)?;
     Ok(Some(target))
@@ -388,39 +321,11 @@ pub fn pin_version(root: &Path, entry: &Entry) -> io::Result<Option<PathBuf>> {
 
 /// A document's pinned versions, newest first.
 ///
-/// 🚨 **Allow-listed *here*, because the app pins versions and has no path that
-/// ever lists them** (§15 D699, `[S16.5-L3-04]`). [`pin_version`] is reached
-/// from `save_file`, so the `.versions/` tree really is being written; this is
-/// the reader half, and its six call sites are every one of them inside a
-/// `#[cfg(test)]` module. It was invisible because `main.rs` carried a blanket
-/// `#[allow(dead_code)]` over the whole `library` module — a receipt for a
-/// condition that ended when the dashboard landed — and removing that surfaced
-/// this and nothing else, under both the plain build and `--all-targets`.
-///
-/// ⚠️ **On the item rather than on the module, and that is the whole point.** A
-/// module-level allow shields everything under it for ever; this one shields
-/// one function, so the plain build is still the gate that catches the *next*
-/// dead thing in `library` — verified with a throwaway `fn`, which it reported.
-///
-/// 🚨 **`#[cfg(test)]` was tried first and the doc gate refused it**, which is
-/// worth knowing because §15 D672's sibling lesson pushes the other way: an
-/// allow-listed item is still a live *root*, so an allow can shield a whole
-/// graph hanging off it. That trap needs the item to **name** other dead
-/// things — it was found on a `pub const ALL` listing 143 constants — and this
-/// function names only `VERSIONS_DIR` and `DOCUMENT_EXT`, both of which
-/// `pin_version` uses too, so it shields nothing but itself. What `cfg(test)`
-/// *did* do was delete the item from the documented crate and break
-/// `pin_version`'s doc link to it — and that link is load-bearing: it is the
-/// argument for D378's read-then-atomic-write, namely that a half-copied pin is
-/// **listed as a version** by this function. **The narrower attribute is the one
-/// that keeps the reasoning readable.**
-///
-/// ⚠️ **This is not a ruling on whether the function should exist.** Keeping it
-/// as dead code or building the version-history screen it is the back half of
-/// are both open, and marking it decides neither — it makes the choice visible
-/// instead of shielded. Delete the attribute the moment a real caller lands,
-/// which is the instruction the blanket receipt gave and that went unfollowed
-/// for a fortnight.
+/// Allow-listed on the item rather than the module: [`pin_version`] writes the
+/// `.versions/` tree but the app has no path that lists it, so every caller of
+/// this reader is in a `#[cfg(test)]` module. A module-level allow would hide the
+/// next dead item in `library`, and `#[cfg(test)]` would delete the item that
+/// `pin_version`'s doc links to. Delete the attribute when a real caller lands.
 #[allow(dead_code)]
 pub fn versions(root: &Path, id: &str) -> Vec<PathBuf> {
     let dir = root.join(VERSIONS_DIR).join(id);
@@ -543,13 +448,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ A rename that changes only the casing must not walk to `-1`.
+    /// A rename that changes only the casing must not walk to `-1`.
     ///
-    /// Flip-check, run: dropping the `keep` argument from `free_stem` produces
-    /// `landing-v4-1.ondin` and fails on the path assertion — the *name*
-    /// assertion stays green, because the block was written correctly either
-    /// way. So a test asserting only the visible name would have passed a
-    /// library that grew a suffix every time somebody fixed a capital letter.
+    /// flip: dropping `keep` from `free_stem` → fails at the path assertion (the
+    /// name assertion stays green).
     #[test]
     fn renaming_to_the_same_slug_keeps_the_file_where_it_is() {
         let root = temp_root("recase");
@@ -613,10 +515,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A duplicated kit leaves its publish behind** (§15 D1023): the copy keeps
-    /// the drawing, mains and all, but neither the mark nor the frozen copy.
+    /// A duplicated kit keeps the drawing, mains and all, but neither the mark nor
+    /// the published copy.
     ///
-    /// Flip, run: `duplicate` without `set_published(None)` fails *"no publish"*.
+    /// flip: `duplicate` without `set_published(None)` → fails at "no publish".
     #[test]
     fn a_duplicated_kit_leaves_its_publish_behind() {
         use ondin_core::{NodeKind, Operation, Transaction};
@@ -671,16 +573,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ **Retention counts from the deletion, not from the last edit** — and
-    /// nothing else in this module proves it, because `fs::rename` preserves the
-    /// mtime and a freshly written fixture is young either way.
+    /// Retention counts from the deletion, not from the last edit: the fixture is
+    /// aged a year, because `fs::rename` preserves the mtime and a fresh fixture
+    /// is young either way.
     ///
-    /// The fixture is aged to a year old on purpose: without the stamp, a
-    /// 30-day retention purges it the instant it is deleted, so a document
-    /// somebody had not touched since last year would vanish out of the trash
-    /// before they could look for it. Flip-check, run: dropping the
-    /// `trash_stamp` call fails both assertions here and leaves every other test
-    /// in the module green.
+    /// flip: dropping the `trash_stamp` call → fails both assertions here only.
     #[test]
     fn deleting_an_old_document_starts_its_retention_now() {
         let root = temp_root("trash-stamp");
@@ -708,24 +605,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **`[S1.2-L1-01]`'s loss: the same document, marked read-only.**
+    /// A read-only document still gets its deletion stamp, stays protected, and
+    /// survives retention. The writable fixture of the test above only proves the
+    /// `trash_stamp` call is reached, not that it succeeded.
     ///
-    /// The attribute refuses only the *middle* one of the three steps a delete
-    /// takes — `rename` into `.trash` is allowed and `remove_file` clears the
-    /// attribute for itself — and the middle step is the stamp, whose result was
-    /// thrown away. So a read-only document deleted after a year untouched was
-    /// permanently gone at the next sweep, under a Trash screen saying it was
-    /// kept for thirty days.
-    ///
-    /// ⚠️ **The test beside this one passes either way and always did**, which is
-    /// why this is a second fixture rather than a stronger assertion in that one:
-    /// its file is writable, so the flip-check its own doc records proves the
-    /// `trash_stamp` call is *reached* and nothing there proves it succeeded.
-    ///
-    /// Flip-check, run: taking the read-only retry back out of `trash_stamp`
-    /// fails at *"the trashed copy must be stamped with the deletion"* — the
-    /// clock, which is the loss; the purge assertion after it is the consequence
-    /// and the attribute assertion last is the promise the fix must not break.
+    /// flip: taking the read-only retry out of `trash_stamp` → fails at "the
+    /// trashed copy must be stamped with the deletion".
     #[test]
     fn deleting_a_read_only_document_still_starts_its_retention() {
         let root = temp_root("trash-stamp-ro");
@@ -805,18 +690,9 @@ mod tests {
 
     /// A pin holds the document's bytes.
     ///
-    /// ⚠️ **Nothing asserted this until D378 changed how a pin is written** — the
-    /// two tests around it count files in `.versions` and never open one. A pin
-    /// that wrote the wrong document, or an empty one, would have passed both, and
-    /// the failure only shows up when somebody restores a version months later.
-    /// Counting is what a test writes when the interesting part felt like
-    /// `fs::copy`'s problem.
-    ///
-    /// ⚠️ **And it does *not* assert atomicity, which cannot be asserted here.**
-    /// Flipping `pin_version` back to `fs::copy` leaves this green: both produce
-    /// the right file, and the difference is only visible to a process that dies
-    /// between the two halves. What covers the mechanism is `atomic`'s own tests;
-    /// what this covers is that a pin goes through it with the right bytes.
+    /// The other pin tests only count files; this opens one. It does not assert
+    /// atomicity (`pin_version` as `fs::copy` stays green); `atomic`'s own tests
+    /// cover the mechanism.
     #[test]
     fn a_pin_holds_the_documents_bytes() {
         let root = temp_root("pin-bytes");
@@ -834,8 +710,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ Two pins in the same second must both survive. The stamp has
-    /// one-second resolution and Ctrl+S twice is a thing people do.
+    /// Two pins in the same second both survive (the stamp has one-second
+    /// resolution).
     #[test]
     fn two_pins_in_one_second_do_not_overwrite_each_other() {
         let root = temp_root("pin-twice");

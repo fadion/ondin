@@ -57,15 +57,13 @@ enum AlignCell {
     Spread(&'static str, Axis, &'static str),
     Rule,
 }
-/// The Align row's button box (`design/Editor.dc.html`: 24 wide, 22 tall).
+/// The Align row's button box: 24 wide, 22 tall.
 const ALIGN_CELL: egui::Vec2 = egui::vec2(24.0, 22.0);
 /// Whether anything is happening to a control, i.e. whether its transaction is
 /// worth building.
 ///
-/// Not the set [`OndinApp::edit_valve`] acts on: the valve asks whether the
-/// control is engaged (`dragged() || has_focus()`), so a focused, idle field is
-/// engaged but not interacting, and a site gating on this withholds it from
-/// the valve on exactly those frames.
+/// Not the set [`OndinApp::edit_valve`] acts on: a focused, idle field is engaged
+/// for the valve but not interacting here.
 fn interacting(resp: &egui::Response) -> bool {
     // valve-gate-not-a-commit: decides whether to build a transaction; the valves commit on their own latch.
     resp.dragged() || resp.drag_stopped() || resp.lost_focus() || resp.changed()
@@ -99,16 +97,11 @@ fn key_color([r, g, b, a]: [u8; 4]) -> ondin_core::peniko::Color {
     ondin_core::peniko::Color::from_rgba8(r, g, b, a)
 }
 /// The vertical pitch between every control in image editing's card — the
-/// panel's own row gap, so it stacks like every other card.
-///
-/// Module-level so `the_image_cards_tracks_and_fields_are_one_height` reads it
-/// rather than carrying a copy.
+/// panel's own row gap.
 const IMAGE_CARD_GAP: f32 = ui::CARD_ROW_GAP;
 
-/// Which tab of image editing's card is showing (§5.5a).
-///
-/// Framing and colour are separate jobs, and stacking them makes the card too
-/// tall, so they are two tabs of one card.
+/// Which tab of image editing's card is showing (§5.5a): framing and colour are
+/// separate jobs, and stacking them makes the card too tall.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum ImageCard {
     /// How the picture sits in its frame: the mode, the mirrors, the tile scale,
@@ -120,12 +113,10 @@ pub(crate) enum ImageCard {
 }
 
 impl ImageCard {
-    /// Tab order, left to right — the order of the work: framing is decided once,
-    /// colour is returned to.
+    /// Tab order, left to right.
     pub(crate) const ALL: [ImageCard; 2] = [ImageCard::Settings, ImageCard::Adjustments];
 
-    /// The tab's label, which is also the card's heading when it is the one
-    /// showing — one name for one thing.
+    /// The tab's label, which is also the card's heading when it is showing.
     fn title(self) -> &'static str {
         match self {
             ImageCard::Settings => "Settings",
@@ -171,10 +162,8 @@ pub(super) struct AppearanceMarks {
     pub(super) clip: Option<Mark>,
 }
 
-/// A signed integer for an adjustment field: `+12`, `-8`, `0`.
-///
-/// These are offsets from a neutral zero, so the sign shows which way each was
-/// pushed; zero takes no sign.
+/// A signed integer for an adjustment field: `+12`, `-8`, `0` (offsets from a
+/// neutral zero, so zero takes no sign).
 fn signed_number(v: f64, _: std::ops::RangeInclusive<usize>) -> String {
     let n = v.round() as i64;
     match n > 0 {
@@ -198,9 +187,8 @@ pub(crate) enum MultiField {
 }
 /// What a multi-selection Transform field is asking for.
 ///
-/// The distinction only bites on rotation and skew, where the layers may
-/// disagree: a nudge shifts them all and keeps the disagreement, an absolute
-/// resolves it. For the box fields the two are the same edit arithmetic apart.
+/// Only rotation and skew tell them apart, where the layers may disagree: a nudge
+/// keeps the disagreement, an absolute resolves it.
 #[derive(Clone, Copy, Debug)]
 enum MultiEdit {
     /// Put the value here — typed into the field.
@@ -254,9 +242,7 @@ impl Corner {
         }
     }
 }
-/// What a vertex-counted shape puts in the Appearance panel. Only these two
-/// kinds have one, so the panel takes it as an option rather than re-matching
-/// the node it was already handed values from.
+/// What a vertex-counted shape puts in the Appearance panel.
 #[derive(Clone, Copy)]
 enum Vertices {
     Polygon { sides: u32 },
@@ -274,11 +260,8 @@ fn largest(r: RoundedRectRadii) -> f64 {
         .max(r.bottom_right)
         .max(r.bottom_left)
 }
-/// Radians as an angle field should show them — and never as `-0`.
-///
-/// Angles decomposed out of a matrix come back as signed zero or a few ulps off
-/// it, which would print `-0`; the magnitude is snapped, far below anything a
-/// drag or typed number produces.
+/// Radians as an angle field should show them — and never as `-0`: angles
+/// decomposed from a matrix come back a few ulps off zero, so tiny magnitudes snap.
 fn shown_degrees(radians: f64) -> f64 {
     let deg = radians.to_degrees();
     if deg.abs() < 1e-9 { 0.0 } else { deg }
@@ -288,37 +271,31 @@ fn shown_degrees(radians: f64) -> f64 {
 /// space. What the Rotation field writes.
 ///
 /// Composed, never decomposed — the same `rotate_about · old_world` as the canvas
-/// ring (`tools::rotate_node`), so mirror, skew and scale survive exactly and a
-/// zero `delta` writes nothing. The flash fix is [`AngleScrub`]'s latch, not this.
+/// ring (`tools::rotate_node`), so mirror, skew and scale survive exactly.
 fn turned_about(world: Affine, pivot: Point, delta: f64) -> Affine {
     Affine::rotate_about(delta, pivot) * world
 }
 
 /// What a Rotation scrub holds for the length of its gesture.
 ///
-/// The one inspector control that keeps state across frames. The previewed
-/// angle re-read from the matrix jumps 180° as a mirrored layer crosses ±90°
-/// (§5.7a), while `DragValue` keeps its own accumulator, so without the latch the
-/// two sides of the delta come from different frames and the field flashes.
-/// `shown` feeds the prefix strip's relative scrub the latched number too.
+/// The one inspector control that keeps state across frames. The angle re-read
+/// from the matrix jumps 180° as a mirrored layer crosses ±90° (§5.7a) while
+/// `DragValue` keeps its own accumulator, so without the latch the field flashes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct AngleScrub {
-    /// The angle the field displayed when the drag began, in degrees. The delta is
-    /// always measured from here, never from a re-read of the document.
+    /// The angle the field displayed when the drag began, in degrees; the delta is
+    /// measured from here, never from a re-read of the document.
     base: f64,
-    /// The world transform as it was when the drag began — what the whole gesture's
-    /// accumulated turn is applied to, so nothing compounds and nothing drifts.
+    /// The world transform when the drag began, which the gesture's whole turn is
+    /// applied to.
     world: Affine,
-    /// The number the field is showing now: last frame's output, fed back in as this
-    /// frame's input.
+    /// The number the field is showing now, fed back in as next frame's input.
     shown: f64,
 }
 
 impl AngleScrub {
-    /// The `(base, world)` this frame measures and turns from: the latch while a
-    /// gesture is in flight, and the document's own reading otherwise — on the
-    /// first frame that is what `DragValue` seeded from, and on the stop frame the
-    /// latch is still there so the commit measures what the preview did.
+    /// The `(base, world)` this frame measures from: the latch while a gesture is
+    /// in flight, the document's own reading otherwise.
     fn reference(latch: Option<Self>, at_rest: f64, world: Affine) -> (f64, Affine) {
         match latch {
             Some(l) => (l.base, l.world),
@@ -358,38 +335,31 @@ struct RowCtx {
     slot: PaintSlot,
     /// Whether the paint is on. `false` fades the row to [`HIDDEN_OPACITY`].
     visible: bool,
-    /// The list and index this row belongs to, or `None` for a paint that is not
-    /// one of a list — the canvas ground, a guide's colour, a decoration, a
-    /// shadow's colour. Being in a list earns the grip and the eye.
+    /// The list and index this row belongs to, or `None` for a paint outside a
+    /// list (canvas ground, guide, decoration, shadow colour). A list earns the
+    /// grip and the eye.
     grip: Option<(PaintList, usize)>,
     /// Whether the grip actually drags. `false` on a list of one; drawn the same
-    /// either way so the row does not jump as paints come and go.
+    /// either way so the row does not jump.
     reorderable: bool,
     /// How many layers a Group Colors row's colour reaches, or `None` on every
-    /// other kind of row. Takes the opacity and remove slot, and is what the
-    /// trailing button acts on.
+    /// other row. Takes the opacity and remove slot.
     census: Option<usize>,
-    /// Set on the one row that stands for every paint in a disagreeing selection,
-    /// and `None` on every row that stands for exactly one paint.
+    /// Set on the one row standing for every paint in a disagreeing selection.
     mixed: Option<MixedRow>,
-    /// What the item is to an instance, for the row's reserved 14-pt
-    /// trailing slot — empty while it follows, the dot when overridden, `+` when
-    /// it is the instance's own. `None` outside an instance, where no slot is
-    /// reserved.
+    /// What the item is to an instance, for the row's reserved 14-pt trailing
+    /// slot (empty while it follows, the dot when overridden, `+` when its own).
+    /// `None` outside an instance, where no slot is reserved.
     item: Option<ondin_core::reset::ItemState>,
 }
-/// What a paint row cannot say about its subject, because it is standing for many
-/// paints at once.
-///
-/// Per property, not per row: only what the paints genuinely disagree about reads
-/// as mixed (`build::shared_over_fills`).
+/// What a paint row cannot say because it stands for many paints, per property:
+/// only what they genuinely disagree about reads as mixed (`build::shared_over_fills`).
 #[derive(Clone, Copy)]
 struct MixedRow {
-    /// They do not agree on a brush: the chip shows the mixed dash and the hex
-    /// says `Mixed`.
+    /// They do not agree on a brush: the chip shows the mixed dash, the hex `Mixed`.
     brush: bool,
-    /// They do not agree on an alpha: the percentage says `Mixed` too. Its own
-    /// flag, since red and blue at 100% disagree on brush but not on alpha.
+    /// They do not agree on an alpha: the percentage says `Mixed`. Its own flag,
+    /// since red and blue at 100% disagree on brush but not alpha.
     alpha: bool,
 }
 /// One property, as it stands across every paint in a selection.
@@ -441,8 +411,7 @@ impl<T: Clone + PartialEq> Spread<T> {
     }
 }
 /// What a paint row's controls asked for. The caller owns the list, so a row only
-/// ever reports; two rows in one frame cannot both be honoured, and which wins is
-/// the panel's call rather than the row's.
+/// reports; which of two rows' requests in one frame wins is the panel's call.
 struct RowOut {
     remove: bool,
     toggle: bool,
@@ -524,8 +493,7 @@ fn sync_paint_collapse(
     empty: bool,
     fresh: bool,
 ) {
-    // A new subject gets the resting state outright: the transition rule below
-    // only ever closes, so it would leave the panel shut on a painted layer.
+    // The transition rule below only ever closes, so a new subject needs the resting state outright.
     if fresh {
         if empty {
             collapsed.insert(title);
@@ -555,11 +523,8 @@ fn open_paint_panel(
 /// properties — so that the pair reads as one entry and two entries read as two.
 ///
 /// The rows sit [`ui::CARD_ROW_GAP`] apart and a non-`last` unit ends with a
-/// second gap, so entries are separated by twice the inner pitch.
-///
-/// Both gaps are allocated under a zero `item_spacing`, because egui spends the
-/// spacing in effect after each widget; the callees inherit that zero and must
-/// state their own vertical pitch rather than hand this scope spacing back.
+/// second gap, so entries are twice the inner pitch apart. Gaps are allocated
+/// under a zero `item_spacing`; callees inherit it and must state their own pitch.
 fn paint_unit<S, A, B>(
     ui: &mut egui::Ui,
     state: &mut S,
@@ -584,14 +549,13 @@ fn paint_unit<S, A, B>(
 /// one being dragged. Returns the body's value and the **slot** the entry
 /// occupies — untranslated, which is what a drop has to be measured against.
 ///
-/// `carrying` translates a tooltip-order layer's shapes, vertically only, so the
-/// visuals follow the cursor while the layout slot stays put. Widgets in that
-/// layer get empty responses, so the release is read from the pointer
+/// `carrying` translates a tooltip-order layer's shapes vertically so the visuals
+/// follow the cursor while the layout slot stays put. Widgets in that layer get
+/// empty responses, so the release is read from the pointer
 /// ([`OndinApp::finish_paint_drag`]).
 ///
-/// `salt` identifies the entry, not its slot, through `UiBuilder::id` — `id_salt`
-/// would still fold in the positional counter, so a reorder would move ids and
-/// drop focus.
+/// `salt` identifies the entry through `UiBuilder::id`; `id_salt` would fold in the
+/// positional counter, so a reorder would move ids and drop focus.
 fn carried_unit<R>(
     ui: &mut egui::Ui,
     carrying: bool,
@@ -627,9 +591,8 @@ enum PaintScope {
     Selection,
 }
 impl PaintScope {
-    /// The node a slot hangs off. A selection has none, so it borrows the root
-    /// as a placeholder exactly as the canvas-ground and guide rows do — the
-    /// slot itself carries the meaning and the id is never read for these.
+    /// The node a slot hangs off. A selection has none, so it borrows the root as
+    /// a placeholder; the slot carries the meaning.
     fn anchor(self, app: &OndinApp) -> NodeId {
         match self {
             PaintScope::Node(id) => id,
@@ -679,9 +642,8 @@ enum TurnScope {
 }
 /// Size of the kind glyph on an identity card.
 const IDENTITY_ICON: f32 = 18.0;
-/// Height of an identity card's first row, both kinds — measured, not set: it
-/// comes from the theme's `interact_size.y`. Test-only because nothing in the
-/// layout reads it.
+/// Height of an identity card's first row, both kinds — measured from the theme's
+/// `interact_size.y`, not set. Test-only: nothing in the layout reads it.
 #[cfg(test)]
 const IDENTITY_ROW_H: f32 = 24.0;
 /// The identity card's second row, from the design: a 46pt dropdown then **three**
@@ -691,17 +653,14 @@ const BOOL_ROW_H: f32 = 28.0;
 const BOOL_ROW_GAP: f32 = ui::CARD_COL_GAP;
 /// Glyph size inside the identity row's 28×28 actions.
 const ACTION_GLYPH: f32 = 16.0;
-/// Outer height of the boolean dropdown's menu. Five [`ui::MENU_ROW_H`] rows, four 6pt
-/// gaps, the separator's 10pt and the menu's own 6pt margins come to 166; the rest is
+/// Outer height of the boolean dropdown's menu: the rows come to 166, the rest is
 /// headroom so a retuned row height does not add a scroll area.
 const BOOL_MENU_H: f32 = 220.0;
 
 /// A full-width hairline parting one group of rows in a dropdown from the next.
 ///
-/// [`ui::rule`] transposed, including the device-pixel snap. `available_width` is
-/// one frame behind on the frame a popup opens, which keeps the hairline within
-/// the ground it is drawn on. The gaps subtract `item_spacing.y` back out so they
-/// stay absolute.
+/// [`ui::rule`] transposed, including the device-pixel snap. The gaps subtract
+/// `item_spacing.y` back out so they stay absolute.
 pub(super) fn popup_rule(ui: &mut egui::Ui) {
     /// Clear space above the hairline and below it, measured from the neighbouring row.
     const ABOVE: f32 = 5.0;
@@ -754,10 +713,10 @@ fn mask_card_targets(doc: &ondin_core::Document, id: NodeId) -> Vec<NodeId> {
 /// The inspector's **first** card — the identity or summary of whatever is
 /// selected.
 ///
-/// All five of them ([`canvas_header`], [`OndinApp::inspector_header`],
+/// All five headers ([`canvas_header`], [`OndinApp::inspector_header`],
 /// [`OndinApp::guide_header`], [`OndinApp::points_header`],
-/// [`OndinApp::inspector_multi`]) share one id salt on purpose: exactly one is
-/// drawn, always first, so its ids stay stable across a change of subject.
+/// [`OndinApp::inspector_multi`]) share one id salt so the ids stay stable across
+/// a change of subject.
 fn identity_card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.push_id("identity", |ui| card(ui, add)).inner
 }
@@ -843,15 +802,10 @@ impl OndinApp {
     }
     /// The position field, or fields — one per **axis** present in the selection.
     ///
-    /// A guide constrains one axis, so a single guide gets one full-width field;
-    /// a mixed-axis selection gets one per axis.
-    ///
     /// A frame-scoped guide shows its offset from the frame, not a world
-    /// coordinate: in a rotated frame it has none, and the offset is what was
-    /// authored. The ruler chip quotes the same number.
+    /// coordinate: in a rotated frame it has none. The ruler chip quotes the same.
     fn guide_position_fields(&mut self, ui: &mut egui::Ui, guides: &[ondin_core::Guide]) {
-        // Drop a target whose axis is no longer on screen, or the next drag of
-        // that axis would start from the abandoned value.
+        // Drop a target whose axis is gone, or the next drag would start from it.
         if let Some((axis, _)) = self.in_flight.guide_position_drag
             && !guides.iter().any(|g| g.axis == axis)
         {
@@ -867,8 +821,7 @@ impl OndinApp {
                 .iter()
                 .all(|g| g.position == first.position)
                 .then_some(first.position);
-            // The value this field is being dragged to — held, because the layout
-            // reads the committed document and the release frame's step is zero.
+            // Held, because the layout reads the committed document and the release step is zero.
             let live = self
                 .in_flight
                 .guide_position_drag
@@ -892,8 +845,7 @@ impl OndinApp {
             if resp.dragged() {
                 self.in_flight.guide_position_drag = Some((axis, position));
             }
-            // Before the early exit, which would skip the valve and strand the
-            // target; `continue`, not `return`, so the other axis is still laid out.
+            // `continue`, not `return`, so the other axis is still laid out.
             if self.gesture_cancelled {
                 self.in_flight.guide_position_drag = None;
                 continue;
@@ -931,9 +883,7 @@ impl OndinApp {
             self.guide_actions(ui, guides);
         });
     }
-    /// Remove, and Remove all Guides — the guide card's action row.
-    ///
-    /// A cross removes what is selected, a bin empties the document — two glyph
+    /// Remove, and Remove all Guides — the guide card's action row, in two glyph
     /// families so the pair is not told apart only by tooltip.
     fn guide_actions(&mut self, ui: &mut egui::Ui, guides: &[ondin_core::Guide]) {
         let total = self.session.doc.guides().len();
@@ -985,8 +935,7 @@ impl OndinApp {
         let targeted = self.picker.as_ref().is_some_and(|p| p.slot == slot);
         let mut open = false;
         field_row_active(ui, size, targeted, |ui| {
-            // The recessed ground shrink-wraps its contents, and with no opacity
-            // field to push it right it would stop just past the hex.
+            // The recessed ground shrink-wraps; with no opacity field it would stop past the hex.
             ui.set_min_width(ui.available_width());
             ui.spacing_mut().item_spacing.x = 9.0;
             let chip = match mixed {
@@ -1039,8 +988,7 @@ impl OndinApp {
     ///
     /// `resettable` is tested twice and both matter: a disabled `field_button`
     /// still reports its click, so `enabled_if` only paints it and the
-    /// `&& resettable` refuses the write. `anchor` is taken before the card is
-    /// drawn, so the picker opens at the card's top.
+    /// `&& resettable` refuses the write.
     fn colour_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -1083,9 +1031,8 @@ impl OndinApp {
     /// Multi-selection: counts plus the operations that only make sense on
     /// several layers at once.
     ///
-    /// The identity card is the single-layer one minus what cannot apply, so the
-    /// first card keeps its shape: the name is a heading (there is no one node to
-    /// rename), and the eye and lock go (no tri-state).
+    /// The identity card is the single-layer one minus what cannot apply: the name
+    /// is a heading, and the eye and lock go.
     fn inspector_multi(&mut self, ui: &mut egui::Ui) {
         let n = self.session.selection.len();
         identity_card(ui, |ui| {
@@ -1103,11 +1050,8 @@ impl OndinApp {
             self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
         self.inspector_component(ui, super::component::ComponentPart::Cards);
-        // The same frame and layout panels, in the same order as on a single layer;
-        // each draws nothing unless the selection has something it describes.
-        //
-        // Templates here is not a duplicate of Transform's W/H: those resize the
-        // union box as a rigid body, while a template sizes each frame.
+        // Same panels, same order as on a single layer; each draws nothing unless
+        // the selection has something it describes.
         self.inspector_frame_templates(ui);
         self.inspector_align(ui);
         self.inspector_multi_transform(ui);
@@ -1168,11 +1112,9 @@ impl OndinApp {
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
             | NodeKind::Artboard { size, .. } => Some(*size),
-            // Every sizing mode, read from `local_box` so the row agrees with the
-            // handles; never `None` for text.
+            // Read from `local_box` so the row agrees with the handles.
             NodeKind::Text { .. } => self.session.preview_local_box(id).map(|b| b.size()),
-            // A derived box, the one the handles scale; an empty group has none, so
-            // the row does not appear.
+            // A derived box; an empty group has none, so the row does not appear.
             NodeKind::Path { .. } | NodeKind::Boolean { .. } | NodeKind::Group => {
                 self.session.preview_local_box(id).map(|b| b.size())
             }
@@ -1211,13 +1153,10 @@ impl OndinApp {
         self.inspector_header(ui, id, glyph, &name0, visible0, locked0);
         // What the layer is, so under its name and above the mask.
         self.inspector_component(ui, super::component::ComponentPart::Cards);
-        // Directly under the identity card: a mask draws nothing, so it is a fact
-        // about what this layer is.
+        // A mask draws nothing, so it is a fact about what the layer is.
         self.inspector_mask(ui, id);
-        // A frame's templates come right under its identity, above Transform. The
-        // cards then run from the layer in its parent to its children to paint.
-        // None is gated on the kind here: each draws nothing for a selection it
-        // cannot describe, so one call serves this and `inspector_multi`.
+        // Cards run from the layer in its parent, to its children, to paint. None is
+        // gated on kind: each draws nothing for a selection it cannot describe.
         self.inspector_frame_templates(ui);
         self.inspector_align(ui);
         self.inspector_transform(ui, id, world, size0);
@@ -1355,10 +1294,9 @@ impl OndinApp {
     /// The selected anchor's two control points, as X/Y — the row pair below the
     /// anchor's own position.
     ///
-    /// X/Y like every other point, prefixed `←`/`→` for incoming and outgoing —
-    /// two glyphs at most, since a field whose digits do not fit grows
-    /// (`ui::value_field_f64`). Dimmed rather than hidden when there is no single
-    /// anchor with handles.
+    /// X/Y prefixed `←`/`→` for incoming and outgoing — two glyphs at most, since a
+    /// field whose digits do not fit grows. Dimmed when there is no single anchor
+    /// with handles.
     fn point_handle_rows(&mut self, ui: &mut egui::Ui, id: NodeId, row: egui::Vec2) {
         for (side, prefix, name) in [
             (
@@ -1392,8 +1330,7 @@ impl OndinApp {
                             Scrub::whole(0.5),
                             |d| d.custom_formatter(ui::number(2)),
                         )
-                        // Two calls: `on_hover_text` never fires inside a disabled
-                        // scope, so the disabled string needs its own.
+                        // `on_hover_text` never fires inside a disabled scope.
                         .on_hover_text(format!("{name}, {axis:?}"))
                         .on_disabled_hover_text("Select one point to edit its handles");
                         let Some(at) = at.filter(|_| enabled) else {
@@ -1419,18 +1356,15 @@ impl OndinApp {
     ///
     /// Opacity is the layer's. The radius writes only to corner points and dims
     /// when none is selected. The per-corner button is permanently dead and holds
-    /// the slot; per-corner on a path is selecting points separately.
-    ///
-    /// The radius does not bind to a variable: a path's radii are indexed by
-    /// anchor, and point editing adds and removes anchors (§15 D1057).
+    /// the slot. The radius does not bind to a variable: a path's radii are indexed
+    /// by anchor, and point editing adds and removes anchors (§15 D1057).
     fn points_appearance(&mut self, ui: &mut egui::Ui, id: NodeId) {
         let opacity0 = self
             .session
             .display_node(id)
             .map(|n| n.opacity())
             .unwrap_or(1.0);
-        // The subject rather than the raw set, so a selected segment rounds its
-        // two corners (`canvas::subject_points`).
+        // The subject, so a selected segment rounds its two corners.
         let picked: Vec<PointRef> = self.subject_points(id);
         let scope = (!picked.is_empty()).then_some(picked);
         let radius0 = self.corner_radius_of(id, scope.as_deref());
@@ -1506,14 +1440,11 @@ impl OndinApp {
                         .desired_width(140.0)
                         .font(egui::FontId::proportional(13.0)),
                 );
-                // The I-beam is kept: the field is frameless, so the cursor is the
-                // only thing that says the heading can be typed in.
+                // The I-beam is kept: the frameless field has no other cue.
                 if resp.gained_focus() || resp.changed() {
                     self.name_edit = Some((id, name.clone()));
                 }
-                // Trimmed, and an empty name refused, as in `layers::layer_rename_field`.
-                // Order matters: the `take` sits before `defocus_commits`, so Escape
-                // still drops the buffer and only declines to write it.
+                // The `take` sits before `defocus_commits`, so Escape still drops the buffer.
                 if resp.lost_focus()
                     && let Some((nid, val)) = self.name_edit.take()
                     && nid == id
@@ -1540,9 +1471,8 @@ impl OndinApp {
                         }]));
                     }
                     let eye = if visible0 { icon::EYE } else { icon::EYE_SLASH };
-                    // Bound to a boolean variable, the eye sits in the chip's
-                    // capsule and the tooltip names variable, value and mode. A
-                    // click toggles and so detaches; right-click is the field menu.
+                    // Bound to a boolean variable, the eye sits in the chip's capsule;
+                    // a click toggles and so detaches.
                     let key = super::binding::FieldKey::Visible { id };
                     let resp = match self.field_var(key) {
                         Some(var) => {
@@ -1593,13 +1523,12 @@ impl OndinApp {
             self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
     }
-    /// The identity card's second row (`design/Editor.dc.html`): the boolean
+    /// The identity card's second row: the boolean
     /// operations dropdown, then Mask, Group and Ungroup as 28×28 actions.
     ///
     /// Disabled rather than hidden when it does not apply. A selected boolean
     /// switches its op (`build::set_boolean_op`); two or more layers get wrapped
-    /// (`build::boolean`); anything else shows Union, disabled. Flatten sits under
-    /// a rule because it is an action, not a state the dropdown can show.
+    /// (`build::boolean`). Flatten sits under a rule: it is an action, not a state.
     fn identity_boolean_row(&mut self, ui: &mut egui::Ui) {
         let existing = self.selected_boolean();
         let refusal = self.booleanable_selection().err();
@@ -1732,9 +1661,8 @@ impl OndinApp {
     /// saying why the control is dim.
     ///
     /// Release is read on the layer and on the group the make-arm wraps it in, so
-    /// the make is undoable from the selection it leaves. Making goes through
-    /// `build::mask`; only refusals with something specific to say are checked
-    /// here, and one parent is required since a mask needs a stacking order.
+    /// the make is undoable from the selection it leaves. Only refusals with
+    /// something specific to say are checked here; `build::mask` has the rest.
     fn mask_action(&self) -> Result<MaskAction, &'static str> {
         const PICK: &str = "Select a layer to use as a mask";
         let doc = &self.session.doc;
@@ -1767,8 +1695,7 @@ impl OndinApp {
                 "A boolean's operands are combined rather than drawn, so nothing there can mask",
             );
         }
-        // Which layer becomes the mask is core's rule; `build::mask` asks the same
-        // function, so the control and the verb agree.
+        // `build::mask` asks the same function, so the control and the verb agree.
         let key = self.session.selection.key().filter(|k| ids.contains(k));
         let target = build::mask_target(doc, ids, key).ok_or(PICK)?;
         if !doc.get(target).ok_or(PICK)?.kind().can_mask() {
@@ -1779,8 +1706,7 @@ impl OndinApp {
         if doc.holds_a_frame(target) {
             return Err("A group holding a frame cannot be a mask; use a shape above it instead");
         }
-        // The builder gets the last word, as a dry run on a throwaway id source, so
-        // the control is never live over a click that would fail.
+        // A dry run, so the control is never live over a click that would fail.
         let mut probe = ondin_core::IdSource::new(0);
         if build::mask(doc, &self.session.resolved, &mut probe, ids, key).is_err() {
             return Err("These layers cannot be wrapped in a group, so they cannot be masked");
@@ -1922,10 +1848,9 @@ impl OndinApp {
 
     /// The layers the **Mask** card describes, given what is selected.
     ///
-    /// The selected layer if it is a mask (its own flag wins), else the masks
-    /// directly inside it — direct children only, so selecting an ancestor never
-    /// rewrites a mask further down. A list because a group can hold two runs,
-    /// which report "Mixed" and are both written.
+    /// The selected layer if it is a mask, else the masks directly inside it —
+    /// direct children only, so an ancestor never rewrites a mask further down. A
+    /// list because a group can hold two runs, which report "Mixed".
     fn mask_card_targets(&self, id: NodeId) -> Vec<NodeId> {
         mask_card_targets(&self.session.doc, id)
     }
@@ -1953,9 +1878,8 @@ impl OndinApp {
 
     /// Collapse the selection into a single `Path` (`build::flatten`).
     ///
-    /// The result is selected. The admission test and refusal are the dropdown's,
-    /// since `Ctrl+E` bypasses its disabled state; only the count refusal is
-    /// worded for this verb, which also takes a lone boolean.
+    /// The result is selected. The refusal is the dropdown's, since `Ctrl+E`
+    /// bypasses its disabled state; only the count refusal is worded for this verb.
     pub(crate) fn flatten_selection(&mut self) {
         if self.selected_boolean().is_none()
             && let Err(why) = self.booleanable_selection()
@@ -2007,8 +1931,7 @@ impl OndinApp {
     /// *Convert to path*: a text layer becomes the `Path` its glyphs trace
     /// (`build::outline_text`, `context-menus.md` §5.6).
     ///
-    /// The status line says the conversion is one-way and names undo, since the
-    /// result still looks like text.
+    /// The status line says the conversion is one-way and names undo.
     pub(crate) fn outline_text(&mut self, id: NodeId) {
         match build::outline_text(
             &self.session.doc,
@@ -2030,8 +1953,7 @@ impl OndinApp {
     /// *Detach from path* — take the selected text off its rail, which comes back
     /// as a path layer.
     ///
-    /// The new path takes the selection: it is drawn with no paint, so the
-    /// selection is what shows it came back.
+    /// The new path takes the selection, since it is drawn with no paint.
     pub(crate) fn detach_text_path(&mut self) {
         let Some(id) = self.session.selection.single() else {
             return;
@@ -2152,11 +2074,10 @@ impl OndinApp {
     /// Align and distribute, in the design's single row: three horizontal
     /// alignments, a rule, three vertical, a rule, then the two distributes.
     ///
-    /// Eight 24×22 buttons and two hairlines fill the card's content width.
     /// [`Self::align_target`] picks the box; a lone top-level layer has none, and
     /// the card is drawn dimmed rather than skipped.
     fn inspector_align(&mut self, ui: &mut egui::Ui) {
-        // In point-editing mode the same eight buttons act on the points.
+        // In point-editing mode the same buttons act on the points.
         let points = self.edited_path().map(|id| self.subject_points(id).len());
         // Naming the gap needs two members where spreading needs three.
         let (can_align, can_distribute, can_space) = match points {
@@ -2219,8 +2140,6 @@ impl OndinApp {
                                 .on_hover_text(match (can_align, on_points) {
                                     (true, _) => tip,
                                     (false, true) => "Select two or more points",
-                                    // "Comes down to": a frame picked with its own
-                                    // children reduces to one through `outermost`.
                                     (false, false) => {
                                         "Nothing to align to — this comes down to one \
                                          top-level layer, with no container and \
@@ -2266,11 +2185,8 @@ impl OndinApp {
     }
 
     /// The Align card's second row: the gap between neighbours, **named** rather
-    /// than equalised.
-    ///
-    /// "Make the gaps exactly this" (`build::distribute_spacing`), under the
-    /// distribute buttons and wearing their glyphs. With the node tool up it
-    /// spaces the selected points (`tools::space_points`). Split evenly like X/Y.
+    /// than equalised (`build::distribute_spacing`). With the node tool up it
+    /// spaces the selected points (`tools::space_points`).
     fn spacing_row(&mut self, ui: &mut egui::Ui, on_points: bool, enabled: bool) {
         let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
         let size = egui::vec2(fw, 28.0);
@@ -2328,8 +2244,7 @@ impl OndinApp {
                         })
                     })
                 });
-                // A disabled widget reports no hover and `Ui::scope`'s response is
-                // never hovered, so the dimmed tooltip needs its own claimant.
+                // A disabled widget reports no hover, so the dimmed tooltip needs its own claimant.
                 if !enabled {
                     ui.interact(
                         scoped.inner.rect,
@@ -2355,9 +2270,8 @@ impl OndinApp {
     }
     /// Opacity, and corner radius when the selection holds any rect.
     ///
-    /// Both are absolute, landing every layer on the number. Opacity reaches only
-    /// the outermost members, since it composes down the tree
-    /// (`build::set_opacity_all`); radius reaches every rect in scope.
+    /// Both are absolute. Opacity reaches only the outermost members, since it
+    /// composes down the tree (`build::set_opacity_all`); radius every rect in scope.
     fn inspector_multi_appearance(&mut self, ui: &mut egui::Ui) {
         let ids = self.session.selection.ids().to_vec();
         let opacity = self.shared_opacity_shown();
@@ -2392,8 +2306,7 @@ impl OndinApp {
             },
             _ => "per corner".to_owned(),
         };
-        // The dot if any one overrides it, and the reset for all; the binding is
-        // compared first, since a copy can differ by the binding alone.
+        // The binding is compared first, since a copy can differ by the binding alone.
         let opacity_mark = Mark::and(
             self.sub_mark(
                 ids,
@@ -2420,8 +2333,7 @@ impl OndinApp {
                 |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
             ),
         );
-        // The radius, over every rect the field writes (the selection's subtree),
-        // compared on all four radii.
+        // Every rect the field writes, compared on all four radii.
         let rects: Vec<NodeId> = match has_rect {
             true => ondin_core::subtree_nodes(&self.session.doc, ids)
                 .into_iter()
@@ -2521,8 +2433,7 @@ impl OndinApp {
                     let doc = &app.session.doc;
                     let to = (pct / 100.0).clamp(0.0, 1.0) as f32;
                     let set = ondin_core::set_opacity_all(doc, ids, to);
-                    // Each bound layer the write changes is detached in the edit
-                    // itself; `set_opacity_all` writes only the layers that change.
+                    // Each bound layer the write changes is detached in the edit itself.
                     let mut ops: Vec<Operation> = set
                         .0
                         .iter()
@@ -2586,14 +2497,10 @@ impl OndinApp {
     /// its own editable row.
     ///
     /// Editing a row recolours every use of that colour in scope, fills and
-    /// strokes, in one transaction — keeping the layers different where a mixed
-    /// Fill row ([`Self::inspector_fill`]) would make them all one. Serves a
-    /// multi-selection and a single container; the scope excludes a selected
-    /// container itself ([`Self::group_color_scope`]).
-    ///
-    /// Gradients are listed under the solids, keyed by the place the census found
-    /// them (`PaintSlot::GroupGradient`) and edited by value through
-    /// `build::repaint`.
+    /// strokes, in one transaction. Serves a multi-selection and a single
+    /// container; the scope excludes a selected container itself
+    /// ([`Self::group_color_scope`]). Gradients are listed under the solids, keyed
+    /// by place (`PaintSlot::GroupGradient`) and edited through `build::repaint`.
     fn inspector_group_colors(&mut self, ui: &mut egui::Ui) {
         let ids = self.group_color_scope();
         let colors = ondin_core::colors_in(&self.session.doc, &ids);
@@ -2653,12 +2560,9 @@ impl OndinApp {
     }
     /// Replace the selection with every layer using one colour.
     ///
-    /// Drops whatever was selected, including the container, and resets
-    /// `entered_group`, since the new members can be anywhere in the tree.
-    ///
-    /// Locked layers are counted and not selected, and the message says so; the
-    /// census row's count (`ColorUse::nodes`) stays a fact about the document.
-    /// When every match is locked nothing moves but the message.
+    /// Resets `entered_group`, since the new members can be anywhere in the tree.
+    /// Locked layers are counted and not selected, and the message says so; when
+    /// every match is locked nothing moves but the message.
     fn select_by_color(&mut self, ids: Vec<NodeId>) {
         if ids.is_empty() {
             return;
@@ -2699,10 +2603,9 @@ impl OndinApp {
         }
         shared
     }
-    /// The uniform corner radius every rect in scope shares, read through any
-    /// live edit. `None` when they differ, when one of them is unevenly rounded,
-    /// or when there is no rect at all. Agreement is within
-    /// `build::RADIUS_AGREEMENT`.
+    /// The uniform corner radius every rect in scope shares, read through any live
+    /// edit, within `build::RADIUS_AGREEMENT`. `None` when they differ, one is
+    /// unevenly rounded, or there is no rect.
     fn shared_radius_shown(&self) -> Option<f64> {
         let mut shared: Option<f64> = None;
         for id in ondin_core::subtree_nodes(&self.session.doc, self.session.selection.ids()) {
@@ -2731,15 +2634,14 @@ impl OndinApp {
     ///
     /// The optional Scale row would otherwise renumber every row beneath it, and a
     /// `DragValue`'s half-typed text would pass to the wrong field. `UiBuilder::id`,
-    /// not `id_salt`, as in `carried_unit`; rows from the optional one down use it.
+    /// not `id_salt`, as in `carried_unit`.
     fn transform_row<R>(
         ui: &mut egui::Ui,
         name: &'static str,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> R {
         let id = ui.id().with(name);
-        // Wraps a plain `horizontal` rather than replacing it: a `scope_builder`
-        // inherits the parent's whole `max_rect`, so rows would grow to the panel.
+        // Wraps a `horizontal`: a bare `scope_builder` inherits the parent's whole `max_rect`.
         ui.scope_builder(egui::UiBuilder::new().id(id), |ui| {
             ui.horizontal(body).inner
         })
@@ -2753,9 +2655,8 @@ impl OndinApp {
             && matches!(self.drag, crate::preview::Drag::Resize { .. })
     }
 
-    /// The outermost members of the selection and the world box they share —
-    /// the same reduction `align_target` makes, and the box `scale_row` and the
-    /// multi W/H fields both resize.
+    /// The outermost members of the selection and the world box they share — the
+    /// reduction `align_target` makes, and the box `scale_row` and multi W/H resize.
     pub(crate) fn selection_union(&self) -> Option<(Vec<NodeId>, ondin_core::kurbo::Rect)> {
         let roots = build::outermost(&self.session.doc, self.session.selection.ids());
         let union = roots
@@ -2768,9 +2669,8 @@ impl OndinApp {
     /// `pct` per cent of the selection's union box, photographically, holding the
     /// box's top-left.
     ///
-    /// **A method rather than the body of the row**, because a `&mut self` widget
-    /// call site cannot be reached from a test and this is the whole of what the
-    /// field decides: which box, which anchor, and which of the two verbs.
+    /// A method rather than the row's body so a test can reach what the field
+    /// decides: which box, which anchor, which verb.
     pub(crate) fn scale_tx(&self, pct: f64) -> Option<Transaction> {
         let (roots, union) = self.selection_union()?;
         let s = pct / 100.0;
@@ -2824,9 +2724,8 @@ impl OndinApp {
             if let Some(tx) = self.scale_tx(pct) {
                 self.edit_valve(&resp, tx);
             }
-            // Back to 100 only once the valve has closed — on the valve's own
-            // engaged test, since `pct` applies to the committed box every frame —
-            // and not while a canvas handle drag is writing the readout.
+            // Back to 100 once the valve has closed (`pct` applies to the committed
+            // box every frame), and not while a canvas handle drag writes the readout.
             if !resp.dragged() && !resp.has_focus() && !self.canvas_scaling() {
                 self.scale_pct = 100.0;
             }
@@ -2850,8 +2749,8 @@ impl OndinApp {
     ///
     /// Position and size describe the union box; rotation and skew are a property
     /// editor over the layers, `Mixed` where they disagree. Dragging rotation
-    /// nudges each layer, typing flattens them; both turn each layer about its
-    /// own origin — sweeping the arrangement is the canvas ring's job.
+    /// nudges each layer, typing flattens them; both turn each layer about its own
+    /// origin.
     fn inspector_multi_transform(&mut self, ui: &mut egui::Ui) {
         let Some(union) = self.multi_union() else {
             return;
@@ -2863,8 +2762,7 @@ impl OndinApp {
             false,
             "One layer at a time: a selection has no shared transform origin",
         );
-        // X and Y are inert while any member is placed by its container, or a
-        // typed position would silently move only the free members.
+        // Inert while any member is laid out, or a typed position would move only the free ones.
         let members = ondin_core::build::outermost(&self.session.doc, self.session.selection.ids());
         let laid_out = laid_out_xy(&self.session.doc, &members);
         self.panel(ui, "Transform", Some(action), |app, ui| {
@@ -2919,8 +2817,7 @@ impl OndinApp {
                     Prefix::Text("H"),
                     Some(union.height()),
                 );
-                // A set is locked when every member is; live, since a typed number
-                // has no Shift to release the ratio.
+                // A set is locked when every member is.
                 let all_locked =
                     tools::proportions_locked(&app.session.doc, app.session.selection.ids());
                 let glyph = if all_locked {
@@ -2943,8 +2840,6 @@ impl OndinApp {
             app.scale_row(ui, fw);
             let rotation = app.shared_angle(MultiField::Rotation);
             let skew = app.shared_angle(MultiField::Skew);
-            // The single-layer panel's two rows: rotation and skew, then the
-            // quarter turns and mirrors.
             Self::transform_row(ui, "rot", |ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 app.multi_number(
@@ -2967,8 +2862,7 @@ impl OndinApp {
     }
     /// Turn every outermost selected layer a whole quarter about **its own** origin.
     ///
-    /// The layers spin in place, as the multi rotation field reads it; one
-    /// transaction, so one undo step.
+    /// One transaction, so one undo step.
     fn rotate_selection_quarter(&mut self, angle: f64) {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let mut ops = Vec::new();
@@ -2985,9 +2879,8 @@ impl OndinApp {
     /// One row for both cards, scoped by [`TurnScope`].
     ///
     /// Quarter turns compose through `rotate_node` about the committed pivot, not
-    /// through the angle field, which would turn a mirrored layer the wrong way;
-    /// so they work over a mixed rotation too. The flip is `build::flip` on both
-    /// sides, which mirrors a selection as one arrangement.
+    /// the angle field, which would turn a mirrored layer the wrong way; so they
+    /// work over a mixed rotation too.
     fn quarters_row(app: &mut Self, ui: &mut egui::Ui, scope: TurnScope) {
         Self::transform_row(ui, "quarters", |ui| {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -3047,14 +2940,12 @@ impl OndinApp {
     /// Committed, not previewed: it is the base a drag measures its total against
     /// (`OndinApp::multi_transform_drag`), or the gesture would run away.
     fn multi_union(&self) -> Option<Rect> {
-        // The same box the Scale row resizes.
         self.selection_union().map(|(_, union)| union)
     }
     /// The rotation (or skew) every selected layer shares, in radians, or `None`
     /// when they differ — which is what shows as `Mixed`.
     fn shared_angle(&self, which: MultiField) -> Option<f64> {
-        /// Half a tenth of a degree: below what the field can show, so two layers
-        /// the user cannot tell apart are not reported as disagreeing.
+        /// Half a tenth of a degree: below what the field can show.
         const EPS: f64 = 0.000_87;
         let mut shared: Option<f64> = None;
         for id in build::outermost(&self.session.doc, self.session.selection.ids()) {
@@ -3076,9 +2967,7 @@ impl OndinApp {
     /// through to committing the edit.
     ///
     /// `base` is `None` only for disagreeing rotation or skew; it still drags,
-    /// saying `Mixed` while every layer moves by the same amount.
-    ///
-    /// Returns the field's `Response` so a test can find and drive the field.
+    /// saying `Mixed`. Returns the field's `Response` for tests.
     fn multi_number(
         &mut self,
         ui: &mut egui::Ui,
@@ -3088,8 +2977,7 @@ impl OndinApp {
         base: Option<f64>,
     ) -> egui::Response {
         let angular = matches!(field, MultiField::Rotation | MultiField::Skew);
-        // How far this field has been dragged so far, total. Zero unless the
-        // drag in flight is this one.
+        // The total dragged so far; zero unless the drag in flight is this field's.
         let live = self
             .multi_transform_drag
             .filter(|(f, _)| *f == field)
@@ -3103,7 +2991,6 @@ impl OndinApp {
                 if mixed {
                     "Mixed".to_string()
                 } else {
-                    // Trimmed, as the single-layer fields are.
                     format!("{}{unit}", crate::ui::number(2)(v, 0..=0))
                 }
             })
@@ -3115,8 +3002,7 @@ impl OndinApp {
         if dragging {
             self.multi_transform_drag = Some((field, delta));
         }
-        // Before the early return below, which would skip the valve and strand
-        // the total.
+        // Before the early return below, which would strand the total.
         if self.gesture_cancelled {
             self.multi_transform_drag = None;
             return resp;
@@ -3155,11 +3041,8 @@ impl OndinApp {
     ///
     /// Not [`OndinApp::edit_valve`] because the drag total must outlive the
     /// drag's frames but not the drag. Otherwise it is that valve in the same
-    /// order: the same engagement latch (commit on its falling edge), the
-    /// chrome-hide note every frame, then preview or commit.
-    ///
-    /// The upstream `interacting` gate is true on every frame this would commit
-    /// on, and a field clicked into and left alone commits nothing.
+    /// order: engagement latch (commit on its falling edge), chrome-hide note,
+    /// then preview or commit.
     fn multi_valve(&mut self, resp: &egui::Response, tx: Transaction) {
         // Read before anything can bail: a cancelled frame must spend the
         // transition, or the next frame commits what the cancel threw away.
@@ -3179,16 +3062,14 @@ impl OndinApp {
         if engaged {
             self.session.set_preview(&tx);
         } else if was_engaged {
-            // Escape abandons the edit; every other way out confirms it.
-            // `cancel_gesture` cannot cover this: its gate runs before the panels.
+            // Escape abandons the edit; `cancel_gesture` cannot cover this, its gate
+            // runs before the panels.
             if !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.commit_edit(tx);
             }
-            // `clear_gesture_preview`, not `clear_preview`, which would also drop a
-            // live text session's uncommitted content.
+            // Not `clear_preview`, which would also drop a live text session's content.
             self.session.clear_gesture_preview();
             self.multi_transform_drag = None;
-            // The remembered typed value, spent either way.
             resp.ctx
                 .data_mut(|d| d.insert_temp::<Option<f64>>(resp.id.with("multi-typed"), None));
         }
@@ -3203,13 +3084,11 @@ impl OndinApp {
         let Some(union) = self.multi_union() else {
             return Transaction(Vec::new());
         };
-        // For the box fields a nudge and an absolute collapse to one target.
         let to = |now: f64| match edit {
             MultiEdit::Absolute(v) => v,
             MultiEdit::Nudge(d) => now + d,
         };
-        // A zero move or same-size resize builds nothing: the builders emit one
-        // op per member unconditionally.
+        // The builders emit one op per member unconditionally.
         let unmoved = |d: f64| d == 0.0;
         match field {
             MultiField::X => {
@@ -3263,9 +3142,9 @@ impl OndinApp {
     /// Rotation and skew across the selection, per layer and about each layer's
     /// own origin.
     ///
-    /// A nudge adds to each layer's own value, so their differences survive; an
-    /// absolute lands every layer on the number. The scale is carried through, or
-    /// a layer under a sheared ancestor would resize on every nudge.
+    /// A nudge adds to each layer's own value, so differences survive; an absolute
+    /// lands every layer on the number. The scale is carried through, or a layer
+    /// under a sheared ancestor would resize on every nudge.
     fn multi_angle_tx(&self, roots: &[NodeId], field: MultiField, edit: MultiEdit) -> Transaction {
         let mut ops = Vec::new();
         for id in roots {
@@ -3274,8 +3153,7 @@ impl OndinApp {
             };
             let [_, _, _, _, e, f] = world.as_coeffs();
             // `exact`, because this rebuilds the transform: a lossy basis would
-            // collapse a rank-1 layer, and the `unchanged` filter below would not
-            // catch it. Such a member is skipped; the rest still turn.
+            // collapse a rank-1 layer. Such a member is skipped.
             let Some(split) = build::Basis::exact(world) else {
                 continue;
             };
@@ -3297,8 +3175,7 @@ impl OndinApp {
             let target = Affine::translate(Vec2::new(e, f))
                 * o.to_affine()
                 * Affine::scale_non_uniform(split.scale.x, split.scale.y);
-            // Skip the layers this leaves alone: an unedited defocus arrives as a
-            // zero nudge.
+            // An unedited defocus arrives as a zero nudge.
             for op in self.place_at(*id, target).0 {
                 let unchanged = matches!(
                     (&op, self.session.doc.get(*id)),
@@ -3318,15 +3195,13 @@ impl OndinApp {
     /// and H an instance's copy holds differently from its source, each with its
     /// reset and a tooltip naming what the field will then read.
     ///
-    /// Compared on stored local values, never on the world readings; the tip
+    /// Compared on stored local values, never the world readings; the tip
     /// re-projects through the copy's parent. An instance root's placement is its
-    /// own (`reset::placement_is_own`), so it gets no X, Y or rotation mark. R's
-    /// reset rotates back about the pivot.
+    /// own (`reset::placement_is_own`), so it gets no X, Y or rotation mark.
     fn transform_marks(&self, id: NodeId, world: [f64; 6], box_min: Point) -> TransformMarks {
         let doc = &self.session.doc;
         // Placement and size compare with the slot (`reset::slot_source_of`), so a
-        // swapped copy stays in its slot; a text's sizing and a line's end are not
-        // slot fields and compare with `content`.
+        // swapped copy stays in its slot; text sizing and a line's end compare with `content`.
         let (Some(copy), Some(src), Some(content)) = (
             doc.get(id),
             ondin_core::reset::slot_source_of(doc, id).and_then(|s| doc.get(s)),
@@ -3340,9 +3215,7 @@ impl OndinApp {
         let theirs = src.transform().as_coeffs();
         let parent = Affine::new(world) * copy.transform().inverse();
         // A placement reset carries the main's insets on its axis: for a pinned
-        // layer the insets are the placement, and without them `keep_insets` would
-        // re-pin the layer where it was. An instance root keeps its own insets,
-        // still written so `keep_insets` stays off a W or H reset.
+        // layer they are the placement, or `keep_insets` would re-pin it where it was.
         let own_place = ondin_core::reset::placement_is_own(doc, id);
         let mine_in = *copy.insets();
         let main_in = if own_place { mine_in } else { *src.insets() };
@@ -3371,8 +3244,7 @@ impl OndinApp {
                 insets(horizontal, vertical),
             ])
         };
-        // Whether an axis's insets differ — on a pinned layer that *is* the axis's
-        // placement, whatever the stored coefficient says.
+        // On a pinned layer differing insets *are* the axis's placement.
         let pinned_differs = |horizontal: bool| {
             if horizontal {
                 (
@@ -3414,8 +3286,7 @@ impl OndinApp {
                 }
             }
             if cur[..4] != theirs[..4] {
-                // The main's basis with the translation rebuilt so the pivot stays
-                // put, so the reset undoes a turn in place.
+                // The main's basis, translation rebuilt so the pivot stays put.
                 let pv = self.session.preview_pivot(id).unwrap_or(Point::ZERO);
                 let held = Affine::new(cur) * pv;
                 let turned =
@@ -3449,8 +3320,7 @@ impl OndinApp {
             _ => None,
         };
         if let (Some(mine), Some(main)) = (size_of(copy.kind()), size_of(src.kind())) {
-            // The binding with the literal: a bound axis's literal is 0, so it can
-            // differ by its binding alone, and the reset writes the main's binding.
+            // A bound axis's literal is 0, so it can differ by its binding alone.
             let (my_vars, main_vars) = (copy.size_vars(), src.size_vars());
             let table = doc.variables();
             let say = |axis: usize, v: f64| match main_vars[axis] {
@@ -3459,8 +3329,7 @@ impl OndinApp {
                     .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
                 None => num(v),
             };
-            // A size is a placement too to `keep_insets` (a layer pinned both
-            // sides is sized by its insets), so it carries its axis's insets.
+            // A layer pinned both sides is sized by its insets, so a size carries them.
             let resize = |s: Size, horizontal: bool| {
                 let mut vars = my_vars;
                 let axis = if horizontal { 0 } else { 1 };
@@ -3487,9 +3356,8 @@ impl OndinApp {
                 });
             }
         }
-        // A text's box is its sizing, marked here only where the modes agree; a
-        // differing mode is `typography::sizing_mark`'s. Each reset keeps the
-        // copy's mode and writes the main's one side.
+        // Marked here only where the modes agree; a differing mode is
+        // `typography::sizing_mark`'s.
         if let (NodeKind::Text { sizing: mine_s, .. }, NodeKind::Text { sizing: main_s, .. }) =
             (copy.kind(), content.kind())
         {
@@ -3550,8 +3418,7 @@ impl OndinApp {
                 });
             }
             let (dir, main_dir) = (mine_e.y.atan2(mine_e.x), main_e.y.atan2(main_e.x));
-            // Where the basis differs as well, R is the basis's mark and the
-            // direction's shows once that is reset — one ↺, one write.
+            // Where the basis differs too, R is the basis's mark: one ↺, one write.
             if dir != main_dir && main_len > 1e-9 && marks.r.is_none() {
                 let shown = parent * copy.transform() * Point::ZERO;
                 let to =
@@ -3565,8 +3432,7 @@ impl OndinApp {
                 });
             }
         }
-        // And the item's `width` and `height`, which a laid-out W and H also
-        // stand for (`layout::size_field`).
+        // The item's `width` and `height`, which a laid-out W and H also stand for.
         for (horizontal, slot) in [(true, &mut marks.w), (false, &mut marks.h)] {
             let item = self.sub_mark(
                 &[id],
@@ -3598,8 +3464,7 @@ impl OndinApp {
         world: [f64; 6],
         size0: Option<Size>,
     ) {
-        // The pivot toggle arms a canvas handle, so it rides on the header; one
-        // layer only.
+        // The pivot toggle arms a canvas handle; one layer only.
         let single = self.session.selection.ids().len() <= 1;
         let action = ui::HeadAction::toggle(
             icon::CROSSHAIR_SIMPLE,
@@ -3611,15 +3476,13 @@ impl OndinApp {
                 "One layer at a time: a selection has no shared transform origin"
             },
         );
-        // X and Y are the box's corner, not the transform's translation: a derived
-        // box (boolean, path, group, trimmed text) starts off its local origin.
+        // The box's corner, not the translation: a derived box starts off its local origin.
         let shown = Affine::new(world)
             * self
                 .session
                 .preview_local_box(id)
                 .map(|b| Point::new(b.x0, b.y0))
                 .unwrap_or(Point::ZERO);
-        // A line's world endpoints, read once for both its angle and its length.
         let line_ends = match self.session.display_node(id).map(|n| n.kind()) {
             Some(NodeKind::Line { end }) => {
                 let (a, b) = (Affine::new(world) * Point::ZERO, Affine::new(world) * *end);
@@ -3629,8 +3492,6 @@ impl OndinApp {
         };
         let shown_line = line_ends.map(|(a, b)| (b.y - a.y).atan2(b.x - a.x));
         let laid_out = ondin_core::build::is_flex_item(&self.session.doc, id);
-        // W's and H's units are a menu of sizing modes where `layout::size_modes`
-        // offers more than one.
         let size_menu = self.session.display_node(id).and_then(|n| {
             let modes = super::layout::size_modes(n.kind(), n.display().is_some(), laid_out);
             let item = n.item();
@@ -3656,12 +3517,10 @@ impl OndinApp {
         let marks = self.transform_marks(id, world, box_min);
         let toggled = self.panel(ui, "Transform", Some(action), |app, ui| {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
-            // The world basis with translation stripped. Only skew rebuilds from it;
-            // rotation only reads its angle and composes (`turned_about`).
+            // The world basis with translation stripped.
             let basis = [world[0], world[1], world[2], world[3], 0.0, 0.0];
             let row = egui::vec2(fw, 28.0);
-            // Inert for an in-flow item, whose container places it
-            // (`build::keep_flex_sizes`); drawn, with the reason on hover beside it.
+            // Inert for an in-flow item, whose container places it.
             let xy = ui::disable_unless(ui, !laid_out, |ui| ui.horizontal(|ui| {
                 let mut x = shown.x;
                 let (rx, reset_x) = ui::value_field_marked(
@@ -3676,14 +3535,12 @@ impl OndinApp {
                 if let (true, Some(m)) = (reset_x, &marks.x) {
                     app.commit_reset(m.tx.clone());
                 }
-                // A world-space nudge by the difference, so the reported corner lands
-                // on the typed number whatever the basis.
+                // A world-space nudge, so the corner lands on the typed number whatever the basis.
                 let tx = app.place_at(
                     id,
                     Affine::translate(Vec2::new(x - shown.x, 0.0)) * Affine::new(world),
                 );
                 app.edit_valve(&rx, tx);
-                // X and Y move the layer, so the view keeps up with them.
                 if interacting(&rx) {
                     app.reveal_selection();
                 }
@@ -3718,8 +3575,7 @@ impl OndinApp {
                 .on_hover_text("Placed by its container's layout — drag it on the canvas to reorder");
             }
             if let Some(size) = size0 {
-                // A text's sizing mode decides what a typed number means: the stored
-                // mode at the drawn extents (`tools::gesture_text_sizing`).
+                // A text's sizing mode decides what a typed number means.
                 let sizing0 = match (
                     app.session.display_node(id).map(|n| n.kind().clone()),
                     app.session.doc.get(id),
@@ -3729,8 +3585,7 @@ impl OndinApp {
                     }
                     _ => None,
                 };
-                // An authored `size` is replaced; a derived box goes through
-                // `tools::resize_box_to`, the bottom-right handle drag.
+                // An authored `size` is replaced; a derived box goes through `tools::resize_box_to`.
                 let authored = app
                     .session
                     .display_node(id)
@@ -3747,8 +3602,6 @@ impl OndinApp {
                         );
                     }
                     let geometry = match sizing0 {
-                        // The mode survives a typed number through the drag's own
-                        // function.
                         Some(sizing) => GeometryPatch::TextSizing(tools::resized_text_sizing(
                             sizing,
                             Size::new(w, h),
@@ -3768,8 +3621,6 @@ impl OndinApp {
                     ui.available_width() - fw - 28.0 - ui::CARD_COL_GAP * 2.0,
                     28.0,
                 );
-                // Paired through `tools::paired_size`, against the box as read before
-                // either field is touched.
                 let now = size;
                 // The lock stands aside while either side is a keyword or percentage.
                 let both_px = size_menu
@@ -3783,8 +3634,7 @@ impl OndinApp {
                         want
                     }
                 };
-                // A percentage typed into W or H is the item's `width`/`height`,
-                // written as one; the size itself is the layout's to work out.
+                // A percentage typed into W or H is the item's `width`/`height`.
                 let percent_tx = |app: &Self, horizontal: bool, v: f64| {
                     let Some(node) = app.session.doc.get(id) else {
                         return Transaction(Vec::new());
@@ -3814,8 +3664,7 @@ impl OndinApp {
                                 (m.h, m.h_pct)
                             }
                         });
-                        // Bound, the field is a chip; only an axis the user sets
-                        // takes a binding (`build::size_axes_authored`).
+                        // Bound, the field is a chip; only an axis the user sets takes a binding.
                         let axis = usize::from(!horizontal);
                         let key = super::binding::FieldKey::Size { id, axis };
                         let bindable = ondin_core::bindable_size_axes(&app.session.doc, id)[axis];
@@ -3863,15 +3712,13 @@ impl OndinApp {
                                 if let (true, Some(m)) = (reset, mark) {
                                     app.commit_reset(m.tx.clone());
                                 }
-                                // Whether a number moved at any point of this edit.
                                 let moved = super::layout::edited(&r, v != drawn);
                                 (r, moved)
                             }
                         };
                         let tx = match mode {
                             Some((SizeMode::Percent, _)) if typed => percent_tx(app, horizontal, v),
-                            // No number moved, nothing commits: a click in and out
-                            // would fix a keyword in px or change a text's mode.
+                            // A click in and out would fix a keyword in px or change a text's mode.
                             _ if !typed => Transaction(Vec::new()),
                             _ if horizontal => {
                                 let want = paired(Size::new(v.max(1.0), size.height), true);
@@ -3888,13 +3735,11 @@ impl OndinApp {
                             app.field_doors(ui, key, &resp);
                         }
                     }
-                    // A broken chain when off, so the state reads without the tint.
                     let glyph = if locked {
                         icon::LINK_SIMPLE
                     } else {
                         icon::LINK_SIMPLE_BREAK
                     };
-                    // The tooltip names the handles too: the lock is the layer's.
                     let state = if both_px {
                         ui::FieldButton::on_if(locked)
                     } else {
@@ -3952,41 +3797,30 @@ impl OndinApp {
                     }
                 });
             }
-            // Under the size row (W/H or a line's L) on every kind.
             app.scale_row(ui, fw);
-            // The origin's numbers are deliberately not here; they sit under the
-            // layer's box on the canvas, by the pivot handle.
-            // Both angles are read through `Basis`, not `atan2(b, a)`, which would
-            // lose a mirror or misread a shear. The world basis's residual scale
-            // (from ancestors) is multiplied back on, or a nudge would resize.
-            //
-            // The round trip is exact only for an invertible basis: `skew_exact`
-            // false still shows the lossy angle but stops the skew write.
+            // Angles are read through `Basis`, not `atan2(b, a)`, which would lose a
+            // mirror or misread a shear; the residual ancestor scale is multiplied
+            // back on, or a nudge would resize. The round trip is exact only for an
+            // invertible basis: `skew_exact` false stops the skew write.
             let split = build::Basis::of(Affine::new(basis));
             let skew_exact = build::Basis::exact(Affine::new(basis)).is_some();
             let scale = Affine::scale_non_uniform(split.scale.x, split.scale.y);
-            // Both angles turn the layer about its pivot, as the canvas handle does.
             let pv = app.session.preview_pivot(id).unwrap_or(Point::ZERO);
             let held = Affine::new(world) * pv;
-            // Only skew rebuilds: it replaces `skew` alone, keeping `angle` and
-            // `mirror` together. Rotation composes instead (`turned_about`).
+            // Only skew rebuilds, replacing `skew` alone; rotation composes (`turned_about`).
             let rebuilt = |o: build::Orientation| {
                 Affine::translate(held.to_vec2())
                     * o.to_affine()
                     * scale
                     * Affine::translate(-pv.to_vec2())
             };
-            // Rotation and skew share a row at X and Y's widths, freeing the row
-            // below for the quarter turns and mirrors.
             Self::transform_row(ui, "rot", |ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                // A line's rotation is the world start-to-end angle, since its
-                // direction lives in the endpoint, not the basis.
+                // A line's rotation is the world start-to-end angle; its direction
+                // lives in the endpoint, not the basis.
                 let line_angle = shown_line;
                 // The document's angle, shown only at rest; a gesture shows its latch.
                 let at_rest = shown_degrees(line_angle.unwrap_or(split.orientation.angle));
-                // Read before the widget runs, so the first frame has no latch
-                // (`AngleScrub::reference`).
                 let scrub_id = egui::Id::new(("rotation-scrub", id));
                 let latch: Option<AngleScrub> = ui.data(|d| d.get_temp(scrub_id));
                 let mut angle_deg = latch.map_or(at_rest, |l| l.shown);
@@ -3999,7 +3833,6 @@ impl OndinApp {
                     Scrub::whole(0.5),
                     |d| d.suffix("°").custom_formatter(ui::number(2)),
                 );
-                // The mark's own tip names the main's angle instead.
                 let ra = match marks.r {
                     None => ra.on_hover_text("Rotate about the transform origin"),
                     Some(_) => ra,
@@ -4007,8 +3840,6 @@ impl OndinApp {
                 if let (true, Some(m)) = (reset_r, &marks.r) {
                     app.commit_reset(m.tx.clone());
                 }
-                // The delta from the gesture's own reference, composed onto the
-                // matrix (`turned_about`, `AngleScrub`).
                 let (base, from) = AngleScrub::reference(latch, at_rest, Affine::new(world));
                 let tr = app.place_at(
                     id,
@@ -4039,8 +3870,7 @@ impl OndinApp {
                     |d| d.suffix("°").custom_formatter(ui::number(2)),
                 )
                 .on_hover_text("Lean the layer sideways — Ctrl-drag a side does the same");
-                // An unrepresentable basis writes nothing, but still goes through the
-                // valve, which owns the engagement latch.
+                // An unrepresentable basis writes nothing but still goes through the valve.
                 let ts = match skew_exact {
                     true => app.place_at(
                         id,
@@ -4059,10 +3889,8 @@ impl OndinApp {
             self.show_pivot = !self.show_pivot;
         }
     }
-    /// Turn `id` a whole quarter about its transform origin.
-    ///
-    /// The pivot is read from the committed tree, the same frame
-    /// `tools::rotate_node` reads the world transform from.
+    /// Turn `id` a whole quarter about its transform origin, read from the
+    /// committed tree like `tools::rotate_node`'s world transform.
     fn rotate_quarter(&mut self, id: NodeId, angle: f64) {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let Some(pivot) = ondin_core::pivot_world(doc, res, id) else {
@@ -4098,8 +3926,7 @@ impl OndinApp {
         };
         let my_vars = |n: &ondin_core::Node| Some(n.corner_vars());
         let write_vars = |id, vars| Operation::SetCornerVars { id, vars };
-        // The main's binding as the tip names it: the variable shared, *per
-        // corner* where they differ, *unbound* where there is none.
+        // The tip names the variable shared, *per corner* where they differ, *unbound* if none.
         let table = self.session.doc.variables();
         let say_vars = |v: &[Option<ondin_core::VarId>]| match v {
             [first, rest @ ..] if rest.iter().all(|x| x == first) => match first {
@@ -4134,8 +3961,7 @@ impl OndinApp {
             _ => None,
         };
         AppearanceMarks {
-            // The binding first: a bound literal is 0, so a copy can differ by
-            // its binding alone, and the reset writes the main's binding too.
+            // The binding first: a bound literal is 0, so a copy can differ by it alone.
             opacity: Mark::and(
                 self.sub_mark(
                     s,
@@ -4162,7 +3988,6 @@ impl OndinApp {
                     |v| format!("{}%", mark_num(f64::from(*v) * 100.0)),
                 ),
             ),
-            // The corners' binding first, by the same rule.
             radius: Mark::and(
                 self.sub_mark(
                     s,
@@ -4244,11 +4069,8 @@ impl OndinApp {
             ),
         }
     }
-    /// One layer's opacity field, `fw` wide, for both Appearance cards — the
-    /// shape's and the point-editing one.
-    ///
-    /// Bound, it is a chip; unbound, the field, where `--` opens the variable
-    /// list and right-click the field menu.
+    /// One layer's opacity field, `fw` wide, for both Appearance cards. Bound, it
+    /// is a chip.
     fn opacity_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -4282,10 +4104,7 @@ impl OndinApp {
         );
         self.field_doors(ui, key, &ro);
     }
-    /// Opacity, corner radius, and the vertex counts — the design's Appearance
-    /// panel.
-    ///
-    /// Everything here changes what the shape looks like, not where it is.
+    /// Opacity, corner radius, and the vertex counts — the design's Appearance panel.
     #[allow(clippy::too_many_arguments)]
     fn inspector_appearance(
         &mut self,
@@ -4301,8 +4120,7 @@ impl OndinApp {
             let per_corner = app.per_corner_radius.contains(&id);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                // Opacity always; radius and its toggle only on a rect. The
-                // widths follow: two fields and a button, or one field.
+                // Opacity always; radius and its toggle only on a rect.
                 let button_space = if corners0.is_some() {
                     28.0 + ui::CARD_COL_GAP
                 } else {
@@ -4437,8 +4255,7 @@ impl OndinApp {
     /// The vertex-count row inside Appearance: a polygon's sides, or a star's
     /// points and inner ratio.
     ///
-    /// The ratio is shown as a percentage over the stored fraction, floored at
-    /// `geometry::MIN_INNER_RATIO`.
+    /// The ratio is shown as a percentage, floored at `geometry::MIN_INNER_RATIO`.
     fn vertex_fields(
         &mut self,
         ui: &mut egui::Ui,
@@ -4525,12 +4342,9 @@ impl OndinApp {
     }
     /// The Fill panel, for one layer or for the whole selection.
     ///
-    /// One row per fill, newest on top of the paint stack, and a `+` in the header
-    /// that adds one. Rows open the detached picker rather than growing an inline
-    /// editor, because a gradient has to be judged against the artwork.
-    ///
-    /// `shown` is the layer's own list, the one every target in the selection
-    /// shares, or a disagreement — which draws one stand-in row
+    /// One row per fill, newest on top, and a `+` in the header that adds one. Rows
+    /// open the detached picker, because a gradient has to be judged against the
+    /// artwork. A disagreeing `shown` draws one stand-in row
     /// ([`Self::mixed_paint_row`]) writing each property to every paint in scope.
     fn inspector_fill(
         &mut self,
@@ -4543,7 +4357,6 @@ impl OndinApp {
         // An instance's ghost rows are something to show.
         let ghosts = self.has_ghosts(scope.node(), |n| &n.paint().fills);
         self.sync_paint_collapse("Fill", shown.unpainted() && !ghosts, fresh);
-        // The `+` goes inert over a disagreement: there is no one list to add to.
         let action = Some(if shown.is_mixed() {
             ui::HeadAction::inert(
                 icon::PLUS,
@@ -4552,15 +4365,13 @@ impl OndinApp {
         } else {
             ui::HeadAction::new(icon::PLUS, "Add a fill")
         });
-        // The card wears its style when its layers have one.
         let targets = self.paint_style_targets(scope);
         let add = self.style_card(ui, "Fill", StyleSlot::Fills, &targets, action, |app, ui| {
             if shown.is_mixed() {
                 app.mixed_paint_row(ui, PaintList::Fill);
                 return;
             }
-            // An instance's list read against its source's, asked before the empty
-            // list is, since an instance that removed every item still has ghosts.
+            // Asked before the empty list is: an instance that removed every item still has ghosts.
             let source = match scope {
                 PaintScope::Node(id) => app.source_list(id, |n| &n.paint().fills),
                 PaintScope::Selection => None,
@@ -4579,12 +4390,10 @@ impl OndinApp {
                 .map(|s| ondin_core::reset::item_states(s, fills));
             let (mut remove, mut toggle, mut reset) = (None, None, None);
             let carrying = app.carrying(PaintList::Fill, anchor);
-            // Top of the paint stack first; during a drag, already in landing order.
             let order = app.paint_order(ui, PaintList::Fill, anchor, fills.len());
             let mut slots = paint::Slots::default();
             for &index in &order {
                 let salt = ("fill-row", index);
-                // As drawn: a bound fill shows its variable's colour.
                 let shown = app
                     .session
                     .doc
@@ -4650,8 +4459,8 @@ impl OndinApp {
         if add {
             self.open_paint_panel("Fill");
             let mut next = fills.to_vec();
-            // Minted; over a selection every layer gets this one id, so a main and
-            // its instance added to together share the item.
+            // Over a selection every layer gets this one id, so a main and its
+            // instance added to together share the item.
             next.push(Keyed::new(
                 self.session.ids.mint_item(),
                 Fill {
@@ -4668,9 +4477,9 @@ impl OndinApp {
     /// The Stroke panel: one two-row unit per stroke — its colour, then its
     /// position, weight and the button holding the rest.
     ///
-    /// The two rows travel together, including through a reorder. Over a
-    /// disagreeing selection it collapses to one stand-in unit, as
-    /// [`Self::inspector_fill`] does, plus [`Self::mixed_stroke_properties`].
+    /// The two rows travel together through a reorder. Over a disagreeing
+    /// selection it collapses to one stand-in unit, as [`Self::inspector_fill`]
+    /// does, plus [`Self::mixed_stroke_properties`].
     fn inspector_stroke(
         &mut self,
         ui: &mut egui::Ui,
@@ -4681,7 +4490,6 @@ impl OndinApp {
         let strokes = shown.list();
         let ghosts = self.has_ghosts(scope.node(), |n| &n.paint().strokes);
         self.sync_paint_collapse("Stroke", shown.unpainted() && !ghosts, fresh);
-        // Inert rather than absent while they disagree — see `inspector_fill`.
         let action = Some(if shown.is_mixed() {
             ui::HeadAction::inert(
                 icon::PLUS,
@@ -4699,7 +4507,6 @@ impl OndinApp {
             action,
             |app, ui| {
                 if shown.is_mixed() {
-                    // Through `paint_unit` like the list below; `last`, as it is the only one.
                     paint_unit(
                         ui,
                         app,
@@ -4709,7 +4516,6 @@ impl OndinApp {
                     );
                     return;
                 }
-                // `inspector_fill`'s reading of an instance's list, for strokes.
                 let source = match scope {
                     PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
                     PaintScope::Selection => None,
@@ -4734,7 +4540,6 @@ impl OndinApp {
                 for (pos, &index) in order.iter().enumerate() {
                     let s = &strokes[index];
                     let shown = app.session.doc.resolve_brush(anchor, &s.brush).into_owned();
-                    // Both rows travel together, so the slot pushed is the pair's.
                     let salt = ("stroke-row", index);
                     let last = pos + 1 == order.len();
                     let ((out, changed), rect) =
@@ -4785,14 +4590,12 @@ impl OndinApp {
                     app.finish_paint_drag(ui, PaintList::Stroke, anchor, slots)
                 {
                     app.write_strokes(scope, paint::reordered(strokes, from, to));
-                    // Index-keyed chrome is renumbered with the strokes, so open
-                    // popups stay on the stroke the user was working on.
+                    // Index-keyed chrome is renumbered so open popups follow their stroke.
                     let n = strokes.len();
                     app.remap_paint_indices(anchor, PaintList::Stroke, |i| {
                         paint::reordered_index(n, from, to, i)
                     });
                 } else if let (Some(_), Some(src)) = (restore, source.as_deref()) {
-                    // The whole list, as the fill card's restore.
                     app.write_strokes(scope, src.to_vec());
                 } else if let (Some(item), Some(src)) =
                     (reset.map(|i| strokes[i].id), source.as_deref())
@@ -4806,7 +4609,6 @@ impl OndinApp {
                     let mut next = strokes.to_vec();
                     next.remove(i);
                     app.write_strokes(scope, next);
-                    // The removed stroke's chrome goes; everything above comes down one.
                     app.remap_paint_indices(anchor, PaintList::Stroke, |j| {
                         paint::removed_index(i, j)
                     });
@@ -4820,7 +4622,6 @@ impl OndinApp {
         if add {
             self.open_paint_panel("Stroke");
             let mut next = strokes.to_vec();
-            // Minted, as the Fill panel's `+` is.
             next.push(Keyed::new(
                 self.session.ids.mint_item(),
                 Stroke {
@@ -4839,7 +4640,7 @@ impl OndinApp {
     /// disagree: the colour they share or the mixed chip, an opacity, an eye, an `x`.
     ///
     /// The same [`Self::paint_row`], told which values it may not state; its grip
-    /// is drawn and inert. The `x` clears every target, the way back to a live `+`.
+    /// is inert. The `x` clears every target, the way back to a live `+`.
     fn mixed_paint_row(&mut self, ui: &mut egui::Ui, list: PaintList) {
         let target = list.target();
         let (brush, mixed) = self.mixed_row(target);
@@ -4890,11 +4691,10 @@ impl OndinApp {
     ///
     /// The height goes in through `interact_size.y` at the full 28: a combo strokes
     /// its border inside its rect, where a `Frame` counts it outside
-    /// ([`ui::FIELD_BORDER_H`]). `salt` keys each stroke's dropdown apart. With
-    /// `aligns` false (an open shape) the combo opens onto a sentence instead.
+    /// ([`ui::FIELD_BORDER_H`]). With `aligns` false (an open shape) the combo
+    /// opens onto a sentence instead.
     fn align_combo(
         ui: &mut egui::Ui,
-        // `Debug` for egui's `AsIdSalt`, which prints it in `warn_on_id_clash`.
         salt: impl std::hash::Hash + std::fmt::Debug,
         aligns: bool,
         combo_w: f32,
@@ -4915,7 +4715,6 @@ impl OndinApp {
                 .selected_text(ui::glyph_and_text(icon::SQUARE_HALF, label));
             if aligns {
                 combo.show_ui(ui, |ui| {
-                    // The popup would otherwise inherit the squeezed spacing.
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
                     for a in [
@@ -4948,18 +4747,15 @@ impl OndinApp {
     }
     /// The width the position dropdown takes in either stroke row.
     ///
-    /// The design's `1.2fr 1fr 28px 28px`: a 1.2 : 1 split of what the two buttons
-    /// leave. One function so both rows read `CARD_COL_GAP` the same way.
+    /// The design's `1.2fr 1fr 28px 28px`: a 1.2 : 1 split of what the two buttons leave.
     fn align_combo_width(ui: &egui::Ui) -> f32 {
         let free = ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 3.0;
         free * 1.2 / 2.2
     }
     /// The mixed unit's second row: the position and the weight every stroke in
-    /// scope shares, or "Mixed" for whichever they do not — laid out **exactly** as
-    /// the per-stroke row is, with the two buttons it ends in present and inert.
-    ///
-    /// The options popup and the per-side selector have no mixed reading and are
-    /// keyed by list index, so they are dimmed, not dropped, keeping the widths.
+    /// scope shares, or "Mixed" for whichever they do not — laid out exactly as the
+    /// per-stroke row, its two buttons dimmed rather than dropped (they have no
+    /// mixed reading and are keyed by list index), keeping the widths.
     fn mixed_stroke_properties(&mut self, ui: &mut egui::Ui, scope: PaintScope) {
         let ids = self.session.selection.ids().to_vec();
         let align = self.shown_over_strokes(|s| s.align);
@@ -4972,8 +4768,7 @@ impl OndinApp {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
             let combo_w = Self::align_combo_width(ui);
             picked = Self::align_combo(ui, "stroke-align-mixed", aligns, combo_w, shared_align);
-            // Absolute, and dragged from `Spread::base`, not zero, so a scrub over a
-            // `bare` target accumulates.
+            // Dragged from `Spread::base`, not zero, so a scrub over a `bare` target accumulates.
             let mut width = shared_width.or_else(|| widths.base()).unwrap_or(0.0);
             let rw = value_field(
                 ui,
@@ -4993,13 +4788,10 @@ impl OndinApp {
             )
             .on_hover_text("Weight of every stroke in the selection");
             if interacting(&rw) {
-                // Weight is master over per-side widths, and a bound width is
-                // detached in the edit unless it already draws this weight
-                // (`weight_all_tx`).
+                // Weight is master over per-side widths (`weight_all_tx`).
                 let tx = weight_all_tx(&self.session.doc, &ids, width);
                 self.edit_valve(&rw, tx);
             }
-            // The per-stroke row's two buttons, dimmed.
             ui::field_button(
                 ui,
                 icon::SLIDERS_HORIZONTAL,
@@ -5020,8 +4812,7 @@ impl OndinApp {
     /// width itself, and the button holding dash, cap and join.
     ///
     /// Returns the stroke as edited, or `None`; the caller owns the list and
-    /// writes it. Dash, cap and join sit behind a button as rarely-touched
-    /// settings; alignment and weight stay in the open.
+    /// writes it.
     fn stroke_properties(
         &mut self,
         ui: &mut egui::Ui,
@@ -5029,12 +4820,10 @@ impl OndinApp {
         index: usize,
         stroke: &Stroke,
     ) -> Option<Stroke> {
-        // Each control is offered only where the shape lets it change something.
         let aligns = self.stroke_rule(scope, ondin_core::geometry::stroke_align_applies);
         let sides_apply = self.stroke_rule(scope, ondin_core::geometry::stroke_sides_apply);
         let joins = self.stroke_rule(scope, ondin_core::geometry::stroke_join_applies);
-        // Open, not "open or set": a collapsed row keeps its setting, shown by
-        // `ui::FieldButton::Set`.
+        // Open, not "open or set": a collapsed row keeps its setting (`FieldButton::Set`).
         let shown = sides_apply && self.stroke_sides_open.contains(&index);
         let mut out = None;
         let dim = if stroke.visible { 1.0 } else { HIDDEN_OPACITY };
@@ -5057,10 +4846,9 @@ impl OndinApp {
                     });
                 }
                 let field_w = ui.available_width() - 28.0 * 2.0 - ui::CARD_COL_GAP * 2.0;
-                // Bound, the weight is a chip — a layer's own stroke only, keyed by
-                // its item.
+                // Bound, the weight is a chip — a layer's own stroke only.
                 let key = match (scope, self.session.doc.get(scope.anchor(self))) {
-                    // Not on a stroke drawing `Custom` sides, where a bind would not land.
+                    // Not on `Custom` sides, where a bind would not land.
                     (PaintScope::Node(id), Some(n)) => n
                         .paint()
                         .strokes
@@ -5083,8 +4871,7 @@ impl OndinApp {
                         self.field_doors(ui, k, &rw);
                     }
                     // Through the valve, not `out`, so a drag previews every frame.
-                    // The weight is master: editing it flattens `Custom` per-side
-                    // widths, zeroes included, onto the new value.
+                    // Editing the weight flattens `Custom` per-side widths onto it.
                     self.stroke_valve(&rw, scope, index, |s| set_stroke_weight(s, width));
                 }
                 let open = self.stroke_menu == Some(index);
@@ -5102,8 +4889,6 @@ impl OndinApp {
                 if let Some(s) = self.stroke_menu_popup(ui, &more, scope, index, stroke, joins) {
                     out = Some(s);
                 }
-                // Opens and closes the row, never touching the stroke; collapsed
-                // over a setting, it shows `ui::FieldButton::Set`.
                 let state = sides_button_state(sides_apply, shown, stroke.sides);
                 if ui::field_button(ui, icon::CORNERS_OUT, 28.0, 15.0, state)
                     .on_hover_text(match state {
@@ -5131,12 +4916,9 @@ impl OndinApp {
         });
         out
     }
-    /// The sides selector under one stroke's properties row, and — when it is on
-    /// `Custom` — the four independent per-side widths under that.
-    ///
-    /// Rows in the card, not a popup: it carries values readable beside the
-    /// weight, and it travels with a reordering drag. "All sides" is in the list as
-    /// the way back.
+    /// The sides selector under one stroke's properties row, and — on `Custom` —
+    /// the four per-side widths. Rows in the card, not a popup, so the values read
+    /// beside the weight and travel with a reordering drag.
     fn stroke_sides_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -5147,17 +4929,15 @@ impl OndinApp {
         let mut out = None;
         let mut sides = stroke.sides;
         let drawn_width = self.drawn_stroke_width(scope, stroke);
-        // The leading gap: inside `paint_unit` the parent's spacing is zero, and a
-        // scope's spacing only goes between its own items.
+        // Inside `paint_unit` the parent's spacing is zero, and a scope's spacing
+        // only goes between its own items.
         ui.add_space(ui::CARD_ROW_GAP);
         ui.scope(|ui| {
-            // Stated, since `paint_unit` zeroes the inherited spacing.
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
             ui.spacing_mut().interact_size.y = 28.0;
             ui.spacing_mut().button_padding.y = 0.0;
             let combo = egui::ComboBox::from_id_salt(("stroke-sides", index))
                 .icon(ui::combo_chevron)
-                // The full width: a combo strokes its border inside its rect.
                 .width(ui.available_width())
                 .selected_text(ui::glyph_and_text(
                     icon::SQUARE_SPLIT_HORIZONTAL,
@@ -5172,8 +4952,7 @@ impl OndinApp {
                     StrokeSides::Right,
                     StrokeSides::Bottom,
                     StrokeSides::Left,
-                    // Seeded from what the stroke draws (a bound weight's number),
-                    // so picking Custom changes nothing on canvas.
+                    // Seeded from what the stroke draws, so picking Custom changes nothing.
                     stroke.sides.as_custom(drawn_width),
                 ] {
                     // By label, since the Custom entry carries live widths.
@@ -5189,8 +4968,7 @@ impl OndinApp {
             });
         });
         if sides != stroke.sides {
-            // Made `Custom`, a bound weight detaches in the edit itself, at the
-            // width it drew.
+            // Made `Custom`, a bound weight detaches in the edit, at the width it drew.
             let custom = matches!(sides, StrokeSides::Custom { .. });
             out = Some(Stroke {
                 sides,
@@ -5208,12 +4986,10 @@ impl OndinApp {
         } = sides
         {
             let mut values = [top, right, bottom, left];
-            // Outside the scope above, so both the leading gap and the pitch are
-            // owed again over `paint_unit`'s zero.
+            // Outside the scope above, so the gap and pitch are owed again.
             ui.add_space(ui::CARD_ROW_GAP);
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-                // Two rows of two, in the order the arrows read.
                 for pair in [
                     [(0_usize, icon::ARROW_UP), (1, icon::ARROW_RIGHT)],
                     [(3_usize, icon::ARROW_LEFT), (2, icon::ARROW_DOWN)],
@@ -5251,20 +5027,16 @@ impl OndinApp {
     /// Drop every piece of Stroke-panel chrome keyed by list index.
     ///
     /// For a change of subject only; a reorder or removal uses
-    /// [`Self::remap_paint_indices`] so the chrome follows its stroke. All of it is
-    /// view state, so this can close a panel but never lose a setting.
+    /// [`Self::remap_paint_indices`] so the chrome follows its stroke.
     fn forget_stroke_chrome(&mut self) {
         self.stroke_menu = None;
         self.stroke_sides_open.clear();
         self.stroke_dash_text = None;
     }
-    /// Renumber everything that names a paint by its index in `list`, because the
-    /// list is being renumbered under it: the detached picker, the hex buffer, and —
-    /// for strokes — the options popup, the sides rows and the dash buffer. `map`
-    /// answers "where did the paint at this index go", `None` for one that has gone.
-    ///
-    /// Serves both reorder and removal, so held chrome follows its paint. Slots in
-    /// the other list are left alone.
+    /// Renumber everything that names a paint by its index in `list`: the picker,
+    /// the hex buffer, and for strokes the options popup, sides rows and dash
+    /// buffer. `map` answers "where did the paint at this index go", `None` for
+    /// one that has gone. Slots in the other list are left alone.
     fn remap_paint_indices(
         &mut self,
         anchor: NodeId,
@@ -5281,7 +5053,6 @@ impl OndinApp {
                 (untouched, _) => Some(untouched),
             }
         };
-        // The picker's drop-or-move and the hex buffer, shared with the other lists.
         self.remap_slots(anchor, moved);
         if list == PaintList::Stroke {
             self.stroke_menu = self.stroke_menu.and_then(&map);
@@ -5323,9 +5094,8 @@ impl OndinApp {
     /// showing — one node, or every paint target in the selection.
     ///
     /// Nothing when the committed list already says this (not the display one,
-    /// which mid-drag already carries the value). Over a selection, `strokes` is
-    /// [`Self::strokes_in_scope`]'s anchor after the change, retargeted onto each
-    /// target's own item ids.
+    /// which mid-drag carries the value). Over a selection, `strokes` is
+    /// [`Self::strokes_in_scope`]'s anchor after the change, retargeted per target.
     fn strokes_tx(&mut self, scope: PaintScope, strokes: Vec<Keyed<Stroke>>) -> Transaction {
         match scope {
             PaintScope::Node(id) => {
@@ -5351,9 +5121,8 @@ impl OndinApp {
             }
         }
     }
-    /// The width `stroke` draws at: a bound one's number on a layer's own
-    /// strokes, its literal otherwise — a selection's shared list is
-    /// read through `shown_over_strokes`, resolved already.
+    /// The width `stroke` draws at: a bound one's number on a layer's own strokes,
+    /// its literal otherwise (a selection's list is resolved already).
     fn drawn_stroke_width(&self, scope: PaintScope, stroke: &Stroke) -> f64 {
         let (PaintScope::Node(id), Some(var)) = (scope, stroke.width_var) else {
             return stroke.width;
@@ -5367,7 +5136,7 @@ impl OndinApp {
     /// Put a scrubbed number on stroke `index` through the edit valve.
     ///
     /// Every draggable stroke number goes through here rather than the row's `out`,
-    /// so a drag previews every frame and the release commits that transaction.
+    /// so a drag previews every frame.
     fn stroke_valve(
         &mut self,
         resp: &egui::Response,
@@ -5384,8 +5153,7 @@ impl OndinApp {
     }
     /// One stroke's dash, cap and join, behind the sliders button.
     ///
-    /// An `Area`, so opening it does not push the strokes below down. The dash tab
-    /// shows only the numbers its pattern kind needs; cap and join are common to all.
+    /// An `Area`, so opening it does not push the strokes below down.
     fn stroke_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -5406,17 +5174,14 @@ impl OndinApp {
         let mut out = None;
         let mut close = false;
         let ctx = ui.ctx().clone();
-        // Whether the pointer is over a `Foreground` overlay, so a click in the cap
-        // combo's own list does not read as a click outside. Asked by layer order:
-        // the combo has already closed itself by the time a popup query could ask.
+        // So a click in the cap combo's own list does not read as a click outside;
+        // asked by layer order, since the combo has already closed itself.
         let over_overlay = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
             .is_some_and(|l| l.order >= egui::Order::Foreground);
         let anchor = Self::popover_anchor(&ctx, head.rect, MENU_W);
-        // The width the stroke draws, which a fresh pattern is sized at.
         let drawn_width = self.drawn_stroke_width(scope, s);
-        // The row's style lock, as the effect popover carries it.
         let locked = !ui.is_enabled();
         let menu = egui::Area::new(egui::Id::new(("stroke-menu", index)))
             .order(egui::Order::Foreground)
@@ -5454,7 +5219,6 @@ impl OndinApp {
                                 dashes: pattern_for(DashStyle::ALL[i], &sized),
                                 ..s.clone()
                             });
-                            // The old mode's typing buffer goes with it.
                             self.stroke_dash_text = None;
                         }
                         if icon_button(ui, icon::X, 18.0, 13.0, false, true)
@@ -5481,8 +5245,7 @@ impl OndinApp {
                                     |d| d.custom_formatter(ui::number(2)),
                                 )
                                 .on_hover_text("Centre-to-centre spacing");
-                                // A dot is a zero-length dash, so the gap is the
-                                // centre-to-centre distance under every cap.
+                                // A dot is a zero-length dash, so the gap is centre-to-centre.
                                 self.stroke_valve(&resp, scope, index, move |st| {
                                     st.dashes = vec![0.0, spacing.max(0.0)];
                                 });
@@ -5540,7 +5303,6 @@ impl OndinApp {
                         let mut cap = s.cap;
                         egui::ComboBox::from_id_salt(("stroke-cap", index))
                             .icon(ui::combo_chevron)
-                            // As the sides combo: `width` is what a combo paints.
                             .width(inner)
                             .selected_text(ui::glyph_and_text(icon::LINE_SEGMENT, cap_label(cap)))
                             .show_ui(ui, |ui| {
@@ -5556,12 +5318,10 @@ impl OndinApp {
                     });
 
                     let join_row = ui.scope(|ui| {
-                        // The label's gap; the strip and miter field are topped up to
-                        // `CARD_ROW_GAP` below.
+                        // The label's gap; the miter field is topped up to `CARD_ROW_GAP` below.
                         ui.spacing_mut().item_spacing.y = ui::SECTION_LABEL_GAP;
-                        // Dimmed where there is no corner to shape
-                        // (`geometry::stroke_join_applies`); `Ui::disable` also fades
-                        // `segmented`, which paints straight onto the painter.
+                        // `Ui::disable` also fades `segmented`, which paints straight
+                        // onto the painter.
                         if !joins {
                             ui.disable();
                         }
@@ -5581,22 +5341,12 @@ impl OndinApp {
                                 ..s.clone()
                             });
                         }
-                        // **Only under Miter, and only where a join means anything
-                        // at all**, because it only means something under both: a
-                        // round or bevelled corner has no spike to limit, and
-                        // neither has a shape with no corner to put one on.
-                        //
-                        // The second half is the one that had to be added. `Miter`
-                        // is the *default* join, so an ellipse whose stroke had
-                        // never been touched still satisfied the first test and
-                        // showed the field — dimmed with the row, but present, and a
-                        // dimmed field is a control that could be used rather than
-                        // one that cannot exist. The row above stays and says why
-                        // (its tooltip); this goes.
+                        // Only under Miter, and only where a join means anything: `Miter`
+                        // is the default, so without the `joins` test an ellipse would
+                        // show a dimmed field that looks usable.
                         if joins && s.join == Join::Miter {
-                            // Two controls, so the Transform card's row pitch —
-                            // the scope is carrying the *label*'s gap, so this is
-                            // the difference (§15 D386).
+                            // The scope carries the label's gap; this tops up to the
+                            // Transform card's row pitch (§15 D386).
                             ui.add_space(ui::CARD_ROW_GAP - ui::SECTION_LABEL_GAP);
                             let shown = ondin_core::miter_degrees_of_ratio(s.miter_limit);
                             let mut degrees = shown;
@@ -5608,22 +5358,13 @@ impl OndinApp {
                                 Scrub::whole(0.25).range(ondin_core::MIN_MITER_DEGREES..=180.0),
                                 |d| d.suffix("°").custom_formatter(ui::number(2)),
                             )
-                            // **The field reads backwards**, so the tooltip says
-                            // which way round it is rather than naming it: a
-                            // *smaller* angle permits a longer spike. 180° is ratio
-                            // 1 and bevels everything.
+                            // A smaller angle permits a longer spike; 180° bevels everything.
                             .on_hover_text("Corners sharper than this are bevelled");
-                            // Stored as the ratio kurbo and SVG take, converted here
-                            // — the one place the two units meet.
-                            //
-                            // **Written only when the angle actually moved.** The
-                            // round trip through `asin` and `sin` is not required to
-                            // be bit-exact, so converting unconditionally would write
-                            // a ratio a few ulps off the stored one every time the
-                            // field lost focus — past `strokes_tx`'s equality guard,
-                            // and into the file and the undo stack. Comparing the
-                            // *degrees* against what was shown catches it, because
-                            // `degrees` starts as exactly that.
+                            // Stored as the ratio kurbo and SVG take. Written only when
+                            // the angle moved: the `asin`/`sin` round trip is not
+                            // bit-exact, so converting unconditionally would write a
+                            // ratio a few ulps off on every defocus, past `strokes_tx`'s
+                            // equality guard and into the undo stack.
                             self.stroke_valve(&resp, scope, index, move |st| {
                                 if degrees != shown {
                                     st.miter_limit = ondin_core::miter_ratio_of_degrees(degrees);
@@ -5631,17 +5372,9 @@ impl OndinApp {
                             });
                         }
                     });
-                    // Said once, on the row rather than on each cell, because the
-                    // reason is about the shape and not about which join was picked.
-                    //
-                    // **Through a claimant of its own, not through `join_row`.** A
-                    // `Ui::scope`'s response is a placeholder over the rect rather
-                    // than a registered widget, so it never reports a hover — and
-                    // `on_hover_text` is gated on `Response::enabled()` besides,
-                    // which is false for everything inside a disabled scope. Hung on
-                    // the scope this was dead in both directions and showed nothing
-                    // ever, which is exactly how it reads: silently. `menu_action`
-                    // and `image_edit_card` do it this way for the same reason.
+                    // Through a claimant of its own: a `Ui::scope`'s response never
+                    // reports a hover, and `on_hover_text` is gated on `enabled()`,
+                    // false inside a disabled scope.
                     if !joins {
                         ui.interact(
                             join_row.response.rect,
@@ -5653,14 +5386,9 @@ impl OndinApp {
                 });
             })
             .response;
-        // **The panel's one click-away rule** (`panels::dismissed_by_click`), which
-        // this popover hand-rolled three of the six terms of. `on_picker` is the one
-        // that mattered: a stroke row's swatch opens the detached picker, which sits
-        // in the lane immediately left of this card and is an `egui::Window` at
-        // `Order::Middle` — below this `Area`, so the overlay term says no, and a
-        // separate layer, so `on_menu` says no too. The image card was found
-        // closing itself for exactly that reason back when it had a click-away rule
-        // at all (§15 D268 took it away with the button); this one had the same hole.
+        // `on_picker` matters: a stroke row's swatch opens the detached picker, an
+        // `egui::Window` at `Order::Middle` — below this `Area`, so the overlay term
+        // says no, and a separate layer, so `on_menu` says no too.
         let on_picker = ctx
             .pointer_interact_pos()
             .and_then(|p| ctx.layer_id_at(p))
@@ -5669,23 +5397,8 @@ impl OndinApp {
         let press_away = super::press_began_away(&ctx, menu.layer_id.id, menu.rect, head.rect);
         if close
             || super::dismissed_by_click(super::ClickAway {
-                // **The primary button only**, as the typography popover does it
-                // and for the same reason: this one holds scrubbable fields (the
-                // mitre angle, the dash lengths), a scrub is cancelled with a
-                // right-click wherever the pointer has been dragged to, and read as
-                // `any_click` that cancel is also a click on the page. Right-click
-                // is spent on gesture-cancel throughout the app, so it is never a
-                // click-away.
-                //
-                // The Guides menu used to be the one *inspector* exemption from this
-                // rule — `any_click`, on the grounds that it was a dropdown with
-                // nothing to scrub and dismissing on any outside press is what a menu
-                // is for. That menu is gone: its two actions live in the body of the
-                // guide card now, so every popover in this panel reads the primary
-                // button and there is no exemption left to keep in step. The top
-                // bar's own View and Snap dropdowns still read `any_click`
-                // (`OndinApp::dropdown`) — they hold no scrubbable field either, and
-                // they are a different family from the panels this rule is about.
+                // The primary button only: this popover holds scrubbable fields, and a
+                // scrub is cancelled with a right-click, which must not also dismiss.
                 clicked: ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary)),
                 over_overlay,
                 on_menu: menu.contains_pointer(),
@@ -5698,11 +5411,8 @@ impl OndinApp {
             self.stroke_menu = None;
             self.stroke_dash_text = None;
         }
-        // Escape closes the popover, and the cap list with it if one is open. Both
-        // answer to the same key and egui dismisses the list itself, so one press
-        // clears both — which is what Escape means everywhere else in the app
-        // (`input::escape`'s ladder) rather than a state to unwind one layer at a
-        // time. Heard, for the router's sake (§15 D847, `OndinApp::popover_heard`).
+        // One Escape closes the popover and the cap list with it. Heard, for the
+        // router's sake (§15 D847, `OndinApp::popover_heard`).
         self.popover_heard = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stroke_menu = None;
@@ -5712,8 +5422,8 @@ impl OndinApp {
     }
     /// The fit-to-corners toggle, shared by the dotted and dashed rows.
     ///
-    /// A flag honoured at the render boundary, not a one-off recompute, so it stays
-    /// true across a resize and the fields keep showing what was typed (§6.3).
+    /// A flag honoured at the render boundary, so it stays true across a resize
+    /// and the fields keep showing what was typed (§6.3).
     fn dash_fit_button(&mut self, ui: &mut egui::Ui, cell: f32, s: &Stroke) -> Option<Stroke> {
         let resp = ui::field_button(
             ui,
@@ -5728,13 +5438,10 @@ impl OndinApp {
             ..s.clone()
         })
     }
-    /// The custom dash list: a comma-separated run of lengths, read as
-    /// on, off, on, off… — `5, 10` is a 5-long dash with a 10 gap, and
-    /// `5, 10, 15` continues into a 15-long dash before repeating.
+    /// The custom dash list: comma-separated lengths read as on, off, on, off…
     ///
-    /// Buffered and applied on defocus: typing `5, 10` passes through `5`, and each
-    /// keystroke would otherwise be an undo step. An unparseable list leaves the
-    /// model alone rather than turning the stroke solid.
+    /// Buffered and applied on defocus, or each keystroke would be an undo step.
+    /// An unparseable list leaves the model alone rather than turning the stroke solid.
     fn dash_list_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -5765,18 +5472,14 @@ impl OndinApp {
                     .font(egui::FontId::proportional(11.5)),
             )
         });
-        // `Escape` ends the edit too, so the write below is gated on
-        // `ui::defocus_commits`, not on `lost_focus()`.
         // valve-gate-not-a-commit: a TextEdit; changed() only stashes, lost_focus() parses.
         if resp.gained_focus() || resp.changed() {
             self.stroke_dash_text = Some((index, text.clone()));
         }
         if editing && resp.lost_focus() {
             self.stroke_dash_text = None;
-            // Compared against the printed text, not the parsed list: the print
-            // rounds, so a bare click in and out would rewrite an imported
-            // `5.0000000001` to `5`. `Escape` is a term here, not an early return,
-            // so the buffer still clears and the hover text still attaches.
+            // Compared against the printed text: the print rounds, so a bare click
+            // would rewrite an imported `5.0000000001` to `5`.
             if let Some(dashes) = parse_dash_list(&text)
                 && text != dash_list_text(&s.dashes)
                 && ui::defocus_commits(&resp)
@@ -5792,8 +5495,7 @@ impl OndinApp {
     }
     /// Which entry of `list` this panel is currently carrying, if any.
     ///
-    /// Keyed on the anchor as well as the list: a drag whose selection changed
-    /// under it carries nothing, because its indices no longer name anything.
+    /// Keyed on the anchor too: a drag whose selection changed carries nothing.
     fn carrying(&self, list: PaintList, anchor: NodeId) -> Option<usize> {
         self.in_flight
             .paint_drag
@@ -5804,10 +5506,8 @@ impl OndinApp {
     /// Advance a paint-row drag against the slots the panel laid out last frame,
     /// and return the model indices to draw the rows in.
     ///
-    /// The reorder is live: rows change places under the pointer while the carried
-    /// entry follows the cursor ([`carried_unit`]). Runs before the rows are drawn,
-    /// so the slot geometry is last frame's — exact, since reordering contents does
-    /// not move the slots.
+    /// Runs before the rows are drawn, so the slot geometry is last frame's —
+    /// exact, since reordering contents does not move the slots.
     fn paint_order(
         &mut self,
         ui: &egui::Ui,
@@ -5836,12 +5536,9 @@ impl OndinApp {
     /// Record the slots the rows just landed in, and resolve the drag on release
     /// into `(from, to)` model indices.
     ///
-    /// `None` on every frame but the one the pointer comes up on, and on that one
-    /// only if the paint actually moved.
-    ///
-    /// The release is read from the pointer, not the grip: a carried row draws in a
-    /// tooltip-order layer ([`carried_unit`]) whose `Response`s are empty, so
-    /// `drag_stopped` would never arrive.
+    /// `None` except on the release frame, and then only if the paint moved. The
+    /// release is read from the pointer: a carried row's `Response`s are empty
+    /// ([`carried_unit`]), so `drag_stopped` never arrives.
     fn finish_paint_drag(
         &mut self,
         ui: &egui::Ui,
@@ -5868,9 +5565,7 @@ impl OndinApp {
     /// it, open with something.
     ///
     /// Asserted outright on a new subject and on the empty/non-empty transition
-    /// otherwise, so a hand toggle within one selection wins. `fresh` is the panel's
-    /// own [`OndinApp::subject_changed`] — [`OndinApp::paint_subject_changed`] for
-    /// Fill and Stroke.
+    /// otherwise, so a hand toggle within one selection wins.
     pub(super) fn sync_paint_collapse(&mut self, title: &'static str, empty: bool, fresh: bool) {
         sync_paint_collapse(
             &mut self.collapsed_panels,
@@ -5881,19 +5576,17 @@ impl OndinApp {
         );
     }
     /// Whether the paint panels are looking at a different subject than the last
-    /// frame that drew them — and record this one as the subject from now on.
+    /// frame that drew them, recording this one.
     ///
-    /// Asked once per frame by the inspector's caller, above
-    /// [`Self::inspector_paint_panels`], and handed down: a panel that consumed the
-    /// edge on its way past would leave the next one told nothing had happened.
+    /// Asked once per frame above [`Self::inspector_paint_panels`] and handed down:
+    /// a panel that consumed the edge would leave the next told nothing happened.
     fn paint_subject_changed(&mut self) -> bool {
         self.subject_changed("Fill")
     }
 
     /// Whether the panel `key` names is looking at a different subject than the
-    /// last frame it asked, recording this one as its subject from now on — every
-    /// self-collapsing panel's edge, one entry each in
-    /// [`OndinApp::synced_selection`] (see there for why one each).
+    /// last frame it asked, recording this one — one entry each in
+    /// [`OndinApp::synced_selection`].
     pub(super) fn subject_changed(&mut self, key: &'static str) -> bool {
         let now = self.session.selection.ids();
         if self.synced_selection.get(key).is_some_and(|s| s == now) {
@@ -5914,17 +5607,15 @@ impl OndinApp {
     /// The frame templates — a panel of named sizes, each drawn at its own
     /// proportions, that fills in W and H.
     ///
-    /// The scroll box is capped at [`TEMPLATE_LIST_H`]. It also reads the size: the
-    /// template matching [`Self::shared_frame_size`] lights, exactly and
-    /// orientation-sensitively, so a landscape frame lights nothing rather than a
-    /// template that applying would rotate. Mixed sizes light nothing.
+    /// The scroll box is capped at [`TEMPLATE_LIST_H`]. The template matching
+    /// [`Self::shared_frame_size`] lights, orientation-sensitively, so a landscape
+    /// frame lights nothing rather than a template applying would rotate.
     fn inspector_frame_templates(&mut self, ui: &mut egui::Ui) {
         let subjects = self.frame_subjects();
         if subjects.is_empty() {
             return;
         }
-        // Not on a component: a main, variant, instance or set is a part, never a
-        // page. Any such frame in the selection hides the card.
+        // A component part is never a page: any such frame hides the card.
         let doc = &self.session.doc;
         if subjects.iter().any(|id| {
             doc.get(*id)
@@ -5937,15 +5628,12 @@ impl OndinApp {
         let current = size.and_then(preset_named);
         let mut pick: Option<Size> = None;
         self.panel(ui, "Frame templates", None, |_app, ui| {
-            // Spans the card across; shrinks down when shorter than the cap.
             egui::ScrollArea::vertical()
                 .max_height(TEMPLATE_LIST_H)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    // A list inside a card: the card's row pitch zeroed, every gap stated.
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    // Measured outside the loop: inside a `horizontal` it shrinks
-                    // after the first cell.
+                    // Measured outside the loop: inside a `horizontal` it shrinks per cell.
                     let cell = (ui.available_width() - TEMPLATE_CELL_GAP) / 2.0;
                     for (gi, (group, entries)) in FRAME_PRESETS.iter().enumerate() {
                         if gi > 0 {
@@ -5972,14 +5660,11 @@ impl OndinApp {
         });
         // A click on the lit cell writes nothing, so it is not an empty undo step.
         if let Some(next) = pick.filter(|next| Some(*next) != size) {
-            // Each frame's own box, unlike Transform's W and H, which scale the
-            // selection's union box as a rigid body.
             self.apply_frame_template(&subjects, next);
         }
     }
 
-    /// Set every subject's own box to `size`, as one undoable step. Its own
-    /// function so a test can drive the same write the cell does.
+    /// Set every subject's own box to `size`, as one undoable step.
     fn apply_frame_template(&mut self, subjects: &[NodeId], size: Size) {
         let tx = Transaction(
             subjects
@@ -5995,15 +5680,12 @@ impl OndinApp {
         }
     }
 
-    /// The size every selected frame already is, or `None` where they differ — the
-    /// templates panel's read-back. A disagreement needs no message: nothing lights,
-    /// as for a custom size.
-    ///
-    /// Reads the committed document, so a template does not light mid-drag.
+    /// The size every selected frame already is, or `None` where they differ, so
+    /// nothing lights. Reads the committed document, so no template lights mid-drag.
     fn shared_frame_size(&self, subjects: &[NodeId]) -> Option<Size> {
         let mut sizes = subjects
             .iter()
-            // Resolved: a bound width or height stores 0.
+            // Resolved: a bound width stores 0.
             .filter_map(|id| match self.session.doc.resolved_kind(*id).as_deref() {
                 Some(NodeKind::Artboard { size, .. }) => Some(*size),
                 _ => None,
@@ -6016,19 +5698,16 @@ impl OndinApp {
     ///
     /// A frame's panel though `Node::grids` is a layer's field: a grid is measured
     /// against an authored size, which only `NodeKind::Artboard` has. A whole-list
-    /// edit, like the paint panels', so every change is one undo step. Its colour
-    /// goes through a [`PaintSlot`]; a grid is chrome, so it previews through
-    /// [`OndinApp::preview_grid`].
+    /// edit, so every change is one undo step. Its colour goes through a
+    /// [`PaintSlot`]; a grid is chrome, so it previews through [`OndinApp::preview_grid`].
     fn inspector_layout_grids(&mut self, ui: &mut egui::Ui) {
         let subjects = self.frame_subjects();
         if subjects.is_empty() {
             return;
         }
         let shared = self.shared_grids_keyed(&subjects);
-        // Closed when empty, like Fill and Stroke; a disagreement counts as not
-        // empty, so the "Mixed" message is seen.
+        // Closed when empty; a disagreement counts as not empty, so "Mixed" is seen.
         let fresh = self.grids_subject_changed();
-        // An instance's ghost rows are something to show.
         let ghosts = match subjects.as_slice() {
             [one] => self.has_ghosts(Some(*one), |n| n.grids()),
             _ => false,
@@ -6039,7 +5718,6 @@ impl OndinApp {
             fresh,
         );
         let mixed = shared.is_none();
-        // Over a disagreeing selection the `+` replaces, and its tooltip says so.
         let action = Some(ui::HeadAction::new(
             icon::PLUS,
             match (subjects.len(), mixed) {
@@ -6048,8 +5726,7 @@ impl OndinApp {
                 (_, true) => "Replace every selected frame's layout grids with one",
             },
         ));
-        // Collected, not committed in the loop: a row that removes itself would
-        // edit the list the later rows are still reading.
+        // Collected, not committed in the loop, which later rows are still reading.
         let mut next: Option<Vec<Keyed<LayoutGrid>>> = None;
         let add = self.panel(ui, "Layout grid", action, |app, ui| {
             let Some(grids) = shared.clone() else {
@@ -6060,8 +5737,6 @@ impl OndinApp {
                 );
                 return;
             };
-            // One instance's list read against its source's, for each row's
-            // override state and the ghost rows of removed grids.
             let source = match subjects.as_slice() {
                 [one] => app.source_list(*one, |n| n.grids()),
                 _ => None,
@@ -6111,9 +5786,7 @@ impl OndinApp {
                     restore = true;
                 }
             }
-            // Written whole, not through `retarget_grids`: a restored grid keeps the
-            // main's id. A ghost row restores the main's whole list; a row's ↺
-            // resets that item.
+            // Written whole, not through `retarget_grids`: a restored grid keeps the main's id.
             let list = match (restore, reset, source.as_deref()) {
                 (true, _, Some(src)) => Some(src.to_vec()),
                 (false, Some(item), Some(src)) => {
@@ -6126,7 +5799,6 @@ impl OndinApp {
                     id: *id,
                     grids,
                 }]));
-                // The rows' own edits stand down that frame, so nothing writes twice.
                 next = None;
             }
         });
@@ -6149,9 +5821,8 @@ impl OndinApp {
     /// `margin: auto` (`ondin_core::container`).
     ///
     /// A pin diagram and four fields. Clicking a strut pins that edge at its current
-    /// distance (`container::with_edge`), so a pin never moves anything; an unpinned
-    /// field reads `auto`. Applies to every [`Self::inset_subjects`] layer, each at
-    /// its own distances.
+    /// distance (`container::with_edge`), so a pin never moves anything. Applies to
+    /// every [`Self::inset_subjects`] layer, each at its own distances.
     fn inspector_insets(&mut self, ui: &mut egui::Ui) {
         use ondin_core::container::Edge as Pin;
         let subjects = self.inset_subjects();
@@ -6169,8 +5840,7 @@ impl OndinApp {
         let mixed = subjects
             .iter()
             .any(|id| self.session.display_node(*id).map(|n| n.insets()) != Some(insets));
-        // Whether the container lays its children out; outside one every child is
-        // absolute, held at its top and left when it has no insets.
+        // Outside a layout every child is absolute, held at top and left when it has no insets.
         let laid = self
             .session
             .doc
@@ -6180,14 +5850,12 @@ impl OndinApp {
             .is_some_and(|p| p.display().is_some());
         // Only inside a layout, where a pin takes the layer out of the flow.
         let badge = (laid && !mixed && insets.is_authored()).then_some("Absolute");
-        // Outside a layout an axis with no inset is shown held, without writing
-        // one: an authored inset would take the layer out of a future layout.
+        // Outside a layout an axis with no inset is shown held, without writing one:
+        // an authored inset would take the layer out of a future layout.
         let held = (
             !laid && insets.left.is_none() && insets.right.is_none(),
             !laid && insets.top.is_none() && insets.bottom.is_none(),
         );
-        // The diagram spans two field rows (L R over T B); the centre buttons share
-        // a row underneath.
         self.panel_badged(ui, "Position", None, badge, |app, ui| {
             if mixed {
                 ui.label(
@@ -6262,7 +5930,6 @@ impl OndinApp {
                         state,
                         mark.as_ref().map(Mark::field),
                     );
-                    // A marked button's tip names the main's state instead.
                     let resp = tip_unless_marked(resp, &mark, tip);
                     if reset {
                         app.reset_marked(true, &mark);
@@ -6274,9 +5941,8 @@ impl OndinApp {
         });
     }
 
-    /// The selected layers a container can pin: every one whose parent is a frame
-    /// or a group with a layout, and whose kind takes insets
-    /// (`container::takes_insets`). Filtered rather than all-or-nothing.
+    /// The selected layers a container can pin: those whose parent is a frame or a
+    /// group with a layout and whose kind takes insets (`container::takes_insets`).
     fn inset_subjects(&self) -> Vec<NodeId> {
         let doc = &self.session.doc;
         self.session
@@ -6296,9 +5962,8 @@ impl OndinApp {
             .collect()
     }
 
-    /// Where `id` is drawn inside its container — the container's size, the
-    /// layer's local transform and box — all through the preview, so the distances
-    /// follow a drag in flight.
+    /// Where `id` is drawn inside its container, all through the preview so the
+    /// distances follow a drag in flight.
     fn inset_placement(&self, id: NodeId) -> Option<InsetPlacement> {
         let parent = self.session.doc.get(id)?.parent()?;
         let frame = match *self.session.display_node(parent)?.kind() {
@@ -6344,8 +6009,7 @@ impl OndinApp {
     ///
     /// Applies the edit to a scratch copy, resolves it, and re-derives each such
     /// layer's insets (`container::inverse`). One pass is exact: a layer out of the
-    /// flow does not size its container. A full resolve per click, paid only when a
-    /// pin takes a layer out of a flow.
+    /// flow does not size its container.
     fn kept_in_place(&self, mut ops: Vec<Operation>, subjects: &[NodeId]) -> Vec<Operation> {
         let doc = &self.session.doc;
         let res = &self.session.resolved;
@@ -6412,11 +6076,9 @@ impl OndinApp {
     }
 
     /// The ops that write where `id` is drawn now into its stored transform and
-    /// size — so a pin change never moves it.
-    ///
-    /// What makes unpinning safe: an axis that loses its insets is placed by the
-    /// stored transform again, which a frame resize since the pin may have left
-    /// stale. Written alongside an explicit `SetInsets`.
+    /// size — so a pin change never moves it. This makes unpinning safe: an axis
+    /// that loses its insets falls back to the stored transform, which a frame
+    /// resize since the pin may have left stale.
     fn baked_placement(&self, id: NodeId, p: &InsetPlacement) -> Vec<Operation> {
         match self.session.doc.get(id) {
             Some(node) => build::baked_ops(id, node, p.local, &p.kind),
@@ -6424,10 +6086,9 @@ impl OndinApp {
         }
     }
 
-    /// The override mark on a centre button: whether an instance's layer is
-    /// centred on the axis where its main's counterpart is not, or the reverse.
-    /// Compared on the auto margins alone, and reset as the whole axis, since auto
-    /// margins between edges not both pinned centre nothing.
+    /// The override mark on a centre button: an instance's layer centred where its
+    /// main's is not, or the reverse. Reset as the whole axis, since auto margins
+    /// between edges not both pinned centre nothing.
     fn centre_mark(&self, subjects: &[NodeId], horizontal: bool) -> Option<Mark> {
         use ondin_core::Insets;
         // Equal when both are centred or neither is, whatever the distances.
@@ -6520,8 +6181,8 @@ impl OndinApp {
     /// edge; `auto` when not — except an edge `held` by default, which shows the
     /// distance it is kept at.
     ///
-    /// A click through an unpinned field pins nothing: its edit is empty until the
-    /// number differs. The unit suffix commits directly, not through the valve.
+    /// A click through an unpinned field pins nothing until the number differs. The
+    /// unit suffix commits directly, not through the valve.
     #[allow(clippy::too_many_arguments)]
     fn inset_field(
         &mut self,
@@ -6550,7 +6211,6 @@ impl OndinApp {
         let at = egui::Rect::from_min_size(ui.cursor().min, size);
         // Reads `auto` over the real distance, so a scrub starts from the edge.
         let unpinned = set.is_none() && !held;
-        // An instance's overridden inset on this edge; an instance root's are its own.
         let mark = self.sub_mark(
             subjects,
             |op| match op {
@@ -6600,7 +6260,6 @@ impl OndinApp {
             },
         );
         let flip = unit_resp.is_some_and(|u| u.clicked());
-        // A marked field's tip names the main's inset instead; two would stack.
         let resp = if unpinned {
             tip_unless_marked(
                 resp,
@@ -6608,7 +6267,6 @@ impl OndinApp {
                 "Not pinned — type a value, drag, or click the diagram to pin",
             )
         } else if set.is_none() {
-            // Held by default: no accent edge, since nothing is authored.
             tip_unless_marked(
                 resp,
                 &mark,
@@ -6652,9 +6310,8 @@ impl OndinApp {
     }
 
     /// The unit suffix's edit: every subject's pinned `edge` converted to `%` of
-    /// its container (`to_percent`) or to px — each subject's own distance in its
-    /// own container, so nothing moves. A switch never makes a pin, so a subject
-    /// with the edge unpinned is left out.
+    /// its container (`to_percent`) or to px, so nothing moves. A switch never
+    /// makes a pin, so a subject with the edge unpinned is left out.
     fn inset_flip_ops(
         &self,
         subjects: &[NodeId],
@@ -6681,9 +6338,9 @@ impl OndinApp {
 
     /// A typed or dragged inset's edit: `edge` pinned at `value` on every subject.
     ///
-    /// An in-flow item this pins leaves its flow where it is drawn: its drawn
-    /// placement is written first, since the unpinned axis would otherwise fall
-    /// back to the stored transform. The typed edge is as typed.
+    /// An in-flow item this pins leaves its flow where it is drawn, so its drawn
+    /// placement is written first (the unpinned axis would fall back to the stored
+    /// transform).
     fn typed_inset_ops(
         &self,
         subjects: &[NodeId],
@@ -6710,10 +6367,7 @@ impl OndinApp {
     }
 
     /// The frames a frame panel is acting on: the selected artboards, in document
-    /// order. Filtered rather than all-or-nothing, so a rectangle caught with three
-    /// frames still means the three frames; empty gates the panel.
-    ///
-    /// `pub(crate)` for `picker_ui`'s orphan match, which asks the card's question.
+    /// order; empty gates the panel. `pub(crate)` for `picker_ui`'s orphan match.
     pub(crate) fn frame_subjects(&self) -> Vec<NodeId> {
         ondin_core::build::in_document_order(&self.session.doc, self.session.selection.ids())
             .into_iter()
@@ -6727,17 +6381,15 @@ impl OndinApp {
     }
 
     /// Whether the selection has moved since the Layout grid panel last read it —
-    /// the edge `sync_paint_collapse` re-asserts the resting collapse state on.
-    /// Its own [`OndinApp::synced_selection`] entry, since asking consumes the edge.
+    /// the edge `sync_paint_collapse` re-asserts the resting state on.
     fn grids_subject_changed(&mut self) -> bool {
         self.subject_changed("Layout grid")
     }
 
     /// The grid list every subject agrees on, or `None` where they disagree.
     ///
-    /// The committed document: `SetLayoutGrids` has no preview, so a scrub's
-    /// in-flight value lives in `OndinApp::grid_scrub` and [`Self::grid_rows`]
-    /// applies it. `pub(crate)` for `picker_ui`'s orphan match.
+    /// The committed document: `SetLayoutGrids` has no preview, so a scrub's value
+    /// lives in `OndinApp::grid_scrub`. `pub(crate)` for `picker_ui`'s orphan match.
     pub(crate) fn shared_grids(&self, subjects: &[NodeId]) -> Option<Vec<LayoutGrid>> {
         self.shared_grids_keyed(subjects)
             .map(|l| ondin_core::item::values(&l))
@@ -6778,12 +6430,11 @@ impl OndinApp {
 
     /// Write one list to every subject, as a single undoable step.
     ///
-    /// A wholesale replacement — the mixed card's override — so each subject keeps
-    /// its own item ids by position (`ondin_core::item::rekey_by_position`); a row
-    /// edit goes through [`Self::retarget_grids`].
+    /// A wholesale replacement, so each subject keeps its own item ids by position
+    /// (`ondin_core::item::rekey_by_position`); a row edit goes through
+    /// [`Self::retarget_grids`].
     fn write_grids(&mut self, subjects: &[NodeId], grids: &[LayoutGrid]) {
         let session = &mut self.session;
-        // One id per position past the end for the whole write, shared by every frame.
         let mut fresh = ondin_core::item::PastTheEnd::default();
         let tx = Transaction(
             subjects
@@ -6812,7 +6463,7 @@ impl OndinApp {
     fn append_grid(&mut self, subjects: &[NodeId], grid: LayoutGrid) {
         let session = &mut self.session;
         // Minted once for every frame: per frame, a main and its instance given a
-        // grid together would get two items, the instance's a local addition.
+        // grid together would get two items.
         let added = Keyed::new(session.ids.mint_item(), grid);
         let ops: Vec<Operation> = subjects
             .iter()
@@ -6831,15 +6482,13 @@ impl OndinApp {
     /// One grid's controls: the axis and its two buttons, then its colour, then the
     /// numbers, then the alignment.
     ///
-    /// Rows sit at [`ui::CARD_ROW_GAP`]; two grids are [`GRID_ROW_GAP`] apart. The
-    /// eye's glyph carries the state, and a hidden grid's controls go dead through
-    /// [`ui::disable_unless`] rather than the paint rows' [`HIDDEN_OPACITY`] fade —
-    /// a number whose effect you cannot see is one you cannot aim.
+    /// Rows sit at [`ui::CARD_ROW_GAP`]; two grids are [`GRID_ROW_GAP`] apart. A
+    /// hidden grid's controls go dead through [`ui::disable_unless`] rather than
+    /// the paint rows' [`HIDDEN_OPACITY`] fade.
     ///
     /// The numeric fields are hand-wound, not valved: `SetLayoutGrids` has no
     /// preview, so the in-flight grid lives in `OndinApp::grid_scrub`, which the
-    /// canvas reads too. Any field dragging holds the whole grid, and the release
-    /// commits it once.
+    /// canvas reads too, and the release commits it once.
     fn grid_rows(
         &mut self,
         ui: &mut egui::Ui,
@@ -6849,11 +6498,9 @@ impl OndinApp {
         item: Option<ondin_core::reset::ItemState>,
     ) -> GridRowOut {
         let mut out = GridRowOut::default();
-        // The panel draws only where the subjects agree, so the first one's colour
-        // slot names the same grid on all of them.
+        // The panel draws only where the subjects agree, so the first names them all.
         let anchor = subjects[0];
-        // Read before the buffer: on a cancel frame egui may still report
-        // `changed()`, which would commit the movement the cancel discards.
+        // Read before the buffer: on a cancel frame egui may still report `changed()`.
         let cancelled = self.gesture_cancelled;
         let held = match &self.in_flight.grid_scrub {
             Some((nodes, i, g)) if nodes.as_slice() == subjects && *i == index && !cancelled => {
@@ -6867,15 +6514,13 @@ impl OndinApp {
         let half = egui::vec2((full - gap) / 2.0, GRID_CELL);
         let track = GRID_CELL - 4.0;
 
-        // The whole head row under the pointer turns an overridden grid's dot into
-        // ↺ (`component::item_slot`'s caveat), asked before it is laid out.
+        // Asked before the row is laid out (`component::item_slot`'s caveat).
         let hot = ui.rect_contains_pointer(egui::Rect::from_min_size(
             ui.cursor().min,
             egui::vec2(full, GRID_CELL),
         ));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            // The axis, narrowed by an instance's trailing slot before the ✕.
             let slot = match item {
                 Some(_) => 14.0 + gap,
                 None => 0.0,
@@ -6885,8 +6530,7 @@ impl OndinApp {
                 .iter()
                 .position(|a| *a == grid.axis)
                 .unwrap_or(0);
-            // Off with the grid; the eye and ✕ after it stay live, or the eye
-            // would have no way back.
+            // The eye and ✕ stay live, or the eye would have no way back.
             if let Some(i) = ui::disable_unless(ui, grid.visible, |ui| {
                 ui::segmented(ui, axis_w, track, 2, current, |p, i, rect, on| {
                     grid_glyph(p, rect, axis_glyph(GridAxis::ALL[i]), on);
@@ -6897,8 +6541,7 @@ impl OndinApp {
                 grid.axis = GridAxis::ALL[i];
                 out.set = Some(grid);
             }
-            // `FieldButton::Off` in both states, like the paint rows: the glyph
-            // carries the state, not an accent on the ordinary case.
+            // `FieldButton::Off` in both states: the glyph carries the state.
             let eye = match grid.visible {
                 true => icon::EYE,
                 false => icon::EYE_SLASH,
@@ -6939,9 +6582,8 @@ impl OndinApp {
             changed |= r.changed();
         };
         let mut count = f64::from(grid.count);
-        // The colour a picker is dragging (`OndinApp::grid_paint`), kept out of
-        // `grid` itself: the scrub machine below would read it as a finished edit
-        // and commit once a frame.
+        // The picker's drag colour (`OndinApp::grid_paint`), kept out of `grid`, or
+        // the scrub machine below would commit it once a frame.
         let shown = match &self.in_flight.grid_paint {
             Some((nodes, i, color)) if nodes.as_slice() == subjects && *i == index => *color,
             _ => grid.color,
@@ -6977,8 +6619,7 @@ impl OndinApp {
             });
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                // Dimmed rather than hidden when the alignment does not read them;
-                // nested `disable_unless` does not fade twice.
+                // Nested `disable_unless` does not fade twice.
                 ui::disable_unless(ui, grid.align.reads_margin(), |ui| {
                     number(
                         ui,
@@ -7014,8 +6655,7 @@ impl OndinApp {
         });
 
         grid.count = count.round().clamp(0.0, 1000.0) as u32;
-        // The clicks above have already said what they want; only the numbers go
-        // through the scrub machine.
+        // Only the numbers go through the scrub machine.
         if out.set.is_none() && !out.remove {
             match grid_step(
                 GridScrub {
@@ -7079,35 +6719,28 @@ impl OndinApp {
         self.strokes_shown(scope).list().to_vec()
     }
     /// The fill rows a scope is showing. [`Self::strokes_in_scope`]'s twin.
-    ///
-    /// Kept as named twins, mirroring core's `shared_fills`/`shared_strokes`: a
-    /// generic would need two closures at every call site.
     fn fills_in_scope(&self, scope: PaintScope) -> Vec<Keyed<Fill>> {
         self.fills_shown(scope).list().to_vec()
     }
     /// A transaction that rewrites the brush of **every** fill (or stroke) of every
     /// paint target in the selection.
     ///
-    /// The mixed row's colour writes — picker, hex and opacity — all come through
-    /// here. None replaces a list, so none can cost a layer its second fill.
-    /// `pub(crate)` for `picker::hex_row` and `picker::document_swatches`, which
-    /// must reach into each paint rather than send one brush.
+    /// The mixed row's colour writes all come through here. None replaces a list,
+    /// so none can cost a layer its second fill. `pub(crate)` for `picker::hex_row`
+    /// and `picker::document_swatches`.
     pub(crate) fn edit_paints_all(
         &self,
         target: ondin_core::PaintTarget,
         brush_of: impl Fn(&Brush) -> Brush,
     ) -> Transaction {
-        // As drawn, so a `%` on a bound paint keeps its binding and a colour
-        // detaches it (`edited_brush`).
         let (doc, ids) = (&self.session.doc, self.session.selection.ids());
         ondin_core::edit_brushes_all(doc, ids, target, brush_of)
     }
-    /// Every fill in scope's value for one property, **as it is being shown** — a
-    /// [`Spread`], which the caller asks either of its two questions.
+    /// Every fill in scope's value for one property, as shown — a [`Spread`].
     ///
-    /// Through `display_node`, not the committed tree, or a scrub on the mixed row
-    /// would re-read the pre-gesture value every frame and never move. The rule is
-    /// `build::shared_over_fills`': a target with no fill disagrees with every value.
+    /// Through `display_node`, or a scrub on the mixed row would re-read the
+    /// pre-gesture value every frame. As in `build::shared_over_fills`, a target
+    /// with no fill disagrees with every value.
     fn shown_over_fills<T>(&self, of: impl Fn(&Fill) -> T) -> Spread<T> {
         self.shown_over(|p| &p.fills, of)
     }
@@ -7116,12 +6749,8 @@ impl OndinApp {
     fn shown_over_strokes<T>(&self, of: impl Fn(&Stroke) -> T) -> Spread<T> {
         self.shown_over(|p| &p.strokes, of)
     }
-    /// The walk both `shown_over_*` are, with the list to read passed as an
-    /// accessor, so the `bare` fold — a target with no paint disagrees with
-    /// everything — has one home.
-    ///
-    /// Reads `display_node`, not `doc.get`: core's question asked of the previewed
-    /// tree, so a value mid-drag reads as what is on screen.
+    /// The walk both `shown_over_*` are, so the `bare` fold has one home. Reads
+    /// `display_node`, so a value mid-drag reads as what is on screen.
     fn shown_over<P, T>(
         &self,
         list: impl Fn(&ondin_core::Paint) -> &[Keyed<P>],
@@ -7132,27 +6761,22 @@ impl OndinApp {
             let Some(node) = self.session.display_node(id) else {
                 continue;
             };
-            // As drawn: a bound paint arrives as the solid its variable resolves to.
             let paint = self.session.doc.resolved_paint(id, node.paint());
             let paints = list(&paint);
-            // A bare target contributes no value, so without this it would read
-            // as agreement beside a painted one (§9.4).
+            // A bare target contributes no value, so it would read as agreement (§9.4).
             spread.bare |= paints.is_empty();
             spread.values.extend(paints.iter().map(|k| of(&k.value)));
         }
         spread
     }
-    /// Every paint's brush, as shown — the spread three of the mixed row's controls
-    /// read, and the one the picker is handed.
+    /// Every paint's brush, as shown — what the mixed row's controls and the picker read.
     fn shown_brushes(&self, target: ondin_core::PaintTarget) -> Spread<Brush> {
         match target {
             ondin_core::PaintTarget::Fill => self.shown_over_fills(|f| f.brush.drawn().clone()),
             ondin_core::PaintTarget::Stroke => self.shown_over_strokes(|s| s.brush.drawn().clone()),
         }
     }
-    /// What the mixed row says about itself, and what its controls operate from —
-    /// two different questions.
-    ///
+    /// What the mixed row says about itself, and what its controls operate from.
     /// The alpha is compared as a byte, the precision the hex field and the save
     /// format work in.
     fn mixed_row(&self, target: ondin_core::PaintTarget) -> (Brush, MixedRow) {
@@ -7171,10 +6795,9 @@ impl OndinApp {
     }
     /// Whether any paint in scope is switched on — what the mixed row's eye shows.
     ///
-    /// `any`, not `all`: with some hidden there is still ink on the canvas, and the
-    /// click then hides the rest.
+    /// `any`, not `all`: with some hidden there is still ink, and the click hides
+    /// the rest. `!= Some(false)` is that "any".
     fn mixed_visible(&self, target: ondin_core::PaintTarget) -> bool {
-        // `!= Some(false)` is that "any": disagreement means something is on.
         match target {
             ondin_core::PaintTarget::Fill => {
                 self.shown_over_fills(|f| f.visible).agreed() != Some(false)
@@ -7187,13 +6810,10 @@ impl OndinApp {
     /// A single paint row: swatch (opens the picker), hex, opacity, remove.
     /// Returns whether the user asked to remove it.
     ///
-    /// The swatch opens the picker; the hex beside it is a text field for the
-    /// keyboard (a gradient's is a label that opens the picker). A lone paint —
-    /// the canvas ground, a guide's colour — passes `None` for [`RowCtx::grip`].
-    ///
-    /// Hidden dims the row to [`HIDDEN_OPACITY`] but never the swatch: [`swatch`]
-    /// masks its corners in the ground colour, which a multiplied opacity would
-    /// turn translucent.
+    /// The hex beside the swatch is a text field (a gradient's is a label that
+    /// opens the picker). Hidden dims the row to [`HIDDEN_OPACITY`] but never the
+    /// swatch: [`swatch`] masks its corners in the ground colour, which a
+    /// multiplied opacity would turn translucent.
     fn paint_row(&mut self, ui: &mut egui::Ui, ctx: RowCtx, brush: &Brush) -> RowOut {
         let RowCtx {
             id,
@@ -7213,24 +6833,20 @@ impl OndinApp {
         let mut open = false;
         // Acted on below, outside the scope, since the closure holds `&mut self`.
         let mut enter_image = false;
-        // Where this row is about to land — the picker opens beside it.
         let anchor = ui.cursor().min;
         let scope = ui.scope(|ui| {
             ui.multiply_opacity(if visible { 1.0 } else { HIDDEN_OPACITY });
-            // Stated, not inherited: [`paint_unit`] zeroes its own spacing.
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let size = egui::vec2(ui.available_width() - 28.0 - ui::CARD_COL_GAP, 28.0);
-                // The whole row under the pointer turns an overridden item's dot
-                // into ↺; asked before the field is laid out.
+                // Asked before the field is laid out.
                 let hot =
                     ui.rect_contains_pointer(egui::Rect::from_min_size(ui.cursor().min, size));
                 field_row_active(ui, size, targeted, |ui| {
                     ui.spacing_mut().item_spacing.x = 9.0;
                     if let Some((list, index)) = grip {
-                        // Only the start is read here; once carried the row's
-                        // responses are empty, so the release is read from the pointer.
+                        // Only the start is read here; once carried the responses are empty.
                         let g = ui::grip(ui, reorderable, size.y);
                         if g.drag_started() {
                             self.in_flight.paint_drag = Some(PaintDrag {
@@ -7238,11 +6854,9 @@ impl OndinApp {
                                 list,
                                 from: index,
                                 to: index,
-                                // Filled in at the end of this frame.
                                 slots: paint::Slots::default(),
                             });
-                            // The stroke menu's `Area` would not follow the row; the
-                            // image card is a mode and stays.
+                            // The stroke menu's `Area` would not follow the row.
                             self.stroke_menu = None;
                             self.stroke_dash_text = None;
                         }
@@ -7252,8 +6866,7 @@ impl OndinApp {
                     // The row's content height; 28 would grow a bound row by 2.
                     const CHIP_ROW_H: f32 = ui::CONTROL_H - ui::FIELD_BORDER_H;
                     let unknown = mixed.is_some_and(|m| m.brush);
-                    // Asked here so the `&mut self.thumbs` and `&self.canvas`
-                    // borrows stay disjoint.
+                    // Asked here so the `&mut self.thumbs` and `&self.canvas` borrows stay disjoint.
                     let thumb = match brush {
                         ondin_core::Brush::Image(img) if !unknown => {
                             self.thumbs
@@ -7280,11 +6893,10 @@ impl OndinApp {
                             swatch(ui, CHIP, color::FIELD, paint)
                         })
                         .inner;
-                    // An image's chip opens image editing, not the picker.
+                    // An image's chip opens image editing, not the picker. Only the
+                    // topmost visible picture is the mode's subject, and a lock makes
+                    // `begin_image_edit` refuse.
                     let picture = !unknown && paint::kind_of(brush) == PaintKind::Image;
-                    // The tooltip asks the click's question, once: only the topmost
-                    // visible picture is the mode's subject, and an effective lock
-                    // makes `begin_image_edit` refuse.
                     let locked_layer = ondin_core::is_effectively_locked(&self.session.doc, id);
                     let door = picture
                         && !locked_layer
@@ -7307,13 +6919,10 @@ impl OndinApp {
                             open = true;
                         }
                     }
-                    // A row whose colour is unknown always takes the hex ("Mixed"),
-                    // even when its stand-in brush is a gradient.
                     let key = super::binding::FieldKey::Paint { id, slot };
                     let typing = matches!(&self.paint_hex, Some((n, s, _)) if *n == id && *s == slot)
                         || self.var_retype.as_ref().is_some_and(|r| r.key == key);
-                    // Every layer bound, not all to one: the *Mixed* capsule, ahead
-                    // of the plain grey *Mixed* for some bound.
+                    // Every layer bound, not all to one: the *Mixed* capsule.
                     let mixed_vars = self.field_mixed_vars(key).filter(|_| !typing);
                     match paint::kind_of(brush) {
                         _ if let Some(vars) = &mixed_vars => {
@@ -7323,13 +6932,13 @@ impl OndinApp {
                                 ui.allocate_exact_size(egui::vec2(w, CHIP_ROW_H), egui::Sense::hover());
                             self.mixed_chip(ui, key, vars, rect);
                         }
+                        // An unknown colour always takes the hex, even over a gradient stand-in.
                         _ if unknown => self.paint_hex_field(ui, id, slot, brush, true),
                         // Bound, the chip replaces the hex until a key is typed onto it.
                         PaintKind::Solid => {
                             match self.field_var(key).filter(|_| !typing) {
                                 Some(var) => {
-                                    // The row's right-hand run — the `%`, the ×
-                                    // and an instance's item slot — keeps its room.
+                                    // Keeps room for the `%`, the × and the item slot.
                                     let reserve = if item.is_some() { 106.0 } else { 82.0 };
                                     let w = (ui.available_width() - reserve).max(40.0);
                                     let (rect, _) = ui.allocate_exact_size(
@@ -7341,8 +6950,7 @@ impl OndinApp {
                                 None => self.paint_hex_field(ui, id, slot, brush, false),
                             }
                         }
-                        // A picture gets a clickable label, no hex, stepping into
-                        // image editing as the chip does.
+                        // A clickable label, no hex, stepping into image editing.
                         PaintKind::Image => {
                             let label = ui
                                 .add(
@@ -7381,8 +6989,7 @@ impl OndinApp {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // A census row ends in a count: there is no one paint to
-                        // fade or remove.
+                        // A census row ends in a count: no one paint to fade or remove.
                         if let Some(layers) = census {
                             ui.label(
                                 egui::RichText::new(match layers {
@@ -7415,8 +7022,7 @@ impl OndinApp {
                             .speed(ui::scrub(0.5))
                             .max_decimals(0)
                             .range(0.0..=100.0);
-                        // egui appends a suffix after the formatter, so the `%`
-                        // comes off for "Mixed".
+                        // egui appends a suffix after the formatter.
                         let value = if hazy {
                             value.custom_formatter(|_, _| "Mixed".into())
                         } else {
@@ -7425,12 +7031,11 @@ impl OndinApp {
                         // `ui::bare_drag_value`'s parser drops a typed `%` on both branches.
                         let resp = ui::bare_drag_value(ui, value);
                         match slot {
-                            // Into each paint, not through the slot's write, which
-                            // would carry the stand-in brush to every layer.
+                            // Into each paint, not the slot's write, which would carry
+                            // the stand-in brush to every layer.
                             PaintSlot::SelectionAll(target) => {
-                                // A Mixed field seeded from `Spread::base()` writes
-                                // nothing until moved, or a bare click would copy
-                                // one layer's alpha onto every other.
+                                // Seeded from `Spread::base()`, a Mixed field writes
+                                // nothing until moved.
                                 let moved = pct != paint::alpha_of(brush) * 100.0;
                                 if !hazy || moved {
                                     let a = (pct / 100.0).clamp(0.0, 1.0);
@@ -7486,8 +7091,7 @@ impl OndinApp {
             self.image_card_anchor(ui, id, slot, brush, mixed.is_some_and(|m| m.brush));
         });
         out.rect = scope.response.rect;
-        // A `+` on the panel header asked for this row before it existed; now
-        // it does, and its own anchor is the one to use.
+        // A `+` on the panel header asked for this row before it existed.
         if open || self.pending_picker.take_if(|p| *p == (id, slot)).is_some() {
             self.open_picker(ui, id, slot, anchor);
         }
@@ -7498,9 +7102,8 @@ impl OndinApp {
     }
     /// Anchors image editing's card to the image row.
     ///
-    /// The card is anchored here, not opened from here: the mode opens it, and the
-    /// row supplies the id, slot, brush and — through `ui.min_rect()` — the height
-    /// to hang it at. Nothing for a non-image paint or a mixed row.
+    /// The mode opens the card; the row supplies the id, slot, brush and — through
+    /// `ui.min_rect()` — the height to hang it at. Nothing for a non-image or mixed row.
     fn image_card_anchor(
         &mut self,
         ui: &mut egui::Ui,
@@ -7515,7 +7118,6 @@ impl OndinApp {
         if paint::image_of(brush).is_none() {
             return;
         }
-        // The paint row as laid out so far; `popover_anchor` takes its top.
         self.image_edit_card(ui, ui.min_rect(), id, slot, brush);
     }
 
@@ -7523,9 +7125,7 @@ impl OndinApp {
     /// rather than a gesture (§5.5a), under two tabs in one `Area`.
     ///
     /// The mode owns it: it appears when a picture is double-clicked and goes when
-    /// `Enter` or `Escape` leaves, so there is no close button and no click-away
-    /// rule. The Settings tab's mode strip re-frames the picture inside the box the
-    /// crop left.
+    /// `Enter` or `Escape` leaves, so there is no close button and no click-away rule.
     #[allow(clippy::too_many_lines)]
     fn image_edit_card(
         &mut self,
@@ -7540,9 +7140,8 @@ impl OndinApp {
         /// Every control's height.
         const CELL: f32 = ui::CONTROL_H;
         /// What a segmented track is asked for to paint [`CELL`]: `ui::segmented`
-        /// pads two points either side of the cell height.
+        /// pads two points either side.
         const TRACK_CELL: f32 = CELL - 4.0;
-        // Only on the fill `edited_image` names; a selection slot is not that fill.
         let PaintSlot::Fill(index) = slot else {
             return;
         };
@@ -7557,17 +7156,16 @@ impl OndinApp {
         // dialog, which mid-`show` would block with the popover half-painted.
         let mut replace: Option<bool> = None;
         // Unreachable while the guard above requires `PaintSlot::Fill`; kept so a
-        // future multi-selection entry cannot rewrite three framings with one file.
+        // future multi-selection entry cannot replace three pictures with one file.
         let replace_scoped = matches!(
             slot,
             paint::PaintSlot::Selection(..) | paint::PaintSlot::SelectionAll(..)
         );
         let ctx = ui.ctx().clone();
         let anchor = Self::popover_anchor(&ctx, row, MENU_W);
-        // The row's lock carried into the card: an `Area` does not inherit the
-        // styled card's disable, so its writes would detach the style.
+        // An `Area` does not inherit the styled card's disable, so its writes would
+        // detach the style.
         let locked = !ui.is_enabled();
-        // Keyed on the node, not the tab, so switching tab does not move the card.
         let mut picked_tab: Option<ImageCard> = None;
         egui::Area::new(egui::Id::new(("image-edit", id)))
             .order(egui::Order::Foreground)
@@ -7584,7 +7182,6 @@ impl OndinApp {
                     // pitch in effect when it is placed.
                     ui.spacing_mut().item_spacing.y = IMAGE_CARD_GAP;
 
-                    // --- the two tabs ------------------------------------------
                     // The strip is also the card's heading.
                     let current = ImageCard::ALL.iter().position(|c| *c == card).unwrap_or(0);
                     if let Some(i) = segmented(
@@ -7598,12 +7195,9 @@ impl OndinApp {
                         picked_tab = Some(ImageCard::ALL[i]);
                     }
 
-                    // The two tabs' arms; everything above is shared.
                     if card == ImageCard::Settings {
-                        // --- the four framing modes ------------------------
-                        // Leaving Crop re-frames the picture in the box the crop
-                        // left and keeps the rectangle; `with_fit` seeds one on
-                        // the way into Crop so choosing it moves nothing.
+                        // Leaving Crop re-frames the picture in the box the crop left;
+                        // `with_fit` seeds a rectangle on the way in so nothing moves.
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.y = 5.0;
                             ui.label(ui::eyebrow("Mode"));
@@ -7631,9 +7225,8 @@ impl OndinApp {
                                 );
                             }
                         });
-                        // Words, not the Transform panel's flip glyphs: these mirror
-                        // the picture, not the layer. Actions, not toggles, since
-                        // `ImageOrient` composes.
+                        // Words, not the flip glyphs: these mirror the picture, not the
+                        // layer. Actions, not toggles, since `ImageOrient` composes.
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.y = 5.0;
                             ui.label(ui::eyebrow("Mirror"));
@@ -7658,8 +7251,7 @@ impl OndinApp {
                                         .on_hover_text(tip)
                                         .clicked()
                                     {
-                                        // `reoriented` carries the crop through the
-                                        // same symmetry, so the visible picture mirrors.
+                                        // `reoriented` carries the crop through the same symmetry.
                                         self.write_slot(
                                             id,
                                             slot,
@@ -7670,16 +7262,12 @@ impl OndinApp {
                             });
                         });
 
-                        // --- the two modes that have a number ----------------------
                         // Scale for Crop, Tile for Tile: one measurement (local units
-                        // per source pixel), read by one mode each. Scale is the zoom
-                        // the crop gesture cannot do. Dimmed rather than hidden when
-                        // the mode is not theirs: they are stored values, not
-                        // impossible ones.
+                        // per source pixel), read by one mode each. Dimmed rather
+                        // than hidden off-mode: they are stored values.
                         let cropping = img.fit == ondin_core::ImageFit::Crop;
-                        // The rectangle in force: an uncropped picture is seeded
-                        // through `cover_crop`, as `paint::with_fit` and the canvas
-                        // gesture seed it, so all three agree on entering Crop.
+                        // An uncropped picture is seeded through `cover_crop`, as
+                        // `paint::with_fit` and the canvas gesture do.
                         let scale = self.crop_seed(id, slot, brush).and_then(|(f, w, h)| {
                             let shown = ondin_core::ImageRef {
                                 fit: ondin_core::ImageFit::Crop,
@@ -7717,8 +7305,7 @@ impl OndinApp {
                                         half,
                                         Prefix::Icon(icon::RESIZE),
                                         &mut crop_pct,
-                                        // Hundredths: a crop scale is multiplicative
-                                        // about the window's centre, so whole steps lurch.
+                                        // Hundredths: whole steps lurch a multiplicative scale.
                                         Scrub::fine(0.5, 2).range(floor..=ceiling),
                                         |d| d.suffix("%").custom_formatter(ui::number(2)),
                                     )
@@ -7744,9 +7331,7 @@ impl OndinApp {
                                 .inner,
                             ));
                         });
-                        // A disabled widget reports no hover and a scope's response
-                        // is never hovered, so a dimmed field's tooltip needs its own
-                        // claimant.
+                        // A dimmed field's tooltip needs its own claimant.
                         for (live, salt, resp) in fields {
                             if !live {
                                 ui.interact(resp.rect, ui.id().with(salt), egui::Sense::empty())
@@ -7758,14 +7343,11 @@ impl OndinApp {
                                     });
                                 continue;
                             }
-                            // Through the valve, live fields only: the valve runs
-                            // `note_edit` every frame, which would arm the chrome hide.
+                            // Live fields only: the valve's `note_edit` would arm the chrome hide.
                             let (hint, edit) = match salt {
                                 "dimmed-crop-scale" => (
                                     "Scale — how big the picture is inside the crop, \
                                      against its own pixels",
-                                    // A factor about the window's centre, keeping the
-                                    // crop's proportions.
                                     paint::map_image(brush, |r| {
                                         if let Some((now, _)) = scale
                                             && crop_pct > 0.0
@@ -7786,9 +7368,8 @@ impl OndinApp {
                             self.valve_slot(&resp.on_hover_text(hint), id, slot, edit);
                         }
 
-                        // --- the one action that is about the rectangle ------------
-                        // Restores the `whole_crop` sentinel ("never cropped"), not a
-                        // computed rectangle, so the next entry into Crop seeds cover.
+                        // Restores the `whole_crop` sentinel ("never cropped"), so the next
+                        // entry into Crop seeds cover.
                         let cropped = img.crop != ondin_core::whole_crop();
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.y = 2.0;
@@ -7813,9 +7394,8 @@ impl OndinApp {
                             }
                         });
 
-                        // --- Asset ------------------------------------------------
-                        // *Embed*/*Link* and *Relink…* are absent, not dead: they
-                        // wait on a linked source nothing can author.
+                        // *Embed*/*Link* and *Relink…* are absent, not dead: they wait on
+                        // a linked source nothing can author.
                         ui.scope(|ui| {
                             ui.spacing_mut().item_spacing.y = 5.0;
                             ui.label(ui::eyebrow("Asset"));
@@ -7861,12 +7441,9 @@ impl OndinApp {
                     }
 
                     if card == ImageCard::Adjustments {
-                        // --- Adjustments ------------------------------------------
-                        // Rows built from `Adjustment::ALL`, so order and words are
-                        // the model's; labelled in the field's prefix. Percent under
-                        // the hand, `-1..=1` in the file.
+                        // Rows built from `Adjustment::ALL`, so order and words are the
+                        // model's. Percent under the hand, `-1..=1` in the file.
                         let adjusted = !img.adjust.is_default();
-                        // The card's pitch, inherited rather than restated.
                         ui.scope(|ui| {
                             for k in Adjustment::ALL {
                                 let at_rest = k.of(&img.adjust) == 0.0;
@@ -7881,8 +7458,6 @@ impl OndinApp {
                                         (pct / 100.0) as f32,
                                         &mut pct,
                                         Scrub::whole(0.25).range(-100.0..=100.0),
-                                        // Offsets from a neutral zero, so positives
-                                        // carry a `+`.
                                         |d| d.custom_formatter(signed_number),
                                     )
                                     .on_hover_text(k.hint());
@@ -7894,8 +7469,8 @@ impl OndinApp {
                                             k.set(&mut r.adjust, (pct / 100.0) as f32)
                                         }),
                                     );
-                                    // Dimmed, not absent, at rest; re-asked after the
-                                    // click because a dim `icon_button` still senses one.
+                                    // Dimmed at rest; re-asked after the click because a dim
+                                    // `icon_button` still senses one.
                                     if ui::icon_button(
                                         ui,
                                         icon::ARROW_COUNTER_CLOCKWISE,
@@ -7943,8 +7518,7 @@ impl OndinApp {
                 });
             });
         // No click-away and no `Escape` here: a canvas click is often the next crop
-        // drag, and `Escape` leaves the mode one level up. Written after the `Area`,
-        // whose closure holds `&mut self`.
+        // drag. Written after the `Area`, whose closure holds `&mut self`.
         if let Some(tab) = picked_tab {
             self.image_tab = tab;
         }
@@ -7971,9 +7545,9 @@ impl OndinApp {
 
     /// Put `id`'s box at `w` × `h`, the picture's own pixels.
     ///
-    /// The W/H fields' three spellings: an authored `size` replaced, a `Text`
-    /// node's `TextSizing`, and `resize_box_to` for a kind with no size field. A
-    /// drop or paste can put a picture on a text node, so its arm is reachable.
+    /// The W/H fields' three spellings: an authored `size`, a `Text` node's
+    /// `TextSizing` (reachable: a drop or paste can put a picture on one), and
+    /// `resize_box_to` for a kind with no size field.
     pub(crate) fn resize_to_original(&mut self, id: NodeId, w: f64, h: f64) {
         let size = Size::new(w, h);
         let kind = self.session.display_node(id).map(|n| n.kind().clone());
@@ -7997,8 +7571,8 @@ impl OndinApp {
     /// The editable hex for a solid paint row.
     ///
     /// Buffered and applied on defocus, so "6D" is not committed on the way to
-    /// "6D8CD9". Alpha is left to the row's opacity field. `mixed` shows the word,
-    /// which `parse_hex` rejects, so typing over it needs no special case.
+    /// "6D8CD9". Alpha is the row's opacity field. `mixed` shows the word, which
+    /// `parse_hex` rejects, so typing over it needs no special case.
     pub(super) fn paint_hex_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -8023,7 +7597,7 @@ impl OndinApp {
             _ => hex_of(current),
         };
         let edit_id = egui::Id::new(("paint-hex", id, format!("{slot:?}")));
-        // `--name` is longer than any hex; the limit holds for a colour only.
+        // `--name` is longer than any hex.
         let limit = if text.starts_with('-') {
             usize::MAX
         } else {
@@ -8060,8 +7634,8 @@ impl OndinApp {
         if resp.gained_focus() || resp.changed() {
             self.paint_hex = Some((id, slot, text.clone()));
         }
-        // `Enter` on a refused `--` keeps the text: it goes back through the retype
-        // buffer, which refocuses it, since a single-line `TextEdit` drops focus.
+        // `Enter` on a refused `--` goes back through the retype buffer, which
+        // refocuses it, since a single-line `TextEdit` drops focus.
         let refused_enter =
             resp.lost_focus() && at.is_some() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if refused_enter {
@@ -8071,7 +7645,6 @@ impl OndinApp {
                 focus: true,
             });
         }
-        // `--` opens the variables list under the row.
         if resp.has_focus() || retyped || refused_enter {
             self.bind_typing(ui.ctx(), key, &text, resp.rect);
         }
@@ -8081,19 +7654,16 @@ impl OndinApp {
         {
             self.field_menu = Some((key, at, resp.rect));
         }
-        // On every way out, `Escape` included, so the abandoned text does not
-        // reopen; falling back to `hex_of` also strips a typed `#`.
+        // On every way out, `Escape` included; falling back to `hex_of` strips a typed `#`.
         if resp.lost_focus() && !refused_enter {
             self.paint_hex = None;
         }
-        // Not valved: `6D8` is a real colour on the way to `6D8CD9`, so nothing
-        // between keystrokes may preview. `Escape` abandons via `defocus_commits`.
+        // Not valved: `6D8` is a real colour on the way to `6D8CD9`.
         if ui::defocus_commits(&resp) {
-            // Nothing written unless the typed colour differs, compared as bytes:
-            // an off-lattice colour would round-trip changed by a bare click, and
-            // `lost_focus()` fires on two frames. `mixed` always writes. A hex
-            // over a binding is a literal that detaches, so a bound field writes it
-            // outright rather than through `edited_brush`.
+            // Compared as bytes: an off-lattice colour would round-trip changed by a
+            // bare click, and `lost_focus()` fires on two frames. `mixed` always
+            // writes. A hex over a binding is a literal that detaches it, so a bound
+            // field writes outright rather than through `edited_brush`.
             let unchanged =
                 !mixed && bound.is_none() && parse_hex(&text) == parse_hex(&hex_of(current));
             if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged) {
@@ -8120,7 +7690,7 @@ impl OndinApp {
                     self.commit_edit(tx);
                     return;
                 }
-                // Each paint keeps its own opacity, which the slot cannot express.
+                // Each paint keeps its own opacity.
                 if let PaintSlot::SelectionAll(target) = slot {
                     let tx = self.edit_paints_all(target, move |b| {
                         Brush::Solid(rgb.with_alpha(paint::alpha_of(b)))

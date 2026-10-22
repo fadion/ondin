@@ -53,15 +53,10 @@ pub enum Operation {
     },
     /// New content **and both span lists that go with it**.
     ///
-    /// All three travel together because a span is a byte range into the content:
-    /// commit the string on its own and every override past the edit point is
-    /// pointing at the wrong characters. `TextEdit` re-bases both lists as it
-    /// goes ([`crate::Spans::edited`]) and hands them back at the end.
-    ///
-    /// **The paragraph list is here for exactly the same reason as the character
-    /// one, not by analogy**: a `ParaSpans` entry is a byte range too, and a
-    /// paragraph reads the value in force at its first byte — so one character
-    /// typed anywhere before it moves that byte out from under the span.
+    /// A span is a byte range into the content, so committing the string alone
+    /// leaves every override past the edit point on the wrong characters.
+    /// `TextEdit` re-bases both lists ([`crate::Spans::edited`]); the paragraph
+    /// list needs it too, as a `ParaSpans` entry is a byte range as well.
     SetText {
         id: NodeId,
         content: String,
@@ -70,17 +65,9 @@ pub enum Operation {
     },
     /// The node's character *defaults* — what a byte with no span carries.
     ///
-    /// **`spans` is how an undo of this puts back an override it dropped.**
-    /// Applying this re-states the list against the new defaults, because a span
-    /// equal to the *old* default was never stored: node size 16, a span puts one
-    /// run at 24, the user sets the node to 24, and that span is correctly and
-    /// invisibly dropped as redundant. Undo restoring the defaults alone then took
-    /// the run to 16 with everything else, because the inverse had no way to say
-    /// what the list used to be — the re-statement was one-way (§15 D163).
-    ///
-    /// `None` means "re-state", which is what every forward caller means and the
-    /// only thing any of them could compute; `Some` installs exactly this list, and
-    /// the inverse always carries one.
+    /// **`spans` is how an undo puts back an override this dropped**: applying
+    /// re-states the list against the new defaults (§15 D163). `None` means
+    /// "re-state"; `Some` installs exactly this list, and the inverse carries one.
     SetTextStyle {
         id: NodeId,
         style: TextStyle,
@@ -88,30 +75,20 @@ pub enum Operation {
     },
     /// The node's character overrides, without touching the content.
     ///
-    /// Separate from [`Operation::SetText`] so styling a range is not an edit to
-    /// the string: an undo of "make this bold" must not be able to restore
-    /// different text.
+    /// Separate from [`Operation::SetText`] so an undo of "make this bold" cannot
+    /// restore different text.
     SetTextSpans {
         id: NodeId,
         spans: crate::node::CharSpans,
     },
-    /// Alignment, indent, wrapping and the rest of the paragraph scope (§5.4) —
-    /// the node's paragraph *defaults*.
-    ///
-    /// `spans` is [`Operation::SetTextStyle`]'s, for the identical reason and not by
-    /// analogy: this op re-states the per-paragraph overrides against the new
-    /// defaults too, so without a list in its inverse the drop is one-way in this
-    /// scope as well (§15 D163).
+    /// The node's paragraph *defaults* (§5.4). `spans` is
+    /// [`Operation::SetTextStyle`]'s, for the same reason (§15 D163).
     SetParagraphStyle {
         id: NodeId,
         paragraph: crate::node::ParagraphStyle,
         spans: Option<crate::node::ParaSpans>,
     },
-    /// The node's per-paragraph overrides, without touching the content.
-    ///
-    /// The paragraph twin of [`Operation::SetTextSpans`], and separate from
-    /// [`Operation::SetText`] for the same reason: an undo of "indent this
-    /// paragraph" must not be able to restore different text.
+    /// The paragraph twin of [`Operation::SetTextSpans`].
     SetParagraphSpans {
         id: NodeId,
         spans: crate::node::ParaSpans,
@@ -135,11 +112,8 @@ pub enum Operation {
         locked: bool,
     },
     /// The Transform panel's chain link: whether a resize of the node holds its
-    /// aspect ratio, so a handle drag keeps the proportions as though Shift were
-    /// held (`canvas::keep_ratio`).
-    ///
-    /// A different thing from [`Operation::SetLocked`] above, which locks the
-    /// layer against being edited at all.
+    /// aspect ratio as though Shift were held (`canvas::keep_ratio`). Not
+    /// [`Operation::SetLocked`], which locks the layer against editing.
     SetProportionsLocked {
         id: NodeId,
         locked: bool,
@@ -149,18 +123,14 @@ pub enum Operation {
         opacity: f32,
     },
     /// Move the node's transform origin — the point rotation and mirroring hold
-    /// still. `None` puts it back on the centre of the node's box, which is where
-    /// both pivoted before the field existed (§5.3, [`Pivot`]).
+    /// still. `None` puts it back on the centre of the node's box (§5.3, [`Pivot`]).
     ///
-    /// **Resize and skew deliberately ignore it**, each because it already has a
-    /// fixed point of its own that the gesture is built on: the opposite edge for a
-    /// resize, the facing side for a skew. Alt-resize about the pivot was built and
-    /// then reversed — §15 D60 has the three constraints that cannot all hold.
+    /// **Resize and skew deliberately ignore it**: each has a fixed point of its
+    /// own, the opposite edge or the facing side (§15 D60).
     ///
-    /// **Nothing composes this into the world transform.** The pivot is read by
-    /// the gesture that produces a transform and then baked into the result, so
-    /// the render boundary, `Resolved`, hit-testing and the SVG writer never see
-    /// it — see §15.
+    /// **Nothing composes this into the world transform.** The gesture reads the
+    /// pivot and bakes it into the transform, so the render boundary, `Resolved`,
+    /// hit-testing and the SVG writer never see it.
     SetPivot {
         id: NodeId,
         pivot: Option<Pivot>,
@@ -173,19 +143,15 @@ pub enum Operation {
     /// Whether this layer is a mask for the siblings above it (§5.3).
     ///
     /// **One node, not a run.** The masked layers carry nothing — being masked
-    /// is a fact about where they sit, so moving one out from over the mask is a
-    /// reorder and not a second edit here. That is also what makes the inverse a
-    /// plain `SetMask` back.
+    /// is a fact about where they sit, so moving one out is a reorder.
     SetMask {
         id: NodeId,
         mask: bool,
     },
     /// How this layer masks — its outline, or its own alpha (§5.3).
     ///
-    /// **Separate from `SetMask`, and writable while the layer is not a mask at
-    /// all.** The mode is remembered across the flag going off and on, so the
-    /// operation that sets it cannot be an argument of the one that turns masking
-    /// on: that would make every release throw the mode away.
+    /// **Separate from `SetMask`, and writable while the layer is not a mask.**
+    /// The mode is remembered across the flag going off and on.
     SetMaskMode {
         id: NodeId,
         mode: MaskMode,
@@ -193,11 +159,9 @@ pub enum Operation {
     /// How this layer's geometry decides its interior — non-zero or even-odd
     /// (§15 D239).
     ///
-    /// **Its own operation rather than part of a geometry patch**, because it is a
-    /// property of no particular kind: a `Path`, a `Boolean` and a frame all have an
-    /// interior and `GeometryPatch` is matched against the kind. It is also the one
-    /// thing about a shape that a *boolean* sets on the user's behalf — `build::boolean`
-    /// gives an `Exclude` an even-odd rule, that being what a symmetric difference is.
+    /// Its own operation rather than part of a geometry patch, because it belongs
+    /// to no particular kind and `GeometryPatch` is matched against the kind.
+    /// `build::boolean` gives an `Exclude` an even-odd rule.
     SetFillRule {
         id: NodeId,
         rule: FillRule,
@@ -210,49 +174,37 @@ pub enum Operation {
         id: NodeId,
         strokes: Vec<Keyed<Stroke>>,
     },
-    /// The whole effect stack (§5.3a), for `SetStrokes`' reason: a reorder, a
-    /// removal, a visibility toggle and a tuned number are then one operation
-    /// with one inverse, and the panel never has to describe *which* of those it
-    /// made.
+    /// The whole effect stack (§5.3a): every edit of it is one operation with one
+    /// inverse.
     SetEffects {
         id: NodeId,
         effects: Vec<Keyed<Effect>>,
     },
-    /// The list of files this layer produces (§7). The whole list, not a
-    /// per-entry edit, for `SetStrokes`' reason: a reorder, a removal and an
-    /// edit are then one operation with one inverse, and the panel never has to
-    /// describe *which* change it made.
+    /// The list of files this layer produces (§7), written whole like the other
+    /// keyed lists.
     SetExports {
         id: NodeId,
         exports: Vec<Keyed<ExportSpec>>,
     },
-    /// The columns and rows drawn over this layer (`crate::layout`). The whole
-    /// list, for [`Operation::SetStrokes`]' reason.
-    ///
-    /// **Chrome, like the guide operations**: it answers `false` to
-    /// [`Self::changes_ink`], because a grid is drawn over the artwork and is
-    /// never part of it.
+    /// The columns and rows drawn over this layer (`crate::layout`), written whole.
+    /// **Chrome, like the guide operations**: `false` to [`Self::changes_ink`].
     SetLayoutGrids {
         id: NodeId,
         grids: Vec<Keyed<crate::layout::LayoutGrid>>,
     },
     /// The layer's CSS insets and auto margins inside its frame
-    /// (`crate::container`, §15 D871) — the whole set, for
-    /// [`Operation::SetStrokes`]' reason: four insets and four margins are one
-    /// property to the user, and an inverse that restores one field of eight is a
-    /// half-undo.
+    /// (`crate::container`, §15 D871) — the whole set, as four insets and four
+    /// margins are one property to the user.
     ///
     /// **Ink, unlike a grid**: an inset moves the layer, so it answers `true` to
-    /// [`Self::changes_ink`]. Written by the inspector's inset card, and by
-    /// `build::keep_insets` when an edit moves a pinned layer.
+    /// [`Self::changes_ink`].
     SetInsets {
         id: NodeId,
         insets: crate::container::Insets,
     },
     /// The layer's layout — CSS `display` with its properties, or `None` for a
     /// container whose children are placed by their own transforms
-    /// (`crate::container::Display`, §15 D867). The whole value, `SetInsets`'
-    /// reason.
+    /// (`crate::container::Display`, §15 D867). The whole value.
     SetDisplay {
         id: NodeId,
         display: Option<crate::container::Display>,
@@ -264,32 +216,27 @@ pub enum Operation {
         item: crate::container::LayoutItem,
     },
     /// Make a frame or group a main component, or stop it being one (§15 D978).
-    /// The rules — which kinds, never inside a main or an instance — are checked
-    /// after the last op (`crate::component::check`), so a verb can make the
-    /// change and its consequences in either order.
+    /// The rules are checked after the last op (`crate::component::check`), so a
+    /// verb may order the change and its consequences either way.
     SetComponent {
         id: NodeId,
         component: bool,
     },
-    /// Link a node to the node it was copied from, or cut the link (§15 D978) —
-    /// how an instance is made, detached, and relinked one level up. Checked after
-    /// the last op, as [`Self::SetComponent`] is.
+    /// Link a node to the node it was copied from, or cut the link (§15 D978).
+    /// Checked after the last op, as [`Self::SetComponent`] is.
     SetLink {
         id: NodeId,
         link: Option<NodeId>,
     },
     /// Swap a nested copy's contents to another main, or back to its slot's
     /// (§15 D983). The field alone: the commit expands it into the copy's
-    /// rewritten children (`crate::swap::settle`), so every door that writes one —
-    /// the picker, a reset, a variant switch — gets the same rewrite. Checked
-    /// after the last op, as [`Self::SetLink`] is.
+    /// rewritten children (`crate::swap::settle`). Checked after the last op.
     SetSwap {
         id: NodeId,
         swap: Option<NodeId>,
     },
     /// Make a frame a component set with these variant properties, or stop it
-    /// being one (§15 D982). Checked after the last op, as [`Self::SetComponent`]
-    /// is (`crate::variant::check`).
+    /// being one (§15 D982). Checked after the last op (`crate::variant::check`).
     SetVariantSet {
         id: NodeId,
         set: Option<crate::variant::VariantSet>,
@@ -299,23 +246,19 @@ pub enum Operation {
         id: NodeId,
         values: Vec<String>,
     },
-    /// The component properties a main or a set defines (§15 D982) — the whole
-    /// list, as the other keyed lists are written.
+    /// The component properties a main or a set defines (§15 D982), written whole.
     SetProperties {
         id: NodeId,
         props: Vec<Keyed<crate::variant::Property>>,
     },
     /// The ground behind and around the frames — the one operation with no node
-    /// to name, because the ground belongs to the document rather than to
-    /// anything in it (§15 D18). A solid colour, not a `Brush`: there is
-    /// nothing behind the canvas, so a gradient would have nowhere to go and an
-    /// alpha nothing to blend with.
+    /// to name (§15 D18). A solid colour, not a `Brush`: nothing lies behind it
+    /// for a gradient or an alpha to act on.
     SetCanvasBackground {
         background: Color,
     },
-    /// Place a ruler guide. The id is minted by the caller like a node's, so a
-    /// guide pulled out of a ruler has a stable identity from the first frame
-    /// of the drag (§5.2, invariant 3).
+    /// Place a ruler guide. The caller mints the id, as for a node (§5.2,
+    /// invariant 3).
     AddGuide {
         guide: Guide,
     },
@@ -335,18 +278,13 @@ pub enum Operation {
     /// Rescope a guide: which frame owns it, and where it sits in that owner's
     /// space (`None` owner meaning the canvas, in world space).
     ///
-    /// **The two fields move together or not at all**, which is the whole reason
-    /// this is one operation and not [`Self::SetGuidePosition`] beside a
-    /// scope-only setter. `position` is *read in* the owner's space
-    /// (`Guide::position`), so a transaction that changed the owner and left the
-    /// number would be reinterpreting the same coordinate in a different space —
-    /// a guide 40 units down a frame would jump to 40 units down the canvas for
-    /// however long the intermediate state lasted, and an inverse built from that
-    /// state would restore the jump rather than the guide.
+    /// **The two fields move together or not at all.** `position` is read in the
+    /// owner's space (`Guide::position`), so changing the owner alone would
+    /// reinterpret the same coordinate in another space, and an inverse built from
+    /// that state would restore the jump.
     ///
-    /// Rescoping is what dragging a guide across a frame's boundary does, in
-    /// either direction, and it inverts to itself carrying the old pair — so the
-    /// mode change is one undo step and the return trip is exact.
+    /// Dragging a guide across a frame's boundary does this, and it inverts to
+    /// itself carrying the old pair.
     SetGuideScope {
         id: GuideId,
         owner: Option<NodeId>,
@@ -354,17 +292,12 @@ pub enum Operation {
     },
     /// Put an image's bytes in the document's table (`crate::image`).
     ///
-    /// **The bytes travel in the operation, which is what makes undo whole.** A
-    /// delete of the last layer showing an image must be undoable, and an inverse
-    /// that only knew the id would restore a reference to nothing. So this
-    /// inverts to [`Self::RemoveImage`] and that inverts back to *this*, entry
-    /// included — the same shape as [`Self::AddGuide`], for a heavier payload and
-    /// the same reason.
+    /// **The bytes travel in the operation, which is what makes undo whole**: this
+    /// inverts to [`Self::RemoveImage`] and that back to *this*, entry included,
+    /// so no inverse restores a reference to nothing.
     ///
-    /// The id is minted by the caller, as a guide's is: it is a content hash of
-    /// the encoded bytes, so the caller is the only thing that can compute one,
-    /// and computing it there is what makes placing the same file twice
-    /// deduplicate rather than duplicate.
+    /// The caller mints the id, a content hash of the encoded bytes, so placing
+    /// the same file twice deduplicates.
     AddImage {
         id: ImageId,
         entry: ImageEntry,
@@ -372,8 +305,7 @@ pub enum Operation {
     /// Take an image out of the table.
     ///
     /// **Not reached by deleting a layer** — nothing collects the table (see
-    /// `Document::images`) — so this is *Purge unused*, *Unlink*, and the second
-    /// half of a replace.
+    /// `Document::images`); this is *Purge unused*, *Unlink* and half a replace.
     RemoveImage {
         id: ImageId,
     },
@@ -382,8 +314,7 @@ pub enum Operation {
     /// [`Self::CloseVault`]; refused when a vault is open.
     ///
     /// **An operation rather than a side effect of the first vendoring insert**,
-    /// so the insert's undo takes the vault away with it and a document that has
-    /// never used a kit saves as it did before kits existed.
+    /// so the insert's undo takes the vault away with it.
     OpenVault {
         id: NodeId,
     },
@@ -391,42 +322,37 @@ pub enum Operation {
     CloseVault {
         id: NodeId,
     },
-    /// Set or clear a node's kit provenance (§5.3e, §15 D1016) — an update moving
-    /// a vendored node to the new version, or *Make local* clearing it as the
-    /// node leaves the vault. `crate::kit::check` holds where an origin may be,
-    /// after the last op.
+    /// Set or clear a node's kit provenance (§5.3e, §15 D1016). `crate::kit::check`
+    /// holds where an origin may be, after the last op.
     SetOrigin {
         id: NodeId,
         origin: Option<crate::kit::Origin>,
     },
-    /// Put a variable in the document's table (§5.3f, §15 D1039). Its cells must
-    /// cover every mode and its name be free — `crate::variable::check`, after
-    /// the last op. Inverts to [`Self::RemoveVariable`], and that back to this,
-    /// carrying the whole variable as [`Self::AddImage`] carries its bytes.
+    /// Put a variable in the document's table (§5.3f, §15 D1039). Cells must cover
+    /// every mode and the name be free (`crate::variable::check`, after the last
+    /// op). Inverts to [`Self::RemoveVariable`], which carries the whole variable
+    /// back.
     AddVariable {
         var: crate::variable::Variable,
     },
     /// Take a variable out of the table. **Refused at the commit while anything is
-    /// bound to it**: the delete verb detaches its users to the value they drew,
-    /// as ops in the same transaction (D1038).
+    /// bound to it**; the delete verb detaches its users in the same transaction.
     RemoveVariable {
         id: crate::variable::VarId,
     },
-    /// Replace a variable whole — its name, its cells and its origin — as a kit
-    /// update rewrites a kit's variable to the new publish (§15 D1064), its cells
-    /// following the kit's modes as they are now. The id must be there; its kind
-    /// may not change. Inverts to the variable it replaced.
+    /// Replace a variable whole — name, cells and origin — as a kit update does
+    /// (§15 D1064). The id must be there; its kind may not change. Inverts to the
+    /// variable it replaced.
     SetVariable {
         var: crate::variable::Variable,
     },
-    /// One kit's modes and its mapping onto the document's (§15 D1064, D1038
-    /// (b)), `None` to drop them. Whole, as the record is small and an update
-    /// moves several parts of it at once; inverts to what it replaced.
+    /// One kit's modes and its mapping onto the document's (§15 D1064), `None` to
+    /// drop them. Written whole; inverts to what it replaced.
     SetKitModes {
         kit: String,
         modes: Option<crate::variable::KitModes>,
     },
-    /// Rename a variable — a slash path, whose groups are the browser's (D1038 G).
+    /// Rename a variable — a slash path, whose groups are the browser's.
     SetVariableName {
         id: crate::variable::VarId,
         name: String,
@@ -437,17 +363,16 @@ pub enum Operation {
         mode: crate::variable::ModeId,
         cell: crate::variable::Cell,
     },
-    /// Add a mode at `index` of the list, with **every variable's cell in it** —
-    /// the column a mode is, so the table is whole after this one op. Inverts to
-    /// [`Self::RemoveMode`].
+    /// Add a mode at `index`, with **every variable's cell in it**, so the table
+    /// is whole after this one op. Inverts to [`Self::RemoveMode`].
     AddMode {
         mode: crate::variable::Mode,
         index: usize,
         cells: Vec<(crate::variable::VarId, crate::variable::Cell)>,
     },
     /// Remove a mode and its column. Inverts to [`Self::AddMode`] with the column
-    /// it took; the frames set to it are returned to *Inherit* by ops in the same
-    /// transaction (D1038), refused at the commit otherwise.
+    /// it took; frames set to it must return to *Inherit* in the same
+    /// transaction, or the commit refuses.
     RemoveMode {
         id: crate::variable::ModeId,
     },
@@ -462,15 +387,13 @@ pub enum Operation {
         mode: Option<crate::variable::ModeId>,
     },
     /// The variables a rectangle's corners are bound to (§15 D1039). Writes the
-    /// bindings alone — the verbs that bind write the bound corners' literals 0
-    /// beside it (`build::bind_corners_ops`).
+    /// bindings alone; `build::bind_corners_ops` writes the literals beside it.
     SetCornerVars {
         id: NodeId,
         vars: crate::variable::CornerVars,
     },
     /// The variables a container's gaps and padding are bound to (§15 D1058).
-    /// Writes the bindings alone, as `SetCornerVars` does — the verbs that bind
-    /// write the bound slots' literals 0 beside it (`build::bind_spacing_ops`).
+    /// Writes the bindings alone (`build::bind_spacing_ops` writes the literals).
     SetSpacingVars {
         id: NodeId,
         vars: crate::variable::SpacingVars,
@@ -482,22 +405,19 @@ pub enum Operation {
         var: Option<crate::variable::VarId>,
     },
     /// The number variables a layer's width and height are bound to (§15
-    /// D1061). Writes the bindings alone — the verb that binds writes the bound
-    /// axis's literal 0 beside it (`build::bind_size_ops`).
+    /// D1061). Writes the bindings alone (`build::bind_size_ops` writes the literals).
     SetSizeVars {
         id: NodeId,
         vars: crate::variable::SizeVars,
     },
     /// The string variables a text's content and family are bound to (§15
-    /// D1069). Writes the bindings alone — the verb that binds writes the bound
-    /// field's literal empty beside it (`build::bind_text_ops`).
+    /// D1069). Writes the bindings alone (`build::bind_text_ops` writes the literals).
     SetTextVars {
         id: NodeId,
         vars: crate::variable::TextVars,
     },
     /// The number variable a layer's opacity is bound to (§15 D1072). Writes
-    /// the binding alone — the verb that binds writes the literal 0 beside it
-    /// (`build::bind_opacity_ops`).
+    /// the binding alone (`build::bind_opacity_ops` writes the literal).
     SetOpacityVar {
         id: NodeId,
         var: Option<crate::variable::VarId>,
@@ -509,8 +429,8 @@ pub enum Operation {
         style: crate::style::Style,
     },
     /// Take a style out of the table. **Refused at the commit while any layer is
-    /// bound to it**: the delete verb detaches its users first, in the same
-    /// transaction (`crate::style::remove_ops`, D1038 (6)).
+    /// bound to it**; `crate::style::remove_ops` detaches its users in the same
+    /// transaction.
     RemoveStyle {
         id: crate::style::StyleId,
     },
@@ -531,7 +451,7 @@ pub enum Operation {
         origin: Option<crate::style::StyleOrigin>,
     },
     /// The style a layer's fills are bound to, `None` to detach. Writes the
-    /// binding alone — the commit writes the style's values beside it.
+    /// binding alone; the commit writes the style's values.
     SetFillStyle {
         id: NodeId,
         style: Option<crate::style::StyleId>,
@@ -548,14 +468,14 @@ pub enum Operation {
     },
     /// The text style a text layer's type is bound to, as [`Self::SetFillStyle`]
     /// (§15 D1067). Not [`Self::SetTextStyle`], which writes the character
-    /// defaults themselves — the values the commit writes beside this one.
+    /// defaults themselves.
     SetTypeStyle {
         id: NodeId,
         style: Option<crate::style::StyleId>,
     },
     /// The layout style a frame or a group's container is bound to, as
     /// [`Self::SetFillStyle`] (§15 D1075). Not [`Self::SetDisplay`], which writes
-    /// the layout itself — one of the values the commit writes beside this one.
+    /// the layout itself.
     SetLayoutStyle {
         id: NodeId,
         style: Option<crate::style::StyleId>,
@@ -564,27 +484,17 @@ pub enum Operation {
 
 impl Operation {
     /// The node this operation **overwrites a field of**, or `None` when it is
-    /// not that kind of operation at all.
+    /// not that kind of operation.
     ///
-    /// The question [`crate::History`] asks to decide whether one edit may be
-    /// folded into the step before it, and the reason it is phrased about
-    /// overwriting: merging keeps the *older* inverse and throws the newer one
-    /// away, which restores the original state only if the second edit replaced
-    /// exactly what the first one did. That holds for an absolute setter on a
-    /// node and fails for everything structural — a create, a delete, a reparent
-    /// or a reorder has an inverse that undoes a *change in the tree*, and
-    /// dropping one loses a node.
+    /// [`crate::History`] asks this to decide whether one edit may fold into the
+    /// step before it: merging keeps the *older* inverse, which restores the
+    /// original state only if the second edit replaced exactly what the first did.
+    /// That holds for an absolute setter and fails for everything structural.
     ///
-    /// The guide operations answer `None` for a duller reason: they name a
-    /// `GuideId` rather than a `NodeId`, so they have no subject of this shape.
-    ///
-    /// ⚠️ **This used to add "a guide drag is one commit on release anyway, so
-    /// nothing wants it yet", and something did** (§15 D482). An arrow-key nudge
-    /// on a guide is a *repeating* gesture and needs to fold, which is
-    /// [`Self::shape_key`]'s business — and deliberately not this function's, whose
-    /// two callers ask *"which node does this transaction write"* and would take a
-    /// guide's underlying id for a layer's. **Two questions that look like one**:
-    /// the subject of an edit, and the key a run merges on.
+    /// The guide operations answer `None`: they name a `GuideId`, not a `NodeId`.
+    /// A guide nudge folds through [`Self::shape_key`] instead — **two questions
+    /// that look like one**: the subject of an edit, and the key a run merges on
+    /// (§15 D482).
     pub fn overwrites(&self) -> Option<NodeId> {
         match self {
             Operation::SetTransform { id, .. }
@@ -730,48 +640,25 @@ impl Operation {
     /// The key `History` merges a run on: the operation, the **field** inside it
     /// where there is one, and the subject (§15 D482).
     ///
-    /// `History::commit_into_run` may keep the older inverse and drop the newer
-    /// one only when the second edit overwrote *exactly* the fields the first one
-    /// did. [`Self::overwrites`] answers a subject and the operation's discriminant
-    /// answers the variant, and for every overwriting operation but one that pair
-    /// **is** the field set — each writes a fixed group of fields. Checked variant
-    /// by variant against `overwrites`' list: `SetInsets`, `SetDisplay` and
-    /// `SetLayoutItem` each write their whole set too. No count here on purpose —
-    /// one stood here and stayed at *"23 of 24"* while two variants arrived
-    /// (`[R2-L8-06]`); a new variant is checked by reading it, not by a figure.
+    /// `History::commit_into_run` may drop the newer inverse only when the second
+    /// edit overwrote *exactly* the fields the first did. The subject plus the
+    /// operation's discriminant **is** the field set for every overwriting
+    /// operation but one, each writing a fixed group of fields.
     ///
-    /// ⚠️ **`SetGeometry` is the one exception, and it is the reason this function
-    /// exists** (`[S2.2-L2-02]`). Its payload is itself a field selector:
-    /// [`GeometryPatch`] has twelve variants aimed at different fields, so two
-    /// commits carrying `Size` and `CornerRadius` looked identical to a
-    /// discriminant-only key and merged. Measured through core's public API on a
-    /// 10×10 rect — `Size(20×20)` then `CornerRadius(5.0)`, `undo_depth` 1, and one
-    /// undo restoring the size while stranding the radius at 5, **with an empty
-    /// stack**: a state that was never committed and nothing left to reach the real
-    /// one. Not reachable through the app today, `commit_run`'s verbs each emitting
-    /// one patch variant per node, but it is core's public contract and
-    /// `commit_into_run`'s doc claims it is enforced.
+    /// ⚠️ **`SetGeometry` is the one exception, and the reason this function
+    /// exists.** Its payload is itself a field selector: two commits carrying
+    /// `Size` and `CornerRadius` would look identical to a discriminant-only key,
+    /// merge, and one undo would restore the size and strand the radius with an
+    /// empty stack.
     ///
-    /// ⚠️ **`SetGuidePosition` is admitted here and not by
-    /// [`Self::overwrites`]**, which answers `None` for every guide operation. A
-    /// guide's id wraps a `NodeId` (§5.2), so it makes a perfectly good merge key —
-    /// but it is not a *node*, and `overwrites`' two callers ask which node an edit
-    /// writes: `app`'s `touched` count behind *"Pasted properties onto n layers"*,
-    /// and `inspector`'s assertion that a recolour names no frame. Widening that one
-    /// would hand both of them a guide's underlying id **as though it were a
-    /// layer's**.
+    /// ⚠️ **`SetGuidePosition` is admitted here and not by [`Self::overwrites`]**.
+    /// A guide's id wraps a `NodeId` (§5.2), so it makes a fine merge key, but it
+    /// is not a node, and `overwrites`' callers ask which node an edit writes;
+    /// widening it would hand them a guide's id as though it were a layer's. The
+    /// ids cannot collide (guides and nodes share one `IdSource`).
     ///
-    /// ⚠️ **Not because the ids could collide — they cannot.** This comment said so
-    /// and was wrong: [`crate::guide::GuideId`]'s own doc records that guides and
-    /// nodes are minted from the session's **one** `IdSource`, *"so a guide id and
-    /// a node id can never collide"*. Neither caller is reachable with a guide
-    /// operation today either, so the cost is a latent lie rather than a measured
-    /// bug — which is the reason to keep the two questions apart rather than a
-    /// reason to shrug.
-    ///
-    /// The other guide operations stay out: `AddGuide` and
-    /// `RemoveGuide` are structural, and nothing repeats a colour or a scope, so
-    /// admitting them would widen the merge for a gesture that does not exist.
+    /// The other guide operations stay out: `AddGuide` and `RemoveGuide` are
+    /// structural, and nothing repeats a colour or a scope.
     pub fn shape_key(
         &self,
     ) -> Option<(
@@ -793,64 +680,45 @@ impl Operation {
     /// Whether applying this changes what is **drawn** — the artwork, not the
     /// chrome around it.
     ///
-    /// **The question that decides whether an edit is worth getting the selection
-    /// box out of the way for** (§15 D128). An edit whose result is invisible has
-    /// nothing to look at, and an edit whose *only* result is chrome would have its
-    /// one visible effect taken away by hiding it. Both fall out of this: the
-    /// proportion lock changes what a future handle drag does and nothing on screen
-    /// now, a pivot is a marker the canvas draws as chrome, a name is a row in a
-    /// panel and a tag over a frame, and a guide is a line over the artwork rather
-    /// than part of it.
+    /// It decides whether an edit is worth getting the selection box out of the
+    /// way for (§15 D128): an invisible result has nothing to look at, and a
+    /// chrome-only result would lose its one visible effect. The proportion lock,
+    /// a pivot, a name and a guide are all `false`.
     ///
     /// **Close kin of `RenderOverrides::absorb`'s no-op arms, and not the same
-    /// list.** Its chrome arm is "the renderer has nothing to do with this" and
-    /// this is "this changes nothing drawn" — one fact asked by two callers, and
-    /// every op of that arm answers `false` here. The lists part in both
-    /// directions, each for a stated reason: `absorb` no-ops the image pair, which
-    /// changes ink with no override to carry it (§15 D659), and the variables
-    /// table's operations, which have none either (§15 D1039) — the modes', a
-    /// mode's name, a kit's variable and a kit's modes change ink, a variable's
-    /// own rows do not — and this answers `false` for the vault's two and
-    /// `SetOrigin`, which `absorb` *refuses* (§15 D1012, D1016).
+    /// list.** Every op of that arm answers `false` here, but `absorb` also no-ops
+    /// the image pair (§15 D659) and some variables-table ops (§15 D1039) that
+    /// change ink with no override to carry it, and `absorb` *refuses* the vault's
+    /// two and `SetOrigin` (§15 D1012, D1016), which answer `false` here.
     /// `overrides.rs` · `every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
     /// pins the no-op side.
     ///
-    /// **The two image operations are the standing exception, and it is a gap
-    /// rather than a disagreement.** They answer `true` here and are absorbed as
-    /// no-ops there, because `RenderOverrides` has no image table for `absorb` to
-    /// patch — so the honest reading of that arm is "cannot preview this", not
-    /// "nothing to preview". It is written out at both ends.
+    /// **The two image operations are the standing gap**: they answer `true` here
+    /// and are absorbed as no-ops there, because `RenderOverrides` has no image
+    /// table to patch — that arm means "cannot preview this".
     ///
     /// No wildcard, so a new `Operation` stops compiling here and has to be
-    /// classified rather than defaulting to either answer. That is the
-    /// `matches!`-over-a-list trap (§15 D87–D88) in the shape it takes for an op.
+    /// classified (§15 D87–D88).
     pub fn changes_ink(&self) -> bool {
         match self {
             Operation::SetName { .. }
             | Operation::SetLocked { .. }
             | Operation::SetProportionsLocked { .. }
             | Operation::SetPivot { .. }
-            // Export settings say what a *file* would contain, and nothing on
-            // the canvas draws from them — adding a 2× PNG to a layer changes
-            // the panel and not one pixel of the artwork.
+            // Export settings say what a file would contain; nothing on the
+            // canvas draws from them.
             | Operation::SetExports { .. }
-            // A layout grid is drawn over a frame and is never in it: no scene
-            // node, no export, nothing in the snapshot. The same sentence the
-            // guide arms below are filed under.
+            // A layout grid is drawn over a frame and is never in it.
             | Operation::SetLayoutGrids { .. }
-            // Being a main, or being linked, is what a layer *is* to the
-            // components machinery, not anything it draws: the main's label chip
-            // and the instance glyph are chrome (§15 D981), and an instance looks
-            // exactly like the nodes it holds.
+            // Being a main or linked is not drawn: the label chip and the
+            // instance glyph are chrome (§15 D981).
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
-            // A swap is the same: what a swapped copy draws changes through the
-            // children and fields its commit rewrites (§15 D983).
+            // A swapped copy draws through the children its commit rewrites
+            // (§15 D983).
             | Operation::SetSwap { .. }
-            // A set's properties, a variant's values and a component's
-            // properties are what the components machinery reads, never what is
-            // drawn: the derived name and a bound field change through their own
-            // operations (§15 D982).
+            // A set's, variant's and component's properties are read by the
+            // components machinery, never drawn (§15 D982).
             | Operation::SetVariantSet { .. }
             | Operation::SetVariant { .. }
             | Operation::SetProperties { .. }
@@ -859,23 +727,20 @@ impl Operation {
             | Operation::SetGuidePosition { .. }
             | Operation::SetGuideColor { .. }
             | Operation::SetGuideScope { .. }
-            // The vault is never drawn (§15 D1012): opening or closing it changes
-            // nothing on the canvas — what a kit insert draws is its instance.
+            // The vault is never drawn (§15 D1012).
             | Operation::OpenVault { .. }
             | Operation::CloseVault { .. }
             // Provenance is a label on a node, never ink (§15 D1016).
             | Operation::SetOrigin { .. }
-            // A variable's name is a row in the browser, and a new variable is
-            // read by nothing yet. A removed one was read by nothing either — the
-            // commit refuses a removal while anything is bound to it, and the
-            // detaches beside it are the ink. (A mode's name is not: a kit's
-            // column is matched to a document mode by name.)
+            // A variable's name is a row in the browser; a new or removed variable
+            // is read by nothing (a removal is refused while bound, and the
+            // detaches beside it are the ink). A mode's name is ink: a kit's
+            // column is matched to a document mode by name.
             | Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
-            // A style's table and a layer's binding to one draw nothing of
-            // themselves: what a styled layer draws is its own list, which the
-            // commit rewrites beside these by `SetFills` and its kin (§15 D1062).
+            // A style's table and a layer's binding draw nothing themselves; the
+            // commit rewrites the layer's own lists beside them (§15 D1062).
             | Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
@@ -893,14 +758,12 @@ impl Operation {
             | Operation::Reorder { .. }
             | Operation::SetTransform { .. }
             | Operation::SetGeometry { .. }
-            // An inset moves the layer it is set on (and stretches it, with two on
-            // one axis) — true even where it is inert, `SetMaskMode`'s reasoning
-            // below: the question is whether this *kind* of edit changes the
-            // drawing, and the answer depending on the parent would be a second
-            // layout pass hidden in a predicate.
+            // An inset moves the layer — true even where it is inert, as for
+            // `SetMaskMode` below: the answer depending on the parent would be a
+            // second layout pass hidden in a predicate.
             | Operation::SetInsets { .. }
-            // A layout moves every child of the container it is set on, and an
-            // item's properties move it and its siblings.
+            // A layout moves every child of its container; an item's properties
+            // move it and its siblings.
             | Operation::SetDisplay { .. }
             | Operation::SetLayoutItem { .. }
             | Operation::SetText { .. }
@@ -912,48 +775,34 @@ impl Operation {
             | Operation::SetVisible { .. }
             | Operation::SetOpacity { .. }
             | Operation::SetClip { .. }
-            // **The most visible flag in this list.** Setting it takes one layer
-            // off the page and cuts every layer above it down to that layer's
-            // outline — two changes to the drawing at once, from one bool.
+            // **The most visible flag in this list**: it takes one layer off the
+            // page and cuts every layer above it down to that outline.
             | Operation::SetMask { .. }
-            // **True even though it can be written to a layer that is not a
-            // mask**, where it changes nothing on screen. The honest reading of
-            // this question is about the operation, not about the state it lands
-            // in: `SetGeometry` on a shape already that size is `true` as well.
+            // **True even when written to a layer that is not a mask**: the
+            // question is about the operation, not the state it lands in, as for
+            // `SetGeometry` on a shape already that size.
             | Operation::SetMaskMode { .. }
-            // **True, and it is a *geometry* change wearing a paint-shaped op.**
-            // Switching the rule changes which parts of the shape are inside, so
-            // the hit test and the mask it feeds change with the picture.
+            // **True: a geometry change wearing a paint-shaped op.** The rule
+            // decides which parts are inside, so hit testing and masks change too.
             | Operation::SetFillRule { .. }
             | Operation::SetFills { .. }
             | Operation::SetStrokes { .. }
-            // **True, and it is the one paint-adjacent op that can change what
-            // is drawn *outside* the layer it names.** A drop shadow reaches
-            // past its own geometry, so this op dirties a region wider than the
-            // node's box — which is why `effect::stack_escape` exists and why
-            // the bounds cache reads it rather than the node's size alone.
+            // **True, and the one paint op that can change what is drawn outside
+            // its layer**: a drop shadow reaches past the node's box, which is why
+            // `effect::stack_escape` exists and the bounds cache reads it.
             | Operation::SetEffects { .. }
             | Operation::SetCanvasBackground { .. }
-            // **True, though neither touches a node.** The table is not a
-            // bookkeeping side-car: a fill referring to an id the document does
-            // not carry paints nothing, so putting the entry back — undoing a
-            // purge, finishing a relink — is the difference between an empty
-            // shape and a photograph on screen. Answering `false` here would
-            // leave the selection box sitting over the one edit that just changed
-            // the most.
-            //
-            // (What it draws without the entry is the placeholder — a grey cross
-            // rather than a blank, §15 D179. Either way the entry going back is
-            // what changes the picture.)
+            // **True, though neither touches a node**: a fill referring to an id
+            // the table lacks draws the placeholder (§15 D179), so the entry going
+            // back changes the picture.
             | Operation::AddImage { .. }
             | Operation::RemoveImage { .. }
-            // **True, though none names a node**: a cell is what every layer bound
-            // to it draws, and adding or removing a mode can move which one is
-            // first — the default every unset frame reads in (D1038 (a)).
+            // **True, though none names a node**: a cell is what every bound layer
+            // draws, and adding or removing a mode can move the default every
+            // unset frame reads in.
             | Operation::SetVariableCell { .. }
-            // A kit's variable rewritten, and a kit's modes or mapping — which
-            // column every layer bound to it reads (§15 D1064). A document mode's
-            // name is a mapping too: an unmapped kit mode is matched by it.
+            // A kit's variable, modes and mapping set which column every bound
+            // layer reads (§15 D1064); a document mode's name is a mapping too.
             | Operation::SetVariable { .. }
             | Operation::SetKitModes { .. }
             | Operation::SetModeName { .. }
@@ -972,37 +821,29 @@ impl Operation {
     /// Whether applying this to `doc` would leave the document exactly as it
     /// stands.
     ///
-    /// The per-operation half of [`Transaction::changes_nothing`], which is
-    /// where the reason for asking is written down.
+    /// The per-operation half of [`Transaction::changes_nothing`], where the
+    /// reason for asking is written down.
     ///
     /// **`false` is the safe answer, and every arm that cannot be certain gives
-    /// it.** A wrong `true` silently drops an edit; a wrong `false` only commits
-    /// an undo step nobody wanted, which is the state the app was in before this
-    /// existed. So the match is exhaustive with no wildcard — a variant added
-    /// later has to answer for itself rather than inherit a guess.
+    /// it**: a wrong `true` silently drops an edit, a wrong `false` only commits an
+    /// unwanted undo step. The match has no wildcard so a new variant must answer
+    /// for itself.
     ///
-    /// **An operation whose subject is missing answers `false`**, so a commit
-    /// that would have failed still fails and still says so. The same goes for
-    /// the two kind gates `apply` enforces ([`Self::SetFills`] and
-    /// [`Self::SetStrokes`] on an unpaintable kind, [`Self::SetEffects`] on the
-    /// root): this reports "changes something" rather than swallowing the error
-    /// that is about to be raised.
+    /// **An operation whose subject is missing answers `false`**, as do the kind
+    /// gates `apply` enforces ([`Self::SetFills`] and [`Self::SetStrokes`] on an
+    /// unpaintable kind, [`Self::SetEffects`] on the root), so the error still
+    /// surfaces.
     ///
-    /// ⚠️ **Equality of the value written, not of the bytes stored.** `-0.0` and
-    /// `0.0` compare equal, so a transform that changes only a zero's sign is
-    /// called a no-op — nothing that reads the document can tell those apart.
-    /// `NaN` compares equal to nothing, which is the useful direction: a
-    /// non-finite operation is never a no-op and still reaches
+    /// ⚠️ **Equality of the value written, not of the bytes stored**: `-0.0` equals
+    /// `0.0`, and `NaN` equals nothing, so a non-finite operation still reaches
     /// [`OpError::NonFinite`].
     pub fn changes_nothing(&self, doc: &crate::Document) -> bool {
         let node = |id: &NodeId| doc.get(*id);
         let kind = |id: &NodeId| doc.get(*id).map(Node::kind);
         match self {
-            // **Structural, so never a no-op by inspection.** A create, a delete,
-            // an insert or an image/guide add-remove either changes the tree or
-            // fails; there is no third answer to find here, and answering `true`
-            // for an insert of zero nodes would suppress the `MalformedSubtree`
-            // that says so.
+            // **Structural, so never a no-op by inspection**: these change the tree
+            // or fail, and `true` for an insert of zero nodes would suppress the
+            // `MalformedSubtree`.
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -1074,11 +915,9 @@ impl Operation {
                 node(id).is_some_and(|n| n.opacity_var() == *var)
             }
 
-            // **The index is read the way `apply` writes it** — the child is
-            // removed from its parent's list and re-inserted at `index`, so the
-            // list comes back identical exactly when `index` is where it already
-            // sits. That is also true of a reparent into the parent it already
-            // has, which is why the two arms differ only in the parent test.
+            // **The index is read the way `apply` writes it**: remove, then
+            // re-insert at `index`, so the list is unchanged exactly when `index`
+            // is where the child already sits.
             Operation::Reparent {
                 id,
                 new_parent,
@@ -1096,22 +935,18 @@ impl Operation {
             Operation::SetTransform { id, transform } => {
                 node(id).is_some_and(|n| n.transform() == *transform)
             }
-            // **Asked of the result rather than of the patch**, which is what
-            // makes this arm exact for all fourteen patch shapes at once: a patch
-            // that does not match the kind answers `None` and so answers `false`
-            // here, and one that does is compared against the kind it would
-            // produce.
+            // **Asked of the result rather than of the patch**, which makes this
+            // arm exact for every patch shape: a patch that does not match the
+            // kind answers `None` and so `false`.
             Operation::SetGeometry { id, geometry } => node(id).is_some_and(|n| {
                 geometry
                     .applied_to(n.kind())
                     .is_some_and(|would_be| would_be == *n.kind())
             }),
 
-            // **The four span-carrying arms compare what `apply` would store, not
-            // what the caller handed over.** Every one of them clamps or re-states
-            // its list on the way in, so a list that differs from the stored one
-            // only by a span the clamp would drop is a no-op, and asking the
-            // question any other way would call it an edit.
+            // **The span-carrying arms compare what `apply` would store, not what
+            // the caller handed over**: each clamps or re-states its list, so a
+            // difference the clamp would drop is a no-op.
             Operation::SetText {
                 id,
                 content,
@@ -1139,10 +974,9 @@ impl Operation {
                     ..
                 }) if **s == *style
                     && match spans {
-                        // `None` means "re-state against the defaults", and the
-                        // defaults are unchanged on this branch, so the question
-                        // is whether the stored list is already a fixed point of
-                        // the re-statement.
+                        // `None` re-states against unchanged defaults, so the
+                        // question is whether the stored list is already a fixed
+                        // point of the re-statement.
                         None => *sp == sp.restated(style),
                         Some(given) => *sp == given.clamped(content, style),
                     }
@@ -1262,9 +1096,8 @@ impl Operation {
 /// Where `id` sits in its parent's child list, or `None` when it has no parent
 /// (the root) or is not in the document.
 ///
-/// **The number [`Operation::Reorder`] is compared against**, and it is spelled
-/// here rather than inline because the reparent arm asks the identical question
-/// of the identical list.
+/// The number [`Operation::Reorder`] is compared against; the reparent arm asks
+/// the same question of the same list.
 fn child_index(doc: &crate::Document, id: NodeId) -> Option<usize> {
     let parent = doc.get(id)?.parent()?;
     doc.get(parent)?.children().iter().position(|c| *c == id)
@@ -1274,8 +1107,7 @@ impl Transaction {
     /// Whether any operation in this changes what is drawn
     /// ([`Operation::changes_ink`]).
     ///
-    /// **Any, not all.** A transaction that moves a layer *and* renames it has a
-    /// visible result, so it is worth looking at; one that only renames does not.
+    /// **Any, not all**: a transaction that moves and renames a layer is visible.
     pub fn changes_ink(&self) -> bool {
         self.0.iter().any(Operation::changes_ink)
     }
@@ -1283,25 +1115,17 @@ impl Transaction {
     /// Whether applying this would leave `doc` exactly as it stands — a
     /// completed interaction that turned out to change nothing (§15 D428).
     ///
-    /// **All, not any, and that is the whole specification.** A per-operation
-    /// filter would break the case the app relies on most: *Hide* over a mixed
-    /// selection emits a `SetVisible` per layer, and the ones already hidden are
-    /// individually no-ops while the transaction as a whole hides something.
-    /// Dropping those would still commit — but a later reader would find the
-    /// undo step describing fewer layers than the user selected, and the inverse
-    /// would put back a different set. So the question is asked of the
-    /// transaction and nothing is ever dropped *from* one.
+    /// **All, not any, and nothing is ever dropped *from* a transaction.** *Hide*
+    /// over a mixed selection emits a `SetVisible` per layer; the already-hidden
+    /// ones are individually no-ops, but dropping them would leave the undo step
+    /// describing fewer layers than were selected.
     ///
-    /// **Sound because a no-op leaves the document it was measured against.**
-    /// Each operation is tested against `doc` as it stands now rather than
-    /// against the state its predecessors would leave; that is the same thing,
-    /// because if every operation before it changes nothing then the document it
-    /// would actually see is this one.
+    /// **Sound because a no-op leaves the document it was measured against**:
+    /// testing each operation against `doc` rather than its predecessors' result
+    /// is the same thing when every earlier operation changes nothing.
     ///
-    /// **Empty is not the same question.** An empty transaction is a tool
-    /// legitimately producing no edit and is dropped one line earlier at the
-    /// commit seam; this answers `false` for one, so that "changes nothing" is
-    /// only ever said about work that was really attempted.
+    /// **Empty answers `false`**: an empty transaction is dropped at the commit
+    /// seam, so "changes nothing" is only said about work that was attempted.
     pub fn changes_nothing(&self, doc: &crate::Document) -> bool {
         !self.0.is_empty() && self.0.iter().all(|op| op.changes_nothing(doc))
     }
@@ -1311,12 +1135,10 @@ impl Transaction {
 #[derive(Clone, Debug, PartialEq)]
 pub enum GeometryPatch {
     Size(Size),
-    /// The same radius on all four corners — the common edit, spelled once so a
-    /// caller that has no per-corner opinion cannot accidentally set three.
+    /// The same radius on all four corners.
     CornerRadius(f64),
-    /// Per-corner radii. The inverse of *either* corner patch is always this
-    /// one, because a uniform set has to be undoable back to four unequal
-    /// values.
+    /// Per-corner radii. The inverse of *either* corner patch is always this one,
+    /// so a uniform set can be undone to four unequal values.
     CornerRadii(RoundedRectRadii),
     /// Vertex count: a polygon's sides, or a star's points.
     Sides(u32),
@@ -1325,12 +1147,9 @@ pub enum GeometryPatch {
     LineEnd(Point),
     /// A path's outline **and** its per-anchor radii, together.
     ///
-    /// **One patch, not two, because they are one fact.** The radii are indexed
-    /// by anchor (`NodeKind::Path::corner_radii`), so a patch that replaced the
-    /// outline alone would leave the radii numbered against a path that no longer
-    /// exists — the moment an anchor is inserted or deleted, every radius after it
-    /// is on the wrong corner. Carrying both makes that unsayable, and makes a
-    /// point edit one undo step rather than two that can be separated.
+    /// **One patch, not two**: the radii are indexed by anchor
+    /// (`NodeKind::Path::corner_radii`), so replacing the outline alone would put
+    /// every radius after an inserted or deleted anchor on the wrong corner.
     Path {
         path: BezPath,
         corner_radii: Vec<f64>,
@@ -1339,42 +1158,25 @@ pub enum GeometryPatch {
     /// The rail a `Text` node is set along, or `None` to take it off
     /// (`NodeKind::Text::on_path`, §15 D405).
     ///
-    /// **A geometry patch and not a style one**, for the reason `TextSizing`
-    /// beside it is: it changes the node's *box* — every glyph moves and the
-    /// bounds are the bent line box — where the three typographic scopes change
-    /// how the characters are drawn inside one. It is also what makes *Text on
-    /// path* and *Detach* one undo step each and reversible by the same
-    /// machinery, since a patch reports the value it displaced.
+    /// **A geometry patch and not a style one**, like `TextSizing`: it changes the
+    /// node's *box* (the bounds are the bent line box), where the typographic
+    /// scopes change how characters draw inside one.
     TextPath(Option<BezPath>),
     /// Which way round a `Text` node runs along its rail
     /// (`NodeKind::Text::on_path_flip`, §15 D406).
     ///
-    /// **Its own patch rather than a second field on [`Self::TextPath`]**, for the
-    /// reason the model keeps the two apart: the flip outlives the rail, so a
-    /// patch carrying both would make *Detach from path* — which sends
-    /// `TextPath(None)` — say something about the flip as well, and the obvious
-    /// something is `false`. That is the destructive toggle spelled as an
-    /// operation.
+    /// **Its own patch rather than a second field on [`Self::TextPath`]**: the
+    /// flip outlives the rail, so a patch carrying both would make *Detach from
+    /// path* (`TextPath(None)`) also reset the flip.
     TextPathFlip(bool),
     /// Where along its rail a `Text` node's type starts, as a fraction of the
     /// rail's length (`NodeKind::Text::on_path_offset`, §15 D409).
     ///
-    /// **Its own patch beside the flip, for the flip's own reason**: the offset
-    /// outlives the rail, so a patch carrying rail and offset together would make
-    /// *Detach from path* — which sends `TextPath(None)` — say something about the
-    /// offset as well.
-    ///
-    /// ⚠️ **Written once today, by the Text tool's click, and that is a gap rather
-    /// than a design.** There is no gesture for *moving* type along its rail yet;
-    /// this is the door one would come through, and it is a geometry patch so that
-    /// such a gesture would preview and undo like every other.
+    /// **Its own patch beside the flip, for the flip's reason**: the offset
+    /// outlives the rail.
     TextPathOffset(f64),
-    /// Which operation a `Boolean` container performs.
-    ///
-    /// A *geometry* patch and not a kind of its own, because that is what it is:
-    /// it changes the node's outline and nothing else about it, and it travels
-    /// through the same preview→commit valve every other geometry edit does —
-    /// which is what lets a dropdown preview an operation on hover.
+    /// Which operation a `Boolean` container performs. A geometry patch, so a
+    /// dropdown can preview it on hover through the preview→commit valve.
     BoolOp(crate::node::BoolOp),
 }
 
@@ -1383,11 +1185,9 @@ impl GeometryPatch {
     /// outline reaches — rather than only its shape inside the box.
     ///
     /// **The question insets ask** (§15 D874): a pinned layer stretched by its
-    /// insets draws at a size the document does not hold, so an edit that resizes
-    /// it is re-pinned around the new size, while a corner radius, a side count or
-    /// an inner ratio is applied to a kind still carrying the *stored* size and must
-    /// not be read as a resize to it. Treating every `SetGeometry` as a resize is
-    /// what un-stretched a stretched rect the moment its corners were rounded.
+    /// insets draws at a size the document does not hold, so a resize is
+    /// re-pinned around the new size, while a corner radius, side count or inner
+    /// ratio is applied to the *stored* size and must not be read as a resize.
     ///
     /// No wildcard, so a new patch has to be classified.
     pub fn resizes(&self) -> bool {
@@ -1396,8 +1196,8 @@ impl GeometryPatch {
             | GeometryPatch::LineEnd(_)
             | GeometryPatch::Path { .. }
             | GeometryPatch::TextSizing(_)
-            // A rail changes the whole box a text node is measured in, and flipping
-            // or sliding the type along one moves where its glyphs — its box — land.
+            // A rail changes the box a text node is measured in, and so do the
+            // flip and the offset.
             | GeometryPatch::TextPath(_)
             | GeometryPatch::TextPathFlip(_)
             | GeometryPatch::TextPathOffset(_)
@@ -1413,10 +1213,8 @@ impl GeometryPatch {
     /// A copy of `kind` with this patch applied, or `None` if the patch does
     /// not match the kind.
     ///
-    /// The non-mutating twin of what `apply` does internally, for callers that
-    /// need to know what a geometry edit *would* produce without performing it
-    /// — chiefly render previews, which must not touch the `Document`
-    /// (invariant 5).
+    /// The non-mutating twin of what `apply` does, chiefly for render previews,
+    /// which must not touch the `Document` (invariant 5).
     pub fn applied_to(&self, kind: &NodeKind) -> Option<NodeKind> {
         let mut copy = kind.clone();
         crate::document::apply_geometry_patch(&mut copy, self)
@@ -1426,10 +1224,8 @@ impl GeometryPatch {
 
     /// Whether every number this patch carries is finite.
     ///
-    /// **Matched exhaustively on purpose**, so a variant added later has to
-    /// answer this rather than defaulting to "fine": every arm here writes a
-    /// number straight into the document, and a non-finite one makes the file
-    /// unopenable for good. See [`OpError::NonFinite`].
+    /// **Matched exhaustively on purpose**: a non-finite number written into the
+    /// document makes the file unopenable. See [`OpError::NonFinite`].
     pub fn is_finite(&self) -> bool {
         let size = |s: &kurbo::Size| s.width.is_finite() && s.height.is_finite();
         match self {
@@ -1487,14 +1283,8 @@ pub enum OpError {
     /// An export spec carrying a value that cannot be a size or a quality
     /// (§15 D492).
     ///
-    /// **Both other entry points already refuse exactly these**, and say why in
-    /// their own comments: `ExportScale::from_label` filters `*px > 0` and
-    /// `n.is_finite() && *n > 0.0`, and `main.rs`'s CLI parse rejects the same set
-    /// *"rather than left to `factor`'s floor, which exists to keep the renderer
-    /// safe and **would turn `--scale 0` into a one-pixel file nobody asked
-    /// for**"*. That is exactly the file a `Width(0)` produced — the comment
-    /// describes the outcome, and the guard was on the two paths that could not
-    /// reach it (`[S8.2-L1-03]`).
+    /// `ExportScale::from_label` and the CLI parse in `main.rs` refuse the same
+    /// values; without this a `Width(0)` would produce a one-pixel file.
     #[error("an export spec's scale or quality is not a usable value")]
     BadExportSpec,
     /// A blur radius past [`crate::effect::MAX_BLUR`].
@@ -1503,11 +1293,9 @@ pub enum OpError {
     #[error("operation not valid for this node kind")]
     WrongKindForOp,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside
-    /// frames and groups (§5.3, §15 D870); what they cannot do is hang off a
-    /// shape, or sit anywhere inside a boolean or a mask — an operand is an
-    /// outline and a mask's outline is its contents, and a page is neither
-    /// (§15 D876). Also what turning a group that holds a frame into a mask
-    /// answers.
+    /// frames and groups (§5.3, §15 D870) but not off a shape or inside a boolean
+    /// or a mask (§15 D876). Also the answer to turning a group that holds a
+    /// frame into a mask.
     #[error("a frame cannot sit inside a boolean, a mask or a shape")]
     ArtboardPlacement,
     #[error("malformed subtree")]
@@ -1515,13 +1303,9 @@ pub enum OpError {
     /// The subtree would sit deeper than [`crate::io::MAX_TREE_DEPTH`] once it
     /// is attached (§15 D832).
     ///
-    /// **Measured against the *parent's* depth, not the subtree's own**, because
-    /// the bound the loader enforces is absolute: a 200-deep subtree pasted into
-    /// a 200-deep parent reloads no better than a 400-deep one pasted at the
-    /// root. Distinct from [`Self::MalformedSubtree`] because the subtree is
-    /// perfectly well formed — it is the destination that makes it unusable, and
-    /// a user who is told *"malformed"* about their own valid layers has been
-    /// told the wrong thing.
+    /// **Measured against the *parent's* depth, not the subtree's own**, as the
+    /// loader's bound is absolute. Distinct from [`Self::MalformedSubtree`]
+    /// because the subtree is well formed; the destination makes it unusable.
     #[error(
         "the subtree would nest deeper than {} once attached, and a document \
          that deep cannot be reloaded",
@@ -1529,31 +1313,22 @@ pub enum OpError {
     )]
     TooDeep,
     /// The operation had nothing to make a shape out of — a boolean whose operands
-    /// cancel out entirely, asked to flatten. Distinct from [`Self::WrongKindForOp`]
-    /// because the kind was right and the *geometry* was empty, which is a thing the
-    /// user can fix by moving a shape rather than by selecting differently.
+    /// cancel out entirely, asked to flatten. Distinct from [`Self::WrongKindForOp`]:
+    /// the kind was right and the user can fix it by moving a shape.
     #[error("there is no geometry here to flatten")]
     EmptyGeometry,
     /// The boolean arithmetic was **abandoned** — [`crate::boolean::evaluate`]'s
     /// `catch_unwind` guard caught an unwind out of flo_curves (§15 D239) — rather
     /// than having answered honestly with nothing.
     ///
-    /// 🚨 **Distinct from [`Self::EmptyGeometry`] because that variant's own
-    /// argument is about *what the user can do next*, and here the answer is
-    /// different.** `EmptyGeometry` says the geometry was empty, *"which is a thing
-    /// the user can fix by moving a shape rather than by selecting differently"* —
-    /// and moving a shape does not help an unwind. Both cases arrive at the same
-    /// `ok_or` as `None`, because `None` is also what a correct empty result answers;
-    /// the counter is the only thing that tells them apart, which is the whole of
-    /// [`crate::boolean::failures`]'s doc.
+    /// 🚨 **Distinct from [`Self::EmptyGeometry`]**: moving a shape does not help
+    /// an unwind. Both arrive at the same `ok_or` as `None`; only the counter
+    /// ([`crate::boolean::failures`]) tells them apart.
     ///
-    /// ⚠️ **The builders are outside §15 D298's bracket and always were.** D298 wires
-    /// the counter into `commit_inner`, *"the one door every edit goes through"*,
-    /// reading it across `Resolved::update` — which is **resolution**, after a
-    /// transaction exists. A builder calls `evaluate` while *constructing* the
-    /// transaction, so a failure there refuses the edit before there is anything for
-    /// that bracket to be read around. Not an omission at those call sites: a
-    /// different call path (`[S10.1-L2-06]`, §15 D736).
+    /// ⚠️ **The builders are outside §15 D298's bracket.** That reads the counter
+    /// across `Resolved::update`, after a transaction exists; a builder calls
+    /// `evaluate` while constructing it, so a failure there refuses the edit first
+    /// (§15 D736).
     #[error("a boolean could not be computed, so there is nothing to flatten")]
     BooleanAbandoned,
     #[error("the root node cannot be deleted, reparented, or reordered")]
@@ -1585,37 +1360,28 @@ pub enum OpError {
     DuplicateGuide(GuideId),
     #[error("no such image: {0}")]
     NoSuchImage(ImageId),
-    /// The table already carries this id. **Not the same event as placing the
-    /// same picture twice**, which is the point of a content-hashed key and must
-    /// be free: a caller that has hashed its bytes asks `Document::has_image`
-    /// first and adds a second *reference*, not a second entry. Reaching here
-    /// means two different entries claimed one id, which is a bug rather than a
-    /// duplicate image.
+    /// The table already carries this id. **Not placing the same picture twice**:
+    /// a caller asks `Document::has_image` first and adds a second *reference*.
+    /// Reaching here means two different entries claimed one id.
     #[error("duplicate image id: {0}")]
     DuplicateImage(ImageId),
     /// A guide asked to be scoped to something that is not a live frame — a node
     /// that is not in the document, or one with no box for a guide to be clipped
     /// to.
     ///
-    /// Validated rather than tolerated because a guide's `position` is *read in*
-    /// its owner's space: with no owner to read it against, the guide has no
-    /// place at all, and every drawing and snapping site would need a fallback
-    /// for a state the model can simply refuse. It is also what makes the
-    /// ordering inside a delete transaction matter — see
+    /// Validated because a guide's `position` is read in its owner's space; it
+    /// also makes the ordering inside a delete transaction matter — see
     /// [`crate::build::guides_of`].
     #[error("a guide may only be scoped to a live frame, not {0:?}")]
     BadGuideOwner(NodeId),
-    /// One of a node's five item lists repeats an item id (§15 D980). Item ids
-    /// are what match an instance's items to its main's, so two items sharing one
-    /// would both claim the same counterpart. Checked after the last op, as
-    /// [`Self::BadGuideOwner`] is.
+    /// One of a node's item lists repeats an item id (§15 D980); item ids match an
+    /// instance's items to its main's. Checked after the last op.
     #[error("node {0:?} has item id {1:?} twice in one list")]
     DuplicateItemId(NodeId, crate::item::ItemId),
     /// A component or instance rule broken (§15 D978, `crate::component::check`) —
     /// a link to nothing, a main inside an instance, an instance of a main inside
-    /// itself. Checked after the last op, as [`Self::BadGuideOwner`] is, so a
-    /// transaction that deletes a main and detaches its instances in either order
-    /// is judged by where it ends.
+    /// itself. Checked after the last op, so a transaction is judged by where it
+    /// ends.
     #[error("node {0:?} {1}")]
     BadLink(NodeId, crate::component::LinkRule),
     /// A vault rule broken (§15 D1012, `crate::kit::check`) — an origin outside
@@ -1623,35 +1389,20 @@ pub enum OpError {
     /// a set — or a vault opened twice or closed while it held something.
     #[error("node {0:?} {1}")]
     Vault(NodeId, crate::kit::VaultRule),
-    /// A number that is `NaN` or infinite — in a node's geometry, in its
-    /// transform, in its **pivot** (§15 D639), in an **effect** it carries — a
-    /// shadow's offset, blur, spread and colour, a layer blur's radius, the four
-    /// filter factors (§15 D641) — in a guide's position (§15 D421), or **in a
-    /// paint**: a
-    /// gradient's stop offsets and colours, its ramp geometry and its transform,
-    /// a solid's colour channels, an image brush's alpha *and the
-    /// [`crate::ImageRef`] behind it* — its crop rectangle, its tile scale and
-    /// its seven adjustment sliders (§15 D452) — and a stroke's width and dash
-    /// lengths (§15 D451).
+    /// Any number the document will write that is `NaN` or infinite — in
+    /// geometry, a transform, a **pivot** (§15 D639), an **effect** (§15 D641), a
+    /// guide's position (§15 D421), or **a paint**: gradient stops, ramp and
+    /// transform, colour channels, an image brush's alpha and the
+    /// [`crate::ImageRef`] behind it (§15 D452), and a stroke's width and dashes
+    /// (§15 D451).
     ///
-    /// ⚠️ **This said *coordinate* and named only the first three until
-    /// 2026-09-07**, which is the whole of D451: the rule was always "a number
-    /// this document will write", and the code was scoped to the values that
-    /// *read* like coordinates. A colour channel is as capable of being `NaN` as
-    /// a radius is and goes into the same file.
+    /// ⚠️ **Refused rather than repaired**: `serde_json` writes a non-finite `f64`
+    /// as `null` and the reader has no arm for it, so such a value would survive
+    /// `save` (and autosave) and kill `load` permanently. Invariant 8 puts the
+    /// check at the operation, the last place the value can be rejected while the
+    /// user still has their work.
     ///
-    /// ⚠️ **Refused rather than repaired, because the alternative is a file that
-    /// never opens again.** `serde_json` writes a non-finite `f64` as `null` and
-    /// the reader has no arm for it, so such a value survives `apply`, survives
-    /// `save`, and kills `load` permanently — silently, and through autosave and
-    /// the crash snapshot as readily as through Ctrl+S. Invariant 8 puts the
-    /// check at the operation for exactly this: it is the last place the value
-    /// can be rejected while the user still has their work.
-    ///
-    /// **Not clamped**, unlike an out-of-range opacity on the load path. There is
-    /// no defensible number to clamp a coordinate to — 0 moves the shape and
-    /// `f64::MAX` is not what was meant — and unlike a stale text span there is
-    /// no repairable file at stake yet: the value has not been written.
+    /// **Not clamped**: no defensible number exists to clamp a coordinate to.
     #[error("a number is not finite")]
     NonFinite,
     /// A layout value CSS itself refuses — a negative track size, `minmax()`
@@ -1668,11 +1419,8 @@ mod changes_ink_tests {
     use super::*;
     use crate::id::IdSource;
 
-    /// **The operations that change nothing drawn are `changes_ink`'s whole
-    /// `false` arm**, the set the inspector's chrome hide turns on (§15 D128).
-    /// Pinned as a list because the `match` is wildcard-free: a new operation
-    /// must choose an arm, and this checks it chose the right one. The fixture
-    /// asserts its own length; recount it against the arm when one is added.
+    /// Pins `changes_ink`'s whole `false` arm (§15 D128) as a list, so a new
+    /// operation's arm choice is checked; recount the fixture when one is added.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
@@ -1724,8 +1472,8 @@ mod changes_ink_tests {
                 owner: None,
                 position: 1.0,
             },
-            // The styles' seven (§15 D1062): the table and the bindings draw
-            // nothing; the lists `style::settle` writes beside them are the ink.
+            // The style table and bindings draw nothing; the lists
+            // `style::settle` writes beside them are the ink (§15 D1062).
             Operation::AddStyle {
                 style: crate::style::Style {
                     id: style,
@@ -1783,9 +1531,8 @@ mod changes_ink_tests {
             );
         }
 
-        // And the ones that plainly do, including the two that are easy to file with
-        // the bookkeeping above: `SetVisible` empties a layer's pixels, and
-        // `SetCanvasBackground` repaints the ground the artwork sits on.
+        // The ones that draw, including `SetVisible` and `SetCanvasBackground`,
+        // which are easy to file with the bookkeeping above.
         let visible = [
             Operation::SetVisible { id, visible: false },
             Operation::SetCanvasBackground {
@@ -1802,9 +1549,8 @@ mod changes_ink_tests {
                 id,
                 strokes: vec![],
             },
-            // Filed here and not with `SetExports` above, which is the mistake
-            // worth guarding: both are a whole-list edit to a `Vec` on the node
-            // that most layers leave empty, and only one of them draws.
+            // Not filed with `SetExports` above: both are whole-list edits, but
+            // only this one draws.
             Operation::SetEffects {
                 id,
                 effects: vec![],
@@ -1838,10 +1584,8 @@ mod changes_ink_tests {
         }
     }
 
-    /// **Any, not all.** A transaction that moves a layer *and* renames it has a
-    /// visible result and is worth looking at; one that only renames does not — which
-    /// is what keeps the layers-panel rename and the identity card's from blanking the
-    /// selection box for a second and a half.
+    /// A transaction is visible if any operation is: move plus rename is, a bare
+    /// rename is not.
     #[test]
     fn a_transaction_is_visible_if_any_of_its_operations_is() {
         let id = IdSource::new(1).mint();
@@ -1862,34 +1606,18 @@ mod changes_ink_tests {
 
 #[cfg(test)]
 mod changes_nothing_tests {
-    //! `Operation::changes_nothing` and its whole-transaction twin, which
-    //! together are the guard `EditorSession::commit_inner` asks before making an
-    //! undo step (§15, G16).
+    //! `Operation::changes_nothing` and its whole-transaction twin, the guard
+    //! `EditorSession::commit_inner` asks before making an undo step.
     //!
-    //! ⚠️ **What each flip here was run against, and where it bit.** The
-    //! plausible wrong version of this feature is not "no guard at all" — that
-    //! fails everything and proves nothing. It is the three near-misses:
-    //!
-    //! - **`any` in place of `all`** on the transaction. Predicted to fail in
-    //!   `a_mixed_selection_still_commits_because_the_test_is_all_and_not_any`,
-    //!   and it did — on the *first* assertion, the transaction one, which is the
-    //!   loss. The per-operation assertion below it is the mechanism and stays
-    //!   second on purpose.
-    //! - **The `Reorder` index adjusted for the removal** — `if index > old
-    //!   { index == old + 1 } else { index == old }`, which is what somebody who
-    //!   has just read `op_reorder`'s remove-then-insert and over-corrected for
-    //!   it writes. ⚠️ **Predicted to fail on the *positive* half of
-    //!   `rows_dropped_where_they_already_sit_change_nothing` and it failed on
-    //!   the negative one**, at *"moving the top row under the bottom one swaps
-    //!   them"*. The adjustment does not break a row that is already where it is
-    //!   asked to be; what it breaks is calling a real swap a no-op — which is
-    //!   the **worse** failure of the two, since that is an edit silently
-    //!   dropped. The correction is left here rather than in the prose above it,
-    //!   because the assertion that bites is the one the next reader is shown.
-    //! - **Dropping the `takes_paint` gate** from the `SetFills` arm. Predicted
-    //!   to fail in `an_operation_whose_subject_refuses_it_is_not_a_no_op`, and
-    //!   it did — a `SetFills { fills: vec![] }` aimed at the root compares two
-    //!   empty lists and is only saved from being called a no-op by the gate.
+    //! The flips that matter:
+    //! - `any` in place of `all` on the transaction fails
+    //!   `a_mixed_selection_still_commits_because_the_test_is_all_and_not_any` at
+    //!   the transaction assertion.
+    //! - Adjusting the `Reorder` index for the removal fails
+    //!   `rows_dropped_where_they_already_sit_change_nothing` at the *negative*
+    //!   assertion (a real swap called a no-op, an edit silently dropped).
+    //! - Dropping the `takes_paint` gate from the `SetFills` arm fails
+    //!   `an_operation_whose_subject_refuses_it_is_not_a_no_op`.
 
     use super::*;
     use crate::Document;
@@ -1932,17 +1660,9 @@ mod changes_nothing_tests {
         (doc, root, frame, [a, b])
     }
 
-    /// **The property the whole guard rests on, stated as a property rather than
-    /// as a list**: an operation that writes back the value already stored is a
-    /// no-op, and the same operation carrying any other value is not.
-    ///
-    /// Each pair is `(the value already there, something else)`, so the negative
-    /// half is a real edit of the same field rather than a different field
-    /// altogether — which is what makes a wrong `true` visible here. The spread
-    /// is one entry per *shape* of arm in the `match`, not one per variant: a
-    /// plain node field, a geometry patch resolved through
-    /// `GeometryPatch::applied_to`, a paint list behind a kind gate, a whole
-    /// stack, and the one operation with no node to name.
+    /// Writing back the stored value is a no-op and any other value is an edit.
+    /// Each pair is `(the value already there, something else)` of the same field;
+    /// the spread is one entry per *shape* of arm, not per variant.
     #[test]
     fn writing_back_the_stored_value_changes_nothing_and_any_other_value_does() {
         let (doc, _root, frame, [a, _b]) = fixture();
@@ -2117,22 +1837,10 @@ mod changes_nothing_tests {
         }
     }
 
-    /// **`[S15.1-L1-03]`'s witness**, and the arm whose arithmetic is easiest to
-    /// write the plausible wrong way.
-    ///
-    /// A multi-row drop that lands rows where they already are emits one
-    /// `Reorder` per row, each net-zero, and the transaction is *not empty* — so
-    /// the empty test at the commit seam let every one of them through and the
-    /// user got an undo step that undoes to the same picture.
-    ///
-    /// The index is compared the way `apply` writes it: the child is removed from
-    /// its parent's list and re-inserted at `index`, which comes back identical
-    /// exactly when `index` is where the child already sits — so the comparison
-    /// is against the list *as it stands*, with no adjustment for the removal.
-    /// ⚠️ **The assertion that catches an adjustment is the negative one**, not
-    /// the positive: an over-corrected index still agrees that a row asked for
-    /// its own position changes nothing, and disagrees about a real swap. See
-    /// the module's flip notes.
+    /// A multi-row drop that lands rows where they already are emits net-zero
+    /// `Reorder`s, and the index is compared as it stands, with no adjustment for
+    /// the removal. ⚠️ The negative assertion is the one that catches an
+    /// over-corrected index.
     #[test]
     fn rows_dropped_where_they_already_sit_change_nothing() {
         let (doc, _root, _frame, [a, b]) = fixture();
@@ -2148,9 +1856,8 @@ mod changes_nothing_tests {
             !Transaction(vec![Operation::Reorder { id: a, index: 1 }]).changes_nothing(&doc),
             "moving the top row under the bottom one swaps them"
         );
-        // The reparent arm asks the identical question of the identical list, so
-        // the same drop spelled as a move into the parent it already has is a
-        // no-op too — and one index along is not.
+        // The same drop spelled as a reparent into its own parent is a no-op too;
+        // one index along is not.
         assert!(
             Transaction(vec![Operation::Reparent {
                 id: b,
@@ -2169,14 +1876,9 @@ mod changes_nothing_tests {
         );
     }
 
-    /// **The whole specification of the transaction-level test, and the reason it
-    /// is `all`.**
-    ///
-    /// *Hide* over a mixed selection emits a `SetVisible` per layer. The ones
-    /// already hidden are individually no-ops; the transaction as a whole hides
-    /// something. An `any` reading would call the transaction a no-op and throw
-    /// the edit away — which is why the loss is asserted first and the mechanism
-    /// second.
+    /// *Hide* over a mixed selection: the already-hidden layers are individually
+    /// no-ops but the transaction hides something, so the test is `all`. The loss
+    /// is asserted first, the mechanism second.
     #[test]
     fn a_mixed_selection_still_commits_because_the_test_is_all_and_not_any() {
         let (mut doc, _root, _frame, [a, b]) = fixture();
@@ -2203,19 +1905,13 @@ mod changes_nothing_tests {
             hide_both.0[0].changes_nothing(&doc),
             "and it must do so with a member that is individually a no-op in it"
         );
-        // An empty transaction is a different question, answered one line earlier
-        // at the commit seam; this one is only ever asked about work attempted.
+        // An empty transaction is dropped at the commit seam, so it answers `false`.
         assert!(!Transaction(vec![]).changes_nothing(&doc));
     }
 
-    /// **An operation `apply` would refuse is not a no-op**, however equal the two
-    /// values look — otherwise the guard would swallow the error instead of the
-    /// edit, and the user would be told nothing at all.
-    ///
-    /// Two doors: a subject that is not in the document, and a subject whose
-    /// *kind* refuses the operation. The second is the interesting one, because
-    /// both lists really are equal — the root's fills are empty and so are the
-    /// ones being written — and only the `takes_paint` gate tells them apart.
+    /// An operation `apply` would refuse is not a no-op: a missing subject, or a
+    /// kind that refuses it. The root's empty fills equal the ones written, so
+    /// only the `takes_paint` gate tells them apart.
     #[test]
     fn an_operation_whose_subject_refuses_it_is_not_a_no_op() {
         let (doc, root, _frame, _rects) = fixture();
@@ -2243,8 +1939,8 @@ mod changes_nothing_tests {
             .changes_nothing(&doc),
             "the root is the one kind op_set_effects refuses"
         );
-        // And a non-finite value is never equal to anything, so it still reaches
-        // `OpError::NonFinite` (§15 D415) rather than being called a no-op.
+        // A non-finite value equals nothing, so it still reaches
+        // `OpError::NonFinite`.
         assert!(
             !Operation::SetGuidePosition {
                 id: crate::guide::GuideId(ghost),
@@ -2254,16 +1950,9 @@ mod changes_nothing_tests {
         );
     }
 
-    /// **The four span-carrying arms compare what `apply` would store**, not what
-    /// the caller handed over — every one of them clamps or re-states its list on
-    /// the way in.
-    ///
-    /// So a `SetTextSpans` carrying a list that reaches past the end of the
-    /// content is a no-op when the clamp brings it back to the list already
-    /// stored, and a `SetTextStyle` with `spans: None` is a no-op when the stored
-    /// list is already a fixed point of the re-statement. Compared any other way,
-    /// both would be called edits and would commit an undo step that changes
-    /// nothing.
+    /// The span-carrying arms compare what `apply` would store: a `SetTextStyle`
+    /// with `spans: None` is a no-op when the stored list is already a fixed point
+    /// of the re-statement.
     #[test]
     fn the_text_arms_compare_the_clamped_list_and_not_the_one_handed_over() {
         let mut ids = IdSource::new(0x7E47);
@@ -2310,9 +1999,7 @@ mod changes_nothing_tests {
             }
             .changes_nothing(&doc)
         );
-        // `None` is the spelling every forward caller uses, and it re-states the
-        // stored list against the defaults being written. Same defaults, and the
-        // stored list is empty, so the re-statement is the identity.
+        // Same defaults and an empty stored list: the re-statement is the identity.
         assert!(
             Operation::SetTextStyle {
                 id: t,
@@ -2346,8 +2033,7 @@ mod changes_nothing_tests {
             }
             .changes_nothing(&doc)
         );
-        // A rect has no block style to compare, so the arm answers `false` on it
-        // rather than reaching for a field that is not there.
+        // The root has no block style to compare, so the arm answers `false`.
         assert!(
             !Operation::SetBlockStyle {
                 id: root,

@@ -1,22 +1,19 @@
-//! The library screen — what the app opens on (§9.5, §15 D365).
+//! The library screen — what the app opens on (§9.5).
 //!
 //! A whole window, not a panel: `OndinApp::ui` returns after calling
 //! [`OndinApp::dashboard_ui`], so there is no canvas, tool or document selection here.
+//! The arrows, `Enter`, `Delete` and `Escape` act on a picked card through
+//! [`OndinApp::dashboard_keys`], as `input::resolve` never runs here.
 //!
-//! A card can be picked out and the arrows, `Enter`, `Delete` and `Escape` act on it,
-//! through [`OndinApp::dashboard_keys`] reading the context directly, not through
-//! `input::resolve`, which never runs here.
-//!
-//! Every action goes to disk immediately and the library is re-scanned, so the screen
-//! cannot disagree with a folder a sync client may also be writing into. A refresh
-//! reads every document's prefix (`library::state::Library::refresh`): never call it
-//! from inside a layout loop.
+//! Every action goes to disk at once and the library is re-scanned, so the screen
+//! cannot disagree with a folder a sync client writes into. A refresh reads every
+//! document's prefix (`library::state::Library::refresh`): never call it from inside
+//! a layout loop.
 
 use crate::app::OndinApp;
 use crate::library::scan::Entry;
 use crate::library::state::Sort;
 use crate::library::{clock, ids, naming, project, store};
-// The editor's Settings card is this screen's kit: one spelling of "a form in a modal".
 use crate::settings;
 use crate::theme;
 use crate::theme::{color, icon};
@@ -38,9 +35,8 @@ const NAV_H: f32 = 30.0;
 const UNARCHIVE_X: f32 = 12.0 + 13.0 / 2.0;
 /// A card in the grid view: the thumbnail's height, plus its caption.
 const CARD_THUMB_H: f32 = 116.0;
-/// The caption band under the thumbnail: the name centred 15 below the
-/// thumbnail, the date 31; the extra points go under the date so the padding
-/// under it matches the padding over the name.
+/// The caption band under the thumbnail: name centred 15 below it, date 31, the
+/// rest padding the date to match the name.
 const CARD_CAPTION_H: f32 = 46.0;
 /// The design's mosaic: 118 tall, two rows, a 7pt gutter, and at most five of the
 /// project's files in it.
@@ -49,10 +45,8 @@ const MOSAIC_GAP: f32 = 7.0;
 /// Five: the largest layout the design draws and the largest the three-column rule
 /// in [`OndinApp::project_mosaic`] fills without a column growing a third row.
 const MOSAIC_MAX: usize = 5;
-/// How many stranded filenames the Settings modal lists before saying "and N more".
-///
-/// A bound on the modal's height: that card has no scroll area, and an uncapped list
-/// would push *Save changes* off screen.
+/// How many stranded filenames the Settings modal lists before "and N more": that
+/// card has no scroll area, so an uncapped list would push *Save changes* off screen.
 const STRANDED_ROWS: usize = 6;
 /// What a project card keeps clear of its own edges (the design's `padding:10px`).
 const PROJECT_PAD: f32 = 10.0;
@@ -61,16 +55,15 @@ const PROJECT_ROW_GAP: f32 = 9.0;
 /// A project card on *Recent*: taller than a file card, carrying a picture of up to
 /// five documents.
 const PROJECT_CARD_H: f32 = PROJECT_PAD * 2.0 + MOSAIC_H + PROJECT_ROW_GAP * 2.0 + 16.0 + 13.0;
-/// The widest a card on the grid may be (§15 D964). A row holds as many cards
-/// as it takes to keep each this wide or narrower, sharing the row between them.
+/// The widest a card on the grid may be; a row holds as many cards as keep each
+/// this wide or narrower.
 const CARD_MAX_W: f32 = 300.0;
 /// Between two cards on the grid, across and down.
 const GRID_GAP: f32 = 14.0;
 
-/// How many columns the grid lays in `width`: the fewest that keep every card
-/// at [`CARD_MAX_W`] or narrower, and never fewer than one. The cards then
-/// fill the row exactly — [`card_width`] — so a wider window adds a column
-/// rather than a gutter.
+/// How many columns the grid lays in `width`: the fewest that keep every card at
+/// [`CARD_MAX_W`] or narrower, never fewer than one. The cards fill the row exactly
+/// ([`card_width`]), so a wider window adds a column rather than a gutter.
 fn grid_cols(width: f32) -> usize {
     (((width + GRID_GAP) / (CARD_MAX_W + GRID_GAP)).ceil() as usize).max(1)
 }
@@ -87,13 +80,11 @@ const SEARCH_W: f32 = 340.0;
 /// overlap — wide enough for its glyph and a few letters of a query.
 const SEARCH_MIN_W: f32 = 120.0;
 
-/// The search field's rectangle in the library's top bar: [`SEARCH_W`] wide,
-/// centred on the window's `centre_x`, and kept clear of the brand on the left
-/// (`left`) and of the right-hand cluster (`right`) by a gap each side — slid off
-/// centre first, then narrowed down to [`SEARCH_MIN_W`].
-///
-/// The centre is the window's, not the bar's `max_rect`, which
-/// [`crate::chrome::bar_frame`] leaves with a left margin and no right one.
+/// The search field's rectangle in the top bar: [`SEARCH_W`] wide, centred on the
+/// window's `centre_x`, clear of the brand (`left`) and the right cluster (`right`) —
+/// slid off centre first, then narrowed to [`SEARCH_MIN_W`]. The centre is the
+/// window's, not the bar's `max_rect`, which [`crate::chrome::bar_frame`] leaves
+/// with a left margin and no right one.
 fn search_rect(centre_x: f32, centre_y: f32, left: f32, right: f32) -> egui::Rect {
     const GAP: f32 = 12.0;
     let (lo, hi) = (left + GAP, right - GAP);
@@ -105,9 +96,8 @@ fn search_rect(centre_x: f32, centre_y: f32, left: f32, right: f32) -> egui::Rec
 }
 /// A row in the search dropdown.
 const SEARCH_ROW_H: f32 = 30.0;
-/// Where the search field's text starts from its left edge, the same in both states:
-/// the painted placeholder and the live `TextEdit` share an origin so the words do
-/// not move when the field opens.
+/// Where the search field's text starts from its left edge: the painted placeholder
+/// and the live `TextEdit` share it, so the words do not move when the field opens.
 const SEARCH_TEXT_X: f32 = 30.0;
 /// Type size of the search field's text and its placeholder, in both states.
 const SEARCH_PT: f32 = 11.5;
@@ -136,13 +126,9 @@ struct MenuOutcome {
 }
 
 /// A floating menu hung under `anchor`: the panel, its rows, their hover ground
-/// and the click-away test (§15 D729).
-///
-/// Only the shell is shared: `paint` draws a row's contents into the rect it is
-/// given, because the filter draws a colour dot and a tick while the ⋮ menu draws a
-/// label that turns red on *Delete*. Escape is not handled here but in
-/// `dashboard_keys` behind `library_menu_open()`, since a keyboard rule inside a
-/// drawing helper only runs on the frames the menu is drawn.
+/// and the click-away test. `paint` draws a row's contents into the rect it is
+/// given. Escape is handled in `dashboard_keys` behind `library_menu_open()`, since
+/// a keyboard rule in a drawing helper only runs on frames the menu is drawn.
 fn anchored_menu(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -154,7 +140,6 @@ fn anchored_menu(
     let h = rows as f32 * FILTER_ROW_H + 10.0;
     let area = egui::Area::new(id)
         .order(egui::Order::Foreground)
-        // Right-aligned to the control, as the design has it.
         .fixed_pos(egui::pos2(anchor.right() - w, anchor.bottom() + 4.0));
     let inner = area.show(ui.ctx(), |ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::empty());
@@ -207,8 +192,7 @@ const FILTER_PAD_X: f32 = 10.0;
 /// A Settings dropdown's closed width (the design's `min-width:132px`), so the three
 /// rows line up as a column.
 const PICKER_W: f32 = 132.0;
-/// Between a [`field_label`] and the box it names (the design's `gap:4px`); closer
-/// than `settings::ROW_GAP` because a label belongs to the field under it.
+/// Between a [`field_label`] and the box it names (the design's `gap:4px`).
 const FIELD_LABEL_GAP: f32 = 4.0;
 /// How many projects and how many documents a search offers, so a query matching
 /// thirty files still shows the project it probably meant.
@@ -228,10 +212,8 @@ const VIEW_TRACK_W: f32 = 26.0 * 2.0 + 2.0 + 4.0;
 /// wordless control still reads as a button.
 const DELETE_W: f32 = 32.0;
 
-/// How wide the sort button has to be to hold the longest of the four orders.
-///
-/// The widest of [`Sort::ALL`], not the one showing, or the button would twitch
-/// sideways as its label cycles.
+/// How wide the sort button must be: the widest of [`Sort::ALL`], not the one
+/// showing, or the button would twitch sideways as its label cycles.
 fn sort_button_w(ctx: &egui::Context) -> f32 {
     Sort::ALL
         .into_iter()
@@ -241,9 +223,8 @@ fn sort_button_w(ctx: &egui::Context) -> f32 {
 
 /// Which sidebar entry is showing.
 ///
-/// `Project` carries an id rather than an index, because the project list is
-/// rebuilt from `projects.json` on every refresh and an index can name another
-/// project afterwards.
+/// `Project` carries an id, not an index: the project list is rebuilt from
+/// `projects.json` on every refresh and an index can name another project.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub(crate) enum Nav {
     #[default]
@@ -298,41 +279,35 @@ impl Nav {
 /// Everything the dashboard needs between frames.
 ///
 /// On `OndinApp` rather than in egui's temp storage, because code outside the layout
-/// reads it (the file menu's action runs after the frame; `visible_entries` and the
-/// modals read the nav).
-///
-/// None of it is a preference or outlives the process: the `dashboard_*`
+/// reads it. None of it is a preference or outlives the process: the `dashboard_*`
 /// preferences are defaults chosen in Settings, while `nav`, `sort` and `list_view`
-/// here are what is showing now (§15 D749).
+/// here are what is showing now.
 #[derive(Default)]
 pub(crate) struct DashboardState {
     pub(crate) nav: Nav,
     pub(crate) sort: Sort,
     pub(crate) list_view: bool,
-    /// How many columns the file grid was last laid in (§15 D964), for the arrow
-    /// keys. Written by `file_grid` every frame it draws; `0` before the first,
-    /// which `arrow_target` reads as one.
+    /// How many columns the file grid was last laid in, for the arrow keys; `0`
+    /// before the first frame, which `arrow_target` reads as one.
     pub(crate) grid_cols: usize,
     /// Where the keyboard's cursor is, by path; only `OndinApp::dashboard_keys`
-    /// writes it. A click opens the document instead of selecting it, so empty is
-    /// the ordinary state.
+    /// writes it. A click opens the document instead, so empty is the ordinary state.
     ///
-    /// The path can name a file that is no longer there, since every action
-    /// re-scans. [`OndinApp::dashboard_body`] clears it, and that clear must run
-    /// before [`OndinApp::dashboard_keys`] because `Enter` and `Delete` act on it.
+    /// The path can name a file that is gone, since every action re-scans.
+    /// [`OndinApp::dashboard_body`] clears it, and that must run before
+    /// [`OndinApp::dashboard_keys`] because `Enter` and `Delete` act on it.
     pub(crate) selected: Option<PathBuf>,
-    /// Set when the keyboard moved [`DashboardState::selected`], and cleared by the
-    /// card or row that scrolled itself into view. A flag rather than a scroll on
-    /// every picked card, which would jerk the grid under a pointer click.
+    /// Set when the keyboard moved [`DashboardState::selected`], cleared by the card
+    /// or row that scrolled into view; a scroll on every picked card would jerk the
+    /// grid under a pointer click.
     pub(crate) scroll_to_selected: bool,
     /// The document whose ⋮ menu is open, by path.
     pub(crate) menu_for: Option<PathBuf>,
     /// Whether either floating menu was on screen when this frame began.
     ///
     /// Latched at the top of `dashboard_ui`, because the live flags are cleared
-    /// mid-frame by the dismissal whose click has to be spent: a menu on a card
-    /// that sorts first is already closed when later cards are drawn (§15 D558).
-    /// Read by [`OndinApp::pick_or_open`], never persisted.
+    /// mid-frame by the dismissal whose click has to be spent: a menu on a card that
+    /// sorts first is already closed when later cards are drawn. Never persisted.
     pub(crate) menu_was_up: bool,
     /// The document whose *Move to project* submenu is open.
     pub(crate) moving: Option<PathBuf>,
@@ -343,8 +318,7 @@ pub(crate) struct DashboardState {
     /// The Edit project modal's fields, while it is open.
     pub(crate) edit_project: Option<EditProject>,
     /// Whether the sidebar's *Archived projects* group is showing its rows.
-    /// Collapsed on every launch, deliberately not a preference: archiving exists
-    /// to keep those projects out of the way.
+    /// Collapsed on every launch, deliberately not a preference.
     pub(crate) archived_open: bool,
     /// The project filter in the header, by id. `None` is *All projects*.
     pub(crate) filter: Option<String>,
@@ -352,14 +326,13 @@ pub(crate) struct DashboardState {
     pub(crate) filter_open: bool,
     /// The project awaiting delete confirmation, and what to do with its files.
     pub(crate) deleting_project: Option<DeleteProject>,
-    /// The search query while the overlay is open; `None` when it is closed, so the
-    /// overlay can never be shut and still holding a query.
+    /// The search query while the overlay is open; `None` when it is closed.
     pub(crate) search: Option<String>,
     /// Which row of the search dropdown the arrows have moved to, if any.
     ///
     /// `None` is "not steered yet", not row zero: the highlight then sits on the
-    /// first document match, which the recents and project groups can push down as
-    /// the query changes. Cleared when the query changes and when the overlay opens.
+    /// first document match, which the groups above can push down as the query
+    /// changes. Cleared when the query changes and when the overlay opens.
     pub(crate) search_row: Option<usize>,
 }
 
@@ -377,10 +350,8 @@ pub(crate) struct Stranded {
 }
 
 /// The Settings modal's draft — see [`OndinApp::library_settings_modal`] for why
-/// this is a draft rather than live preferences.
-///
-/// `PartialEq` lets *Save changes* light when the draft differs from
-/// [`LibrarySettings::from_prefs`]. The derive hides an unread field from
+/// it is a draft. `PartialEq` lights *Save changes* when it differs from
+/// [`LibrarySettings::from_prefs`]; the derive hides an unread field from
 /// `dead_code`, so read the struct against the modal after removing a row.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct LibrarySettings {
@@ -436,8 +407,8 @@ pub(crate) struct NewProject {
     /// Whether to create a matching folder on disk — the user's choice alone
     /// (`library::project`).
     pub(crate) folder: bool,
-    /// Whether the name field has already been handed the caret: a latch, since
-    /// asking every frame would make the field impossible to leave.
+    /// Whether the name field has been handed the caret: a latch, since asking every
+    /// frame would make the field impossible to leave.
     pub(crate) name_focused: bool,
 }
 
@@ -456,9 +427,8 @@ impl Default for NewProject {
 /// The Edit project modal's own state — the New project card again, with
 /// *Create folder* replaced by *Archive project* and *Create* by *Save changes*.
 ///
-/// It holds the project's id and a copy of its fields, not a borrow or an index, for
-/// [`Nav`]'s reason; the write at Save looks the id up again and does nothing if it
-/// has gone.
+/// It holds the project's id and a copy of its fields, for [`Nav`]'s reason; Save
+/// looks the id up again and does nothing if it has gone.
 pub(crate) struct EditProject {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -468,7 +438,6 @@ pub(crate) struct EditProject {
     pub(crate) color: String,
     /// Whether the project is to be archived (`library::project`).
     pub(crate) archived: bool,
-    /// Whether the name field has already been handed the caret —
     /// [`NewProject::name_focused`]'s latch.
     pub(crate) name_focused: bool,
 }
@@ -488,8 +457,8 @@ impl EditProject {
     /// Whether this card holds anything [`Self::of`] did not seed it with.
     ///
     /// The mirror of `of`: every field it copies as content is compared here
-    /// (`id` is identity and `name_focused` a latch, so both are absent). `name` is
-    /// compared trimmed because `save_project` stores it trimmed.
+    /// (`id` and `name_focused` are not content). `name` is compared trimmed
+    /// because `save_project` stores it trimmed.
     fn differs_from(&self, p: &project::Project) -> bool {
         self.name.trim() != p.name || self.color != p.color || self.archived != p.archived
     }
@@ -550,19 +519,15 @@ impl OndinApp {
     pub(crate) fn dashboard_ui(&mut self, ui: &mut egui::Ui) {
         let mut act: Option<Act> = None;
 
-        // Before anything is drawn: the dismissals run from inside the cards, so this
-        // is the only point where "was a menu up when this click arrived" is right.
+        // Before anything is drawn: the dismissals run from inside the cards.
         self.dash.menu_was_up = self.library_menu_open();
 
-        // Before any card asks (§15 D863): take the answers the worker has finished
-        // (the list view asks for none) and let go of covers nobody wants.
+        // Before any card asks: take the worker's finished answers and drop unwanted covers.
         self.covers.pass(ui.ctx());
 
-        // Document drops are taken here, not in the editor's `take_dropped_images`,
-        // which sits below the `View::Dashboard` return. A modal backdrop does not
-        // stop a drop (§15 D772), so `library_keys_are_free`, this screen's own
-        // enumeration of "a card is up", gates it. Not `modal_is_up`, which is the
-        // editor's; the recovery prompt is the one card they share.
+        // Taken here, not in the editor's `take_dropped_images`, which sits below the
+        // `View::Dashboard` return. A modal backdrop does not stop a drop, so
+        // `library_keys_are_free` gates it, not the editor's `modal_is_up`.
         if self.library_keys_are_free() {
             self.take_dropped_documents(ui.ctx());
         }
@@ -572,8 +537,7 @@ impl OndinApp {
             .resizable(false)
             .frame(ui::panel_frame(color::PANEL, 10, 14))
             .show(ui, |ui| self.dashboard_sidebar(ui, &mut act));
-        // The drop hint is drawn on the panel's own rect: inside `dashboard_body` the
-        // rect is the panel less its 20pt margin.
+        // The drop hint uses the panel's own rect; `dashboard_body`'s is less its 20pt margin.
         let body = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(color::BG).inner_margin(20))
             .show(ui, |ui| self.dashboard_body(ui, &mut act));
@@ -601,8 +565,6 @@ impl OndinApp {
             .resizable(false)
             .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
             .show(ui, |ui| {
-                // Like every door on this screen, inert for the click that dismisses
-                // a menu (§15 D558).
                 let chrome_acts = !self.dash.menu_was_up;
                 let bar = crate::chrome::bar_rect(ui, 14.0, chrome);
                 crate::chrome::drag_strip(ui, bar, chrome_acts);
@@ -622,14 +584,11 @@ impl OndinApp {
 
                     let cluster = ui
                         .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // The window's own buttons first, rightmost.
                             crate::chrome::caption_buttons(ui, chrome, chrome_acts);
                             crate::chrome::after_buttons(ui, 14.0, 12.0);
-                            // Library settings is its own modal, not the editor's:
-                            // the two answer different questions. The gap to the
-                            // update pill is `TOP_GAP`, set here because egui adds an
-                            // item's gap when the item is placed; with no pill the
-                            // status dot follows and keeps the row's 12.
+                            // The gap to the update pill is `TOP_GAP`, set here because
+                            // egui adds an item's gap when the item is placed; with no
+                            // pill the status dot follows and keeps the row's 12.
                             let pill = self.updater.state().label().is_some();
                             ui.spacing_mut().item_spacing.x =
                                 if pill { crate::app::TOP_GAP } else { 12.0 };
@@ -656,17 +615,14 @@ impl OndinApp {
                             {
                                 self.restart_to_update();
                             }
-                            // The library's half of the status line, which the
-                            // editor's top bar cannot show here. A dot with the message
-                            // on hover (§15 D751): a width-bound message would fade
-                            // out on narrow windows.
+                            // A dot with the message on hover: a width-bound message
+                            // would fade out on narrow windows.
                             crate::app::status_dot(ui, self.session.status());
                         })
                         .response
                         .rect;
 
-                    // Painted into the middle of the bar rather than laid out between
-                    // the clusters, so it is centred on the window.
+                    // Painted, not laid out between the clusters, so it is window-centred.
                     let field = search_rect(
                         ui.ctx().content_rect().center().x,
                         ui.max_rect().center().y,
@@ -681,10 +637,8 @@ impl OndinApp {
     /// The search box, and the results under it while it is open.
     fn search_field(&mut self, ui: &mut egui::Ui, rect: egui::Rect, act: &mut Option<Act>) {
         let ctx = ui.ctx().clone();
-        // `Ctrl+K`/`Ctrl+P` are read here, not through `input::resolve`, which does
-        // not run on this screen. They are gated by `library_keys_are_free` like
-        // `dashboard_keys`, and by Ctrl without Alt or Shift, so `Ctrl+Shift+K`
-        // (*Place image* in the editor) opens nothing (§15 D712).
+        // `Ctrl+K`/`Ctrl+P` are read here, not through `input::resolve`. Ctrl without
+        // Alt or Shift, so `Ctrl+Shift+K` (*Place image* in the editor) opens nothing.
         let chord = self.library_keys_are_free()
             && ctx.input(|i| {
                 let cmd_only = i.modifiers.command && !i.modifiers.alt && !i.modifiers.shift;
@@ -728,7 +682,6 @@ impl OndinApp {
                 egui::FontId::proportional(SEARCH_PT),
                 theme::text::FAINT,
             );
-            // The chord hint is drawn at rest and hidden once the field is live.
             p.text(
                 egui::pos2(rect.right() - 10.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
@@ -746,16 +699,13 @@ impl OndinApp {
             return;
         }
 
-        // Escape is consumed, not read (§15 D543): this branch runs before the body
-        // and returns before the `TextEdit` is drawn, so `dashboard_keys` in the same
-        // frame would otherwise see the overlay already shut and clear
-        // `dash.selected` with the same press.
+        // Escape is consumed, not read: this branch shuts the overlay before the body, so
+        // `dashboard_keys` would otherwise clear `dash.selected` with the same press.
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.dash.search = None;
             return;
         }
-        // Arrows are consumed above the `TextEdit` (§15 D382), or the field would also
-        // move its caret; this must run before the widget is added.
+        // Arrows are consumed before the `TextEdit` is added, or it would also move its caret.
         let step = ctx.input_mut(|i| {
             i32::from(i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown))
                 - i32::from(i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp))
@@ -763,10 +713,9 @@ impl OndinApp {
         let Some(query) = self.dash.search.as_mut() else {
             return;
         };
-        // The box is exactly one text row tall and centred by hand: `Ui::put` justifies
-        // its widget, so a taller rect would draw the galley at the top. The
-        // horizontal inset is the rect's, since egui ignores `TextEdit::margin` once
-        // a frame is supplied.
+        // One text row tall and centred by hand: `Ui::put` justifies its widget, so a
+        // taller rect would draw the galley at the top. egui ignores `TextEdit::margin`
+        // once a frame is supplied, so the inset is the rect's.
         let row_h = ui
             .ctx()
             .fonts_mut(|f| f.row_height(&egui::FontId::proportional(SEARCH_PT)));
@@ -788,18 +737,15 @@ impl OndinApp {
                         .color(theme::text::FAINT),
                 ),
         );
-        // Requested every frame it is drawn, for `rename_field`'s reason; the
-        // outside-press dismissal below is what makes that safe.
+        // Requested every frame, for `rename_field`'s reason; the dismissal below makes that safe.
         if !edit.has_focus() {
             edit.request_focus();
         }
-        // A new query is a new list, so the arrows start over.
         if edit.changed() {
             self.dash.search_row = None;
         }
         let panel = self.search_results(ui, rect, step, act);
-        // A press outside the field and its dropdown shuts the overlay; read as a
-        // press so it lands before whatever is underneath acts on the release.
+        // Read as a press so it lands before whatever is underneath acts on the release.
         let outside = ui.ctx().input(|i| {
             i.pointer.any_pressed()
                 && i.pointer
@@ -811,9 +757,8 @@ impl OndinApp {
         }
     }
 
-    /// The dropdown under the search field: matching projects, then matching
-    /// documents, both capped. Projects come first because a project match is
-    /// the likelier intent.
+    /// The dropdown under the search field: matching projects, then documents, both
+    /// capped; a project match is the likelier intent.
     fn search_results(
         &mut self,
         ui: &mut egui::Ui,
@@ -823,14 +768,12 @@ impl OndinApp {
     ) -> Option<egui::Rect> {
         let query = self.dash.search.clone().unwrap_or_default();
         let needle = query.trim().to_lowercase();
-        // An empty query shows the design's *Recent searches*.
         let recents: Vec<String> = if needle.is_empty() {
             self.library.local.recent_searches.clone()
         } else {
             Vec::new()
         };
-        // Archived projects are included, unlike `Projects::active`: the name is
-        // already typed, so hiding the match would only make it unreachable.
+        // Archived projects are included, unlike `Projects::active`: the name is typed already.
         let projects: Vec<(String, String, String)> = if needle.is_empty() {
             Vec::new()
         } else {
@@ -843,8 +786,8 @@ impl OndinApp {
                 .map(|p| (p.id.clone(), p.name.clone(), p.color.clone()))
                 .collect()
         };
-        // Most recently edited first, ties by name (§15 D967): `Library::entries` is in
-        // directory order, which differs by platform. Sorted before the cap.
+        // Most recently edited first, ties by name, before the cap: `Library::entries`
+        // is in directory order, which differs by platform.
         let files: Vec<Entry> = if needle.is_empty() {
             Vec::new()
         } else {
@@ -875,9 +818,8 @@ impl OndinApp {
             return None;
         }
 
-        // `Enter` takes the highlighted row (§15 D382), whatever its kind. Unsteered,
-        // the highlight sits on the first document match, recomputed because the
-        // groups above it change length with the query.
+        // `Enter` takes the highlighted row, whatever its kind. Unsteered, it sits on
+        // the first document match, recomputed as the groups above change length.
         let default = if files.is_empty() {
             0
         } else {
@@ -909,8 +851,7 @@ impl OndinApp {
                 );
                 y += SEARCH_ROW_H;
                 let resp = ui.interact(r, ui.id().with(("search-row", i)), egui::Sense::click());
-                // Two grounds: the pointer and the keyboard can be on different rows,
-                // and the row `Enter` will take is the louder.
+                // Pointer and keyboard can be on different rows; the `Enter` row is the louder.
                 let ground = match (i == sel, resp.hovered()) {
                     (true, _) => Some(theme::color::text_a(20)),
                     (false, true) => Some(theme::color::text_a(14)),
@@ -1000,11 +941,9 @@ impl OndinApp {
         Some(panel)
     }
 
-    /// The panel the results are drawn into — one place that owns its ground,
-    /// its border and its position under the field.
-    ///
-    /// Returns the rect it drew into, which lets the field tell a press on a result
-    /// row from a press that means *shut this*.
+    /// The panel the results are drawn into: its ground, border and position under
+    /// the field. Returns its rect, so the field can tell a press on a result row
+    /// from one that means *shut this*.
     fn search_panel(
         ui: &mut egui::Ui,
         anchor: egui::Rect,
@@ -1049,7 +988,6 @@ impl OndinApp {
         ui.spacing_mut().item_spacing.y = 4.0;
         ui.add_space(2.0);
 
-        // *New file*: the screen's only accent button.
         let (rect, resp) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
         let lit = resp.hovered();
@@ -1070,8 +1008,7 @@ impl OndinApp {
             egui::StrokeKind::Inside,
         );
         // The glyph is a separate icon-font `p.text`, as the bundled Inter has no
-        // fullwidth plus. Measured then placed so glyph and word centre as one;
-        // `ui::action_button` cannot be borrowed since it paints a recessed ground.
+        // fullwidth plus; `ui::action_button` paints a recessed ground, so is not reused.
         const GLYPH_PT: f32 = 15.0;
         const GAP: f32 = 7.0;
         let font = egui::FontId::proportional(12.5);
@@ -1093,13 +1030,12 @@ impl OndinApp {
             word,
             color::ACCENT_100,
         );
-        // Hand-rolled, so `nav_row`'s menu gate does not reach it (§15 D558).
+        // Hand-rolled, so `nav_row`'s menu gate does not reach it.
         if resp.clicked() && !self.dash.menu_was_up {
             *act = Some(Act::NewFile);
         }
 
         ui.add_space(10.0);
-        // Labels come from `Nav::label`, shared with the Settings picker.
         for (nav, glyph) in [
             (Nav::Recent, icon::CLOCK_COUNTER_CLOCKWISE),
             (Nav::All, icon::FILES),
@@ -1131,7 +1067,6 @@ impl OndinApp {
             self.dash.new_project = Some(NewProject::default());
         }
 
-        // The archived group shows only when something is archived.
         let archived: Vec<project::Project> = self.library.projects.archived().cloned().collect();
         if !archived.is_empty() {
             ui.add_space(12.0);
@@ -1152,7 +1087,6 @@ impl OndinApp {
             }
         }
 
-        // Bottom of the sidebar: importing is rare and opens an OS dialog.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             if self.nav_row(ui, icon::FOLDER_OPEN, "Import files", None, false) {
                 *act = Some(Act::Import);
@@ -1235,7 +1169,6 @@ impl OndinApp {
                 theme::text::FAINT,
             );
         }
-        // Inert for the click that dismisses a menu; see [`OndinApp::pick_or_open`].
         resp.clicked() && !self.dash.menu_was_up
     }
 
@@ -1253,8 +1186,7 @@ impl OndinApp {
             egui::vec2(ui.available_width(), NAV_H),
             egui::Sense::click(),
         );
-        // Registered after the row, so on top of it (as `file_menu_button` does); the
-        // click is taken from the row below by returning early.
+        // Registered after the row, so on top of it (as `file_menu_button` does).
         let undo = archived.then(|| {
             ui.interact(
                 egui::Rect::from_center_size(
@@ -1308,7 +1240,6 @@ impl OndinApp {
                 egui::FontId::proportional(11.0),
                 theme::text::FAINT,
             ),
-            // The way back sits where the count would, keeping both groups one shape.
             ProjectRowKind::Archived => painter.text(
                 egui::pos2(rect.right() - UNARCHIVE_X, rect.center().y),
                 egui::Align2::CENTER_CENTER,
@@ -1328,8 +1259,7 @@ impl OndinApp {
                 return ProjectRowHit::Unarchive;
             }
         }
-        // A click spent dismissing a floating menu must not also re-nav (§15 D558);
-        // the gate covers both hits, as *Unarchive* shares this row's rect.
+        // A click spent dismissing a menu must not also re-nav; *Unarchive* shares this rect.
         if resp.clicked() && !self.dash.menu_was_up {
             ProjectRowHit::Select
         } else {
@@ -1340,9 +1270,8 @@ impl OndinApp {
     /// The heading, the controls beside it, and the documents.
     fn dashboard_body(&mut self, ui: &mut egui::Ui, act: &mut Option<Act>) {
         let entries = self.visible_entries();
-        // A selection that names nothing is cleared here, against `entries` (the list
-        // on screen), since the keys act on it and a filtered-off one cannot be
-        // dismissed.
+        // A selection that names nothing is cleared here, against the list on screen: the
+        // keys act on it and a filtered-off one cannot be dismissed.
         if self
             .dash
             .selected
@@ -1352,8 +1281,7 @@ impl OndinApp {
             self.dash.selected = None;
         }
         // Before anything draws, so a card the arrows moved onto scrolls into view the
-        // same frame; after the stale-selection clear, so the index is into the
-        // list on screen.
+        // same frame; after the clear, so the index is into the list on screen.
         self.dashboard_keys(&ui.ctx().clone(), &entries, act);
         // Registered before the cards so the cards win: egui's hit test takes the last
         // widget at a point, and a later background would swallow every card click.
@@ -1365,12 +1293,10 @@ impl OndinApp {
         self.dashboard_header(ui, entries.len());
         ui.add_space(14.0);
 
-        // Project cards appear above the files on *Recent* only, and use the same
-        // predicate the cards are drawn from, or the heading appears over nothing.
+        // The same predicate the cards are drawn from, or the heading appears over nothing.
         let show_projects = self.dash.nav == Nav::Recent && !self.recent_projects().is_empty();
-        // A project's grid ends in a *New file* card, so it never needs the empty
-        // state; that card is absent while the library's folder is missing
-        // (`new_file_into`), the one case where the empty state says more.
+        // A project's grid ends in a *New file* card, so it needs no empty state, except
+        // while the library's folder is missing (`new_file_into`).
         let new_file = self.new_file_into();
 
         if entries.is_empty() && !show_projects && new_file.is_none() {
@@ -1394,24 +1320,19 @@ impl OndinApp {
                     }
                 });
         }
-        // The registration order above is what makes this mean "on nothing".
         if background.clicked() {
             self.dash.selected = None;
         }
     }
 
-    /// *Drop to import* — the outline and the words, while files are over the
-    /// window (§15 D373). It borrows the canvas drop indicator's colour; the
-    /// `library_` prefix avoids `panels::layers`'s `drop_hint`.
-    ///
-    /// The outline marks the body while [`Self::take_dropped_documents`] takes a drop
-    /// anywhere in the window: the hint under-promises on purpose.
+    /// *Drop to import* — the outline and the words, while files are over the window.
+    /// It borrows the canvas drop indicator's colour. The outline marks only the body
+    /// while [`Self::take_dropped_documents`] takes a drop anywhere: under-promising.
     fn library_drop_hint(&self, ui: &egui::Ui, rect: egui::Rect) {
         let files = ui.input(|i| i.raw.hovered_files.len());
         if files == 0 {
             return;
         }
-        // Square and hugging the panel's own rect, since it is a region's edge, not a card.
         let p = ui.painter();
         p.rect_stroke(
             rect,
@@ -1457,7 +1378,6 @@ impl OndinApp {
                 .cloned()
                 .collect(),
             // The cache, for `nav_count`'s reason.
-            // (§15 D728)
             Nav::Trash => self.library.trashed().to_vec(),
             Nav::Project(id) => self
                 .library
@@ -1467,14 +1387,11 @@ impl OndinApp {
                 .cloned()
                 .collect(),
         };
-        // Gated on the predicate that draws the control, or the filter would keep
-        // selecting where its dropdown is hidden.
         if self.filter_applies()
             && let Some(filter) = &self.dash.filter
         {
             out.retain(|e| e.meta.project.as_deref() == Some(filter.as_str()));
         }
-        // Likewise for the sort: see [`OndinApp::sort_applies`].
         if self.sort_applies() {
             self.library.sort_entries(&mut out, self.dash.sort);
         }
@@ -1487,7 +1404,6 @@ impl OndinApp {
     /// False on *Recent*, whose order (when this machine opened each document) is
     /// the page's point and which `Sort` cannot cycle back to.
     fn sort_applies(&self) -> bool {
-        // §15 D381.
         self.dash.nav != Nav::Recent
     }
 
@@ -1508,8 +1424,8 @@ impl OndinApp {
     fn dashboard_header(&mut self, ui: &mut egui::Ui, count: usize) {
         let (heading, subheading) = self.heading();
         ui.horizontal(|ui| {
-            // The tall item is allocated first: a `horizontal` row centres each item
-            // against the row height known when it is placed.
+            // The tall item first: a `horizontal` row centres each item against the
+            // height known when it is placed.
             ui.vertical(|ui| {
                 ui.label(
                     egui::RichText::new(&heading)
@@ -1525,8 +1441,7 @@ impl OndinApp {
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                // Two plain buttons rather than a ⋮ menu: the ordinary action carries
-                // its word and the destructive one is a glyph that has to be aimed at.
+                // Two plain buttons rather than a ⋮ menu: the destructive one is a glyph to aim at.
                 if let Nav::Project(id) = self.dash.nav.clone() {
                     if delete_project_button(ui).clicked() && !self.dash.menu_was_up {
                         self.dash.deleting_project = Some(DeleteProject {
@@ -1535,10 +1450,9 @@ impl OndinApp {
                             transfer_to: None,
                         });
                     }
-                    // Written after *Delete project* because a right-to-left row places
-                    // the first item at the right margin. Drawn only when the project
-                    // resolves (§15 D376), unlike *Delete project*, which stays useful
-                    // for a project `projects.json` no longer has.
+                    // After *Delete project*: a right-to-left row places the first item at
+                    // the right margin. Drawn only when the project resolves, unlike
+                    // *Delete project*, which stays useful for one `projects.json` lost.
                     if let Some(p) = self.library.projects.get(&id).cloned()
                         && ui::action_button(
                             ui,
@@ -1556,8 +1470,7 @@ impl OndinApp {
                         self.dash.edit_project = Some(EditProject::of(&p));
                     }
                 }
-                // A segmented track, not two icon buttons (§15 D367): one of
-                // grid and list is always on.
+                // A segmented track, not two icon buttons: one of grid and list is always on.
                 let selected = usize::from(self.dash.list_view);
                 let picked = ui::segmented(
                     ui,
@@ -1574,13 +1487,10 @@ impl OndinApp {
                         ui::segment_glyph(p, rect, glyph, on);
                     },
                 );
-                // Writes no preference: the `dashboard_*` defaults are set only in
-                // Settings (§15 D749).
+                // Writes no preference: the `dashboard_*` defaults are set only in Settings.
                 if let Some(i) = picked {
                     self.dash.list_view = i == 1;
                 }
-                // One button that cycles, sized to the longest label (`sort_button_w`)
-                // so the view toggle does not shift as the word changes.
                 if self.sort_applies()
                     && ui::action_button(
                         ui,
@@ -1595,7 +1505,6 @@ impl OndinApp {
                 {
                     self.dash.sort = self.dash.sort.next();
                 }
-                // Leftmost of the cluster, so last in a right-to-left row.
                 self.project_filter(ui);
             });
         });
@@ -1604,10 +1513,8 @@ impl OndinApp {
     /// Whether the project filter is offered, and so whether
     /// [`OndinApp::visible_entries`] applies it: one predicate for the control and
     /// the selection, or a filter set on *All files* would keep selecting on
-    /// *Recent* with no control to unset it.
-    ///
-    /// Not on *Recent* (a landing page, see [`OndinApp::dashboard_body`]), not
-    /// inside a project, and not without an active project to filter by.
+    /// *Recent* with no control to unset it. Not on *Recent*, not inside a project,
+    /// and not without an active project to filter by.
     fn filter_applies(&self) -> bool {
         matches!(
             self.dash.nav,
@@ -1615,15 +1522,12 @@ impl OndinApp {
         ) && self.library.projects.active().next().is_some()
     }
 
-    /// *All projects ⌄* — the body header's project filter (§15 D369).
-    ///
-    /// A button and an `Area`, not a `ComboBox`, because the closed state carries a
-    /// colour dot and the rows a dot and a tick. The ground is [`ui::button_face`]'s;
-    /// [`FieldButton::Set`] lights while the menu is open and while a filter is in force.
+    /// *All projects ⌄* — the body header's project filter: a button and an `Area`, not
+    /// a `ComboBox`, because the closed state carries a colour dot. The ground is
+    /// [`ui::button_face`]'s; [`FieldButton::Set`] lights while open or filtering.
     fn project_filter(&mut self, ui: &mut egui::Ui) {
-        // A filter naming a project that no longer exists is no filter. This runs above
-        // the early return on purpose: the id can stop resolving because the last
-        // project was deleted, which is exactly when the control is not drawn.
+        // A filter naming a vanished project is no filter. Above the early return on
+        // purpose: deleting the last project is exactly when the control is not drawn.
         let current = self
             .dash
             .filter
@@ -1699,7 +1603,6 @@ impl OndinApp {
         );
 
         let w = FILTER_MENU_W;
-        // The shell is [`anchored_menu`]'s; each row is a colour dot and a tick.
         let current = self.dash.filter.clone();
         let out = anchored_menu(
             ui,
@@ -1779,9 +1682,8 @@ impl OndinApp {
     fn empty_state(&mut self, ui: &mut egui::Ui) {
         ui.add_space(60.0);
         ui.vertical_centered(|ui| {
-            // A missing folder answers every nav, and first: the other sentences
-            // would lie when the library cannot be seen
-            // (`library::state::Library::root_unavailable`).
+            // A missing folder (`library::state::Library::root_unavailable`) answers
+            // every nav, first: the other sentences would lie.
             let unavailable = self.library.root_unavailable;
             let (glyph, line) = match &self.dash.nav {
                 _ if unavailable => (
@@ -1803,7 +1705,6 @@ impl OndinApp {
             ui.label(
                 egui::RichText::new(glyph)
                     .font(theme::icon_font(28.0))
-                    // Warned rather than faint: this state is a fault.
                     .color(if unavailable {
                         color::WARN
                     } else {
@@ -1812,7 +1713,7 @@ impl OndinApp {
             );
             ui.add_space(8.0);
             ui.label(egui::RichText::new(line).size(12.5).color(theme::text::DIM));
-            // No path under the sentence: the base folder lives in Settings (§15 D382).
+            // No path under the sentence: the base folder lives in Settings.
         });
     }
 
@@ -1821,7 +1722,6 @@ impl OndinApp {
         section_label(ui, "PROJECTS");
         ui.add_space(6.0);
         let gap = GRID_GAP;
-        // The file grid's columns and widths (§15 D964).
         let cols = grid_cols(ui.available_width());
         let card_w = card_width(ui.available_width());
         let projects = self.recent_projects();
@@ -1836,7 +1736,6 @@ impl OndinApp {
                         .project_touched(&p.id)
                         .map(|t| clock::relative_label(clock::since(t)))
                         .unwrap_or_else(|| "Empty".into());
-                    // Inert for the click that dismisses a menu (§15 D558).
                     if self.project_card(ui, p, card_w, count, &touched) && !self.dash.menu_was_up {
                         go = Some(p.id.clone());
                     }
@@ -1850,7 +1749,7 @@ impl OndinApp {
     }
 
     /// One project card: a mosaic of its files, then its name, then its two facts
-    /// — the design's shape (§15 D381). Returns whether it was clicked.
+    /// — the design's shape. Returns whether it was clicked.
     fn project_card(
         &mut self,
         ui: &mut egui::Ui,
@@ -1921,7 +1820,6 @@ impl OndinApp {
         rect: egui::Rect,
         dot: egui::Color32,
     ) {
-        // Off screen, nothing: `file_card`'s gate (§15 D862), and the scan below with it.
         if !ui.is_rect_visible(rect) {
             return;
         }
@@ -1958,10 +1856,9 @@ impl OndinApp {
     /// The project a *New file* card can promise to file into, by name.
     ///
     /// `None` unless the nav's project resolves and may receive a document
-    /// ([`project::Projects::destination`], which refuses an archived one, §15 D557),
-    /// and the library folder is there ([`OndinApp::library_writable`]); `None` also
-    /// lets the empty state through. `pub(crate)` so a test in `app.rs` can assert the
-    /// card and the act agree.
+    /// ([`project::Projects::destination`] refuses an archived one) and the library
+    /// folder is there ([`OndinApp::library_writable`]); `None` also lets the empty
+    /// state through. `pub(crate)` so a test in `app.rs` can check card and act agree.
     pub(crate) fn new_file_into(&self) -> Option<String> {
         if self.library.root_unavailable {
             return None;
@@ -1979,8 +1876,8 @@ impl OndinApp {
     /// The grid of file cards, with the dashed *New file* card after the last one
     /// when there is a project to put it in.
     ///
-    /// Slots are counted by index rather than `chunks`, so the *New file* card can
-    /// finish a short last row instead of sitting alone on its own.
+    /// Slots are counted by index, not `chunks`, so the *New file* card can finish a
+    /// short last row.
     fn file_grid(
         &mut self,
         ui: &mut egui::Ui,
@@ -1991,7 +1888,6 @@ impl OndinApp {
         let gap = GRID_GAP;
         let cols = grid_cols(ui.available_width());
         let card_w = card_width(ui.available_width());
-        // The arrow keys' row length, from the grid as it was just laid.
         self.dash.grid_cols = cols;
         let slots = entries.len() + usize::from(new_file.is_some());
         for start in (0..slots).step_by(cols) {
@@ -2000,11 +1896,7 @@ impl OndinApp {
                 for i in start..(start + cols).min(slots) {
                     match entries.get(i) {
                         Some(entry) => self.file_card(ui, entry, card_w, act),
-                        // The one slot past the end exists only when `new_file` is
-                        // `Some`, so the `unwrap_or_default` never falls back.
                         None => {
-                            // Inert for the click that dismisses a menu, which would
-                            // otherwise create a document (§15 D558).
                             if self.new_file_card(ui, card_w, new_file.unwrap_or_default())
                                 && !self.dash.menu_was_up
                             {
@@ -2019,14 +1911,12 @@ impl OndinApp {
     }
 
     /// The dashed *New file in {project}* card at the end of a project's grid
-    /// (§15 D376): the sidebar button's [`Act::NewFile`] offered where the eye is,
-    /// so it exists only where the nav names a project to land in.
+    /// — the sidebar button's [`Act::NewFile`] offered where the eye is, only where
+    /// the nav names a project to land in.
     ///
-    /// The arrows cannot reach it, deliberately: [`OndinApp::dashboard_keys`] steps
-    /// through documents, and a selection on a verb would make `Delete` and `Enter`
-    /// ambiguous. The keyboard's route is `Ctrl+N`.
-    ///
-    /// Returns whether it was clicked.
+    /// The arrows cannot reach it, deliberately: a selection on a verb would make
+    /// `Delete` and `Enter` ambiguous; the keyboard's route is `Ctrl+N`. Returns
+    /// whether it was clicked.
     fn new_file_card(&self, ui: &mut egui::Ui, w: f32, into: &str) -> bool {
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(w, CARD_THUMB_H + CARD_CAPTION_H),
@@ -2039,16 +1929,14 @@ impl OndinApp {
             theme::text::FAINT
         };
         let p = ui.painter();
-        // A shade under [`color::CARD`] (the design's `text 12%` against `15%`), so
-        // the slot reads as where a card would go.
+        // A shade under [`color::CARD`] (`text 12%` against `15%`): reads as an empty slot.
         p.rect_filled(
             rect,
             egui::CornerRadius::same(GHOST_R as u8),
             theme::color::text_a(8),
         );
         // `rect_stroke` has no dash pattern, so the dashes follow a polyline of the
-        // same rounded corners as the fill; `rounded_rect_path` repeats the first
-        // point to close the last edge.
+        // fill's corners; `rounded_rect_path` repeats the first point to close the last edge.
         let closed = rounded_rect_path(rect.shrink(0.5), GHOST_R, 6);
         let stroke = egui::Stroke::new(
             1.0,
@@ -2078,13 +1966,11 @@ impl OndinApp {
         resp.clicked()
     }
 
-    /// The one chip a card or a row wears, or none (§15 D613).
+    /// The one chip a card or a row wears, or none, most severe first.
     ///
     /// `Unreadable` has two sources: `Entry::unread`, the scan's cheap answer for a
     /// file whose first 4 KB will not parse, and `Covers::unreadable`, the loader's
     /// verdict on the whole file, which alone catches a document from a newer build.
-    /// One mark, most severe first: a conflict copy of a broken document shows
-    /// *Unreadable*.
     fn mark_of(&self, entry: &Entry) -> Option<Mark> {
         if entry.unread || self.covers.unreadable(entry) {
             return Some(Mark::Unreadable);
@@ -2100,7 +1986,6 @@ impl OndinApp {
             egui::vec2(w, CARD_THUMB_H + CARD_CAPTION_H),
             egui::Sense::click(),
         );
-        // Pulsing while it opens (§15 D1027), put back at the end.
         let opacity = ui.opacity();
         ui.multiply_opacity(self.opening_alpha(entry));
         let lit = resp.hovered();
@@ -2114,8 +1999,8 @@ impl OndinApp {
         let thumb = egui::Rect::from_min_size(rect.min, egui::vec2(w, CARD_THUMB_H));
         let p = ui.painter();
         p.rect_filled(rect, egui::CornerRadius::same(9), color::CARD);
-        // Three tiers: the top is the keyboard's cursor (§15 D381), a full accent
-        // border against hover's muted `ACCENT_700`, since the two can coexist.
+        // Three tiers: the top is the keyboard's cursor, a full accent border against
+        // hover's muted `ACCENT_700`, since the two can coexist.
         p.rect_stroke(
             rect,
             egui::CornerRadius::same(9),
@@ -2138,10 +2023,9 @@ impl OndinApp {
             se: 0,
         };
         p.rect_filled(thumb.shrink(1.0), plate_radius, dot.gamma_multiply(0.14));
-        // Asked for only while the plate is on screen (§15 D862): the grid is not
-        // virtualised, so an unconditional `get` would render the whole library on
-        // the first frame. It also means `Covers::unreadable` (one of `mark_of`'s two
-        // sources) is known only for documents the grid has shown.
+        // Only while the plate is on screen: the grid is not virtualised, so an
+        // unconditional `get` would render the whole library on the first frame. So
+        // `Covers::unreadable` is known only for documents the grid has shown.
         let cover = if ui.is_rect_visible(thumb) {
             self.covers.get(ui.ctx(), entry).cloned()
         } else {
@@ -2149,9 +2033,8 @@ impl OndinApp {
         };
         match cover {
             Some(texture) => {
-                // Fitted inside the plate, never filled: a cover is a whole document
-                // at its own aspect ratio, and bleeding to the edges would show
-                // square corners over the rounded plate.
+                // Fitted, never filled: bleeding to the edges would show square
+                // corners over the rounded plate.
                 let size = texture.size_vec2();
                 let room = thumb.shrink(10.0);
                 let scale = (room.width() / size.x).min(room.height() / size.y).min(1.0);
@@ -2173,7 +2056,6 @@ impl OndinApp {
                 );
             }
         }
-        // Bottom-left of the cover, opposite the star (§15 D375).
         let mut corner = egui::pos2(thumb.left() + 8.0, thumb.bottom() - 8.0);
         if let Some(mark) = self.mark_of(entry) {
             let took = mark_chip(ui, corner, egui::Align2::LEFT_BOTTOM, mark);
@@ -2183,9 +2065,8 @@ impl OndinApp {
         if marks_kit(entry) {
             kit_chip(ui, corner);
         }
-        // The star sits on the cover (the design's `top:7px;right:7px`) so a grid can
-        // be scanned for it. It is an outline star, as the bundled Phosphor has only
-        // the Regular weight; the gold carries the state.
+        // The star sits on the cover (`top:7px;right:7px`) so a grid can be scanned for
+        // it. Outline, as the bundled Phosphor has only Regular; the gold carries the state.
         if self.is_starred(entry) {
             let at = egui::pos2(thumb.right() - 14.0, thumb.top() + 14.0);
             let p = ui.painter();
@@ -2230,7 +2111,7 @@ impl OndinApp {
     }
 
     /// How opaque `entry`'s card or row draws: the open pulse's value while
-    /// [`OndinApp::begin_open`] is reading it, and whole otherwise (§15 D1027).
+    /// [`OndinApp::begin_open`] is reading it, and whole otherwise.
     fn opening_alpha(&self, entry: &Entry) -> f32 {
         self.opening
             .as_ref()
@@ -2240,19 +2121,13 @@ impl OndinApp {
             })
     }
 
-    /// What a click on a card or a row means: it opens the document (§15 D381).
-    /// A click does not select and no card reads a double-click.
-    ///
-    /// The keyboard's cursor is separate (§15 D374): arrows move it, `Enter` opens
-    /// it, `Delete` asks, `Escape` clears it, and `DashboardState::selected` is
-    /// written only by [`OndinApp::dashboard_keys`].
+    /// What a click on a card or a row means: it opens the document. A click does not
+    /// select and no card reads a double-click. The keyboard's cursor is separate:
+    /// arrows move it, `Enter` opens it, `Delete` asks, `Escape` clears it.
     fn pick_or_open(&mut self, resp: &egui::Response, entry: &Entry, act: &mut Option<Act>) {
-        // A click that dismisses a menu is spent doing so (§15 D558,
-        // `context-menus.md` §0 R4), gated here as `canvas_ui` does: a dismissal
-        // cannot consume a click the card already turned into an `Act::Open`. It
-        // reads `menu_was_up`, latched at the top of the frame, not
-        // `library_menu_open()`, which is already false for cards drawn after the
-        // anchor's.
+        // A click that dismisses a menu is spent doing so (`context-menus.md` §0 R4), as
+        // in `canvas_ui`. Reads the latched `menu_was_up`: `library_menu_open()` is
+        // already false for cards drawn after the anchor's.
         if self.dash.menu_was_up {
             return;
         }
@@ -2263,52 +2138,45 @@ impl OndinApp {
 
     /// Whether one of the library's two floating menus is on screen: the ⋮ file
     /// menu and the *All projects ⌄* dropdown (the modals stop the pointer
-    /// themselves). [`OndinApp::dashboard_keys`] asks it too (§15 D578), so the
-    /// keymap and the pointer-side doors agree about what is on screen.
+    /// themselves). [`OndinApp::dashboard_keys`] asks it too, so the keymap and the
+    /// pointer-side doors agree about what is on screen.
     ///
     /// # Where `menu_was_up` is read
     ///
-    /// Every door a click can reach gates on it (§15 D558, D973), so the click that
-    /// dismisses a menu does nothing else:
+    /// Every door a click can reach gates on it, so the click that dismisses a menu
+    /// does nothing else: [`OndinApp::pick_or_open`] (file card and row), the dashed
+    /// *New file* card and list row, the sidebar's hand-rolled *New file* button,
+    /// [`Self::nav_row`], [`Self::project_row`] (both hits), `project_cards`' call of
+    /// [`Self::project_card`], the body header's controls and the top bar's search,
+    /// settings, update chip, caption buttons and drag strip.
     ///
-    /// - [`OndinApp::pick_or_open`], the file card and row.
-    /// - `file_grid`'s dashed *New file* card and `file_list`'s *New file* row.
-    /// - `dashboard_sidebar`'s hand-rolled *New file* button, [`Self::nav_row`], and
-    ///   [`Self::project_row`] (both hits).
-    /// - `project_cards`' call of [`Self::project_card`].
-    /// - The body header's controls and the top bar's search, settings, update chip,
-    ///   caption buttons and drag strip.
-    ///
-    /// Not gated, each for a reason: [`Self::file_menu_button`] is the ⋮ anchor both
-    /// dismissals exempt; rows inside either menu are the menu working; and
-    /// `dashboard_act` is not a choke point, since gating there would swallow the
-    /// ⋮ menu's own rows. The body background dismisses a menu on purpose and only
-    /// clears the keyboard cursor.
+    /// Not gated: [`Self::file_menu_button`] (the ⋮ anchor both dismissals exempt),
+    /// rows inside either menu, and `dashboard_act`, where gating would swallow the ⋮
+    /// menu's own rows. The body background dismisses a menu on purpose.
     fn library_menu_open(&self) -> bool {
         self.dash.menu_for.is_some() || self.dash.filter_open
     }
 
     /// Whether a document in the list on screen may be opened: false in the trash,
     /// where opening would put the editor on a file the purge will delete. Read by
-    /// the card click and by `Enter` (§15 D374).
+    /// the card click and by `Enter`.
     fn can_open(&self) -> bool {
         !self.in_trash()
     }
 
     /// Whether the list on screen is the trash — the one fact behind
-    /// [`OndinApp::can_open`], [`OndinApp::file_menu_popup`]'s two-row menu, and the
-    /// keymap's `F2` and `Ctrl+D`: a trashed document has only *Restore* and delete.
+    /// [`OndinApp::can_open`], [`OndinApp::file_menu_popup`]'s two-row menu and the
+    /// keymap's `F2` and `Ctrl+D`.
     fn in_trash(&self) -> bool {
         self.dash.nav == Nav::Trash
     }
 
     /// Bring the card or row the keyboard just moved onto into view.
     ///
-    /// Called by the card, not the keymap, because the scroll needs a rect that
-    /// exists only once the card is laid out; clearing the flag here stops later
-    /// frames fighting a scrollbar drag. No alignment, so egui scrolls the least it
-    /// can, and [`egui::style::ScrollAnimation::none`], so a held arrow does not
-    /// chase an unfinished animation.
+    /// Called by the card, not the keymap: the scroll needs a rect that exists only
+    /// once the card is laid out, and clearing the flag here stops later frames
+    /// fighting a scrollbar drag. No alignment and
+    /// [`egui::style::ScrollAnimation::none`], so a held arrow does not chase an animation.
     fn follow_selection(&mut self, ui: &egui::Ui, picked: bool, rect: egui::Rect) {
         if picked && self.dash.scroll_to_selected {
             ui.scroll_to_rect_animation(rect, None, egui::style::ScrollAnimation::none());
@@ -2321,12 +2189,12 @@ impl OndinApp {
     ///
     /// One predicate for the two sites that read `egui::Context` directly,
     /// [`OndinApp::dashboard_keys`] and [`OndinApp::search_field`], which no modal
-    /// can intercept (§15 D542). `egui_wants_keyboard_input` is deliberately absent:
-    /// it asks about a live text cursor, and `search_field` reads its chord before
-    /// drawing its own `TextEdit`. Each caller asks it separately.
+    /// can intercept. `egui_wants_keyboard_input` is deliberately absent: it asks
+    /// about a live text cursor, and `search_field` reads its chord before drawing
+    /// its own `TextEdit`.
     fn library_keys_are_free(&self) -> bool {
         // The recovery card is drawn by `OndinApp::ui` above the view branch, so
-        // this file lists it by name (§15 D377).
+        // this file lists it by name.
         self.recovery.pending.is_empty()
             && self.dash.moving.is_none()
             && self.dash.deleting.is_none()
@@ -2339,22 +2207,18 @@ impl OndinApp {
     }
 
     /// The library's own keymap — arrows, `Enter`, `Delete`, `Escape`, `F2`,
-    /// `Ctrl+R`, `Ctrl+N` and `Ctrl+D` (§15 D374, D383; `shortcuts.md` §8a).
+    /// `Ctrl+R`, `Ctrl+N` and `Ctrl+D` (`shortcuts.md` §8a).
     ///
-    /// Read straight off the context, like `Ctrl+K` in [`OndinApp::search_field`],
-    /// because `input::resolve` does not run while the library is up. The guards are
-    /// the things that own the keyboard: the floating menus (asked through
-    /// [`OndinApp::library_menu_open`], which also handle `Escape`), then
+    /// Read straight off the context, as `input::resolve` does not run while the
+    /// library is up. The guards are the things that own the keyboard: the floating
+    /// menus ([`OndinApp::library_menu_open`], which also handle `Escape`), then
     /// [`OndinApp::library_keys_are_free`] and `egui_wants_keyboard_input`.
-    /// `search.is_some()` is not redundant (§15 D543): on the frame the overlay
-    /// closes, the field is never drawn and egui has already dropped focus.
-    ///
-    /// `modifiers.is_none()` is the last gate and keeps `Ctrl+K` from also stepping
-    /// the selection, which is why the modified chords are read above it.
+    /// `search.is_some()` is not redundant: on the frame the overlay closes, the
+    /// field is never drawn and egui has already dropped focus. `modifiers.is_none()`
+    /// is the last gate, so the modified chords are read above it.
     fn dashboard_keys(&mut self, ctx: &egui::Context, entries: &[Entry], act: &mut Option<Act>) {
-        // The ⋮ popup and the filter dropdown are `Area`s, not modals, so nothing
-        // else gives them an `Escape` (§15 D578). Handled before the guard list: a
-        // menu owning the keyboard and a menu ignoring it are different things.
+        // The ⋮ popup and the filter dropdown are `Area`s, not modals, so nothing else
+        // gives them an `Escape`. Handled before the guard list.
         if self.library_menu_open() {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.dash.menu_for = None;
@@ -2387,8 +2251,7 @@ impl OndinApp {
                     i.key_pressed(egui::Key::F2),
                     i.key_pressed(egui::Key::N),
                     i.key_pressed(egui::Key::D),
-                    // `Ctrl+R`, the editor's other rename, read on the chord side
-                    // while `F2` is read on the plain one.
+                    // `Ctrl+R`, the editor's other rename; `F2` is read on the plain side.
                     i.key_pressed(egui::Key::R),
                     i.modifiers.is_none(),
                     // Spelled as `input::normal_mode` spells it, so `Ctrl+Alt+N` and
@@ -2397,8 +2260,6 @@ impl OndinApp {
                 )
             });
         // The chords come before `plain` closes the door on everything modified.
-        // `Ctrl+R` is here and `F2` past that gate, so the rename rules live in
-        // [`OndinApp::start_rename`] for both.
         if chord {
             if new_file {
                 *act = Some(Act::NewFile);
@@ -2435,7 +2296,6 @@ impl OndinApp {
             return;
         }
         if escape {
-            // The keyboard's version of a click on the empty body.
             self.dash.selected = None;
             return;
         }
@@ -2452,13 +2312,12 @@ impl OndinApp {
         }
     }
 
-    /// Open the rename field over the keyboard's selection — `F2` and `Ctrl+R`,
-    /// one verb read on opposite sides of [`OndinApp::dashboard_keys`]' `plain` gate.
+    /// Open the rename field over the keyboard's selection (`F2`, `Ctrl+R`).
     ///
     /// The name comes from `entries` like the ⋮'s *Rename*: `Entry::display_name`
-    /// drops the conflict suffix a sync client may have added (D375). Nothing
-    /// happens with no selection, in the trash ([`OndinApp::in_trash`]), or when the
-    /// selected path is no longer in `entries`.
+    /// drops the conflict suffix a sync client may have added. Nothing happens with
+    /// no selection, in the trash ([`OndinApp::in_trash`]), or when the selected
+    /// path is no longer in `entries`.
     fn start_rename(&self, entries: &[Entry], act: &mut Option<Act>) {
         if self.in_trash() {
             return;
@@ -2501,8 +2360,7 @@ impl OndinApp {
         for entry in entries {
             self.file_row(ui, entry, &cols, act);
         }
-        // The row says only *New file*, where the card says *New file in X*, as the
-        // design has it. Inert for the click that dismisses a menu (§15 D558).
+        // The row says only *New file*, where the card says *New file in X*, as the design has it.
         if new_file.is_some() && self.new_file_row(ui) && !self.dash.menu_was_up {
             *act = Some(Act::NewFile);
         }
@@ -2620,7 +2478,6 @@ impl OndinApp {
                 },
             );
             if let (0, Some(mark)) = (i, chip) {
-                // Beside the name it belongs to, not at a fixed column.
                 let name_w = ui
                     .ctx()
                     .fonts_mut(|f| {
@@ -2655,10 +2512,8 @@ impl OndinApp {
     ///
     /// Returns whether it drew, so the caller knows to skip painting the name.
     ///
-    /// Commits on `lost_focus`, not only Enter, so clicking elsewhere keeps the
-    /// typed name; Escape clears the buffer before the focus loss can be read. The
-    /// focus latch, the placement and the layout below are each a fix for putting a
-    /// live field where a painted word is (§15 D380).
+    /// Commits on `lost_focus`, not only Enter, so clicking elsewhere keeps the typed
+    /// name; Escape clears the buffer before the focus loss can be read.
     fn rename_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -2679,9 +2534,8 @@ impl OndinApp {
         }
         let id = egui::Id::new(("rename", &entry.path));
         // The app's field ground, painted here rather than left to egui's focus ring
-        // (`ui::text_field` states the rule; this rect is already reserved, so that
-        // helper does not fit). `color::FIELD_BORDER`, not the accent: the field is
-        // only ever on screen while focused.
+        // (`ui::text_field` does not fit a reserved rect). `color::FIELD_BORDER`, not
+        // the accent: the field is only on screen while focused.
         let p = ui.painter();
         p.rect_filled(rect, egui::CornerRadius::same(ui::BUTTON_R), color::FIELD);
         p.rect_stroke(
@@ -2690,15 +2544,13 @@ impl OndinApp {
             egui::Stroke::new(1.0, color::FIELD_BORDER),
             egui::StrokeKind::Inside,
         );
-        // The inset is 4 on the frame, where the painted name sits 4pt right of the
-        // box in both callers; `TextEdit::margin` is ignored once a frame is
-        // supplied. One row tall and centred, since `Ui::put` justifies a taller box
-        // and the galley would sit at the top ([`SEARCH_TEXT_X`]'s fault, on y).
+        // The inset is 4 on the frame, where the painted name sits 4pt right of the box
+        // in both callers. One row tall and centred, for [`search_field`]'s reason.
         let font = egui::FontId::proportional(size);
         let row = ui.ctx().fonts_mut(|f| f.row_height(&font));
         let line = egui::Rect::from_center_size(rect.center(), egui::vec2(rect.width(), row));
-        // `new_child`, not `Ui::put`: `put` advances the parent's cursor to this
-        // rect's right edge, which rewinds it and lays the next card on top of this one.
+        // `new_child`, not `Ui::put`, which advances the parent's cursor to this rect's
+        // right edge and lays the next card on top of this one.
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .id(id.with("ui"))
@@ -2713,22 +2565,19 @@ impl OndinApp {
                 .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 0)))
                 .font(font),
         );
-        // Once, through the latch: requesting focus every pass re-takes the caret in
-        // the frame that surrendered it, so `lost_focus()` would never be true
-        // (`NewProject::name_focused` is the same latch).
+        // Once, through the latch: requesting focus every pass re-takes the caret in the
+        // frame that surrendered it, so `lost_focus()` would never be true.
         if !*focused {
             resp.request_focus();
             *focused = true;
         }
         if resp.lost_focus() {
-            // Enter and a click elsewhere both commit; Escape returned above.
             *act = Some(Act::CommitRename);
         }
         true
     }
 
-    /// The ⋮ and the menu behind it — the one place every per-document action
-    /// lives, including *Rename* (which the design had nowhere else to put).
+    /// The ⋮ and the menu behind it — the one place every per-document action lives.
     fn file_menu_button(
         &mut self,
         ui: &mut egui::Ui,
@@ -2764,9 +2613,8 @@ impl OndinApp {
     }
 
     /// The file menu's kit row: *Make a kit* or *Stop sharing as kit*, the same
-    /// toggle as the document menu's. None on a conflict copy (§15 D1024), which
-    /// carries the original's id; a conflict copy left as its kit's only file is
-    /// the kit and gets the row.
+    /// toggle as the document menu's. None on a conflict copy, which carries the
+    /// original's id; one left as its kit's only file is the kit and gets the row.
     fn kit_row(&self, entry: &Entry) -> Option<(&'static str, Act)> {
         if !stands_for_its_kit(&self.library, entry) {
             return None;
@@ -2813,7 +2661,6 @@ impl OndinApp {
             ]
         };
         let mut rows = rows;
-        // After the file's own verbs, before *Delete*, as the mockup has it.
         if !trashed && let Some(row) = self.kit_row(entry) {
             rows.insert(rows.len() - 1, row);
         }
@@ -2859,8 +2706,7 @@ impl OndinApp {
     /// answers `None`; any other becomes the frame's act.
     ///
     /// A row that opens a card gives up a file still loading too, as
-    /// [`Self::dashboard_act`] does for the rest (§15 D1027), or the load would land
-    /// under the card.
+    /// [`Self::dashboard_act`] does for the rest, or the load would land under the card.
     fn file_menu_chose(&mut self, action: Act, trashed: bool) -> Option<Act> {
         if matches!(action, Act::MoveTo(_, None) | Act::SetKit(_, false))
             || matches!(action, Act::Trash(_) if !trashed)
@@ -2868,8 +2714,7 @@ impl OndinApp {
             self.opening = None;
         }
         match action {
-            // *Move to project*, *Delete* and *Stop sharing as kit* open a card, so
-            // they set state instead of becoming an act.
+            // These open a card, so they set state instead of becoming an act.
             Act::MoveTo(path, None) => self.dash.moving = Some(path),
             Act::Trash(path) if !trashed => self.dash.deleting = Some(path),
             Act::SetKit(path, false) => self.unsharing_kit = Some(Some(path)),
@@ -2881,13 +2726,12 @@ impl OndinApp {
     /// Apply what the frame decided. See [`Act`] for why this is deferred.
     fn dashboard_act(&mut self, act: Act) {
         let root = self.library.root.clone();
-        // Any other act gives up a file still loading (§15 D1027), or a trash, rename
-        // or move would see it adopted at its old path.
+        // Any other act gives up a file still loading, or a trash, rename or move
+        // would see it adopted at its old path.
         if !matches!(act, Act::Open(_)) {
             self.opening = None;
         }
         match act {
-            // Off the frame, the card pulsing until it lands (§15 D1027).
             Act::Open(path) => self.begin_open(&path),
             Act::NewFile => {
                 let project = self.nav_project();
@@ -2933,9 +2777,8 @@ impl OndinApp {
                 if let Some(entry) = store::trashed(&root).into_iter().find(|e| e.path == path) {
                     let project = self.library.project_of(&entry).cloned();
                     match store::move_to_project(&root, &entry, project.as_ref()) {
-                        // The follow is unreachable today, since `trash_or_purge`
-                        // clears `session.path`, and is written anyway so this arm
-                        // cannot become the rename bug if that stops.
+                        // Unreachable today, since `trash_or_purge` clears `session.path`;
+                        // written so this arm cannot become the rename bug if that stops.
                         Ok(moved) => {
                             let id = project.as_ref().map(|p| p.id.clone());
                             self.open_document_follows(&path, moved, |m| m.project = id);
@@ -2968,13 +2811,11 @@ impl OndinApp {
 
     /// Remove a project and settle its files.
     ///
-    /// The files are dealt with first and the project row is removed last, and only
-    /// when every member moved (§15 D556): a partial failure leaves the project
-    /// standing with whatever could not be moved, and pressing *Delete project*
-    /// again retries exactly those.
+    /// The files go first and the project row last, and only when every member moved:
+    /// a partial failure leaves the project standing with what could not be moved,
+    /// and pressing *Delete project* again retries exactly those.
     pub(crate) fn delete_project(&mut self, id: &str, transfer_to: Option<&str>, keep_files: bool) {
-        // Before a single file moves: `save_projects` latches on its own, so a
-        // later check would protect the bytes but not the files.
+        // Before a single file moves: a later check would protect the bytes, not the files.
         if !self.library.may_write_projects() {
             self.session
                 .fail("projects.json could not be read — not deleting anything");
@@ -3015,8 +2856,8 @@ impl OndinApp {
                 }
             }
         }
-        // Only when every member moved (§15 D556). `save_projects` runs either way, so
-        // an unwritable `projects.json` is reported before the retry.
+        // Only when every member moved. `save_projects` runs either way, so an
+        // unwritable `projects.json` is reported before the retry.
         if failed == 0 {
             self.library.projects.projects.retain(|p| p.id != id);
         }
@@ -3039,9 +2880,8 @@ impl OndinApp {
     }
 
     /// Copy `.ondin` documents from outside the library into it, through an open
-    /// dialog. A copy, not a move: the originals are somebody else's files. An
-    /// imported document keeps its name and creation date and gets a fresh id, as
-    /// in `store::duplicate`, so importing twice gives two independent documents.
+    /// dialog. A copy, not a move: the originals are somebody else's files. It keeps
+    /// its name and creation date and gets a fresh id, as in `store::duplicate`.
     fn import_documents(&mut self) {
         // Before the dialog, so a picked answer is never thrown away.
         if !self.library_writable() {
@@ -3058,18 +2898,15 @@ impl OndinApp {
     }
 
     /// Documents dropped on the library window, filed exactly as *Import files*
-    /// files them (§15 D373).
-    ///
-    /// Only files with a `path` count: [`Self::import_paths`] is path-taking all the
-    /// way down, so a bytes-only drop (from a browser) is counted as "other".
-    /// Everything that is not a document is reported in one message, not one per file.
+    /// files them. Only files with a `path` count: [`Self::import_paths`] takes paths
+    /// all the way down, so a bytes-only drop (from a browser) is "other". Everything
+    /// that is not a document is reported in one message.
     fn take_dropped_documents(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if dropped.is_empty() {
             return;
         }
-        // After the emptiness check, or the refusal would fire every frame while
-        // the folder is missing.
+        // After the emptiness check, or the refusal fires every frame while the folder is missing.
         if !self.library_writable() {
             return;
         }
@@ -3087,8 +2924,7 @@ impl OndinApp {
                 _ => others += 1,
             }
         }
-        // One message, composed here: the status is a single slot, so counting and
-        // announcing are separate ([`Self::import_counting`]).
+        // One message, composed here: the status is a single slot.
         if docs.is_empty() {
             self.session
                 .fail("The library takes .ondin documents — open one to place images in it");
@@ -3107,12 +2943,10 @@ impl OndinApp {
     }
 
     /// [`Self::import_paths`] without the announcement, for the caller that adds its
-    /// own count to it (the status is a single slot, so speaking after this would
-    /// erase it; see [`import_summary`]). `pub(crate)` so a test can pin it.
+    /// own count to it (the status is a single slot; see [`import_summary`]).
     pub(crate) fn import_counting(&mut self, files: &[PathBuf]) -> (usize, usize, usize) {
-        // Into the project being viewed. `destination`, not `get`: an archived
-        // project is selectable, and a refused destination must file as unfiled
-        // (§15 D557, as `new_file_into` and `nav_project`).
+        // Into the project being viewed. `destination`, not `get`: an archived project
+        // is selectable, and a refused destination files as unfiled.
         let project = match &self.dash.nav {
             Nav::Project(id) => self.library.projects.destination(id).cloned(),
             _ => None,
@@ -3120,9 +2954,8 @@ impl OndinApp {
         let root = self.library.root.clone();
         let (mut ok, mut failed, mut already) = (0usize, 0usize, 0usize);
         for path in files {
-            // Files already in the library are skipped, not re-imported (the dialog
-            // may open on the base folder), and counted so the summary reports them
-            // (§15 D693; see [`import_summary`]).
+            // Files already in the library (the dialog may open on the base folder) are
+            // skipped and counted for [`import_summary`].
             if path.starts_with(&root) {
                 already += 1;
                 continue;
@@ -3146,7 +2979,6 @@ impl OndinApp {
                         path.file_stem().and_then(|s| s.to_str()).unwrap_or(""),
                     )
                 });
-            // A fresh identity, per `import_documents`.
             let mut meta = doc.meta().clone();
             meta.id = None;
             doc.set_meta(meta);
@@ -3177,10 +3009,9 @@ impl OndinApp {
             if let Err(e) = std::fs::remove_file(path) {
                 self.session.fail(format!("Delete failed: {e}"));
             }
-            // The permanent delete is a door into `.trash` that bypasses `store`, and
-            // the trash listing is cached, so it must announce itself (§15 D728).
-            // Unconditional rather than in an `Ok` arm, and not a full `refresh`:
-            // nothing outside `.trash` moved.
+            // The permanent delete bypasses `store` and the trash listing is cached, so it
+            // must announce itself. Unconditional, and not a full `refresh`: nothing
+            // outside `.trash` moved.
             self.library.refresh_trash();
             self.dash.deleting = None;
             return;
@@ -3204,10 +3035,10 @@ impl OndinApp {
 
     /// Create a document, filed immediately, and open it.
     ///
-    /// The destination is an argument so one function answers four doors: the
-    /// sidebar button, the dashed card ([`OndinApp::new_file_card`]), `Ctrl+N` here and
-    /// `Ctrl+N` in the editor ([`crate::input::Action::NewDocument`]). See
-    /// [`OndinApp::nav_project`] and [`OndinApp::open_document_project`].
+    /// The destination is an argument so one function answers four doors: the sidebar
+    /// button, the dashed card, `Ctrl+N` here and in the editor
+    /// ([`crate::input::Action::NewDocument`]); see [`OndinApp::nav_project`] and
+    /// [`OndinApp::open_document_project`].
     pub(crate) fn new_library_document(&mut self, project: Option<project::Project>) {
         if !self.library_writable() {
             return;
@@ -3225,10 +3056,9 @@ impl OndinApp {
 
     /// Refuse, out loud, to create anything while the base folder is missing.
     ///
-    /// *New file*, *New project* and an import ask, as each ends in a
-    /// `create_dir_all` that would put an empty folder where the offline library
-    /// belongs (`library::state::Library::may_write`). A message rather than a
-    /// disabled button, which would give no reason.
+    /// *New file*, *New project* and an import ask, as each ends in a `create_dir_all`
+    /// that would put an empty folder where the offline library belongs
+    /// (`library::state::Library::may_write`). A message, not a disabled button.
     fn library_writable(&mut self) -> bool {
         if self.library.may_write() {
             return true;
@@ -3241,9 +3071,8 @@ impl OndinApp {
     /// The project in front of you, as the dashboard spells it: the nav being
     /// viewed. `None` (unfiled) for *Recent*, *All files*, *Starred* and the trash.
     ///
-    /// `destination`, not `get` (§15 D557): the same gate as [`Self::new_file_into`],
-    /// or the card and the act it fires disagree, so an archived project answers
-    /// *no project*. `pub(crate)` for that test.
+    /// `destination`, not `get`: the same gate as [`Self::new_file_into`], or the card
+    /// and the act it fires disagree; an archived project answers *no project*.
     pub(crate) fn nav_project(&self) -> Option<project::Project> {
         match &self.dash.nav {
             Nav::Project(id) => self.library.projects.destination(id).cloned(),
@@ -3253,12 +3082,9 @@ impl OndinApp {
 
     /// The same rule as [`OndinApp::nav_project`], as the editor spells it: the open
     /// document's own project. Reading [`Nav`] from the editor would file into
-    /// whichever nav the dashboard was left on. Neither reads `OndinApp::view`,
-    /// which is exact in production but starts as [`crate::app::View::Editor`] under
-    /// `OndinApp::headless`.
-    ///
-    /// `None` for a session whose document is not in the library — the never-filed
-    /// starter the app opens on.
+    /// whichever nav the dashboard was left on. Neither reads `OndinApp::view`, which
+    /// starts as [`crate::app::View::Editor`] under `OndinApp::headless`. `None` for
+    /// a document not in the library — the never-filed starter the app opens on.
     pub(crate) fn open_document_project(&self) -> Option<project::Project> {
         self.session
             .path
@@ -3269,11 +3095,9 @@ impl OndinApp {
     }
 
     /// The open document follows a library file that has just moved — its path and
-    /// the metadata the move wrote to disk, together (§15 D429). Re-pointing the
-    /// path alone would let the next save write the old `meta.name` or
-    /// `meta.project` back. The patch is a closure because only the field differs.
-    ///
-    /// A no-op when the moved file is not the one the session has open.
+    /// the metadata the move wrote to disk, together: re-pointing the path alone
+    /// would let the next save write the old `meta.name` or `meta.project` back. A
+    /// no-op when the moved file is not the one the session has open.
     fn open_document_follows(
         &mut self,
         was: &Path,
@@ -3348,9 +3172,8 @@ impl OndinApp {
     /// flag, and the folder that follows the name.
     ///
     /// The folder moves before `projects.json` is written, and the stem recorded is
-    /// the one the move actually produced (the slug may step around a collision or
-    /// the rename may fail). A failed folder rename is reported and the project
-    /// keeps its folder, rather than abandoning the name change.
+    /// the one the move produced (the slug may step around a collision). A failed
+    /// rename is reported and the project keeps its folder; the name change stands.
     fn save_project(&mut self) {
         let Some(ep) = self.dash.edit_project.take() else {
             return;
@@ -3365,13 +3188,11 @@ impl OndinApp {
             return;
         }
         let Some(before) = self.library.projects.get(&ep.id).cloned() else {
-            // Deleted while the card was open; nothing to write it back to.
             return;
         };
-        // Nothing edited, nothing written (§15 D719): a write rewrites
-        // `projects.json` and rescans the library. The footer dims the button with
-        // the same `differs_from`; this also refuses when Enter dismissed the card
-        // or another window changed the project meanwhile.
+        // Nothing edited, nothing written: a write rewrites `projects.json` and rescans.
+        // The footer dims the button with the same `differs_from`; this also refuses
+        // when Enter dismissed the card.
         if !ep.differs_from(&before) {
             return;
         }
@@ -3388,7 +3209,6 @@ impl OndinApp {
                 }
             }
         };
-        // The open document follows its folder, as it follows its file through a move.
         if let (Some(old), Some(new)) = (before.folder.as_deref(), folder.as_deref())
             && old != new
             && let Some(open) = self.session.path.clone()
@@ -3453,7 +3273,7 @@ impl OndinApp {
         }
     }
 
-    // The `dashboard_*` preferences are written only by `apply_library_settings` (§15 D749).
+    // The `dashboard_*` preferences are written only by `apply_library_settings`.
 
     fn new_project_modal(&mut self, ctx: &egui::Context, act: &mut Option<Act>) {
         if self.dash.new_project.is_none() {
@@ -3478,14 +3298,12 @@ impl OndinApp {
                 ui,
                 egui::vec2(ui.available_width(), settings::FIELD_H),
                 &mut np.name,
-                // Not a plausible project name, so the empty field is obvious.
                 "Your awesome project",
                 12.5,
             );
-            // Asked for once, when the modal opens: a per-frame `request_focus` would
-            // keep the caret from ever leaving. The latch is deliberately not guarded
-            // on `Memory::focused()` being empty, as something behind the backdrop
-            // may still hold the caret on the opening frame.
+            // Once, when the modal opens: a per-frame `request_focus` would keep the caret
+            // from ever leaving. Not guarded on `Memory::focused()` being empty, as
+            // something behind the backdrop may still hold the caret on the opening frame.
             if !np.name_focused {
                 field.request_focus();
                 np.name_focused = true;
@@ -3513,7 +3331,6 @@ impl OndinApp {
             });
 
             ui.add_space(settings::ROW_GAP);
-            // A switch, not a checkbox: the design's toggle.
             if ui::switch_row(
                 ui,
                 "Add a matching folder on disk",
@@ -3550,20 +3367,19 @@ impl OndinApp {
         }
     }
 
-    /// *Edit project* — the New project card with two rows swapped (§15 D379).
+    /// *Edit project* — the New project card with two rows swapped.
     ///
     /// Spelled out again rather than sharing [`OndinApp::new_project_modal`], which
-    /// would branch on a flag three times; the numbers all come from `settings`. There
-    /// is no *Create folder* row: the folder is decided at creation, and a rename
-    /// takes an existing one along (`library::project::rename_folder`).
+    /// would branch on a flag three times. There is no *Create folder* row: the
+    /// folder is decided at creation, and a rename takes it along
+    /// (`library::project::rename_folder`).
     fn edit_project_modal(&mut self, ctx: &egui::Context, act: &mut Option<Act>) {
         if self.dash.edit_project.is_none() {
             return;
         }
         let mut cancel = false;
         let mut save = false;
-        // The project as stored, cloned before the closure, which borrows `self`
-        // mutably for the card's own state (§15 D719).
+        // The project as stored, cloned before the closure, which borrows `self` mutably.
         let stored = self
             .dash
             .edit_project
@@ -3588,8 +3404,7 @@ impl OndinApp {
                 "Your awesome project",
                 12.5,
             );
-            // The latch, for `NewProject::name_focused`'s reason; here the field opens
-            // holding text, so a per-frame request would pin the caret.
+            // The latch, for `NewProject::name_focused`'s reason.
             if !ep.name_focused {
                 field.request_focus();
                 ep.name_focused = true;
@@ -3626,8 +3441,7 @@ impl OndinApp {
                 "Hidden from the sidebar and from every project list. Its files stay where they are.",
             );
 
-            // Lit only when there is something to save; a project deleted from under
-            // the card answers `None` and dims it.
+            // Lit only when there is something to save; a vanished project dims it.
             let enabled = !ep.name.trim().is_empty()
                 && stored
                     .as_ref()
@@ -3660,9 +3474,8 @@ impl OndinApp {
 
     /// *Delete project* — and, more importantly, what happens to its files.
     ///
-    /// A project has no trash: deleting one removes a row from `projects.json`. So
-    /// this modal is the whole confirmation and the *files* question is answered
-    /// before it closes.
+    /// A project has no trash: deleting one removes a row from `projects.json`, so
+    /// this modal is the whole confirmation.
     fn delete_project_modal(&mut self, ctx: &egui::Context, act: &mut Option<Act>) {
         let Some(dp) = self.dash.deleting_project.as_ref() else {
             return;
@@ -3702,9 +3515,8 @@ impl OndinApp {
 
             if count > 0 {
                 ui.add_space(12.0);
-                // The design's toggle, reading the inverse of `keep_files` (see
-                // [`DeleteProject`]). The row deliberately does not say the files go
-                // to the trash, which would soften the loudest control on the card.
+                // The inverse of `keep_files` (see [`DeleteProject`]). The row does not say
+                // the files go to the trash, which would soften the loudest control.
                 if ui::switch_row(
                     ui,
                     &format!("Delete its {count} file(s) too"),
@@ -3773,8 +3585,7 @@ impl OndinApp {
         }
     }
 
-    /// *Move to project* — a list of the projects plus *No project*, a modal rather
-    /// than a submenu, which would nest an arbitrary number of projects in a popup.
+    /// *Move to project* — the projects plus *No project*, a modal rather than a submenu.
     fn move_modal(&mut self, ctx: &egui::Context, act: &mut Option<Act>) {
         let Some(path) = self.dash.moving.clone() else {
             return;
@@ -3788,8 +3599,7 @@ impl OndinApp {
             .entry_at(&path)
             .map(|e| e.display_name())
             .unwrap_or_default();
-        // Archived projects are not offered as a destination (a document cannot be
-        // filed into one without unarchiving it), except the one this document is
+        // Archived projects are not destinations, except the one this document is
         // already in, or the sheet would show it as unfiled.
         let mut projects: Vec<project::Project> = self.library.projects.active().cloned().collect();
         if let Some(home) = current
@@ -3884,9 +3694,8 @@ impl OndinApp {
     ///
     /// A draft that applies on Save: a base folder plus *Move my files there* is an
     /// operation on every document, which must not start while the path is half
-    /// typed. Same card as the editor's Settings (`crate::settings`): the same
-    /// [`settings::card_modal`], [`settings::section`] and [`settings::modal_footer`],
-    /// the commit lit only when the draft differs from what is saved.
+    /// typed. Built from the editor's Settings kit ([`settings::card_modal`],
+    /// [`settings::section`], [`settings::modal_footer`]).
     fn library_settings_modal(&mut self, ctx: &egui::Context) {
         let Some(mut d) = self.library_settings.clone() else {
             return;
@@ -3894,9 +3703,8 @@ impl OndinApp {
         let saved = LibrarySettings::from_prefs(&self.prefs, &self.library.root);
         let resolved_now = self.library.root.display().to_string();
         let mut decision: Option<settings::Decision> = None;
-        // Cloned out and answered after the card: the closure cannot borrow `self`,
-        // and a retry runs a whole migration, which must not happen inside a paint
-        // (§15 D810).
+        // Cloned out and answered after the card: a retry runs a whole migration, which
+        // must not happen inside a paint.
         let stranded = self.stranded.clone();
         let mut retry = false;
 
@@ -3909,13 +3717,11 @@ impl OndinApp {
                 decision = Some(settings::Decision::Cancel);
             }
 
-            // --- storage ---------------------------------------------------
             ui.add_space(settings::TITLE_GAP - settings::SECTION_AIR);
             settings::section(ui, "Storage");
             field_label(ui, "Base folder");
-            // The button is allocated first, in a right-to-left row, so the field
-            // takes the rest (`picker_row`'s shape). Disabled while the typed path is
-            // not an existing folder, which is only while a new path is being typed.
+            // The button is allocated first, in a right-to-left row, so the field takes
+            // the rest (`picker_row`'s shape). Disabled while the typed path is no folder.
             let open_dir = PathBuf::from(d.base_folder.trim());
             let can_open = !d.base_folder.trim().is_empty() && open_dir.is_dir();
             ui.horizontal(|ui| {
@@ -3943,8 +3749,8 @@ impl OndinApp {
                     );
                 });
             });
-            // The migrate switch exists only once the path has changed, and its caption
-            // changes with it so *off* is not left unstated.
+            // The migrate switch exists only once the path has changed; its caption
+            // changes with it so *off* is stated.
             if d.base_folder.trim() != resolved_now && !d.base_folder.trim().is_empty() {
                 ui.add_space(settings::ROW_GAP);
                 if ui::switch_row(
@@ -3968,9 +3774,8 @@ impl OndinApp {
                 );
             }
 
-            // What the last migration left behind (§15 D810): named files and the
-            // folder, which a status line cannot hold. Below the switch, which is
-            // about the next move.
+            // What the last migration left behind: named files and the folder, which a
+            // status line cannot hold. Below the switch, which is about the next move.
             if let Some(report) = &stranded {
                 ui.add_space(settings::ROW_GAP);
                 warn_caption(
@@ -4010,9 +3815,8 @@ impl OndinApp {
             }
 
             ui.add_space(settings::ROW_GAP);
-            // The label sits inside the field in a two-column row, as
-            // `settings::nudge_field` does; *Base folder* keeps its caption because
-            // a path has no width to give a prefix.
+            // The label sits inside the field in a two-column row, as `settings::nudge_field`
+            // does; *Base folder* keeps a caption because a path has no width for a prefix.
             let half = egui::vec2(
                 (ui.available_width() - settings::COL_GAP) / 2.0,
                 settings::FIELD_H,
@@ -4047,7 +3851,6 @@ impl OndinApp {
                 d.version_history = !d.version_history;
             }
 
-            // --- library ---------------------------------------------------
             settings::section(ui, "Library");
             picker_row(
                 ui,
@@ -4055,9 +3858,8 @@ impl OndinApp {
                 "default-page",
                 d.default_page.label(),
                 |ui| {
-                    // Only the three that always exist: not *Trash* (a strange way
-                    // to start), a project (it can be deleted between launches,
-                    // `Nav::from_id`) or *Kits* (§15 D1017).
+                    // Only the three that always exist: not *Trash*, a project (it can be
+                    // deleted between launches, `Nav::from_id`) or *Kits*.
                     for nav in [Nav::Recent, Nav::All, Nav::Starred] {
                         let label = nav.label();
                         ui.selectable_value(&mut d.default_page, nav, label);
@@ -4088,7 +3890,6 @@ impl OndinApp {
                 },
             );
 
-            // --- general ---------------------------------------------------
             settings::section(ui, "General");
             if ui::switch_row(
                 ui,
@@ -4101,7 +3902,6 @@ impl OndinApp {
                 d.reopen_last = !d.reopen_last;
             }
 
-            // --- footer ----------------------------------------------------
             if let Some(x) = settings::modal_footer(ui, "Save changes", d != saved) {
                 decision = Some(x);
             }
@@ -4121,8 +3921,8 @@ impl OndinApp {
             // Still open: keep whatever was typed into it this frame.
             None => self.library_settings = Some(d),
         }
-        // After the match, so a retry cannot race a Save that re-points the library
-        // (§15 D810). Cancel leaves the report standing.
+        // After the match, so a retry cannot race a Save that re-points the library.
+        // Cancel leaves the report standing.
         if retry {
             self.retry_migration();
         }
@@ -4133,7 +3933,7 @@ impl OndinApp {
     /// Without this `session.path` still names the abandoned folder and the next
     /// save forks the document under one `meta.id`. The path is looked up in the
     /// map, not re-joined under the new root, as `relocate` renames into a
-    /// collision. `prefs.last_document` travels with it. Shared by the retry (§15 D810).
+    /// collision. `prefs.last_document` travels with it. Shared by the retry.
     fn follow_moved_documents(&mut self, moved: &crate::library::relocate::Moved) {
         for path in [self.session.path.clone(), self.prefs.last_document.clone()]
             .into_iter()
@@ -4151,19 +3951,17 @@ impl OndinApp {
         }
     }
 
-    /// Run the stranded half of the last migration again (§15 D810).
+    /// Run the stranded half of the last migration again.
     ///
     /// Not idempotent and need not be: a successful move deletes its source, so the
-    /// walk meets only what was left behind, and a name taken at the destination
-    /// stays stranded. It owes `follow_moved_documents`, a `refresh` and the same
-    /// `disk_settle` as the first run.
+    /// walk meets only what was left behind. It owes `follow_moved_documents`, a
+    /// `refresh` and the same `disk_settle` as the first run.
     ///
-    /// Three refusals, each keeping the report (§15 D846, D848): the report is
-    /// answerable only against the library it was made for; an unreachable old
-    /// folder is not an empty one (`relocate` says "Nothing to move" for a missing
-    /// source); and an unreachable library folder would make `relocate` record the
-    /// root itself as the one failure and resurrect an offline library
-    /// (`Library::may_write`).
+    /// Three refusals, each keeping the report: the report is answerable only against
+    /// the library it was made for; an unreachable old folder is not an empty one
+    /// (`relocate` says "Nothing to move" for a missing source); and an unreachable
+    /// library folder would make `relocate` record the root itself as the one
+    /// failure and resurrect an offline library (`Library::may_write`).
     pub(crate) fn retry_migration(&mut self) {
         let Some(stranded) = self.stranded.clone() else {
             return;
@@ -4223,9 +4021,8 @@ impl OndinApp {
         };
         let new_root =
             crate::library::root(requested.as_deref()).unwrap_or_else(|| self.library.root.clone());
-        // The folder is made first and its failure refuses the change (§15 D700): a
-        // path naming an existing file must be adopted neither by the migration nor
-        // by `prefs.base_folder`. The reason the call exists is below.
+        // The folder is made first and its failure refuses the change: a path naming an
+        // existing file must be adopted neither by the migration nor by `prefs.base_folder`.
         let creatable = new_root == self.library.root || std::fs::create_dir_all(&new_root).is_ok();
         if !creatable {
             // Only the base folder is refused; the other settings were applied above.
@@ -4237,54 +4034,43 @@ impl OndinApp {
         } else if new_root != self.library.root {
             let old_root = self.library.root.clone();
             self.prefs.base_folder = requested;
-            // The in-memory textures go: they are for documents no longer on screen.
-            // `clear` ends the cover renderer, a second worker aimed at the old
-            // root, so it runs before the migration and cancels rather than waits
-            // (§15 D845): a job queued before the move would cache `Unreadable`
-            // for a healthy moved document. `Covers::clear` documents what happens
-            // to the disk cache (§15 D708).
+            // `clear` ends the cover renderer, a second worker aimed at the old root, so
+            // it runs before the migration and cancels rather than waits: a job queued
+            // before the move would cache `Unreadable` for a healthy moved document.
             self.covers.clear();
             if d.migrate {
-                // The snapshot writer is drained before the folder moves:
-                // `relocate` carries `.recovery/` across on this thread, and a
-                // write in flight to the old root would be copied then deleted.
+                // Drain the snapshot writer first: `relocate` carries `.recovery/` across,
+                // and a write in flight to the old root would be copied then deleted.
                 self.disk_settle();
                 let moved = crate::library::relocate::relocate(&old_root, &new_root);
-                // See [`OndinApp::follow_moved_documents`] (§15 D810).
                 self.follow_moved_documents(&moved);
                 self.session.info(moved.summary());
-                // Kept as a list, which the one-sentence status line cannot hold
-                // (§15 D810); assigned in both directions so a clean migration
-                // clears a previous report.
+                // Kept as a list, which the status line cannot hold; assigned both ways
+                // so a clean migration clears a previous report.
                 self.stranded = (!moved.failed.is_empty()).then(|| Stranded {
                     from: old_root.clone(),
                     to: new_root.clone(),
                     failed: moved.failed.clone(),
                 });
             } else {
-                // A change that does not migrate clears the report too (§15 D846), or
-                // *Try again* would relocate into a folder that is no longer the library.
+                // A change that does not migrate clears the report too, or *Try again*
+                // would relocate into a folder that is no longer the library.
                 self.stranded = None;
             }
-            // The folder is created at all because `Library::root_unavailable` is
-            // "could not be listed and this machine has documents recorded", and the
-            // index is keyed by document id, so a new root that does not exist yet
-            // would be a library the app refuses to write into, permanently (§15 D700).
-            // `relocate` does this for itself.
+            // The folder is created because `Library::root_unavailable` is "could not be
+            // listed and this machine has documents recorded", so a new root that does
+            // not exist yet would be a library the app refuses to write into.
             //
-            // Re-opened rather than refreshed: `Library` caches its root. The
-            // per-machine index is handed across rather than re-read (§15 D848),
-            // bar the exceptions `Library::open_with_index` names.
+            // Re-opened rather than refreshed: `Library` caches its root. The per-machine
+            // index is handed across, bar the exceptions `Library::open_with_index` names.
             let local = std::mem::take(&mut self.library.local);
             self.library = crate::library::state::Library::open_with_index(new_root, local);
             // A nav naming a project of the old library names nothing in the new one.
             self.dash.nav = Nav::from_id(&self.prefs.dashboard_page);
         }
         self.prefs.save();
-        // The retention window may have just shrunk; sweeping makes it take effect now
-        // (`OndinApp::open_at_launch` also sweeps, §15 D550).
+        // The retention window may have just shrunk; sweeping applies it now.
         crate::library::store::purge_trash(&self.library.root, self.prefs.trash_keep_days);
-        // The sweep changed the trash, so the sidebar's count is re-read (§15 D728).
         self.library.refresh_trash();
     }
 
@@ -4292,24 +4078,20 @@ impl OndinApp {
         let Some(path) = self.dash.deleting.clone() else {
             return;
         };
-        // In the trash the fallback is the only branch: `entry_at` searches the
-        // library, and re-reading `.trash` is not allowed inside a layout, so the
-        // name comes off the path.
+        // In the trash the fallback is the only branch: `entry_at` searches the library,
+        // and re-reading `.trash` is not allowed inside a layout.
         let name = self
             .library
             .entry_at(&path)
             .map(|e| e.display_name())
             .or_else(|| {
-                // Through `scan::display_name`, the one stem-to-name function.
                 path.file_stem()
                     .and_then(|s| s.to_str())
                     .map(|stem| crate::library::scan::display_name(&Default::default(), stem))
             })
             .unwrap_or_else(|| "this file".into());
         let mut decision: Option<bool> = None;
-        // In the trash `Act::Trash` deletes outright, so the copy must not say
-        // "moves to Trash"; the `Delete` key reaches this state (see
-        // [`OndinApp::dashboard_keys`]).
+        // In the trash `Act::Trash` deletes outright, so the copy must not say "moves to Trash".
         let purge = self.dash.nav == Nav::Trash;
         let modal = settings::card("delete-file", ctx, |ui| {
             ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
@@ -4354,11 +4136,7 @@ impl OndinApp {
 /// Where an arrow key moves the selection: the new index, or `None` for a key
 /// this view does not move on.
 ///
-/// A free function so the keymap's arithmetic is testable (§15 D269);
-/// [`OndinApp::dashboard_keys`] is then only guards and a path lookup.
-///
-/// Linear order: the grid wraps at the ends of its rows, `Right` from a row's last
-/// card being the next row's first. Out of range clamps rather than refusing, as
+/// Linear order: the grid wraps at the ends of its rows. Out of range clamps, as
 /// Explorer does, so `Down` toward a short last row lands on its last card; `Down`
 /// on the last row and `Up` on the first still return `Some`, which is why the
 /// caller sets rather than toggles. `Left`/`Right` are dead in the list view.
@@ -4372,7 +4150,7 @@ fn arrow_target(
     if len == 0 {
         return None;
     }
-    // The caller passes the grid's column count (§15 D964); `0` is one.
+    // The caller passes the grid's column count; `0` is one.
     let cols = if list_view { 1 } else { grid_cols.max(1) } as isize;
     let step = match key {
         egui::Key::ArrowLeft if !list_view => -1,
@@ -4391,11 +4169,9 @@ fn arrow_target(
 
 /// The small grey word above a field — *Project name*, *Base folder*, *Autosave*.
 ///
-/// A caption over the field, as the design draws every one of these; unlike the
-/// nudge pair, whose two-character labels fit a [`ui::value_field`] prefix.
-///
-/// Allocated at exactly the galley's height for `settings::section`'s reason: a
-/// `ui.horizontal` would add `interact_size.y` slack above and below.
+/// A caption over the field, unlike the nudge pair, whose two-character labels fit a
+/// [`ui::value_field`] prefix. Allocated at exactly the galley's height for
+/// `settings::section`'s reason: a `ui.horizontal` would add `interact_size.y` slack.
 fn field_label(ui: &mut egui::Ui, text: &str) {
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), FIELD_LABEL_H),
@@ -4414,11 +4190,10 @@ fn field_label(ui: &mut egui::Ui, text: &str) {
 /// A Settings row that is a *choice*: the question on the left, a dropdown against
 /// the right margin.
 ///
-/// The combo is allocated before the label (the nesting makes that so): a
-/// `ui.horizontal` centres each item against the row height known when it is
-/// placed, as in `settings::font_cache_row`. The combo owes the usual two
-/// corrections: [`ui::combo_chevron`] for egui's triangle and `interact_size.y`
-/// forced to the field height.
+/// The combo is allocated before the label (a `ui.horizontal` centres each item
+/// against the height known when it is placed) and owes the usual two corrections:
+/// [`ui::combo_chevron`] for egui's triangle and `interact_size.y` forced to the
+/// field height.
 fn picker_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -4497,12 +4272,10 @@ fn warn_caption(ui: &mut egui::Ui, text: &str) {
 /// What an import says when it is done: how many landed, how many could not be
 /// read, and how many were not documents at all.
 ///
-/// One function because the status is a single slot, so the dialog's import and
-/// the drop's import cannot each say half. `skipped` (non-documents, always 0 from
-/// the dialog) and `already` (files already in the library, §15 D693) are reported
-/// even when everything else went well, and the `(0, 0)` arm states only what it
-/// knows. A free function so `an_import_says_what_it_took_and_what_it_left` can
-/// check the sentences without an app.
+/// One function because the status is a single slot, so the dialog's import and the
+/// drop's cannot each say half. `skipped` (non-documents, always 0 from the dialog)
+/// and `already` (files already in the library) are reported even when everything
+/// else went well, and the `(0, 0)` arm states only what it knows.
 fn import_summary(ok: usize, failed: usize, skipped: usize, already: usize) -> String {
     let mut rest = String::new();
     if already > 0 {
@@ -4537,8 +4310,8 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
 /// The sidebar's *Archived projects* heading: a caret, the words, and how many.
 /// Returns whether it was clicked.
 ///
-/// The whole row is the control (the group has no rows to click while shut); it is
-/// deliberately not a [`section_label`] with additions, since that one is inert.
+/// The whole row is the control; it is not a [`section_label`] with additions, since
+/// that one is inert.
 fn archived_header(ui: &mut egui::Ui, open: bool, count: usize) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::click());
@@ -4592,8 +4365,7 @@ const GHOST_R: f32 = 9.0;
 ///
 /// The first cell takes a column at full height; the rest fill the following
 /// columns two at a time, top then bottom; a column holding only one cell runs full
-/// height. All columns are equal width. A free function so it can be asserted
-/// without a frame.
+/// height. All columns are equal width.
 fn mosaic_cells(n: usize, rect: egui::Rect) -> Vec<egui::Rect> {
     if n == 0 {
         return Vec::new();
@@ -4623,10 +4395,9 @@ fn mosaic_cells(n: usize, rect: egui::Rect) -> Vec<egui::Rect> {
 
 /// The outline of a rounded rectangle as a closed polyline, for dashing along.
 ///
-/// `per_corner` is how many segments each quarter-turn is sampled at. The straight
-/// edges are implicit between consecutive points; the first point is repeated at the
-/// end to close the polyline. `Shape::dashed_line` carries its dash phase across the
-/// whole polyline, which this relies on.
+/// `per_corner` is how many segments each quarter-turn is sampled at; the first point
+/// is repeated at the end to close it. `Shape::dashed_line` carries its dash phase
+/// across the whole polyline, which this relies on.
 fn rounded_rect_path(rect: egui::Rect, r: f32, per_corner: usize) -> Vec<egui::Pos2> {
     use std::f32::consts::{FRAC_PI_2, PI};
     let r = r.min(rect.width() / 2.0).min(rect.height() / 2.0);
@@ -4644,7 +4415,6 @@ fn rounded_rect_path(rect: egui::Rect, r: f32, per_corner: usize) -> Vec<egui::P
             pts.push(centre + egui::vec2(a.cos(), a.sin()) * r);
         }
     }
-    // The last arc only approximates the first point, so this is a real closure.
     pts.push(pts[0]);
     pts
 }
@@ -4656,7 +4426,6 @@ fn rounded_rect_path(rect: egui::Rect, r: f32, per_corner: usize) -> Vec<egui::P
 /// [`STAR_ROUND`] fillets every vertex so no needle remains at 15pt.
 fn star_shape(centre: egui::Pos2, r: f32, fill: egui::Color32) -> egui::Shape {
     const POINTS: usize = 5;
-    // The ten corners, before any of them is rounded.
     let corner = |i: usize| {
         let radius = if i.is_multiple_of(2) {
             r
@@ -4692,9 +4461,8 @@ fn star_shape(centre: egui::Pos2, r: f32, fill: egui::Color32) -> egui::Shape {
 /// *Delete project* — an icon button; its click removes something with no trash.
 ///
 /// The tooltip is attached here so a caller cannot drop it: it is the only thing
-/// saying *project* rather than *file*. The face is [`ui::button_face`]'s, and the
-/// hover repaints a [`color::DANGER`] wash between face and glyph, rounded to
-/// [`ui::BUTTON_R`].
+/// saying *project* rather than *file*. The face is [`ui::button_face`]'s, with a
+/// [`color::DANGER`] hover wash between face and glyph, rounded to [`ui::BUTTON_R`].
 fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
     let (rect, resp, fg) =
         ui::button_face(ui, egui::vec2(DELETE_W, HEADER_CONTROL_H), FieldButton::Off);
@@ -4720,17 +4488,13 @@ fn delete_project_button(ui: &mut egui::Ui) -> egui::Response {
     resp.on_hover_text("Delete project")
 }
 
-/// The pill a [`Mark`] wears on a card or row (§15 D375). Returns the rect it took,
-/// so a caller can lay the rest of a row out after it.
-///
-/// A drawn pill rather than a tooltip: it must be visible while scanning cards that
-/// look identical. Colour and label both come from the mark.
+/// The pill a [`Mark`] wears on a card or row, drawn rather than a tooltip so it is
+/// visible while scanning. Returns the rect it took, for laying the row out after it.
 fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> egui::Rect {
     let rect = align.anchor_size(at, mark_chip_size(ui, mark));
     let color = mark.color();
     let p = ui.painter();
-    // The black pass first: on a card this sits over arbitrary artwork, where a
-    // translucent tint alone could vanish.
+    // The black pass first: over arbitrary artwork a translucent tint alone could vanish.
     p.rect_filled(
         rect,
         egui::CornerRadius::same(4),
@@ -4752,7 +4516,7 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
 }
 
 /// Whether a library file is a kit that is sharing — the *Kits* filter's and the
-/// file menu's question (§15 D1017). A mark that stopped sharing is not one, nor is
+/// file menu's question. A mark that stopped sharing is not one, nor is
 /// a conflict copy unless it is the kit's only file left.
 fn is_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
     marks_kit(entry) && stands_for_its_kit(lib, entry)
@@ -4820,9 +4584,8 @@ fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
 pub(crate) enum Mark {
     /// This build cannot load the file.
     ///
-    /// The card's *Open* stays live over this mark (§15 D818): the file is often
-    /// merely written by a newer build, so the mark warns and the click is still
-    /// the user's.
+    /// The card's *Open* stays live over this mark: the file is often merely written
+    /// by a newer build, so the mark warns and the click is still the user's.
     Unreadable,
     /// A sync client's copy.
     Conflict,
@@ -4850,8 +4613,7 @@ const MARK_PT: f32 = 8.5;
 
 /// How much room [`mark_chip`] needs.
 ///
-/// Measured per mark rather than a constant: the list view takes it out of the
-/// *Name* column before eliding, and the labels differ in length.
+/// Measured per mark: the list view takes it out of the *Name* column before eliding.
 fn mark_chip_size(ui: &egui::Ui, mark: Mark) -> egui::Vec2 {
     ui.ctx()
         .fonts_mut(|f| {
@@ -4869,7 +4631,7 @@ fn mark_chip_size(ui: &egui::Ui, mark: Mark) -> egui::Vec2 {
 /// accent on a malformed value (the file is hand-editable).
 ///
 /// The guard checks bytes are hex digits, not only length, so a non-ASCII value
-/// cannot reach the parse; the `Err` arm is the same fallback should it loosen.
+/// cannot reach the parse.
 fn swatch(hex: &str) -> egui::Color32 {
     let h = hex.trim_start_matches('#');
     if h.len() != 6 || !h.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -4960,9 +4722,9 @@ mod tests {
         (app, root)
     }
 
-    /// The colour of the library's status dot this frame, or `None` when the top
-    /// bar painted none. Found by radius rather than position; a tooltip's text never
-    /// reaches `.shapes`, so the wording is asserted via `session.status().text`.
+    /// The colour of the library's status dot this frame, or `None` when the top bar
+    /// painted none. Found by radius; a tooltip never reaches `.shapes`, so wording
+    /// is asserted via `session.status().text`.
     fn status_dot_color(app: &mut OndinApp, ctx: &egui::Context) -> Option<egui::Color32> {
         fn walk(s: &egui::Shape, out: &mut Vec<egui::Color32>) {
             match s {
@@ -5081,8 +4843,7 @@ mod tests {
         for _ in 1..4 {
             full = ctx.run_ui(input.clone(), |ui| app.dashboard_ui(ui));
         }
-        // The card is the rect containing its first eyebrow (the dashboard still
-        // paints behind the backdrop, and no rect is `CARD_W` wide).
+        // The card is the rect containing its first eyebrow; the dashboard still paints behind.
         let eyebrow = full
             .shapes
             .iter()
@@ -5122,8 +4883,7 @@ mod tests {
             column, 338.0,
             "376 across, less 18 of padding and a hairline"
         );
-        // Painted after the card as well as inside it: paint order separates the
-        // modal's own text from the empty state behind it.
+        // Paint order separates the modal's own text from the empty state behind it.
         for cs in full.shapes.iter().skip(card_at + 1) {
             let egui::Shape::Text(t) = &cs.shape else {
                 continue;
@@ -5306,7 +5066,6 @@ mod tests {
             "a filter with no control on screen selects nothing"
         );
 
-        // A stale project id is cleared by the control when drawn.
         app.dash.nav = Nav::All;
         app.library.projects.projects.clear();
         app.library.refresh();
@@ -5351,13 +5110,11 @@ mod tests {
         pos + size / 2.0
     }
 
-    /// A click that dismisses a floating library menu (⋮ popup, project dropdown,
-    /// and every other click site) is spent doing so and opens/creates/navigates
-    /// nothing; the menu still closes, and the same clicks work with no menu up.
-    /// flip: remove the `menu_was_up` early return from `pick_or_open` → fails at the
-    /// first "must not have opened" assertion; replacing `menu_was_up` with
-    /// `library_menu_open()` fails there too (the live flag is already closed for
-    /// cards drawn after the anchor).
+    /// A click that dismisses a floating library menu (⋮ popup, project dropdown) at
+    /// any click site is spent doing so; the menu closes, and the same clicks work
+    /// with no menu up. flip: remove the `menu_was_up` early return from
+    /// `pick_or_open` → fails at the first "must not have opened" assertion;
+    /// `library_menu_open()` in its place fails there too.
     #[test]
     fn a_click_that_dismisses_a_library_menu_does_not_also_open_a_document() {
         let ctx = egui::Context::default();
@@ -5399,8 +5156,7 @@ mod tests {
              route out of it"
         );
 
-        // The *All projects ⌄* dropdown, the same way. A project must exist first:
-        // `project_filter` returns early and clears `filter_open` without one.
+        // The *All projects ⌄* dropdown; `project_filter` clears `filter_open` without a project.
         app.library
             .projects
             .projects
@@ -5429,9 +5185,8 @@ mod tests {
         );
         assert!(!app.dash.filter_open, "and it closed too");
 
-        // The dashed *New file* card and the sidebar rows are further click sites.
-        // The menu anchor must be a document shown on this nav, or `menu_for` is
-        // never drawn nor dismissed, so file Charlie in Kestrel.
+        // The menu anchor must be shown on this nav, or `menu_for` is never drawn nor
+        // dismissed, so file Charlie in Kestrel.
         let mut charlie_doc = ondin_core::Document::new(app.session.ids.mint());
         let kestrel = app.library.projects.get("p-1").cloned().unwrap();
         let charlie =
@@ -5450,7 +5205,6 @@ mod tests {
         );
         assert!(app.dash.menu_for.is_none(), "and the menu still closed");
 
-        // And the sidebar: a dismissing click on a project row must not re-nav.
         app.dash.nav = Nav::All;
         let row = card_centre(&mut app, &ctx, "Kestrel");
         app.dash.menu_for = Some(alpha.clone());
@@ -5611,7 +5365,6 @@ mod tests {
             "and picks nothing out on the way: the outline is the keyboard's now"
         );
 
-        // Back to the library, and the keyboard cursor from there.
         app.go_to_dashboard();
         press(&mut app, &ctx, egui::Key::ArrowRight);
         assert_eq!(
@@ -5628,7 +5381,6 @@ mod tests {
             "and a click on nothing puts it back"
         );
 
-        // A cursor whose file has gone is cleared by the next frame that draws.
         app.dash.selected = Some(path.clone());
         std::fs::remove_file(&path).unwrap();
         app.library.refresh();
@@ -5679,7 +5431,6 @@ mod tests {
             "a document dropped on the library is filed in it"
         );
 
-        // Anything that is not a document is refused, and the library is untouched.
         let png = outside.join("picture.png");
         std::fs::write(&png, [0u8; 8]).unwrap();
         drop(&mut app, &png);
@@ -5688,8 +5439,7 @@ mod tests {
             1,
             "an image is not a document — the library takes .ondin files"
         );
-        // The dot is the surface and the slot is the wording; the tooltip joining
-        // them is unassertable.
+        // The dot is the surface and the slot is the wording.
         assert!(
             status_dot_color(&mut app, &ctx).is_some(),
             "the bar is marked"
@@ -5700,7 +5450,6 @@ mod tests {
             app.session.status().text
         );
 
-        // The mixed drop: one sentence carries both facts.
         let mut second = ondin_core::Document::new(app.session.ids.mint());
         let source2 = store::file_document(&outside, None, "Also dropped", &mut second).unwrap();
         let input = egui::RawInput {
@@ -5723,8 +5472,7 @@ mod tests {
             2,
             "the document in the pile lands"
         );
-        // Surface asserted separately from the field: deleting the status call from
-        // the top bar fails the first assertion below, not the second.
+        // Surface asserted apart from the field: no status call in the top bar fails the first.
         assert!(
             status_dot_color(&mut app, &ctx).is_some(),
             "the bar is marked"
@@ -5741,7 +5489,7 @@ mod tests {
     }
 
     /// The import summary's arms, one sentence each; the refusal clauses survive the
-    /// happy arms and the `(0, 0)` arm names no reason it was not given. flip: move
+    /// happy arms. flip: move
     /// `rest` into the `(0, 0)` arm only → the second, fourth and sixth fail.
     #[test]
     fn an_import_says_what_it_took_and_what_it_left() {
@@ -5795,7 +5543,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(&outside).unwrap();
 
-        // Two documents filed *into* the library, and one left outside it.
         let mut a = ondin_core::Document::new(app.session.ids.mint());
         let inside_a = store::file_document(&root, None, "Already A", &mut a).unwrap();
         let mut b = ondin_core::Document::new(app.session.ids.mint());
@@ -5867,8 +5614,7 @@ mod tests {
             "the settings that were not about the folder still applied"
         );
 
-        // The dot is the surface and the slot is the wording (a tooltip never
-        // reaches `.shapes`).
+        // The dot is the surface and the slot is the wording.
         assert!(
             status_dot_color(&mut app, &ctx).is_some(),
             "the bar is marked"
@@ -5883,8 +5629,8 @@ mod tests {
     }
 
     /// A partly-failed migration names every file it left behind on screen, and the
-    /// retry finishes the job. The failure is arranged by a file where a project
-    /// folder must go; the loose document is the control. flip: drop the
+    /// retry finishes the job (a file where a project folder must go; the loose
+    /// document is the control). flip: drop the
     /// `self.stranded = …` assignment in `apply_library_settings` → fails at "the
     /// migration left a report"; drop `self.library.refresh()` from
     /// `retry_migration` → fails at the `library.entries` assertion.
@@ -5919,7 +5665,6 @@ mod tests {
         let mut loose = ondin_core::Document::new(ondin_core::IdSource::new(0xD0D).mint());
         crate::library::store::file_document(&from, None, "Loose sketch", &mut loose).unwrap();
 
-        // The obstruction: a file where the project folder has to be.
         let blocker = to.join("kestrel");
         std::fs::write(&blocker, b"not a directory").unwrap();
 
@@ -5941,7 +5686,6 @@ mod tests {
             "control: the rest of the migration ran"
         );
 
-        // The modal is where the report is readable.
         app.library_settings = Some(LibrarySettings::from_prefs(&app.prefs, &app.library.root));
         let shown = galleys(&mut app, &ctx);
         let text = |needle: &str| shown.iter().any(|(_, _, t)| t.contains(needle));
@@ -5957,7 +5701,6 @@ mod tests {
         );
         assert!(text("Try again"), "and offers to run it again");
 
-        // Clear the obstruction and take the offer.
         std::fs::remove_file(&blocker).unwrap();
         app.retry_migration();
 
@@ -6014,7 +5757,6 @@ mod tests {
         }
         let (report, _) = planted_report(&root.join("old"), &root);
 
-        // A clean migration.
         app.stranded = Some(report.clone());
         let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
         d.base_folder = elsewhere.display().to_string();
@@ -6028,7 +5770,6 @@ mod tests {
             app.stranded
         );
 
-        // A change that moves nothing.
         app.stranded = Some(report);
         let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
         d.base_folder = third.display().to_string();
@@ -6214,8 +5955,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Drive one bare key press through one frame of the dashboard (a key is read on
-    /// the frame it arrives, unlike a click).
+    /// Drive one bare key press through one frame of the dashboard.
     fn press(app: &mut OndinApp, ctx: &egui::Context, key: egui::Key) {
         press_with(app, ctx, key, Default::default());
     }
@@ -6287,7 +6027,7 @@ mod tests {
             "a full-width row has nothing beside it"
         );
         assert_eq!(l(Some(2), ArrowRight), None);
-        // The caller indexes `entries`, so `None` on an empty list prevents a panic.
+        // The caller indexes `entries`: `None` on an empty list prevents a panic.
         assert_eq!(arrow_target(None, ArrowDown, false, 4, 0), None);
         assert_eq!(arrow_target(Some(0), ArrowUp, true, 4, 0), None);
     }
@@ -6329,7 +6069,6 @@ mod tests {
                 "and the row is filled exactly at {width}"
             );
         }
-        // Four cards at the ceiling and three gaps.
         let four = 4.0 * CARD_MAX_W + 3.0 * GRID_GAP;
         assert_eq!(grid_cols(four), 4, "exactly four at 300");
         assert_eq!(grid_cols(four + 1.0), 5, "one point more is a fifth column");
@@ -6340,9 +6079,8 @@ mod tests {
     /// Arrows move the selection, `Escape` puts it back, `Enter` opens it and `Delete`
     /// asks first — and none reaches the library while the search overlay, the file
     /// menu or the filter dropdown has the keyboard. Removing only the
-    /// `search.is_some()` guard stays green (focus settles inside the pass); the
-    /// dropdown assertions share one flip site: the guard back to
-    /// `menu_for.is_some()` → fails at "the filter dropdown is open".
+    /// `search.is_some()` guard stays green (focus settles inside the pass). flip:
+    /// the guard back to `menu_for.is_some()` → fails at "the filter dropdown is open".
     #[test]
     fn the_keyboard_moves_the_selection_opens_it_and_asks_before_deleting() {
         let ctx = egui::Context::default();
@@ -6409,7 +6147,7 @@ mod tests {
         );
         app.dash.search = None;
 
-        // The ⋮ popup blocks the keymap and takes Escape itself.
+        // The ⋮ popup blocks the keymap and takes Escape.
         app.dash.menu_for = Some(a.clone());
         press(&mut app, &ctx, egui::Key::ArrowDown);
         assert_eq!(
@@ -6419,9 +6157,8 @@ mod tests {
         press(&mut app, &ctx, egui::Key::Escape);
         assert_eq!(app.dash.menu_for, None, "and Escape shuts it");
 
-        // The *All projects ⌄* dropdown. `filter_open` is set directly before every
-        // press: with no project `project_filter` clears it, and the header clears it
-        // after `dashboard_keys` each frame.
+        // Set before every press: with no project `project_filter` clears `filter_open`,
+        // and the header clears it after `dashboard_keys` each frame.
         let open_dropdown = |app: &mut OndinApp| app.dash.filter_open = true;
 
         app.dash.selected = Some(a.clone());
@@ -6451,8 +6188,7 @@ mod tests {
     }
 
     /// `Ctrl+K` does not open the search from under a card that owns the keyboard
-    /// (*New project* and the rename field are asserted; the unguarded control still
-    /// opens it). flip: drop `library_keys_are_free()` from `search_field`'s `chord`
+    /// (*New project*, the rename field). flip: drop `library_keys_are_free()` from `search_field`'s `chord`
     /// → fails at the first assertion.
     #[test]
     fn ctrl_k_does_not_steal_the_caret_from_a_card_that_owns_the_keyboard() {
@@ -6534,10 +6270,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// `Escape` under the search overlay closes the overlay and nothing else (the
-    /// `search.is_some()` guard matters on the closing frame, where the field is not
-    /// drawn); bare `Escape` still clears the selection. flip: `key_pressed` in
-    /// place of `consume_key` → fails at the surviving-selection assertion.
+    /// `Escape` under the search overlay closes the overlay and nothing else; bare
+    /// `Escape` still clears the selection. flip: `key_pressed` in place of
+    /// `consume_key` → fails at the surviving-selection assertion.
     #[test]
     fn escape_closes_the_search_overlay_without_clearing_the_keyboard_cursor() {
         let ctx = egui::Context::default();
@@ -6769,8 +6504,8 @@ mod tests {
     }
 
     /// `Ctrl+N` files a new document in the project in front of you: the nav on the
-    /// dashboard (`OndinApp::nav_project`), the open document's project in the editor
-    /// (`OndinApp::open_document_project`). Asserted by where the file landed on disk.
+    /// dashboard, the open document's project in the editor. Asserted by where the
+    /// file landed on disk.
     #[test]
     fn ctrl_n_files_into_the_project_in_front_of_you() {
         let ctx = egui::Context::default();
@@ -6797,7 +6532,6 @@ mod tests {
         );
         assert_eq!(app.view, crate::app::View::Editor, "and it opens it");
 
-        // From the editor, with the nav deliberately pointing elsewhere.
         app.dash.nav = Nav::All;
         app.dispatch(&ctx, crate::input::Action::NewDocument);
         let second = app.session.path.clone().expect("a second document");
@@ -6808,7 +6542,6 @@ mod tests {
             "the open document's project, not the nav left behind on the dashboard"
         );
 
-        // A session whose document is not in the library files at the root.
         app.session.path = None;
         app.dispatch(&ctx, crate::input::Action::NewDocument);
         assert_eq!(
@@ -6820,9 +6553,8 @@ mod tests {
     }
 
     /// A sync client's copy wears the chip, in both views, and the document it
-    /// copied does not; chips are counted since both cards share a name. flip: drop
-    /// the `conflict` branch from `file_card` → the grid assertion fails (the list
-    /// draws from a different call site).
+    /// copied does not. flip: drop the `conflict` branch from `file_card` → the grid
+    /// assertion fails (the list draws from a different call site).
     #[test]
     fn a_conflict_copy_is_the_one_of_the_two_that_is_marked() {
         let ctx = egui::Context::default();
@@ -6859,9 +6591,8 @@ mod tests {
 
     /// A document written by a newer build (well-formed JSON the loader refuses)
     /// wears the *UNREADABLE* mark in both views, and the healthy one beside it does
-    /// not. The mark is learned when the cover renders, so one pass queues it and
-    /// `settle` waits. flip: drop `covers.unreadable` from `mark_of` → fails at 0
-    /// against 1.
+    /// not. The mark is learned when the cover renders. flip: drop
+    /// `covers.unreadable` from `mark_of` → fails at 0 against 1.
     #[test]
     fn a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not() {
         let ctx = egui::Context::default();
@@ -6941,7 +6672,6 @@ mod tests {
             "{asked} of 40 covers asked for with at most four rows on screen"
         );
 
-        // The arrows' path: select the last card and let the grid scroll to it.
         app.dash.selected = Some(last.path.clone());
         app.dash.scroll_to_selected = true;
         let _ = galleys(&mut app, &ctx);
@@ -7004,10 +6734,10 @@ mod tests {
     }
 
     /// The list view takes a cover's answer though no row asks for one: the
-    /// `Covers::pass` call at the top of `dashboard_ui` is the only taker. The ask is
-    /// `Covers::get` called directly, and the wait is a deadline, not `settle` (which
-    /// takes answers itself). flip: delete the `self.covers.pass(ui.ctx())` line →
-    /// fails at "a list frame took the answer no row asked for".
+    /// `Covers::pass` call at the top of `dashboard_ui` is the only taker. The wait
+    /// is a deadline, not `settle` (which takes answers itself). flip: delete the
+    /// `self.covers.pass(ui.ctx())` line → fails at "a list frame took the answer no
+    /// row asked for".
     #[test]
     fn the_list_view_takes_an_unreadable_answer_no_row_asks_for() {
         let ctx = egui::Context::default();
@@ -7068,9 +6798,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The cover pass runs once a frame, before any card asks; the frame's calls are
-    /// counted through `Covers::take_calls`, since nothing else differs until more
-    /// than `MAX_RESIDENT_COVERS` are resident. flip: move `self.covers.pass` below
+    /// The cover pass runs once a frame, before any card asks, counted through
+    /// `Covers::take_calls`. flip: move `self.covers.pass` below
     /// `library_settings_modal` → fails at "the pass runs before any card asks"; call
     /// it twice → fails at "one cover pass a frame".
     #[test]
@@ -7132,7 +6861,6 @@ mod tests {
             "a headless app's index is empty by construction, not by being cleared"
         );
 
-        // Blank first, so the guard is asserted against an empty list.
         app.remember_search("   ");
         assert!(list(&app).is_empty(), "a blank query is not a search");
 
@@ -7141,7 +6869,6 @@ mod tests {
         }
         assert_eq!(list(&app), vec!["gamma", "beta", "alpha"], "newest first");
 
-        // Searching something already there promotes it rather than repeating it.
         app.remember_search("alpha");
         assert_eq!(
             list(&app),
@@ -7149,7 +6876,6 @@ mod tests {
             "an old query moves to the front and is not duplicated"
         );
 
-        // The cap, asserted at its own boundary: five in, a sixth pushes one off.
         for q in ["d", "e", "f"] {
             app.remember_search(q);
         }
@@ -7169,7 +6895,6 @@ mod tests {
             "the list is what survives a restart, which is the whole point of it"
         );
 
-        // The rows reach the screen.
         app.dash.search = Some(String::new());
         let shown = galleys(&mut app, &ctx);
         for q in ["f", "e", "d", "alpha", "gamma"] {
@@ -7226,9 +6951,8 @@ mod tests {
     }
 
     /// The *Delete its N file(s) too* switch reads the way it acts: asserted through
-    /// `ui::switch_row_ink`, starting off (`keep_files: true`), with the file count in
-    /// the label (a zero count draws no row). flip: `!dp.keep_files` → `dp.keep_files`
-    /// → fails at the muted-ink assertion.
+    /// `ui::switch_row_ink`, starting off (`keep_files: true`). flip: `!dp.keep_files`
+    /// → `dp.keep_files` → fails at the muted-ink assertion.
     #[test]
     fn the_delete_project_switch_is_off_while_the_files_are_being_kept() {
         let ctx = egui::Context::default();
@@ -7262,7 +6986,6 @@ mod tests {
             "the row counts the project's own documents"
         );
 
-        // The label's colour is the switch's state, which is what the eye reads.
         let ink = |app: &mut OndinApp, ctx: &egui::Context| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
@@ -7338,9 +7061,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// `Enter` will not open a document in the trash. The double click is not driven
-    /// (egui's window is wall-clock); it shares `OndinApp::can_open` in `pick_or_open`.
-    /// flip: `can_open` returning `true` → fails at the second assertion.
+    /// `Enter` will not open a document in the trash (the click shares `can_open`, but
+    /// egui's double-click window is wall-clock). flip: `can_open` returning `true`
+    /// → fails at the second assertion.
     #[test]
     fn nothing_opens_a_document_out_of_the_trash() {
         let ctx = egui::Context::default();
@@ -7380,9 +7103,8 @@ mod tests {
     }
 
     /// *Delete* from the ⋮ menu raises the confirmation card and does not trash the
-    /// document; both the card and the untouched entry count are asserted. Driven
-    /// through the painted row. flip: `Act::Trash(path) if !trashed` → `if trashed`
-    /// → fails at the `deleting` assertion.
+    /// document. flip: `Act::Trash(path) if !trashed` → `if trashed` → fails at the
+    /// `deleting` assertion.
     #[test]
     fn delete_from_the_file_menu_raises_the_card_rather_than_trashing() {
         let ctx = egui::Context::default();
@@ -7418,9 +7140,8 @@ mod tests {
     }
 
     /// The ⋮ menu's rules: a trashed document gets two rows and neither is *Open*;
-    /// *Star*/*Unstar* follows `is_starred`; *Move to project* opens the sheet. The
-    /// ordinary menu's rows are asserted present first, since an absence only counts
-    /// beside the presence. flip: delete the `("Open", …)` row → fails at "the
+    /// *Star*/*Unstar* follows `is_starred`; *Move to project* opens the sheet.
+    /// flip: delete the `("Open", …)` row → fails at "the
     /// ordinary menu offers Open"; invert `if starred` → fails at the
     /// `menu_row_centre("Star")` lookup.
     #[test]
@@ -7433,7 +7154,6 @@ mod tests {
         app.library.refresh();
         app.dash.nav = Nav::All;
 
-        // The star label, both ways round.
         app.dash.menu_for = Some(path.clone());
         let star = menu_row_centre(&mut app, &ctx, "Star");
         click_at(&mut app, &ctx, star);
@@ -7442,7 +7162,6 @@ mod tests {
         app.dash.menu_for = Some(path.clone());
         let _ = menu_row_centre(&mut app, &ctx, "Unstar");
 
-        // *Move to project* opens the sheet instead of acting.
         app.dash.menu_for = Some(path.clone());
         let move_to = menu_row_centre(&mut app, &ctx, "Move to project");
         click_at(&mut app, &ctx, move_to);
@@ -7503,8 +7222,7 @@ mod tests {
     /// A project's grid ends in the dashed *New file* card, in the next cell of the
     /// last row, creating a document filed in that project; no other nav has one.
     /// flip: `file_grid` back to `entries.chunks(cols)` plus a trailing card → both
-    /// position assertions fail; the x is the stronger (the y threshold is
-    /// `CARD_THUMB_H`, and only by a small margin).
+    /// position assertions fail; the x is the stronger.
     #[test]
     fn a_project_grid_ends_in_a_new_file_card_and_nothing_else_does() {
         let ctx = egui::Context::default();
@@ -7594,7 +7312,6 @@ mod tests {
             "so the library's empty state does not also appear"
         );
 
-        // A nav holding an id `projects.json` no longer has.
         app.dash.nav = Nav::Project("0f9c2b7a4e".into());
         let runs = galleys(&mut app, &ctx);
         assert!(
@@ -7663,10 +7380,10 @@ mod tests {
     }
 
     /// The search dropdown answers the arrows and `Enter` takes the row they are on;
-    /// unsteered, `Enter` takes the first *document* match, not row zero (a project
-    /// sits above the files). flip: remove the file matches' `sort_entries` → fails
-    /// at "the most recently edited document is the one Enter opens". A plain
-    /// `key_pressed` for `consume_key` stays green (it only moves the caret; §15 D382).
+    /// unsteered, `Enter` takes the first *document* match, not row zero. flip: remove
+    /// the file matches' `sort_entries` → fails at "the most recently edited document
+    /// is the one Enter opens". A plain `key_pressed` for `consume_key` stays green
+    /// (it only moves the caret).
     #[test]
     fn the_search_arrows_move_the_highlight_and_enter_takes_the_row_it_is_on() {
         let ctx = egui::Context::default();
@@ -7679,7 +7396,6 @@ mod tests {
             paths.push(store::file_document(&root, None, name, &mut doc).unwrap());
         }
         app.library.refresh();
-        // One project row and two file rows, in that order.
         app.dash.search = Some("alp".into());
         let _ = galleys(&mut app, &ctx);
         assert_eq!(
@@ -7716,8 +7432,8 @@ mod tests {
             "a project row opens no document"
         );
 
-        // With nothing steered, Enter takes the most recently edited document. The
-        // stamps are set, since the two writes can land either side of a second.
+        // Unsteered, Enter takes the most recently edited document; stamps are set, as
+        // two writes can land either side of a second.
         let stamp = |path: &std::path::Path, secs: u64| {
             std::fs::File::options()
                 .write(true)
@@ -7763,9 +7479,9 @@ mod tests {
         let (mut app, root) = app(&ctx, "focus-ring");
         app.dash.new_project = Some(NewProject::default());
 
-        // Sixteen frames per call, events only on the first: the modal fades in, tinting
-        // the ring until settled (eight frames were not enough). Colour alone also
-        // matches the sidebar's *New file* hairline; `StrokeKind::Outside` separates them.
+        // Sixteen frames per call, events only on the first: the modal fades in, tinting the
+        // ring until settled. Colour alone also matches the sidebar's *New file*
+        // hairline; `StrokeKind::Outside` separates them.
         let rings = |app: &mut OndinApp, events: Vec<egui::Event>| {
             let mut events = Some(events);
             let mut out = 0;
@@ -7873,11 +7589,9 @@ mod tests {
         app.library.refresh();
     }
 
-    /// Moving the open document to another project survives the next save: the
-    /// session's own `Document` is told of the move, so the save does not write the
-    /// old project back. The save is the assertion. flip: drop the `patch` call from
-    /// `open_document_follows` → fails at "the file the move produced still belongs
-    /// to Atlas".
+    /// Moving the open document to another project survives the next save, which is
+    /// the assertion. flip: drop the `patch` call from `open_document_follows` →
+    /// fails at "the file the move produced still belongs to Atlas".
     #[test]
     fn moving_the_open_document_to_another_project_survives_the_next_save() {
         let ctx = egui::Context::default();
@@ -7890,7 +7604,6 @@ mod tests {
         let mut doc = ondin_core::Document::new(app.session.ids.mint());
         let path = store::file_document(&root, Some(&kestrel), "Landing v4", &mut doc).unwrap();
         app.library.refresh();
-        // Opened, so this is the *open* document rather than a card.
         app.session.adopt_document(doc, Some(path.clone()));
 
         app.dashboard_act(Act::MoveTo(path.clone(), Some("p-2".into())));
@@ -7901,7 +7614,6 @@ mod tests {
             .expect("the session follows its file");
         assert_ne!(moved, path, "the move really moved it");
 
-        // The user's next save.
         store::write_document(&moved, &app.session.doc).unwrap();
         app.library.refresh();
         assert_eq!(
@@ -7922,9 +7634,8 @@ mod tests {
 
     /// An archived project leaves the sidebar's *Projects* group for a collapsed
     /// group of its own, and leaves the body's project cards and the header's filter.
-    /// The absence is asserted beside the heading's presence and the reopened name.
-    /// flip: force the group open, or list every project in the sidebar → both fail at
-    /// the same absence assertion (indistinguishable).
+    /// flip: force the group open, or list every project in the sidebar → both fail
+    /// at the same absence assertion (indistinguishable).
     #[test]
     fn an_archived_project_leaves_the_lists_for_a_collapsed_group_of_its_own() {
         let ctx = egui::Context::default();
@@ -7990,7 +7701,6 @@ mod tests {
             "the row belongs to the archived group, not to the Projects list above it"
         );
 
-        // The filter is offered with one active project and not with none.
         app.dash.nav = Nav::All;
         assert!(
             app.filter_applies(),
@@ -8069,10 +7779,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Both floating menus draw their rows through the shared `anchored_menu` shell:
-    /// contents, not a count, are asserted. The filter half is a difference against
-    /// the closed state (the button and sidebar paint the same strings). flip: never
-    /// call `paint` → the file-menu assertions fail.
+    /// Both floating menus draw their rows through the shared `anchored_menu` shell;
+    /// the filter half is a difference against the closed state. flip: never call
+    /// `paint` → the file-menu assertions fail.
     #[test]
     fn both_library_menus_draw_their_rows_through_the_shared_shell() {
         let ctx = egui::Context::default();
@@ -8086,7 +7795,6 @@ mod tests {
             galleys(app, ctx).iter().filter(|(_, _, t)| t == of).count()
         };
 
-        // The filter dropdown, each row counted against the closed state.
         let shut = (
             times(&mut app, &ctx, ALL_PROJECTS),
             times(&mut app, &ctx, "Kestrel"),
@@ -8156,7 +7864,6 @@ mod tests {
              scan of the same folder in the same frame"
         );
 
-        // And it is invalidatable.
         app.library.refresh_trash();
         assert_eq!(
             app.nav_count(&Nav::Trash),
@@ -8165,12 +7872,9 @@ mod tests {
         );
     }
 
-    /// A card with nothing edited writes nothing and rescans nothing, so no spurious
-    /// "Could not write projects.json" appears; a changed card still writes.
-    /// `projects.json`'s mtime is the witness, backdated rather than compared within
-    /// a second. The button's `enabled` is not under test (Enter takes another door).
-    /// flip: disable `save_project`'s `differs_from` guard → fails at the first mtime
-    /// assertion.
+    /// A card with nothing edited writes nothing and rescans nothing; a changed card
+    /// still writes. `projects.json`'s mtime is the witness, backdated. flip: disable
+    /// `save_project`'s `differs_from` guard → fails at the first mtime assertion.
     #[test]
     fn a_card_with_nothing_edited_neither_writes_nor_rescans() {
         let ctx = egui::Context::default();
@@ -8214,7 +7918,6 @@ mod tests {
              being identical either way is exactly why the stamp is the witness"
         );
 
-        // Control: one character typed and the write happens.
         let before = backdate();
         let mut edited = EditProject::of(&stored);
         edited.name = "Kestrels".into();
@@ -8251,8 +7954,7 @@ mod tests {
                 !runs.iter().any(|(_, _, t)| t == "Edit project"),
                 "{nav:?} is not a project"
             );
-            // The trash glyph too, or the positive assertion below is satisfied by
-            // the sidebar.
+            // The trash glyph too, or the sidebar satisfies the positive assertion below.
             assert!(
                 !runs.iter().any(|(_, _, t)| t == icon::TRASH),
                 "{nav:?} has no project to delete either"
@@ -8320,7 +8022,6 @@ mod tests {
             "and the file followed it, which is what `store::rename` is for"
         );
 
-        // The other door: a click on the page background.
         let renamed = app
             .library
             .entries
@@ -8347,8 +8048,8 @@ mod tests {
     }
 
     /// The rename field draws where the name it replaces did, and leaves the card
-    /// beside it alone; the x assertion keeps the two insets from splitting. flip:
-    /// justify into the whole 20pt box instead of a one-row rect → fails the y
+    /// beside it alone. flip: justify into the whole 20pt box instead of a one-row
+    /// rect → fails the y
     /// assertion; go back to `Ui::put` → fails the neighbour assertion.
     #[test]
     fn the_rename_field_lands_on_the_name_and_moves_no_card() {
@@ -8398,8 +8099,7 @@ mod tests {
     /// *Recent* ignores the sort (and does not offer the control), hides projects
     /// with no files, and shows a duplicate made from that page. flip: show every
     /// active project → fails the *Field Notes* count; drop `mark_opened` on a
-    /// duplicate → fails the last assertion; exempting *Recent* from the sort needs
-    /// the hand-set opened times below.
+    /// duplicate → fails the last assertion.
     #[test]
     fn recent_obeys_the_sort_hides_empty_projects_and_shows_a_duplicate() {
         let ctx = egui::Context::default();
@@ -8490,17 +8190,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A save that fails on the way to the library does not block the walk (a
-    /// maintainer ruling) and is marked on the library's status surface. The
-    /// unwritable path is a directory, which fails on every platform. The recovery
-    /// snapshot is not asserted: this fixture never writes one.
+    /// A save that fails on the way to the library does not block the walk and is
+    /// marked on the library's status surface. The unwritable path is a directory,
+    /// which fails on every platform.
     #[test]
     fn a_failed_save_walks_to_the_library_and_is_marked_there() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let (mut app, root) = app(&ctx, "save-fail");
 
-        // A document whose path names a directory: unwritable.
         let doomed = root.join("not-a-file.ondin");
         std::fs::create_dir_all(&doomed).unwrap();
         app.session.path = Some(doomed.clone());
@@ -8534,10 +8232,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The header's controls change what you are looking at and no preference: the
-    /// sort button is clicked via its painted label, and `dashboard_page` and
-    /// `dashboard_sort` stay put (the first assertion proves the click landed).
-    /// flip: put `self.remember_dashboard()` back after the sort cycles → fails at
+    /// The header's controls change what you are looking at and no preference
+    /// (`dashboard_page` and `dashboard_sort` stay put). flip: put `self.remember_dashboard()` back after the sort cycles → fails at
     /// the page assertion.
     #[test]
     fn the_header_controls_do_not_write_the_default_page() {
@@ -8550,7 +8246,6 @@ mod tests {
         app.dash.nav = Nav::Trash;
         let was = app.dash.sort;
 
-        // The sort button wears the current sort's word.
         let at = {
             let runs = galleys(&mut app, &ctx);
             let label = was.label();
@@ -8671,7 +8366,7 @@ mod tests {
 
     /// *Make a kit* writes the mark; the *Kits* filter then lists it and the card
     /// wears the *Kit* chip; *Stop sharing as kit* asks first, and the confirmation
-    /// (not driven; `set_kit_at` is called) keeps the mark and version. flip: `is_kit`
+    /// (`set_kit_at` is called directly) keeps the mark and version. flip: `is_kit`
     /// answering for any mark → fails at "a mark that stopped sharing is not a kit";
     /// delete `file_menu_chose`'s `SetKit(_, false)` arm → fails at "the row opens the
     /// confirmation".
@@ -8885,7 +8580,6 @@ mod tests {
             "fixture: held"
         );
 
-        // Another writer's publish, on disk only.
         let mut newer = ondin_core::io::load(&std::fs::read(&atlas).unwrap()).unwrap();
         let mut meta = newer.meta().clone();
         meta.kit.as_mut().unwrap().version = 7;

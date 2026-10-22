@@ -20,7 +20,7 @@ use crate::renderer::{RenderOverrides, Viewport};
 use crate::scene::{self, ClipRule, ScenePainter, StrokePaint, TextRun};
 use kurbo::{Affine, BezPath, Rect, Stroke};
 use ondin_core::peniko::{
-    BlendMode, Brush as BackendBrush, Color, Compose, Fill as VelloFill, Mix,
+    BlendMode, Brush as BackendBrush, Color, Compose, Fill as VelloFill, ImageSampler, Mix,
 };
 use ondin_core::{Brush, Document, Effect, ImageId, Resolved};
 use rustc_hash::FxHashMap;
@@ -274,29 +274,34 @@ impl CpuPainter<'_> {
         }
     }
 
-    /// Sets the paint (solid, gradient or image) and its transform; returns
-    /// whether there is anything to paint. `false` means the brush resolved to
-    /// nothing (an image the store has no pixels for) and the caller skips the draw.
+    /// Sets the paint (solid, gradient or image) and its transform; returns the
+    /// opacity the draw owes as a layer ([`Self::painted`]), or `None` when the
+    /// brush resolved to nothing (an image the store has no pixels for) and the
+    /// caller skips the draw.
+    ///
+    /// An image's alpha comes back rather than going on the sampler: `vello_cpu`
+    /// panics on an image paint whose sampler alpha is not 1.
     ///
     /// The paint transform is context state here, unlike vello's, so it is set on
     /// every call: left standing, an image's framing would transform the next
     /// shape's gradient. It composes as `transform * paint_transform`, as in vello.
-    fn apply_paint(&mut self, brush: &Brush, framing: Option<ondin_core::Framing>) -> bool {
+    fn apply_paint(&mut self, brush: &Brush, framing: Option<ondin_core::Framing>) -> Option<f32> {
         // The image arm is taken from the model's brush, not the backend's: the
         // reference carries the id and adjustment the conversion memo is keyed on,
         // which the backend brush has dropped.
         if let Brush::Image(img) = brush {
-            let Some((source, to_source)) = self.image_source(&img.image) else {
-                return false;
-            };
+            let (source, to_source) = self.image_source(&img.image)?;
             self.ctx().set_paint_transform(
                 color::framed_transform(framing, to_source).unwrap_or(Affine::IDENTITY),
             );
             self.ctx().set_paint(CpuImage {
                 image: source,
-                sampler: color::framed_sampler(img.sampler, framing),
+                sampler: ImageSampler {
+                    alpha: 1.0,
+                    ..color::framed_sampler(img.sampler, framing)
+                },
             });
-            return true;
+            return Some(img.sampler.alpha);
         }
         // The transform is set from the answer rather than cleared: a gradient
         // carries its own (§15 D412) and a solid answers the identity.
@@ -314,9 +319,23 @@ impl CpuPainter<'_> {
             }
             // Unreachable (the image arm returned above); spelled out so that
             // changing either half stops compiling here.
-            Some((BackendBrush::Image(_), _)) | None => return false,
+            Some((BackendBrush::Image(_), _)) | None => return None,
         }
-        true
+        Some(1.0)
+    }
+
+    /// Run `draw` at `alpha`: directly when opaque, else inside an opacity layer,
+    /// which is how an image paint's alpha reaches the raster here.
+    fn painted(&mut self, alpha: f32, draw: impl FnOnce(&mut Self)) {
+        if alpha >= 1.0 {
+            draw(self);
+            return;
+        }
+        // Pushed and popped on the context directly, inside one draw: the walk's
+        // own layer bookkeeping (`opened_ordinary`) never sees it.
+        self.ctx().push_layer(None, None, Some(alpha), None, None);
+        draw(self);
+        self.ctx().pop_layer();
     }
 
     /// The premultiplied pixmap `r` paints from, built at most once per render,
@@ -360,9 +379,9 @@ impl ScenePainter for CpuPainter<'_> {
     ) {
         let base = self.base;
         self.ctx().set_transform(base * transform);
-        if !self.apply_paint(brush, framing) {
+        let Some(alpha) = self.apply_paint(brush, framing) else {
             return;
-        }
+        };
         // Set and restored around the one call: this context keeps the rule until
         // something changes it, and a fill left in even-odd would re-read every
         // later shape on this backend and not on the GPU one.
@@ -370,16 +389,16 @@ impl ScenePainter for CpuPainter<'_> {
             ClipRule::NonZero => VelloFill::NonZero,
             ClipRule::EvenOdd => VelloFill::EvenOdd,
         });
-        self.ctx().fill_path(path);
+        self.painted(alpha, |p| p.ctx().fill_path(path));
         self.ctx().set_fill_rule(VelloFill::NonZero);
     }
 
     fn stroke_path(&mut self, transform: Affine, path: &BezPath, stroke: &StrokePaint<'_>) {
         let base = self.base;
         self.ctx().set_transform(base * transform);
-        if !self.apply_paint(stroke.brush, stroke.framing) {
+        let Some(alpha) = self.apply_paint(stroke.brush, stroke.framing) else {
             return;
-        }
+        };
         let mut k = Stroke::new(stroke.width)
             .with_join(stroke.join)
             .with_caps(stroke.cap)
@@ -388,28 +407,30 @@ impl ScenePainter for CpuPainter<'_> {
             k = k.with_dashes(stroke.dash_offset, stroke.dashes.iter().copied());
         }
         self.ctx().set_stroke(k);
-        self.ctx().stroke_path(path);
+        self.painted(alpha, |p| p.ctx().stroke_path(path));
     }
 
     fn draw_text(&mut self, transform: Affine, run: &TextRun<'_>) {
         let base = self.base;
         self.ctx().set_transform(base * transform);
-        // The `false` return must be honoured: paint is context state, so ignoring
+        // The `None` return must be honoured: paint is context state, so ignoring
         // it would draw the text in whatever the last `set_paint` left (the previous
         // node's colour) rather than nothing (§15 D437, D179).
-        if !self.apply_paint(run.brush, run.framing) {
+        let Some(alpha) = self.apply_paint(run.brush, run.framing) else {
             return;
-        }
-        // Split: the glyph run needs the context and the resources at once.
-        let (ctx, resources) = self.split();
-        ctx.glyph_run(resources, run.font)
-            .font_size(run.font_size)
-            .normalized_coords(run.coords)
-            .fill_glyphs(run.glyphs.iter().map(|g| Glyph {
-                id: g.id,
-                x: g.x,
-                y: g.y,
-            }));
+        };
+        self.painted(alpha, |p| {
+            // Split: the glyph run needs the context and the resources at once.
+            let (ctx, resources) = p.split();
+            ctx.glyph_run(resources, run.font)
+                .font_size(run.font_size)
+                .normalized_coords(run.coords)
+                .fill_glyphs(run.glyphs.iter().map(|g| Glyph {
+                    id: g.id,
+                    x: g.x,
+                    y: g.y,
+                }));
+        });
     }
 
     fn push_layer(

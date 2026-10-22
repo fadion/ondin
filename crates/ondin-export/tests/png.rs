@@ -1113,6 +1113,46 @@ fn a_tiled_image_repeats_across_its_shape() {
     );
 }
 
+/// An image fill under 100% rasterizes at that alpha rather than panicking in
+/// `vello_cpu`, which has no image paint with an alpha. flip: `CpuPainter::
+/// apply_paint` keeping the sampler's alpha → panics in `vello_common`'s encoder.
+#[test]
+fn a_translucent_image_fill_rasterizes_at_its_alpha() {
+    let id = ImageId("sha256:swatch".into());
+    let (mut doc, _) = image_doc(&id);
+    let artboard = doc.get(doc.root()).unwrap().children()[0];
+    let rect = doc.get(artboard).unwrap().children()[0];
+    let mut brush = image_brush(id);
+    let ondin_core::peniko::Brush::Image(img) = &mut brush else {
+        unreachable!("image_brush builds an image brush")
+    };
+    img.sampler.alpha = 0.5;
+    doc.apply(&Transaction(vec![Operation::SetFills {
+        id: rect,
+        fills: keyed_by_position([Fill {
+            brush: brush.into(),
+            visible: true,
+        }]),
+    }]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let mut images = ondin_render::ImageStore::new();
+    images.prepare(&doc);
+    let (rgba, w, _) = VelloCpuRenderer::new().render_to_rgba(&doc, &res, &viewport(), &images);
+
+    let [r, g, b, a] = pixel(&rgba, w, 25, 25);
+    assert!(
+        a.abs_diff(128) <= 2,
+        "the red quadrant is half covered, got {:?}",
+        [r, g, b, a]
+    );
+    assert!(
+        r > 200 && g < 60 && b < 60,
+        "and still red, got {:?}",
+        [r, g, b]
+    );
+}
+
 /// **A fill naming an image the store cannot produce draws the placeholder** —
 /// which is grey and a cross, and is emphatically not black and not nothing.
 ///

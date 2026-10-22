@@ -15,6 +15,11 @@ left is in the files trimmed first, which still hold 75–225 KB of comments eac
 `dashboard.rs`, `ui.rs`, `tools/mod.rs`, core `build.rs` and `svg_in.rs`. Two files the first
 pass skipped carry the same weight: `panels/component.rs` and `panels/layout.rs`.
 
+A second pass is under way on those twelve. It cuts 20–30% of a file's comment bytes; past
+that, what is left is one-line reasons. Done: core `build.rs` and `text.rs`. In progress, by
+where the next range starts: `canvas.rs` at `fn set_plus_at`, `panels/inspector.rs` at
+`fn inspector_effects`, `app.rs` at `mod copy_as_png_tests`.
+
 **Why:** an agent reading code pays for every comment line. Much of that prose was the same
 history the docs had: amendment trails, "found in session N", flip-check write-ups, §15
 citation chains and counts that have gone stale. The comments are read far more often than the

@@ -1,28 +1,18 @@
 //! The document's image table, and the reference a fill holds into it.
 //!
-//! **An image is a fill, not a node kind** (§5.5a): any shape, path or
-//! boolean can carry one, so "image in a circle" works without masks existing.
-//! What a `Fill` stores is an [`ImageRef`] — a key and nothing else — and the
-//! bytes live once in a document-level table, so two layers showing the same
-//! photograph store it once and a geometry edit produces a diff nowhere near it.
+//! **An image is a fill, not a node kind** (§5.5a). A `Fill` stores an
+//! [`ImageRef`] — a key — and the bytes live once in a document-level table.
 //!
-//! **The stored bytes are the *encoded* original, never a decoded buffer.** A
-//! 2000×1500 photo is 12 MB as RGBA and ~300 KB as the JPEG it arrived as, and
-//! the file is written as text. Decoding happens in the app, once per image, into
-//! a cache keyed by the same id.
+//! **The stored bytes are the *encoded* original, never a decoded buffer**; the
+//! app decodes once per image into a cache keyed by the same id.
 //!
-//! **The id is opaque here.** It is a content hash of the encoded bytes — which
-//! is what makes deduplication free and makes an id stable across machines — but
-//! core neither computes nor checks it: hashing would be a dependency core's
-//! rules do not permit (§3), and the bytes arrive in the app already, where the
-//! decode happens. Core stores keys and compares them.
+//! **The id is opaque here**: a content hash core neither computes nor checks
+//! (hashing is a dependency core's rules do not permit, §3).
 
 use serde::{Deserialize, Serialize};
 
-/// A key into the document's image table.
-///
-/// Ordered, because the table is written sorted by id for byte-stable output
-/// (invariant 9).
+/// A key into the document's image table. Ordered, because the table is written
+/// sorted by id (invariant 9).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ImageId(pub String);
 
@@ -32,10 +22,8 @@ impl std::fmt::Display for ImageId {
     }
 }
 
-/// The encodings v1 accepts, named so that "why not TIFF" has an answer that is
-/// a decision rather than an omission (§5.5a, §15 D191).
-///
-/// A GIF is its first frame; animation is out of v1 (§15 D191).
+/// The encodings v1 accepts (§5.5a, §15 D191). A GIF is its first frame;
+/// animation is out of v1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ImageFormat {
     Png,
@@ -55,17 +43,8 @@ impl ImageFormat {
         }
     }
 
-    /// The file extension for a *stored* picture's own format.
-    ///
-    /// ⚠️ **No caller, again.** It was written for *Export original…*, waited some
-    /// months for it, got it in `OndinApp::export_image_action` (§15 D225), and
-    /// lost it when that verb was removed on 2026-08-23 — the Export panel offers
-    /// sizes and formats, which is what "export this picture" turns out to mean.
-    /// So this is back to being a `pub` item in a library with nothing reaching it,
-    /// where `dead_code` never fires and this comment is the only thing that says
-    /// so. **Not to be confused with `ExportFormat::extension`**, which is the one
-    /// with four live callers and is about a *rendered* file rather than a stored
-    /// one.
+    /// The file extension for a *stored* picture's format. Has no caller; not
+    /// `ExportFormat::extension`, which is about a *rendered* file.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Png => "png",
@@ -78,82 +57,41 @@ impl ImageFormat {
 
 /// Where an image's bytes come from.
 ///
-/// **Embedded by default, linked as the per-image escape hatch** — Illustrator's
-/// split, and for Illustrator's reason: a file that breaks when you send it to
-/// someone is a worse failure than a large one. The two are convertible in both
-/// directions (*Embed* and *Link*), which is why this is one enum on one entry
-/// rather than two kinds of table.
+/// **Embedded by default, linked as the per-image escape hatch**: a file that
+/// breaks when you send it is worse than a large one.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImageSource {
     /// The encoded file itself, written into the document as base64.
     ///
-    /// **`Arc<[u8]>` rather than `Vec<u8>`, and it is a performance fix rather
-    /// than a style** (§15 D301). `Document::apply` clones the whole document to
-    /// get a working copy it can fail out of, so every committed edit — and every
-    /// undo and every redo — deep-copied every photograph in the table. Measured
-    /// before it was changed: **3.5 ms per commit at 20 MB of images, 10.2 ms at
-    /// 60 MB**, in release, for a one-transform nudge. A held arrow key commits
-    /// per repeat, so that is a stutter with no visible cause.
-    ///
-    /// **Safe because these bytes are immutable**, which is the property that
-    /// matters rather than the table being append-only: nothing anywhere mutates
-    /// an embedded blob in place — a *Replace…* writes a whole new entry under a
-    /// new content hash — so no caller ever needs `Arc::make_mut` and the sharing
-    /// can never be observed.
+    /// **`Arc<[u8]>` rather than `Vec<u8>`** (§15 D301): `Document::apply` clones
+    /// the whole document, which would deep-copy every photograph per commit. Safe
+    /// because the bytes are immutable (*Replace…* writes a new entry).
     Embedded(std::sync::Arc<[u8]>),
     /// A path on this machine, as written. **A string rather than a `PathBuf`**:
-    /// a document is portable and a path is not, so what is stored is what the
-    /// author's machine called it, and *Relink* is the answer when it no longer
-    /// resolves. A link that has gone stale is never silently dropped from the
-    /// document, and draws the visible placeholder [`missing_placeholder`]
-    /// describes until something can read it (§15 D179). *Relink* is still the
-    /// repair this variant wants; the one that exists is *Replace…*, which
-    /// embeds a file rather than repointing the path.
+    /// a document is portable and a path is not. A stale link draws the
+    /// [`missing_placeholder`] (§15 D179).
     Linked(String),
 }
 
-/// One image the document knows about.
-///
-/// The intrinsic size is stored rather than derived, so placing a layer, laying
-/// out its box and drawing the layers panel never wait on a decode — and so a
-/// document with a broken link still knows how big the picture was.
+/// One image the document knows about. The intrinsic size is stored so layout
+/// never waits on a decode and a broken link still knows its size.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageEntry {
     pub source: ImageSource,
     pub format: ImageFormat,
     /// Intrinsic pixel width.
     ///
-    /// 🚨 **Render-originated data stored in the model, and it is *accepted*
-    /// rather than tolerated** (§15 D788, `[A1-L3-11]`). Both this and
-    /// [`Self::height`] are produced by `ondin-render`'s decoder and then stored in
-    /// the `Document` and serialized — a derived value cached in the model, which
-    /// is the pattern invariant 4 exists to prevent — and nothing re-decodes to
-    /// check them, so a hand-edited or truncated file carries whatever size it
-    /// claims.
-    ///
-    /// **Two reasons it is right anyway, and the second is the one that settles
-    /// it.** Entries are content-hash-keyed and their bytes immutable, so it cannot
-    /// go stale in ordinary use. And for [`ImageSource::Linked`] the bytes are **not
-    /// in the document at all**, so the stored size is the only record there is —
-    /// which is the point of a link, not a shortcoming of it. There is nothing to
-    /// derive it from without the file, and the whole reason a link exists is that
-    /// the file may be absent.
-    ///
-    /// ⚠️ **Recorded here because a reviewer read it as a violation and nearly
-    /// filed it as one.** An accepted-by-necessity exception with no entry is
-    /// indistinguishable from an oversight, which is the mechanism `CLAUDE.md`'s
-    /// whole §15 rule is about.
+    /// **Render-originated data stored in the model, accepted deliberately**
+    /// (§15 D788): nothing re-checks it, but bytes are immutable and a
+    /// [`ImageSource::Linked`] entry has no bytes, so the stored size is the only
+    /// record.
     pub width: u32,
-    /// Intrinsic pixel height. See [`Self::width`] — the two are one field for
-    /// every purpose, including §15 D788's.
+    /// Intrinsic pixel height. See [`Self::width`].
     pub height: u32,
 }
 
 impl ImageEntry {
-    /// The encoded bytes, when they are in the document.
-    ///
-    /// `None` for a linked image, whose bytes are the app's to fetch — core does
-    /// no file I/O.
+    /// The encoded bytes; `None` for a linked image (core does no file I/O).
     pub fn bytes(&self) -> Option<&[u8]> {
         match &self.source {
             ImageSource::Embedded(b) => Some(b),
@@ -161,69 +99,19 @@ impl ImageEntry {
         }
     }
 
-    /// ⚠️ **Twice without a caller, and each time for the same reason.** It sat
-    /// `pub` here with none until `tools::original_refusal` gave it one (§15 D280)
-    /// — and that mattered, because the two doors it replaced had each hand-rolled
-    /// `bytes().is_some()`, which is equally false for a *linked* picture and for
-    /// an id the table does not hold, so a document that had simply lost a picture
-    /// was told it used linking. `original_refusal` went with the *Export
-    /// original…* rows on 2026-08-23 and took this with it, and it had none again
-    /// until `io::clip::parse` (§15 D852).
+    /// Whether the source is a link; ask rather than infer it from absent bytes.
     ///
-    /// **The distinction is the thing to keep, not this function.** Ask it
-    /// explicitly rather than inferring "linked" from absent bytes; that inference
-    /// is what cost behaviour last time, and `dead_code` will not warn here because
-    /// this is a library.
-    ///
-    /// 🚨 **Linked sources are a decided non-goal for v1** (§15 D819). The three
-    /// Asset rows that would author one — *Embed*/*Link*, *Relink…* and a
-    /// document-wide *Embed all* — all wait on the same missing thing: a gesture
-    /// that **authors** a linked source. §15 D191 is the out-of-v1 image list this
-    /// joins.
-    ///
-    /// ⚠️ **This said *"`ImageSource::Linked` is constructed in one place … and
-    /// nothing can make one"*, and the second half was false for a range** (§15
-    /// D852, `[R2-L8-03]`) — the first staying literally true, one constructor,
-    /// which is why nothing caught it. `io::schema`'s `into_entry` has **two**
-    /// callers — the file loader and `io::clip::parse`, the clipboard crossing —
-    /// and `build::missing_image_ops` carries whatever entries a paste brings into
-    /// the document. So the doors onto a linked source are:
-    ///
-    /// - **A hand-written or foreign `.ondin`**, which the app opens as it always
-    ///   has: the non-goal is authoring, not reading.
-    /// - **The clipboard, which refuses one** — this function's only production
-    ///   caller, and the non-goal's only enforcement. A link arriving there was an
-    ///   attacker-chosen URL written verbatim into every SVG export.
-    ///
-    /// Every app path that *makes* a picture still funnels through
-    /// `load_image_bytes`, which builds `Embedded` unconditionally.
-    ///
-    /// **This function stays**, and so does `tools::original_refusal`'s three-state
-    /// reasoning in the comments where that function stood: the subject exists in
-    /// the model, a foreign document can put one in front of the app, and the next
-    /// person to build the authoring gesture should rebuild from those rather than
-    /// re-derive them.
+    /// Authoring linked sources is a non-goal for v1 (§15 D819). A foreign
+    /// `.ondin` can still carry one, and the clipboard refuses one (the only
+    /// production caller), since a pasted link would be an attacker-chosen URL in
+    /// every SVG export.
     pub fn is_linked(&self) -> bool {
         matches!(self.source, ImageSource::Linked(_))
     }
 
-    /// How a document that is not ours refers to this picture: a `data:` URI for
-    /// an embedded image, the stored path for a linked one.
-    ///
-    /// **Here rather than in the SVG writer, because base64 is core's already**
-    /// — the save format writes the same bytes the same way (§5.5a), and one
-    /// encoder is what keeps a document and its export saying the same thing
-    /// about the same file. [`ImageFormat::mime`] was written for this caller
-    /// before it existed.
-    ///
-    /// The *encoded original* goes out, never a re-encode: it is what the table
-    /// stores and what the content hash names, so an exported picture is the file
-    /// that was placed, byte for byte (§7.1).
-    ///
-    /// A linked image's path is emitted **as it was written**, relative or
-    /// absolute, which is the only honest thing to do with a string this crate
-    /// never resolved. It is not URL-escaped here; a writer that needs escaping
-    /// for its own syntax does that itself, as the SVG one does.
+    /// How a foreign document refers to this picture: a `data:` URI of the
+    /// *encoded original* (never a re-encode, §7.1) or the stored path, unescaped
+    /// (the SVG writer escapes). Here because base64 is core's already (§5.5a).
     pub fn href(&self) -> String {
         use base64::Engine as _;
         match &self.source {
@@ -239,35 +127,18 @@ impl ImageEntry {
 
 /// How an image sits inside the frame its fill paints.
 ///
-/// **Four modes, and each of them is an affine plus a [`peniko::Extend`] (and,
-/// for one of them, a clip) — no pixel work.** The picture is never resampled
-/// into a new buffer to change how it sits; the same decoded blob is drawn with
-/// a different brush transform, so switching mode costs nothing and scrubbing a
-/// crop costs nothing.
+/// **Four modes, each an affine plus a [`peniko::Extend`] (and, for one, a
+/// clip) — no pixel work**, so switching mode or scrubbing a crop is free.
 ///
-/// **Fill and Fit are derived; Crop and Tile read a number stored beside this
-/// one.** Fill and Fit answer "cover" and "contain" against whatever the frame
-/// currently is, so resizing the shape re-frames the picture. Crop and Tile need
-/// something the frame cannot re-derive — *this* rectangle of the source, *that*
-/// repetition scale — and those live on [`ImageRef`] rather than in here. A mode
-/// that stored a baked-in affine would come apart the first time the shape was
-/// resized, which is why this is an enum of intents rather than a matrix.
-///
-/// **The payloads are deliberately not variant payloads.** They were, first, and
-/// that made the mode strip a destructive control: clicking *Fit* to see the
-/// whole picture and clicking back would hand you a fresh identity crop, because
-/// the rectangle had nowhere to live while the mode was not Crop. A mode switch
-/// must be a change of view, not a reset — so the parameters persist and only
-/// their *meaning* switches on and off. It is the shape Figma's `scaleMode` /
-/// `imageTransform` / `scalingFactor` has, for this reason.
+/// Fill and Fit are derived from the frame; Crop and Tile read a number stored on
+/// [`ImageRef`]. **The payloads are deliberately not variant payloads**: a mode
+/// switch must not reset them, so clicking *Fit* and back keeps the crop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ImageFit {
     /// Cover the frame, preserving aspect; whatever overflows is cut off.
     ///
-    /// The default, and Figma's, because it is the mode that never shows the
-    /// canvas through a hole the user did not ask for. A click-placed image is
-    /// framed to its own aspect (§5.5a), so Fill and [`ImageFit::Fit`] are
-    /// the same drawing there and only differ once the shape is resized.
+    /// The default. A click-placed image is framed to its own aspect (§5.5a), so
+    /// Fill and [`ImageFit::Fit`] draw the same until the shape is resized.
     #[default]
     Fill,
     /// The whole picture inside the frame, preserving aspect; the frame shows
@@ -280,56 +151,34 @@ pub enum ImageFit {
 }
 
 impl ImageFit {
-    /// Whether this is the value a missing key means, for
-    /// `skip_serializing_if`: an image placed before framing existed keeps its
-    /// byte-for-byte line in the file (§5.11).
+    /// Whether this is the value a missing key means (§5.11).
     pub fn is_default(&self) -> bool {
         matches!(self, Self::Fill)
     }
 
-    /// The four, in the order a mode strip offers them: the two that need no
-    /// parameter first.
+    /// The four, in the order a mode strip offers them.
     pub const ALL: [ImageFit; 4] = [Self::Fill, Self::Fit, Self::Crop, Self::Tile];
 }
 
 /// A mirror and a quarter turn: how the picture sits inside its frame,
 /// independent of the layer's own transform.
 ///
-/// **Eight states, spelled canonically as mirror-then-turn.** The symmetries of
-/// a rectangle are a group of exactly eight, and `flip_x`/`flip_y`/`turns` would
-/// spell them sixteen ways — a horizontal flip *and* a vertical flip together
-/// are a half turn — so two of those three fields would have to agree about
-/// which spelling to write, and a file could carry a state the buttons can never
-/// produce. Here [`Self::mirrored`] is applied first, in the source's own frame,
-/// and [`Self::quarters`] clockwise turns after it; each of the eight has one
-/// spelling and only one.
+/// **Eight states, spelled canonically as mirror-then-turn**: `flip_x`/`flip_y`/
+/// `turns` would spell the eight symmetries sixteen ways. [`Self::mirrored`] is
+/// applied first, then [`Self::quarters`] clockwise turns.
 ///
-/// **The controls are actions, not toggles**, which is what this shape is for.
-/// "Is it flipped horizontally?" has no answer once a quarter turn is involved:
-/// the same drawing is a horizontal flip of one orientation and a vertical flip
-/// of another. So [`OrientOp`] *composes* rather than sets, and the panel draws
-/// plain buttons rather than toggles it would have to lie about. That holds even
-/// though the popover offers only the two mirrors today ([`OrientOp::Turn`]): the
-/// turn count is still live, because `FlipV` resolves to `quarters: 2`.
-///
-/// This is deliberately **not** [`crate::build::Orientation`], which decomposes a
-/// layer's world matrix and carries a real angle. Nothing here is continuous:
-/// the frame is fixed and the picture inside it turns in quarters, so there is
-/// no angle to store and no decomposition to get wrong.
+/// **The controls are actions, not toggles**: "flipped horizontally?" has no
+/// answer once a turn is involved, so [`OrientOp`] *composes*. Not
+/// [`crate::build::Orientation`], which carries a real angle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ImageOrient {
     /// Quarter turns clockwise, applied **after** [`Self::mirrored`].
     ///
-    /// Always written in `0..4` — [`ImageOrient::applying`] is the only thing
-    /// that produces one — but read through [`ImageOrient::quarters`], which
-    /// takes it modulo four so a hand-edited file naming five turns draws one
-    /// rather than nothing. Note that the derived `PartialEq` compares the raw
-    /// number, so a hand-written `4` is unequal to `0` while drawing the same;
-    /// nothing in the app can reach that state.
+    /// Written in `0..4`, read through [`ImageOrient::quarters`] (modulo four) so
+    /// a hand-edited file still draws; the derived `PartialEq` sees the raw number.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub quarters: u8,
-    /// Mirrored left-to-right in the source's own frame, applied **before** the
-    /// turn.
+    /// Mirrored left-to-right in the source's frame, **before** the turn.
     #[serde(default, skip_serializing_if = "is_not")]
     pub mirrored: bool,
 }
@@ -349,9 +198,7 @@ impl ImageOrient {
         mirrored: false,
     };
 
-    /// Whether this is the value a missing key means, for `skip_serializing_if`:
-    /// an image placed before orientation existed keeps its byte-for-byte line in
-    /// the file (§5.11).
+    /// Whether this is the value a missing key means (§5.11).
     pub fn is_default(&self) -> bool {
         self.quarters.is_multiple_of(4) && !self.mirrored
     }
@@ -380,10 +227,7 @@ impl ImageOrient {
     /// axes — which is what the button the user just pressed means.
     ///
     /// **A mirror conjugates a rotation into its inverse** (`M∘Rᵏ = R⁻ᵏ∘M`), so
-    /// flipping an already-turned picture reverses the turn as well as the
-    /// mirror. Spelling that out is the whole reason this type exists: written as
-    /// two independent flags it is wrong for six of the eight states and right
-    /// for the two anybody tests with.
+    /// flipping an already-turned picture reverses the turn as well as the mirror.
     pub fn applying(self, op: OrientOp) -> Self {
         let k = self.quarters();
         match op {
@@ -406,28 +250,19 @@ impl ImageOrient {
     /// Source-pixel space → oriented-pixel space: the box `(0,0)..(width,height)`
     /// onto `(0,0)..`[`oriented_size`](Self::oriented_size).
     ///
-    /// **Written out as exact matrices rather than composed from
-    /// `Affine::rotate`.** `rotate(π/2)` returns a cosine of about `6.1e-17`, so
-    /// a composed version leaves a shear of that size in every turned picture's
-    /// brush transform and puts the turned box a hair off the corner it is
-    /// supposed to land on. Invisible on screen; not invisible in the file, since
-    /// a brush transform that differs in its last bits is a `SetFills` the
-    /// equality guards do not catch. Pinned by
-    /// `every_orientation_maps_the_source_box_exactly_onto_the_oriented_box`,
-    /// which compares the box exactly and is the test that rejects the composed
-    /// spelling.
+    /// **Exact matrices, not `Affine::rotate`**: `rotate(π/2)` has a cosine of
+    /// about `6.1e-17`, leaving a shear that differs in the file's last bits.
+    /// Pinned by `every_orientation_maps_the_source_box_exactly_onto_the_oriented_box`.
     pub fn affine(self, width: f64, height: f64) -> kurbo::Affine {
         use kurbo::Affine;
         let (w, h) = (width, height);
-        // Maps the source box onto itself, so the turn below still receives a box
-        // at the origin whatever the mirror did.
+        // Maps the source box onto itself, so the turn still gets a box at the origin.
         let mirror = if self.mirrored {
             Affine::new([-1.0, 0.0, 0.0, 1.0, w, 0.0])
         } else {
             Affine::IDENTITY
         };
-        // Each turn is followed by the translation that brings the box back into
-        // the positive quadrant, so the result is always `(0,0)..oriented_size`.
+        // Each turn carries the translation back into the positive quadrant.
         let turn = match self.quarters() {
             1 => Affine::new([0.0, 1.0, -1.0, 0.0, h, 0.0]),
             2 => Affine::new([-1.0, 0.0, 0.0, -1.0, w, h]),
@@ -448,59 +283,31 @@ pub enum OrientOp {
     FlipV,
     /// A quarter turn clockwise.
     ///
-    /// **No control writes this today**, and that is a decision rather than an
-    /// oversight, so it is said here where the next reader will look. The image
-    /// popover had a rotate button beside the two mirrors and it was taken out:
-    /// turning a picture inside a frame the box keeps is a real thing to want and
-    /// a much rarer one than mirroring, and the Transform panel's own quarter
-    /// turns already handle the common case — a photograph that came in sideways
-    /// arrives in a shape cut to its own aspect, so turning the *layer* is the
-    /// right answer there and turns the box with it.
-    ///
-    /// It stays because the arithmetic around it is what makes the other two
-    /// correct, not because it is spare: [`ImageOrient::applying`] resolves
-    /// `FlipV` to `quarters: 2`, so the turn count is live whether or not anything
-    /// turns, and the odd quarters are one button away the moment an
-    /// EXIF-orientation import or a rotate control wants them.
+    /// **No control writes this today, by decision**: the Transform panel's own
+    /// quarter turns cover the common case. It stays because
+    /// [`ImageOrient::applying`] resolves `FlipV` to `quarters: 2`.
     Turn,
 }
 
 impl OrientOp {
-    /// A normalized crop rectangle carried through this op.
-    ///
-    /// **[`ImageRef::crop`] is normalized to the picture *as oriented*, so a flip
-    /// or a turn that left the rectangle alone would show a different part of the
-    /// photograph** — you would turn a portrait and find yourself looking at its
-    /// shoulder. Moving the rectangle with the picture is what makes the mirror
-    /// buttons mirror what you are looking at rather than jump somewhere else in
-    /// the source.
-    ///
-    /// [`whole_crop`] is a fixed point of all three, so a picture nobody has
-    /// cropped keeps the sentinel — and keeps writing no rectangle at all.
+    /// A normalized crop rectangle carried through this op, since
+    /// [`ImageRef::crop`] is normalized to the picture *as oriented*.
+    /// [`whole_crop`] is a fixed point of all three.
     pub fn crop_carried(self, c: kurbo::Rect) -> kurbo::Rect {
         match self {
             Self::FlipH => kurbo::Rect::new(1.0 - c.x1, c.y0, 1.0 - c.x0, c.y1),
             Self::FlipV => kurbo::Rect::new(c.x0, 1.0 - c.y1, c.x1, 1.0 - c.y0),
-            // A point at (x, y) of the unit square is at (1 − y, x) of the turned
-            // one — the same map `ImageOrient::affine` makes, normalized.
+            // (x, y) maps to (1 − y, x): `ImageOrient::affine`, normalized.
             Self::Turn => kurbo::Rect::new(1.0 - c.y1, c.x0, 1.0 - c.y0, c.x1),
         }
     }
 }
 
-/// The rectangle an image that has **never been cropped** carries: the whole
-/// source.
+/// The rectangle of an image **never cropped**: the whole source.
 ///
-/// **A sentinel, not a picture anybody chose.** Mapped onto a frame of a
-/// different aspect it stretches, which is nobody's idea of an uncropped
-/// photograph — so everything that *enters* cropping replaces it with
-/// [`ImageRef::cover_crop`], the rectangle `Fill` is already showing. That is
-/// what makes choosing Crop change nothing on screen, and it is what *reset
-/// crop* restores: putting this value back means "never cropped", and the next
-/// entry seeds cover from it again.
-///
-/// It is also the `skip_serializing_if` value, so an image nobody has cropped
-/// writes no rectangle at all (§5.11).
+/// **A sentinel, not a chosen crop**: it stretches on a frame of another aspect,
+/// so entering cropping replaces it with [`ImageRef::cover_crop`]; *reset crop*
+/// puts it back. It is also the `skip_serializing_if` value (§5.11).
 pub fn whole_crop() -> kurbo::Rect {
     kurbo::Rect::new(0.0, 0.0, 1.0, 1.0)
 }
@@ -510,51 +317,19 @@ fn is_whole_crop(r: &kurbo::Rect) -> bool {
 }
 
 /// Whether a width or a height is one this file's arithmetic can divide by
-/// (§15 D452).
-///
-/// **Every degenerate-input guard in this module bounded the small end only** —
-/// eight of them spelled `<= 0.0`, which `inf` passes, and the ninth and tenth
-/// said the same thing in positive form — and that is the whole of
-/// `[S9.1-L5-01]`. A `.ondin` whose image fill
-/// carries `"crop": {"x0":-1e308, "y0":-1e308, "x1":1e308, "y1":1e308}` holds four
-/// **finite** numbers — so it is not the non-finite family D421 and D451 cover —
-/// but `crop.width()` overflows to `inf`, and `inf` is greater than zero. Three
-/// measured consequences from that one document:
-///
-/// - `crop_clamped` divides `inf / inf` and returns an all-`NaN` rectangle, which
-///   one crop-pan drag commits through `SetFills`; the file then saves `null` and
-///   never opens again — D421's terminal failure by a different manufacturer.
-/// - [`ImageRef::framing`] returns a **singular** `Affine` with a `NaN`
-///   translation, which is exactly what `Framing::identity` exists to prevent and
-///   what `degenerate_inputs_resolve_to_the_identity_framing` documents as
-///   *"a backend question with no good answer"*.
-/// - [`ImageRef::picture_box`] answers `Some(NaN…)` rather than `None`, and
-///   `tools::crop_resized` then calls `f64::clamp(NaN, NaN)`, which **panics** —
-///   on the UI thread, on a crop resize.
-///
-/// **Spelled once and asked at every span test in the module.** ⚠️ The finding
-/// named **five** sites; a grep for the `<= 0.0` shape found **eight**; and a
-/// ninth (`missing_placeholder`) plus a tenth in *positive* form
-/// ([`ImageRef::crop_scale`]'s `span > 0.0`, which answers `Some(0.0)` for an
-/// `inf` span where the honest answer is `None`) turned up only because the
-/// eight were being changed and somebody read the neighbours. **Five, then
-/// eight, then ten** — which is the argument for a named predicate over a
-/// repeated comparison, and for not trusting a site count that came from one
-/// grep shape. `ImageFit::Tile`'s arm already spelled this inline
-/// (`is_finite() && > 0.0`) and is left as the one place that had it right.
+/// (§15 D452): positive **and finite**. A bare `> 0.0` passes `inf`, and a crop of
+/// `±1e308` is four finite numbers whose `width()` overflows, yielding an
+/// all-`NaN` rectangle, a singular `Affine`, and a `Some(NaN…)` `picture_box`
+/// that panics `tools::crop_resized`. Asked at every span test in the module.
 fn usable_span(x: f64) -> bool {
     x > 0.0 && x.is_finite()
 }
 
 /// The crop after dragging the **picture** by `by`, in the frame's own units.
 ///
-/// The picture follows the pointer, so the rectangle moves the other way: drag
-/// right and you reveal what was off to the left. Both the source's intrinsic
-/// size and the framing scale cancel out of that — the crop is normalized and
-/// the frame is what it maps onto — so this needs neither.
-///
-/// Clamped by [`crop_clamped`], so a drag runs out at the edge of the picture
-/// rather than pulling `Extend::Pad`'s smear into the frame.
+/// The picture follows the pointer, so the rectangle moves the other way. Clamped
+/// by [`crop_clamped`], so a drag stops at the picture's edge rather than pulling
+/// `Extend::Pad`'s smear into the frame.
 pub fn crop_panned(crop: kurbo::Rect, by: kurbo::Vec2, frame: kurbo::Rect) -> kurbo::Rect {
     let (fw, fh) = (frame.width(), frame.height());
     if !usable_span(fw) || !usable_span(fh) {
@@ -567,33 +342,16 @@ pub fn crop_panned(crop: kurbo::Rect, by: kurbo::Vec2, frame: kurbo::Rect) -> ku
 /// The crop scaled by `k` about its own centre — the *zoom* control, where
 /// [`crop_reframed`] is the *window* one (§15 D271).
 ///
-/// **`k` scales the rectangle, so it is the reciprocal of the picture's zoom**: a
-/// smaller crop shows less of the source and therefore a bigger picture. Named for
-/// what it does to the number rather than for what the user sees, because the
-/// caller is the one holding the scale the user typed.
-///
-/// **Uniform, and about the centre.** Scaling the normalized rectangle by one
-/// factor scales it by that factor in source *pixels* too, so this can neither
-/// introduce a stretch nor remove one the layer's own resize put there — which is
-/// what lets [`ImageRef::crop_scale`] read a single axis and still round-trip. The
-/// centre is the anchor because the window is not moving: what the eye is on is the
-/// middle of the crop, and zooming about a corner would slide the subject out of it.
-///
-/// Clamped by [`crop_clamped`], so zooming out stops where the picture does rather
-/// than pulling `Extend::Pad`'s smear into the frame — the same floor
-/// [`ImageRef::cover_scale`] names. A factor that is not finite and positive gives
-/// the rectangle back: a singular crop is worse than an ignored keystroke.
-///
-/// This is `crop_zoomed` under a new name and a fixed anchor. That function went
-/// with the crop tool's corner-zoom in §15 D268, and the *gesture* has not come
-/// back — what returned is the arithmetic, behind a typed number.
+/// **`k` scales the rectangle, so it is the reciprocal of the picture's zoom.**
+/// Uniform, so it adds no stretch and [`ImageRef::crop_scale`] can read one axis
+/// and round-trip; about the centre so the subject stays put. Clamped by
+/// [`crop_clamped`] (the floor [`ImageRef::cover_scale`] names); a `k` that is not
+/// finite and positive gives the rectangle back.
 pub fn crop_scaled(crop: kurbo::Rect, k: f64) -> kurbo::Rect {
     if !k.is_finite() || k <= 0.0 {
         return crop;
     }
-    // Smallest crop worth having: a hundredth of the source in the shorter
-    // direction. Past that the picture is a few pixels stretched over the whole
-    // frame, and there is nothing left to look at.
+    // Smallest crop worth having: a hundredth of the source in the shorter direction.
     const MIN: f64 = 0.01;
     let k = k.max(MIN / crop.width().min(crop.height()).max(f64::MIN_POSITIVE));
     crop_clamped(kurbo::Rect::from_center_size(
@@ -605,27 +363,14 @@ pub fn crop_scaled(crop: kurbo::Rect, k: f64) -> kurbo::Rect {
 /// The crop after the **frame** changed from `from` to `to`, with the picture
 /// left exactly where it was on screen.
 ///
-/// This is what makes the bounding box a crop rectangle (§15 D268). Under
-/// [`ImageFit::Crop`] the crop maps onto the frame exactly, so the frame and the
-/// crop are two views of one mapping — normalized source coordinate `n` sits at
-/// local `frame.x0 + (n − crop.x0)/crop.width() · frame.width()`. Moving an edge
-/// of the frame therefore has exactly one answer that does not move the picture:
-/// re-read the *old* mapping at the *new* frame's corners.
+/// This is what makes the bounding box a crop rectangle (§15 D268): the *old*
+/// mapping of crop onto frame, read at the *new* frame's corners. The picture's
+/// scale per source pixel is unchanged on both axes.
 ///
-/// A consequence worth naming, because it is the whole reason the gesture needs
-/// no aspect handling of its own: the picture's scale in local units per source
-/// pixel is unchanged on both axes, so a crop drag can neither stretch nor
-/// squash. Only how much of the picture is showing changes.
-///
-/// **Not clamped, and deliberately.** A crop that left the source would be a
-/// frame that had grown past the picture, and the caller is the one holding the
-/// picture's rectangle to stop that with — [`ImageRef::picture_box`] is the
-/// limit, and `tools::crop_resized` is what applies it. Clamping the rectangle
-/// here instead would slide it out from under a frame this function cannot see,
-/// which is the two-numbers-disagreeing bug the exactness above exists to rule
-/// out.
-///
-/// A degenerate `from` has no mapping to re-read and gives `crop` back.
+/// **Not clamped, deliberately**: the caller holds the limit
+/// ([`ImageRef::picture_box`], applied by `tools::crop_resized`), and clamping
+/// here would slide the rectangle out from under a frame this function cannot see.
+/// A degenerate `from` gives `crop` back.
 pub fn crop_reframed(crop: kurbo::Rect, from: kurbo::Rect, to: kurbo::Rect) -> kurbo::Rect {
     let (fw, fh) = (from.width(), from.height());
     if !usable_span(fw) || !usable_span(fh) {
@@ -636,21 +381,16 @@ pub fn crop_reframed(crop: kurbo::Rect, from: kurbo::Rect, to: kurbo::Rect) -> k
     kurbo::Rect::new(at_x(to.x0), at_y(to.y0), at_x(to.x1), at_y(to.y1))
 }
 
-/// `crop` brought back inside the source, keeping its size and aspect where it
-/// can and its aspect where it cannot.
-///
-/// Two separate jobs, and the order matters. A rectangle **larger** than the
-/// source in one direction is scaled down about its own centre — uniformly, so
-/// the picture does not stretch — until it fits. Then whatever is left is
-/// *slid* inside, which preserves the zoom the user just chose: clamping the
-/// edges independently would silently change the shape of the crop and stretch
-/// the picture as the drag ran into the edge.
+/// `crop` brought back inside the source, keeping its size where it can and its
+/// aspect always. The order matters: a rectangle **larger** than the source is
+/// scaled down about its centre first, then *slid* inside (clamping edges
+/// independently would stretch the picture).
 pub fn crop_clamped(crop: kurbo::Rect) -> kurbo::Rect {
     let (w, h) = (crop.width(), crop.height());
     if !usable_span(w) || !usable_span(h) {
         return whole_crop();
     }
-    // Shrink about the centre if it has outgrown the source in either direction.
+    // Shrink about the centre if it has outgrown the source.
     let over = (w.max(1.0) / 1.0).max(h.max(1.0) / 1.0);
     let (w, h, c) = if over > 1.0 {
         (w / over, h / over, crop.center())
@@ -658,7 +398,7 @@ pub fn crop_clamped(crop: kurbo::Rect) -> kurbo::Rect {
         (w, h, crop.center())
     };
     let mut r = kurbo::Rect::from_center_size(c, kurbo::Size::new(w, h));
-    // ...then slide, rather than clamp each edge, so the size survives.
+    // Slide rather than clamp each edge, so the size survives.
     let dx = if r.x0 < 0.0 {
         -r.x0
     } else if r.x1 > 1.0 {
@@ -689,34 +429,27 @@ fn is_unit_scale(s: &f64) -> bool {
 /// An image fill's framing, resolved against the frame it paints into and the
 /// source's intrinsic size. See [`ImageRef::framing`].
 ///
-/// The three fields are the three things a backend needs and nothing else: what
-/// the pixel grid maps to, what happens off the edge of it, and — for the one
-/// mode that leaves part of the frame empty — what the ink has to be cut to.
+/// The three things a backend needs: the pixel grid's mapping, what happens off
+/// its edge, and what the ink is cut to when part of the frame is empty.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Framing {
-    /// Source-pixel space → the frame's own local space, which is the space the
-    /// path is in. Both backends take this as a brush transform applied under
-    /// the node's transform.
+    /// Source-pixel space → the frame's local space, applied by both backends as a
+    /// brush transform under the node's transform.
     pub transform: kurbo::Affine,
-    /// What the backends sample beyond the source rectangle. Repeat for
-    /// [`ImageFit::Tile`], pad for everything else.
+    /// What the backends sample beyond the source: Repeat for
+    /// [`ImageFit::Tile`], pad otherwise.
     pub extend: peniko::Extend,
-    /// The picture's own rectangle in local space, when it does not cover the
-    /// frame and the ink has to be clipped to it.
+    /// The picture's rectangle in local space when the ink has to be clipped to it.
     ///
-    /// **Only [`ImageFit::Fit`] ever asks for one, and only when it actually
-    /// letterboxes.** peniko has no transparent extend — `Extend` is pad,
-    /// repeat or reflect — so the empty band beside a fitted picture would
-    /// otherwise be a smear of its edge pixels, which reads as a rendering bug
-    /// rather than as a fit. A clip costs a layer, so it is emitted only when
-    /// the aspects genuinely differ.
+    /// **Only [`ImageFit::Fit`] asks for one, and only when it letterboxes**:
+    /// peniko has no transparent extend, so the band would be a smear of edge
+    /// pixels. A clip costs a layer.
     pub clip: Option<kurbo::Rect>,
 }
 
 impl Framing {
-    /// The framing that changes nothing: one unit per source pixel at the
-    /// origin, padded, unclipped. What a degenerate frame or a zero-sized source
-    /// resolves to, since neither has a drawing to get right.
+    /// The framing that changes nothing, which a degenerate frame or a
+    /// zero-sized source resolves to.
     pub fn identity() -> Self {
         Self {
             transform: kurbo::Affine::IDENTITY,
@@ -728,32 +461,17 @@ impl Framing {
 
 /// How many samples a tone curve is written as.
 ///
-/// **33, and the number is part of the format rather than an implementation
-/// detail**: it is the length of the `tableValues` list an SVG export writes, and
-/// the pixel path evaluates the *same* list by the *same* linear interpolation
-/// SVG defines for it — so the canvas and the export are one drawing by
-/// construction rather than two that were tuned to look alike. 33 puts a sample
-/// every 8 levels of an 8-bit channel, which is finer than the tone curves here
-/// ever bend.
+/// **33, and the number is part of the format**: the length of the `tableValues`
+/// list an SVG export writes, which the pixel path evaluates identically.
 pub const TONE_STEPS: usize = 33;
 
 /// The seven per-pixel adjustments an image fill carries, each `0.0` at rest and
 /// running `-1.0..=1.0`.
 ///
-/// **Per fill, not per image**, so two layers showing the same photograph can be
-/// adjusted independently — which is the whole reason this lives on [`ImageRef`]
-/// beside the framing rather than on [`ImageEntry`] beside the bytes. The bytes
-/// are shared and deduplicated by content hash; what is done to them is not.
-///
-/// **Every field is a *symmetric* offset from a neutral zero**, not a multiplier
-/// around one. That is what makes the default the identity, which is what makes
-/// this an additive schema change (§5.11) — an image placed before adjustments
-/// existed keeps its byte-for-byte line in the file — and it is also what makes
-/// "reset" mean the same thing for all seven.
-///
-/// **These are not seven independent little features; they are one pipeline**
-/// ([`ImageAdjust::pipeline`]), and the pipeline is the thing the three writers
-/// share. Nothing outside this file should reimplement what a slider does.
+/// **Per fill, not per image** (on [`ImageRef`], not [`ImageEntry`]). **Every field
+/// is a symmetric offset from zero**, so the default is the identity (§5.11).
+/// They are one pipeline ([`ImageAdjust::pipeline`]) shared by the three writers;
+/// nothing else should reimplement what a slider does.
 #[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct ImageAdjust {
     /// Stops of exposure: the picture is multiplied by `2^exposure`, so `-1` is
@@ -769,8 +487,7 @@ pub struct ImageAdjust {
     /// Warm (`+`, more red and less blue) to cool (`-`).
     #[serde(default, skip_serializing_if = "is_neutral")]
     pub temperature: f32,
-    /// Magenta (`+`) to green (`-`) — the axis a white balance needs beside
-    /// [`Self::temperature`], and the reason both exist rather than one.
+    /// Magenta (`+`) to green (`-`) — the second axis of a white balance.
     #[serde(default, skip_serializing_if = "is_neutral")]
     pub tint: f32,
     /// Lifts (`+`) or recovers (`-`) the bright end, leaving the dark end alone.
@@ -786,8 +503,7 @@ fn is_neutral(v: &f32) -> bool {
 }
 
 impl ImageAdjust {
-    /// Nothing adjusted — the value a picture that has never been touched
-    /// carries, and what *reset* puts back.
+    /// Nothing adjusted; what *reset* puts back.
     pub const NEUTRAL: Self = Self {
         exposure: 0.0,
         contrast: 0.0,
@@ -798,13 +514,9 @@ impl ImageAdjust {
         shadows: 0.0,
     };
 
-    /// Whether this is the value a missing key means, for `skip_serializing_if`
-    /// on [`ImageRef::adjust`] (§5.11).
-    ///
-    /// **Compared exactly, and a non-finite value is not neutral.** A `NaN` in a
-    /// hand-edited file has to reach [`Self::pipeline`], which refuses it there
-    /// — treating it as neutral here would write a file that says one thing and
-    /// draws another.
+    /// Whether this is the value a missing key means (§5.11). **Compared exactly,
+    /// and a non-finite value is not neutral**: a `NaN` must reach
+    /// [`Self::pipeline`], which refuses it.
     pub fn is_default(&self) -> bool {
         Adjustment::ALL.iter().all(|k| k.of(self) == 0.0)
     }
@@ -817,64 +529,16 @@ impl ImageAdjust {
     /// The per-pixel function these seven numbers describe, or [`None`] when
     /// they describe the identity.
     ///
-    /// **Two stages, and they are the two SVG filter primitives that can say
-    /// this exactly**: a 4×5 colour matrix (`feColorMatrix type="matrix"`) and a
-    /// per-channel transfer table (`feComponentTransfer type="table"`). That is
-    /// not a coincidence dressed up as a design — it is the design. An adjusted
-    /// picture has to be drawable by the GPU canvas, by the CPU export and by the
-    /// SVG writer, and the SVG writer is the one of the three that cannot invent
-    /// arithmetic: it can only name primitives a viewer already has. So the
-    /// pipeline is built out of what SVG can name, and the two pixel backends
-    /// evaluate the very same numbers.
-    ///
-    /// The stages are separately optional, so an exposure nudge does not carry a
-    /// tone curve of 33 numbers it does not bend.
+    /// **Two stages, the two SVG filter primitives that can say this exactly**: a
+    /// 4×5 colour matrix and a per-channel transfer table. The SVG writer cannot
+    /// invent arithmetic, so the pixel backends evaluate the same numbers.
     ///
     /// [`None`] for the neutral value **and for any value outside `-1..=1`**,
-    /// which includes the non-finite ones: a hand-written `NaN` would otherwise
-    /// reach a buffer and paint a hole.
-    ///
-    /// ⚠️ **This asked only about finiteness until §15 D538, and the range was
-    /// the part that mattered** — `[S9.1-L5-02]`. [`Adjustment::set`] clamps to
-    /// `-1..=1` and its doc gives the reason verbatim: *"a range the model does
-    /// not enforce is a range a hand-edited file ignores. The tone curve's
-    /// monotonicity argument only holds inside this range."* This is the door a
-    /// hand-edited file uses, and it was not asking. Two measured pictures, both
-    /// from a `.ondin` that loads cleanly and survives a round trip:
-    ///
-    /// - `"exposure": 1000.0` is a finite `f32`, so it passed. [`Self::matrix`]
-    ///   computes `2f32.powf(1000.0)` = `inf`, and `inf * 0.0` in the compose
-    ///   makes **all twenty coefficients `NaN`** — every pixel of the photograph
-    ///   renders `[0, 0, 0, 255]`, a solid black rectangle, on the canvas and in
-    ///   the PNG. The threshold is exactly `|exposure| >= 128`, where `f32`
-    ///   overflows at `2^128`; at 127 the matrix is still finite and still wrong.
-    /// - `"shadows": 2.0` makes [`Self::curve`] **double back at 12 of its 32
-    ///   steps**: source black comes out `[204,204,204]` and source mid-grey
-    ///   `[179,179,179]`, so the dark end of the picture is inverted. The
-    ///   threshold is the file's own algebra — the derivative of `v + 0.4s(1−v)²`
-    ///   at `v = 0` is `1 − 0.8s`, so anything above `1.25` is non-monotonic.
-    ///
-    /// ⚠️ **And it is a backend divergence, which is what makes it worse than a
-    /// wrong picture.** Both pixel backends quantise `NaN` to zero and agree on
-    /// black; the SVG writer passes every coefficient through `fmt` and emits
-    /// `<feColorMatrix values="NaN NaN …">`, which a viewer rejects outright. One
-    /// number, black in two writers and invalid markup in the third.
-    ///
-    /// **Refused rather than clamped**, and the choice is not stylistic:
-    /// [`Self::is_default`] already reports such a value as non-neutral, so
-    /// clamping here would make the file *draw* something it does not *say* —
-    /// the panel would read 1000 and the canvas would show the picture at 1.
-    /// Refusing draws the unadjusted picture, which is the one honest answer
-    /// available to a reader that has been handed a number the model forbids.
-    ///
-    /// ⚠️ **Flipped twice**, both against `an_impossible_value_is_refused_at_both_doors`.
-    /// Reverting the predicate to bare `is_finite()` fails at the `exposure: 1000`
-    /// arm — the predicted site. And the *plausible wrong fix*, clamping each
-    /// value through [`Adjustment::set`] before building instead of refusing,
-    /// **fails at the same assertion**, which is the point of writing it on
-    /// `pipeline().is_none()` rather than on a pixel: a clamping version draws a
-    /// perfectly good picture that the file does not describe, and only an
-    /// assertion about the *refusal* can tell the two apart.
+    /// including non-finite ones (§15 D538): `"exposure": 1000.0` makes every
+    /// matrix coefficient `NaN`, and `"shadows": 2.0` makes [`Self::curve`]
+    /// non-monotonic. **Refused rather than clamped**, since clamping would make the
+    /// file *draw* what it does not *say*; `an_impossible_value_is_refused_at_both_doors`
+    /// asserts on `pipeline().is_none()` to tell the two apart.
     pub fn pipeline(&self) -> Option<AdjustPipeline> {
         if Adjustment::ALL.iter().any(|k| {
             let v = k.of(self);
@@ -890,33 +554,25 @@ impl ImageAdjust {
     /// The colour matrix for the five adjustments that are linear in the
     /// channels, or [`None`] when all five are neutral.
     ///
-    /// **Composed in the order a photographer works in**: light first (exposure
-    /// and the white balance, which are one diagonal between them), then
-    /// colourfulness, then the tone spread. Each is a 4×5 matrix, so the whole of
-    /// it collapses to one — which is the only reason five sliders cost one
-    /// filter primitive.
+    /// Composed light first (exposure and white balance), then colourfulness, then
+    /// the tone spread, collapsing to one matrix and one filter primitive.
     fn matrix(&self) -> Option<[f32; 20]> {
         let (e, c, s) = (self.exposure, self.contrast, self.saturation);
         let (t, n) = (self.temperature, self.tint);
         if e == 0.0 && c == 0.0 && s == 0.0 && t == 0.0 && n == 0.0 {
             return None;
         }
-        // Exposure is stops, so it is a power of two; the two white-balance axes
-        // are gentle channel gains on top of it. **±0.3 on the axis's own channel
-        // and half that, the other way, on the pair beside it** — a full-tilt
-        // temperature is a visible warm cast rather than a colour separation, and
-        // tint's compensation on red and blue is what keeps the green axis from
-        // reading as a brightness slider.
+        // Exposure is stops, so a power of two; the white-balance axes are gentle
+        // channel gains on top: ±0.3 on the axis's own channel and half that, the
+        // other way, on the pair beside it, so tint does not read as brightness.
         let light = 2f32.powf(e);
         let gain = diagonal(
             light * (1.0 + 0.3 * t) * (1.0 + 0.15 * n),
             light * (1.0 - 0.3 * n),
             light * (1.0 - 0.3 * t) * (1.0 + 0.15 * n),
         );
-        // **SVG's own luminance coefficients**, not Rec.601's, because
-        // `feColorMatrix type="saturate"` is written with these — so the numbers
-        // this emits are the numbers a reader of the markup would expect, and a
-        // neutral-saturation export is recognisably the identity.
+        // SVG's own luminance coefficients, not Rec.601's: the ones
+        // `feColorMatrix type="saturate"` is written with.
         let k = 1.0 + s;
         let (lr, lg, lb) = (0.213, 0.715, 0.072);
         let sat = [
@@ -941,8 +597,7 @@ impl ImageAdjust {
             1.0,
             0.0,
         ];
-        // Contrast pivots on mid-grey, which is a scale plus the offset that
-        // holds 0.5 still — the fifth column is exactly what that offset is for.
+        // Contrast pivots on mid-grey: a scale plus the offset that holds 0.5 still.
         let kc = 1.0 + c;
         let mut contrast = diagonal(kc, kc, kc);
         for row in 0..3 {
@@ -957,9 +612,7 @@ impl ImageAdjust {
     /// **The two ends are weighted so that each slider leaves the other end
     /// alone** — `(1−v)²` for the shadows and `v²` for the highlights — and the
     /// ±0.4 strength is the largest that keeps the curve monotonic at both ends
-    /// (the derivative of `v + a(1−v)²` at `v = 0` is `1 − 2a`). A curve that
-    /// doubled back would make a slider *invert* part of the picture at its
-    /// extreme, which reads as a rendering bug rather than as a strong setting.
+    /// (the derivative of `v + a(1−v)²` at `v = 0` is `1 − 2a`).
     fn curve(&self) -> Option<[f32; TONE_STEPS]> {
         let (h, s) = (self.highlights, self.shadows);
         if h == 0.0 && s == 0.0 {
@@ -999,44 +652,24 @@ fn compose(a: &[f32; 20], b: &[f32; 20]) -> [f32; 20] {
 }
 
 /// What [`ImageAdjust`] resolves to: the per-pixel function, in the one shape all
-/// three writers can say.
-///
-/// **Here for the reason [`ImageRef::framing`] and [`missing_placeholder`] are
-/// here.** Three copies of a per-pixel function are three pictures, and the two
-/// that are pixels would agree with each other while the one that is markup
-/// quietly did not — which is exactly how the frame background's missing
-/// placeholder got lost (§15 D179).
+/// three writers can say (§15 D179).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AdjustPipeline {
-    /// A 4×5 colour matrix over straight-alpha sRGB, row-major — the twenty
-    /// numbers `feColorMatrix type="matrix"` takes, in its order.
+    /// A 4×5 colour matrix over straight-alpha sRGB, row-major, as
+    /// `feColorMatrix type="matrix"` takes it.
     pub matrix: Option<[f32; 20]>,
-    /// A transfer table applied to each of R, G and B **after** the matrix — the
-    /// `tableValues` of an `feComponentTransfer type="table"`, sampled at
-    /// [`TONE_STEPS`] points across `0..=1`.
+    /// A [`TONE_STEPS`]-point transfer table applied to R, G and B **after** the
+    /// matrix (`feComponentTransfer type="table"`).
     pub curve: Option<[f32; TONE_STEPS]>,
 }
 
 impl AdjustPipeline {
-    /// One pixel through the pipeline: straight-alpha sRGB in `0..=1` in, the
-    /// same out.
+    /// One pixel through the pipeline: straight-alpha sRGB in `0..=1`, in and out.
     ///
-    /// **The order is the interesting part; the clamp is stated twice on
-    /// purpose.** SVG runs the primitives in the order the `<filter>` lists them
-    /// and cuts each one's result to `0..=1` before the next reads it. That bound
-    /// is written here *and* again inside [`transfer`], which is belt and braces
-    /// — remove either alone and nothing changes — but not decoration: remove
-    /// **both** and an overshooting matrix reaches the table with an index the
-    /// `.min` bounds and a fraction it does not, so the lerp extrapolates off the
-    /// end of the curve. `the_matrix_runs_before_the_tone_curve` is the test that
-    /// catches that, because it probes a pixel the exposure pushes past white.
-    ///
-    /// What the *order* buys is that such a pixel is a blown highlight the curve
-    /// can recover: swapped round, the same two settings give a picture that is
-    /// merely blown.
-    ///
-    /// Alpha is not touched by either stage, which is why it is not a parameter:
-    /// the matrix's alpha row is the identity and no `feFuncA` is emitted.
+    /// **The order matters, and the clamp is stated twice on purpose.** SVG cuts
+    /// each primitive's result to `0..=1`; the bound is written here *and* inside
+    /// [`transfer`]. Removing both lets an overshooting matrix make the lerp
+    /// extrapolate off the curve (`the_matrix_runs_before_the_tone_curve`).
     pub fn apply(&self, rgb: [f32; 3]) -> [f32; 3] {
         let mut v = rgb;
         if let Some(m) = &self.matrix {
@@ -1054,10 +687,8 @@ impl AdjustPipeline {
 }
 
 /// SVG's `feComponentTransfer type="table"`, to the letter: `n` values spanning
-/// `0..=1`, read by linear interpolation between the two straddling it.
-///
-/// Spelled out rather than approximated because it is the seam where the canvas
-/// and the export have to agree — see [`TONE_STEPS`].
+/// `0..=1`, linearly interpolated. The seam where canvas and export must agree —
+/// see [`TONE_STEPS`].
 pub fn transfer(table: &[f32], v: f32) -> f32 {
     if table.is_empty() {
         return v;
@@ -1067,15 +698,13 @@ pub fn transfer(table: &[f32], v: f32) -> f32 {
     }
     let v = v.clamp(0.0, 1.0);
     let n = table.len() - 1;
-    // The spec's own indexing: `k = floor(v·n)`, held at `n−1` so that `v = 1`
-    // interpolates from the last pair rather than off the end of the list.
+    // The spec's indexing: `k = floor(v·n)`, held at `n−1` so `v = 1` uses the last pair.
     let k = ((v * n as f32) as usize).min(n - 1);
     let t = v * n as f32 - k as f32;
     table[k] + t * (table[k + 1] - table[k])
 }
 
-/// One of the seven, named — so the panel draws them from this list rather than
-/// from seven hand-written rows, and the order and the words live in one place.
+/// One of the seven, named, so the panel draws them from one list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Adjustment {
     Exposure,
@@ -1088,8 +717,7 @@ pub enum Adjustment {
 }
 
 impl Adjustment {
-    /// The seven, in the order the panel lists them: light, then colour, then the
-    /// two that shape one end of the range each.
+    /// The seven, in the order the panel lists them.
     pub const ALL: [Adjustment; 7] = [
         Self::Exposure,
         Self::Contrast,
@@ -1100,10 +728,7 @@ impl Adjustment {
         Self::Shadows,
     ];
 
-    /// The word the control carries. **A word rather than a glyph**, which is the
-    /// rule the popover's mirror pair arrived at the hard way: a control that
-    /// cannot be told from its neighbour by its drawing has to be told by its
-    /// label, and no icon set has seven distinguishable tone-adjustment glyphs.
+    /// The word the control carries (no icon set has seven distinguishable glyphs).
     pub fn label(self) -> &'static str {
         match self {
             Self::Exposure => "Exposure",
@@ -1143,10 +768,9 @@ impl Adjustment {
 
     /// Write one of the seven, held inside `-1..=1`.
     ///
-    /// **Clamped here rather than at the control**, because there are two writers
-    /// — a slider and a *reset* — and a range the model does not enforce is a
-    /// range a hand-edited file ignores. The tone curve's monotonicity argument
-    /// only holds inside this range.
+    /// **Clamped here rather than at the control**: a range the model does not
+    /// enforce is a range a hand-edited file ignores, and the tone curve's
+    /// monotonicity argument only holds inside it.
     pub fn set(self, a: &mut ImageAdjust, v: f32) {
         let v = if v.is_finite() {
             v.clamp(-1.0, 1.0)
@@ -1167,76 +791,39 @@ impl Adjustment {
 
 /// What a fill holds: which image, and how it sits in the frame.
 ///
-/// **A struct rather than a bare [`ImageId`]**, which is what let the framing
-/// arrive as an additive schema change (§5.11) rather than a migration.
-/// Everything about *sampling* is carried by peniko's own `ImageSampler` beside
-/// this — extend in both axes, quality, and an alpha multiplier — so none of it
-/// is restated here, and the one field of it the fit has an opinion about
-/// (extend) is answered by [`ImageRef::framing`] at the render boundary rather
-/// than written back into the model, so the two can never disagree.
+/// **A struct rather than a bare [`ImageId`]**, so framing is an additive schema
+/// change (§5.11). Sampling is peniko's own `ImageSampler`; the one field the fit
+/// has an opinion about (extend) is answered by [`ImageRef::framing`] at the
+/// render boundary rather than written into the model.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImageRef {
     pub id: ImageId,
     #[serde(default, skip_serializing_if = "ImageFit::is_default")]
     pub fit: ImageFit,
     /// The rectangle of the source [`ImageFit::Crop`] shows, **normalized** to
-    /// the picture *as [`Self::orient`] leaves it*: `(0,0)..(1,1)` is the whole
-    /// of it, and `(0,0)` is whichever source corner the flips and turns have
-    /// put at the frame's top-left.
+    /// the picture *as [`Self::orient`] leaves it* (the space the crop gesture
+    /// drags in), so `crop_panned` and `crop_reframed` know nothing about
+    /// orientation; [`ImageRef::reoriented`] is the only way to change it, carrying
+    /// the rectangle along. Normalized rather than in pixels so *replace image*
+    /// keeps the framing (§5.5a, §15 D179).
     ///
-    /// Normalized to the **oriented** picture rather than to the raw source
-    /// because that is the space the crop gesture drags in — its axes are the
-    /// frame's — so `crop_panned` and `crop_reframed` need to know nothing about
-    /// orientation at all. The price is that changing the orientation has to
-    /// carry the rectangle with it, which [`OrientOp::crop_carried`] does and
-    /// [`ImageRef::reoriented`] is the only way to reach.
-    ///
-    /// Normalized rather than in pixels so that *replace image* keeps the
-    /// framing when the new picture has different dimensions, which §5.5a
-    /// requires by name and which is the whole of what makes the popover's
-    /// *Replace…* a repair rather than a fresh placement (§15 D179); in pixels it
-    /// would either be silently wrong or would have to be rescaled on every
-    /// replace.
-    ///
-    /// The rectangle maps onto the frame **exactly**, so aspect is the frame's
-    /// business: cropping to a square and then stretching the shape stretches
-    /// the picture. That is what having chosen a region means, and it keeps the
-    /// crop gesture and the resize gesture from arguing about the same number.
-    ///
-    /// **Kept while the mode is not `Crop`**, which is the whole reason it lives
-    /// here rather than inside the variant — see [`ImageFit`]. Coordinates
-    /// outside `0..1` are not rejected: core stores what it is given, and they
-    /// sample the edge pixel, since `Extend::Pad` is the only clamp peniko has.
+    /// Maps onto the frame **exactly**, so stretching the shape stretches the
+    /// picture. **Kept while the mode is not `Crop`** — see [`ImageFit`]. Coordinates
+    /// outside `0..1` are not rejected; they sample the edge pixel.
     #[serde(default = "whole_crop", skip_serializing_if = "is_whole_crop")]
     pub crop: kurbo::Rect,
-    /// What [`ImageFit::Tile`] repeats at, as a multiple of the source's
-    /// intrinsic pixel size: `1.0` is one document unit per source pixel.
-    ///
-    /// Kept while the mode is not `Tile`, as [`Self::crop`] is. A value that is
-    /// not finite and positive draws at `1.0` rather than being refused, because
-    /// a singular brush transform is a backend question and this is a document.
+    /// What [`ImageFit::Tile`] repeats at: `1.0` is one document unit per source
+    /// pixel. Kept while the mode is not `Tile`; a value that is not finite and
+    /// positive draws at `1.0`.
     #[serde(default = "unit_scale", skip_serializing_if = "is_unit_scale")]
     pub tile_scale: f64,
-    /// The flips and quarter turns applied to the picture **before** any of the
-    /// four modes frames it.
-    ///
-    /// Read by all four, unlike [`Self::crop`] and [`Self::tile_scale`]: turning
-    /// a picture turns it whether it is filling, fitting, cropped or tiled, and a
-    /// mode that ignored it would be the one mode where the flip button does
-    /// nothing.
+    /// The flips and quarter turns applied **before** any mode frames the
+    /// picture; read by all four, unlike [`Self::crop`] and [`Self::tile_scale`].
     #[serde(default, skip_serializing_if = "ImageOrient::is_default")]
     pub orient: ImageOrient,
-    /// The per-pixel adjustments applied to the picture before any of this is
-    /// framed.
-    ///
-    /// **The one field here that is not geometry**, and the difference is what it
-    /// costs: the other four are answered by a brush transform over the decoded
-    /// buffer the whole document shares, where this one produces a *second
-    /// buffer* — which is why `ondin_render::ImageStore` keys derived pixels by
-    /// `(id, adjust)` and why [`ImageAdjust::pipeline`] is shaped the way it is.
-    ///
-    /// Read by all four framing modes, as [`Self::orient`] is: what is done to the
-    /// picture's colours has nothing to do with how it sits in the frame.
+    /// The per-pixel adjustments, applied before framing. **The one field that is
+    /// not geometry**: it produces a *second buffer*, so `ondin_render::ImageStore`
+    /// keys derived pixels by `(id, adjust)`.
     #[serde(default, skip_serializing_if = "ImageAdjust::is_default")]
     pub adjust: ImageAdjust,
 }
@@ -1253,14 +840,8 @@ impl ImageRef {
         }
     }
 
-    /// This reference flipped or turned inside its frame, **with the crop
-    /// carried along**.
-    ///
-    /// One function rather than two writes at the call site, because the two have
-    /// to happen together or the picture jumps to a different part of the source
-    /// — see [`OrientOp::crop_carried`]. Making it the only way to reach the
-    /// orientation is what stops that being got wrong at a call site, the way
-    /// [`Self::framing`] is the only way to reach a brush transform.
+    /// This reference flipped or turned inside its frame, **with the crop carried
+    /// along** (the two must happen together or the picture jumps).
     pub fn reoriented(&self, op: OrientOp) -> Self {
         Self {
             orient: self.orient.applying(op),
@@ -1277,25 +858,10 @@ impl ImageRef {
 
     /// The crop rectangle that shows exactly what [`ImageFit::Fill`] shows.
     ///
-    /// **What entering Crop seeds**, so that choosing it changes nothing on
-    /// screen and the gesture starts from the picture the user is already looking
-    /// at. Without it, Crop begins at the whole source stretched onto the frame —
-    /// which is a different picture, arrived at by picking the mode whose entire
-    /// job is not to change one.
-    ///
-    /// It is the widest crop the gesture can zoom out to — a rectangle any larger
-    /// would have to leave the source, where `Extend::Pad` smears the edge row —
-    /// and therefore what *reset crop* comes back to, which it does by restoring
-    /// [`whole_crop`] and letting the next entry seed this again.
-    ///
-    /// Degenerate input gives [`whole_crop`] — there is no cover to compute, and
-    /// nothing draws anyway.
-    ///
-    /// **A method rather than an associated function, because the answer depends
-    /// on [`Self::orient`]**: cover is computed against the *turned* aspect, and
-    /// the rectangle it returns is normalized to the turned picture, which is the
-    /// space [`Self::crop`] is in. Taking the intrinsic size as an argument
-    /// anyway, because the caller is the one holding the table entry.
+    /// **What entering Crop seeds**, so choosing it changes nothing on screen: the
+    /// widest crop the gesture can zoom out to (any larger leaves the source).
+    /// Degenerate input gives [`whole_crop`]. Cover is computed against the
+    /// *turned* aspect ([`Self::orient`]).
     pub fn cover_crop(&self, frame: kurbo::Rect, width: u32, height: u32) -> kurbo::Rect {
         let (pw, ph) = (width as f64, height as f64);
         let (fw, fh) = (frame.width(), frame.height());
@@ -1303,10 +869,8 @@ impl ImageRef {
             return whole_crop();
         }
         let (iw, ih) = self.orient.oriented_size(pw, ph);
-        // The scale cover uses, then the source rectangle that much of the frame
-        // is worth — centred, as the cover framing centres what it overflows.
-        // Orientation is a symmetry of the box about its own centre, so a centred
-        // rectangle stays centred and nothing here has to un-turn anything.
+        // The cover scale, then the centred source rectangle that much frame is worth.
+        // Orientation is a symmetry about the centre, so nothing needs un-turning.
         let s = (fw / iw).max(fh / ih);
         let (vw, vh) = (fw / s / iw, fh / s / ih);
         kurbo::Rect::new(
@@ -1317,51 +881,25 @@ impl ImageRef {
         )
     }
 
-    /// How big the picture is on the page under [`ImageFit::Crop`], in local units
-    /// per **oriented** source pixel — `1.0` being one unit per pixel, exactly as
-    /// [`Self::tile_scale`] means it for the mode beside it.
+    /// The picture's size under [`ImageFit::Crop`], in local units per **oriented**
+    /// source pixel (as [`Self::tile_scale`]).
     ///
-    /// **The one thing the crop *gesture* cannot change**, which is what makes this
-    /// a control rather than a duplicate of one: a handle drag moves an edge of the
-    /// window with the picture nailed down, and a pan slides the picture under a
-    /// window that is nailed down. Neither alters this number. So the window and
-    /// the zoom are two separate questions with one answer each — where the old
-    /// crop tool put both on the same drag, which is half of why "I chose Crop and
-    /// it resized" was the report it was (§15 D268, D271).
-    ///
-    /// **Measured on x.** The two axes agree wherever the crop's aspect matches the
-    /// frame's, which is every rectangle this app's own gestures produce — they
-    /// seed from [`Self::cover_crop`] and scale uniformly from there. They can
-    /// differ after the *layer* is resized non-uniformly outside image editing,
-    /// which stretches the picture on purpose (the rectangle maps onto the frame
-    /// exactly); there this reports the horizontal scale and the picture is taller
-    /// or shorter than it says. Reading one axis is also what makes the field
-    /// round-trip: [`crop_scaled`] multiplies the rectangle uniformly, so reading x
-    /// and writing a uniform factor cannot drift.
+    /// **The one thing the crop *gesture* cannot change** (§15 D268, D271): window
+    /// and zoom are separate questions. **Measured on x**: the axes agree for every
+    /// rectangle the app's gestures produce, differ after a non-uniform layer
+    /// resize, and one axis round-trips with [`crop_scaled`]'s uniform factor.
     pub fn crop_scale(&self, frame: kurbo::Rect, width: u32, height: u32) -> Option<f64> {
         let (iw, _) = self
             .orient
             .oriented_size(f64::from(width), f64::from(height));
         let span = self.crop.width() * iw;
-        // Positive-form, and it wants the same predicate for the same reason: an
-        // `inf` span passes `> 0.0` and answers `Some(0.0)` where the honest
-        // answer is `None`.
+        // An `inf` span passes `> 0.0` and would answer `Some(0.0)` instead of `None`.
         (usable_span(span) && usable_span(frame.width())).then(|| frame.width() / span)
     }
 
-    /// The scale `Fill` shows the picture at — and therefore the **floor** for
-    /// [`Self::crop_scale`].
-    ///
-    /// Below it the crop rectangle would have to leave the source on one axis or
-    /// both, where `Extend::Pad` smears the edge row into the frame. So a crop can
-    /// only ever zoom *in* from cover, and that is a fact about the geometry rather
-    /// than a limit anybody chose: the rectangle maps onto the frame exactly, so
-    /// there is no letterboxing for a smaller picture to sit in. Figma's crop has
-    /// the same floor for the same reason.
-    ///
-    /// Note that this is not the same as "100% and up": on a layer much smaller
-    /// than its picture, cover is well under one unit per pixel and the field runs
-    /// from there.
+    /// The scale `Fill` shows the picture at: the **floor** for
+    /// [`Self::crop_scale`], below which the crop would leave the source. Not
+    /// "100% and up": on a small layer cover is well under one unit per pixel.
     pub fn cover_scale(&self, frame: kurbo::Rect, width: u32, height: u32) -> Option<f64> {
         let (pw, ph) = (f64::from(width), f64::from(height));
         let (fw, fh) = (frame.width(), frame.height());
@@ -1369,22 +907,15 @@ impl ImageRef {
             return None;
         }
         let (iw, ih) = self.orient.oriented_size(pw, ph);
-        // The very expression `cover_crop` scales by, which is the point: the
-        // rectangle it returns is this scale's, so a field clamped here and a
-        // gesture seeded there cannot disagree about where the bottom is.
+        // The very expression `cover_crop` scales by, so the two agree on the floor.
         Some((fw / iw).max(fh / ih))
     }
 
     /// How this reference sits in `frame`, given the source's intrinsic size.
     ///
-    /// `frame` is the shape's bounding box in its own local space — the space
-    /// the path is in, and therefore the space the brush transform is in
-    /// (§6.2). The result is the same for both backends and for the SVG writer,
-    /// which is why the arithmetic lives here rather than in either of them.
-    ///
-    /// A zero-sized source or an empty frame resolves to
-    /// [`Framing::identity`]: neither has a drawing to get right, and a
-    /// singular brush transform is worse than a wrong one.
+    /// `frame` is the shape's bounding box in its local space (§6.2). Shared by
+    /// both backends and the SVG writer. A zero-sized source or an empty frame
+    /// resolves to [`Framing::identity`].
     pub fn framing(&self, frame: kurbo::Rect, width: u32, height: u32) -> Framing {
         use kurbo::Affine;
         let (pw, ph) = (width as f64, height as f64);
@@ -1392,11 +923,8 @@ impl ImageRef {
         if !usable_span(pw) || !usable_span(ph) || !usable_span(fw) || !usable_span(fh) {
             return Framing::identity();
         }
-        // **Everything below frames the *oriented* picture.** The mirror and the
-        // quarter turns happen in source space, before any of the four modes sees
-        // it, so Fill covers with the turned aspect and the crop rectangle names a
-        // region of what is actually on screen. Composed on the right at the end,
-        // which leaves the four arms the arithmetic they always were.
+        // Everything below frames the *oriented* picture; the orientation affine is
+        // composed on the right at the end.
         let orient = self.orient.affine(pw, ph);
         let (iw, ih) = self.orient.oriented_size(pw, ph);
         let base = match self.fit {
@@ -1405,17 +933,13 @@ impl ImageRef {
                 let cover = matches!(self.fit, ImageFit::Fill);
                 let s = if cover { sx.max(sy) } else { sx.min(sy) };
                 let (w, h) = (iw * s, ih * s);
-                // Centred, which is the only anchor that does not need a second
-                // control to explain it.
                 let x = frame.x0 + (fw - w) / 2.0;
                 let y = frame.y0 + (fh - h) / 2.0;
                 Framing {
                     transform: Affine::translate((x, y)) * Affine::scale(s),
                     extend: peniko::Extend::Pad,
-                    // Cover leaves nothing showing; contain does, but only where
-                    // the aspects differ — a tolerance rather than an exact
-                    // comparison, so a picture placed at its own aspect does not
-                    // pay for a layer because of a rounding bit.
+                    // Contain clips only where the aspects differ, with a tolerance so
+                    // a rounding bit does not pay for a layer.
                     clip: (!cover && (w < fw - 1e-9 || h < fh - 1e-9))
                         .then(|| kurbo::Rect::new(x, y, x + w, y + h)),
                 }
@@ -1451,24 +975,11 @@ impl ImageRef {
             transform: base.transform * orient,
             ..base
         };
-        // ⚠️ **A usable *span* is not a usable rectangle**, and the Crop arm is
-        // where the two come apart: it also weighs the crop's **origin**, through
-        // `Affine::translate((-r.x0 * iw, -r.y0 * ih))`, and nothing above tests
-        // that. `{"x0": -1e308, "x1": -1e308 + 1e300}` spans `1e300` — finite,
-        // positive, and `usable_span` says yes to `1e300 * iw` — while
-        // `1e308 * iw` overflows for any picture wider than one pixel. Measured on
-        // a 4000×3000 source: the composed transform comes back
-        // `[2.5e-302, 0, 0, 3.33e-302, NaN, NaN]`, so [`Self::picture_box`] answers
-        // `Some(NaN…)` and `tools::crop_resized` panics in `f64::clamp` — which is
-        // `[S9.1-L5-01]`'s third measured consequence reached by a crop D452's own
-        // guards call usable (§15 D452, amended).
-        //
-        // **Tested on the result rather than on the operands** because the operands
-        // are not the only road to it: `fw / sw` and `-r.x0 * iw` can each be
-        // finite and their product infinite, and a fourth road would need a fourth
-        // guard. This one is closed by construction — it asks the question
-        // `Framing::identity` exists to answer, of the value that is actually
-        // returned.
+        // **A usable span is not a usable rectangle.** The Crop arm also weighs the
+        // crop's origin (`-r.x0 * iw`), which `usable_span` never tests: a crop at
+        // `x0 = -1e308` with a `1e300` span has a finite span but an overflowing
+        // translation, and `picture_box` would answer `Some(NaN…)` (§15 D452). So the
+        // *result* is tested rather than the operands, which closes every road to it.
         if framed.transform.as_coeffs().iter().all(|c| c.is_finite()) {
             framed
         } else {
@@ -1476,26 +987,11 @@ impl ImageRef {
         }
     }
 
-    /// Where the **whole** picture lands in the frame's own local space — the
-    /// rectangle the frame is a window onto.
-    ///
-    /// **Read off [`Self::framing`] rather than computed beside it**, which is the
-    /// only thing keeping it honest: the transform this maps the source rectangle
-    /// through is the very one the two backends and the SVG writer paint with, so
-    /// the outline drawn round a picture cannot land anywhere but where the
-    /// picture is. A second copy of the four modes' arithmetic would be a fifth
-    /// opinion about the same drawing.
-    ///
-    /// Defined in all four modes, and it says something different in each: under
-    /// `Fill` it is the rectangle that overflows the frame, under `Fit` the one
-    /// that falls short of it (`Framing::clip`'s rectangle, when there is one),
-    /// under `Crop` the source the crop is a region of, and under `Tile` the first
-    /// repeat. **Only `Crop` draws it** (§15 D268) — under the other three the
-    /// frame is not a window the user is moving, so an outline round the overflow
-    /// would be marking something no gesture acts on.
-    ///
-    /// `None` for a degenerate frame or a zero-sized source, where
-    /// [`Framing::identity`] is standing in and there is no picture to bound.
+    /// Where the **whole** picture lands in the frame's local space. **Read off
+    /// [`Self::framing`]**, so an outline cannot land anywhere but where the
+    /// picture is painted. Defined in all four modes (under `Tile`, the first
+    /// repeat); **only `Crop` draws it** (§15 D268). `None` for a degenerate frame
+    /// or a zero-sized source.
     pub fn picture_box(&self, frame: kurbo::Rect, width: u32, height: u32) -> Option<kurbo::Rect> {
         if width == 0 || height == 0 || !usable_span(frame.width()) || !usable_span(frame.height())
         {
@@ -1503,20 +999,16 @@ impl ImageRef {
         }
         let f = self.framing(frame, width, height);
         let source = kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        // A bounding box rather than the mapped rectangle, because the transform
-        // carries `orient`: a quarter turn maps the source box to itself only up
-        // to a swap of its corners, and `Rect` has no way to hold the swapped one.
-        // The box is the same either way, which is all this is asked for.
+        // A bounding box: the transform carries `orient`, and a quarter turn swaps
+        // the corners, which `Rect` cannot hold.
         Some(f.transform.transform_rect_bbox(source))
     }
 }
 
 /// The drawing that stands in for a picture that cannot be drawn (§15 D179).
 ///
-/// **Here rather than in either writer, for the reason [`ImageRef::framing`] is
-/// here**: the answer has to be the same on the GPU canvas, in the CPU export and
-/// in the SVG writer, and three copies of a drawing are three drawings. The
-/// caller supplies the shape and does the painting; this supplies what to paint.
+/// Here for the reason [`ImageRef::framing`] is: canvas, CPU export and SVG writer
+/// must draw the same thing. The caller supplies the shape and does the painting.
 pub struct Missing {
     /// The ground the shape is filled with.
     pub ground: peniko::Color,
@@ -1530,20 +1022,10 @@ pub struct Missing {
 
 /// Grey and a cross over `bounds`, or [`None`] for a box with no area.
 ///
-/// **Grey and a cross, which is the one idiom everybody already reads.** No glyph
-/// and no words: a placeholder that needed a font could not be drawn by a walk
-/// that has none, and the export path has to draw the same thing as the canvas.
-/// Neutral rather than an alarm colour, because the usual cause is a file that
-/// moved rather than a mistake in the document.
-///
-/// **The cross is the *box's* diagonals and the rim is the caller's own path**,
-/// so an image fill in a circle keeps the circle: the caller clips the cross to
-/// the shape. A rectangle drawn over a round shape would read as a layer of its
-/// own rather than as that shape having lost its picture.
-///
-/// The width is a fortieth of the shorter side, held between 0.5 and 4 units. A
-/// fixed width is a hairline on a photograph's frame and a slab on a 20-unit
-/// icon; this is ink, so it scales with the zoom either way.
+/// **No glyph and no words**, since a walk with no font must draw it. The cross is
+/// the *box's* diagonals and the rim is the caller's own path, so an image fill in
+/// a circle keeps the circle (the caller clips the cross). The width is a
+/// fortieth of the shorter side, held between 0.5 and 4 units.
 pub fn missing_placeholder(bounds: kurbo::Rect) -> Option<Missing> {
     if !usable_span(bounds.width()) || !usable_span(bounds.height()) {
         return None;
@@ -1554,9 +1036,7 @@ pub fn missing_placeholder(bounds: kurbo::Rect) -> Option<Missing> {
     cross.move_to((bounds.x1, bounds.y0));
     cross.line_to((bounds.x0, bounds.y1));
     Some(Missing {
-        // Light, not a mid grey: a placeholder should read as an *absence*, and a
-        // solid slab reads as artwork somebody chose. The cross is what carries it
-        // against a white page, which is why the ground can afford to be quiet.
+        // Light, so it reads as an *absence* rather than artwork somebody chose.
         ground: peniko::Color::from_rgb8(0xE4, 0xE4, 0xE6),
         ink: peniko::Color::from_rgb8(0xA0, 0xA0, 0xA8),
         width: (bounds.width().min(bounds.height()) / 40.0).clamp(0.5, 4.0),
@@ -1566,35 +1046,18 @@ pub fn missing_placeholder(bounds: kurbo::Rect) -> Option<Missing> {
 
 /// The model's brush: peniko's, over an image *reference* instead of pixels.
 ///
-/// **Not a brush enum of our own, which is what the image plan expected to
-/// need** (§15 D176, which is the whole record of that reversal).
-/// Its reasoning was that "an image reference cannot live in `peniko::Brush`,
-/// which holds pixels" — true of the shape peniko had when that was written, and
-/// not of 0.6: `Brush<I, G>` and `ImageBrush<D>` are both generic over their
-/// storage, and peniko's own documentation gives the reason as *"different
-/// renderers can use different types here, such as a pre-registered id"*. So the
-/// model substitutes [`ImageRef`] for the pixels and keeps everything else.
-///
-/// Three consequences, all of them the point:
+/// **Not a brush enum of our own** (§15 D176): `Brush<I, G>` and `ImageBrush<D>`
+/// are generic over their storage, so the model substitutes [`ImageRef`] for the
+/// pixels and keeps everything else.
 ///
 /// - **The save format does not move.** `Solid` and `Gradient` are the same
-///   variants of the same enum carrying the same types, so every document
-///   written before images existed loads byte-for-byte unchanged, with no schema
-///   bump and no migration. A brush enum of our own would have re-spelled two
-///   variants that were already right in order to add a third.
-///   ⚠️ **The `Gradient` half of that stopped being literally true on 2026-09-03
-///   and the property it was claiming still holds** (§15 D412): the payload is
-///   [`GradientBrush`] now rather than `peniko::Gradient`, and it stays
-///   wire-compatible by `#[serde(flatten)]` rather than by being the same type.
-///   *The second generic parameter is what made that a one-line change* — the
-///   same door `ImageRef` came through, used a second time and for a reason
-///   nobody had in mind when it was chosen.
-/// - **`alpha` and `extend` are not restated.** `ImageBrush` already carries an
-///   `ImageSampler`, which is the plan's own trap ("do not add parallel fields
-///   for them") answered by construction rather than by remembering (§15 D176).
-/// - **The render boundary is the only thing that changes**, which is where the
-///   seam was already waiting: `ondin_render::color::brush_to_backend` turns this
-///   into the backends' `peniko::Brush` by resolving the reference through the
+///   variants carrying wire-compatible types, so documents written before images
+///   existed load unchanged. The gradient payload is [`GradientBrush`], which
+///   stays compatible by `#[serde(flatten)]` (§15 D412).
+/// - **`alpha` and `extend` are not restated**: `ImageBrush` already carries an
+///   `ImageSampler`.
+/// - **Only the render boundary changes**:
+///   `ondin_render::color::brush_to_backend` resolves the reference through the
 ///   decode cache.
 pub type Brush = peniko::Brush<peniko::ImageBrush<ImageRef>, GradientBrush>;
 
@@ -1604,37 +1067,18 @@ pub type ImageBrush = peniko::ImageBrush<ImageRef>;
 /// The gradient half of [`Brush`]: peniko's gradient, plus the affine that maps
 /// the space it was authored in onto the shape's own.
 ///
-/// **Why the model needs a transform peniko does not have.** A
-/// `peniko::RadialGradientPosition` is two *circles*, so nothing in it can say
-/// "an ellipse" — and an elliptical radial gradient is the ordinary case in real
-/// files, since `gradientUnits="objectBoundingBox"` on any non-square shape
-/// produces one. ⚠️ **The reading that this is a peniko limitation is wrong and
-/// was carried in `roadmap.md` for days** (§15 D412): an ellipse *is* a circle
-/// under a non-uniform transform, and **both backends already had the
-/// mechanism** — vello's `Scene::fill` takes a `brush_transform` and
-/// `vello_cpu`'s `RenderContext` has `set_paint_transform`, both of which the
-/// image path had been using for framing all along while the gradient path
-/// explicitly reset them. What was missing was a place in the *model* to put the
-/// affine, which is this field.
+/// **Why the model needs a transform peniko does not have**: a
+/// `peniko::RadialGradientPosition` is two *circles*, but an elliptical gradient
+/// is the ordinary case in real files, and an ellipse is a circle under a
+/// non-uniform transform that both backends already take (§15 D412). It sits on
+/// the brush rather than on [`crate::node::Fill`] since a `Stroke` carries a
+/// `Brush` too.
 ///
-/// **On the brush rather than on [`crate::node::Fill`]**, which is what makes it
-/// one change instead of two: a `Stroke` carries a `Brush` as well, and a
-/// gradient-stroked shape wants the same treatment for the same reason. A field
-/// on `Fill` would have needed a twin on `Stroke` and a rule about which of the
-/// two a shared helper meant.
-///
-/// ⚠️ **Wire-compatible by `#[serde(flatten)]`, which is load-bearing rather than
-/// tidy.** A gradient written before this field existed is a JSON object of
-/// peniko's own keys; flattening puts `transform` beside them instead of nesting
-/// the gradient one level down, so those files load unchanged and a new file
-/// gains a key only when the transform is not the identity. Nesting would have
-/// been a schema break for every gradient ever saved, to add a field almost none
-/// of them use. `a_gradient_written_before_the_transform_existed_still_reads` is
-/// what says so.
-///
-/// **Read through [`GradientBrushWire`]**, which makes the stops monotonic
-/// ([`make_stops_monotonic`]), so a file, a paste or an MCP call holding a
-/// descending ramp arrives as the picture every renderer draws of it.
+/// **Wire-compatible by `#[serde(flatten)]`, which is load-bearing**: saved
+/// gradients load unchanged
+/// (`a_gradient_written_before_the_transform_existed_still_reads`). **Read through
+/// [`GradientBrushWire`]**, which makes the stops monotonic
+/// ([`make_stops_monotonic`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(from = "GradientBrushWire")]
 pub struct GradientBrush {
@@ -1642,50 +1086,27 @@ pub struct GradientBrush {
     #[serde(flatten)]
     pub gradient: peniko::Gradient,
     /// Gradient space → the shape's local space. The identity for everything the
-    /// app itself authors, because the panel builds a gradient's geometry from
-    /// the shape's own box; non-identity comes from an import
-    /// (`svg_in`'s `gradientTransform` and `objectBoundingBox` units) and rides
-    /// along untouched while stops are edited.
+    /// app authors; non-identity comes from an import (`svg_in`'s
+    /// `gradientTransform` and `objectBoundingBox` units) and rides along while
+    /// stops are edited.
     ///
-    /// ⚠️ **A *similarity* is not stored here**, and that is why this field is
-    /// rarer than it looks: a rotation or a uniform scale can be baked into the
-    /// two circles exactly, and `svg_in` still does that. Only the part peniko
-    /// genuinely cannot express — a squash — has to survive as a transform.
+    /// A *similarity* is not stored here: a rotation or uniform scale is baked
+    /// into the two circles, and only a squash survives as a transform.
     #[serde(default, skip_serializing_if = "is_identity")]
     pub transform: kurbo::Affine,
     /// The whole ramp's opacity, `0.0..=1.0`, multiplied over every stop's own
     /// alpha at paint time (§15 D767).
     ///
-    /// 🚨 **A field rather than a rewrite of the stops, because the rewrite was
-    /// lossy and the loss was silent.** `panels::paint::with_alpha` used to scale
-    /// every stop by `alpha / peak`; taking a ramp to 0% made `peak` zero, and the
-    /// next call could only fall back to writing one flat alpha across the whole
-    /// ramp. `[1.0, 0.0]` — the shape **every** gradient this app authors starts
-    /// as, a colour fading to transparent — came back `[1.0, 1.0]`, flat and
-    /// opaque, with the fade gone and no undo step to blame. Scaling is not
-    /// invertible through zero, and the maintainer's ruling that *"0 alpha means
-    /// fully invisible"* rules out the floors that would have kept it away from
-    /// zero.
+    /// **A field rather than a rewrite of the stops**: scaling every stop's alpha
+    /// is not invertible through zero, so taking a `[1.0, 0.0]` fade to 0% and back
+    /// came back flat and opaque. This matches the image brush, whose
+    /// `peniko::ImageSampler::alpha` is a multiplier beside the pixels.
     ///
-    /// **This is the shape the image brush has had all along**, which is the
-    /// argument for it: `peniko::ImageSampler::alpha` is a multiplier beside the
-    /// pixels, so `with_alpha` on a picture assigns a number and touches nothing —
-    /// already lossless, already invertible. The gradient arm was the only one of
-    /// the three that destroyed its subject, and the asymmetry *was* the defect.
+    /// Wire-compatible like `transform`: `default` plus `skip_serializing_if`, so
+    /// saved gradients load unchanged and re-save byte-identical (invariant 9).
     ///
-    /// ⚠️ **Wire-compatible by the same mechanism `transform` uses**: `default` plus
-    /// `skip_serializing_if`, so every gradient ever saved loads unchanged and
-    /// re-saves byte-identical (invariant 9). No `CURRENT_SCHEMA_VERSION` bump and
-    /// no migration.
-    ///
-    /// ⚠️ **The repair is forward-only and the record should not imply otherwise.**
-    /// A ramp already flattened to `[1.0, 1.0]` in a saved document stays flat: the
-    /// ratio information is gone from the file and nothing can invent it.
-    ///
-    /// ⚠️ **Clamped by its reader, not trusted from the file.** A `serde(default)`
-    /// float the loader does not validate is precisely §15 D713's shape — any six
-    /// characters in a `.ondin` become the field — so `build::brush_is_finite`
-    /// carries its range and `paint::alpha_of` clamps.
+    /// **Clamped by its reader, not trusted from the file** (§15 D713):
+    /// `build::brush_is_finite` carries its range and `paint::alpha_of` clamps.
     #[serde(default = "one", skip_serializing_if = "is_one")]
     pub opacity: f32,
 }
@@ -1732,33 +1153,19 @@ fn is_one(a: &f32) -> bool {
 /// Clamp a gradient's stop offsets up to the running maximum, in place
 /// (§15 D455).
 ///
-/// **This is SVG's rule, verbatim** — *"each gradient offset value is required to
-/// be equal to or greater than the previous"*, and a smaller one is corrected up
-/// — and it is the rule because a `.ondin` gradient's ramp is most often an SVG
-/// gradient's ramp. It is **not a sort**, and the difference is the whole point:
-/// `[0, 0.8, 0.2, 1]` clamps to `[0, 0.8, 0.8, 1]` (the third stop collapses onto
-/// the second) and sorts to `[0, 0.2, 0.8, 1]` (the third stop moves), which are
-/// two different pictures.
+/// **This is SVG's rule**: each offset must be at least the previous, and a
+/// smaller one is corrected up. It is **not a sort**: `[0, 0.8, 0.2, 1]` clamps to
+/// `[0, 0.8, 0.8, 1]` and sorts to `[0, 0.2, 0.8, 1]`, two different pictures.
 ///
-/// ⚠️ **A descending ramp is not a wrong picture, it is *no* picture.**
-/// `[S11.1-L1-02]`, measured in release through `VelloCpuRenderer`: a 100×20 rect
-/// with a horizontal linear gradient came back **the first stop's colour in all
-/// 100 columns** — the ramp collapses to a flat fill — and a descent of one part
-/// in ten million does it. Equal offsets, which is exactly what this produces,
-/// are fine.
+/// A descending ramp collapses to the first stop's colour in the vello CPU
+/// renderer; equal offsets, which this produces, are fine.
 ///
-/// ⚠️ **A sort is still the right rule where the *user* is the author**, which is
-/// why `panels::paint::with_stops` keeps its `sort_by` and this does not replace
-/// it. Dragging a stop handle past its neighbour means *"put it there"*; a file
-/// that says `0.2` after `0.8` is a file to be read, not an intention to be
-/// guessed at. Every gradient read is clamped here ([`GradientBrush`]'s
-/// deserialization), so the sort only ever sees a ramp that is already in order.
+/// A sort is still right where the *user* is the author, so
+/// `panels::paint::with_stops` keeps its `sort_by` (dragging a handle past its
+/// neighbour means "put it there"); it only ever sees an already-ordered ramp.
 pub fn make_stops_monotonic(stops: &mut [peniko::ColorStop]) {
-    // Starting at 0 rather than at the first stop's own offset, because a ramp is
-    // defined on `0..=1` and both authoring doors already say so:
-    // `svg_in::stop_of` clamps to `0.0..1.0` and `panels::paint::with_stops`
-    // clamps each stop it writes. A negative offset therefore reaches this only
-    // from a hand-edited file, where "at the start" is the honest reading.
+    // Start at 0, not the first stop's offset: a ramp is defined on `0..=1`, so a
+    // negative offset can only come from a hand-edited file.
     let mut hi = 0.0f32;
     for s in stops {
         s.offset = monotonic_offset(&mut hi, s.offset);
@@ -1768,22 +1175,13 @@ pub fn make_stops_monotonic(stops: &mut [peniko::ColorStop]) {
 /// [`make_stops_monotonic`]'s rule as one step, for a caller whose stops are not
 /// [`peniko::ColorStop`]s (§15 D564).
 ///
-/// **It exists because there is a fourth door and it was about to hold a fourth
-/// copy of the rule.** D455 fixed the importer, the renderer and the SVG writer,
-/// which share this function; the app's
-/// gradient *chips* — `ui::paint_ramp`, which the paint row, the picker's preview
-/// chip, its stop bar and the typography swatch all funnel through — read
-/// `Fill::brush`'s stop list verbatim and painted a descending ramp **mirrored**,
-/// while the canvas beside them painted SVG's clamped reading. Spelling the
-/// running maximum a second time there would have been G8's own shape, so it is
-/// spelled here instead.
+/// Shared with the app's gradient chips (`ui::paint_ramp`), which would otherwise
+/// hold a second copy of the rule and paint a descending ramp mirrored.
 ///
 /// `hi` is the running maximum and is updated; the return is the offset to use.
-/// `NaN` is `max`ed away rather than propagated — `f32::max` answers the non-NaN
-/// operand, so a NaN offset takes the running maximum and the ramp stays
-/// readable. It should never arrive (`build::brush_is_finite` refuses one at the
-/// op boundary, §15 D451) and both callers are drawing, which is not the place to
-/// find out.
+/// `NaN` takes the running maximum (`f32::max` answers the non-NaN operand) so the
+/// ramp stays readable; it should never arrive (`build::brush_is_finite`, §15
+/// D451) and both callers are drawing.
 pub fn monotonic_offset(hi: &mut f32, offset: f32) -> f32 {
     *hi = hi.max(offset);
     *hi
@@ -1796,8 +1194,7 @@ impl From<peniko::Gradient> for GradientBrush {
         Self {
             gradient,
             transform: kurbo::Affine::IDENTITY,
-            // Opaque: the stops carry whatever alpha the author gave them, and
-            // this multiplier starts out saying nothing (§15 D767).
+            // Opaque: the stops carry their own alpha.
             opacity: 1.0,
         }
     }
@@ -1815,14 +1212,8 @@ pub fn image_brush(id: ImageId) -> Brush {
 mod tests {
     use super::*;
 
-    /// **A brush that was written before images existed still reads.**
-    ///
-    /// The whole argument for reusing peniko's generic enum rather than
-    /// declaring one of our own is that the two solid/gradient variants keep
-    /// their serde shape, so no saved document has to be migrated. That is a
-    /// claim about *bytes*, so it is asserted against bytes: the JSON here was
-    /// produced by the old `peniko::Brush` (pixels in the image slot) and is
-    /// parsed by the new one (a reference in it).
+    /// A solid brush written by the old `peniko::Brush` still parses and
+    /// re-serializes to the same bytes.
     #[test]
     fn a_solid_brush_written_before_images_existed_still_parses() {
         let json = r#"{"Solid":{"components":[0.2,0.4,0.6,1.0]}}"#;
@@ -1831,34 +1222,15 @@ mod tests {
             panic!("expected a solid, got {brush:?}");
         };
         assert_eq!(c.components, [0.2, 0.4, 0.6, 1.0]);
-        // And back out to the same bytes, which is what invariant 9 turns on.
         let out = serde_json::to_string(&Brush::Solid(c)).expect("serializes");
         assert_eq!(out, json);
     }
 
-    /// **A gradient written before the transform existed still reads, and one
-    /// with the identity still writes the same bytes** (§15 D412).
-    ///
-    /// This is the claim `#[serde(flatten)]` is there to make, and it is a claim
-    /// about *bytes*, so it is asserted against bytes. Nesting the gradient under
-    /// a key instead — the obvious spelling — would have been a schema break for
-    /// every gradient ever saved, in order to add a field almost none of them
-    /// use.
-    ///
-    /// ⚠️ **The second half is the one that would rot quietly.** A `transform`
-    /// key appearing on every gradient would still *load* everywhere, so nothing
-    /// would fail; what it would cost is invariant 9 — every document containing
-    /// a gradient would rewrite on the next save, and the git diff this format
-    /// exists to keep readable would be noise. `skip_serializing_if` is what
-    /// stops that, and only this assertion says so.
-    ///
-    /// ⚠️ **The old bytes are produced by the old *type*, not typed out here.**
-    /// The payload before this change was a bare `peniko::Gradient`, so
-    /// serializing one is exactly what a pre-2026-09-03 file contains — and it
-    /// cannot drift when peniko adds a field, where a hand-written literal would
-    /// silently start testing a shape nothing ever wrote. (The first draft of
-    /// this test was such a literal and was wrong on its first run: it guessed
-    /// `"interpolation_alpha_space":"Separate"`, a variant that does not exist.)
+    /// A gradient written before the transform existed still reads, and one with
+    /// the identity (and opacity 1) re-saves the same bytes (§15 D412). The old
+    /// bytes come from serializing a bare `peniko::Gradient`, so they cannot drift
+    /// when peniko adds a field. Only the round-trip assertion catches a
+    /// `skip_serializing_if` that stopped skipping, which loads everywhere.
     #[test]
     fn a_gradient_written_before_the_transform_existed_still_reads() {
         let old = serde_json::to_string(&peniko::Gradient::new_linear((0.0, 0.0), (10.0, 0.0)))
@@ -1874,19 +1246,12 @@ mod tests {
             "an absent transform is the identity"
         );
         assert!(matches!(g.gradient.kind, peniko::GradientKind::Linear(_)));
-        // **And the same for `opacity`, which arrived the same way** (§15 D767).
-        // Asserted rather than left implicit: the byte-for-byte check below would
-        // catch a missing `skip_serializing_if`, but *this* is the assertion that
-        // names what an absent key means, and a default of `0.0` would make every
-        // pre-D767 gradient load invisible.
+        // A default of `0.0` would make every older gradient load invisible.
         assert_eq!(
             g.opacity, 1.0,
             "an absent opacity is fully opaque, not fully transparent"
         );
-        // And back out to the same bytes — no `transform` key, because it is the
-        // identity, and no `opacity` key, because it is 1. This is the half that
-        // keeps invariant 9, and it is why D767 needed no schema bump and no
-        // migration: every gradient ever saved re-saves byte-identical.
+        // No `transform` or `opacity` key goes out: invariant 9.
         assert_eq!(serde_json::to_string(&brush).expect("serializes"), json);
 
         // A squash *is* written, and comes back as itself.
@@ -1930,12 +1295,8 @@ mod tests {
         assert_eq!(offsets, [0.0, 0.8, 0.8, 1.0]);
     }
 
-    /// **An image brush is a key, and the sampler is peniko's.**
-    ///
-    /// Asserting on the JSON rather than on a round trip, because what this is
-    /// about is that no *pixels* can reach the file: a table of encoded bytes
-    /// written once is the whole point of the reference, and a brush that
-    /// serialized a decoded buffer would defeat it invisibly.
+    /// An image brush serializes as a key plus peniko's sampler; asserted on the
+    /// JSON so no decoded pixels can reach the file.
     #[test]
     fn an_image_brush_serializes_as_a_key_and_a_sampler() {
         let brush = image_brush(ImageId("abc123".into()));
@@ -1948,15 +1309,8 @@ mod tests {
         assert_eq!(back, brush);
     }
 
-    /// **A chosen fit is written; the default one is not.**
-    ///
-    /// Both halves matter and they are different claims. The default staying
-    /// out is what made framing an additive change (§5.11) — every image placed
-    /// before it existed keeps its exact line in the file, which is what the
-    /// test above asserts against literal JSON. The chosen one going *in* is the
-    /// half a `skip_serializing_if` gets wrong by being pointed at the wrong
-    /// predicate, and it fails silently: the document would load with the crop
-    /// thrown away and look like the crop gesture had not committed.
+    /// A chosen fit and crop are written (a `skip_serializing_if` on the wrong
+    /// predicate would silently drop them); the default stays out (§5.11).
     #[test]
     fn a_chosen_fit_is_written_and_the_default_one_is_not() {
         let mut brush = image_brush(ImageId("abc123".into()));
@@ -1975,8 +1329,7 @@ mod tests {
         assert_eq!(back, brush);
     }
 
-    /// The source rectangle's two opposite corners, in the frame's local space —
-    /// which is the whole of what a framing transform says.
+    /// The source rectangle's two opposite corners in the frame's local space.
     fn corners(f: &Framing, w: u32, h: u32) -> (kurbo::Point, kurbo::Point) {
         (
             f.transform * kurbo::Point::ZERO,
@@ -1984,8 +1337,7 @@ mod tests {
         )
     }
 
-    /// All eight symmetries of the rectangle, so a test that only wants to know
-    /// "does this hold whatever the picture has been turned to" says so once.
+    /// All eight symmetries of the rectangle.
     fn every_orientation() -> impl Iterator<Item = ImageOrient> {
         (0..4).flat_map(|quarters| {
             [false, true]
@@ -2020,23 +1372,10 @@ mod tests {
         .framing(frame, w, h)
     }
 
-    /// **Entering Crop must not change the picture**, which is what
-    /// `ImageRef::cover_crop` is for — and the assertion is that the two
-    /// framings are *equal*, not that they look similar.
-    ///
-    /// Crop's rectangle maps onto the frame exactly, so the seed has to undo the
-    /// cover framing precisely: get it slightly wrong and choosing Crop nudges
-    /// the picture, which is the one thing the mode whose job is not to change
-    /// one must not do. Asserted across three aspect relationships — a source
-    /// wider than its frame, taller than it, and matching it — because the
-    /// centring term vanishes on the matching case and a version that forgot it
-    /// passes there.
-    ///
-    /// **Run again under every one of the eight orientations**, which is where
-    /// the seed is easiest to get wrong: the turned cases need cover computed
-    /// against the *turned* aspect, and a `cover_crop` that ignored the
-    /// orientation is right for the four unturned ones and wrong for the four
-    /// that swap the axes.
+    /// Entering Crop at `cover_crop` draws exactly what Fill drew, across three
+    /// aspect relationships (the centring term vanishes on the matching one) and
+    /// all eight orientations (a `cover_crop` that ignored orientation is wrong
+    /// for the four that swap the axes).
     #[test]
     fn entering_crop_at_its_cover_rectangle_draws_exactly_what_fill_drew() {
         let id = ImageId("x".into());
@@ -2072,9 +1411,7 @@ mod tests {
                     ..filled.clone()
                 };
                 let (a, b) = (filled.framing(frame, w, h), cropped.framing(frame, w, h));
-                // Compared through the corners rather than the affine's
-                // coefficients, so a transform composed a different way but
-                // landing in the same place still counts as equal.
+                // Compared through the corners, not the coefficients.
                 let corner = |f: &Framing, p: kurbo::Point| f.transform * p;
                 for p in [kurbo::Point::ZERO, kurbo::Point::new(w as f64, h as f64)] {
                     let (pa, pb) = (corner(&a, p), corner(&b, p));
@@ -2088,37 +1425,14 @@ mod tests {
         }
     }
 
-    /// **The same guarantee is unreachable for `Fit`, and this is the proof
-    /// rather than the excuse** — §15 D561.
+    /// Entering Crop on a letterboxed `Fit` picture cannot reproduce it (§15
+    /// D561): the exact rectangle leaves the source, and `crop_clamped` of it *is*
+    /// `cover_crop`, at every orientation. The exact rectangle is read off
+    /// `ImageRef::picture_box` rather than re-derived. The `Fill` row is the
+    /// control (its exact rectangle equals cover unclamped).
     ///
-    /// `canvas::crop_and_limit` seeds every non-`Crop` fill from
-    /// `ImageRef::cover_crop`, and its doc used to promise the picture *"starts
-    /// where the eye already is"* for all four fits. The test above shows that
-    /// exactly for `Fill`. For `Fit` it is false — entering the crop on a
-    /// letterboxed picture scales it up and throws part of it away — and it
-    /// cannot be made true: a `Crop` framing maps its rectangle onto the **whole**
-    /// frame, so reproducing a letterbox would need a rectangle *larger than the
-    /// source*, and `crop_clamped` shrinks any such rectangle back about its own
-    /// centre before it can be stored.
-    ///
-    /// So the assertion is the sharper statement, and it is what makes cover the
-    /// right answer rather than a convenient one: **`crop_clamped` of the exact
-    /// rectangle *is* `cover_crop`**, to the last bit, at every orientation.
-    ///
-    /// The exact rectangle is read off `ImageRef::picture_box` — where the whole
-    /// picture actually lands — rather than re-derived from the aspect ratios,
-    /// because a re-derivation would be this file's own arithmetic checked against
-    /// itself. ⚠️ **The `Fill` row is the control that makes the derivation
-    /// credible**: there the exact rectangle needs no clamping at all and equals
-    /// `cover_crop` on its own, so the equality below cannot be an artefact of
-    /// clamping everything onto the same rectangle.
-    ///
-    /// **Flip-checked, and it bit at the control rather than where it was aimed**:
-    /// `cover_crop`'s `.max` turned into `.min` — cover made contain, which is the
-    /// implementation somebody would actually have written — fails the *Fill* row
-    /// first, at `(-0.5, 0) – (1.5, 1)` against an exact `(0, 0.25) – (1, 0.75)`.
-    /// The clamped assertion never runs. So the control is not decoration here; it
-    /// is the assertion with the teeth.
+    /// flip: `cover_crop`'s `.max` → `.min` → fails at the Fill row's derivation
+    /// assertion, before the clamped one runs.
     #[test]
     fn a_fit_pictures_exact_crop_leaves_the_source_and_clamps_to_the_cover_one() {
         let id = ImageId("x".into());
@@ -2146,9 +1460,7 @@ mod tests {
             ),
         ] {
             for orient in every_orientation() {
-                // The rectangle of the picture the frame is a window onto,
-                // normalised the way a crop is: the frame expressed against the
-                // whole picture's own box.
+                // The frame expressed against the whole picture's box, as a crop is.
                 let exact_for = |fit: ImageFit| {
                     let r = ImageRef {
                         fit,
@@ -2204,10 +1516,8 @@ mod tests {
         }
     }
 
-    /// The seed is also the widest the crop can honestly go: any larger and it
-    /// leaves the source, where `Extend::Pad` smears the edge row across the
-    /// frame. One axis always reaches the full `0..1` — the other is the one
-    /// cover overflows.
+    /// The cover crop lies inside the source and spans one axis fully (it is the
+    /// widest crop); degenerate input gives `whole_crop`.
     #[test]
     fn the_cover_crop_lies_inside_the_source_and_touches_one_pair_of_edges() {
         for (frame, w, h) in [
@@ -2234,7 +1544,6 @@ mod tests {
                 );
             }
         }
-        // Degenerate input has no cover to compute and must not divide by zero.
         assert_eq!(
             ImageRef::new(ImageId("x".into())).cover_crop(
                 kurbo::Rect::new(0.0, 0.0, 10.0, 10.0),
@@ -2245,15 +1554,9 @@ mod tests {
         );
     }
 
-    /// **The picture follows the pointer, and the rectangle goes the other way.**
-    ///
-    /// The sign is the whole of this function and it is the thing that is wrong
-    /// half the time by construction — a crop that ran away from the drag would
-    /// be reported as "it moves backwards" and nothing else about the gesture
-    /// would look different. Asserted by where a *source point lands*, not by
-    /// which way the numbers went: drag right by a quarter of the frame and the
-    /// pixel that was at the frame's left edge must now be a quarter of the way
-    /// across it.
+    /// Panning moves the picture with the pointer, asserted by where a source
+    /// point lands: dragging right by a quarter of the frame carries the pixel at
+    /// the left edge a quarter of the way across.
     #[test]
     fn panning_moves_the_picture_with_the_pointer() {
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
@@ -2263,7 +1566,6 @@ mod tests {
             crop: start,
             ..ImageRef::new(ImageId("x".into()))
         };
-        // The source pixel showing at the frame's left edge before the drag.
         let before = r.framing(frame, 100, 100);
         let at_left = kurbo::Point::new(start.x0 * 100.0, start.center().y * 100.0);
         assert!(
@@ -2283,17 +1585,12 @@ mod tests {
         );
     }
 
-    /// **A drag stops at the edge of the picture, and stops by *sliding*.**
-    ///
-    /// Clamping the edges independently is the obvious spelling and it silently
-    /// changes the crop's size — so a pan that ran into the edge would zoom the
-    /// picture as well as stop it, which reads as the image "snapping bigger" at
-    /// the end of a drag. The size surviving is the assertion.
+    /// A pan into the edge slides the crop rather than resizing it (independent
+    /// edge clamping would zoom the picture at the end of a drag).
     #[test]
     fn panning_into_the_edge_slides_rather_than_resizing_the_crop() {
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
         let start = kurbo::Rect::new(0.1, 0.1, 0.6, 0.6);
-        // Far more than enough to run out of picture on the left.
         let r = crop_panned(start, kurbo::Vec2::new(1000.0, 0.0), frame);
         assert!(
             (r.width() - start.width()).abs() < 1e-9,
@@ -2309,30 +1606,21 @@ mod tests {
             (r.x0).abs() < 1e-9,
             "flush against it rather than short of it"
         );
-        // The other axis was not dragged and must not have moved.
         assert!((r.y0 - start.y0).abs() < 1e-9);
     }
 
-    /// **Reframing does not move the picture**, which is the whole of what makes
-    /// the bounding box a crop rectangle rather than a resize.
-    ///
-    /// Asserted where it is felt rather than on the numbers: the picture's scale
-    /// in *local units per source pixel* is what the eye reads, so the test
-    /// recomputes it on both axes either side of the change. A version that only
-    /// checked the crop's width would pass against an implementation that slid
-    /// the rectangle as well as shrinking it, which is the plausible wrong answer
-    /// here — dragging the right edge in and having the picture jump left.
+    /// Reframing keeps the picture's scale (local units per source pixel) on both
+    /// axes and holds the anchored corner, for far and near edges alike; a frame
+    /// with no extent returns the crop. A width-only check would pass a version
+    /// that slid the rectangle.
     #[test]
     fn reframing_keeps_the_picture_where_it_was_on_both_axes() {
         let (w, h) = (400u32, 300u32);
         let from = kurbo::Rect::new(0.0, 0.0, 200.0, 100.0);
         let start = kurbo::Rect::new(0.2, 0.1, 0.9, 0.6);
-        // The right and bottom edges pulled in, the top-left corner held.
         let to = kurbo::Rect::new(0.0, 0.0, 150.0, 60.0);
         let next = crop_reframed(start, from, to);
 
-        // Local units per source pixel, before and after. Both axes, because a
-        // rule that held on one of them would stretch the picture on the other.
         let scale = |crop: kurbo::Rect, frame: kurbo::Rect| {
             (
                 frame.width() / (crop.width() * f64::from(w)),
@@ -2345,16 +1633,11 @@ mod tests {
             (sx1 - sx0).abs() < 1e-9 && (sy1 - sy0).abs() < 1e-9,
             "the picture changed size: {sx0}×{sy0} became {sx1}×{sy1}"
         );
-        // And the held corner still reads the same part of the source, which is
-        // the half that catches a rectangle that slid.
         assert!(
             (next.x0 - start.x0).abs() < 1e-9 && (next.y0 - start.y0).abs() < 1e-9,
             "the anchored corner moved in the source: {next:?} against {start:?}"
         );
 
-        // Dragging the *near* edges instead moves the origin and holds the far
-        // one, which is the case an implementation written only for the far edges
-        // gets wrong in silence.
         let near = crop_reframed(start, from, kurbo::Rect::new(50.0, 25.0, 200.0, 100.0));
         assert!(
             (near.x1 - start.x1).abs() < 1e-9 && (near.y1 - start.y1).abs() < 1e-9,
@@ -2362,26 +1645,14 @@ mod tests {
         );
         assert!(near.x0 > start.x0 && near.y0 > start.y0, "{near:?}");
 
-        // A frame with no extent has no mapping to re-read.
         let flat = kurbo::Rect::new(0.0, 0.0, 0.0, 100.0);
         assert_eq!(crop_reframed(start, flat, to), start);
     }
 
-    /// **The scale field round-trips, and its floor is cover.**
-    ///
-    /// Two claims the control rests on and neither is obvious. *Round-trips*: read
-    /// the scale, ask for a factor of it, read it back and get what was asked —
-    /// which is only true because `crop_scale` measures one axis and `crop_scaled`
-    /// multiplies uniformly. A version that recomputed each axis from the frame
-    /// would also pass a symmetric fixture and would silently un-stretch a
-    /// deliberately stretched picture, so the fixture here is **oblong on both
-    /// counts** — a 2:1 source in a 1:2 frame.
-    ///
-    /// *The floor is cover*: zooming out stops where the crop reaches the source,
-    /// and that is exactly the rectangle `Fill` shows. Asserted by asking for a
-    /// tenth of the cover scale and getting cover back, which is the case that
-    /// distinguishes a real clamp from an unbounded field whose number walks away
-    /// from the picture.
+    /// The crop scale round-trips through `crop_scaled`, and its floor is cover
+    /// (asking for a tenth of cover gives cover back). The fixture is oblong on
+    /// both counts (a 2:1 source in a 1:2 frame), since a symmetric one would pass
+    /// a version that recomputed each axis.
     #[test]
     fn the_crop_scale_round_trips_and_bottoms_out_at_cover() {
         let (w, h) = (400u32, 200u32);
@@ -2397,7 +1668,6 @@ mod tests {
             "the cover rectangle must read as the cover scale: {at_cover} against {cover}"
         );
 
-        // Zoom in to 2.5× cover and read it back.
         let want = cover * 2.5;
         r.crop = crop_scaled(r.crop, at_cover / want);
         let got = r.crop_scale(frame, w, h).expect("a scale");
@@ -2405,8 +1675,6 @@ mod tests {
             (got - want).abs() < 1e-9,
             "asked for {want} and read back {got}"
         );
-        // Uniform: the crop's proportions are unchanged, so the picture is not
-        // stretched by having been zoomed.
         let seed = ImageRef::new(ImageId("x".into())).cover_crop(frame, w, h);
         assert!(
             (r.crop.width() / r.crop.height() - seed.width() / seed.height()).abs() < 1e-9,
@@ -2414,7 +1682,6 @@ mod tests {
             r.crop
         );
 
-        // And back out past the bottom: it stops at cover rather than running on.
         r.crop = crop_scaled(r.crop, 10.0);
         let floor = r.crop_scale(frame, w, h).expect("a scale");
         assert!(
@@ -2423,19 +1690,14 @@ mod tests {
              crop left the source and `Extend::Pad` is smearing the edge row"
         );
 
-        // A nonsense factor is refused rather than producing a singular crop.
         let before = r.crop;
         assert_eq!(crop_scaled(before, 0.0), before);
         assert_eq!(crop_scaled(before, f64::NAN), before);
     }
 
-    /// **The picture's rectangle is where the picture is**, in every mode — the
-    /// outline the crop gesture draws and clamps against.
-    ///
-    /// Checked against what each mode *means* rather than against a recomputed
-    /// transform, since recomputing it here is the copy `picture_box` exists to
-    /// avoid: Fill overflows the frame, Fit falls short of it, and a Crop of half
-    /// the source is twice the frame.
+    /// `picture_box` says where each mode put the picture, checked against what
+    /// the mode means (Fill overflows, Fit falls short, a half Crop is twice the
+    /// frame) rather than a recomputed transform.
     #[test]
     fn the_pictures_box_says_where_each_mode_put_it() {
         let (w, h) = (400u32, 200u32); // 2:1
@@ -2458,12 +1720,9 @@ mod tests {
             fit.width() <= frame.width() + 1e-9 && fit.height() <= frame.height() + 1e-9,
             "Fit must stay inside the frame: {fit:?}"
         );
-        // Fit's box is the rectangle it clips to, which is the same statement
-        // made by the code that paints it.
         assert_eq!(r.framing(frame, w, h).clip, Some(fit));
 
-        // Half the source in each direction maps onto the frame, so the whole of
-        // it is twice the frame — and centred on it, since this crop is.
+        // Half the source in each direction: twice the frame, centred on it.
         r.fit = ImageFit::Crop;
         r.crop = kurbo::Rect::new(0.25, 0.25, 0.75, 0.75);
         let cropped = r.picture_box(frame, w, h).expect("a picture");
@@ -2474,29 +1733,17 @@ mod tests {
         );
         assert!((cropped.center() - frame.center()).hypot() < 1e-9);
 
-        // Nothing to bound where nothing draws.
         assert_eq!(r.picture_box(frame, 0, h), None);
         assert_eq!(r.picture_box(kurbo::Rect::ZERO, w, h), None);
     }
 
-    /// **A parameter is read by the mode that needs it and ignored by the three
-    /// that do not.**
-    ///
-    /// This is what carrying `crop` and `tile_scale` beside the mode rather than
-    /// inside its variant costs: with variant payloads a mode physically cannot
-    /// see another's number, and here it can. So the isolation the enum used to
-    /// give for free is asserted instead — a Fill that quietly applied the crop
-    /// would look like the crop gesture leaking into every other mode, and it is
-    /// the exact bug this shape makes possible.
-    ///
-    /// The trade it buys is in `paint::with_fit`'s test: a mode strip that must
-    /// not throw a crop away when you click *Fit* to look at the whole picture.
+    /// A parameter is read only by the mode that needs it. With `crop` and
+    /// `tile_scale` beside the mode rather than in its variant, a mode could see
+    /// another's number, so the isolation is asserted instead.
     #[test]
     fn a_mode_ignores_the_parameters_it_does_not_use() {
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
         let plain = ImageRef::new(ImageId("x".into()));
-        // The same reference carrying a crop and a scale that are *not* the
-        // defaults — the state an image has after being cropped and set back.
         let loaded = ImageRef {
             crop: kurbo::Rect::new(0.25, 0.0, 0.75, 1.0),
             tile_scale: 3.0,
@@ -2548,7 +1795,7 @@ mod tests {
             .framing(frame, 100, 50),
             "a tile must not read the crop"
         );
-        // ...and each really is using its own, rather than both defaulting.
+        // Each really uses its own, rather than both defaulting.
         assert_eq!(
             tiled.framing(frame, 100, 50).transform * kurbo::Point::new(100.0, 50.0),
             kurbo::Point::new(300.0, 150.0),
@@ -2561,14 +1808,8 @@ mod tests {
         );
     }
 
-    /// **A parameter the mode is not using stays out of the file.**
-    ///
-    /// Three `skip_serializing_if`s rather than one, so an image that has been
-    /// cropped and then set back to Fill writes its rectangle (it is still the
-    /// user's) while one that has never been cropped writes nothing at all — the
-    /// byte-for-byte line §5.11 wants. Asserting the *absence* is the half that
-    /// fails silently: a default that reached the file would put a `crop` and a
-    /// `tile_scale` on every image brush ever written.
+    /// Only changed parameters are written: a never-cropped image writes no
+    /// framing (§5.11), a crop the user set is written whatever the mode.
     #[test]
     fn only_the_parameters_that_were_changed_are_written() {
         let plain = image_brush(ImageId("abc".into()));
@@ -2599,14 +1840,9 @@ mod tests {
         );
     }
 
-    /// **Cover and contain, on a frame that is not at the origin.**
-    ///
-    /// The offset frame is the point: `(frame.width() − w) / 2` centres a
-    /// picture in a frame's *size* and puts it in the wrong place in every frame
-    /// that has been moved, which is every frame in a real document and none in
-    /// the obvious test. A 200×100 frame and a square source also separate the
-    /// two modes — cover scales by 2 and overflows top and bottom, contain
-    /// scales by 1 and leaves a band either side.
+    /// Cover and contain on a frame that is not at the origin (centring by the
+    /// frame's size alone is wrong in every moved frame). A 200×100 frame and a
+    /// square source separate the modes: cover scales by 2, contain by 1.
     #[test]
     fn fill_covers_the_frame_and_fit_is_contained_by_it() {
         let frame = kurbo::Rect::new(10.0, 20.0, 210.0, 120.0);
@@ -2640,10 +1876,7 @@ mod tests {
         assert_eq!(fit.extend, peniko::Extend::Pad);
     }
 
-    /// **A fit that does not letterbox pays for no clip**, which is the case a
-    /// click-placed image is always in: the shape was made at the picture's own
-    /// aspect, so contain and cover are the same drawing and a layer per fill
-    /// per frame would be bought for nothing.
+    /// A fit that does not letterbox emits no clip (the click-placed case).
     #[test]
     fn fit_clips_only_where_it_letterboxes() {
         let frame = kurbo::Rect::new(0.0, 0.0, 300.0, 150.0);
@@ -2660,12 +1893,9 @@ mod tests {
         );
     }
 
-    /// **A crop maps its rectangle onto the frame and nothing else onto it.**
-    ///
-    /// The rectangle is normalized to the source, so the assertion is that the
-    /// *pixels* it names — the middle half of a 100×50 picture — land on the
-    /// frame's corners exactly. Reading the crop as pixels rather than as a
-    /// fraction passes any test whose source happens to be 1×1.
+    /// A crop maps the *pixels* its normalized rectangle names (the middle half of
+    /// a 100×50 picture) onto the frame's corners; a 1×1 source would hide a
+    /// fraction-for-pixels mistake.
     #[test]
     fn a_crop_maps_its_rectangle_onto_the_frame() {
         let frame = kurbo::Rect::new(10.0, 10.0, 110.0, 110.0);
@@ -2677,7 +1907,6 @@ mod tests {
             100,
             50,
         );
-        // Source pixels 25..75 × 0..50 — a 50×50 region — onto a 100×100 frame.
         assert_eq!(f.transform * kurbo::Point::new(25.0, 0.0), frame.origin());
         assert_eq!(
             f.transform * kurbo::Point::new(75.0, 50.0),
@@ -2685,8 +1914,6 @@ mod tests {
         );
         assert!(f.clip.is_none(), "a crop covers its frame by construction");
 
-        // The identity crop is the whole picture stretched onto the frame, which
-        // is what *reset crop* restores.
         let whole = fitted(ImageFit::Crop, frame, 100, 50);
         assert_eq!(
             corners(&whole, 100, 50),
@@ -2694,11 +1921,8 @@ mod tests {
         );
     }
 
-    /// **Tile is anchored at the frame's corner, at its own scale, repeating.**
-    ///
-    /// Anchored rather than centred: a repeat has no centre, and a tiling that
-    /// shifted when the shape was resized from the far edge would look like the
-    /// pattern was sliding.
+    /// Tile is anchored at the frame's corner (a repeat has no centre), at its own
+    /// scale, repeating.
     #[test]
     fn tile_repeats_at_its_scale_from_the_frames_corner() {
         let frame = kurbo::Rect::new(10.0, 20.0, 210.0, 120.0);
@@ -2712,13 +1936,8 @@ mod tests {
         assert!(f.clip.is_none());
     }
 
-    /// **Nothing degenerate produces a singular brush transform.**
-    ///
-    /// Each of these reaches a division that would otherwise be by zero, and
-    /// what comes out of a singular affine is a backend question with no good
-    /// answer — vello draws nothing, `vello_cpu` has been known to draw a smear.
-    /// A frame with no area draws nothing anyway, so the identity is a safe
-    /// answer rather than a fudged one.
+    /// Degenerate inputs, including spans that overflow to `inf` (§15 D452),
+    /// resolve to the identity framing rather than a singular brush transform.
     #[test]
     fn degenerate_inputs_resolve_to_the_identity_framing() {
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
@@ -2741,7 +1960,6 @@ mod tests {
             Framing::identity(),
             "a crop of no width names no pixels"
         );
-        // A scale of zero would be singular; it is drawn at 1:1 instead.
         let zero = parameterized(ImageFit::Tile, whole_crop(), 0.0, frame, 100, 100);
         assert_eq!(
             corners(&zero, 100, 100),
@@ -2749,12 +1967,7 @@ mod tests {
         );
         assert_eq!(zero.extend, peniko::Extend::Repeat);
 
-        // ⚠️ **The overflow arm, added 2026-09-07 (§15 D452).** These four
-        // coordinates are *finite*, so the non-finite family (D421, D451) never
-        // sees them; it is `x1 - x0` that overflows. `inf` passes `> 0.0`, and
-        // bounding the small end is all these guards used to do, so `framing` returned
-        // `Affine([0, 0, 0, 0, NaN, NaN])` — singular, with a NaN translation,
-        // the exact thing `Framing::identity` exists to give an answer instead of.
+        // Finite coordinates whose span `x1 - x0` overflows to `inf`.
         let huge = kurbo::Rect::new(-1e308, -1e308, 1e308, 1e308);
         assert!(
             huge.width().is_infinite(),
@@ -2777,29 +1990,13 @@ mod tests {
         );
     }
 
-    /// **A crop whose span overflows never reaches the document.**
+    /// A crop whose span overflows never reaches the document: `crop_clamped`
+    /// and `crop_panned` stay finite (`usable_span` stops the NaN being made;
+    /// `build::brush_is_finite`, D451, stops one reaching the document).
     ///
-    /// `[S9.1-L5-01]`. The four coordinates are finite — `-1e308` and `1e308` are
-    /// ordinary JSON numbers a hand-edited file can carry — and it is `x1 - x0`
-    /// that overflows to `inf`. Every guard in this module bounded the small end
-    /// only — eight of them spelled `<= 0.0` — which `inf` passes, so
-    /// `crop_clamped` went on to divide `inf / inf` and returned
-    /// an all-`NaN` rectangle. **One crop-pan drag commits that through
-    /// `SetFills`**, the file saves `"x0": null`, and it never opens again — D421's
-    /// terminal failure reached without a single non-finite number in the input.
-    ///
-    /// ⚠️ **Two guards, and the test says which is which.** `usable_span` stops
-    /// the NaN being *manufactured* here; `build::brush_is_finite` (D451) stops one
-    /// reaching the document if anything else ever makes one. The second was
-    /// blind to this until today — its `Brush::Image` arm read `sampler.alpha`
-    /// alone, and the crop hangs off the `ImageRef` one level further in, which is
-    /// what a check written by reading `peniko::Brush` misses.
-    ///
-    /// ⚠️ **Flipped** by restoring `w <= 0.0 || h <= 0.0` in `crop_clamped`: fails
-    /// on the first assertion with all four coordinates `NaN`. The framing
-    /// assertions in `degenerate_inputs_resolve_to_the_identity_framing` stay
-    /// **green** under that flip, which is what says the two guards are separate
-    /// and neither covers the other.
+    /// flip: `w <= 0.0 || h <= 0.0` in `crop_clamped` → fails at the first
+    /// assertion, while `degenerate_inputs_resolve_to_the_identity_framing` stays
+    /// green, so the two guards are separate.
     #[test]
     fn a_crop_whose_span_overflows_never_reaches_the_document() {
         let huge = kurbo::Rect::new(-1e308, -1e308, 1e308, 1e308);
@@ -2809,8 +2006,6 @@ mod tests {
             "an unusable crop resolves to the whole picture, as a zero-sized one does"
         );
 
-        // And `crop_panned` cannot emit one either — it is the door the drag
-        // actually goes through.
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
         let panned = crop_panned(huge, kurbo::Vec2::new(5.0, 0.0), frame);
         assert!(
@@ -2820,7 +2015,6 @@ mod tests {
             "a crop-pan of an unusable crop is finite: {panned:?}"
         );
 
-        // The control: an ordinary crop is untouched by any of this.
         let ordinary = kurbo::Rect::new(0.25, 0.25, 0.75, 0.75);
         assert_eq!(
             crop_clamped(ordinary),
@@ -2829,17 +2023,11 @@ mod tests {
         );
     }
 
-    /// **The turn has period four and each mirror is its own inverse**, so
-    /// pressing a button until you are back where you started really does get you
-    /// back where you started.
-    ///
-    /// What this does **not** prove is that the matrices are exact, and it is
-    /// worth saying so: `quarters` is recomputed from the count rather than
-    /// accumulated, so the fourth turn lands on the `_ => Affine::IDENTITY` arm
-    /// whatever the other three arms are made of — an `Affine::rotate` spelling
-    /// passes this test untouched. `every_orientation_maps_the_source_box_exactly_onto_the_oriented_box`
-    /// is the one that rejects it. (Checked by putting that spelling in: three
-    /// tests fail and this is not one of them.)
+    /// The turn has period four and each mirror is its own inverse. It does not
+    /// prove the matrices exact: the fourth turn lands on the `_ =>
+    /// Affine::IDENTITY` arm, so an `Affine::rotate` spelling passes;
+    /// `every_orientation_maps_the_source_box_exactly_onto_the_oriented_box`
+    /// rejects it.
     #[test]
     fn four_quarter_turns_come_back_to_exactly_where_they_started() {
         let start = ImageRef::new(ImageId("x".into()));
@@ -2853,7 +2041,6 @@ mod tests {
             kurbo::Affine::IDENTITY.as_coeffs(),
             "and the matrix has to be the identity to the bit"
         );
-        // The same for the two mirrors, which are their own inverses.
         for op in [OrientOp::FlipH, OrientOp::FlipV] {
             let there_and_back = start.reoriented(op).reoriented(op);
             assert_eq!(there_and_back.orient, start.orient, "{op:?} twice");
@@ -2864,21 +2051,13 @@ mod tests {
         }
     }
 
-    /// **A button means the same thing whatever the picture has already been
-    /// turned to**, which is the claim `ImageOrient::applying` makes and the one
-    /// two independent flags get wrong.
-    ///
-    /// Asserted against the matrix rather than against the fields: pressing *flip
-    /// horizontal* must compose a horizontal mirror **in the frame's axes** onto
-    /// whatever transform the picture already had. Written as `mirrored =
-    /// !mirrored` and nothing else — the spelling anyone reaches for first — this
-    /// passes for the two unturned orientations and fails for the six others,
-    /// because a mirror conjugates a rotation into its inverse. Every one of the
-    /// eight is checked for exactly that reason.
+    /// Each op composes onto the existing transform in the frame's axes, from all
+    /// eight orientations, asserted against the matrix. `mirrored = !mirrored`
+    /// alone passes for the two unturned orientations and fails the other six.
     #[test]
     fn a_flip_or_a_turn_composes_in_the_frames_axes_from_every_orientation() {
         use kurbo::Affine;
-        // The source is oblong so a wrong turn cannot hide behind a square.
+        // Oblong, so a wrong turn cannot hide behind a square.
         let (w, h) = (320.0, 200.0);
         for o in every_orientation() {
             let (ow, oh) = o.oriented_size(w, h);
@@ -2910,21 +2089,10 @@ mod tests {
         }
     }
 
-    /// **An orientation is a symmetry of the source box**, so however the picture
-    /// is turned its four corners still land on the four corners of the oriented
-    /// box — no gap, no overhang, and the aspect swapped exactly when the turn is
-    /// an odd one.
-    ///
-    /// This is what the framing arms rely on when they take
-    /// `ImageOrient::oriented_size` and then never think about orientation
-    /// again. A translation left off one of the three turn matrices puts the box
-    /// in the wrong quadrant, which reads on screen as the picture vanishing.
-    ///
-    /// **Compared exactly, and that is the second thing it is for.** Built out of
-    /// `Affine::rotate(FRAC_PI_2)` the box lands within `1e-14` of the right place
-    /// and this fails — which is the point, because a brush transform that
-    /// differs in its last bits is a `SetFills` no equality guard catches, so a
-    /// turn and three more would write the file every time.
+    /// Every orientation maps the source box onto `(0,0)..oriented_size` with no
+    /// gap or overhang (a translation missing from a turn matrix puts it in the
+    /// wrong quadrant). **Compared exactly**: with `Affine::rotate(FRAC_PI_2)` the
+    /// box lands within `1e-14` and this fails.
     #[test]
     fn every_orientation_maps_the_source_box_exactly_onto_the_oriented_box() {
         let (w, h) = (320.0, 200.0);
@@ -2944,20 +2112,14 @@ mod tests {
                 (0.0, 0.0, ow, oh),
                 "{o:?} put the source box at {got:?} instead of (0,0)..({ow},{oh})"
             );
-            // ...and it is a rigid motion, so the area cannot have changed.
             assert_eq!(got.width() * got.height(), w * h);
         }
     }
 
-    /// **A turned picture is framed by its turned aspect.**
-    ///
-    /// The case that separates "the orientation is composed onto the transform"
-    /// from "the orientation is composed onto the transform *and* the mode knows
-    /// about it": a 200×100 source exactly fills a 200×100 frame, and turned a
-    /// quarter it is a 100×200 picture that cover has to scale by 2. A version
-    /// that composed the turn but kept the original aspect scales by 1 and leaves
-    /// half the frame empty — which draws, and looks like a rendering bug rather
-    /// than like arithmetic.
+    /// A turned picture is framed by its turned aspect: a 200×100 source turned a
+    /// quarter is 100×200, which cover scales by 2. A version that composed the
+    /// turn but kept the original aspect would scale by 1 and leave half the frame
+    /// empty.
     #[test]
     fn a_turned_picture_covers_and_contains_by_its_turned_aspect() {
         let frame = kurbo::Rect::new(0.0, 0.0, 200.0, 100.0);
@@ -2970,8 +2132,7 @@ mod tests {
             ..ImageRef::new(ImageId("x".into()))
         };
         let f = turned.framing(frame, 200, 100);
-        // The oriented picture is 100 wide by 200 tall; covering a 200×100 frame
-        // scales it by 2, to 200×400, hanging 150 above and below.
+        // 100×200 scaled by 2: 200×400, hanging 150 above and below.
         let (a, b) = corners(&f, 200, 100);
         let (lo, hi) = (
             kurbo::Point::new(a.x.min(b.x), a.y.min(b.y)),
@@ -2987,8 +2148,7 @@ mod tests {
         );
         assert!(f.clip.is_none(), "a cover leaves nothing showing");
 
-        // Contain goes the other way: scale 0.5, a 50×100 picture centred, and a
-        // letterbox that now has to be cut.
+        // Contain: scale 0.5, a 50×100 picture centred.
         let fitted = ImageRef {
             fit: ImageFit::Fit,
             ..turned.clone()
@@ -3001,23 +2161,15 @@ mod tests {
         );
     }
 
-    /// **Turning or flipping a cropped picture turns what you are looking at**,
-    /// rather than moving the frame to a different part of the photograph.
-    ///
-    /// Asserted on the *source pixels reaching the frame*, which is the thing the
-    /// user would report: map the frame's corners back through the framing and
-    /// compare the box they name in the source before and after. The obvious
-    /// wrong version — write the orientation and leave `crop` alone — passes
-    /// every test above and fails this one, because a crop is normalized to the
-    /// oriented picture and the orientation is what says which pixels that is.
-    ///
-    /// A crop that is neither centred nor square, so a version that carried the
-    /// rectangle the wrong way round is caught too.
+    /// Reorienting a cropped picture keeps the same source pixels in the frame,
+    /// asserted by mapping the frame's corners back through the framing. Writing
+    /// the orientation and leaving `crop` alone fails here only. The crop is
+    /// neither centred nor square, so a rectangle carried the wrong way round is
+    /// caught too.
     #[test]
     fn reorienting_a_cropped_picture_keeps_the_same_pixels_in_the_frame() {
         let frame = kurbo::Rect::new(10.0, 20.0, 210.0, 120.0);
         let (w, h) = (400u32, 200u32);
-        // The pixels a framing puts inside the frame, as a box in source space.
         let shown = |r: &ImageRef| -> kurbo::Rect {
             let inv = r.framing(frame, w, h).transform.inverse();
             let mut b = kurbo::Rect::from_points(inv * frame.origin(), inv * frame.origin());
@@ -3035,11 +2187,7 @@ mod tests {
             crop: kurbo::Rect::new(0.1, 0.25, 0.55, 0.6),
             ..ImageRef::new(ImageId("x".into()))
         };
-        // The fixture has to be in the state the test is about, or it is about
-        // nothing: an off-centre, non-square crop of an oblong source. Compared
-        // loosely because `shown` goes back through a matrix inverse, which is
-        // where the last bit of 50.0 goes; the claim is about which pixels, not
-        // about arithmetic exactness.
+        // Compared loosely: `shown` goes through a matrix inverse.
         let before = shown(&start);
         let d = |a: f64, b: f64| (a - b).abs() < 1e-9;
         assert!(
@@ -3065,8 +2213,7 @@ mod tests {
                 "after {op:?} the frame shows {after:?} of the source instead of {before:?}"
             );
         }
-        // And the whole-source sentinel is a fixed point of all three, so a
-        // picture nobody has cropped still writes no rectangle after a flip.
+        // The whole-source sentinel is a fixed point of all three ops.
         for op in [OrientOp::FlipH, OrientOp::FlipV, OrientOp::Turn] {
             assert_eq!(
                 ImageRef::new(ImageId("x".into())).reoriented(op).crop,
@@ -3076,15 +2223,8 @@ mod tests {
         }
     }
 
-    /// **An orientation nobody set stays out of the file, and one somebody set
-    /// reaches it.**
-    ///
-    /// The absence is the half that fails silently — a default reaching the file
-    /// would put an `orient` on every image brush ever written and break the
-    /// byte-for-byte line §5.11 wants. The presence is the half a
-    /// `skip_serializing_if` pointed at the wrong predicate gets wrong: the
-    /// document would load with the picture the right way up and look like the
-    /// flip button had never been pressed.
+    /// An orientation nobody set stays out of the file (§5.11), and one somebody
+    /// set reaches it alone.
     #[test]
     fn only_an_orientation_that_was_set_is_written() {
         let plain = image_brush(ImageId("abc".into()));
@@ -3100,8 +2240,6 @@ mod tests {
         };
         img.image = img.image.reoriented(OrientOp::FlipH);
         let json = serde_json::to_string(&brush).expect("serializes");
-        // Mirrored with no turn: the turn count is itself at its default and
-        // stays out, so what lands is the one fact that changed.
         assert!(
             json.contains(r#""orient":{"mirrored":true}"#),
             "a flip must reach the file and take nothing else with it, got {json}"
@@ -3111,7 +2249,6 @@ mod tests {
             brush
         );
 
-        // A turn on its own is the mirror of that case.
         let turned = ImageRef::new(ImageId("abc".into())).reoriented(OrientOp::Turn);
         let json = serde_json::to_string(&turned).expect("serializes");
         assert!(
@@ -3120,37 +2257,14 @@ mod tests {
         );
     }
 
-    /// **A crop whose *span* is usable and whose *origin* overflows.**
+    /// A crop whose span is usable but whose origin overflows (`1e300` of span at
+    /// `x0 = -1e308`, source 4000 wide) resolves to the identity framing, and
+    /// `picture_box` answers the source box rather than NaNs. The fixture is an
+    /// offset from `-1e308` because two round numbers overflow the span too.
     ///
-    /// `[S9.1-L5-01]`'s residue, found by `arch-scribe` reading D452's brief
-    /// against the code and measured here. D452 asked `usable_span` of
-    /// `r.width() * iw` at every span test in the module, which is the whole of
-    /// what the finding named — but `ImageRef::framing`'s Crop arm also weighs
-    /// the crop's **origin**, and a rectangle can have a finite, positive,
-    /// perfectly usable span sitting at an origin that overflows the moment it is
-    /// multiplied by the source width.
-    ///
-    /// `1e300` of span at `x0 = -1e308` is that rectangle. All four coordinates
-    /// are finite, so `build::image_ref_is_finite` (D451) passes it too — **both
-    /// of D452's two guards say yes** — and the composed transform came back
-    /// `[2.5e-302, 0, 0, 3.33e-302, NaN, NaN]`, which is the singular-with-a-NaN
-    /// -translation shape `Framing::identity` exists to prevent. `picture_box`
-    /// reads off `framing`, so it answered `Some(NaN…)`, and that is the input
-    /// `tools::crop_resized` hands to `f64::clamp` — the panic the finding
-    /// measured, on a crop resize, on the UI thread.
-    ///
-    /// ⚠️ **The obvious fixture does not reach it.** `{-1e308 … -9.99e307}` — the
-    /// rectangle the residue was first written down as — spans `1e305`, and
-    /// `1e305 * 4000` overflows too, so `usable_span(sw)` catches it and `framing`
-    /// already answered the identity. The case only exists where the span survives
-    /// the multiply and the origin does not, which is why the fixture is written
-    /// as an offset from `-1e308` rather than as two round numbers.
-    ///
-    /// ⚠️ **Flipped** by removing the finiteness test on the composed transform:
-    /// fails on the first assertion, printing the NaN coefficients. The
-    /// `usable_span` assertion below stays **green** under that flip, which is
-    /// what says D452's guard does not cover this and a fourth road would need a
-    /// fourth guard — the reason the test is on the *result*.
+    /// flip: removing the finiteness test on the composed transform in
+    /// `ImageRef::framing` → fails at the first assertion; the `usable_span`
+    /// assertions stay green.
     #[test]
     fn a_crop_whose_origin_overflows_resolves_to_the_identity_framing() {
         let mut r = ImageRef::new(ImageId("a".into()));
@@ -3158,9 +2272,6 @@ mod tests {
         r.crop = kurbo::Rect::new(-1e308, -1e308, -1e308 + 1e300, -1e308 + 1e300);
         let frame = kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
 
-        // The fixture is in the state the test is about, or it is about nothing:
-        // a span D452's guard calls usable, at an origin that does not survive the
-        // multiply.
         assert!(
             usable_span(r.crop.width() * 4000.0),
             "the span must pass D452's guard, or this is D452's own case again"
@@ -3194,21 +2305,15 @@ mod adjust_tests {
         a.pipeline().expect("a moved slider describes a pipeline")
     }
 
-    /// One channel of a pixel put through the pipeline, as a byte, so a failure
-    /// message reads in the units the picture is in.
+    /// A pixel put through the pipeline, as bytes.
     fn through(p: &AdjustPipeline, rgb: [u8; 3]) -> [u8; 3] {
         p.apply(rgb.map(|c| c as f32 / 255.0))
             .map(|c| (c * 255.0 + 0.5) as u8)
     }
 
-    /// **The neutral value describes nothing and writes nothing**, which is the
-    /// whole of what makes adjustments an additive schema change (§5.11).
-    ///
-    /// Both halves are asserted, because they fail separately: a `pipeline` that
-    /// answered `Some` for the identity would put every image in the document
-    /// through a second buffer for no visual difference, and a `skip_serializing_if`
-    /// pointed at the wrong predicate would rewrite every existing file's image
-    /// lines.
+    /// The neutral value is no pipeline and writes no bytes (§5.11), and a moved
+    /// slider does reach the file. The halves fail separately: `Some` for the
+    /// identity costs every image a second buffer.
     #[test]
     fn a_neutral_adjustment_is_no_pipeline_and_no_bytes() {
         assert!(ImageAdjust::NEUTRAL.pipeline().is_none());
@@ -3221,9 +2326,6 @@ mod adjust_tests {
             "an untouched picture must write no adjustment at all, got {json}"
         );
 
-        // And the other half: a moved slider does reach the file. A
-        // `skip_serializing_if` on the wrong predicate loses this silently, and
-        // the document would load looking like the scrub had not committed.
         let mut moved = image_brush(ImageId("abc123".into()));
         let peniko::Brush::Image(img) = &mut moved else {
             unreachable!("image_brush builds an image brush")
@@ -3238,14 +2340,9 @@ mod adjust_tests {
         assert_eq!(back, moved);
     }
 
-    /// **Each of the seven does what its word says**, asserted on pixels rather
-    /// than on the matrix, because the matrix is the thing that could be composed
-    /// in the wrong order and still look plausible.
-    ///
-    /// Mid-grey is the probe for the three that are about light, and a saturated
-    /// colour for the two that are about colour — a grey put through a saturation
-    /// change is grey whichever way the coefficients went, so testing saturation
-    /// on grey tests nothing.
+    /// Each of the seven does what its word says, asserted on pixels. Mid-grey
+    /// probes the light sliders; saturation needs a saturated colour, since a grey
+    /// stays grey whichever way the coefficients went.
     #[test]
     fn every_slider_moves_the_picture_the_way_its_word_says() {
         let grey = [128u8, 128, 128];
@@ -3258,9 +2355,7 @@ mod adjust_tests {
             "exposure is stops of light: {up:?} up, {down:?} down"
         );
 
-        // Contrast pushes what is *above* mid-grey up and what is below it down,
-        // so it is tested at two levels — one probe at mid-grey would pass
-        // against a version that did nothing at all.
+        // Two levels: a probe at mid-grey would pass a version that did nothing.
         let hi = through(&adjusted(|a| a.contrast = 0.5), [180, 180, 180]);
         let lo = through(&adjusted(|a| a.contrast = 0.5), [80, 80, 80]);
         assert!(
@@ -3295,14 +2390,9 @@ mod adjust_tests {
         );
     }
 
-    /// **Highlights and shadows each leave the other end of the range alone**,
-    /// which is the only thing that distinguishes them from a second exposure
-    /// slider.
-    ///
-    /// The discriminating probe is the *far* end: a version that lifted the
-    /// whole curve passes every test aimed at the end the slider is named for,
-    /// and fails only here. Black and white are exact fixed points of both — the
-    /// weights are `(1−v)²` and `v²` — so those are asserted to the byte.
+    /// Highlights and shadows each leave the other end of the range alone; the
+    /// far end is the probe that fails a version lifting the whole curve. Black and
+    /// white are fixed points to the byte (weights `(1−v)²` and `v²`).
     #[test]
     fn each_end_of_the_tone_curve_moves_alone() {
         for (name, set) in [
@@ -3332,12 +2422,7 @@ mod adjust_tests {
                 "{name} must leave the other end alone: {far} from {started_far}"
             );
         }
-        // **Each slider's weight is exactly zero at the far end**, so that end is
-        // a fixed point *to the byte* — and it is the opposite end from the one
-        // the slider is named for: shadows cannot touch white, highlights cannot
-        // touch black. Asserting the pair the wrong way round is how this test
-        // was first written and it failed, which is worth leaving as the reason
-        // the pairing is spelled out.
+        // Shadows cannot touch white, highlights cannot touch black.
         for (name, set, fixed, at) in [
             (
                 "shadows",
@@ -3361,14 +2446,10 @@ mod adjust_tests {
         }
     }
 
-    /// **The tone curve never doubles back**, at either extreme of either
-    /// slider.
+    /// The tone curve never doubles back at either extreme of either slider.
     ///
-    /// A curve that did would make one end of the picture *invert* at a strong
-    /// setting — dark pixels coming out lighter than the ones beside them — which
-    /// reads as a rendering fault rather than as a strong setting. The ±0.4
-    /// strength is the largest that keeps it monotonic, and the check that this
-    /// test is not vacuous is to raise it: at 0.55 the shadow arm fails here.
+    /// flip: raising the ±0.4 strength to 0.55 in `ImageAdjust::curve` → the
+    /// shadow arm fails the monotonic assertion.
     #[test]
     fn the_tone_curve_is_monotonic_at_every_extreme() {
         for (h, s) in [
@@ -3393,13 +2474,9 @@ mod adjust_tests {
         }
     }
 
-    /// **Contrast pivots on mid-grey**, which is what the matrix's fifth column
-    /// is for.
-    ///
-    /// The plausible wrong version is a bare diagonal scale with no offset — it
-    /// spreads the tones exactly as this one does at the top of the range and
-    /// darkens the whole picture, so "contrast made the light parts lighter"
-    /// passes against it and only the fixed point catches it.
+    /// Contrast pivots on mid-grey. A bare diagonal scale with no offset spreads
+    /// the tones the same at the top of the range and darkens the whole picture;
+    /// only the fixed point catches it.
     #[test]
     fn contrast_holds_mid_grey_still() {
         for c in [-0.75, -0.25, 0.25, 0.9] {
@@ -3413,15 +2490,9 @@ mod adjust_tests {
         }
     }
 
-    /// **A table is read the way SVG reads one**, because that agreement is the
-    /// whole reason the tone curve is a table at all: the canvas evaluates the
-    /// same list a viewer does, so the export is the same picture rather than a
-    /// near one (see `TONE_STEPS`).
-    ///
-    /// The two cases worth naming are the spec's own corners: `v = 1` must
-    /// interpolate from the *last* pair rather than index off the end, and a
-    /// value between two samples must land between them rather than at the
-    /// nearest.
+    /// A table is read the way SVG reads one (see `TONE_STEPS`): `v = 1` uses the
+    /// last pair rather than indexing off the end, and a value between two samples
+    /// interpolates rather than snaps.
     #[test]
     fn a_transfer_table_is_read_by_svgs_own_rule() {
         let table = [0.0f32, 0.5, 1.0];
@@ -3435,24 +2506,14 @@ mod adjust_tests {
             "a value between two samples interpolates, it does not snap"
         );
         assert!((transfer(&table, 0.75) - 0.75).abs() < 1e-6);
-        // Degenerate lists answer rather than panic — a hand-edited file can
-        // carry one.
         assert_eq!(transfer(&[], 0.3), 0.3);
         assert_eq!(transfer(&[0.2], 0.9), 0.2);
     }
 
-    /// **The matrix runs first and the tone curve reads its clamped result** —
-    /// which is a claim about the *order* of the two stages, and the order is not
-    /// a detail: it is what "set the exposure, then pull the highlights back"
-    /// means, and it is what the emitted `<filter>` says by listing its
-    /// primitives in that sequence.
-    ///
-    /// The discriminating probe is a pixel the matrix pushes **past white**. Run
-    /// the other way round the same two settings answer 1.0 — a blown-out
-    /// highlight — where run this way they answer 0.6, a recovered one. Both are
-    /// plausible pictures, which is exactly why the number is asserted rather
-    /// than the direction: 0.9 doubled is 1.8, cut to 1.0, and `v + 0.4·(−1)·v²`
-    /// at 1.0 is 0.6 exactly.
+    /// The matrix runs first and the tone curve reads its clamped result. The
+    /// probe is a pixel the matrix pushes past white: 0.9 doubled is 1.8, cut to
+    /// 1.0, and `v + 0.4·(−1)·v²` at 1.0 is 0.6 (the other order gives a blown
+    /// 1.0). Both are plausible pictures, so the number is asserted.
     #[test]
     fn the_matrix_runs_before_the_tone_curve() {
         let mut a = ImageAdjust::NEUTRAL;
@@ -3468,13 +2529,10 @@ mod adjust_tests {
         );
     }
 
-    /// **Nothing that is not a number can reach a buffer.**
-    ///
-    /// Two doors, and they are different: `Adjustment::set` is the one the
-    /// panel and *reset* write through and it clamps, while
-    /// `ImageAdjust::pipeline` is what a *hand-edited file* reaches, where
-    /// there was no `set` to clamp anything. A `NaN` past either would paint a
-    /// hole in a photograph.
+    /// An impossible value is refused at both doors: `Adjustment::set` (the
+    /// panel's, which clamps) and `ImageAdjust::pipeline` (a hand-edited file's)
+    /// — §15 D538. A clamping `pipeline` would pass `is_some()` and draw a picture
+    /// the file does not describe, so `is_default()` is asserted false too.
     #[test]
     fn an_impossible_value_is_refused_at_both_doors() {
         let mut a = ImageAdjust::NEUTRAL;
@@ -3499,21 +2557,7 @@ mod adjust_tests {
             "and it is not the neutral value, so it is not silently written away"
         );
 
-        // ⚠️ **The two arms below are the ones this test was named for and did
-        // not have** (§15 D538, `[S9.1-L5-02]`). Both are *finite*, so the
-        // finiteness guard this predicate used to be passed them, and both are
-        // reachable by hand-editing a `.ondin` that then loads cleanly and
-        // survives a round trip. `Adjustment::set` has clamped to `-1..=1` all
-        // along and its doc says why — *"a range the model does not enforce is a
-        // range a hand-edited file ignores"* — but `set` is the door the panel
-        // uses and a file does not.
-        //
-        // **Asserted on `pipeline()` and on `is_default()` together.** A version
-        // that *clamped* instead of refusing would pass a `pipeline().is_some()`
-        // assertion and draw a picture the file does not describe; what says the
-        // value is refused rather than quietly repaired is that it is still
-        // reported non-neutral, so the panel shows 1000 and nothing pretends
-        // otherwise.
+        // Finite but out of range, so a bare finiteness guard passes both.
         for (label, a) in [
             (
                 "exposure 1000: 2f32.powf(1000) is inf, and inf * 0.0 makes all \
@@ -3539,9 +2583,7 @@ mod adjust_tests {
             );
         }
 
-        // **Controls, at both ends of the range**, because a predicate written
-        // `(-1.0..1.0)` or `(0.0..=1.0)` would pass every assertion above and
-        // silently refuse half the sliders the panel can produce.
+        // Controls at both ends: `(-1.0..1.0)` or `(0.0..=1.0)` would pass the above.
         for v in [-1.0f32, 1.0, 0.5, -0.5] {
             let a = ImageAdjust {
                 exposure: v,
@@ -3554,8 +2596,7 @@ mod adjust_tests {
         }
     }
 
-    /// **The seven are one list**, so a slider cannot exist that the reset, the
-    /// key or the snapshot does not know about.
+    /// `Adjustment::ALL` covers every field of `ImageAdjust`.
     #[test]
     fn the_list_of_adjustments_covers_the_whole_struct() {
         let mut a = ImageAdjust::NEUTRAL;
@@ -3563,8 +2604,6 @@ mod adjust_tests {
             k.set(&mut a, (i + 1) as f32 / 10.0);
         }
         assert!(!a.is_default());
-        // Every field is now non-zero, so a struct field missing from `ALL`
-        // fails here rather than silently never being reset.
         for k in Adjustment::ALL {
             assert!(k.of(&a) != 0.0, "{} is not in ALL", k.label());
         }

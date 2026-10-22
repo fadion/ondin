@@ -1,18 +1,9 @@
-//! The pixel grid — a one-unit lattice, drawn once the zoom makes it worth
-//! seeing.
+//! The pixel grid — a one-unit lattice, drawn once the zoom makes it worth seeing.
 //!
-//! **One world unit is one pixel.** That has always been true of the model
-//! (`Viewport` derives zoom from the ratio of a world rect to a pixel size, and
-//! the design's 51.94% shows 100 units every 51.94px), but nothing depended on
-//! it until this grid and `snap::to_pixel` did. They are two views of the same
-//! lattice — what the app *shows* and what it *honours* — so if one ever picks a
-//! different pitch the other is lying.
-//!
-//! The grid and snapping to it are separately switchable (*View ▸ Show grid* and
-//! *Snap ▸ Snap to grid*), and deliberately so: they answer different questions.
-//! Showing it asks "where are the pixel boundaries", which only has a useful
-//! answer when they are far enough apart to see; snapping to it asks "should my
-//! geometry be whole", which is true at every zoom or none.
+//! One world unit is one pixel; the grid and `snap::to_pixel` are two views of that
+//! lattice and must share a pitch. They are switched separately (*View ▸ Show grid*,
+//! *Snap ▸ Snap to grid*): showing is useful only when cells are far enough apart to
+//! see, snapping to whole geometry is wanted at every zoom or none.
 
 use crate::app::OndinApp;
 use eframe::egui;
@@ -20,21 +11,13 @@ use ondin_core::kurbo::Point;
 
 /// The zoom at which the grid appears: 800%, as the zoom readout spells it.
 ///
-/// `camera.zoom` is device pixels per world unit, and the readout is that same
-/// number as a percentage, so this threshold is the one the user sees. It is
-/// also the physical answer: below about this, one-pixel cells are closer
-/// together than the hairlines drawn between them and the grid reads as a grey
-/// wash rather than as a lattice.
+/// `camera.zoom` is the readout as a fraction, so this is the threshold the user
+/// sees; below it the cells crowd into a grey wash.
 pub const VISIBLE_AT_ZOOM: f64 = 8.0;
 
-/// The grid's ink.
-///
-/// A neutral mid-grey at low alpha rather than a tint of the chrome's near-white
-/// text. The grid is the one piece of chrome drawn over *artwork of any
-/// lightness* — the canvas ground is document state and may be white, and a
-/// frame's own background usually is — so a light hairline would vanish exactly
-/// where a pixel grid is most wanted, inside a white frame. Mid-grey survives
-/// both directions; a ground-derived ink would only ever solve one of them.
+/// The grid's ink: a neutral mid-grey at low alpha, because the grid is drawn over
+/// artwork of any lightness (a white frame is where it is most wanted) and a light
+/// or ground-derived ink would vanish in one direction.
 const INK: egui::Color32 = egui::Color32::from_rgba_premultiplied(30, 30, 30, 60);
 
 impl OndinApp {
@@ -44,18 +27,13 @@ impl OndinApp {
         self.show_grid && self.session.camera.zoom >= VISIBLE_AT_ZOOM
     }
 
-    /// Draw the lattice across `rect`.
-    ///
-    /// Bounded by construction rather than by a cap: the zoom threshold puts the
-    /// cells at least [`VISIBLE_AT_ZOOM`] device pixels apart, so the line count
-    /// can never exceed the canvas's pixel width over eight — a few hundred
-    /// hairlines at any window size, which is nothing to `epaint`.
+    /// Draw the lattice across `rect`. Bounded by the zoom threshold: cells are at
+    /// least [`VISIBLE_AT_ZOOM`] device pixels apart, so the line count stays small.
     pub(crate) fn draw_pixel_grid(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if !self.grid_visible() {
             return;
         }
-        // Only the artwork area: the ruler bars are chrome of their own and a
-        // lattice running under their ticks would make both unreadable.
+        // Only the artwork area; a lattice under the ruler ticks would hide both.
         let area = if self.rulers_on() {
             egui::Rect::from_min_max(
                 egui::pos2(
@@ -73,20 +51,8 @@ impl OndinApp {
 
         let world_min = self.to_world(area.min, rect, ppp);
         let world_max = self.to_world(area.max, rect, ppp);
-        // A one-device-pixel line has to land *on* a pixel rather than straddling
-        // two and coming out as a two-pixel smear, and it matters more here than
-        // anywhere else in the app: every line is the thinnest thing the screen can
-        // draw.
-        //
-        // ⚠️ **This used to hand-inline the guides' arithmetic and is the call now**
-        // (§15 D484, `[S16.5-L3-07]`). The copy was `round() / ppp + half` with the
-        // half *unconditional*, and it agreed with `snap_across_axis` at every
-        // scale measured — but only because `width` is `1.0 / ppp`, so
-        // `floor(width × ppp)` is 1 at every scale and the odd branch is the only
-        // one it ever reaches. **Nothing here said that**, and sixteen lines of
-        // measured reasoning that have already been rewritten twice were sitting in
-        // two places. Changing this width to 2pt would have silently made the copy
-        // wrong; through the call it stays right.
+        // A one-device-pixel line must land on a pixel, not straddle two; the guides'
+        // `snap_across_axis` stays right if this width ever changes.
         let width = 1.0 / ppp;
         let stroke = egui::Stroke::new(width, INK);
 
@@ -125,10 +91,7 @@ impl OndinApp {
 mod tests {
     use super::*;
 
-    /// Every hairline this module drew, as endpoint pairs.
-    ///
-    /// Filtered by the grid's own `INK` rather than by shape alone, so nothing
-    /// egui happens to emit into the same frame is counted as a grid line.
+    /// Every hairline this module drew, as endpoint pairs, filtered by `INK`.
     fn grid_lines(
         app: &OndinApp,
         ctx: &egui::Context,
@@ -147,26 +110,11 @@ mod tests {
             .collect()
     }
 
-    /// **The threshold is a boundary and both sides of it are asserted**
-    /// (`[A5-L6-02]`, §15 D504).
+    /// Both sides of the threshold are asserted, with `show_grid = false` at each: the
+    /// switch and the threshold are separate reasons to be off.
     ///
-    /// ⚠️ **Neither decision function in this module had a test caller.** The two
-    /// tests below `the_grid_threshold_is_the_zoom_readout_at_800_percent` are
-    /// closed over the constant alone — one re-derives `(8.0 × 100).round() ==
-    /// 800`, the other is literally `assert!(8.0 >= 8.0)` — so `>=` → `>` and
-    /// `&&` → `||` both stayed green, and the grid failing to appear at exactly
-    /// 800% is the one number the module's whole doc is about.
-    ///
-    /// `7.99` and `8.01` bracket it, `8.0` is the case in the name, and
-    /// `show_grid = false` is asserted at all three: the switch and the threshold
-    /// are separate reasons to be off, and an `||` makes *View ▸ Show grid* stop
-    /// switching the grid off above 8×.
-    ///
-    /// **Two flips run.** `>=` → `>` fails at exactly `8.0`, the predicted site.
-    /// `&&` → `||` fails one assertion **earlier** than predicted — at `7.99`
-    /// with the switch *on*, not on the switched-off case — because `true || …`
-    /// is already wrong there. Both assertions catch it; the earlier one gets
-    /// there first, and only running it says which.
+    /// flip: `>=` → `>` in `grid_visible` → fails at exactly 8.0; `&&` → `||` →
+    /// fails at 7.99 with the switch on.
     #[test]
     fn the_grid_is_on_at_the_threshold_and_off_below_it_and_off_when_switched_off() {
         let ctx = egui::Context::default();
@@ -188,24 +136,12 @@ mod tests {
         }
     }
 
-    /// **The lattice stops at the ruler bars** (`[A5-L6-02]`, §15 D504) — the
-    /// outcome the code's own comment names, *"a lattice running under their ticks
-    /// would make both unreadable"*, and which nothing asserted.
+    /// The lattice stops at the ruler bars. The rulers-off control matters because
+    /// the line count barely changes; the leftmost vertical's position does. The
+    /// fixture sets `present` too, since `rulers_on()` is `show_rulers && !present`.
     ///
-    /// The rulers-off case is the control and it is the one that gives the
-    /// assertion its teeth: deleting the `if self.rulers_on()` branch leaves the
-    /// **count** roughly unchanged, so a test that only counted lines would pass.
-    /// What separates the two is where the leftmost vertical sits.
-    ///
-    /// ⚠️ **`present` mode turns the rulers off**, so `rulers_on()` is
-    /// `show_rulers && !present` and the fixture sets both — a test that set only
-    /// `show_rulers` would be asserting the inset on an app that might not have
-    /// one.
-    ///
-    /// **Flip run**, the `rulers_on()` branch deleted and `rect` used
-    /// unconditionally: fails on *"the first vertical clears the ruler bar"* — the
-    /// predicted site — at **1.5 against 20**, the leftmost line back at the
-    /// canvas edge and well inside the bar.
+    /// flip: delete the `rulers_on()` branch in `draw_pixel_grid` → fails at "the
+    /// first vertical clears the ruler bar".
     #[test]
     fn the_lattice_does_not_run_under_the_ruler_bars() {
         let ctx = egui::Context::default();
@@ -245,62 +181,31 @@ mod tests {
         );
     }
 
-    /// The threshold is the number the zoom readout shows, so "shows at 800%"
-    /// means the readout saying 800 — not 8, and not 80000.
+    /// The threshold is what the zoom readout shows: 800, not 8 or 80000.
     #[test]
     fn the_grid_threshold_is_the_zoom_readout_at_800_percent() {
-        // The readout is `(camera.zoom * 100).round()`, as `zoom_control` builds
-        // it. Pinned here because the two have to agree for the menu row and the
-        // percentage in the bar to tell the same story.
+        // The readout is `(camera.zoom * 100).round()`, as `zoom_control` builds it.
         let readout = |zoom: f64| (zoom * 100.0).round() as i32;
         assert_eq!(readout(VISIBLE_AT_ZOOM), 800);
     }
 
-    /// One pixel cell is at least 8 device pixels across once the grid appears,
-    /// which is what makes a hairline lattice legible rather than a grey wash.
+    /// A cell is at least 8 device pixels across once the grid appears.
     #[test]
     fn a_cell_is_wide_enough_to_read_at_the_threshold() {
         let device_px_per_cell = VISIBLE_AT_ZOOM;
         assert!(device_px_per_cell >= 8.0);
-        // And at 150% display scaling it is still over five points, so the lines
-        // do not merge on a scaled display either.
+        // At 150% display scaling it is still over five points.
         assert!(device_px_per_cell / 1.5 >= 5.0);
     }
 
-    /// **The snap adapts to the width it is given, which is why calling it is safe
-    /// where the hand-inlined copy was only accidentally right** (§15 D484,
-    /// `[S16.5-L3-07]`).
-    ///
-    /// `draw_pixel_grid`'s line is `1.0 / ppp` **points** wide — one device pixel —
-    /// so `floor(width × ppp)` is 1 at every scale and `rulers::snap_across_axis`
-    /// only ever reaches its odd branch. That is why the old
-    /// `round() / ppp + 0.5 / ppp`, with the half **unconditional**, agreed with it
-    /// everywhere. It is a fact about the *width*, and nothing in this file said
-    /// so: changing the grid to a 2pt line would have made the copy silently wrong.
-    ///
-    /// **So the assertion is over two widths, not one.** One device pixel wants a
-    /// pixel centre and two want a pixel edge, and the property that has to hold
-    /// for both is that the ink covers whole pixels.
-    ///
-    /// ⚠️ **This test was written over one width first and a flip proved it
-    /// vacuous.** With only `1.0 / ppp` in the loop, changing the width to
-    /// `2.0 / ppp` left it **green** — because `snap_across_axis` handles the even
-    /// case correctly, so the *right* implementation passes at any width. The test
-    /// was pinning the callee's contract, which `rulers::guide_geometry_tests`
-    /// already pins, and said nothing about the merge. The two widths are what make
-    /// the difference visible.
-    ///
-    /// ⚠️ **Flip-check, run: the unconditional `+ 0.5 / ppp` this file used to
-    /// carry, in place of the call.** Passes at one device pixel — the branch it
-    /// was accidentally right on — and fails at two with a half-pixel overhang at
-    /// every scale. That is exactly the latent hazard the finding names.
+    /// `rulers::snap_across_axis` covers whole pixels at one device pixel (wants a
+    /// pixel centre) and at two (a pixel edge), so the grid may call it at either width.
     #[test]
     fn a_pixel_grid_line_covers_whole_pixels_at_either_width() {
         for ppp in [1.0f32, 1.25, 1.5, 1.75, 2.0, 3.0] {
             for device_px in [1.0f32, 2.0] {
                 let width = device_px / ppp;
-                // A deliberately fractional screen coordinate: an integral one is
-                // the case any arithmetic gets right.
+                // Fractional on purpose: an integral coordinate is right for any arithmetic.
                 let at = crate::rulers::snap_across_axis(100.37, ppp, width);
                 let centre = at * ppp;
                 let (lo, hi) = (centre - width * ppp / 2.0, centre + width * ppp / 2.0);

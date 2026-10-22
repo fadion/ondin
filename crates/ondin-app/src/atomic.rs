@@ -1,140 +1,77 @@
 //! Writing a file so that a reader never sees half of one (§15 D378).
 //!
-//! **Every record this app keeps goes through [`fn@write`].** A document, each
-//! pinned version of it, the project list, the preferences, the per-machine
-//! index, a crash snapshot — all of them are files that are read back and
-//! *believed*, and all of them were a bare `fs::write` until 2026-08-28, or an
-//! `fs::copy` in the pin's case, which is the same three steps with the bytes
-//! coming off a disk rather than out of memory: open, truncate, stream. A process
-//! that dies anywhere in the middle of that leaves a file that is neither the old
-//! contents nor the new ones, and the thing that reads it next cannot tell.
+//! Every record this app keeps goes through [`fn@write`]: a document, each pinned
+//! version, the project list, the preferences, the per-machine index, a crash
+//! snapshot. A bare `fs::write` (or `fs::copy`) opens, truncates and streams, so a
+//! process dying in the middle leaves a file that is neither the old contents nor
+//! the new, and the next reader cannot tell. The exposure is the whole of every
+//! save, autosave included.
 //!
-//! ⚠️ **The window is not small and it is not rare.** `write_document` truncates
-//! the user's actual document before it writes a byte, so the exposure is the
-//! whole of every save — the autosave that fires every thirty seconds included.
-//! `library::recovery` was built with the temp-and-rename shape from the start,
-//! on the grounds that a file whose entire purpose is surviving a crash cannot be
-//! written in a way a crash can corrupt; this module is that argument applied to
-//! the files the snapshot exists to protect.
+//! After [`fn@write`] returns, `path` holds either the complete new contents or
+//! the complete old ones, whatever happens next: `rename` is atomic on POSIX and
+//! on Windows (`MoveFileEx` with `REPLACE_EXISTING`). The `sync_all` before the
+//! rename extends that from process death to power loss; without it the rename can
+//! land while the data is still in the page cache.
 //!
-//! **What this gives and what it does not.** After [`fn@write`] returns, `path`
-//! holds either the complete new contents or the complete old ones, whatever
-//! happens next — that is `rename` being atomic, on POSIX and on Windows
-//! (`MoveFileEx` with `REPLACE_EXISTING`) alike. The `sync_all` before the rename
-//! extends that from *process death* to *power loss*: without it the rename can
-//! land while the data behind it is still in the page cache, which is a
-//! zero-length or garbage file after a hard power cut.
+//! The directory entry itself is not synced (POSIX asks for it, Rust does not
+//! portably expose it). A power cut just after the rename can leave the old name
+//! pointing at the old data: the residual risk is losing the new version, never
+//! tearing a file.
 //!
-//! ⚠️ **The directory entry itself is not synced**, which POSIX asks for and Rust
-//! does not portably expose. So a power cut in the microseconds after the rename
-//! can still leave the *old* name pointing at the old data — which is the
-//! pre-write state, and therefore the safe end of the failure. Nothing here can
-//! produce a torn file; the residual risk is losing the new version, not
-//! corrupting the old one.
+//! Two Ondin instances can write one path: there is no single-instance check, and
+//! `instances`' lock files only count running copies for the updater. [`temp_for`]
+//! therefore carries the process id and a per-process counter, so a second writer
+//! is a lost update rather than a torn file (a shared temp name let one writer's
+//! handle follow the file through the other's rename and extend it).
 //!
-//! ⚠️ **That claim was false for a second writer of the same path until §15 D548,
-//! and the premise it rested on was about the *process* rather than the machine.**
-//! The temp name used to be derived from the target with no unique part, on the
-//! stated grounds that this app never has two writers for one path — true of one
-//! Ondin, and nothing prevents two. Nothing does: there is no named mutex and no
-//! single-instance check — `instances`' lock file per process counts running
-//! copies for the updater and stops none (§15 D970) — and the base folder is
-//! documented as syncable. Two instances with the same document open both autosave every thirty
-//! seconds and snapshot every ten, through here, onto one temp name; the second
-//! `File::create` truncates the first's temp, and the first's handle then follows
-//! the file *through* the rename and extends it. Staged deterministically that
-//! ends with the destination holding `BBBB` + twelve NULs + `AAAA` **after both
-//! saves reported success** — a torn file produced by the mechanism that exists to
-//! make torn files impossible. [`temp_for`] now carries the process id and a
-//! per-process counter, which turns that into a lost update: the safe direction,
-//! and the only one this module can reach without an instance lock.
-//!
-//! **Three kinds of file deliberately do not use this.** The *derived caches* —
-//! the cover PNGs and the font data — are regenerated from a document or
-//! re-fetched when they fail to parse, so a torn one costs nothing and is
-//! self-healing, and they are written in bulk where a `sync_all` each would be
-//! felt. The *exports*, CLI and panel alike (`main.rs`, `panels::export`), are an
-//! output the user re-runs rather than a record the app keeps. And `ondin.log`
-//! (`logging`), an append-only stream with no atomic form worth having, whose
-//! worst crash is a torn last line (§15 D378's amendment). **The rule is that
-//! a file worth an fsync is one nothing else can reconstruct**, and those are the
-//! whole of the un-converted set — which is worth stating as an inventory,
-//! because the next `fs::write` somebody adds should have to argue its way onto
-//! this list rather than simply not be noticed.
+//! Three kinds of file deliberately do not use this. The derived caches (cover
+//! PNGs, font data) are regenerated or re-fetched when they fail to parse, and are
+//! written in bulk. The exports (`main.rs`, `panels::export`) are output the user
+//! re-runs. `ondin.log` (`logging`) is an append-only stream whose worst crash is
+//! a torn last line. A file worth an fsync is one nothing else can reconstruct; a
+//! new `fs::write` has to argue its way onto this list.
 
-// ⚠️ **`[`fn@write`]` throughout, not `[`write`]`.** A bare link to this
-// module's `write` is ambiguous with `std::write!`, which is in the prelude — and
-// `cargo doc` is a hard gate here, so it fails the build rather than warning.
-// Worth knowing before naming any other item after a prelude macro.
+// Link as `[`fn@write`]`, not `[`write`]`: a bare link is ambiguous with the
+// prelude's `std::write!`, and the doc gate fails the build on it.
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 /// Write `bytes` to `path`, atomically.
 ///
-/// Creates the parent directory if it is missing, which every caller wanted
-/// anyway and two of them used to do by hand.
+/// Creates the parent directory if it is missing.
 pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    // 🚨 **Through a symlink to the file it names** (§15 D975, `[R3-L5-03]`).
-    // A rename replaces the *link*, so a document reached through one became a
-    // plain file beside a target that never saw the save again — on Linux and
-    // macOS, where D956 first shipped this function and links are ordinary.
-    // The temp is then made beside the target, so the rename stays on one
-    // volume. A link whose target cannot be resolved is written as before.
+    // Write through a symlink: a rename would replace the link, leaving a plain
+    // file beside a target that never sees the save again.
     let resolved = through_link(path);
     let path = resolved.as_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Both halves of what [`temp_for`]'s uniqueness costs: the debris no longer
-    // self-clears, so it is swept instead. Cheap — one `stat` per write, and one
-    // `read_dir` per directory for the whole life of the process.
+    // [`temp_for`]'s unique names are never overwritten, so stale debris is swept.
     remove_if_stale(&legacy_temp_for(path));
     sweep_once(path);
     let temp = temp_for(path);
-    // 🚨 **Every failure removes the temp, not only the rename's** (§15 D706,
-    // `[S1.2-L2-07]`). The cleanup used to sit in the `rename` error arm alone,
-    // so a failure at `File::create`, `write_all` or `sync_all` returned through
-    // `?` and left the temp behind — and **disk-full, which is the reason this
-    // comment gives for cleaning up at all, surfaces at `write_all`**, the one
-    // of the four with no cleanup.
+    // Every failure removes the temp, not only the rename's: disk-full surfaces at
+    // `write_all`, and `sweep_once` runs once per directory.
     //
-    // ⚠️ **`sweep_once` above does not cover it, and the reason is worth
-    // knowing.** D548 bounds that sweep to once per directory per process on the
-    // argument that *"debris left by a dead process was there before this one
-    // started"* — which is true of debris this process inherits and false of
-    // debris it creates *after* its own sweep has run. That is bounded rather
-    // than permanent, since a later launch sweeps it once `STALE_TEMP` has
-    // passed, but the honest place to clean up a write's own failure is the
-    // write.
-    //
-    // A block, so the handle is closed before the rename. Windows will not
-    // rename over — or from — a file that is still open in this process.
+    // A block, so the handle is closed before the rename: Windows will not rename
+    // from a file still open in this process.
     let result = (|| -> std::io::Result<()> {
         {
             let mut file = std::fs::File::create(&temp).map_err(|e| at(e, "create", &temp))?;
             file.write_all(bytes).map_err(|e| at(e, "write", &temp))?;
             file.sync_all().map_err(|e| at(e, "flush", &temp))?;
-            // **The replaced file's permissions, kept** (§15 D975,
-            // `[R3-L5-03]`): the temp is created with the process's default
-            // mode, so every save turned a document the user had restricted to
-            // `0600` into `0644`. Ignored on failure — the bytes are what the
-            // write is for. On Windows `Permissions` is the read-only flag, and
-            // a read-only destination refuses the rename anyway (D967).
+            // Keep the replaced file's permissions (a `0600` document must not
+            // become `0644`). Ignored on failure.
             if let Ok(meta) = std::fs::metadata(path) {
                 let _ = file.set_permissions(meta.permissions());
             }
         }
-        // **The destination, not the temp.** This is the one step whose path the
-        // user has heard of, and it is the step reachable today — see
-        // `a_refused_write_names_the_file_it_could_not_write`.
+        // The destination, not the temp, is named: it is the path the user knows.
         std::fs::rename(&temp, path).map_err(|e| at(e, "replace", path))
     })();
     if result.is_err() {
-        // The temp file is the failure's only trace, and leaving it would mean a
-        // folder that slowly fills with the debris of a disk that is full —
-        // which is the most likely reason to be here. Ignored, because the
-        // caller is being handed the *write's* error and a failure to tidy up
-        // after it is not the more interesting one.
+        // Ignored: the caller gets the write's error, not a tidy-up failure.
         let _ = std::fs::remove_file(&temp);
     }
     result
@@ -153,38 +90,20 @@ fn through_link(path: &Path) -> PathBuf {
 
 /// Remove every temp file that belongs to `path`, whichever writer left it.
 ///
-/// For callers that delete a record and want its debris to go too; the ordinary
-/// path needs nothing, because [`fn@write`] sweeps.
-///
-/// ⚠️ **Unconditional, where [`fn@write`]'s sweep is age-gated**, and the
-/// difference is deliberate: this is a caller saying *this record is gone*, so a
-/// temp for it is debris by definition. If a second instance is mid-write on the
-/// same path its rename then fails and it reports the failure — a lost update,
-/// announced, which is the right end of a race the user started by deleting the
-/// thing being written.
+/// For callers that delete a record. Unconditional, where [`fn@write`]'s sweep is
+/// age-gated: the record is gone, so a temp for it is debris, and a second
+/// instance mid-write fails its rename and reports it.
 pub fn forget(path: &Path) {
     for temp in leftovers(path) {
         let _ = std::fs::remove_file(temp);
     }
 }
 
-/// Say which step failed and on which file, keeping the kind (§15 D715).
+/// Say which step failed and on which file, keeping the kind.
 ///
-/// **An `io::Error` carries a kind and a sentence and no path**, so every refusal
-/// out of [`fn@write`] reached the status line as `Save failed: Access is denied.
-/// (os error 5)` — naming neither the file nor the step, on a message whose whole
-/// job is to be acted on. `[S1.2-L1-08]` measured the Windows sharing-violation
-/// spelling of the same thing.
-///
-/// ⚠️ **`Error::new` keeps `kind()` and drops `raw_os_error()`.** Nothing in this
-/// workspace reads either off a save today; the kind is preserved because it is
-/// the half a caller would plausibly want to classify on, and the raw code is
-/// already in the message text the OS wrote.
-///
-/// The verbs are the four steps rather than the four function names — a user
-/// reads *"could not replace"*, not *"rename failed"* — and `flush` is
-/// `sync_all`, which is the durability barrier rather than a buffer flush, but is
-/// the word that means anything outside this module.
+/// An `io::Error` carries no path. `Error::new` keeps `kind()` and drops
+/// `raw_os_error()`, which is already in the OS's message text. The verbs are in a
+/// user's words ("could not replace"); `flush` is `sync_all`.
 fn at(e: std::io::Error, step: &str, on: &Path) -> std::io::Error {
     std::io::Error::new(e.kind(), format!("could not {step} {}: {e}", on.display()))
 }
@@ -194,52 +113,32 @@ const TEMP_EXT: &str = ".writing";
 
 /// How old a temp file has to be before [`fn@write`] will sweep it.
 ///
-/// ⚠️ **An hour, which is absurdly generous on purpose.** The thing this bound
-/// protects is another *live* writer's temp: sweep one of those and its rename
-/// fails. The slowest write this module has measured is a 60 MB document, ~1.2 s
-/// to serialise before a byte reaches here, so any sane figure is orders out — and
-/// the reason it is an hour rather than a minute is that the base folder is
-/// documented as syncable, so an mtime here can have come off another machine's
-/// clock. An hour is longer than the skew anyone tolerates on a synced folder and
-/// still short enough that a crash's debris is gone by the next session.
+/// An hour, generous on purpose: sweeping another live writer's temp fails that
+/// rename, and the base folder is syncable, so an mtime can come off another
+/// machine's clock.
 const STALE_TEMP: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 /// One counter for the whole process, so two threads racing for one path cannot
-/// pick the same temp either.
-///
-/// The process id alone would fix the two-*instance* case and leave the
-/// two-*thread* case, which `library::writer`'s module doc has been holding shut
-/// by hand — *"one worker for both, and that is not tidiness"* — since D392. It
-/// still should; this makes the write layer stop depending on it.
+/// pick the same temp; the pid alone covers only two instances.
 static WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// The directories [`sweep_once`] has already been through.
 ///
-/// A `Vec` rather than a `HashSet` because there are four of them for the life of
-/// the process — the base folder, `.recovery/`, the versions folder and the config
-/// dir — and `Vec::new` is `const` where `HashSet::new` is not.
+/// A `Vec` rather than a `HashSet`: there are only a few, and `Vec::new` is `const`.
 static SWEPT: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// The temp file used while writing `path`: the target's own name, this process's
 /// id, a counter, and `.writing`.
 ///
-/// ⚠️ **Unique per call, which is what makes two writers of one path safe** — see
-/// the module doc, and §15 D548 for what it replaced and what that cost. It is the
-/// *target's* name with a suffix appended rather than a name of its own, so the
-/// temp is always in the destination's directory and a cross-volume rename is
-/// unreachable.
+/// Unique per call, which makes two writers of one path safe. Appended to the
+/// target's name, so the temp is always in the destination's directory.
 ///
-/// ⚠️ **The extension is still `writing`, which is what keeps these out of the
-/// library.** `library::scan` matches on an extension of exactly `ondin`, so
-/// `landing-v4.ondin.8412-3.writing` is not a document, is not counted by a
-/// heading and cannot be opened by accident — and `library::recovery::pending`
-/// filters the same way.
+/// The extension stays `writing`, which keeps these out of the library:
+/// `library::scan` matches an extension of exactly `ondin`, as does
+/// `library::recovery::pending`.
 ///
-/// ⚠️ **The `<pid>-<counter>` segment is load-bearing beyond uniqueness**: it is
-/// what lets [`sweep_once`] tell this module's debris from a file the user happens
-/// to have named `notes.writing`. A bare `.writing` suffix cannot be swept safely
-/// for exactly that reason, and [`legacy_temp_for`] is how the old scheme's litter
-/// is cleared instead.
+/// The `<pid>-<counter>` segment is load-bearing beyond uniqueness: it lets
+/// [`sweep_once`] tell this module's debris from a user's own `notes.writing`.
 fn temp_for(path: &Path) -> PathBuf {
     let n = WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut name = path.as_os_str().to_os_string();
@@ -247,13 +146,11 @@ fn temp_for(path: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// The temp file the pre-D548 scheme used for `path` — the target's name with
+/// The temp file the earlier scheme used for `path` — the target's name with
 /// `.writing` and nothing between.
 ///
-/// Kept because an installed build wrote them, and a user upgrading has one per
-/// file it ever crashed a save of. [`fn@write`] clears this one by *name*, from the
-/// exact target it is writing, which is the only context in which a bare
-/// `.writing` is unambiguously ours.
+/// [`fn@write`] clears it by name from the exact target it is writing, the only
+/// context in which a bare `.writing` is unambiguously ours.
 fn legacy_temp_for(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
     name.push(TEMP_EXT);
@@ -278,13 +175,11 @@ fn leftovers(path: &Path) -> Vec<PathBuf> {
 
 /// Whether `candidate` is a temp file for the target file named `target`.
 ///
-/// Either `<target>.writing` (the pre-D548 scheme) or
+/// Either `<target>.writing` (the earlier scheme) or
 /// `<target>.<digits>-<digits>.writing`.
 ///
-/// ⚠️ **The digits are checked rather than the shape assumed**, so that
-/// `doc.ondin` does not claim `doc.ondin.bak.4-0.writing` — which it would under
-/// the obvious "starts with the name, ends with the suffix" predicate, and which
-/// [`forget`] would then delete.
+/// The digits are checked rather than the shape assumed, so `doc.ondin` does not
+/// claim `doc.ondin.bak.4-0.writing`, which [`forget`] would then delete.
 fn is_temp_of(target: &str, candidate: &str) -> bool {
     let Some(rest) = candidate.strip_prefix(target) else {
         return false;
@@ -323,18 +218,10 @@ fn remove_if_stale(temp: &Path) {
 /// Clear stale temp files out of `path`'s directory, the first time this process
 /// writes into it.
 ///
-/// ⚠️ **Once per directory, not once per write.** The sweep is a `read_dir` plus a
-/// `stat` per entry, and the base folder can hold thousands of documents — which
-/// would be tens of milliseconds inside the frame that saves the preferences. The
-/// bound costs nothing: debris left by a *dead* process was there before this one
-/// started, so the first write into a directory is the only moment that can find
-/// any that matters.
-///
-/// ⚠️ **It only removes names carrying [`temp_for`]'s `<pid>-<counter>` stamp**, and
-/// that is the whole reason the stamp is in the name. A directory sweep does not
-/// know which files are records this app writes, so a bare `*.writing` filter would
-/// delete a user's own `draft.writing` out of their base folder — data loss, from
-/// the module whose subject is not losing data.
+/// Once per directory: a `read_dir` plus a `stat` per entry is too much per write
+/// in a base folder of thousands of documents, and debris from a dead process
+/// predates this one. It only removes names carrying [`temp_for`]'s
+/// `<pid>-<counter>` stamp, never a user's own `draft.writing`.
 fn sweep_once(path: &Path) {
     let Some(dir) = path.parent() else {
         return;
@@ -354,8 +241,7 @@ fn sweep_once(path: &Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        // `is_temp_of` with the target taken from the candidate itself: whatever
-        // precedes a well-formed stamp is a target name by construction.
+        // `is_temp_of` with the target taken from the candidate itself.
         let Some(stamp) = name.strip_suffix(TEMP_EXT) else {
             continue;
         };
@@ -371,12 +257,8 @@ fn sweep_once(path: &Path) {
 /// Every temp file belonging to `path`, for tests that assert none was left
 /// behind.
 ///
-/// ⚠️ **Exposed so no test spells a name out**, which is not fastidiousness: a
-/// test asserting `foo.writing` does not exist goes on passing forever once the
-/// scheme changes, because it is then checking for a file that cannot exist under
-/// any circumstances. `library::recovery`'s did exactly that for the length of one
-/// edit — and D548 changed the scheme, which is the second time that warning has
-/// been the difference between a test and a decoration.
+/// Exposed so no test spells a name out: a test asserting `foo.writing` is absent
+/// passes forever once the scheme changes.
 #[cfg(test)]
 pub fn leftover_temps(path: &Path) -> Vec<PathBuf> {
     leftovers(path)
@@ -393,18 +275,9 @@ mod tests {
         dir
     }
 
-    /// Make `write(path, …)` fail, the way each platform refuses a replace —
-    /// and `unlock` undoes it, before the cleanup.
-    ///
-    /// 🚨 **Not the same fixture on both, and it was one until CI first ran
-    /// off Windows** (2026-10-03, §15 D967). On Windows a read-only
-    /// *destination* refuses the rename. On Linux and macOS it does not: a
-    /// rename is governed by the **directory's** write permission, and
-    /// replacing a read-only file that way is how editors there have always
-    /// saved — so the read-only fixture let the write through and both tests
-    /// failed. There the directory is made read-only instead, which refuses the
-    /// temp file's creation, a step earlier. ⚠️ **Root ignores both**, so these
-    /// tests assume an ordinary user, which every CI runner is.
+    /// Make `write(path, …)` fail: a read-only destination on Windows, a read-only
+    /// directory on Linux and macOS (a rename is governed by the directory, so the
+    /// temp's creation is refused a step earlier). Root ignores both.
     fn lock(path: &Path) {
         #[cfg(windows)]
         {
@@ -420,13 +293,11 @@ mod tests {
         }
     }
 
-    /// Undo `lock`: the file writable again on Windows, the directory on
-    /// Linux and macOS, so the temp root can be removed.
+    /// Undo `lock`, so the temp root can be removed.
     fn unlock(path: &Path) {
         #[cfg(windows)]
-        // `set_readonly(false)` is what clippy warns about — it grants
-        // *everyone* write on Unix — and this arm is Windows', where the flag is
-        // one bit on a file this test made.
+        // Clippy warns that `set_readonly(false)` grants everyone write on Unix;
+        // this arm is Windows', where it is one flag on a file this test made.
         #[allow(clippy::permissions_set_readonly_false)]
         {
             let mut perms = std::fs::metadata(path).unwrap().permissions();
@@ -444,20 +315,11 @@ mod tests {
     /// A write replaces the file, leaves no temp behind, and makes the parent
     /// directory it needs.
     ///
-    /// ⚠️ **The temp-file assertion is the one about the mechanism.** A leftover
-    /// `.writing` after a *successful* write means the rename did not happen and
-    /// the bytes at `path` are whatever was there before — a save that reports
-    /// success and did nothing. Flip-checked by replacing the `rename` with a
-    /// `fs::copy`: that assertion fails with the temp still present, and the
-    /// content assertions stay green, which is exactly the shape of the bug. The
-    /// same flip also fails `a_temp_file_left_by_a_dead_process_is_not_a_document`
-    /// at *its* self-clears assertion, which is the same fact from the other side.
+    /// flip: `rename` replaced by `fs::copy` → fails at the leftovers assertion
+    /// with the temp still present, content assertions green. The same flip fails
+    /// `a_temp_file_left_by_a_dead_process_is_not_a_document` at its leftovers assertion.
     ///
-    /// ⚠️ **`sync_all` has no flip**, and nothing here can have one: it is the
-    /// difference between surviving a process death and surviving a power cut,
-    /// and a test can stage the first but not the second. That is stated rather
-    /// than papered over — the module doc says exactly what the call buys, and it
-    /// is the one line in this file no assertion is watching.
+    /// `sync_all` has no flip: a test can stage process death but not power loss.
     #[test]
     fn a_write_replaces_the_file_and_leaves_no_temp_behind() {
         let root = temp_root("write");
@@ -478,28 +340,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The temp file is not a document, which is what keeps a crashed save out of
-    /// the library rather than in it under a name nobody chose.
-    ///
-    /// ⚠️ **Asserted through `library::scan` rather than by inspecting the
-    /// name.** The property that matters is not "the extension is `writing`", it
-    /// is "the scan does not list it" — and those are the same fact only for as
-    /// long as `scan` matches on the extension it matches on today.
-    ///
-    /// ⚠️ **The self-clearing half changed with §15 D548 and is now the sweep's,
-    /// not `File::create`'s.** It used to hold because the temp name was the
-    /// target's, so the next save truncated the same file and renamed it away. A
-    /// unique name per write ends that, so the debris is swept instead — which is
-    /// **age-gated**, and the case this test names therefore has to be *arranged*
-    /// rather than hoped for. The stamp is set with `File::set_modified`, which is
-    /// `recovery`'s lesson: a test that hopes two writes land in the same whole
-    /// second is a test of the clock.
+    /// A crashed save's temp stays out of the library (asserted through
+    /// `library::scan`), and the next save sweeps it once it is old enough, dated
+    /// with `File::set_modified`.
     #[test]
     fn a_temp_file_left_by_a_dead_process_is_not_a_document() {
         let root = temp_root("debris");
         let path = root.join("landing-v4.ondin");
-        // The state a process killed between `create` and `rename` leaves, in
-        // both schemes: one of the old build's, one of this one's.
+        // What a process killed between `create` and `rename` leaves, in both schemes.
         let old = legacy_temp_for(&path);
         let mine = temp_for(&path);
         std::fs::write(&old, b"half a document").unwrap();
@@ -509,8 +357,7 @@ mod tests {
             "a half-written save must not appear in the library, in either scheme"
         );
 
-        // Dated back past the sweep's gate, which is what makes them debris
-        // rather than another live writer's work in progress.
+        // Dated back past the sweep's gate, so they are debris and not a live writer's.
         for temp in [&old, &mine] {
             let stale = std::time::SystemTime::now() - STALE_TEMP - ONE_MINUTE;
             std::fs::OpenOptions::new()
@@ -521,7 +368,7 @@ mod tests {
                 .unwrap();
         }
 
-        // And the next successful save of the same file clears both.
+        // The next successful save of the same file clears both.
         write(&path, b"whole").unwrap();
         assert!(
             leftovers(&path).is_empty(),
@@ -537,22 +384,13 @@ mod tests {
     }
 
     /// A minute, for dating a fixture's temp file either side of `STALE_TEMP`.
-    ///
-    /// Plain backticks, not a `[link]` — §15 D319's convention: this item is
-    /// `#[cfg(test)]`, so `cargo doc` cannot see it and no gate would validate one.
     const ONE_MINUTE: std::time::Duration = std::time::Duration::from_secs(60);
 
-    /// **Two writers of one path get different temp files**, which is the whole of
-    /// §15 D548's fix (`[A3-L5-04]`).
+    /// Two writers of one path get different temp files, beside the target and
+    /// recognised as its debris.
     ///
-    /// ⚠️ **Flip-check, run: `temp_for` reverted to `name.push(TEMP_EXT)`.** Fails
-    /// here on the first assertion, and — the one that matters — on
-    /// `a_second_writer_cannot_tear_the_destination` below, which is where the
-    /// consequence lives. This test is the property; that one is the damage.
-    ///
-    /// The counter and not just the pid: a process id makes two *instances* safe
-    /// and leaves two *threads*, and `library::writer`'s single worker is the only
-    /// thing that has been holding that shut.
+    /// flip: `temp_for` reverted to `name.push(TEMP_EXT)` → fails at the first
+    /// assertion, and at `a_second_writer_cannot_tear_the_destination`.
     #[test]
     fn two_writes_of_one_path_get_different_temp_files() {
         let path = Path::new("C:").join("lib").join("doc.ondin");
@@ -571,45 +409,27 @@ mod tests {
         }
     }
 
-    /// **A second writer of the same path cannot tear the destination** — the
-    /// failure `[A3-L5-04]` names, staged deterministically rather than raced.
+    /// A second writer of the same path cannot tear the destination, staged
+    /// deterministically. The other writer uses `legacy_temp_for` on purpose: the
+    /// name a reverted `temp_for` would collide with.
     ///
-    /// The interleaving is the one from the finding, with the ordering that makes
-    /// it *worse* than the finding claimed: the loser's handle follows the file
-    /// through the rename and extends it, so the destination ends up holding both
-    /// payloads with a hole between them — **after both saves reported success**.
-    ///
-    /// ⚠️ **The other writer is spelled `legacy_temp_for`, which looks like the
-    /// thing `leftover_temps`' doc forbids and is the opposite of it.** That
-    /// warning is about asserting a *name is absent*, which goes vacuously green
-    /// when the scheme changes. Here the name is an **adversary's**, and it has to
-    /// be the pre-D548 name specifically, because that is the name the flipped
-    /// version of `temp_for` would collide with. Written any other way the flip
-    /// below does not bite.
-    ///
-    /// ⚠️ **Flip-check, run: `temp_for` reverted to `name.push(TEMP_EXT)`.** Fails
-    /// on the content assertion with 20 bytes against 4 —
-    /// `BBBB` + twelve NULs + `AAAA` — which is the reported symptom in the
-    /// failure message rather than in a comment.
+    /// flip: `temp_for` reverted to `name.push(TEMP_EXT)` → fails at the content
+    /// assertion, 20 bytes against 4 (`BBBB` + twelve NULs + `AAAA`).
     #[test]
     fn a_second_writer_cannot_tear_the_destination() {
         let root = temp_root("two-writers");
         let path = root.join("doc.ondin");
         write(&path, b"OLD").unwrap();
 
-        // The other instance, mid-write: its temp open, 16 bytes in, not yet
-        // synced. Under the old scheme this is the very file `write` is about to
-        // create over.
+        // The other instance, mid-write: its temp open, 16 bytes in, not yet synced.
         let mut other = std::fs::File::create(legacy_temp_for(&path)).unwrap();
         other.write_all(&[b'A'; 16]).unwrap();
 
         // This instance's whole write, start to finish, in that window.
         write(&path, b"BBBB").unwrap();
 
-        // And the other instance finishing: its rename fails either way, because
-        // its temp has been renamed away (old scheme) or is simply a different
-        // file (new). What it does next is write through the handle it still
-        // holds.
+        // The other instance finishing: its rename fails either way, and it then
+        // writes through the handle it still holds.
         other.write_all(&[b'A'; 4]).unwrap();
         other.sync_all().unwrap();
         drop(other);
@@ -624,31 +444,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A live writer's temp is not swept**, which is the bound on the sweep that
-    /// replaced §15 D548's self-clearing.
+    /// A live writer's temp is not swept; one older than `STALE_TEMP` is.
     ///
-    /// ⚠️ **Flip-check, run: `STALE_TEMP` set to zero.** Fails on the
-    /// `still_there` assertion — the sweep eats the other writer's in-flight temp,
-    /// whose rename then fails and whose save is lost. So the age gate is what
-    /// keeps a *concurrent* save a lost update rather than an error, and this is
-    /// the assertion watching it.
+    /// flip: `STALE_TEMP` set to zero → fails at the `in_flight` assertion, the
+    /// sweep eating the other writer's temp.
     ///
-    /// ⚠️ **And a second flip, which did *not* bite where it was predicted to:**
-    /// dropping the `<pid>-<counter>` check from `sweep_once` and filtering on
-    /// `.writing` alone leaves this test green, because the fixture's own name
-    /// carries a stamp. It fails on `a_users_own_writing_file_is_not_debris`
-    /// instead — the one that stages the data loss the stamp exists to prevent.
+    /// Dropping the `<pid>-<counter>` check from `sweep_once` leaves this green
+    /// (the fixture carries a stamp); `a_users_own_writing_file_is_not_debris`
+    /// catches it.
     #[test]
     fn a_live_writers_temp_is_left_alone() {
         let root = temp_root("live-writer");
         let theirs = root.join("theirs.ondin");
         let mine = root.join("mine.ondin");
 
-        // Their write, in flight: a well-formed temp of this very moment.
+        // Their write, in flight.
         let in_flight = temp_for(&theirs);
         std::fs::write(&in_flight, b"in flight").unwrap();
 
-        // And one of theirs from a session that died an hour ago.
+        // And one from a session that died an hour ago.
         let dead = temp_for(&theirs);
         std::fs::write(&dead, b"a dead session").unwrap();
         std::fs::OpenOptions::new()
@@ -672,17 +486,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **The sweep does not delete a file the user named `something.writing`.**
+    /// The sweep does not delete a file the user named `something.writing`: the
+    /// `<pid>-<counter>` stamp is what distinguishes them.
     ///
-    /// The base folder is the user's own directory, so a directory-wide sweep on
-    /// the extension alone is data loss from the module whose subject is not
-    /// losing data. The `<pid>-<counter>` stamp is what distinguishes them, and
-    /// this is the assertion that says so.
-    ///
-    /// ⚠️ **Flip-check, run: `sweep_once` filtering on `TEMP_EXT` alone.** Both
-    /// assertions fail — the hand-named file and the pre-D548 debris go together,
-    /// and the second is why `write` clears the legacy name from the *target* it is
-    /// writing instead of from the directory.
+    /// flip: `sweep_once` filtering on `TEMP_EXT` alone → both assertions fail; the
+    /// second is why `write` clears the legacy name from its own target instead of
+    /// from the directory.
     #[test]
     fn a_users_own_writing_file_is_not_debris() {
         let root = temp_root("user-file");
@@ -713,60 +522,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A write that fails leaves the old file whole** — this module's headline
-    /// promise, and until §15 D480 it was asserted by nothing (`[S1.2-L6-05]`).
+    /// A write that fails leaves the old file whole, with no temp behind.
     ///
-    /// Both tests above exercise the success path, and the flip recorded in the
-    /// first one picks `rename` → `fs::copy`, which fails on the *leftover temp*.
-    /// So the pair looks like it covers the mechanism and covers the temp file
-    /// rather than the destination. **The regression that admits is the one every
-    /// reviewer of Windows code reaches for**: *"`fs::rename` fails if the
-    /// destination exists, so remove it first."* Inserting
-    /// `let _ = std::fs::remove_file(path);` above the rename leaves both of them
-    /// green, and every save then has a window in which the user's document does
-    /// not exist at all.
+    /// The regression to guard is "remove the destination first" (`fs::rename`
+    /// already replaces it). On Windows `remove_file` clears the read-only
+    /// attribute, so it defeats the lock and silently overwrites the document.
+    /// On Linux and macOS this only shows that a refused `create` leaves the old
+    /// file whole; the rename is pinned on Windows alone.
     ///
-    /// **Read-only is the lock on Windows, where it is one line.** The
-    /// destination is made read-only, so the rename onto it is refused; the
-    /// alternative measured for `[S1.2-L6-05]` — holding the file open with
-    /// `share_mode(FILE_SHARE_READ)`, no `DELETE` — produces the same
-    /// `PermissionDenied` and needs `std::os::windows`. 🚨 **It was called
-    /// portable here and is not** (§15 D967): on Linux and macOS a read-only file
-    /// is replaced by a rename like any other, so `lock` makes the *directory*
-    /// read-only there, which refuses the temp file's `create` — and the rename,
-    /// and every flip aimed at it, is then never reached. **On Linux and macOS
-    /// this test only shows that a refused create leaves the old file whole**;
-    /// the headline promise below is pinned on Windows alone.
-    ///
-    /// ⚠️ **Flip-check, run (on Windows; it cannot bite elsewhere, the rename
-    /// being unreached): `let _ = std::fs::remove_file(path);` inserted above
-    /// the `rename`.** Fails on the content assertion with `NEW` against `OLD`,
-    /// and **both tests above stay green** — which is the measurement that says
-    /// this test is not a restatement of them.
-    ///
-    /// ⚠️ **The predicted failure was wrong twice over and the corrections are
-    /// worth more than the prediction.** It was expected to fail *because the file
-    /// was gone*; it fails because the file was **replaced**. On Windows
-    /// `std::fs::remove_file` clears the read-only attribute and retries the
-    /// delete, so the flipped version defeats the very lock that stages this test:
-    /// the rename then succeeds, `write` returns `Ok`, and the protected document
-    /// is silently overwritten. That is a *worse* outcome than the one predicted
-    /// and this test is what shows it — the "remove it first" instinct does not
-    /// merely open a window, it walks through a refusal.
-    ///
-    /// And the assertions had to be reordered to say so. With `result.is_err()`
-    /// first the flip failed on *"the fixture has to reach a failing rename"* — a
-    /// fixture guard, reporting that the setup was wrong when the setup was fine
-    /// and the code had destroyed the file. **The loss goes before the report**:
-    /// what the user loses is the old contents, and whether the failure was
-    /// announced is the second question.
-    ///
-    /// ⚠️ **`fs::rename` really does replace an existing destination on Windows**
-    /// (`MOVEFILE_REPLACE_EXISTING`), so the "remove it first" instinct is wrong on
-    /// its own terms as well as dangerous. Measured for `[S1.2-L6-05]` and recorded
-    /// here so the next reader does not re-derive it from documentation — and
-    /// `temp_for` appends to the full destination path, so the temp is always in
-    /// the destination's own directory and a cross-volume rename is unreachable.
+    /// flip (Windows only): `let _ = std::fs::remove_file(path);` above the
+    /// `rename` → fails at the content assertion, `NEW` against `OLD`, with the
+    /// success-path tests green. The content assertion goes first so the loss is
+    /// reported before the announcement.
     #[test]
     fn a_failed_write_leaves_the_old_file_intact() {
         let root = temp_root("failed");
@@ -791,74 +558,24 @@ mod tests {
             leftovers(&path).is_empty(),
             "and it must not leave its temp file behind"
         );
-        // 🚨 **This assertion now covers all four failure points and exercises
-        // one** (§15 D706). The cleanup used to live in the `rename` error arm,
-        // which is the arm this fixture stages; it is a common `if
-        // result.is_err()` now, so `File::create`, `write_all` and `sync_all`
-        // are covered by construction. **On Windows they are not covered by a
-        // test, and saying so is the point** — a read-only *destination* is the
-        // failure staged there, and the three earlier arms want a full disk or a
-        // revoked ACL. Writable-with-difficulty rather than written, which is a
-        // queue rather than a fact. ⚠️ **On Linux and macOS it is the reverse**
-        // (§15 D967): `lock`'s read-only directory refuses the `File::create`
-        // arm and never reaches the rename.
+        // The cleanup is one `if result.is_err()`, so this covers all four failure
+        // points but exercises one: on Windows the `rename`, on Linux and macOS the
+        // `File::create`. The `write_all` and `sync_all` arms want a full disk.
         //
-        // ⚠️ **Flip, run:** disabling the cleanup fails this line, and this line
-        // alone — the content and `is_err` assertions above stay green, which is
-        // what says the temp-file question is asked here and nowhere else.
-
-        // ⚠️ **On Linux and macOS this line cannot fail**: `lock` refuses the
-        // temp file's creation there, so no temp ever exists to be left, and the
-        // flip above bites on Windows only.
+        // flip: disabling the cleanup → fails the leftovers assertion above and
+        // only that one, on Windows; it cannot fail on Linux or macOS, where no
+        // temp is ever created.
 
         unlock(&path);
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A refused write says which file it could not write** (§15 D715,
-    /// `[S1.2-L1-08]`).
+    /// A refused write names the file and keeps the error kind (substring match,
+    /// since the OS text differs by platform and locale).
     ///
-    /// The status line is `format!("Save failed: {e}")` (`app.rs`), and every
-    /// error out of `write` used to be a bare `std::io::Error` — which
-    /// carries a *kind* and a sentence and **no path**. So a locked or read-only
-    /// document produced *"Save failed: The process cannot access the file
-    /// because it is being used by another process. (os error 32)"*: it names
-    /// neither the file nor which of the four steps was refused, and the user
-    /// cannot act on it.
-    ///
-    /// 🚨 **This is the half of `[S1.2-L1-08]` that survives, and the finding's
-    /// headline does not.** That finding is about a stale `.writing` another
-    /// process holds open making `File::create` fail forever — which **§15 D548
-    /// closed** by putting the process id and a per-call counter in the temp
-    /// name, so the name a write is about to create has never existed before.
-    /// `two_writes_of_one_path_get_different_temp_files` above is what pins that.
-    /// The finding was taken at a SHA before D548 and its measurement was correct
-    /// then.
-    ///
-    /// ⚠️ **And the residual is wider than the finding's own account of it**,
-    /// which asked for the *temp* path in the message. The step reachable today is
-    /// the **rename**, refused by a destination something else holds open — a sync
-    /// client or an indexer on the user's own `.ondin`, not on a leftover — and
-    /// the path worth printing there is the destination, which is the file the
-    /// user has actually heard of.
-    ///
-    /// **Asserted on the substring rather than the whole sentence**, because the
-    /// OS text differs by platform and locale and pinning it would make this a
-    /// test of Windows' phrasing.
-    ///
-    /// ⚠️ **Flip-check, run: the `rename`'s `map_err` removed, leaving the three
-    /// temp-file steps wrapped.** Fails here with *"Access is denied. (os error
-    /// 5)"* — the bare message again — and the seven tests above stay green.
-    /// 🚨 **That flip is the finding's own fix sketch**, which asked for the temp
-    /// path and no more; it would have left the one step a user actually reaches
-    /// as unattributable as it was. *A sketch written against the mechanism that
-    /// was reachable when it was written is not a sketch of the fix once another
-    /// entry has closed that mechanism.*
-    ///
-    /// ⚠️ **That flip bites on Windows only** (§15 D967). On Linux and macOS
-    /// `lock` refuses the temp file's *creation*, whose error names the temp —
-    /// `doc.ondin.<pid>-<n>.writing`, which carries the destination's name — so
-    /// the assertions hold there on the `create` arm and never reach the rename.
+    /// flip: the `rename`'s `map_err` removed → fails at the file-name assertion.
+    /// On Linux and macOS it cannot bite: the refused `create` names a temp that
+    /// carries the destination's name.
     #[test]
     fn a_refused_write_names_the_file_it_could_not_write() {
         let root = temp_root("named-error");
@@ -884,17 +601,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// **A save keeps the document's mode and its symlink** (§15 D975,
-    /// `[R3-L5-03]`): a `0600` file stays `0600`, and a document reached
-    /// through a link is written at the link's target, the link left a link.
+    /// A save keeps the document's mode and its symlink: a `0600` file stays
+    /// `0600`, and a document reached through a link is written at the link's
+    /// target, the link left a link.
     ///
-    /// `cfg(unix)`: both are Linux and macOS semantics, so of the local gates
-    /// only a Linux build compiles this; CI does on every push.
+    /// `cfg(unix)`: both are Linux and macOS semantics.
     ///
-    /// **Flip-checked under WSL Ubuntu 24.04** (2026-10-04): the permissions
-    /// copy disabled fails on *"the mode is kept"* with `420` (`0o644`, a
-    /// `022` umask) against `384`; `write` skipping `through_link` fails on
-    /// *"the link is still a link"*.
+    /// flip: the permissions copy disabled → fails at "the mode is kept", `420`
+    /// (`0o644`, a `022` umask) against `384`; `write` skipping `through_link` →
+    /// fails at "the link is still a link".
     #[cfg(unix)]
     #[test]
     fn a_save_keeps_the_documents_mode_and_its_link() {

@@ -1,32 +1,21 @@
 //! Wall-clock time for the library: reading it, and turning a stored stamp into
 //! something the dashboard can print.
 //!
-//! **The library stores seconds since the Unix epoch and nothing else** — see
-//! `ondin_core::meta::DocumentMeta::created` for why a formatted date is the
-//! wrong thing to put in a file. Everything that turns one back into text lives
-//! here, so there is one answer to "what year is 1774483200" rather than one per
-//! column.
+//! The library stores seconds since the Unix epoch and nothing else (see
+//! `ondin_core::meta::DocumentMeta::created`); everything that turns one back
+//! into text lives here.
 //!
-//! ⚠️ **The civil date is local time on Windows, Linux and macOS**, and that is
-//! the whole of [`local_offset`]. It read UTC everywhere until 2026-08-28, which
-//! named the wrong day for a few hours either side of midnight — accepted at the
-//! time because converting correctly needs the zone's *history* (a stamp from
-//! last July has a different offset from one from January, so today's offset is
-//! not enough) and every way of getting that looked like a dependency. It is
-//! not: Windows keeps the history and answers for a given instant, in one call
-//! this app was already linked against — and so does every Unix libc, which is
-//! how the other two caught up on 2026-10-03 (§15 D959).
-//!
-//! The relative labels people actually read — "2h ago", "Yesterday" — are
-//! differences between two instants and have no timezone in them at all, which
-//! is why none of this reaches them.
+//! The civil date is local time on Windows, Linux and macOS ([`local_offset`]),
+//! which needs the zone's history, not today's offset; each platform's own call
+//! answers for a given instant without a dependency (§15 D959). Relative labels
+//! ("2h ago", "Yesterday") are differences between instants and have no timezone.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Seconds since the Unix epoch, or `0` if the system clock is before it.
 ///
-/// Saturating rather than erroring: a clock set to 1969 is a broken machine, not
-/// a case the library should refuse to file a document over.
+/// Saturating rather than erroring: a clock before 1970 is a broken machine, not
+/// a reason to refuse to file a document.
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -36,19 +25,16 @@ pub fn now() -> u64 {
 
 /// Seconds between `then` and now, or `0` if `then` is in the future.
 ///
-/// **The future is not an error here.** A file synced from a machine whose clock
-/// runs fast arrives with a modification time later than this one's, and the
-/// honest label for it is "just now" rather than a negative number or a panic.
+/// The future is not an error: a file synced from a machine whose clock runs
+/// fast is honestly "just now".
 pub fn since(then: u64) -> u64 {
     now().saturating_sub(then)
 }
 
 /// Split a Unix timestamp into a UTC calendar date, `(year, month, day)`.
 ///
-/// Howard Hinnant's `civil_from_days`, which is exact for every date the type
-/// can hold and needs no table. The shift by 719468 moves the epoch to a
-/// calendar starting on 1 March 0000, where the leap day is last in the year and
-/// the month-length pattern is a single linear formula.
+/// Howard Hinnant's `civil_from_days`. The shift by 719468 moves the epoch to a
+/// calendar starting on 1 March 0000, where the leap day is last in the year.
 pub fn civil_from_unix(secs: u64) -> (i64, u32, u32) {
     let days = (secs / 86_400) as i64;
     let z = days + 719_468;
@@ -65,17 +51,12 @@ pub fn civil_from_unix(secs: u64) -> (i64, u32, u32) {
 
 /// The inverse of [`civil_from_unix`]: a calendar date back to a Unix second.
 ///
-/// Hinnant's `days_from_civil`, the same March-first calendar read the other
-/// way. It exists because Windows answers a zone question in calendar fields
-/// rather than in seconds, so [`local_offset`] has to come back down to a number
-/// to subtract — and because a round trip through the pair is the one assertion
-/// about this arithmetic that holds on any machine in any zone.
+/// Hinnant's `days_from_civil`, the same calendar read the other way. Windows
+/// answers a zone question in calendar fields, so [`local_offset`] needs it to
+/// get back to seconds. Midnight of that date; the caller adds the time of day.
 ///
-/// Midnight of that date; the caller adds the time of day.
-///
-/// ⚠️ **Windows and the tests only**: the Unix arm reads its offset in seconds
-/// and never needs the calendar back, so compiled there this was dead code,
-/// and CI's Linux and macOS clippy legs deny warnings (§15 D959).
+/// Windows and tests only: the Unix arm never needs it, and CI's Linux and macOS
+/// clippy legs deny the dead code (§15 D959).
 #[cfg(any(windows, test))]
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
@@ -87,34 +68,18 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-/// The local zone's offset from UTC, in seconds east, **for that instant**
-/// (§15 D384).
+/// The local zone's offset from UTC, in seconds east, for that instant (§15 D384).
 ///
-/// ⚠️ **"For that instant" is the whole feature.** A stamp from last July and one
-/// from January sit at different offsets in any zone that keeps summer time, and
-/// a rule that changed — the US moving its DST dates in 2007, the EU arguing
-/// about abolishing it — means even the *rule* is a function of the year. Adding
-/// today's offset to every stamp is the version that looks right all summer and
-/// is an hour out on half the library.
+/// "For that instant" is the point: offsets differ between July and January, and
+/// DST rules themselves change by year, so adding today's offset is an hour out
+/// on half the library.
 ///
-/// **Windows already knows.** `GetDynamicTimeZoneInformation` hands back the
-/// zone including its registry key name, and `SystemTimeToTzSpecificLocalTimeEx`
-/// converts *through that key*, which is where the year-by-year rules are kept.
-/// So this is one call rather than a date library and its own copy of the tz
-/// database — the trade `library::clock`'s module note recorded as "a dependency
-/// or a platform call" and then did not take.
-///
-/// **Linux and macOS know too** (§15 D959): `localtime_r` converts through the
-/// tz database the system keeps, and the `tm` it fills carries `tm_gmtoff` —
-/// the offset in force at that instant, summer time and old rules included —
-/// so there is no calendar to come back down from. The zone is the process's
-/// own: `TZ` if it is set, `/etc/localtime` if not. Until this arm was
-/// written they answered UTC — caught before §15 D956's first Linux or macOS
-/// build was published, so no user saw it.
-///
-/// **Zero on any other host**, i.e. UTC — BSDs and the rest build as Linux
-/// elsewhere in the app, but this arm names the two platforms that are
-/// released and tested, not every `tm` that happens to have the field.
+/// Windows: `GetDynamicTimeZoneInformation` returns the zone with its registry
+/// key name, and `SystemTimeToTzSpecificLocalTimeEx` converts through that key,
+/// where the year-by-year rules are kept. Linux and macOS (§15 D959):
+/// `localtime_r` converts through the system tz database and `tm_gmtoff` is the
+/// offset in force at that instant; the zone is `TZ`, else `/etc/localtime`.
+/// Zero (UTC) on any other host.
 pub fn local_offset(secs: u64) -> i64 {
     #[cfg(windows)]
     {
@@ -125,9 +90,8 @@ pub fn local_offset(secs: u64) -> i64 {
         };
 
         let (y, m, d) = civil_from_unix(secs);
-        // `civil_from_unix` is exact for every `u64`, and `SYSTEMTIME` holds the
-        // year in a `u16`: a stamp past the year 65535 is a broken clock, and the
-        // honest answer for one is UTC rather than a wrapped year.
+        // `SYSTEMTIME` holds the year in a `u16`; a stamp past 65535 is a broken
+        // clock and gets UTC rather than a wrapped year.
         let Ok(year) = u16::try_from(y) else {
             return 0;
         };
@@ -145,14 +109,11 @@ pub fn local_offset(secs: u64) -> i64 {
         };
         // SAFETY: both calls write into stack-allocated, fully-initialized
         // structures and read the one we hand them; neither retains a pointer.
-        // Failure of either leaves `local` untouched, which is why the return is
-        // gated on the `BOOL` rather than on the value.
+        // Failure of either leaves `local` untouched, hence the `BOOL` gate.
         unsafe {
             let mut zone: DYNAMIC_TIME_ZONE_INFORMATION = std::mem::zeroed();
-            // ⚠️ **`TIME_ZONE_ID_INVALID` is `u32::MAX` and every other return
-            // value is a success**, including `TIME_ZONE_ID_UNKNOWN` — a zone
-            // that simply has no daylight saving, which is a perfectly good
-            // answer and not an error.
+            // Only `TIME_ZONE_ID_INVALID` (`u32::MAX`) is a failure; the rest,
+            // including `TIME_ZONE_ID_UNKNOWN` (no daylight saving), succeed.
             if GetDynamicTimeZoneInformation(&mut zone) == u32::MAX {
                 return 0;
             }
@@ -170,16 +131,14 @@ pub fn local_offset(secs: u64) -> i64 {
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        // A stamp past `time_t`'s range is the same broken clock as one past
-        // the Windows arm's `u16` year, and gets the same answer.
+        // A stamp past `time_t`'s range is the same broken clock; same answer.
         let Ok(t) = libc::time_t::try_from(secs) else {
             return 0;
         };
         // SAFETY: `localtime_r` reads the one `time_t` we hand it and writes
         // the one `tm` we own, both on the stack; it keeps neither pointer.
-        // Null is its failure, and leaves nothing to read. It initialises the
-        // zone from `TZ` itself on glibc, musl and Apple's libc alike, so no
-        // `tzset` is called first.
+        // Null is its failure. It initialises the zone from `TZ` itself on
+        // glibc, musl and Apple's libc, so no `tzset` is called first.
         unsafe {
             let mut tm: libc::tm = std::mem::zeroed();
             if libc::localtime_r(&t, &mut tm).is_null() {
@@ -203,17 +162,12 @@ const MONTHS: [&str; 12] = [
 /// A stored stamp as `"12 Mar 2026"` — the *Created* column's format, in local
 /// time ([`local_offset`]).
 pub fn date_label(secs: u64) -> String {
-    // ⚠️ **Clamped at the epoch rather than allowed to go negative**, which is
-    // the one case a shifted stamp can leave the range `civil_from_unix` takes:
-    // midnight on 1 January 1970 is 31 December 1969 anywhere west of Greenwich.
-    // A document created at the epoch is a broken clock — the same case `now`
-    // saturates for — and this keeps the label a machine's timezone cannot
-    // change, which is also what makes it assertable in a test.
+    // Clamped at the epoch: a shifted stamp west of Greenwich would go negative,
+    // out of `civil_from_unix`'s range. The epoch is a broken clock anyway, and
+    // the clamp keeps that label timezone-independent for the test.
     let local = (secs as i64 + local_offset(secs)).max(0) as u64;
     let (y, m, d) = civil_from_unix(local);
-    // `m` comes out of `civil_from_unix` in 1..=12, so the index is in range;
-    // clamped anyway rather than indexed blind, because the cost of being wrong
-    // is a panic in a list row.
+    // `m` is in 1..=12; clamped anyway, as a wrong index panics in a list row.
     let month = MONTHS[(m.clamp(1, 12) - 1) as usize];
     format!("{d} {month} {y}")
 }
@@ -221,18 +175,14 @@ pub fn date_label(secs: u64) -> String {
 /// How long ago, in the dashboard's voice: `"2h ago"`, `"Yesterday"`,
 /// `"Last week"`.
 ///
-/// **Coarser than the editor's save dot's tooltip on purpose** (`app::save_label`,
-/// which counts minutes for three quarters of an hour). That one is answering "did my last
-/// edit make it to disk", where a minute matters; this one is answering "which
-/// of these forty files was I working on", where it does not — and forty rows
-/// each reading "47m ago" is a column of noise rather than a column of
-/// information.
+/// Coarser than the save dot's tooltip (`app::save_label`) on purpose: that
+/// answers "did my last edit make it to disk", where a minute matters; this
+/// answers "which file was I working on", where forty rows of "47m ago" are noise.
 pub fn relative_label(secs_ago: u64) -> String {
     match secs_ago {
         0..=59 => "Just now".into(),
         60..=3_599 => format!("{}m ago", secs_ago / 60),
-        // Up to 18 hours reads as hours; past that "Yesterday" is both shorter
-        // and what a person would say.
+        // Up to 18 hours reads as hours; past that "Yesterday" is what a person says.
         3_600..=64_799 => format!("{}h ago", secs_ago / 3_600),
         64_800..=172_799 => "Yesterday".into(),
         172_800..=604_799 => format!("{}d ago", secs_ago / 86_400),
@@ -248,24 +198,22 @@ pub fn relative_label(secs_ago: u64) -> String {
 mod tests {
     use super::*;
 
-    /// Anchored on dates that are checkable by hand, including the two the
-    /// algorithm is most likely to get wrong: a leap day, and 1 January.
+    /// Known instants, including a leap day and 1 January.
     #[test]
     fn the_civil_date_matches_known_instants() {
         assert_eq!(civil_from_unix(0), (1970, 1, 1));
-        // 2026-03-26T00:00:00Z, the day this was written.
+        // 2026-03-26T00:00:00Z.
         assert_eq!(civil_from_unix(1_774_483_200), (2026, 3, 26));
-        // 2024-02-29, a leap day — the case the March-first calendar shift
-        // exists to make ordinary.
+        // 2024-02-29, a leap day.
         assert_eq!(civil_from_unix(1_709_164_800), (2024, 2, 29));
-        // 2000-03-01, the day after the leap day of the century that *is* a leap
-        // year: the 400-year rule, which a naive /4 //100 gets wrong.
+        // 2000-03-01: the 400-year rule, which a naive /4 //100 gets wrong.
         assert_eq!(civil_from_unix(951_868_800), (2000, 3, 1));
     }
 
-    /// ⚠️ The seconds *within* a day must not shift the date. Flip-check: using
-    /// `(secs + 86_399) / 86_400` — a plausible "round up to the day" slip —
-    /// leaves the midnight cases above green and fails here.
+    /// The seconds within a day must not shift the date.
+    ///
+    /// flip: `(secs + 86_399) / 86_400` in `civil_from_unix` → leaves the
+    /// midnight cases above green and fails here.
     #[test]
     fn any_time_within_a_day_is_the_same_date() {
         let midnight = 1_774_483_200;
@@ -275,15 +223,8 @@ mod tests {
         assert_eq!(civil_from_unix(midnight + 86_400), (2026, 3, 27));
     }
 
-    /// ⚠️ **Both of these are stamps the local offset cannot move, and they used
-    /// to be one that it can.** This asserted `date_label(1_774_483_200) == "26
-    /// Mar 2026"` — midnight UTC — which was exact while the label was UTC and
-    /// became a test of *the machine's timezone* the moment it was not: green in
-    /// Europe, red in New York, for a function that is right in both. Noon is
-    /// safe for every offset in `(-12h, +12h)`, which is every zone but Kiribati
-    /// and a New Zealand summer, and the epoch is safe because `date_label`
-    /// clamps there. What the label does with a *non-zero* offset is the next
-    /// test, which is written to be true in any zone.
+    /// Both stamps are ones the local offset cannot move: noon is safe for every
+    /// offset in `(-12h, +12h)`, and the epoch is clamped.
     #[test]
     fn the_date_label_reads_the_way_the_column_shows_it() {
         // 2026-03-26T12:00:00Z.
@@ -291,23 +232,13 @@ mod tests {
         assert_eq!(date_label(0), "1 Jan 1970");
     }
 
-    /// The *Created* column names the local day, which is the whole of the change
-    /// — and the two probes are placed either side of midnight so that **one of
-    /// them fires in any zone that is not UTC**.
+    /// The *Created* column names the local day. The probes sit either side of
+    /// midnight so one fires in any non-UTC zone; the test reads the offset and
+    /// asserts what it implies, and checks nothing at UTC (CI's runners), which
+    /// is why the Unix arm has a test that picks its zone.
     ///
-    /// ⚠️ **A test that has to be written around the machine it runs on**, since
-    /// there is no way to ask Windows for a zone this process is not in. So the
-    /// shape is: read the offset, then assert what it *implies*. On a machine set
-    /// to UTC neither arm has anything to check and the test says so out loud
-    /// rather than passing quietly on nothing — and CI's runners are at UTC, so
-    /// there it checks nothing either way. That is why the Unix arm has a test
-    /// of its own that picks its zone (`the_unix_offset_is_the_zones_for_the_instant`).
-    ///
-    /// Flip-check, run on a machine at UTC+1: making `date_label` ignore the
-    /// offset fails at *"23:30 UTC is already tomorrow"* with "26 Mar 2026"
-    /// against 27. ⚠️ **The other arm stays green in that flip** — a positive
-    /// offset never moves a 00:30 stamp back a day — which is why both are here
-    /// and why the `else` branch has to name the zone it saw.
+    /// flip: `date_label` ignoring the offset, on a UTC+1 machine → fails at
+    /// "23:30 UTC is already tomorrow"; the other arm stays green.
     #[test]
     fn the_date_label_crosses_midnight_with_the_local_zone() {
         // 2026-03-26T23:30:00Z and 2026-03-26T00:30:00Z.
@@ -337,25 +268,12 @@ mod tests {
         }
     }
 
-    /// The offset is a function of **the instant**, not of today — which is the
-    /// claim the whole platform call is for, and the one thing a wrong-but-
-    /// plausible implementation ("ask the zone for its current bias") gets
-    /// wrong.
+    /// The offset is a function of the instant, not of today: a current-bias
+    /// implementation would return one number for January, July and July 2006.
     ///
-    /// ⚠️ **Written from a measurement rather than from the API docs.** On the
-    /// machine this landed on — Central European, UTC+1 standard — a probe
-    /// printed **3600** for 15 January 2026 and **7200** for 15 July 2026, and
-    /// 7200 again for July *2006*, twenty years earlier. A current-bias
-    /// implementation prints the same number three times, so the January/July
-    /// difference is the assertion and the 2006 stamp is the reason the call is
-    /// the `Ex` one: it converts through the zone's registry key, where the
-    /// year-by-year rules are kept.
-    ///
-    /// ⚠️ **Vacuous in a zone with no summer time**, where the difference is
-    /// legitimately zero. There is no way to ask Windows about a zone this
-    /// process is not in, so the test asserts the *set* of legal answers and
-    /// names the one it saw; the three are the DST steps that exist — none, half
-    /// an hour (Lord Howe), and an hour (everywhere else).
+    /// Vacuous in a zone with no summer time, as a zone this process is not in
+    /// cannot be asked for; so it asserts the set of legal DST steps (none, half
+    /// an hour for Lord Howe, an hour).
     #[test]
     fn the_offset_answers_for_the_instant_rather_than_for_today() {
         // 2026-01-15 and 2026-07-15, both at midnight UTC.
@@ -366,8 +284,8 @@ mod tests {
             "summer time moves a zone by an hour, half an hour, or not at all — \
              not by {step} seconds"
         );
-        // And the same month twenty years earlier, which is what the dynamic
-        // (key-name) conversion is for. Its own offset must be a legal one too.
+        // The same month twenty years earlier, which the dynamic (key-name)
+        // conversion is for.
         let old = local_offset(1_152_921_600);
         assert_eq!(
             old % 900,
@@ -376,24 +294,11 @@ mod tests {
         );
     }
 
-    /// **On Linux and macOS the offset is the zone's, for the instant** — run
-    /// in a zone chosen by the test rather than the one the machine is in.
-    ///
-    /// The two tests above are written around the machine's own zone, and CI's
-    /// runners are at UTC, where both pass on an arm that returns 0 — which is
-    /// what this arm was before §15 D959. So the test runs
-    /// itself again in a child process with `TZ` set to Central European
-    /// time, written as a POSIX rule (`CET-1CEST,M3.5.0,M10.5.0/3`) so it needs
-    /// no tz database on the runner, and the child asserts January's hour and
-    /// July's two. A child and not `std::env::set_var`, which is `unsafe` in
-    /// this edition for the reason that matters here: the other tests are
-    /// reading the environment on other threads.
-    ///
-    /// ⚠️ **Never run on this repository's own machine** — it is Windows, and
-    /// this is the arm only CI compiles. The spawn was checked there with the
-    /// `cfg` lifted, where the Windows arm ignores `TZ` and the machine happens
-    /// to be at Central European time: green, and red with the child's January
-    /// expectation changed to 7200, so the parent does see the child fail.
+    /// On Linux and macOS the offset is the zone's for the instant, in a zone the
+    /// test picks. CI runs at UTC, where the tests above pass on an arm returning
+    /// 0, so this re-runs itself in a child with `TZ` set to a POSIX Central
+    /// European rule (no tz database needed). A child, not `std::env::set_var`,
+    /// because other tests read the environment on other threads.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn the_unix_offset_is_the_zones_for_the_instant() {
@@ -418,22 +323,16 @@ mod tests {
             "the child failed:\n{stdout}\n{}",
             String::from_utf8_lossy(&out.stderr)
         );
-        // And it ran the test, rather than matching nothing and passing.
+        // It ran the test rather than matching nothing.
         assert!(
             stdout.contains("1 passed"),
             "the child ran nothing:\n{stdout}"
         );
     }
 
-    /// `days_from_civil` is `civil_from_unix` backwards, and the pair is the
-    /// only part of the local-time path that can be checked without asking the
-    /// machine what zone it is in.
-    ///
-    /// ⚠️ **Every day rather than a handful**, because what this is really
-    /// guarding is the March-first calendar's seams — the leap day, the century
-    /// years, the month whose length the linear formula gets from `(153m+2)/5` —
-    /// and a sampled test picks the days those seams are not on. Sixty years of
-    /// days is under a millisecond.
+    /// `days_from_civil` inverts `civil_from_unix`, checked on every day of sixty
+    /// years rather than a sample, since the seams (leap day, century years,
+    /// month lengths) are what a sample misses.
     #[test]
     fn the_calendar_round_trips_in_both_directions() {
         for day in 0..(60 * 365 + 15) {
@@ -445,14 +344,12 @@ mod tests {
                 "{y}-{m:02}-{d:02} came back as a different day"
             );
         }
-        // And before the epoch, which is the arm with the `- 399` and `- 146_096`
-        // corrections in it and which no library date reaches.
+        // Before the epoch: the `- 399` and `- 146_096` arms no library date reaches.
         assert_eq!(days_from_civil(1969, 12, 31), -1);
         assert_eq!(days_from_civil(1900, 1, 1), -25_567);
     }
 
-    /// Every boundary, from both sides — the pattern that catches an arm whose
-    /// range is off by one, which reading the `match` cannot.
+    /// Every boundary, from both sides, to catch an off-by-one range.
     #[test]
     fn the_relative_label_changes_voice_at_each_boundary() {
         assert_eq!(relative_label(0), "Just now");
@@ -471,8 +368,7 @@ mod tests {
         assert_eq!(relative_label(31_536_000), "1y ago");
     }
 
-    /// A clock that runs backwards — a file synced from a machine set ahead —
-    /// reads as "just now" rather than wrapping to a huge number.
+    /// A stamp from the future reads as "just now", not a wrapped number.
     #[test]
     fn a_timestamp_from_the_future_is_just_now() {
         assert_eq!(since(now() + 10_000), 0);

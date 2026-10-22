@@ -16,10 +16,9 @@ left is in the files trimmed first, which still hold 75–225 KB of comments eac
 pass skipped carry the same weight: `panels/component.rs` and `panels/layout.rs`.
 
 A second pass is under way on those twelve. It cuts 20–30% of a file's comment bytes; past
-that, what is left is one-line reasons. Done: `app.rs`, `panels/typography.rs`,
-`panels/dashboard.rs`, core `build.rs` and core `text.rs`. In progress, by where the last range
-starts: `canvas.rs` at `laying_out_the_inspector_commits_nothing_and_previews_nothing`,
-`panels/inspector.rs` at `mod effects_multi_tests`.
+that, what is left is one-line reasons. Done: `canvas.rs`, `panels/inspector.rs`, `app.rs`,
+`panels/typography.rs`, `panels/dashboard.rs`, `ui.rs`, `tools/mod.rs`, core `build.rs`, core
+`text.rs` and `svg_in.rs`. Left: `panels/component.rs` and `panels/layout.rs`.
 
 **Why:** an agent reading code pays for every comment line. Much of that prose was the same
 history the docs had: amendment trails, "found in session N", flip-check write-ups, §15

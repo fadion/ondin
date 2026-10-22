@@ -2,16 +2,13 @@
 //! on release (§9.3). The transaction-building logic is pure and unit-tested;
 //! the canvas supplies the egui events.
 //!
-//! World-space projections that more than one caller needs (move, reparent,
-//! group) live in `ondin_core::build` so MCP and the future command line share
-//! them; what stays here is tool-shaped: turning a drag rectangle into a node.
+//! World-space projections that more than one caller needs (move, reparent, group)
+//! live in `ondin_core::build`; what stays here is tool-shaped.
 //!
-//! Much of this file and of `crate::preview` is headless geometry (no egui, winit
-//! or wgpu) that MCP will need, but `ondin-app` is a binary-only crate and
-//! `ondin-mcp` sits below it in the crate graph, so nothing outside can link it.
-//! The move to `ondin_core` is deferred until the first MCP tool handler needs
-//! `set_geometry`: everything taking only `Document` / `Resolved` / kurbo types
-//! moves; gesture state (`Drag`, `PenState`, `TextSession`, `CaretBlink`) stays.
+//! Much of this file and of `crate::preview` is headless geometry MCP will need, but
+//! `ondin-app` is a binary-only crate and `ondin-mcp` sits below it, so nothing outside can
+//! link it. Everything taking only `Document` / `Resolved` / kurbo types moves to `ondin_core`
+//! once the first MCP tool handler needs `set_geometry`; gesture state stays.
 
 use crate::preview::{Handle, LineEnd, PenAnchor, PenSubpath, PointRef, Side};
 use ondin_core::Brush;
@@ -45,31 +42,24 @@ pub enum Tool {
     /// Edits the *points* of a path rather than the path as a layer — anchors,
     /// their handles, add and remove.
     ///
-    /// A tool, not a mode: it has a rail button, a name, a letter and canvas chrome
-    /// announcing it. The pen is reachable from inside it (`P` arms `app::pen_bias`
-    /// rather than switching tool), which reroutes no key and changes only what a
-    /// canvas press means.
+    /// A tool, not a mode: it has a rail button, a letter and canvas chrome. The pen is
+    /// reachable from inside it (`P` arms `app::pen_bias`), which reroutes no key.
     Node,
     Text,
     /// Picks a colour off the rendered canvas onto the selection
     /// (`crate::eyedropper`). One shot: a pick hands back to the tool it was
     /// armed from (`OndinApp::dropper_return`), unless Shift held it.
     Eyedropper,
-    /// Places images the cursor is loaded with, and disarms itself when it runs out.
-    ///
-    /// You pick files first, then each click places one in order. Arming it with
-    /// nothing loaded opens the file dialog, so the rail button and `Ctrl+Shift+K`
-    /// are the same action. Placing the last one hands back to Select.
+    /// Places images the cursor is loaded with, one per click, and disarms itself when it
+    /// runs out. Arming it with nothing loaded opens the file dialog, so the rail button
+    /// and `Ctrl+Shift+K` are the same action.
     Image,
     /// Image editing: the layer's box becomes a window onto its picture. Dragging a
-    /// handle crops, dragging the picture pans it, and the framing, the mode and
-    /// the seven adjustments come up in a card.
+    /// handle crops, dragging the picture pans it, and a card holds the rest.
     ///
-    /// The one member with no rail button and no letter: it cannot be entered
-    /// without a picture, and entering it puts a card and an outline on screen.
-    /// It stays a `Tool` because input routing, the cursor, `chrome_hidden`, the
-    /// `Escape` ladder and `Enter`'s toggle all key off `self.tool`; the subject
-    /// stays derived (`canvas::edited_image`).
+    /// No rail button or letter: it cannot be entered without a picture. It stays a `Tool`
+    /// because input routing, the cursor, `chrome_hidden`, the `Escape` ladder and `Enter`
+    /// all key off `self.tool`; the subject stays derived (`canvas::edited_image`).
     ImageEdit,
 }
 
@@ -77,10 +67,9 @@ impl Tool {
     /// Whether this tool draws by click-dragging a box (as opposed to the
     /// click-driven pen, and Select's own gesture machinery).
     ///
-    /// Text is also a click tool: a click plants an auto-width node and a drag draws
-    /// a fixed box, decided by egui's drag threshold. A drag that returns to its
-    /// start is a drag to egui but has no box under `MIN_CREATE_PX`, so the text
-    /// release plants a caret (see `canvas::text_gesture`); a shape abandons it.
+    /// Text is also a click tool: a drag that returns to its start has no box under
+    /// `MIN_CREATE_PX`, so the text release plants a caret (`canvas::text_gesture`); a
+    /// shape abandons it.
     pub fn drags_a_box(self) -> bool {
         matches!(
             self,
@@ -99,18 +88,9 @@ impl Tool {
     /// What a plain click with this tool makes, or `None` for a tool whose click
     /// means something else — or nothing.
     ///
-    /// Exhaustive with no wildcard, so a new tool is a build error here.
-    ///
-    /// - Rect, Ellipse, Polygon, Star: a square at [`CLICK_CREATE_SIZE`] with the
-    ///   tool's own defaults.
-    /// - Image: the picture at its own size, shrunk only if it exceeds the frame
-    ///   ([`fitted_image_size`]).
-    /// - Text: a node that sizes itself to what is typed, or the caret placed in
-    ///   text already there.
-    ///
-    /// Frame and Line answer `None` deliberately: a default frame guesses at a
-    /// layout, and a default line would invent a direction. The non-creation tools
-    /// claim the pointer earlier in `canvas::normal_mode_input`.
+    /// Exhaustive with no wildcard, so a new tool is a build error here. Frame and Line
+    /// answer `None` deliberately: a default frame guesses at a layout, and a default
+    /// line would invent a direction.
     pub fn click_makes(self) -> Option<ClickCreate> {
         match self {
             Tool::Rect | Tool::Ellipse | Tool::Polygon | Tool::Star => {
@@ -132,10 +112,8 @@ impl Tool {
     /// Whether this tool picks, moves and transforms existing layers — Select and
     /// Scale, which differ only in what a handle drag *means*.
     ///
-    /// Spelled once because the click and drag start, the hover outline, the pivot
-    /// marker and the ruler guides all ask it. The cursor matches
-    /// `Tool::Select | Tool::Scale` itself, since the two have different rest states
-    /// (`canvas::rest_cursor`).
+    /// The cursor matches `Tool::Select | Tool::Scale` itself, since the two have
+    /// different rest states (`canvas::rest_cursor`).
     pub fn selects(self) -> bool {
         matches!(self, Tool::Select | Tool::Scale)
     }
@@ -149,8 +127,7 @@ impl Tool {
     }
 }
 
-/// What a plain click with a creation tool makes ([`Tool::click_makes`]); the
-/// three differ in where the size comes from: a constant, the file, or the typing.
+/// What a plain click with a creation tool makes ([`Tool::click_makes`]).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ClickCreate {
     /// A [`CLICK_CREATE_SIZE`] square carrying the tool's own defaults.
@@ -158,30 +135,27 @@ pub enum ClickCreate {
     /// The loaded picture at its intrinsic size, shrunk only if it exceeds the
     /// frame it lands in ([`fitted_image_size`]).
     FittedImage,
-    /// A text node that sizes itself to what is typed — or, over text that
-    /// already exists, the caret placed in it rather than a new node over it.
+    /// A text node that sizes itself to what is typed — or, over existing text, the
+    /// caret placed in it.
     TextNode,
 }
 
 /// What a handle drag changes — the whole difference between Select and Scale.
-/// A gesture rather than a document preference, and the cursor says which is armed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Scaling {
     /// The layer's geometry changes and nothing else: a 1px border, a 4px radius
-    /// and 16pt type stay as they are, which makes a resize a layout edit (§5.6).
+    /// and 16pt type stay as they are (§5.6).
     #[default]
     Geometry,
-    /// Everything scales with the box, as though the layer were a picture being
-    /// enlarged: geometry, stroke widths, corner radii and font size.
+    /// Everything scales with the box: geometry, stroke widths, corner radii and font size.
     Photographic,
 }
 
 impl Scaling {
     /// The single factor the scalars take, given the two the box was scaled by.
     ///
-    /// The geometric mean `sqrt(|sx·sy|)`: a stroke width, corner radius or font
-    /// size has one value but a squashed box has two factors, and this is exactly
-    /// `s` under a uniform scale. Absolute, so a mirror never negates a width.
+    /// The geometric mean `sqrt(|sx·sy|)`, exactly `s` under a uniform scale.
+    /// Absolute, so a mirror never negates a width.
     fn scalar(self, csx: f64, csy: f64) -> Option<f64> {
         if self != Scaling::Photographic {
             return None;
@@ -191,27 +165,20 @@ impl Scaling {
     }
 }
 
-/// The box a shape tool's *click* gets, in world units, when there is no drag to
-/// take one from ([`ClickCreate::DefaultBox`]).
-///
-/// Square, and the same number for all four tools. World units, not screen
-/// pixels, so a click makes the same shape at every zoom.
+/// The square a shape tool's *click* gets, in world units so a click makes the same
+/// shape at every zoom ([`ClickCreate::DefaultBox`]).
 pub const CLICK_CREATE_SIZE: f64 = 100.0;
 
-/// Sides a fresh polygon is drawn with — a triangle, the smallest shape the
-/// count can describe, so the field has somewhere to go.
+/// Sides a fresh polygon is drawn with — a triangle, the smallest shape.
 pub const POLYGON_DEFAULT_SIDES: u32 = 3;
-/// Points a fresh star is drawn with, and the inner radius that makes it the
-/// star everybody draws: five points, inner ring at the golden-section radius
-/// where the spokes' edges line up straight through the middle.
+/// Points a fresh star is drawn with, and its inner radius: five points, inner ring at
+/// the golden-section radius where the spokes' edges line up straight through the middle.
 pub const STAR_DEFAULT_POINTS: u32 = 5;
 pub const STAR_DEFAULT_RATIO: f64 = 0.382;
 
-/// The authored local box of a node — the `size` a user typed or dragged out — or
-/// `None` for the kinds that have no such field (lines, paths, groups, booleans).
-///
-/// `None` does not mean unresizable: paths and lines scale through
-/// [`resize_geometry`] and `scale_geometry` rather than a `GeometryPatch::Size`.
+/// The authored local box of a node, or `None` for the kinds with no such field
+/// (lines, paths, groups, booleans), which scale through [`resize_geometry`] and
+/// `scale_geometry` instead of a `GeometryPatch::Size`.
 pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
     match kind {
         NodeKind::Rect { size, .. }
@@ -231,24 +198,18 @@ pub fn resizable_size(kind: &NodeKind) -> Option<Size> {
 }
 
 /// The box a resize gesture anchors on, in the node's own local space: the box the
-/// handles were drawn on, which is `query::local_box`.
+/// handles were drawn on (`query::local_box`). Not [`resizable_size`], whose zero
+/// extent for auto text would put the opposite edge at the origin; with no cached
+/// layout it falls back to it.
 ///
-/// Not [`resizable_size`], which reports a zero extent for auto-sized text; the
-/// opposite edge of a zero box sits at the origin, not under the other handle.
-/// The extent is keyed on the sizing mode (authored extent is the user's number,
-/// emergent is the content's); with no cached layout it falls back to
-/// `resizable_size`.
-///
-/// The origin is not always zero: a trimmed auto text box starts at
-/// `(0, trim_top)` so tightening moves no ink (§15 D78), and [`resize_to_handle`]
-/// shifts the pointer by this origin to compensate.
+/// The origin is not always zero: a trimmed auto text box starts at `(0, trim_top)`,
+/// and [`resize_to_handle`] shifts the pointer by it.
 fn anchored_box(kind: &NodeKind, text: Option<&ondin_core::TextLayout>) -> Option<Rect> {
     let size = resizable_size(kind)?;
     let (NodeKind::Text { sizing, .. }, Some(layout)) = (kind, text) else {
         return Some(Rect::from_origin_size(Point::ZERO, size));
     };
-    // On a rail the sizing modes are inert, so `sizing` would anchor to a rectangle
-    // the handles are not drawn on; `layout.bounds()` is what the canvas draws.
+    // On a rail the sizing modes are inert; `layout.bounds()` is what the canvas draws.
     if layout.warp.is_some() {
         return Some(layout.bounds());
     }
@@ -262,14 +223,10 @@ fn anchored_box(kind: &NodeKind, text: Option<&ondin_core::TextLayout>) -> Optio
 
 /// The [`TextSizing`] a resize to `new_size` leaves a text layer in.
 ///
-/// The mode follows the gesture: whether the grabbed thing owns `y`
-/// (`authors_height`). A side handle ([`Handle::anchored`] gives no `y`) and the
-/// panel's `W` field with the lock off do not; corners, top/bottom handles and `H`
-/// do.
-///
-/// So an auto-width label made wider becomes `AutoHeight` (a wrap width, lines
-/// decide the height), given a height it becomes `Fixed`, and an already-`Fixed`
-/// box stays fixed. The canvas and the inspector share this one rule.
+/// The mode follows whether the grabbed thing owns `y` (`authors_height`): side
+/// handles and the panel's `W` field with the lock off do not. An auto-width label
+/// made wider becomes `AutoHeight`, given a height it becomes `Fixed`, and a `Fixed`
+/// box stays fixed.
 pub fn resized_text_sizing(sizing: TextSizing, new_size: Size, authors_height: bool) -> TextSizing {
     if authors_height || sizing.height_is_authored() {
         TextSizing::Fixed(new_size)
@@ -279,14 +236,11 @@ pub fn resized_text_sizing(sizing: TextSizing, new_size: Size, authors_height: b
 }
 
 /// The sizing a text gesture starts from: the mode the node stores, at the extents
-/// it is drawn at (§15 D940).
+/// it is drawn at (`used`).
 ///
-/// For text a flex or grid container stretched, the used kind is a `Fixed` box
-/// (`container::flexed_text`) whatever the node stores, and reading that as the
-/// mode would turn a dragged auto-width label into a fixed box. The mode is the
-/// user's choice and only the extents are the layout's, so the mode comes from
-/// `node` and a stored `AutoHeight` takes the drawn width. `used` is the sizing
-/// as drawn.
+/// A flex or grid container turns stretched text into a `Fixed` box
+/// (`container::flexed_text`); reading that as the mode would turn a dragged
+/// auto-width label into a fixed box. A stored `AutoHeight` takes the drawn width.
 pub fn gesture_text_sizing(node: &ondin_core::Node, used: TextSizing) -> TextSizing {
     let NodeKind::Text { sizing: stored, .. } = node.kind() else {
         return used;
@@ -299,18 +253,13 @@ pub fn gesture_text_sizing(node: &ondin_core::Node, used: TextSizing) -> TextSiz
     }
 }
 
-/// The box a resize gesture produces, in the node's own local space.
+/// The box a resize gesture produces, in the node's own local space, split out of
+/// [`resize_to_handle`] so the anchored-axis rule is testable without a `Document`.
 ///
-/// The whole of the resize geometry and none of the document, split out of
-/// [`resize_to_handle`]: the anchored-axis rule (a side drag changes one
-/// dimension, a corner two) is unit-testable without a `Document`.
-///
-/// `size` is the box being resized (origin at the local origin, §5.6) and `p` the
-/// pointer in the same local space. Returns `(origin, size, mirrored)`, where
-/// `mirrored` is per axis: the box lands on the far side of the anchor with no
-/// sign, so the flip (§5.6) is reported here and [`resize_to_handle`] composes the
-/// reflection. `symmetric` is about the box's own centre, not the node's
-/// transform origin (§15 D60).
+/// `size` is the box being resized and `p` the pointer in the same local space.
+/// Returns `(origin, size, mirrored)`; `mirrored` is per axis, since the box lands on
+/// the far side of the anchor with no sign. `symmetric` is about the box's own
+/// centre, not the node's transform origin.
 fn resized_box(
     size: Size,
     handle: Handle,
@@ -321,9 +270,7 @@ fn resized_box(
     let (hold_x, hold_y) = handle.anchored(size.width, size.height);
     let centre = Point::new(size.width / 2.0, size.height / 2.0);
 
-    // The extent on each axis the handle owns: the distance from the held edge, or
-    // with `symmetric` twice the distance from the centre. An unowned axis keeps
-    // its current extent.
+    // An unowned axis keeps its extent; `symmetric` doubles the distance from the centre.
     let extent = |hold: Option<f64>, at: f64, mid: f64, current: f64| match hold {
         None => current,
         Some(_) if symmetric => 2.0 * (at - mid).abs(),
@@ -335,7 +282,6 @@ fn resized_box(
     if keep_ratio && size.width > 0.0 && size.height > 0.0 {
         let ratio = size.width / size.height;
         match (hold_x.is_some(), hold_y.is_some()) {
-            // A corner follows whichever axis the pointer pushed further.
             (true, true) => {
                 if w / ratio >= h {
                     h = w / ratio;
@@ -343,7 +289,6 @@ fn resized_box(
                     w = h * ratio;
                 }
             }
-            // A side owns one axis and the other simply follows it.
             (true, false) => h = w / ratio,
             (false, true) => w = h * ratio,
             (false, false) => {}
@@ -351,9 +296,8 @@ fn resized_box(
     }
     let (w, h) = (w.max(1.0), h.max(1.0));
 
-    // Where the box starts. Symmetric centres both axes, owned or not: an unowned
-    // axis only moves when `keep_ratio` drove it (Alt+Shift on a side handle).
-    // Anchored keeps the held edge; an unanchored axis does not move.
+    // Symmetric centres both axes, owned or not (`keep_ratio` can drive an unowned one);
+    // anchored keeps the held edge.
     let edge = |hold: Option<f64>, at: f64, mid: f64, extent: f64| {
         if symmetric {
             return mid - extent / 2.0;
@@ -364,10 +308,9 @@ fn resized_box(
             Some(held) => held,
         }
     };
-    // Whether the pointer went past the anchor. Not `at < held`, which is only
-    // right for a high-side handle: the box extends from the anchor in the
-    // direction `span - 2 * held` (held is 0 or `span`), and a crossing is the
-    // pointer's offset having the opposite sign. With Alt the anchor is the centre.
+    // Whether the pointer went past the anchor (the centre with Alt). Not `at < held`,
+    // which is right only for a high-side handle: the box extends in the direction
+    // `span - 2 * held`.
     let crossed = |hold: Option<f64>, at: f64, mid: f64, span: f64| match hold {
         None => false,
         Some(held) => {
@@ -393,11 +336,8 @@ fn resized_box(
 ///
 /// Per §5.6 this edits *geometry*, never the transform's scale. Dragging a
 /// top/left handle also translates the node, since geometry starts at the local
-/// origin.
-///
-/// `opts.keep_ratio` (Shift) locks the aspect ratio; `opts.symmetric` (Alt) holds
-/// the box's centre still instead of the opposite edge; they compose.
-/// `opts.scaling` is what separates the Scale tool from this one.
+/// origin. `opts.keep_ratio` (Shift) locks the aspect ratio; `opts.symmetric` (Alt)
+/// holds the box's centre; they compose.
 pub fn resize_to_handle(
     doc: &Document,
     res: &Resolved,
@@ -417,9 +357,8 @@ pub fn resize_to_handle(
     };
     let size = drawn.size();
 
-    // Local space: the inverse world transform handles rotation and parents. The
-    // pointer is shifted into the drawn box's space, a no-op except for a trimmed
-    // auto text node ([`anchored_box`]), since `resized_box` measures from (0, 0).
+    // The pointer is shifted into the drawn box's space (`resized_box` measures from
+    // (0, 0)): a no-op except for a trimmed auto text node.
     let inset = drawn.origin().to_vec2();
     let (origin, new_size, mirrored) = resized_box(
         size,
@@ -430,8 +369,6 @@ pub fn resize_to_handle(
     );
 
     let geometry = match res.used_kind_of(node) {
-        // Whether the height becomes authored is the handle's business (a side
-        // handle says nothing about `y`); the rule is [`resized_text_sizing`].
         NodeKind::Text {
             on_path: Some(rail),
             ..
@@ -454,16 +391,11 @@ pub fn resize_to_handle(
         _ => GeometryPatch::Size(new_size),
     };
 
-    // The rail arm wrote the move into the geometry; shifting again would double it.
     let geometry_moved_itself = matches!(geometry, GeometryPatch::TextPath(_));
     let mut ops = vec![Operation::SetGeometry { id, geometry }];
-    // `inset` goes back on: the box written starts at the origin even when the
-    // box measured did not.
     let shift = origin.to_vec2() + inset;
-    // The flip is a reflection about the new box's own centre (the box is already
-    // on the far side), composed on the right because it lives in the node's new
-    // local space. Not on the rail arm: type on a path is positioned by the curve,
-    // and its flip is the `on_path_flip` field.
+    // The flip reflects about the new box's own centre, composed on the right (it lives
+    // in the node's new local space). Not on the rail arm: its flip is `on_path_flip`.
     let mirror = |on: bool, centre: f64| -> Affine {
         if !on {
             return Affine::IDENTITY;
@@ -475,7 +407,6 @@ pub fn resize_to_handle(
     let flip = if geometry_moved_itself {
         Affine::IDENTITY
     } else {
-        // The y reflection is the x one conjugated with a transpose.
         let swap = Affine::new([0.0, 1.0, 1.0, 0.0, 0.0, 0.0]);
         mirror(mirrored.0, inset.x + new_size.width / 2.0)
             * (swap * mirror(mirrored.1, inset.y + new_size.height / 2.0) * swap)
@@ -487,7 +418,6 @@ pub fn resize_to_handle(
             transform: res.used_local_of(node) * Affine::translate(shift) * flip,
         });
     }
-    // The leaf case has no `csx`/`csy`; the scalars' factors are the box ratios.
     scale_scalars(
         doc,
         id,
@@ -501,8 +431,7 @@ pub fn resize_to_handle(
 
 /// The box `rail` would give this node, through the same layout the canvas draws.
 ///
-/// Shared by [`railed_resize`]'s correction loop and [`scale_geometry`], which
-/// needs the current rail's box to know what a residual factor scales.
+/// Shared by [`railed_resize`]'s correction loop and [`scale_geometry`].
 fn railed_box(kind: &NodeKind, rail: &ondin_core::kurbo::BezPath) -> Option<Rect> {
     let content = ondin_core::TextRef::of(kind)?.content.to_owned();
     let mut parts = ondin_core::TextParts::of(kind)?;
@@ -512,10 +441,8 @@ fn railed_box(kind: &NodeKind, rail: &ondin_core::kurbo::BezPath) -> Option<Rect
 
 /// On a rail a resize edits the rail: the patch both resize doors write
 /// ([`resize_to_handle`] and [`scale_geometry`]), from the drawn box to `want`,
-/// holding `hold`'s corner. `TextSizing` is inert on a rail.
-///
-/// Solved against the type this transaction will leave ([`kind_to_solve_against`]),
-/// since the Scale tool multiplies the font size too; `drawn` stays the unscaled box.
+/// holding `hold`'s corner. Solved against the type this transaction will leave
+/// ([`kind_to_solve_against`]); `drawn` stays the unscaled box.
 fn railed_patch(
     kind: &NodeKind,
     rail: &ondin_core::kurbo::BezPath,
@@ -540,14 +467,12 @@ fn railed_patch(
 }
 
 /// The rail a resize from `drawn` to `want` leaves a text node with, both boxes in
-/// the node's own local space (§15 D405).
+/// the node's own local space.
 ///
-/// A railed node's box is the ribbon the rail sweeps (curve plus a unit-normal
-/// offset), not a linear function of the rail, so scaling the rail by the box ratio
-/// lands off target. The factor is solved instead: scale, measure, correct, twice.
-/// Then the rail is translated so the corner `hold` holds lands exactly where
-/// `want` puts it (not the box origin, which is only the held corner for
-/// `BottomRight`): placement is exact, extent is close.
+/// A railed node's box is the ribbon the rail sweeps, not a linear function of the
+/// rail, so the factor is solved: scale, measure, correct, twice. Then the rail is
+/// translated so the corner `hold` holds lands exactly where `want` puts it:
+/// placement is exact, extent is close.
 fn railed_resize(
     kind: &NodeKind,
     rail: &ondin_core::kurbo::BezPath,
@@ -568,15 +493,13 @@ fn railed_resize(
         ratio(drawn.height(), want.height()),
     );
     let mut out = scaled(sx, sy);
-    // Two corrections; a third moves nothing visible.
     for _ in 0..2 {
         let Some(got) = measure(&out) else { return out };
         sx *= ratio(got.width(), want.width());
         sy *= ratio(got.height(), want.height());
         out = scaled(sx, sy);
     }
-    // Pin the held corner (`hold`), not the origin: asking [`Handle::anchored`] of
-    // each box makes the two offsets differ by exactly the extent residual.
+    // Pin the held corner, not the origin.
     let anchor = |r: Rect| {
         let (hx, hy) = hold.anchored(r.width(), r.height());
         r.origin() + Vec2::new(hx.unwrap_or(0.0), hy.unwrap_or(0.0))
@@ -595,19 +518,13 @@ fn ratio(before: f64, after: f64) -> f64 {
     after / before
 }
 
-/// Resize the single layer `id` by dragging `handle` to `pointer_world`, choosing the
-/// path its kind needs.
-///
-/// The routing `canvas::resize_tx` applies to one layer, shared so the inspector's
-/// W/H fields mean the same as a dragged handle:
+/// Resize the single layer `id` by dragging `handle` to `pointer_world`: the routing
+/// `canvas::resize_tx` applies, shared with the inspector's W/H fields:
 ///
 /// - an authored `size` is replaced ([`resize_to_handle`]);
-/// - a childless leaf (`Path`, `Line`) or a group with a layout has its geometry
-///   scaled about the held corner ([`resize_geometry`]);
+/// - a childless leaf or a group with a layout has its geometry scaled about the held
+///   corner ([`resize_geometry`]);
 /// - any other container recurses into its contents ([`resize_group`]).
-///
-/// The test is structural rather than a list of kinds. A frame never reaches the
-/// last two: its `size` is authored.
 pub fn resize_layer(
     doc: &Document,
     res: &Resolved,
@@ -625,8 +542,7 @@ pub fn resize_layer(
     let Some(local) = ondin_core::local_box(doc, res, id) else {
         return Transaction::default();
     };
-    // A laid-out group is a box that `scale_geometry` sets; `resize_group` would
-    // scale its children instead.
+    // `resize_group` would scale a laid-out group's children instead of setting its box.
     let laid_group = matches!(node.kind(), NodeKind::Group) && node.display().is_some();
     if node.children().is_empty() || laid_group {
         resize_geometry(doc, res, id, local, handle, pointer_world, opts)
@@ -635,11 +551,8 @@ pub fn resize_layer(
     }
 }
 
-/// Whether a resize over `ids` has to keep its proportions: all-or-nothing (§15
-/// D50), so one locked member never silently constrains the others. Empty is not
-/// locked. Shared by the handles, the inspector's multi W/H fields and
-/// `Ctrl`+arrows.
-///
+/// Whether a resize over `ids` has to keep its proportions: all-or-nothing, so one
+/// locked member never silently constrains the others. Empty is not locked.
 /// Pass the whole selection, not [`build::outermost`]'s reduction of it.
 pub fn proportions_locked(doc: &Document, ids: &[NodeId]) -> bool {
     !ids.is_empty()
@@ -648,15 +561,10 @@ pub fn proportions_locked(doc: &Document, ids: &[NodeId]) -> bool {
             .all(|id| doc.get(*id).is_some_and(|n| n.proportions_locked()))
 }
 
-/// The size a locked box wants, given the size that was asked for and the box it has
-/// now: the axis the caller drove keeps its number and the other follows the aspect.
-///
-/// Shared by the single and multi cards' W/H fields and `Ctrl`+arrows.
-///
-/// `drove_x` is which field the user touched and cannot be inferred from the two
-/// sizes (a paired value can land exactly on the other axis's number, or a floor
-/// can clamp the driven axis). A zero-width box falls back to aspect 1; a zero
-/// aspect leaves the width alone. The floor applies only to the derived value.
+/// The size a locked box wants: the axis the caller drove keeps its number and the
+/// other follows the aspect. `drove_x` cannot be inferred from the two sizes. A
+/// zero-width box falls back to aspect 1; a zero aspect leaves the width alone. The
+/// floor applies only to the derived value.
 pub fn paired_size(now: Size, want: Size, drove_x: bool) -> Size {
     let aspect = if now.width > 0.0 {
         now.height / now.width
@@ -673,8 +581,7 @@ pub fn paired_size(now: Size, want: Size, drove_x: bool) -> Size {
 /// Make `id`'s box exactly `want`, holding its top-left corner — the inspector's W and H
 /// fields for a shape whose extent is derived rather than authored.
 ///
-/// A synthesized bottom-right handle drag through [`resize_layer`], so a typed size
-/// and a dragged handle cannot drift.
+/// A synthesized bottom-right handle drag through [`resize_layer`].
 pub fn resize_box_to(doc: &Document, res: &Resolved, id: NodeId, want: Size) -> Transaction {
     let Some(local) = ondin_core::local_box(doc, res, id) else {
         return Transaction::default();
@@ -697,11 +604,8 @@ pub fn resize_box_to(doc: &Document, res: &Resolved, id: NodeId, want: Size) -> 
 /// Put one end of the line `id` at the world point `target`.
 ///
 /// A `Line` stores only its far point; the near one is the node's origin (§5.3).
-/// Moving the end is one `LineEnd` patch; moving the start is a transform edit
-/// (translation only, so a rotated or skewed line keeps its basis) plus a
-/// re-expressed `end` so the far point stays put.
-///
-/// Read off the committed tree, so mid-drag previews never compound.
+/// Moving the start is a translation-only transform edit plus a re-expressed `end`
+/// so the far point stays put. Read off the committed tree, so previews never compound.
 pub fn move_line_end(
     doc: &Document,
     res: &Resolved,
@@ -730,7 +634,6 @@ pub fn move_line_end(
                 .and_then(|p| res.world_transform(p))
                 .unwrap_or(Affine::IDENTITY);
             let local = parent_world.inverse() * target;
-            // The last two coefficients are the node's origin in its parent's space.
             let [a, b, c, d, _, _] = res.used_local_of(node).as_coeffs();
             let transform = Affine::new([a, b, c, d, local.x, local.y]);
             Transaction(vec![
@@ -760,9 +663,8 @@ pub fn line_ends_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<(Po
 /// dragging `handle`.
 ///
 /// `scale_geometry` scales about the node's origin, and a path's bounding box is
-/// usually elsewhere, so the node's transform takes the correction `anchor·(1 − S)`
-/// that puts the held corner back. [`scaled_about`] on the identity is that pair, and
-/// [`split_geometry_scale`] makes a mirror land as a flip, not a negative size (§5.6).
+/// usually elsewhere, so the node's transform takes the correction that puts the held
+/// corner back; [`split_geometry_scale`] makes a mirror land as a flip, not a negative size.
 pub fn resize_geometry(
     doc: &Document,
     res: &Resolved,
@@ -807,11 +709,8 @@ pub fn resize_geometry(
 ///
 /// §5.6's group-resize rule: the edit recurses into geometry rather than
 /// multiplying a scale into the group's transform, so stroke widths, corner
-/// radii and text sizes are unaffected.
-///
-/// Exact at every angle: [`split_geometry_scale`] puts the skew of a rotated
-/// descendant under non-uniform scale in its basis and the rest in its geometry
-/// (§15 D50).
+/// radii and text sizes are unaffected. Exact at every angle:
+/// [`split_geometry_scale`] puts a rotated descendant's skew in its basis.
 pub fn resize_group(
     doc: &Document,
     res: &Resolved,
@@ -838,8 +737,6 @@ pub fn resize_group(
 
 /// What a handle drag was asked for, beyond where the pointer is: the two
 /// modifiers and the tool's verb.
-///
-/// One struct instead of trailing arguments on [`resize_selection`] (§15 D41).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Resize {
     /// Shift, or a layer with its proportions locked: hold the box's aspect ratio.
@@ -863,12 +760,10 @@ impl Resize {
 }
 
 /// The scale factors a handle drag implies for `box_`, and the point held still
-/// while they are applied — both in whatever space `box_` and `p` are measured
-/// in.
+/// while they are applied, in the space `box_` and `p` are measured in.
 ///
-/// Shared by [`resize_group`] and [`resize_selection`], which needs the same
-/// arithmetic over a union box. `symmetric` (Alt) holds `box_`'s own centre, not the
-/// node's transform origin (§15 D60).
+/// Shared by [`resize_group`] and [`resize_selection`]. `symmetric` (Alt) holds
+/// `box_`'s own centre, not the node's transform origin.
 fn resize_factors(
     box_: Rect,
     handle: Handle,
@@ -876,17 +771,14 @@ fn resize_factors(
     keep_ratio: bool,
     symmetric: bool,
 ) -> (f64, f64, Point) {
-    // The coordinate held still on each axis; `None` on an axis a side handle
-    // leaves alone.
     let (hold_x, hold_y) = handle.anchored(box_.width(), box_.height());
     let hold_x = hold_x.map(|x| box_.min_x() + x);
     let hold_y = hold_y.map(|y| box_.min_y() + y);
 
-    // Scale factors about the anchor: the pointer's distance from it over the
-    // dragged corner's starting distance. Both are signed: a minimum-side handle
-    // sits at -extent from its anchor, and an unsigned divisor would mirror the
-    // selection the moment it was grabbed. Dragging past the anchor goes negative
-    // and mirrors, which `split_geometry_scale` peels into the orientation (§5.6).
+    // Factors are the pointer's distance from the anchor over the dragged corner's
+    // starting distance, both signed: an unsigned divisor would mirror the selection
+    // the moment a minimum-side handle was grabbed. Dragging past the anchor mirrors,
+    // which `split_geometry_scale` peels into the orientation.
     let centre = box_.center();
     let (ux, uy) = handle.unit();
     // Anchored: a whole extent from the far side. Symmetric: half from the middle.
@@ -914,22 +806,18 @@ fn resize_factors(
         )
     };
     if keep_ratio {
-        // Only driven axes have an opinion; a side handle's other axis follows.
         let s = match (hold_x.is_some(), hold_y.is_some()) {
             (true, true) => sx.abs().max(sy.abs()),
             (true, false) => sx.abs(),
             (false, true) => sy.abs(),
             (false, false) => 1.0,
         };
-        // The magnitude is shared and each axis keeps its own sign, so a
-        // proportional drag can flip one axis only.
+        // Each axis keeps its own sign, so a proportional drag can flip one axis only.
         sx = s.copysign(sx);
         sy = s.copysign(sy);
     }
 
-    // An untouched axis is anchored at the box minimum. `symmetric` pins the centre
-    // on both axes and must be asked before `hold`: `keep_ratio` can drive the
-    // unowned axis (Alt+Shift on a side handle), as in [`resized_box`]'s `edge`.
+    // `symmetric` must be asked before `hold`: `keep_ratio` can drive the unowned axis.
     let pin = |hold: Option<f64>, mid: f64, min: f64| match hold {
         _ if symmetric => mid,
         Some(held) => held,
@@ -943,11 +831,8 @@ fn resize_factors(
 }
 
 /// The box a whole selection is resized about: the frame it is turned by, and its
-/// extent measured in that frame's own axes (§15 D326, D478).
-///
-/// One parameter because frame and extent are never meaningful apart (§15 D41).
-/// [`Self::upright`] is the world-axis reading the inspector's W/H fields ask for;
-/// the canvas asks for the oriented one its handles are drawn on.
+/// extent measured in that frame's own axes. [`Self::upright`] is the world-axis
+/// reading the inspector's W/H fields ask for; the canvas asks for the oriented one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SelectionBox {
     /// The transform the set is turned by — `Affine::IDENTITY` for an upright one.
@@ -968,18 +853,12 @@ impl SelectionBox {
 
 /// Resize a whole selection about one box drawn over all of it.
 ///
-/// `roots` must already be [`build::outermost`] — the members with no ancestor in
-/// the selection — or a layer inside a selected group would be scaled twice, once
-/// on its own and once by its container (§5.7a).
+/// `roots` must already be [`build::outermost`], or a layer inside a selected group
+/// would be scaled twice, once on its own and once by its container (§5.7a).
 ///
-/// The factors and the anchor are computed in `sel.frame`'s space (§15 D478): the
-/// pointer is mapped through `frame⁻¹`, and each root is scaled there and mapped
-/// back, so a corner lands on the pointer when the frame is turned. With an upright
-/// box both maps are the identity.
-///
-/// Per root this is `resize_group`'s step: carried through the scale, then split
-/// into the transform it keeps and the scale its geometry takes
-/// ([`split_geometry_scale`]).
+/// The factors and the anchor are computed in `sel.frame`'s space: the pointer is
+/// mapped through `frame⁻¹` and each root is scaled there and mapped back, so a
+/// corner lands on the pointer when the frame is turned.
 pub fn resize_selection(
     doc: &Document,
     res: &Resolved,
@@ -1007,15 +886,13 @@ pub fn resize_selection(
             .parent()
             .and_then(|p| res.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
-        // Scale in the frame's space (`frame · S · frame⁻¹ · world`), project into
-        // the parent, and only then split; splitting in world space would leave the
-        // parent's basis wrapped round the result. An overflowing member is left
-        // alone and the rest still resize.
+        // Scale in the frame's space, project into the parent, and only then split;
+        // splitting in world space would leave the parent's basis wrapped round the
+        // result. An overflowing member is left alone and the rest still resize.
         let Some(scaled) = scaled_about(to_frame * world, anchor, sx, sy) else {
             continue;
         };
         let desired = sel.frame * scaled;
-        // A member with no exact split is skipped likewise.
         let Some((transform, csx, csy)) = split_geometry_scale(parent_world.inverse() * desired)
         else {
             continue;
@@ -1030,20 +907,17 @@ pub fn resize_selection(
 
 /// A world-space turn of `angle` about `pivot`.
 ///
-/// One expression so the chrome and the shapes cannot disagree (§15 D325): a set's
-/// frame is drawn with this affine mid-rotation and every member's new world
-/// transform is this affine times its old one.
+/// One expression so the chrome and the shapes cannot disagree: a set's frame is
+/// drawn with this affine mid-rotation and every member's new world transform is
+/// this affine times its old one.
 pub fn turn_about(pivot: Point, angle: f64) -> Affine {
     Affine::translate(pivot.to_vec2()) * Affine::rotate(angle) * Affine::translate(-pivot.to_vec2())
 }
 
 /// Rotate a whole selection by `angle` about one shared `pivot`.
 ///
-/// Each member turns about the selection's centre, so the set keeps its
-/// arrangement. Per node this is [`rotate_node`]; the rotation is applied in world
-/// space and projected back through each node's parent.
-///
-/// `roots` must be [`build::outermost`], as for [`resize_selection`].
+/// Per node this is [`rotate_node`]. `roots` must be [`build::outermost`], as for
+/// [`resize_selection`].
 pub fn rotate_selection(
     doc: &Document,
     res: &Resolved,
@@ -1059,8 +933,7 @@ pub fn rotate_selection(
 }
 
 /// `t` scaled by `(sx, sy)` about `anchor`, in whatever space `t` is measured
-/// in. Both the origin and the basis take the scale; splitting the result back
-/// into what a node may store is [`split_geometry_scale`]'s job.
+/// in; both the origin and the basis take the scale.
 fn scaled_about(t: Affine, anchor: Point, sx: f64, sy: f64) -> Option<Affine> {
     let [a, b, c, d, e, f] = t.as_coeffs();
     let out = Affine::new([
@@ -1071,27 +944,23 @@ fn scaled_about(t: Affine, anchor: Point, sx: f64, sy: f64) -> Option<Affine> {
         anchor.x + (e - anchor.x) * sx,
         anchor.y + (f - anchor.y) * sy,
     ]);
-    // `None` is finite operands whose product overflows: `MAX_SCALE` caps the
-    // factor, not the basis it multiplies, and an `inf` basis turns `NaN` in
-    // `Basis::of`. Refusing per node lets the rest of a selection still move.
+    // `None` is finite operands whose product overflows (`MAX_SCALE` caps only the
+    // factor); an `inf` basis turns `NaN` in `Basis::of`.
     out.as_coeffs().iter().all(|v| v.is_finite()).then_some(out)
 }
 
 /// Split the transform a node is *intended* to have into the one it may store
 /// and the scale its geometry takes instead (§5.6).
 ///
-/// The two together reproduce `local` exactly (`Basis::exact` is an RQ
-/// decomposition, exact for every invertible matrix). Rotation, skew and flip stay
-/// in the transform; only scale goes to the geometry (§5.6, §15 D50).
+/// The two together reproduce `local` exactly. Rotation, skew and flip stay in the
+/// transform; only scale goes to the geometry.
 ///
-/// `None` where no split reproduces `local` (§15 D714): a rank-1 or near-zero basis
-/// would otherwise collapse a layer or zero its stroke widths. The caller leaves
-/// that member where it was (§6.2). Only reachable from outside, since
-/// `scale_along` floors every factor at `MIN_EXTENT`: via `op_set_transform` or
-/// `svg_in`'s verbatim `transform=`.
+/// `None` where no split reproduces `local`: a rank-1 or near-zero basis would
+/// otherwise collapse a layer or zero its stroke widths, so the caller leaves that
+/// member where it was. Reachable only from outside (`op_set_transform`, `svg_in`'s
+/// verbatim `transform=`), since `scale_along` floors every factor.
 ///
-/// `local` must be the node's local transform, not its world one, or the parent's
-/// basis comes back on the outside of the result.
+/// `local` must be the node's local transform, not its world one.
 fn split_geometry_scale(local: Affine) -> Option<(Affine, f64, f64)> {
     let [_, _, _, _, e, f] = local.as_coeffs();
     let basis = Basis::exact(local)?;
@@ -1105,9 +974,9 @@ fn split_geometry_scale(local: Affine) -> Option<(Affine, f64, f64)> {
 /// A text node's box under a container scale of `(csx, csy)`, or `None` where
 /// there is no box to scale.
 ///
-/// The mode is preserved, one axis at a time: a scale multiplies only the extents
-/// the user authored. `Auto` has none, `AutoHeight` only its wrap width, `Fixed`
-/// both. The clamp keeps a zero factor from authoring a zero-width wrap.
+/// A scale multiplies only the extents the user authored: `Auto` has none,
+/// `AutoHeight` its wrap width, `Fixed` both. The clamp keeps a zero factor from
+/// authoring a zero-width wrap.
 fn scaled_text_sizing(sizing: TextSizing, csx: f64, csy: f64) -> Option<TextSizing> {
     match sizing {
         TextSizing::Auto => None,
@@ -1119,14 +988,12 @@ fn scaled_text_sizing(sizing: TextSizing, csx: f64, csy: f64) -> Option<TextSizi
     }
 }
 
-/// The geometry edits that scale what `id` is by `(csx, csy)`, already measured in
-/// `id`'s own axes: a leaf's size, a line's end, a path's points, or for a
-/// container the same recursed into its contents about its own origin.
+/// The geometry edits that scale what `id` is by `(csx, csy)`, measured in `id`'s own
+/// axes: a leaf's size, a line's end, a path's points, or a container's contents.
 ///
-/// Text answers first, via [`scaled_text_sizing`]: a scale must not change its
-/// sizing mode, and the generic path would clamp an auto box's zero extent into
-/// 1×1. Auto-sized text still takes the font size under [`Scaling::Photographic`]
-/// through [`scale_scalars`], before the early return.
+/// Text answers first, via [`scaled_text_sizing`]: the generic path would clamp an
+/// auto box's zero extent into 1×1. Auto-sized text still takes the font size under
+/// [`Scaling::Photographic`] through [`scale_scalars`], before the early return.
 fn scale_geometry(
     doc: &Document,
     res: &Resolved,
@@ -1138,8 +1005,7 @@ fn scale_geometry(
 ) {
     let Some(node) = doc.get(id) else { return };
     scale_scalars(doc, id, scaling, csx, csy, ops);
-    // On a rail a resize edits the rail through this door too ([`railed_patch`]);
-    // `want` is the drawn box scaled by the residual factors about its origin.
+    // On a rail a resize edits the rail through this door too ([`railed_patch`]).
     if let NodeKind::Text {
         on_path: Some(rail),
         ..
@@ -1152,7 +1018,6 @@ fn scale_geometry(
         );
         ops.push(Operation::SetGeometry {
             id,
-            // Scaled about `drawn.origin()`, the corner `BottomRight` holds.
             geometry: railed_patch(
                 res.used_kind_of(node),
                 rail,
@@ -1193,20 +1058,18 @@ fn scale_geometry(
                     id,
                     geometry: GeometryPatch::Path {
                         path: scaled,
-                        // Carried, not scaled: a geometry resize keeps a 4px radius
-                        // (§5.6); the Scale tool multiplies it in `scale_scalars`.
+                        // Carried: only the Scale tool multiplies it (`scale_scalars`).
                         corner_radii: corner_radii.clone(),
                     },
                 });
             }
-            // A group with a layout is a box and a resize sets its `width`/`height`
-            // (§15 D875); scaling its children would hand the layout bigger items.
-            // The Scale tool takes the contents too (§15 D876).
+            // A group with a layout is a box and a resize sets its `width`/`height`;
+            // scaling its children would hand the layout bigger items. The Scale tool
+            // takes the contents too.
             NodeKind::Group if node.display().is_some() => {
                 if let Some(now) = res.used_frame(id) {
                     let size = Size::new((now.width * csx).max(1.0), (now.height * csy).max(1.0));
-                    // The transform written for the group before its geometry: the
-                    // held edge decides a released stretch's alignment (§15 D905).
+                    // The held edge decides a released stretch's alignment.
                     let to = ops.iter().rev().find_map(|op| match op {
                         Operation::SetTransform { id: i, transform } if *i == id => {
                             Some(*transform)
@@ -1228,11 +1091,10 @@ fn scale_geometry(
 
 /// The four text scopes as a photographic scale of `s` leaves them.
 ///
-/// Every absolute length scales and only those: `Length::scaled` multiplies the
-/// `Px` variants and leaves `Em`, which scale with the font size. The span lists
-/// are re-normalized against the scaled defaults, so a span that asked for its own
-/// indent does not rejoin the node's. Split out of [`scale_scalars`] so a rail can
-/// be solved against the type it will end up with (§15 D604).
+/// Every absolute length scales (`Length::scaled` multiplies `Px` and leaves `Em`).
+/// The span lists are re-normalized against the scaled defaults, so a span with its
+/// own indent does not rejoin the node's. Split out of [`scale_scalars`] so a rail
+/// can be solved against the type it will end up with.
 fn scaled_text_scopes(
     style: &TextStyle,
     spans: &ondin_core::CharSpans,
@@ -1254,8 +1116,7 @@ fn scaled_text_scopes(
 
 /// The node kind [`railed_resize`] should measure against, given the scaling the
 /// same gesture is about to apply: a photographic scale multiplies the type, and a
-/// rail's box depends on the curve and the type (§15 D604). `None` measures the
-/// kind unchanged.
+/// rail's box depends on the curve and the type. `None` measures the kind unchanged.
 fn kind_to_solve_against(
     kind: &NodeKind,
     scaling: Scaling,
@@ -1288,8 +1149,7 @@ fn kind_to_solve_against(
 /// size by the geometric mean of the two factors ([`Scaling::scalar`]), and a
 /// frame's guides by the axis factor. Nothing under [`Scaling::Geometry`] (§5.6).
 ///
-/// A corner radius is scaled from the stored radius, not re-derived from the box,
-/// since `local_path` clamps and the stored number can exceed the clamp.
+/// A corner radius is scaled from the stored radius, since `local_path` clamps.
 fn scale_scalars(
     doc: &Document,
     id: NodeId,
@@ -1298,9 +1158,8 @@ fn scale_scalars(
     csy: f64,
     ops: &mut Vec<Operation>,
 ) {
-    // Ahead of the `scalar` guard: that answers `None` for a mean within
-    // [`SCALE_NOOP`] of 1 too, and a non-uniform scale with mean 1 must still move
-    // guides and layout (§15 D694).
+    // Ahead of the `scalar` guard: a non-uniform scale with mean 1 must still move
+    // guides and layout.
     if scaling == Scaling::Photographic {
         ops.extend(scaled_guides(doc, id, csx, csy));
         ops.extend(scaled_layout(doc, id, csx, csy));
@@ -1365,9 +1224,7 @@ fn scale_scalars(
                 },
             });
         }
-        // Every absolute length in the node scales, via [`scaled_text_scopes`].
-        // Both style ops pass `spans: None`; the scaled lists arrive in the span
-        // ops beside them.
+        // Both style ops pass `spans: None`; the scaled lists arrive in the span ops.
         NodeKind::Text {
             style,
             spans,
@@ -1399,12 +1256,9 @@ fn scale_scalars(
 
 /// A frame's own guides, multiplied by the scale — the Scale tool only.
 ///
-/// A guide's offset is an absolute length, so a resize leaves it (§5.6; an offset
-/// that outgrows a shrunk frame is kept, not clamped) and the Scale tool scales it.
-///
-/// By the axis factor, not the geometric mean: a vertical guide by `csx`, a
-/// horizontal one by `csy`, so it stays on the feature it was placed against.
-/// Called from [`scale_scalars`], where the `Scaling` fork already is.
+/// A guide's offset is an absolute length, so a resize leaves it (kept even when it
+/// outgrows a shrunk frame) and the Scale tool scales it by the axis factor, not
+/// the geometric mean, so it stays on the feature it was placed against.
 fn scaled_guides(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Vec<Operation> {
     let mut ops: Vec<Operation> = doc
         .guides_owned_by(id)
@@ -1419,7 +1273,7 @@ fn scaled_guides(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Vec<Operatio
         })
         .map(|(id, position)| Operation::SetGuidePosition { id, position })
         .collect();
-    // Deterministic order, as `build::guides_of`: the transaction lands in history.
+    // Deterministic order, as `build::guides_of`.
     ops.sort_by_key(|op| match op {
         Operation::SetGuidePosition { id, .. } => *id,
         _ => unreachable!("only positions are produced here"),
@@ -1428,9 +1282,8 @@ fn scaled_guides(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Vec<Operatio
 }
 
 /// A container's padding and gaps under the Scale tool, each by its own axis's
-/// factor (§15 D875), and a grid's px tracks with them: columns by `csx`, rows by
-/// `csy` (§15 D914). As for [`scaled_guides`], the mean would leave a card's
-/// insides out of proportion; a `%` or `fr` track is a share and scales itself.
+/// factor, and a grid's px tracks with them (columns by `csx`, rows by `csy`). A `%`
+/// or `fr` track is a share and scales itself.
 fn scaled_layout(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Option<Operation> {
     use ondin_core::container::{Display, Track, TrackBreadth, TrackSize};
     let was = doc.get(id)?.display()?;
@@ -1487,19 +1340,14 @@ const MIN_EXTENT: f64 = 1e-6;
 /// How far a scale factor has to be from 1 to be worth an operation. Not
 /// `f64::EPSILON`: factors come out of a square root and land a few ulps off 1.
 const SCALE_NOOP: f64 = 1e-9;
-/// Cap on a single resize step, so dragging a handle across a nearly-flat group
-/// cannot produce an astronomically large one.
-///
-/// It bounds the factor, not the basis it multiplies: `1e308` times 2 is `inf`.
-/// [`scaled_about`] guards the product (§15 D481).
+/// Cap on a single resize step. It bounds the factor, not the basis it multiplies;
+/// [`scaled_about`] guards the product.
 const MAX_SCALE: f64 = 1e4;
 
 /// The factor that takes `current` to `wanted`, sign included.
 ///
 /// The sign is the flip: clamping it to `MIN_EXTENT` would collapse the shape and
-/// regrow it on the same side. [`split_geometry_scale`] peels a negative factor into
-/// `Orientation::mirror`, so the geometry still gets a positive scale (§5.6). The
-/// magnitude is clamped at both ends.
+/// regrow it on the same side. The magnitude is clamped at both ends.
 fn scale_along(current: f64, wanted: f64) -> f64 {
     if current.abs() < MIN_EXTENT {
         return 1.0;
@@ -1509,9 +1357,7 @@ fn scale_along(current: f64, wanted: f64) -> f64 {
 }
 
 /// Scale everything under `id` by `(sx, sy)` about `anchor`, expressed in the
-/// space `id`'s children live in.
-///
-/// Each child's base is its used transform (§15 D874).
+/// space `id`'s children live in. Each child's base is its used transform.
 #[allow(clippy::too_many_arguments)]
 fn scale_subtree(
     doc: &Document,
@@ -1530,10 +1376,8 @@ fn scale_subtree(
         };
         let t = res.used_local_of(child);
 
-        // Scale the child bodily, then split. A rotated child under non-uniform
-        // scale leaves a skew, which the split parks in the basis. The factors
-        // handed down are the child's (in its own axes), not the parent's. An
-        // overflowing child is skipped, as in `resize_selection`.
+        // Scale bodily, then split; the factors handed down are the child's own-axes
+        // ones. An overflowing child is skipped, as in `resize_selection`.
         let Some(scaled) = scaled_about(t, anchor, sx, sy) else {
             continue;
         };
@@ -1547,10 +1391,8 @@ fn scale_subtree(
             });
         }
         scale_geometry(doc, res, *child_id, csx, csy, scaling, ops);
-        // A frame in a scaled group is a box and a container, and the Scale tool
-        // scales both (§15 D876); `scale_geometry` alone only sets the box. Here
-        // rather than there, so a selected frame behaves the same alone or beside
-        // others.
+        // The Scale tool scales a frame's contents as well as its box; here rather
+        // than in `scale_geometry`, so a selected frame behaves the same alone or beside others.
         if scaling == Scaling::Photographic
             && matches!(res.used_kind_of(child), NodeKind::Artboard { .. })
         {
@@ -1560,12 +1402,11 @@ fn scale_subtree(
 }
 
 /// Rotate a single node by `angle` radians about `pivot` (world space).
-/// `new_local = parent_world⁻¹ · rotate_about(pivot, angle) · old_world`.
 ///
-/// The result goes through [`split_geometry_scale`] (§15 D577): under a skewed
-/// parent `P⁻¹ · R · P` is not a rotation, and storing its scale in the transform
-/// would later move the stored size. The `SCALE_NOOP` gate keeps ordinary turns
-/// from adding a phantom resize to the undo stack.
+/// The result goes through [`split_geometry_scale`]: under a skewed parent
+/// `P⁻¹ · R · P` is not a rotation, and storing its scale in the transform would
+/// later move the stored size. The `SCALE_NOOP` gate keeps ordinary turns from
+/// adding a phantom resize to the undo stack.
 pub fn rotate_node(
     doc: &Document,
     res: &Resolved,
@@ -1598,9 +1439,8 @@ pub fn rotate_node(
     Transaction(ops)
 }
 
-/// How far a skew may lean: a degree short of the quarter turn at which a shape
-/// collapses onto a line and its matrix stops being invertible. Clamped rather
-/// than rejected, so a wild drag pins at the extreme instead of snapping back.
+/// How far a skew may lean: a degree short of the quarter turn at which the matrix
+/// stops being invertible. Clamped rather than rejected, so a wild drag pins.
 pub const MAX_SKEW: f64 = std::f64::consts::FRAC_PI_2 - 0.017_453_292_519_943_295;
 
 /// Skew step with Shift held: 15°, the same step a rotation snaps to.
@@ -1612,7 +1452,7 @@ const SKEW_SNAP: f64 = std::f64::consts::FRAC_PI_2 / 6.0;
 /// lean and compiles.
 #[derive(Clone, Copy, Debug)]
 pub struct SideDrag {
-    /// Where the press landed — the origin the lean is measured from (§15 D322).
+    /// Where the press landed — the origin the lean is measured from.
     pub press: Point,
     /// Where the pointer is now.
     pub at: Point,
@@ -1632,12 +1472,9 @@ impl SideDrag {
 /// space. `None` for a corner handle and for a box too thin to lean.
 ///
 /// Skew is a side gesture only: the dragged side follows the pointer along its
-/// length while the opposite side stays put. A corner keeps resize and the rotate
-/// ring. The box's extent across the gesture is the lever, as in a rotation.
-///
-/// The offset is measured from `press`, not the box centre (§15 D322), so the first
-/// frame of an off-centre drag does not jump. This returns the shear since the
-/// press, so a second skew gesture starts from zero.
+/// length while the opposite side stays put. The offset is measured from `press`,
+/// not the box centre, so the first frame of an off-centre drag does not jump; the
+/// shear is since the press, so a second gesture starts from zero.
 pub fn side_shear(
     box_: Rect,
     handle: Handle,
@@ -1658,7 +1495,6 @@ pub fn side_shear(
         })
     };
     let (shear, held) = match handle {
-        // A horizontal side leans sideways, about the side facing it.
         Handle::Top => (
             build::skew_x(lean(p.x - press.x, box_.min_y() - box_.max_y())?),
             Vec2::new(0.0, box_.max_y()),
@@ -1682,10 +1518,9 @@ pub fn side_shear(
 
 /// Skew a single node by dragging `handle`, in the node's own frame.
 ///
-/// `box_` is the node's local box ([`ondin_core::local_box`]), the rectangle the
-/// handles are drawn on. The shear is in the node's own space, so
-/// `new_local = old_local · shear` and a container's contents follow; the split
-/// afterwards keeps any extent change in the geometry (§5.6).
+/// `box_` is the node's local box ([`ondin_core::local_box`]). The shear is in the
+/// node's own space, so `new_local = old_local · shear` and a container's contents
+/// follow; the split afterwards keeps any extent change in the geometry.
 pub fn skew_to_handle(
     doc: &Document,
     res: &Resolved,
@@ -1701,7 +1536,6 @@ pub fn skew_to_handle(
     let Some(world) = res.world_transform(id) else {
         return Transaction(vec![]);
     };
-    // Both points go through the same inverse, via `mapped`.
     let Some(shear) = side_shear(box_, handle, drag.mapped(world.inverse()), snap_to_steps) else {
         return Transaction(vec![]);
     };
@@ -1720,12 +1554,8 @@ pub fn skew_to_handle(
 
 /// Apply one world-space `shear` to a whole selection.
 ///
-/// `roots` must be [`build::outermost`], as for [`resize_selection`]. Every member
-/// takes the same shear, so the set leans as one parallelogram.
-///
-/// It is handed the shear (§15 D324): it comes from [`side_shear`] over the set's
-/// upright union and the chrome draws the frame with the same affine. A member
-/// turned off-axis also gets a scale from [`split_geometry_scale`].
+/// `roots` must be [`build::outermost`], as for [`resize_selection`]. The shear comes
+/// from [`side_shear`] so the chrome draws the frame with the same affine.
 pub fn skew_selection(
     doc: &Document,
     res: &Resolved,
@@ -1742,7 +1572,6 @@ pub fn skew_selection(
             .parent()
             .and_then(|p| res.world_transform(p))
             .unwrap_or(Affine::IDENTITY);
-        // Projected into the parent before the split, as in `resize_selection`.
         let Some((transform, gx, gy)) =
             split_geometry_scale(parent_world.inverse() * shear * world)
         else {
@@ -1759,8 +1588,7 @@ pub fn skew_selection(
 }
 
 /// The parent-local origin + size of the axis-aligned box spanned by two world
-/// points, given the parent's world transform. Used by the create tools so a
-/// drawn shape lands correctly under any (translated/scaled) parent.
+/// points, given the parent's world transform.
 fn local_box(parent_world: Affine, a: Point, b: Point) -> (Point, Size) {
     let inv = parent_world.inverse();
     let la = inv * a;
@@ -1772,9 +1600,6 @@ fn local_box(parent_world: Affine, a: Point, b: Point) -> (Point, Size) {
 
 /// Create an artboard spanning world points `a`..`b` under `parent` — the root, or
 /// the frame it was drawn inside (§5.3, frames nest).
-///
-/// `parent_world` is what the box is projected through, as for a shape; a nested
-/// frame needs the real one.
 pub fn create_artboard(
     id: NodeId,
     parent: NodeId,
@@ -1785,7 +1610,6 @@ pub fn create_artboard(
     background: Color,
 ) -> Transaction {
     let (origin, size) = local_box(parent_world, a, b);
-    // Two operations, as [`create_rect`]: `CreateNode` carries no paint.
     Transaction(vec![
         Operation::CreateNode {
             id,
@@ -1808,7 +1632,7 @@ pub fn create_artboard(
 }
 
 /// Create a rectangle spanning world points `a`..`b` under `parent`, with a
-/// solid `fill`. `index` is the child slot (append = current child count).
+/// solid `fill`.
 pub fn create_rect(
     id: NodeId,
     parent: NodeId,
@@ -1841,13 +1665,9 @@ pub fn create_rect(
     ])
 }
 
-/// Create an empty text node filling the world box `a`..`b` under `parent` — the
-/// Text tool's drag, as against its click.
-///
-/// A click plants `TextSizing::Auto`; a drag plants `Fixed` at the drawn box, height
-/// included. The height has a floor of one line box so a thin drag does not commit
-/// a node whose first character overflows; the width has none. `parts` carries the
-/// app's current defaults, as on the click path.
+/// Create an empty `Fixed` text node filling the world box `a`..`b` under `parent` —
+/// the Text tool's drag. The height has a floor of one line box so a thin drag does
+/// not commit a node whose first character overflows; the width has none.
 pub fn create_text(
     id: NodeId,
     parent: NodeId,
@@ -1858,8 +1678,7 @@ pub fn create_text(
     parts: &ondin_core::TextParts,
 ) -> Transaction {
     let (origin, size) = local_box(parent_world, a, b);
-    // One line box from a shaped layout, since `line_height: None` means the font
-    // decides (§15 D162). An empty string is enough.
+    // `line_height: None` means the font decides, so shape an empty string for it.
     let mut auto = parts.clone();
     auto.sizing = TextSizing::Auto;
     let line = ondin_core::text::layout(auto.as_ref("")).line_height;
@@ -1876,7 +1695,6 @@ pub fn create_text(
             paragraph: parts.paragraph.clone(),
             block: parts.block,
             sizing: TextSizing::Fixed(size),
-            // As `canvas::begin_text`: a new node is never on a rail.
             on_path: None,
             on_path_flip: false,
             on_path_offset: 0.0,
@@ -1887,11 +1705,8 @@ pub fn create_text(
 }
 
 /// The size to place an image at inside a box of `frame` — shrink to fit, never
-/// scale up (§5.5a, §15 D177), preserving aspect.
-///
-/// The box is the frame the image lands in, or on bare canvas the viewport. A
-/// degenerate box falls back to the intrinsic size, since a zero-sized layer cannot
-/// be seen or fixed.
+/// scale up (§5.5a), preserving aspect. A degenerate box falls back to the
+/// intrinsic size, since a zero-sized layer cannot be seen or fixed.
 pub fn fitted_image_size(intrinsic: Size, frame: Size) -> Size {
     if frame.width <= 0.0 || frame.height <= 0.0 {
         return intrinsic;
@@ -1905,12 +1720,9 @@ pub fn fitted_image_size(intrinsic: Size, frame: Size) -> Size {
 
 /// Place `image` as a new Rect centred on the world point `at`, fitted to `frame`.
 ///
-/// Centred on the point, since the pointer is where the picture goes. A drag goes
-/// through [`create_image_in_box`] instead.
-///
-/// `entry` is `None` when the document already carries this id, so placing the same
-/// file twice adds a reference, not a second copy; `Some` for an id already in the
-/// table gives `OpError::DuplicateImage`.
+/// A drag goes through [`create_image_in_box`] instead. `entry` is `None` when the
+/// document already carries this id, so placing a file twice adds a reference, not a
+/// copy; `Some` for an id already in the table gives `OpError::DuplicateImage`.
 #[allow(clippy::too_many_arguments)]
 pub fn create_image(
     id: NodeId,
@@ -1930,11 +1742,8 @@ pub fn create_image(
     image_ops(id, parent, index, origin, size, image, entry, name)
 }
 
-/// [`create_image`] for a drag: the shape is the box the user drew, at whatever
-/// aspect they drew it.
-///
-/// No fit and no aspect lock: a drawn box is obeyed. What the picture does inside it
-/// is the fill's framing: [`ondin_core::ImageFit::Fill`] crops rather than squashes.
+/// [`create_image`] for a drag: the drawn box is obeyed, with no fit or aspect lock;
+/// [`ondin_core::ImageFit::Fill`] crops rather than squashes.
 #[allow(clippy::too_many_arguments)]
 pub fn create_image_in_box(
     id: NodeId,
@@ -1994,21 +1803,16 @@ fn image_ops(
     Transaction(ops)
 }
 
-/// The frame after `handle` is dragged to `at`, bounded by the picture — the crop
-/// gesture's whole geometry, in the layer's local space.
+/// The frame after `handle` is dragged to `at`, bounded by the picture, in the
+/// layer's local space.
 ///
-/// `limit` is `ImageRef::picture_box`; the frame is a window onto it and cannot
-/// reach past the edge, where only `Extend::Pad`'s smear would show. The opposite
-/// edges are held, which is [`resized_box`]'s rule without `keep_ratio` or
-/// `symmetric`, so the transaction this feeds through [`resize_layer`] writes the
-/// same box. An edge handle moves one axis only; [`MIN_CROP`] is the floor.
-///
-/// A handle stays on its own side of the box rather than crossing over (a mirrored
-/// window would flip the photograph), so the corner returned is always the one that
-/// moved, which `crop_resize_tx` aims [`resize_layer`] at.
+/// `limit` is `ImageRef::picture_box`; the frame cannot reach past it, where only
+/// `Extend::Pad`'s smear would show. The opposite edges are held ([`resized_box`]'s
+/// rule). A handle stays on its own side rather than crossing over (a mirrored window
+/// would flip the photograph), so the corner returned is the one `crop_resize_tx`
+/// aims [`resize_layer`] at.
 pub fn crop_resized(frame: Rect, handle: Handle, at: Point, limit: Rect) -> Rect {
     let (ux, uy) = handle.unit();
-    // `unit` is 0 at the near edge, 1 at the far one, 0.5 on an unowned axis.
     let span = |u: f64, moved: f64, lo: f64, hi: f64, lim_lo: f64, lim_hi: f64| -> (f64, f64) {
         let (mut a, mut b) = if u == 0.0 {
             (moved, hi)
@@ -2034,20 +1838,15 @@ pub fn crop_resized(frame: Rect, handle: Handle, at: Point, limit: Rect) -> Rect
     Rect::new(x0, y0, x1, y1)
 }
 
-/// The smallest a crop window gets, in the layer's local units.
-///
-/// One unit, [`resized_box`]'s own floor, so the frame [`crop_resized`] computes
-/// matches the one [`resize_layer`] writes.
+/// The smallest a crop window gets: [`resized_box`]'s own floor, so [`crop_resized`]
+/// matches what [`resize_layer`] writes.
 const MIN_CROP: f64 = 1.0;
 
-/// Which fill of `paint` image editing acts on: the first visible image, as
-/// [`ondin_core::Paint::image_fill`] states it (shared with `build::mask_target`).
-/// The name stays because the call sites here read as "croppable".
+/// Which fill of `paint` image editing acts on: the first visible image
+/// ([`ondin_core::Paint::image_fill`], shared with `build::mask_target`).
 pub fn croppable_fill(paint: &ondin_core::Paint) -> Option<usize> {
     paint.image_fill()
 }
-
-// `ondin_core::ImageEntry::is_linked` is reached from nothing in this crate.
 
 /// Create an ellipse inscribed in the world box `a`..`b` under `parent`.
 pub fn create_ellipse(
@@ -2082,9 +1881,8 @@ pub fn create_ellipse(
 /// One press of `↑` or `↓` on a polygon or star being drawn
 /// (`docs/shortcuts.md` §9, Illustrator exact).
 ///
-/// Clamped to the model's bounds, the pair the inspector's sides field scrubs
-/// between; `↓` at the minimum would otherwise wrap a `u32`. Both keys at once is a
-/// no-op.
+/// Clamped to the model's bounds; `↓` at the minimum would otherwise wrap a `u32`.
+/// Both keys at once is a no-op.
 pub fn step_sides(sides: u32, up: bool, down: bool) -> u32 {
     let delta = i64::from(up) - i64::from(down);
     (i64::from(sides) + delta).clamp(
@@ -2220,8 +2018,7 @@ pub fn create_line(
 /// The outline a set of pen anchors describes, in **world** space.
 ///
 /// Public because the canvas draws the in-progress path with the function it is
-/// committed with. A segment is a line when both handles it uses are zero
-/// (`PenAnchor::straight_to`), a cubic otherwise.
+/// committed with.
 pub fn pen_outline(anchors: &[PenAnchor], close: bool) -> BezPath {
     let mut path = BezPath::new();
     if anchors.is_empty() {
@@ -2245,15 +2042,12 @@ pub fn pen_outline(anchors: &[PenAnchor], close: bool) -> BezPath {
     path
 }
 
-/// Every subpath in `subpaths`, one after another — [`pen_outline`] for a whole
-/// path rather than a single run of anchors.
+/// [`pen_outline`] for every subpath in `subpaths`.
 ///
 /// The partner of [`pen_anchors`], not its inverse: the round trip is exact only for
-/// paths the pen wrote (§15 D583). A quad is elevated to the same cubic; a
-/// `ClosePath` whose last point is already the first folds the duplicate away; and
-/// a closed subpath whose last point is not the first comes back with the closing
-/// `LineTo` written out (the common SVG spelling), which is why [`rewrite_path`]'s
-/// no-op guard canonicalises both sides.
+/// paths the pen wrote (a quad comes back as a cubic, a closed subpath with its
+/// closing `LineTo` written out), which is why [`rewrite_path`]'s no-op guard
+/// canonicalises both sides.
 pub fn pen_path(subpaths: &[PenSubpath]) -> BezPath {
     let mut path = BezPath::new();
     for sub in subpaths {
@@ -2266,8 +2060,8 @@ pub fn pen_path(subpaths: &[PenSubpath]) -> BezPath {
 
 /// Put `subpaths` through `t` — anchors and both handles.
 ///
-/// A handle is an offset, so it takes the transform's linear part only; transforming
-/// the control points the handles describe does that without a second code path.
+/// A handle is an offset, so it takes the linear part only; transforming the control
+/// points does that without a second code path.
 pub fn map_subpaths(subpaths: &mut [PenSubpath], t: Affine) {
     for sub in subpaths {
         for a in &mut sub.anchors {
@@ -2282,15 +2076,13 @@ pub fn map_subpaths(subpaths: &mut [PenSubpath], t: Affine) {
 /// Read a `BezPath` back into the anchors that would draw it — the inverse of
 /// [`pen_outline`], and what every point edit needs before it can start.
 ///
-/// Paths the pen wrote read back directly; flattened booleans, SVG imports and
-/// scaled paths can hold quads and several subpaths, handled here:
+/// Flattened booleans, SVG imports and scaled paths can hold quads and several
+/// subpaths:
 ///
-/// - A quad is elevated to the same cubic (`c1 = p0 + 2/3(c − p0)`,
-///   `c2 = p + 2/3(c − p)`), so it comes back as an editable anchor pair; writing
-///   back produces a cubic.
-/// - A `ClosePath` whose last point is already the first (what `pen_outline`
-///   emits) folds: the duplicate goes and its incoming handle moves onto the first
-///   anchor, or every read-and-write would grow an anchor.
+/// - A quad is elevated to the same cubic, so it comes back as an editable anchor pair.
+/// - A `ClosePath` whose last point is already the first folds: the duplicate goes
+///   and its incoming handle moves onto the first anchor, or every read-and-write
+///   would grow an anchor.
 ///
 /// `out` is set only when the segment leaving an anchor is a curve, which keeps
 /// [`PenAnchor::is_corner`] agreeing with what came in.
@@ -2299,7 +2091,6 @@ pub fn pen_anchors(path: &BezPath, radii: &[f64]) -> Vec<PenSubpath> {
     const SAME: f64 = 1e-9;
 
     let mut out: Vec<PenSubpath> = Vec::new();
-    // A segment before any `MoveTo` has no anchor; ignoring it keeps this total.
     for el in path.elements() {
         match *el {
             PathEl::MoveTo(p) => out.push(PenSubpath {
@@ -2352,8 +2143,7 @@ pub fn pen_anchors(path: &BezPath, radii: &[f64]) -> Vec<PenSubpath> {
             }
         }
     }
-    // Radii last, after the close fold changes the anchor count: anchor `base + i`
-    // takes `radii[base + i]`.
+    // Radii last, after the close fold changes the anchor count.
     let mut base = 0usize;
     for sub in &mut out {
         for (i, a) in sub.anchors.iter_mut().enumerate() {
@@ -2366,10 +2156,8 @@ pub fn pen_anchors(path: &BezPath, radii: &[f64]) -> Vec<PenSubpath> {
 
 /// The per-anchor radii of `subpaths`, flattened for the model.
 ///
-/// Trailing zeros are trimmed: the list is `skip_serializing_if = "Vec::is_empty"`,
-/// so an unrounded path must produce an empty vec, and byte-stable output
-/// (invariant 9) needs one canonical form. `rewrite_path`'s no-op comparison relies
-/// on it too.
+/// Trailing zeros are trimmed: an unrounded path must produce an empty vec for
+/// byte-stable output (invariant 9), and `rewrite_path`'s no-op comparison relies on it.
 pub fn pen_radii(subpaths: &[PenSubpath]) -> Vec<f64> {
     let mut radii: Vec<f64> = subpaths
         .iter()
@@ -2381,10 +2169,7 @@ pub fn pen_radii(subpaths: &[PenSubpath]) -> Vec<f64> {
     radii
 }
 
-/// Move every anchor in `points` by `delta`, handles riding along.
-///
-/// The handles are offsets from the anchor, so moving a point is one addition and
-/// it keeps how it leaves itself while bending its neighbours' segments.
+/// Move every anchor in `points` by `delta`, handles riding along (they are offsets).
 pub fn move_points(subpaths: &mut [PenSubpath], points: &[PointRef], delta: Vec2) {
     for (sub, anchor) in points {
         if let Some(a) = subpaths
@@ -2399,11 +2184,8 @@ pub fn move_points(subpaths: &mut [PenSubpath], points: &[PointRef], delta: Vec2
 /// Aim one anchor's handle at `to`, breaking the mirror when `break_pair`.
 ///
 /// Within `snap` of the anchor the handle retracts onto it, which is how a smooth
-/// point becomes a corner again (`is_corner` wants both handles at zero to 1e-9,
-/// which a hand cannot hit). The substitution is [`PenAnchor::pull_within`].
-///
-/// The direction snaps too: `tangent` is how close the handle has to come to a
-/// direction worth having, per [`tangent_snap`].
+/// point becomes a corner again (`is_corner` wants exact zeros); see
+/// [`PenAnchor::pull_within`]. `tangent` is the tolerance for [`tangent_snap`].
 pub fn pull_handle(
     subpaths: &mut [PenSubpath],
     at: PointRef,
@@ -2427,16 +2209,13 @@ pub fn pull_handle(
 /// Two kinds of direction:
 ///
 /// - Collinear with the other handle, which makes the anchor smooth. Offered only
-///   when the pair is already broken: the anchor holds last frame's handles, so on
-///   a mirrored anchor the candidate is the direction this handle already points
-///   and a slow drag would stick and then jump.
-/// - The eight axis and diagonal directions, the set a Shift-drawn line snaps to
-///   (`canvas::axial_corner`).
+///   when the pair is already broken: on a mirrored anchor the candidate is the
+///   direction this handle already points and a slow drag would stick, then jump.
+/// - The eight axis and diagonal directions (`canvas::axial_corner`).
 ///
-/// The tolerance is a perpendicular distance, not an angle, so the target is the
-/// same size at both ends of a handle. The length is kept (the pointer is projected
-/// onto the direction), and a candidate the pointer is behind is skipped, since
-/// projecting there would flip the handle through its anchor.
+/// The tolerance is a perpendicular distance, so the target is the same size at both
+/// ends of a handle. The length is kept, and a candidate the pointer is behind is
+/// skipped, since projecting there would flip the handle through its anchor.
 pub fn tangent_snap(a: &PenAnchor, side: Side, to: Point, tolerance: f64) -> Point {
     let v = to - a.at;
     if v.hypot() < 1e-9 || tolerance <= 0.0 {
@@ -2470,8 +2249,7 @@ pub fn tangent_snap(a: &PenAnchor, side: Side, to: Point, tolerance: f64) -> Poi
 /// it arrives at, which wraps to 0 on the closing segment of a closed subpath.
 ///
 /// `None` when `at` names no segment: an out-of-range index, a subpath too short,
-/// or the last anchor of an open run. The closing segment and that missing one live
-/// at the same index, hence the `Option`.
+/// or the last anchor of an open run.
 pub fn segment_ends(subpaths: &[PenSubpath], at: PointRef) -> Option<(PointRef, PointRef)> {
     let sub = subpaths.get(at.0)?;
     let n = sub.anchors.len();
@@ -2482,11 +2260,8 @@ pub fn segment_ends(subpaths: &[PenSubpath], at: PointRef) -> Option<(PointRef, 
     (next != 0 || sub.closed).then_some(((at.0, at.1), (at.0, next)))
 }
 
-/// Whether the segment leaving `at` is written out as a straight line —
-/// [`PenAnchor::straight_to`] asked about a segment rather than about a pair.
-///
-/// Not derivable from [`segment_cubic`], whose cubic for a line has control points
-/// a third of the way along, like a real curve's.
+/// Whether the segment leaving `at` is written out as a straight line. Not derivable
+/// from [`segment_cubic`], whose cubic for a line has control points at the thirds.
 pub fn segment_is_straight(subpaths: &[PenSubpath], at: PointRef) -> bool {
     let Some((a, b)) = segment_ends(subpaths, at) else {
         return false;
@@ -2500,14 +2275,12 @@ pub fn segment_is_straight(subpaths: &[PenSubpath], at: PointRef) -> bool {
     }
 }
 
-/// The segment leaving `at`, as a cubic — `pen_outline`'s own line-or-cubic rule
-/// ([`PenAnchor::straight_to`]) resolved into one type, so a caller can ask for a
-/// position at a parameter without branching.
+/// The segment leaving `at`, as a cubic, so a caller can ask for a position at a
+/// parameter without branching on line or curve.
 ///
-/// A straight segment comes back degree-elevated, with control points at the
-/// thirds rather than on its endpoints. The degenerate form has a different
-/// parameterisation (`B(0.25)` at 15.6%) from `geometry::nearest_segment`'s linear
-/// `t`; elevated, `B(t)` is `lerp(t)` identically.
+/// A straight segment comes back degree-elevated, with control points at the thirds:
+/// the degenerate form's parameterisation differs from `geometry::nearest_segment`'s
+/// linear `t`; elevated, `B(t)` is `lerp(t)` identically.
 pub fn segment_cubic(subpaths: &[PenSubpath], at: PointRef) -> Option<CubicBez> {
     let (a, b) = segment_ends(subpaths, at)?;
     let a = subpaths.get(a.0)?.anchors.get(a.1)?;
@@ -2520,24 +2293,19 @@ pub fn segment_cubic(subpaths: &[PenSubpath], at: PointRef) -> Option<CubicBez> 
     })
 }
 
-/// Where parameter `t` falls on the segment leaving `at`, in whatever space
-/// `subpaths` are measured in; what a segment gesture's snap is measured against.
+/// Where parameter `t` falls on the segment leaving `at`, in `subpaths`' space.
 pub fn segment_point(subpaths: &[PenSubpath], at: PointRef, t: f64) -> Option<Point> {
     Some(segment_cubic(subpaths, at)?.eval(t.clamp(0.0, 1.0)))
 }
 
 /// Split the segment leaving `at` at parameter `t`, returning the new anchor.
 ///
-/// The curve does not change shape: `CubicBez::subsegment` gives the two halves of
-/// the cubic that was there, and the neighbours' inward handles and the new
-/// anchor's two are read off the split.
-///
-/// The new anchor takes no radius and its neighbours keep theirs, since a radius
-/// rides on the anchor (§15 D119).
+/// The curve does not change shape. The new anchor takes no radius and its
+/// neighbours keep theirs, since a radius rides on the anchor.
 ///
 /// A straight segment splits by lerp with every handle zero: subdividing the
 /// elevated cubic would put control points partway along the line, growing the path
-/// on every read and write (§15 D117).
+/// on every read and write.
 ///
 /// `None` when `at` names no segment (see [`segment_ends`]).
 pub fn insert_point(subpaths: &mut [PenSubpath], at: PointRef, t: f64) -> Option<PointRef> {
@@ -2562,27 +2330,16 @@ pub fn insert_point(subpaths: &mut [PenSubpath], at: PointRef, t: f64) -> Option
         }
     };
     let sub = subpaths.get_mut(at.0)?;
-    // Always at `at.1 + 1`; on the closing segment that is the end of the run.
     sub.anchors.insert(at.1 + 1, inserted);
     Some((at.0, at.1 + 1))
 }
 
-/// Remove every segment in `cuts`, leaving the anchors either side of each one
-/// in place.
+/// Remove every segment in `cuts`, leaving the anchors either side in place.
 ///
-/// The counterpart to `remove_points`' healing: deleting an anchor joins its
-/// neighbours, but deleting a segment leaves a gap, so a closed subpath becomes open
-/// and an open one splits.
-///
-/// One walk handles any number of cuts: a closed run is rotated to start just after
-/// its first cut, becoming an open run with one fewer break.
-///
-/// The handles at each new end are zeroed, since they described a segment that has
-/// gone; left set they would reappear if the run were closed again.
-///
-/// A remainder of fewer than two anchors is dropped, as it is in
-/// [`remove_points`]: one point draws nothing and can never be selected again. An
-/// empty result means the path is gone and the caller deletes the node.
+/// Unlike `remove_points`' healing, a segment removal leaves a gap: a closed subpath
+/// becomes open and an open one splits. The handles at each new end are zeroed. A
+/// remainder of fewer than two anchors is dropped, as in [`remove_points`]; an empty
+/// result means the caller deletes the node.
 pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSubpath> {
     /// One run between two cuts, kept only if it still draws something, with the
     /// handles that described the removed segments zeroed off its new ends.
@@ -2605,7 +2362,6 @@ pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSub
 
     let mut out: Vec<PenSubpath> = Vec::with_capacity(subpaths.len() + 1);
     for (i, sub) in subpaths.iter().enumerate() {
-        // Only cuts naming a real segment (not the last anchor of an open run).
         let mut cut: Vec<usize> = cuts
             .iter()
             .filter(|at| at.0 == i && segment_ends(subpaths, **at).is_some())
@@ -2618,7 +2374,6 @@ pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSub
             continue;
         }
         let n = sub.anchors.len();
-        // Closed: start just after the first cut so the run ends on it.
         let order: Vec<usize> = match sub.closed {
             true => (cut[0] + 1..n).chain(0..=cut[0]).collect(),
             false => (0..n).collect(),
@@ -2638,24 +2393,19 @@ pub fn remove_segments(subpaths: &[PenSubpath], cuts: &[PointRef]) -> Vec<PenSub
 /// Bend a segment: pull the point at parameter `t` by `delta`, leaving both
 /// anchors where they are.
 ///
-/// `Ctrl` shapes the curvature, as it pulls handles out of an existing anchor.
+/// The segment's two control points take the whole pull, split so the point at `t`
+/// lands under the pointer with the smallest change: with `u = 3(1−t)²t` and
+/// `v = 3(1−t)t²`, the minimum-norm solution is `δ₁ = delta·u/(u²+v²)`,
+/// `δ₂ = delta·v/(u²+v²)`.
 ///
-/// The two control points of this segment take the whole pull, split so the point
-/// at `t` lands under the pointer with the smallest change: with `u = 3(1−t)²t` and
-/// `v = 3(1−t)t²`, the minimum-norm solution of `u·δ₁ + v·δ₂ = delta` is
-/// `δ₁ = delta·u/(u²+v²)`, `δ₂ = delta·v/(u²+v²)`.
-///
-/// A straight segment is first elevated to the cubic with control points at the
-/// thirds, as [`segment_cubic`] reports, so `t` means what the pointer grabbed; its
-/// corners become curve anchors ([`PenAnchor::is_corner`]). The anchors' other
-/// handles are left alone, so bending beside a smooth point breaks its pair. Near
-/// `t = 0` or `1` the bend does nothing rather than diverging.
+/// A straight segment is first elevated as [`segment_cubic`] reports. The anchors'
+/// other handles are left alone, so bending beside a smooth point breaks its pair.
+/// Near `t = 0` or `1` the bend does nothing rather than diverging.
 pub fn bend_segment(subpaths: &mut [PenSubpath], at: PointRef, t: f64, delta: Vec2) {
     let Some((a, b)) = segment_ends(subpaths, at) else {
         return;
     };
-    // A bend that has not moved must not elevate a line, which would rewrite the
-    // path (`rewrite_path` compares elements).
+    // A bend that has not moved must not elevate a line, which would rewrite the path.
     if delta == Vec2::ZERO {
         return;
     }
@@ -2670,21 +2420,16 @@ pub fn bend_segment(subpaths: &mut [PenSubpath], at: PointRef, t: f64, delta: Ve
         Some(c) => c,
         None => return,
     };
-    // Read the pair before writing either, in case both ends are the same anchor.
+    // Both read before either is written: both ends can be the same anchor.
     let (from, to) = (curve.p1 + d1, curve.p2 + d2);
     let anchors = (subpaths[a.0].anchors[a.1].at, subpaths[b.0].anchors[b.1].at);
     subpaths[a.0].anchors[a.1].out = from - anchors.0;
     subpaths[b.0].anchors[b.1].back = to - anchors.1;
 }
 
-/// The upright box the selected anchors occupy — the frame a scale gesture over a
-/// point set is measured in.
-///
-/// The anchors only, not their handles, which would push the box out past the ink.
-///
-/// `None` below two points, and for a flat box: its corners would land on the
-/// extreme points, where the point wins the press (`canvas::NodeGrab`), so the
-/// chrome would promise handles that cannot be grabbed.
+/// The upright box the selected anchors occupy (not their handles). `None` below two
+/// points, and for a flat box: its corners would land on the extreme points, where
+/// the point wins the press (`canvas::NodeGrab`), so the handles could not be grabbed.
 pub fn points_box(subpaths: &[PenSubpath], points: &[PointRef]) -> Option<Rect> {
     if points.len() < 2 {
         return None;
@@ -2699,10 +2444,9 @@ pub fn points_box(subpaths: &[PenSubpath], points: &[PointRef]) -> Option<Rect> 
 
 /// A run being drawn, with `arriving` attached to its tail.
 ///
-/// The orientation is the opposite of the one the pen resumes with:
-/// `PenEdit::working` turns the target so the grabbed endpoint is last, but here
-/// the pen appends to us, so it must come first. `from_start` says the grab was at
-/// index 0, which needs no reversal.
+/// The opposite orientation to `PenEdit::working`'s: the pen appends to us, so the
+/// grabbed endpoint must come first. `from_start` says the grab was at index 0,
+/// which needs no reversal.
 pub fn join_runs(head: &[PenAnchor], arriving: &PenSubpath, from_start: bool) -> PenSubpath {
     let mut tail = arriving.clone();
     if !from_start {
@@ -2718,7 +2462,7 @@ pub fn join_runs(head: &[PenAnchor], arriving: &PenSubpath, from_start: bool) ->
 /// exactly two — the subject *Join* acts on (`context-menus.md` §6.5).
 ///
 /// The menu row's gate and [`join_ends`]' precondition, spelled once so a live row
-/// cannot reach a refusal (§15 D87, D230). Three refusals:
+/// cannot reach a refusal. Three refusals:
 ///
 /// - A closed run has no ends.
 /// - An anchor in the middle of a run is not an end; joining there is a split first.
@@ -2746,10 +2490,9 @@ pub fn joinable_ends(subpaths: &[PenSubpath], points: &[PointRef]) -> Option<(Po
 ///   which `geometry::anchor_runs` names by the last anchor.
 /// - Ends of two runs: they splice into one open run at the lower subpath index.
 ///
-/// The orientation is [`join_runs`]'s: the head's selected end must come last, so a
-/// head grabbed at index 0 is reversed, and the tail's `from_start` is passed
-/// through. Nothing is merged: coincident ends stay two anchors with a zero-length
-/// segment, as the pen's own join leaves them (`canvas::pen_join`).
+/// Orientation is [`join_runs`]'s. Nothing is merged: coincident ends stay two
+/// anchors with a zero-length segment, as the pen's own join leaves them
+/// (`canvas::pen_join`).
 pub fn join_ends(
     subpaths: &[PenSubpath],
     a: PointRef,
@@ -2776,9 +2519,8 @@ pub fn join_ends(
 
 /// Turn the selected anchors about `pivot` by `angle` radians.
 ///
-/// Handles turn with their anchors and keep their length, so the curves come round
-/// with the points. As in [`map_subpaths`], the `Affine` goes through the control
-/// points, which keeps a zero-length handle at zero.
+/// Handles turn with their anchors and keep their length. As in [`map_subpaths`], the
+/// `Affine` goes through the control points, which keeps a zero-length handle at zero.
 pub fn rotate_points(subpaths: &mut [PenSubpath], points: &[PointRef], pivot: Point, angle: f64) {
     let t = Affine::translate(pivot.to_vec2())
         * Affine::rotate(angle)
@@ -2796,11 +2538,8 @@ pub fn rotate_points(subpaths: &mut [PenSubpath], points: &[PointRef], pivot: Po
 
 /// Scale the selected anchors about `box_`, as a handle drag on it asks.
 ///
-/// The arithmetic is [`resize_factors`]', as for a layer or multi-selection resize,
-/// so Alt holds the box's centre and a handle dragged past its anchor mirrors.
-///
-/// Handles scale componentwise with their anchors, since they are offsets. Radii
-/// are left alone (§5.6; the Scale tool multiplies them).
+/// The arithmetic is [`resize_factors`]'. Handles scale componentwise with their
+/// anchors, since they are offsets. Radii are left alone (§5.6).
 pub fn resize_points(
     subpaths: &mut [PenSubpath],
     points: &[PointRef],
@@ -2838,8 +2577,7 @@ fn offset(axis: Axis, d: f64) -> Vec2 {
     }
 }
 
-/// The extent of `points` along `axis` — `None` when fewer than two are given,
-/// since one point is already aligned with itself and already evenly spaced.
+/// The extent of `points` along `axis`, or `None` below two points.
 fn span(subpaths: &[PenSubpath], points: &[PointRef], axis: Axis) -> Option<(f64, f64)> {
     let mut vals = points
         .iter()
@@ -2853,8 +2591,7 @@ fn span(subpaths: &[PenSubpath], points: &[PointRef], axis: Axis) -> Option<(f64
 /// Align the selected anchors along `axis`, against the box **they** occupy.
 ///
 /// Against their own extent, the only candidate: unlike layers (`align_target`),
-/// points in one path have no key and no container but the path, whose box is
-/// derived from these points.
+/// points have no container but the path, whose box is derived from them.
 pub fn align_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis: Axis, edge: Edge) {
     let Some((lo, hi)) = span(subpaths, points, axis) else {
         return;
@@ -2874,9 +2611,8 @@ pub fn align_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis: Axis
 
 /// Space the selected anchors evenly along `axis`.
 ///
-/// Equal positions, where layers get equal gaps (`build::distribute` subtracts each
-/// layer's width; a point has none), so this is a lerp between the extremes. Fewer
-/// than three does nothing: the end points are pinned.
+/// Equal positions, where layers get equal gaps (a point has no width), so this is a
+/// lerp between the extremes. Fewer than three does nothing: the end points are pinned.
 pub fn distribute_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis: Axis) {
     if points.len() < 3 {
         return;
@@ -2884,7 +2620,6 @@ pub fn distribute_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis:
     let Some((lo, hi)) = span(subpaths, points, axis) else {
         return;
     };
-    // Sorted by where they already are, so distributing does not reorder them.
     let order = points_along(subpaths, points, axis);
     let step = (hi - lo) / (order.len() - 1).max(1) as f64;
     for (i, (at, was)) in order.iter().enumerate() {
@@ -2895,36 +2630,25 @@ pub fn distribute_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis:
     }
 }
 
-/// How long a handle invented for a smooth anchor is, as a fraction of the chord
-/// to the neighbour it faces.
-///
-/// A third is the standard construction (Catmull-Rom, Illustrator's *Convert to
-/// smooth*), and a fraction rather than a length so it suits any path size.
+/// How long a handle invented for a smooth anchor is, as a fraction of the chord to
+/// the neighbour it faces: the standard third, so it suits any path size.
 const SMOOTH_HANDLE_FRACTION: f64 = 1.0 / 3.0;
 
 /// Make the selected anchors corners or smooth points — Illustrator's *Convert to
-/// corner / smooth*, and the menu rows over `context-menus.md` §6.5 (§15 D250).
+/// corner / smooth*, and the menu rows over `context-menus.md` §6.5.
 ///
 /// Two cases, and only the second invents anything:
 ///
-/// - The anchor already has a handle (an `Alt`-broken pair, or straight in and
-///   curved out): "smooth" means mirror, keeping the longer handle, which was aimed
-///   on purpose.
+/// - The anchor already has a handle: "smooth" means mirror, keeping the longer
+///   handle, which was aimed on purpose.
 /// - It has none: the tangent is the chord `next − prev`, at
-///   [`SMOOTH_HANDLE_FRACTION`] of the shorter leg.
+///   [`SMOOTH_HANDLE_FRACTION`] of the shorter leg (a longer handle loops).
 ///
-/// Both handles get the same length: a smooth anchor here is `back == −out` exactly
-/// (`PenAnchor::pull_side`, `is_smooth`), and an unequal collinear pair would be
-/// pulled apart by the next handle drag. The shorter leg sets the length since a
-/// longer handle loops.
-///
-/// An endpoint of an open subpath gets one handle, not two: a mirrored handle would
-/// control a curve that does not exist, and smoothness is a property of a joint
-/// between two segments.
-///
-/// The corner radius is left alone in both directions: on a smooth anchor it draws
-/// nothing (`geometry::fillet` returns `None`) and returns when the anchor is a
-/// corner again.
+/// Both handles get the same length: a smooth anchor is `back == −out` exactly
+/// (`is_smooth`), and an unequal collinear pair would be pulled apart by the next
+/// handle drag. An endpoint of an open subpath gets one handle, since smoothness is a
+/// property of a joint between two segments. The corner radius is left alone: on a
+/// smooth anchor it draws nothing (`geometry::fillet`) and returns with the corner.
 pub fn set_smoothness(subpaths: &mut [PenSubpath], points: &[PointRef], smooth: bool) {
     for at in points {
         let Some(sub) = subpaths.get(at.0) else {
@@ -2945,8 +2669,6 @@ pub fn set_smoothness(subpaths: &mut [PenSubpath], points: &[PointRef], smooth: 
 
 /// The `(out, back)` a smoothed anchor `i` of `sub` should carry, or `None` when
 /// there is nothing to derive one from — a lone anchor, or a chord of zero length.
-///
-/// Split out of [`set_smoothness`] so the arithmetic is testable on a subpath.
 fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
     let an = sub.anchors.get(i)?;
     let n = sub.anchors.len();
@@ -2965,8 +2687,7 @@ fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
         None
     };
     // Already shaped: mirror the handle that was aimed on purpose. The missing side
-    // of an endpoint stays zero here too (§15 D560); a lone anchor keeps the
-    // mirrored pair, since there is shaping to read and nothing is invented.
+    // of an endpoint stays zero; a lone anchor keeps the mirrored pair.
     let (out, back) = (an.out, an.back);
     if out.hypot() > 1e-9 || back.hypot() > 1e-9 {
         let long = if out.hypot() >= back.hypot() {
@@ -2982,7 +2703,6 @@ fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
     }
     let leg = |j: usize| sub.anchors.get(j).map(|o| o.at - an.at);
     match (prev.and_then(leg), next.and_then(leg)) {
-        // The through-tangent `next − prev`, one length for both from the shorter leg.
         (Some(back_leg), Some(out_leg)) => {
             let dir = out_leg - back_leg;
             (dir.hypot() > 1e-9).then(|| {
@@ -2991,7 +2711,6 @@ fn smoothed_handles(sub: &PenSubpath, i: usize) -> Option<(Vec2, Vec2)> {
                 (unit * len, -unit * len)
             })
         }
-        // An endpoint: one segment, one handle, aimed along it.
         (Some(leg), None) => {
             (leg.hypot() > 1e-9).then(|| (Vec2::ZERO, leg * SMOOTH_HANDLE_FRACTION))
         }
@@ -3015,10 +2734,8 @@ fn points_along(subpaths: &[PenSubpath], points: &[PointRef], axis: Axis) -> Vec
     order
 }
 
-/// The distance between each neighbouring pair of selected anchors along `axis`.
-///
-/// The point subject's answer to `build::gaps_along`: centre-to-centre, since a
-/// point has no edges ([`distribute_points`]).
+/// The distance between each neighbouring pair of selected anchors along `axis`:
+/// centre-to-centre, since a point has no edges (`build::gaps_along`'s point twin).
 pub fn point_spacings(subpaths: &[PenSubpath], points: &[PointRef], axis: Axis) -> Vec<f64> {
     points_along(subpaths, points, axis)
         .windows(2)
@@ -3029,9 +2746,8 @@ pub fn point_spacings(subpaths: &[PenSubpath], points: &[PointRef], axis: Axis) 
 /// Put exactly `gap` between each neighbouring pair of selected anchors along
 /// `axis`, holding the **first on that axis** where it is.
 ///
-/// The point subject's answer to `build::distribute_spacing` (§15 D243). Points
-/// have no key to designate, so there is no anchor argument, as in
-/// [`align_points`]. Two points are enough: they have one gap.
+/// The point twin of `build::distribute_spacing`, with no anchor argument since points
+/// have no key to designate. Two points are enough: they have one gap.
 pub fn space_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis: Axis, gap: f64) {
     if points.len() < 2 || !gap.is_finite() {
         return;
@@ -3050,12 +2766,9 @@ pub fn space_points(subpaths: &mut [PenSubpath], points: &[PointRef], axis: Axis
 
 /// Remove `points`, healing each subpath by joining the anchors either side.
 ///
-/// Healing falls out of the representation: dropping an anchor leaves its
-/// neighbours adjacent. Leaving a gap is [`remove_segments`], chosen by which of the
-/// two is selected.
-///
-/// A subpath left with fewer than two anchors is dropped, since it draws nothing and
-/// could never be selected again. An empty result means the caller deletes the node.
+/// Leaving a gap is [`remove_segments`], chosen by which of the two is selected. A
+/// subpath left with fewer than two anchors is dropped; an empty result means the
+/// caller deletes the node.
 pub fn remove_points(subpaths: &[PenSubpath], points: &[PointRef]) -> Vec<PenSubpath> {
     let mut out: Vec<PenSubpath> = Vec::with_capacity(subpaths.len());
     for (i, sub) in subpaths.iter().enumerate() {
@@ -3076,21 +2789,15 @@ pub fn remove_points(subpaths: &[PenSubpath], points: &[PointRef]) -> Vec<PenSub
     out
 }
 
-/// The anchor count of each subpath — what `PointSet::retain_valid` checks a
-/// stale selection against.
-///
-/// Dead in production and kept deliberately (§15 D637): allowed rather than
-/// `cfg(test)`-ed so it stays callable wherever its partner `retain_valid` is.
+/// The anchor count of each subpath, for `PointSet::retain_valid`. Dead in production
+/// and kept deliberately, allowed rather than `cfg(test)`-ed like its partner.
 #[allow(dead_code)]
 pub fn subpath_lengths(subpaths: &[PenSubpath]) -> Vec<usize> {
     subpaths.iter().map(|s| s.anchors.len()).collect()
 }
 
 /// Which subpaths a set of point (or segment) references lands in, ascending and
-/// without repeats.
-///
-/// The bridge between a per-point selection and the verbs whose subject is a whole
-/// run, such as reversing one.
+/// without repeats — the bridge to verbs whose subject is a whole run.
 pub fn subpaths_touched(points: &[PointRef]) -> Vec<usize> {
     let mut out: Vec<usize> = points.iter().map(|(s, _)| *s).collect();
     out.sort_unstable();
@@ -3101,10 +2808,9 @@ pub fn subpaths_touched(points: &[PointRef]) -> Vec<usize> {
 /// Traverse the named subpaths the other way round.
 ///
 /// Fills are non-zero (`boolean.rs`), so a contained subpath drawn the same way round
-/// fills solid and the opposite way cuts a hole. Auto-reversing would break for
-/// partly overlapping runs (§15 D125), so direction stays the designer's and this
-/// changes it after the fact. [`PenSubpath::reverse`] does the work; the index remap
-/// it forces is `PointSet::reverse_within`.
+/// fills solid and the opposite way cuts a hole. Direction stays the designer's
+/// (auto-reversing breaks for partly overlapping runs); the index remap this forces
+/// is `PointSet::reverse_within`.
 pub fn reverse_subpaths(subpaths: &mut [PenSubpath], which: &[usize]) {
     for i in which {
         if let Some(sub) = subpaths.get_mut(*i) {
@@ -3115,19 +2821,16 @@ pub fn reverse_subpaths(subpaths: &mut [PenSubpath], which: &[usize]) {
 
 /// Where the pen should snap to close the path, at pointer position `world`.
 ///
-/// `None` when closing is not on offer or the pointer is not near enough; `Some`
-/// is the first anchor's position, used both to draw the pending segment and to
-/// decide that a press closes, so the snap is a promise the click keeps.
-///
-/// Only the first anchor offers a close. `radius_px` is screen pt, so the world
-/// tolerance shrinks as the view zooms in.
+/// `Some` is the first anchor's position, used both to draw the pending segment and
+/// to decide that a press closes, so the snap is a promise the click keeps. Only the
+/// first anchor offers a close. `radius_px` is screen pt, so the world tolerance
+/// shrinks as the view zooms in.
 pub fn pen_close_snap(
     anchors: &[PenAnchor],
     world: Point,
     zoom: f64,
     radius_px: f64,
 ) -> Option<Point> {
-    // Closing a single point is not a shape: `create_path` refuses it.
     let first = anchors.first().filter(|_| anchors.len() >= 2)?;
     let near = (first.at - world).hypot() * zoom < radius_px;
     near.then_some(first.at)
@@ -3136,9 +2839,8 @@ pub fn pen_close_snap(
 /// Create a `Path` node from world-space pen `anchors` under `parent`, stroked
 /// with `color` at `width`.
 ///
-/// The node origin sits at the first anchor; everything else is stored relative to
-/// it in parent-local space. `close` joins the last anchor back to the first,
-/// through their handles. Fewer than two anchors yields an empty transaction.
+/// The node origin sits at the first anchor. `close` joins the last anchor back to
+/// the first, through their handles. Fewer than two anchors yields an empty transaction.
 #[allow(clippy::too_many_arguments)]
 pub fn create_path(
     id: NodeId,
@@ -3155,8 +2857,6 @@ pub fn create_path(
     }
     let origin = parent_world.inverse() * anchors[0].at;
     let mut path = pen_outline(anchors, close);
-    // World → parent-local → node-local, so the first anchor lands on the
-    // node's own origin and the transform carries where that is.
     path.apply_affine(Affine::translate(-origin.to_vec2()) * parent_world.inverse());
     Transaction(vec![
         Operation::CreateNode {
@@ -3188,15 +2888,12 @@ pub fn create_path(
 /// own world transform is `node_world`.
 ///
 /// The partner of [`create_path`] for the resume case, except that the transform is
-/// not touched: extending the start of a path must not move its origin. The path is
-/// expressed in the node's own space.
+/// not touched: extending the start of a path must not move its origin.
 ///
 /// Fewer than two anchors in every subpath yields an empty transaction, and so does
-/// a rewrite that matches `current`, the path the node already holds. That is why
-/// `current` is a parameter: resuming and pressing Escape must leave the document
-/// untouched, and counting anchors cannot establish it. It relies on the caller
-/// handing the subpath back in the orientation it was read in
-/// (`canvas::finish_pen` undoes the resume-from-the-start reversal).
+/// a rewrite that matches `current`, the path the node already holds: resuming and
+/// pressing Escape must leave the document untouched. It relies on the caller handing
+/// the subpath back in the orientation it was read in (`canvas::finish_pen`).
 pub fn rewrite_path(
     id: NodeId,
     node_world: Affine,
@@ -3209,13 +2906,10 @@ pub fn rewrite_path(
     let mut path = pen_path(subpaths);
     path.apply_affine(node_world.inverse());
     let corner_radii = pen_radii(subpaths);
-    // The radii are part of "changed nothing": scrubbing a radius back leaves the
-    // outline identical. Both sides are put in the pen's canonical form first
-    // (§15 D583): the `pen_anchors` → `pen_path` round trip adds a `LineTo` to the
-    // ordinary SVG spelling of a closed shape and `pen_radii` trims trailing zeros,
-    // so comparing raw would rewrite on a bare click. Comparing forward avoids a
-    // load-time migration (invariant 9); the forms differ only in zero-length
-    // segments and zero radii, so a match never drops an edit.
+    // Both sides go to the pen's canonical form first: the `pen_anchors` → `pen_path`
+    // round trip adds a `LineTo` to the ordinary SVG spelling of a closed shape, so
+    // comparing raw would rewrite on a bare click. The forms differ only in
+    // zero-length segments and zero radii, so a match never drops an edit.
     let canonical = current.map(|(c, r)| {
         let subs = pen_anchors(c, r);
         (pen_path(&subs), pen_radii(&subs))
@@ -3231,8 +2925,6 @@ pub fn rewrite_path(
 
 #[cfg(test)]
 mod tests {
-    // Moving/reparenting under a transformed parent is covered by
-    // `ondin-core/tests/build.rs`, which owns those projections now.
     use super::*;
     use ondin_core::IdSource;
 
@@ -3256,8 +2948,7 @@ mod tests {
             "a left drag moved an edge it does not own"
         );
 
-        // Dragged past the held edge a crop must collapse, not mirror; an exact
-        // rectangle is asserted since a mirrored one also has `x0 < x1`.
+        // A mirrored rectangle also has `x0 < x1`, hence the exact one.
         let past = crop_resized(
             frame,
             Handle::BottomRight,
@@ -3270,7 +2961,6 @@ mod tests {
             "a handle run across the box must collapse onto the held corner, not \
              mirror about it"
         );
-        // The same from the other corner, where the moved edge is the near one.
         let past_tl = crop_resized(frame, Handle::TopLeft, Point::new(500.0, 500.0), limit);
         assert_eq!(
             past_tl,
@@ -3316,7 +3006,6 @@ mod tests {
         let (doc, res, rect) = artboard_with_rect();
         let frame = ondin_core::local_box(&doc, &res, rect).expect("a box");
         let world = res.world_transform(rect).expect("a transform");
-        // Room to grow, so a handle pulled out tests the resize, not the clamp.
         let limit = frame.inflate(200.0, 200.0);
 
         for (handle, at) in [
@@ -3324,7 +3013,7 @@ mod tests {
             (Handle::TopLeft, Point::new(11.0, 7.0)),
             (Handle::Left, Point::new(-40.0, 0.0)),
             (Handle::Bottom, Point::new(0.0, 90.0)),
-            // Past the held edge, where both floors must fire on the same number.
+            // Past the held edge, where both floors must agree.
             (Handle::TopLeft, Point::new(999.0, 999.0)),
         ] {
             let next = crop_resized(frame, handle, at, limit);
@@ -3367,7 +3056,6 @@ mod tests {
         let (doc, res, rect) = artboard_with_rect();
         let frame = ondin_core::local_box(&doc, &res, rect).expect("a box");
         let world = res.world_transform(rect).expect("a transform");
-        // An oblong source at an off-centre crop.
         let (w, h) = (400u32, 300u32);
         let img = ondin_core::ImageRef {
             fit: ondin_core::ImageFit::Crop,
@@ -3507,8 +3195,7 @@ mod tests {
     }
 
     /// The text child's sizing after the group's bottom-right corner is dragged out
-    /// to double the box on both axes (a whole extent past the held minimum corner,
-    /// since the box is offset inside its group).
+    /// to double the box on both axes.
     fn double_group(sizing: TextSizing) -> TextSizing {
         let (mut doc, res, group, text) = group_with_text(sizing);
         let local = ondin_core::local_box(&doc, &res, group).unwrap();
@@ -3548,8 +3235,7 @@ mod tests {
         );
     }
 
-    /// A group of two rects not starting at its own origin: its local box runs
-    /// 10,5..160,80 (150 × 75), and the group is offset under the root.
+    /// A group of two rects not starting at its own origin: local box 10,5..160,80.
     fn group_of_two_rects() -> (Document, Resolved, NodeId) {
         let mut ids = IdSource::new(11);
         let root = ids.mint();
@@ -3623,7 +3309,6 @@ mod tests {
     #[test]
     fn dragging_an_auto_labels_left_edge_holds_its_right_edge() {
         let (mut doc, res, _group, text) = group_with_text(TextSizing::Auto);
-        // The text sits at (10,10) in the group at the root.
         let measured = ondin_core::local_box(&doc, &res, text).unwrap();
         let right = 10.0 + measured.width();
         let tx = resize_to_handle(
@@ -3658,7 +3343,7 @@ mod tests {
     }
 
     /// A top drag on a trimmed auto label holds the bottom edge the handles drew
-    /// (the trimmed box starts below the local origin, §15 D78).
+    /// (the trimmed box starts below the local origin).
     #[test]
     fn dragging_the_top_of_a_trimmed_label_holds_the_bottom_the_handles_drew() {
         let (mut doc, _res, _group, text) = group_with_text(TextSizing::Auto);
@@ -3711,7 +3396,6 @@ mod tests {
     #[test]
     fn resize_from_bottom_right_only_changes_size() {
         let (mut doc, res, rect) = artboard_with_rect();
-        // Rect world origin is (100,100); the top-left anchor must not move.
         let tx = resize_to_handle(
             &doc,
             &res,
@@ -3733,7 +3417,6 @@ mod tests {
     #[test]
     fn resize_from_top_left_moves_the_origin_and_holds_the_far_corner() {
         let (mut doc, res, rect) = artboard_with_rect();
-        // The BR corner must stay at (150,150) and the box become 30x40.
         let tx = resize_to_handle(
             &doc,
             &res,
@@ -3760,9 +3443,9 @@ mod tests {
         );
     }
 
-    /// Every kind flips past its anchor, and the two resize paths agree (§15 D753):
-    /// a `Rect` lands in the same world box as a `Path`, so the assertion is on
-    /// `Mirror`, not the ink's bounding box. Alt is the same rule about the centre.
+    /// Every kind flips past its anchor, and the two resize paths agree: a `Rect` lands
+    /// in the same world box as a `Path`, so the assertion is on `Mirror`. Alt is the
+    /// same rule about the centre.
     /// flip: `resized_box`'s `crossed` returns `false` → fails at the rect's `Mirror::X`
     #[test]
     fn a_rect_flips_past_its_anchor_exactly_as_a_path_does() {
@@ -3863,7 +3546,7 @@ mod tests {
     }
 
     /// A drag that stops short of the anchor flips nothing: the control for the test
-    /// above (§15 D753), which `crossed` returning `true` would pass.
+    /// above, which `crossed` returning `true` would pass.
     /// flip: `crossed` spelled `at < anchor` → fails at "the left handle pulled in"
     #[test]
     fn an_ordinary_resize_flips_nothing() {
@@ -4107,9 +3790,8 @@ mod tests {
             "{what}: {got:?} vs {want:?}"
         );
     }
-    /// A lone line and a lone pen path scale from a handle, asserted on the committed
-    /// geometry. The path's box (x ∈ [10, 30]) is away from its origin, so the held
-    /// edge stays put only with the `anchor·(1 − S)` correction.
+    /// A lone line and a lone pen path scale from a handle. The path's box is away from
+    /// its origin, so the held edge stays put only with the `anchor·(1 − S)` correction.
     #[test]
     fn a_lone_line_and_path_scale_from_a_handle() {
         let mut ids = IdSource::new(0x11E);
@@ -4168,7 +3850,6 @@ mod tests {
             "the endpoint follows the handle: {end:?}"
         );
 
-        // Drag the right edge to 50: the left edge stays at 10, the width doubles.
         let local = ondin_core::local_box(&doc, &res, path).expect("a path has a box");
         assert_eq!(
             (local.x0, local.x1),
@@ -4235,7 +3916,6 @@ mod tests {
                 transform: None,
                 name: None,
             },
-            // Two 20×20 squares at x = 0 and 80: the group's box is 100×20.
             Operation::CreateNode {
                 id: a,
                 parent: g,
@@ -4414,8 +4094,8 @@ mod tests {
         assert_eq!(got, Size::new(200.0, 100.0));
     }
 
-    /// A moved pivot does not change what an Alt-resize does (§15 D60), asserted on
-    /// the whole transaction since no caller may consult the pivot either.
+    /// A moved pivot does not change what an Alt-resize does, asserted on the whole
+    /// transaction.
     #[test]
     fn a_moved_pivot_does_not_change_an_alt_resize() {
         use ondin_core::Pivot;
@@ -4460,7 +4140,6 @@ mod tests {
     #[test]
     fn alt_resizes_about_the_centre() {
         let size = Size::new(100.0, 50.0);
-        // Centre is 50, so dragging to x = 80 gives a box 60 wide from 20 to 80.
         let (origin, got, _) = resized_box(size, Handle::Right, Point::new(80.0, 0.0), false, true);
         assert_eq!(got, Size::new(60.0, 50.0));
         assert_eq!(origin, Point::new(20.0, 0.0));
@@ -4482,8 +4161,6 @@ mod tests {
         assert_eq!(s, Size::new(60.0, 30.0));
         assert_eq!(o, Point::new(20.0, 10.0));
 
-        // Dragging past the centre keeps the box symmetric; the shape flips, which
-        // the third return reports (§15 D753).
         let (o, s, crossed) = resized_box(size, Handle::Right, Point::new(20.0, 0.0), false, true);
         assert_eq!(s, Size::new(60.0, 50.0));
         assert_eq!(o, Point::new(20.0, 0.0));
@@ -4503,7 +4180,7 @@ mod tests {
     }
 
     /// Alt+Shift on a side handle centres the followed axis for a path too, as
-    /// `resized_box` does (§15 D559); the interesting half is the y pair.
+    /// `resized_box` does; the interesting half is the y pair.
     /// flip: `resize_factors`' `pin` guards on `Some(_) if symmetric` → fails at the y assertion
     #[test]
     fn alt_and_shift_on_a_side_handle_centre_the_followed_axis_for_a_path_too() {
@@ -4678,9 +4355,8 @@ mod tests {
         assert!((size.width - 80.0).abs() < 1e-9 && (size.height - 40.0).abs() < 1e-9);
     }
 
-    /// A side handle gives auto height, not a fixed box. Each handle is dragged
-    /// outward; the widths differ because the right edge holds the origin while the
-    /// left holds the far side of the measured box (see `anchored_box`).
+    /// A side handle gives auto height, not a fixed box. The widths differ because the
+    /// right edge holds the origin while the left holds the far side (`anchored_box`).
     #[test]
     fn dragging_a_side_of_auto_text_gives_auto_height() {
         let (doc, res, t) = artboard_with_text(TextSizing::Auto);
@@ -4725,12 +4401,10 @@ mod tests {
         );
     }
 
-    /// Dragging a handle on railed text moves the ink (§15 D405): `TextSizing` is
-    /// inert on a rail, so the assertion is on the box, end to end. Dragging the
-    /// bottom-right corner to twice the width roughly doubles it, and the held
-    /// corner does not move (the rail arm writes the translation itself, so the
-    /// `SetTransform` shift must not apply it twice). The rail takes a solved factor,
-    /// not the box ratio, so only its height is checked.
+    /// Dragging a handle on railed text moves the ink: `TextSizing` is inert on a rail,
+    /// so the assertion is on the box. Dragging the bottom-right corner to twice the
+    /// width roughly doubles it and the held corner does not move (the rail arm writes
+    /// the translation itself, so the `SetTransform` shift must not apply it twice).
     #[test]
     fn dragging_railed_text_scales_its_rail() {
         use ondin_core::kurbo::{BezPath, Shape};
@@ -4762,7 +4436,6 @@ mod tests {
             "the fixture must have a box: {before:?}"
         );
 
-        // Twice the width, same height; world and local agree here.
         let target = Point::new(
             before.x0 + before.width() * 2.0,
             before.y0 + before.height(),
@@ -4806,10 +4479,9 @@ mod tests {
         );
     }
 
-    /// Every handle holds its own corner on a rail (§15 D789), not just the
-    /// `BottomRight` where the origin is the anchor. The drift only exists on a
-    /// railed node, and the residual scales with distance from 1, so each handle
-    /// shrinks the box to a quarter.
+    /// Every handle holds its own corner on a rail, not just the `BottomRight` where
+    /// the origin is the anchor. Each handle shrinks the box to a quarter, since the
+    /// drift scales with distance from 1.
     /// flip: `railed_resize` anchors `want.origin() - got.origin()` → fails at `BottomLeft`
     #[test]
     fn every_handle_holds_its_own_corner_on_a_rail() {
@@ -4878,10 +4550,9 @@ mod tests {
         }
     }
 
-    /// The Scale tool on a rail holds the corner the Select tool holds (§15 D604):
-    /// the solve must run against the type the transaction leaves, since
-    /// `scale_scalars` also multiplies the font size. The anchor is asserted tightly
-    /// and the extent loosely.
+    /// The Scale tool on a rail holds the corner the Select tool holds: the solve must
+    /// run against the type the transaction leaves, since `scale_scalars` also
+    /// multiplies the font size. The anchor is asserted tightly, the extent loosely.
     /// flip: `kind_to_solve_against` returns `None` unconditionally → fails at the anchor assertion
     #[test]
     fn the_scale_tool_on_a_rail_holds_the_corner_the_select_tool_holds() {
@@ -4946,9 +4617,9 @@ mod tests {
         );
     }
 
-    /// Resizing a group that holds a railed text edits the rail too (§15 D472): the
-    /// rect in the group is the control that the gesture reached the subtree, and the
-    /// child's growth is asserted loosely since the rail solve owns the exact width.
+    /// Resizing a group that holds a railed text edits the rail too. The rect in the
+    /// group is the control that the gesture reached the subtree; the child's growth is
+    /// asserted loosely since the rail solve owns the exact width.
     /// flip: delete the `on_path` arm of `scale_geometry` → fails at the railed text's width
     #[test]
     fn resizing_a_group_carries_a_railed_text_with_it() {
@@ -4998,7 +4669,6 @@ mod tests {
         let t0 = ondin_core::local_box(&doc, &res, t).expect("the text has a box");
         let r0 = ondin_core::local_box(&doc, &res, rect).expect("the rect has a box");
 
-        // The group's bottom-right corner to twice its box, in world space.
         let world = res.world_transform(group).expect("world");
         let target = world * Point::new(g0.x0 + g0.width() * 2.0, g0.y0 + g0.height() * 2.0);
         let tx = resize_group(
@@ -5047,7 +4717,6 @@ mod tests {
 
     #[test]
     fn create_rect_lands_at_world_drag_box_under_translated_parent() {
-        // Artboard at (50,20); a rect drawn from world (100,100) to (160,140).
         let mut ids = IdSource::new(1);
         let root = ids.mint();
         let mut doc = Document::new(root);
@@ -5197,8 +4866,7 @@ mod tests {
         assert!((origin.y - 100.0).abs() < 1e-9, "y={}", origin.y);
     }
 
-    /// A thin drag still gets a box one line tall (floor from a shaped layout, §15
-    /// D162); the width has no floor.
+    /// A thin drag still gets a box one line tall; the width has no floor.
     #[test]
     fn a_thin_text_drag_still_clears_one_line() {
         let mut ids = IdSource::new(0x7E88);
@@ -5325,9 +4993,9 @@ mod tests {
         ] {
             assert!(tool.drags_a_box(), "{tool:?}");
         }
-        // This predicate also decides which tools clear the selection when armed
-        // (§15 D294); `Node` and `ImageEdit` are entered from a selection that
-        // `edited_path` reads, so a wrong answer would empty the tool as it opened.
+        // This predicate also decides which tools clear the selection when armed;
+        // `Node` and `ImageEdit` are entered from a selection, so a wrong answer would
+        // empty the tool as it opened.
         for tool in [
             Tool::Pen,
             Tool::Node,
@@ -5340,9 +5008,9 @@ mod tests {
         }
     }
 
-    /// The whole click table, tool by tool (§15 D291, D295), and the containment that
-    /// anything answering a click also drags a box. The `match` in `click_makes`
-    /// makes a missing arm a build error; this makes a wrong arm a failure.
+    /// The whole click table, tool by tool, and the containment that anything
+    /// answering a click also drags a box. The `match` in `click_makes` makes a missing
+    /// arm a build error; this makes a wrong arm a failure.
     #[test]
     fn every_tool_answers_a_click_with_exactly_what_it_should() {
         use ClickCreate::*;
@@ -5458,7 +5126,6 @@ mod tests {
             PenAnchor::corner(Point::new(100.0, 100.0)),
         ];
 
-        // 4 world units at 1:1 is inside 5pt and snaps to the anchor.
         assert_eq!(
             pen_close_snap(&square, Point::new(4.0, 0.0), 1.0, R),
             Some(Point::new(0.0, 0.0))
@@ -5603,7 +5270,6 @@ mod tests {
         pull(&mut a, Point::new(10.0, 20.0), false);
         assert_eq!(a.back, Vec2::new(0.0, -10.0));
 
-        // Within the retract radius the handle lands on the anchor.
         a.pull_within(Side::Out, Point::new(12.0, 11.0), false, 7.0);
         assert!(a.is_corner(), "out={:?} back={:?}", a.out, a.back);
         a.pull_within(Side::Out, Point::new(30.0, 10.0), false, 7.0);
@@ -5771,7 +5437,6 @@ mod tests {
         path.move_to((0.0, 0.0));
         path.line_to((10.0, 0.0));
         path.quad_to((20.0, 10.0), (30.0, 0.0));
-        // A closed triangle whose `ClosePath` implies the last edge.
         path.move_to((100.0, 0.0));
         path.line_to((140.0, 0.0));
         path.line_to((140.0, 40.0));
@@ -5802,7 +5467,6 @@ mod tests {
         want.move_to((100.0, 0.0));
         want.line_to((140.0, 0.0));
         want.line_to((140.0, 40.0));
-        // The edge `ClosePath` implied comes back explicit, and still a line.
         want.line_to((100.0, 0.0));
         want.close_path();
         assert_same_path(&out, &want);
@@ -5907,7 +5571,6 @@ mod tests {
             "a resume that changed nothing must not become an undo step"
         );
 
-        // Extending the start: reverse, append, reverse back.
         let mut working = subpaths[0].clone();
         working.reverse();
         working
@@ -6030,7 +5693,6 @@ mod tests {
         );
         assert_eq!(end, Point::new(100.0, 0.0));
 
-        // Removing everything leaves nothing, so the caller deletes the node.
         assert!(remove_points(&subs, &[(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)]).is_empty());
     }
 
@@ -6062,7 +5724,6 @@ mod tests {
         assert!(!subs[0].anchors[1].is_corner());
         assert_eq!(subs[0].anchors[1].out, Vec2::new(8.0, 0.0));
 
-        // Inside it: both handles collapse and the segments either side go straight.
         pull_handle(
             &mut subs,
             (0, 1),
@@ -6135,7 +5796,6 @@ mod tests {
             "evenly between the two extremes, which stay put"
         );
 
-        // Two points cannot be distributed and one cannot be aligned: both are no-ops.
         let before: Vec<Point> = subs[0].anchors.iter().map(|a| a.at).collect();
         distribute_points(&mut subs, &picked[..2], Axis::X);
         align_points(&mut subs, &picked[..1], Axis::X, Edge::Max);
@@ -6154,7 +5814,6 @@ mod tests {
         use ondin_core::kurbo::Vec2;
         let mut subs = vec![PenSubpath {
             anchors: vec![
-                // A handle along +x, which a quarter turn aims along +y.
                 PenAnchor::smooth(Point::new(20.0, 10.0), Vec2::new(5.0, 0.0)),
                 PenAnchor::corner(Point::new(30.0, 10.0)),
                 // Not selected.
@@ -6263,7 +5922,6 @@ mod tests {
         assert_eq!(subs[0].anchors[0].out, Vec2::ZERO);
         assert_eq!(subs[0].anchors[2].out, Vec2::ZERO);
 
-        // A broken pair mirrors instead, keeping the longer handle.
         let mut broken = vec![PenSubpath {
             anchors: vec![PenAnchor {
                 at: Point::ZERO,
@@ -6376,7 +6034,6 @@ mod tests {
     #[test]
     fn the_app_and_core_number_a_paths_anchors_alike() {
         let mut cases: Vec<BezPath> = Vec::new();
-        // A closed run as `pen_outline` writes it, with the repeated closing point.
         let mut a = BezPath::new();
         a.move_to((0.0, 0.0));
         a.line_to((10.0, 0.0));
@@ -6477,7 +6134,6 @@ mod tests {
         let NodeKind::Line { end } = doc.get(line).unwrap().kind() else {
             panic!("expected a line");
         };
-        // Node origin maps to world `a`; local `end` maps to world `b`.
         let w_start = world * Point::ZERO;
         let w_end = world * *end;
         assert!((w_start.x - a.x).abs() < 1e-9 && (w_start.y - a.y).abs() < 1e-9);
@@ -6487,7 +6143,6 @@ mod tests {
     #[test]
     fn rotate_about_pivot_moves_points_correctly() {
         let (mut doc, res, rect) = artboard_with_rect();
-        // Local (50,0) sits at world (150,100); +90° about (100,100) lands it at (100,150).
         let tx = rotate_node(
             &doc,
             &res,
@@ -6639,7 +6294,6 @@ mod tests {
         let union = union_of(&res, &roots);
         assert_eq!((union.width(), union.height()), (100.0, 20.0));
 
-        // Bottom-right corner dragged to double the width, height unchanged.
         doc.apply(&resize_selection(
             &doc,
             &res,
@@ -6716,7 +6370,6 @@ mod tests {
 
         let res = Resolved::rebuild(&doc);
         let after = union_of(&res, &roots);
-        // 100×20 becomes 20×100, still centred on the same point.
         assert!(
             (after.width() - 20.0).abs() < 1e-9 && (after.height() - 100.0).abs() < 1e-9,
             "the box did not turn: {after:?}"
@@ -6770,7 +6423,6 @@ mod tests {
         .unwrap();
         let after = Resolved::rebuild(&doc);
 
-        // The turned member's box, stretched 3× in x about the union's held corner.
         let hold = Point::new(union.min_x(), union.min_y());
         let want = Rect::new(
             hold.x + (before.min_x() - hold.x) * 3.0,
@@ -6822,7 +6474,6 @@ mod tests {
         let (mut doc, res, a, _) = two_squares();
         let before = res.world_bounds(a).unwrap();
 
-        // The top side pressed at its midpoint and dragged 20 right: a 45° lean.
         doc.apply(&skew_to_handle(
             &doc,
             &res,
@@ -6858,7 +6509,7 @@ mod tests {
     }
 
     /// A side grabbed off its midpoint leans by the drag delta from the press, not by the
-    /// grab's offset from the box centre: no lean unmoved, `atan(1/120)` for 1 unit, −26.76° for 60.5.
+    /// grab's offset from the box centre.
     ///
     /// flip: measure from the centre (`p.x - c.x`) instead of `p.x - press.x` → fails at the no-lean assertion
     #[test]
@@ -6881,7 +6532,6 @@ mod tests {
         .expect("the reported rectangle");
         let res = Resolved::rebuild(&doc);
         let box_ = Rect::new(0.0, 0.0, 200.0, 120.0);
-        // 80.3% along the top edge, 60.5 right of the centre.
         let press = Point::new(160.5, 0.0);
 
         let lean_after = |dx: f64| {
@@ -6949,7 +6599,6 @@ mod tests {
         };
         let before: Vec<Affine> = roots.iter().map(|id| placement(&doc, &res, *id)).collect();
 
-        // Top side dragged right by the union's height: a 45° lean about the bottom edge.
         let shear = side_shear(
             union,
             Handle::Top,
@@ -7143,7 +6792,6 @@ mod tests {
     #[test]
     fn a_non_uniform_scale_moves_the_scalars_by_the_geometric_mean() {
         let (mut doc, res, rect) = artboard_with_a_decorated_rect();
-        // 50x50 -> 200x50: sx = 4, sy = 1, so the mean is 2.
         doc.apply(&resize_to_handle(
             &doc,
             &res,
@@ -7624,8 +7272,7 @@ mod tests {
             anchors: vec![
                 PenAnchor::corner(Point::new(0.0, 0.0)),
                 PenAnchor::corner(Point::new(100.0, 0.0)),
-                // Arrives straight, leaves on a curve: a shape an insert can
-                // easily get wrong.
+                // Arrives straight, leaves on a curve: easy for an insert to get wrong.
                 PenAnchor {
                     at: Point::new(100.0, 100.0),
                     out: Vec2::new(-40.0, 20.0),
@@ -7718,7 +7365,6 @@ mod tests {
         let subs = quad_with_a_curve();
         let corners: Vec<Point> = subs[0].anchors.iter().map(|a| a.at).collect();
 
-        // Cut the segment leaving anchor 1: the run runs 2, 3, 0, 1.
         let left = remove_segments(&subs, &[(0, 1)]);
         assert_eq!(left.len(), 1);
         assert!(!left[0].closed, "a cut run cannot still be closed");
@@ -7746,7 +7392,6 @@ mod tests {
         assert_eq!(two[0].anchors.len(), 2);
         assert_eq!(two[1].anchors.len(), 2);
 
-        // Cutting the first segment leaves a lone point, which is dropped.
         let one = remove_segments(&subs, &[(0, 0)]);
         assert_eq!(one.len(), 1);
         assert_eq!(one[0].anchors.len(), 3);
@@ -7757,7 +7402,6 @@ mod tests {
         assert_eq!(none.len(), 1);
         assert_eq!(none[0].anchors.len(), 4);
 
-        // A two-point path loses its only segment, which tells the caller to delete the node.
         let pair = vec![PenSubpath {
             anchors: subs[0].anchors[..2].to_vec(),
             closed: false,
@@ -7791,7 +7435,6 @@ mod tests {
         let subs = quad_with_a_curve();
         let p: Vec<Point> = subs[0].anchors.iter().map(|a| a.at).collect();
 
-        // Closed, cut after anchor 0 and after anchor 2: runs 1–2 and 3–0.
         let two = remove_segments(&subs, &[(0, 0), (0, 2)]);
         assert_eq!(two.len(), 2);
         let got: Vec<Vec<Point>> = two
@@ -7801,7 +7444,6 @@ mod tests {
         assert_eq!(got, vec![vec![p[1], p[2]], vec![p[3], p[0]]], "{got:?}");
         assert!(two.iter().all(|s| !s.closed));
 
-        // Cutting every segment leaves only lone points, all dropped.
         assert!(remove_segments(&subs, &[(0, 0), (0, 1), (0, 2), (0, 3)]).is_empty());
 
         // An index naming no segment is ignored (an open run's last anchor has none).
@@ -7859,7 +7501,6 @@ mod tests {
         assert!(points_box(&subs, &[(0, 0)]).is_none());
         assert!(points_box(&subs, &[(0, 0), (0, 1)]).is_none());
 
-        // Doubling from the bottom-right keeps the top-left put, handles included.
         let mut scaled = subs.clone();
         resize_points(
             &mut scaled,
@@ -7914,7 +7555,6 @@ mod tests {
     #[test]
     fn a_min_side_handle_scales_rather_than_mirroring() {
         let box_ = Rect::new(0.0, 0.0, 100.0, 50.0);
-        // Top-left pulled out to (-100, -50): twice the box.
         let (sx, sy, anchor) = resize_factors(
             box_,
             Handle::TopLeft,
@@ -8031,7 +7671,6 @@ mod tests {
         };
         let smooth_dir = Vec2::new(30.0, 40.0).normalize();
 
-        // 3 units off the ray, 50 out: it lands on the ray at the pointer's length.
         let want = at + smooth_dir * 50.0;
         let perp = Vec2::new(-smooth_dir.y, smooth_dir.x) * 3.0;
         let got = tangent_snap(&broken, Side::Out, want + perp, 4.0);
@@ -8064,8 +7703,7 @@ mod tests {
         let off = at + Vec2::new(50.0, 20.0);
         assert_eq!(tangent_snap(&corner, Side::Out, off, 4.0), off);
 
-        // Nor does an already-smooth anchor: the handles are last frame's, so offering its
-        // own direction would pull a slow drag back where it was, and it would stick and jump.
+        // Nor does an already-smooth anchor: its own direction would make a slow drag stick, then jump.
         let mirrored = PenAnchor::smooth(at, Vec2::new(40.0, 10.0));
         let nudged = at + Vec2::new(41.0, 11.5);
         assert_eq!(
@@ -8153,7 +7791,6 @@ mod tests {
         let two_runs = [run(3, 0.0, false), run(3, 100.0, false)];
         let ok = |points: &[PointRef]| joinable_ends(&two_runs, points).is_some();
 
-        // One end of each run (the splice), or both ends of one run (the close).
         assert!(ok(&[(0, 2), (1, 0)]));
         assert!(ok(&[(0, 0), (1, 2)]), "either end of either run");
         assert!(ok(&[(0, 0), (0, 2)]));
@@ -8201,7 +7838,6 @@ mod tests {
             assert_eq!(list.len(), 1, "{a:?}→{b:?}: the two runs became one");
             assert_eq!(xs(&list[0]), want, "{a:?}→{b:?}");
             assert!(!list[0].closed, "a splice leaves the run open");
-            // The seam names the segment leaving the head's last anchor.
             assert_eq!(seam, (0, 2), "{a:?}→{b:?}");
         }
     }
@@ -8247,7 +7883,6 @@ mod tests {
     fn reversing_a_subpath_flips_its_winding_and_leaves_the_others_alone() {
         use ondin_core::kurbo::Shape;
 
-        // A square ring with a smaller one inside it wound the same way.
         let ring = |x: f64, y: f64, w: f64| PenSubpath {
             anchors: vec![
                 PenAnchor::corner(Point::new(x, y)),
@@ -8281,7 +7916,6 @@ mod tests {
             inner1.abs()
         );
         assert_eq!(outer1, outer0, "the run nobody named was turned round too");
-        // The third corner of four is now the second, and the radii list is trimmed.
         assert_eq!(subs[1].anchors[1].radius, 6.0, "the radius left its corner");
         assert_eq!(pen_radii(&subs), vec![0.0, 0.0, 0.0, 0.0, 0.0, 6.0]);
     }
@@ -8295,7 +7929,7 @@ mod tests {
         );
         assert!(subpaths_touched(&[]).is_empty());
     }
-    // --- placing an image (§5.5a, §15 D177) ----------------------------------
+    // --- placing an image (§5.5a) --------------------------------------------
 
     fn entry_of(w: u32, h: u32) -> ImageEntry {
         ImageEntry {
@@ -8311,7 +7945,6 @@ mod tests {
     fn a_placed_image_shrinks_to_fit_and_is_never_scaled_up() {
         let frame = Size::new(1000.0, 800.0);
 
-        // Smaller than the frame, and exactly the frame: untouched.
         assert_eq!(
             fitted_image_size(Size::new(32.0, 32.0), frame),
             Size::new(32.0, 32.0)
@@ -8321,7 +7954,6 @@ mod tests {
         let wide = fitted_image_size(Size::new(4000.0, 2000.0), frame);
         assert_eq!(wide, Size::new(1000.0, 500.0));
 
-        // Taller than the frame: the height is the binding constraint.
         let tall = fitted_image_size(Size::new(1000.0, 4000.0), frame);
         assert_eq!(tall, Size::new(200.0, 800.0));
         assert!(
@@ -8395,8 +8027,7 @@ mod tests {
     }
 
     /// `create_polygon` and `create_star` clamp their count at the commit door as
-    /// `step_sides` does at the keyboard door, so the model never holds a count the draw
-    /// silently clamps. Both are driven since they use different fields (`sides`, `points`).
+    /// `step_sides` does at the keyboard door. Both are driven: different fields.
     ///
     /// flip: delete either `clamp` → fails at that builder's out-of-range case
     #[test]
@@ -8515,7 +8146,6 @@ mod tests {
             Color::BLACK,
         );
         match made(&tx) {
-            // Corners given the other way round give the same box.
             NodeKind::Ellipse { size } => assert_eq!(size, Size::new(50.0, 300.0)),
             other => panic!("create_ellipse makes an ellipse, not {other:?}"),
         }
@@ -8641,7 +8271,6 @@ mod guide_scale_tests {
     /// axis's factor, not the geometric mean, which would drift a guide off its feature.
     #[test]
     fn the_scale_tool_multiplies_a_frames_guides_and_a_resize_does_not() {
-        // 400x200 -> 800x200: sx = 2, sy = 1, so the mean would be wrong for both guides.
         let corner = Point::new(800.0, 200.0);
 
         let (mut doc, res, frame, down, across) = framed_guides();
@@ -9145,7 +8774,6 @@ mod unrepresentable_basis_tests {
             turned.0
         );
 
-        // The multi-select drag: the rank-1 member sits it out.
         let mut doc = doc.clone();
         let union = [a, b]
             .iter()
@@ -9329,7 +8957,6 @@ mod side_shear_tests {
         let box_ = Rect::new(0.0, 0.0, 200.0, 120.0);
         for handle in Handle::EDGES {
             let press = grip(box_, handle);
-            // Twenty units along the side's own length, well inside the clamp.
             let at = match handle {
                 Handle::Top | Handle::Bottom => press + Vec2::new(20.0, 0.0),
                 _ => press + Vec2::new(0.0, 20.0),
@@ -9344,7 +8971,6 @@ mod side_shear_tests {
                 "{handle:?}: the held side moved, by {:?}",
                 still - held
             );
-            // The grabbed corner travels the drag's own displacement.
             let want = at - press;
             let moved = shear * grabbed;
             assert!(
@@ -9376,8 +9002,8 @@ mod side_shear_tests {
             .expect("an edge shears")
         };
 
-        // 40 across a 120 drop is atan(1/3) = 18.43°. The sign is asserted: the top span is
-        // −120, so a rightward drag is a negative `skew_x`, and magnitude alone would pass a wrong lean.
+        // 40 across a 120 drop is atan(1/3) = 18.43°. The sign is asserted: a rightward
+        // drag is a negative `skew_x` here, and magnitude alone would pass a wrong lean.
         assert!(
             (lean_of(drag(40.0, false)).to_degrees() + 18.4349).abs() < 1e-3,
             "the fixture's own angle moved: {}",

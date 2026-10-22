@@ -1,45 +1,17 @@
-//! **The writer and the reader are inverse functions in two crates, and this is the
-//! only thing that binds them.**
+//! The writer (`ondin_export::svg`) and the reader (`ondin_core::svg_in`) are
+//! inverse functions in two crates, and this file is what binds them: neither
+//! crate's own tests notice when one grows an attribute the other does not know.
 //!
-//! `ondin_export::svg` writes the markup and `ondin_core::svg_in` reads it; nothing
-//! the compiler does will notice when one grows an attribute the other does not
-//! know, and neither crate's own tests can — the writer's assert on substrings and
-//! the reader's on hand-written fixtures, so both stay green while they drift apart.
-//! What fails here is exactly that drift.
+//! Asserted as geometry relative to the set's own bounding box, not as bytes: the
+//! writer frames its output on a `viewBox` from world bounds, so the drawing may
+//! arrive at a different origin.
 //!
-//! **Asserted as geometry rather than as bytes**, and relative to the set's own
-//! bounding box rather than absolutely: the writer frames its output on a `viewBox`
-//! computed from world bounds, so the whole drawing may legitimately arrive at a
-//! different origin. What must survive is every shape's size and its position
-//! *relative to the others* — which is what a user would call "the same picture".
+//! One asymmetry is deliberate: a `Polygon` or `Star` is written as `<polygon>` and
+//! comes back as a `Path`, since reading every point list as a regular *n*-gon would
+//! turn an arbitrary outline into a hexagon.
 //!
-//! ⚠️ **One asymmetry is deliberate and is asserted here rather than excused
-//! elsewhere**: a `Polygon` or `Star` is written as `<polygon>` and comes back as a
-//! `Path`. `NodeKind::Polygon` is a regular *n*-gon with a radius, so reading every
-//! point list back as one would turn an arbitrary outline into a hexagon. The
-//! geometry round-trips; the kind does not.
-//!
-//! 🚨 **One test in this file is not a binding, and the count is what made that
-//! invisible** (§15 D650, `[A5-L6-05]`).
-//! `an_imported_clip_path_is_empty_outside_the_clip` takes **hand-authored**
-//! markup and never calls `svg_of`; it is a *renderer* test, and honest as one —
-//! its own doc says so — but it was being read as this suite's clip coverage,
-//! which it cannot be. **Both sides of a hand-written fixture agree about what SVG
-//! looks like**, so the only thing that can disagree with you is the writer's own
-//! output. `the_writers_own_clip_spelling_round_trips` is the binding it was
-//! standing in for. The lesson generalises past clips: *a test in this file that
-//! does not call `svg_of` is not one of the things that binds*, however much its
-//! name reads like it.
-//!
-//! **Flipped twice, and each flip bit exactly one test.** ⚠️ *Recorded when this
-//! file held four tests, and left in the tense it was written in rather than
-//! re-run over sixteen.* Making the reader ignore every element `transform` fails
-//! the arrangement test at shape 0 — the rect arrives at (-10, -10) instead of
-//! (10, 10) — and left the other three green. Making it ignore `fill-rule` failed
-//! the exclusion test and nothing else. *Neither flip was caught by the group
-//! test*, which asserts opacity and no placement at all, and that is the shape to
-//! remember: four round-trip tests overlapped much less than four round-trip
-//! tests sound like they would.
+//! A test here that does not call `svg_of` is not a binding: hand-written markup
+//! agrees with the reader about what SVG looks like.
 
 mod common;
 
@@ -109,14 +81,8 @@ fn close(a: Rect, b: Rect) -> bool {
 }
 
 /// Four shapes at four different places, one per emitter in the writer: a rounded
-/// rect, a circle, a diagonal line and a closed triangle.
-///
-/// **Built here rather than taken from `common::fixture`**, and the reason is what
-/// the first draft of this file got wrong: exporting the shared fixture's *artboard*
-/// brings its background `<rect>` and its `<text>` along, so the imported set is
-/// neither the same length nor in the same order as the original, and the comparison
-/// quietly softens into "some shapes arrived somewhere". A set exported by id has no
-/// extras in it.
+/// rect, a circle, a diagonal line and a closed triangle. Not `common::fixture`,
+/// whose artboard export brings a background `<rect>` and a `<text>` along.
 fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
     let mut ids = IdSource::new(0x4444);
     let root = ids.mint();
@@ -196,18 +162,13 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
     (doc, res, vec![rect, circle, line, tri])
 }
 
-/// **Four shapes out, four shapes back, each the same size in the same place
-/// relative to the others.**
+/// Four shapes out, four back, each the same size in the same place relative to
+/// the others. The arrangement claim catches an importer that dropped a
+/// translation while every size still matched. The 0.02 tolerance is needed
+/// because the writer formats coordinates as decimal text.
 ///
-/// Four emitters in the writer and four arms in the reader, so a break in any one
-/// of them fails here alone — and the *arrangement* claim is what a single-shape
-/// test cannot make: the four are at four corners of the drawing, so an importer
-/// that dropped a translation would put them on top of each other while every size
-/// still matched.
-///
-/// ⚠️ **The tolerance is 0.02 and it is doing real work.** The writer formats
-/// coordinates as decimal text, so the trip is lossy by construction — an exact
-/// comparison would be a test of the number formatter rather than of the mapping.
+/// flip: the reader ignoring element `transform` → fails at shape 0 (the rect
+/// arrives at (-10, -10) instead of (10, 10)).
 #[test]
 fn the_four_shape_emitters_round_trip_with_their_arrangement() {
     let (doc, res, ids) = four_shapes();
@@ -226,8 +187,7 @@ fn the_four_shape_emitters_round_trip_with_their_arrangement() {
             "shape {i} moved or resized: {a:?} against {b:?}"
         );
     }
-    // And the kinds that *can* survive do. A rect that came back as a path would
-    // pass every assertion above and be a worse layer to edit.
+    // The kinds that can survive do; a rect back as a path would pass the above.
     assert!(matches!(
         back.get(got[0]).unwrap().kind(),
         NodeKind::Rect { .. }
@@ -246,10 +206,8 @@ fn the_four_shape_emitters_round_trip_with_their_arrangement() {
     ));
 }
 
-/// **A group's opacity and transform survive as a group's**, which is the reason the
-/// writer nests at all: `opacity` on a `<g>` composites the group as a unit, and a
-/// reader that flattened it would fade each child separately and draw the overlap
-/// twice as dark.
+/// A group's opacity survives as the group's: `opacity` on a `<g>` composites the
+/// group as a unit, and flattening it would draw the overlap twice as dark.
 #[test]
 fn a_group_keeps_its_opacity_rather_than_fading_each_child() {
     let mut ids = IdSource::new(0x9999);
@@ -306,12 +264,10 @@ fn a_group_keeps_its_opacity_rather_than_fading_each_child() {
     }
 }
 
-/// **An exclusion round-trips as an even-odd path**, which is the newest thing in
-/// this pair and the one most likely to be lost on either side (§15 D239).
+/// An exclusion round-trips as an even-odd path; a reader ignoring `fill-rule`
+/// would fill the hole. Asserted as the hole, not as the attribute.
 ///
-/// The writer gained `fill-rule="evenodd"` hours before the reader existed, and a
-/// reader that ignored the attribute would produce a *union* — a filled square where
-/// the file says there is a hole. Asserted as the hole, not as the attribute.
+/// flip: the reader ignoring `fill-rule` → fails here and in no other test.
 #[test]
 fn an_exclusion_comes_back_with_its_hole() {
     let mut ids = IdSource::new(0x0DD);
@@ -378,8 +334,7 @@ fn an_exclusion_comes_back_with_its_hole() {
     let NodeKind::Path { path, .. } = back.get(id).unwrap().kind() else {
         panic!("an exclusion is a path once it is written out")
     };
-    // The overlap is the hole. Sampled in the path's own space, which the writer
-    // wrote in local coordinates and the reader read back the same way.
+    // The overlap is the hole, sampled in the path's own local space.
     let bounds = ondin_core::kurbo::Shape::bounding_box(path);
     let mid = Point::new(bounds.center().x, bounds.center().y);
     assert!(
@@ -392,21 +347,12 @@ fn an_exclusion_comes_back_with_its_hole() {
     );
 }
 
-/// **An imported `clip-path` is empty outside the clip, on screen.**
+/// An imported `clip-path` is empty outside the clip, on screen. This is a renderer
+/// test on hand-written markup, not a writer binding; the inside is asserted red
+/// first so an import with no ink cannot pass vacuously.
 ///
-/// The core tests assert the *structure* — a wrapper group with a mask node under
-/// its content — and structure cannot see the renderer ignoring the flag, putting
-/// the run in the wrong order, or clipping to the wrong box. This is the layer where
-/// "there is a mask node in the tree" becomes "the ink stops", and it is the same
-/// gap `boolean.rs`'s four pixel tests exist to close.
-///
-/// **The fixture is asserted before the claim**: the inside has to be red, or "the
-/// outside is transparent" passes over an import that produced no ink at all — the
-/// way this test would most plausibly be vacuous.
-///
-/// ⚠️ **Flipped by dropping the `SetMask` operation**, where (60, 60) comes back
-/// `[255, 0, 0, 255]` — the fill colour spread over the whole square, which is the
-/// unclipped picture in as many words.
+/// flip: dropping the `SetMask` operation → fails at the (60, 60) assertion, which
+/// comes back `[255, 0, 0, 255]`.
 #[test]
 fn an_imported_clip_path_is_empty_outside_the_clip() {
     let (doc, _) = reimport(
@@ -442,19 +388,9 @@ fn an_imported_clip_path_is_empty_outside_the_clip() {
     );
 }
 
-/// **Text comes back as text, and its baseline lands where the writer put it.**
-///
-/// ⚠️ **This test used to assert the opposite** — it was written as
-/// `text_is_the_one_thing_the_round_trip_still_loses`, recording the gap where the
-/// gap was so that closing it would be a *failing test* rather than an act of
-/// memory. It failed the day text import landed, which is the whole return on
-/// writing a test for something that does not work yet.
-///
-/// **What still does not round-trip is the paragraph, not the text.** The writer
-/// emits one `<text>` per *line* at a baseline the canvas computed (§15 D81), and
-/// nothing in the markup says those lines were one node — so a two-line text layer
-/// comes back as two layers in the right places. *The picture closes; the structure
-/// does not*, and that is asserted here rather than left to be discovered.
+/// Text comes back as text with its baseline where the writer put it; a paragraph
+/// comes back as lines, since the writer emits one `<text>` per line and nothing
+/// in the markup says they were one node. The picture closes; the structure does not.
 #[test]
 fn text_round_trips_as_text_but_a_paragraph_comes_back_as_lines() {
     let f = common::fixture();
@@ -475,12 +411,9 @@ fn text_round_trips_as_text_but_a_paragraph_comes_back_as_lines() {
 
     let before = f.res.world_bounds(f.text).expect("the text has bounds");
     let (_, union) = boxes(&doc, &texts);
-    // ⚠️ **Size, not position, and the reason is in this file's own header**: the
-    // writer frames its output on a `viewBox` computed from world bounds, so the
-    // drawing legitimately arrives at a different origin — and with a *single* layer
-    // the "relative to the union" comparison the other tests use is trivially (0, 0)
-    // and asserts nothing. What is left that has teeth is the box's own size, which
-    // is where a dropped `font-size` or a baseline read as a box top would show.
+    // Size, not position: the origin legitimately moves, and with one layer the
+    // relative-to-union comparison is trivially (0, 0). A dropped `font-size` or a
+    // baseline read as a box top shows in the size.
     assert!(
         (union.width() - before.width()).abs() < 2.0
             && (union.height() - before.height()).abs() < 2.0,
@@ -488,29 +421,13 @@ fn text_round_trips_as_text_but_a_paragraph_comes_back_as_lines() {
     );
 }
 
-/// **Two different weights reach a fixed point in one cycle, on SVG's initial 400 —
-/// not on the first run's weight** (§15 D398).
-///
-/// ⚠️ **This was written down as a *reading* first and the reading was wrong**, which
-/// is why it is a test. The prediction was "cycle 1 keeps the first run's weight with
-/// a span for the other; cycle 2 moves the node to the element default" — two cycles,
-/// with the node passing through the authored weight. What the code does is neither:
-/// `svg::run_attrs` puts every font property on the `<tspan>`s and states none of them
-/// on the `<text>`, so on re-import `run_style.weight` is `Style::default()`'s **400**
-/// for our own output; *both* runs differ from it, both mint spans, neither covers the
-/// whole content, so neither is hoisted (§15 D398) and the node lands on 400 in **one**
-/// cycle.
-///
-/// It renders identically at every step, and the *styling* is a fixed point from
-/// cycle 2. ⚠️ **The markup is not** — I asserted byte-identity here first and it
-/// failed on two things that have nothing to do with weights: the `viewBox` and
-/// `transform` move, the writer framing on world bounds; and `fill` stops being
-/// written on every `<tspan>`, because the run colours were hoisted onto the node.
-/// The assertion is on the node's weight and its span boundaries instead, which is
-/// the claim this test is actually about.
-///
-/// *Revisit if the writer ever states a font property on the `<text>` element*, which
-/// would make cycle 1 an identity and this test's name wrong.
+/// Two different weights settle on SVG's initial 400 in one cycle, not on either
+/// run's weight: `svg::run_attrs` puts every font property on the `<tspan>`s and
+/// none on the `<text>`, so on re-import both runs differ from 400, both mint spans,
+/// neither covers the content and neither is hoisted. The markup is not byte-stable
+/// across cycles (`viewBox`, `transform`, `fill` on tspans move), so the assertion
+/// is on the node's weight and span boundaries. If the writer ever states a font
+/// property on `<text>`, cycle 1 becomes an identity and this name is wrong.
 #[test]
 fn two_weights_settle_on_the_element_default_rather_than_on_either_run() {
     use ondin_core::{CharAttr, CharSpans};
@@ -563,15 +480,8 @@ fn two_weights_settle_on_the_element_default_rather_than_on_either_run() {
         "both runs mint a span, neither covers everything, so neither is hoisted"
     );
 
-    // Cycle 2: the *styling* is a fixed point from here — same node weight, same two
-    // spans. ⚠️ **The markup is not byte-identical, and asserting that it was is what
-    // this comment is for.** Two things legitimately move and neither is about
-    // weights: the `viewBox` and the `transform`, because the writer frames on world
-    // bounds and the re-imported node sits at a different origin (this file's own
-    // header); and `fill`, which the first pass emits on the `<text>` *and* on every
-    // `<tspan>` and the second emits only on the `<text>` — the run colours having
-    // been hoisted onto the node (§15 D398), which is the hoist doing its job one
-    // cycle later on a different attribute than the one it was written for.
+    // Cycle 2: the styling is a fixed point from here (same weight, same spans),
+    // though the markup is not byte-identical.
     let res2 = Resolved::rebuild(&doc);
     let (doc3, ids3) = reimport(&svg_of(&doc, &res2, &[text]));
     let text3 = ids3
@@ -595,22 +505,11 @@ fn two_weights_settle_on_the_element_default_rather_than_on_either_run() {
     );
 }
 
-/// **A two-colour line comes back as one node with its colour span intact**, which
-/// is the half of the text round trip that used to be a report rather than a
-/// drawing.
-///
-/// The writer emits one `<tspan>` per *style run* (§15 D81) and the run's colour is
-/// what §15 D154 put on it; the reader now folds an unpositioned `<tspan>`'s fill
-/// back into `CharSpans`. **This test is the only thing that binds those two**, and
-/// it is worth a whole test rather than an assertion on the one above because the
-/// two halves live in different crates and neither's own suite can see the seam.
-///
-/// ⚠️ **The fixture's content is `Hi <there>`, and the angle brackets are the
-/// point.** The writer escapes them to `&lt;`/`&gt;`, so the coloured run starts at
-/// byte 3 of the *content* and byte 3 of the *markup* is a different character
-/// entirely. A reader that counted markup bytes would come back colouring `t;there`
-/// and pass every assertion about there being a span at all — so the range is
-/// asserted exactly, and the content it indexes is asserted first.
+/// A two-colour line comes back as one node with its colour span intact: the
+/// writer emits one `<tspan>` per style run and the reader folds its fill back into
+/// `CharSpans`. The content is `Hi <there>` so the escaped `&lt;`/`&gt;` make
+/// content offsets differ from markup offsets; a reader counting markup bytes would
+/// colour `t;there`, so the range is asserted exactly.
 #[test]
 fn a_runs_colour_survives_the_round_trip_where_its_paragraph_does_not() {
     use ondin_core::{CharAttr, CharSpans};
@@ -646,8 +545,6 @@ fn a_runs_colour_survives_the_round_trip_where_its_paragraph_does_not() {
     let NodeKind::Text { content, spans, .. } = doc.get(text).unwrap().kind() else {
         panic!("a Text node")
     };
-    // Assert the fixture is in the state the range is about, or the range is
-    // about nothing.
     assert_eq!(content, "Hi <there>", "the entities decoded");
     let list = spans.as_slice();
     assert_eq!(list.len(), 1, "one colour span came back: {list:?}");
@@ -666,41 +563,19 @@ fn a_runs_colour_survives_the_round_trip_where_its_paragraph_does_not() {
     );
 }
 
-/// **A rail round-trips: type on a path comes back on the same path** (§15 D406).
-///
-/// **The gap this closes was named on the day the writer opened it** (§15 D405):
-/// `<textPath>` was emitted and not read, so type on a curve went out and came back
-/// as *nothing*. That is the worse of the two failure modes — worse than coming back
-/// straight, because a straight line at least tells you where the layer is.
-///
-/// Three claims, and they fail in three different ways:
-///
-/// - **It comes back as one text node carrying a rail.** A reader that skipped
-///   `<textPath>` and read the `<text>` around it would produce a straight layer at
-///   the origin, which is the plausible wrong answer.
-/// - **The picture is the same size *and in the same place*.** The rail is the
-///   node's geometry now, so the box is the ribbon it sweeps.
-///   ⚠️ **The rect is exported alongside the text for the position half, and it is
-///   not decoration**: with a single layer the "relative to the union" comparison
-///   this file is built on is trivially `(0, 0)` and asserts nothing, which is
-///   exactly what the older text round-trip says about itself. The failure it buys
-///   is the one a size assertion cannot see — the baseline translate left on top of
-///   a rail, which moves the layer by an ascent and resizes it by nothing.
-/// - **The `d` survives exactly.** Asserted on the geometry rather than the markup
-///   because the writer's `viewBox` legitimately moves everything, per this file's
-///   header.
+/// A rail round-trips: type on a path comes back on the same path, as one text
+/// node carrying the rail, the same size, in the same place and with the same curve.
+/// The rect is exported alongside so the position comparison is not trivially
+/// `(0, 0)`; it catches the baseline translate left on top of a rail, which moves
+/// the layer by an ascent and resizes it by nothing.
 #[test]
 fn type_on_a_rail_round_trips_as_type_on_the_same_rail() {
     use ondin_core::kurbo::{BezPath, Shape};
     use ondin_core::{GeometryPatch, Operation, Transaction};
 
-    // ⚠️ **The rail starts well away from the node's own origin on purpose.** A rail
-    // through `(0, 0)` puts the first glyph's baseline at `y ≈ 0`, which is what the
-    // *flat* placement arithmetic reads as the ascent — so leaving that arithmetic
-    // on top of a rail moves the layer by about one unit and every tolerance in this
-    // file swallows it. Measured: with the bug in, a rail from the origin drifts by
-    // (1.0, 0.4) and this rail by an ascent. **A fixture that does not reach the
-    // failure is the commonest way a round-trip test passes for the wrong reason.**
+    // The rail starts well away from the node's origin on purpose: through `(0, 0)`
+    // the flat placement arithmetic's ascent drifts by about one unit, which every
+    // tolerance here swallows.
     let mut rail = BezPath::new();
     rail.move_to((10.0, 60.0));
     rail.curve_to((50.0, 30.0), (120.0, 90.0), (160.0, 60.0));
@@ -715,7 +590,7 @@ fn type_on_a_rail_round_trips_as_type_on_the_same_rail() {
     let res = Resolved::rebuild(&f.doc);
     let before = res.world_bounds(f.text).expect("a railed box");
 
-    // Two layers, so position is comparable at all — see the doc.
+    // Two layers, so position is comparable at all.
     let out = svg_of(&f.doc, &res, &[f.text, f.rect]);
     assert!(out.contains("<textPath"), "the writer emits it: {out}");
     let (was, was_union) = boxes(&f.doc, &[f.text, f.rect]);
@@ -762,19 +637,10 @@ fn type_on_a_rail_round_trips_as_type_on_the_same_rail() {
     let _ = before;
 }
 
-/// **A flipped rail round-trips as the same *drawing*, and deliberately not as the
-/// same *spelling*** (§15 D406).
-///
-/// The writer has no way to say "the other side" that every viewer honours — SVG 2's
-/// `side="right"` is unevenly implemented — so it writes the rail **reversed**,
-/// which is exactly what our own flip means (`text::PathWarp::flip` traverses
-/// backwards) and which every SVG renderer since 1.1 gets right. The reader then
-/// sees a reversed rail with no flag.
-///
-/// ⚠️ **So the assertion is on the ink and not on the flag**, and asserting on the
-/// flag is the mistake this doc exists to stop the next reader making: `on_path_flip`
-/// comes back `false` and that is correct. What must survive is where the letters
-/// are, which is what a user would call the same picture.
+/// A flipped rail round-trips as the same drawing, not the same spelling: SVG 2's
+/// `side="right"` is unevenly implemented, so the writer writes the rail reversed
+/// (what `text::PathWarp::flip` means) and the reader sees a reversed rail with no
+/// flag. `on_path_flip` comes back `false` and the assertion is on the box.
 #[test]
 fn a_flipped_rail_round_trips_as_the_same_drawing() {
     use ondin_core::kurbo::BezPath;
@@ -808,8 +674,6 @@ fn a_flipped_rail_round_trips_as_the_same_drawing() {
             .filter(|id| matches!(doc.get(*id).unwrap().kind(), NodeKind::Text { .. }))
             .collect();
         assert_eq!(texts.len(), 1, "one layer: {out}");
-        // The flag is *not* asserted — see the doc. What is asserted is that the
-        // box the reader produces matches the one the writer started from.
         let (_, union) = boxes(&doc, &texts);
         assert!(
             (union.width() - before.width()).abs() < 2.0
@@ -819,10 +683,8 @@ fn a_flipped_rail_round_trips_as_the_same_drawing() {
         before
     };
 
-    // And the two are genuinely different pictures to begin with, or the assertion
-    // above is being made twice about one thing. A flip on this rail moves the type
-    // to the other side of a curve that is not symmetric about it, so the boxes
-    // differ.
+    // The two must be different pictures to begin with: the rail is not symmetric,
+    // so a flip moves the boxes.
     let (plain, flipped) = (sized(false), sized(true));
     assert!(
         (plain.y0 - flipped.y0).abs() > 1.0 || (plain.y1 - flipped.y1).abs() > 1.0,
@@ -831,20 +693,9 @@ fn a_flipped_rail_round_trips_as_the_same_drawing() {
     );
 }
 
-/// **A rail's start offset survives the round trip, as `startOffset` in percent**
-/// (§15 D409).
-///
-/// **The writer already had a percentage and the reader was throwing it away.**
-/// `startOffset` was emitted from the alignment alone and read back only to be
-/// checked against `text-anchor` and reported as approximate; now the model has a
-/// field for "the type starts a third of the way along", both sides carry it.
-///
-/// ⚠️ **The anchor is *not* folded in, and asserting both is the point.** They say
-/// different things — the anchor is how the text sits about a point on the rail,
-/// the offset is which point — so a centred node offset by a quarter writes `75%`
-/// with `middle` rather than an absolute start with `text-anchor="start"`. Folding
-/// them would give up the one robustness the percentage buys: a viewer whose
-/// shaping differs still centres the text on the same spot.
+/// A rail's start offset survives the round trip as `startOffset` in percent. The
+/// anchor is not folded in: it is how the text sits about a point, the offset is
+/// which point, so a viewer whose shaping differs still centres on the same spot.
 #[test]
 fn a_rails_start_offset_round_trips_as_a_percentage() {
     use ondin_core::kurbo::BezPath;
@@ -895,26 +746,11 @@ fn a_rails_start_offset_round_trips_as_a_percentage() {
     );
 }
 
-/// **A radial gradient's focal point survives the round trip** (§15 D413).
+/// A radial gradient's focal point (SVG `fx`/`fy`, peniko `start_center`) survives
+/// the round trip, asserted as the offset from the centre rather than a coordinate.
 ///
-/// The focal circle is SVG's `fx`/`fy` and peniko's `start_center` — the point the
-/// ramp radiates *from*, which is what makes a sphere read as lit from one side
-/// rather than as a flat target. The writer emits it and the reader defaults it to
-/// `cx`/`cy` when absent, and **nothing in the workspace asserted either half**
-/// until 2026-09-03, which is how `paint::with_radial_centre` came to discard it in
-/// the panel with every gate green.
-///
-/// ⚠️ **Asserted as the offset from the centre, not as a coordinate.** The writer
-/// frames its output on a `viewBox` computed from world bounds, so the pair may
-/// legitimately arrive somewhere else on the page; what must survive is where the
-/// highlight sits *relative to the ramp it belongs to*. That is the same rule this
-/// file's head states for shapes, applied inside one paint.
-///
-/// **Flipped** against the plausible wrong writer — `fx`/`fy` emitted from
-/// `end_center`, which is a copy-paste away and is also what someone would write
-/// believing the focal point defaults to the centre — and it fails on the offset
-/// assertion. Note the `fx=`/`fy=` *presence* check above cannot catch that one: the
-/// attributes are still there, carrying the wrong point.
+/// flip: the writer emitting `fx`/`fy` from `end_center` → fails at the offset
+/// assertion (the `fx=`/`fy=` presence check cannot see it).
 #[test]
 fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
     use ondin_core::peniko::{Gradient, GradientKind, RadialGradientPosition};
@@ -981,19 +817,11 @@ fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
     );
 }
 
-/// **An elliptical radial gradient survives the round trip** (§15 D412), which is
-/// the two-sided half of that change: the writer has to emit `gradientTransform`
-/// and the reader has to keep the squash off the two circles.
-///
-/// ⚠️ **It closes a loop that was previously *reported* as lossy in one direction
-/// and silently lossy in the other.** `svg_in` used to approximate an ellipse to a
-/// circle and say so; the writer had no `gradientTransform` at all, so a gradient
-/// that had somehow acquired a squash would have gone out round with nothing said.
-/// Only a round trip can fail on the second half.
-///
-/// The document is built with the transform directly rather than imported, so this
-/// is about the writer and the reader rather than about `svg_in`'s baking rule —
-/// `a_squashed_radial_gradient_is_exact_rather_than_drawn_round` covers that.
+/// An elliptical radial gradient survives the round trip: the writer emits
+/// `gradientTransform` and the reader keeps the squash off the two circles. The
+/// transform is built directly, not imported;
+/// `a_squashed_radial_gradient_is_exact_rather_than_drawn_round` covers `svg_in`'s
+/// baking rule.
 #[test]
 fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
     use ondin_core::GradientBrush;
@@ -1052,9 +880,7 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
     else {
         panic!("still a gradient fill");
     };
-    // The two circles must be *unmapped*: a reader that folded the squash into
-    // them would give back a round gradient of some averaged radius, which is
-    // exactly what the import used to do and report.
+    // The two circles must be unmapped, not averaged into a round gradient.
     let ondin_core::peniko::GradientKind::Radial(r) = g.gradient.kind else {
         panic!("still radial");
     };
@@ -1070,29 +896,11 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
     );
 }
 
-/// **An effect stack survives the round trip**, which nothing in this file asserted
-/// until 2026-09-03 and which no gate could have noticed (§15 D411).
-///
-/// The writer emits a whole `<filter>` graph for every stack — a `feColorMatrix`
-/// silhouette, an optional `feMorphology`, an `feOffset`, an optional
-/// `feGaussianBlur`, then `feFlood` + `feComposite` — and the reader accepted a
-/// `<filter>` that was exactly one `<feGaussianBlur>` and nothing else. So every
-/// shadow and every adjustment this app exported came back as nothing, reported as
-/// `skipped: ["filter"]` and therefore honest, but *lost*. **The round trip was the
-/// only thing that could have said so, and it had no effect coverage at all.**
-///
-/// Asserted as the model's own stack rather than as markup: what a user means by
-/// "the shadow survived" is a `DropShadow` with their offset, blur and colour on it.
-///
-/// ⚠️ **The effect comes back on a *group*, not on the shape, and that asymmetry is
-/// deliberate on both sides** — the same shape as the `<polygon>`-becomes-`Path` one
-/// this file's head already records. The writer wraps a filtered node in
-/// `<g filter="url(#…)">` rather than putting the attribute on the element, because
-/// a stack applies to a container exactly as it does to a shape and one spelling
-/// serves both; the reader then faithfully reads the group it is given. So the
-/// picture round-trips and the tree gains a level. Asserted as *which* node carries
-/// it — exactly one — rather than as the shape's own stack, which would demand a
-/// collapse the reader has no business doing.
+/// An effect stack survives the round trip, asserted as the model's own stack (a
+/// `DropShadow` with its offset, blur and colour) rather than as markup. The effect
+/// comes back on a group, not the shape, deliberately on both sides: the writer
+/// wraps a filtered node in `<g filter="url(#…)">` and the reader reads the group
+/// it is given, so the assertion is that exactly one node carries it.
 #[test]
 fn an_effect_stack_round_trips_as_the_same_stack() {
     use ondin_core::{Effect, EffectKind, Shadow};
@@ -1160,70 +968,18 @@ fn an_effect_stack_round_trips_as_the_same_stack() {
     );
 }
 
-/// **A picture round-trips into nothing, and the suite is where that gets
-/// recorded** (§15 D477).
+/// A picture round-trips into nothing, and the loss is reported: the writer emits
+/// an image fill as a `<pattern>` and the reader has no pattern support, so this
+/// pins that `skipped` names the pattern, that the artboard's own `<clipPath>` is
+/// not falsely listed as skipped, and that the shape is unpainted rather than an
+/// opaque black rectangle. It does not assert the picture survives.
 ///
-/// `[A5-L6-01]`. This module's header calls itself *"the only thing that binds"*
-/// the writer and the reader, and it had no image case — each side had its own
-/// green test on its own hand-written fixture (`svg::an_image_fill_exports_as_a_
-/// pattern_over_the_encoded_original` and `svg_in::an_image_becomes_a_rect_with_
-/// an_image_fill`) and **nothing composed them**. `svg_in`'s own module doc names
-/// this hazard verbatim: *"the two mappings can drift, and nothing the compiler
-/// does will say so — what binds them is the round-trip test in
-/// `ondin-export/tests/svg_roundtrip.rs`."*
+/// The artboard `<clipPath>` comes back as a mask node carrying SVG's initial
+/// black, harmless as a mask paints nothing, so the picture's rect is found by
+/// size rather than by sweeping every node.
 ///
-/// The writer emits an image fill as `<pattern><image href="data:…"/></pattern>`
-/// and points the shape at it; the reader has **no `<pattern>` support at all** —
-/// `Gradients::collect` keys `by_id` on `linearGradient`/`radialGradient` and
-/// `clips` on `clipPath`/`mask`, and `parse_paint` has no arm for a pattern. So
-/// the picture does not come back, and before this it did not come back
-/// **silently**: measured, the re-imported rect held one *solid black* fill, the
-/// document held **0 images**, and the image was on neither report list.
-///
-/// ⚠️ **This test does not assert that the picture survives, because it does
-/// not.** Reading a pattern back is a new paint-server kind in the reader and is
-/// left to whoever writes it — which is exactly the practice §15 D411 set and
-/// `text_round_trips_as_text_…` records: *"recording the gap where the gap was so
-/// that closing it would be a failing test rather than an act of memory."* What
-/// it asserts is the two things that were also wrong and are cheap:
-///
-/// 1. **The loss is reported.** `svg_in`'s header forbids the alternative —
-///    *"nothing is lost silently — a paste that quietly loses half a drawing is
-///    worse than one that refuses"* — and `skipped` now names the pattern.
-/// 2. **The shape is unpainted rather than an opaque black rectangle** — which it
-///    already was, and that is the finding's one claim that does not survive
-///    checking. See the ⚠️ below.
-///
-/// ⚠️ **And `skipped` carried a false positive**, which is the third thing here:
-/// the writer emits its artboard `<clipPath>` at top level rather than inside
-/// `<defs>`, so the walk reached it through the unknown-element arm and reported
-/// it **skipped** — when `Gradients::collect` had already registered it and the
-/// clip round-tripped perfectly. A false positive on that list is worse than a
-/// missing entry: the list is the one thing telling a user what a paste lost, and
-/// an item on it that was not lost teaches them not to read it. `clipPath` and
-/// `mask` are definitions wherever they sit and the walk skips them silently now.
-///
-/// ⚠️ **The "opaque black rectangle" does not reproduce, and a one-word fix for
-/// it was written and taken back out.** `svg_in::parse_paint` returns `None` for
-/// a `url(…)` it cannot resolve, so `style.fill` becomes `None` and the shape is
-/// **unpainted** — no black anywhere near it. A ` none` fallback after the
-/// reference was added to `paint_attr` on the finding's reading, and the flip
-/// showed it changing nothing; measured in Chrome over HTTP to be sure the
-/// finding was not right about *browsers* where it was wrong about this reader,
-/// `<rect fill="url(#nope)"/>` and `<rect fill="url(#nope) none"/>` both paint
-/// **0** black pixels. It was reverted rather than kept on "some other renderer
-/// might".
-///
-/// **The black the finding saw is almost certainly the artboard `<clipPath>`'s own
-/// rect**, which comes back as a **mask node** carrying SVG's initial black
-/// because the writer gives it no `fill` — harmless, since a mask paints nothing.
-/// A whole-tree sweep for black finds it, which is why this test looks the
-/// picture's rect up by size, and why the first draft of it failed for that
-/// reason.
-///
-/// **Flipped** at each surviving half. Dropping the `patterns` report fails the
-/// `skipped` assertion. Putting `clipPath` back on the walked list fails the
-/// false-positive assertion.
+/// flip: dropping the `patterns` report → fails at the `skipped` assertion;
+/// putting `clipPath` back on the walked list → fails at the false-positive one.
 #[test]
 fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
     use ondin_core::{
@@ -1282,7 +1038,6 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
     let res = Resolved::rebuild(&doc);
     let markup = svg_of(&doc, &res, &[ab]);
 
-    // The fixture is in the state this test is about.
     assert!(
         markup.contains("<pattern id=\"img-"),
         "fixture: the writer emits the picture as a pattern:\n{markup}"
@@ -1309,16 +1064,7 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
         out.skipped
     );
 
-    // **Not a black rectangle.** The reference carries `none` as its fallback, so
-    // a reader that cannot resolve the pattern paints nothing at all.
-    //
-    // ⚠️ **Found by node size rather than over every node**, and the first draft
-    // swept them all and failed for the wrong reason. The artboard's `<clipPath>`
-    // comes back as a **mask node** — that is the clip round-tripping, which is
-    // the good half — and its `<rect>` carries no `fill` attribute, so it inherits
-    // SVG's initial black like anything else. A mask's fill paints nothing, so
-    // that black is harmless and pre-existing; sweeping for it measures the clip
-    // rather than the picture.
+    // Not a black rectangle: an unresolvable pattern paints nothing.
     let (back2, all) = reimport(&markup);
     let black = Color::from_rgba8(0, 0, 0, 255);
     let picture = all
@@ -1345,50 +1091,20 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
     );
 }
 
-/// **A named layer keeps its name across the round trip** (§15 D611,
-/// `[S8.1-L6-04]`).
+/// A named layer keeps its name across the round trip. The four names are chosen
+/// for what they do to markup: a group and a leaf (two writer functions), a name
+/// with a space (not an XML `Name`, why the attribute is `data-name`), and one
+/// holding `&`, `<` and a quote (the escaping). The two-fill rect covers the
+/// stacked-paint arm (`emit_stacked`), where a name on a child would attach to a
+/// layer the document does not have.
 ///
-/// 🚨 **No name reached the file at all, and six reader sites took `id` *as* the
-/// name.** So the pair was asymmetric in the one direction that loses data: every
-/// layer of an exported drawing came back unnamed, and nothing anywhere said so —
-/// this suite calls itself *"the only thing that binds"* the two and asserted
-/// geometry, paint and structure and never a name. `Node::name()` was not called
-/// once in the whole writer.
+/// The second assertion exists because the round trip cannot tell `data-name` from
+/// `id` (`roxmltree` returns either verbatim): every emitted `id` must be an XML
+/// `Name`, since names written as ids would share a namespace with the defs' ids
+/// and a layer named `clip-601d_2` would shadow a real `<clipPath>`.
 ///
-/// **Four names, chosen for what they do to markup rather than for coverage.**
-/// A group and a leaf, because they are written by two different functions
-/// (`svg::name_attr`'s three call sites — plain backticks, because nothing checks
-/// a link in a `tests/` file and §15 D319 says to say so); a name with a **space**, which is what
-/// `naming.rs` produces by default and is not a valid XML `Name` — the reason the
-/// attribute is `data-name` and not `id`; and one holding `&`, `<` and a quote,
-/// which is the escaping the writer owes and the only one that can make the file
-/// unparseable rather than merely wrong.
-///
-/// ⚠️ **The stacked-paint arm is the third writer of a node's element and is
-/// covered here by the two-fill rect**, which is not obvious from the fixture: a
-/// single fill takes `emit_shape`'s plain arm and a second one moves the same node
-/// to `emit_stacked`, where the `<g>` is the node and its children are its paints.
-/// A name written onto one of those children would come back attached to a layer
-/// the document does not have.
-///
-/// **Flip-check, run, and the first one did not bite** — which is a finding about
-/// this test rather than about the code, and it is why the second assertion
-/// exists. `name_attr` writing ` id="…"` instead of ` data-name="…"` — the other
-/// candidate fix, the one the finding sketched first — **round-trips all three
-/// names perfectly**, because `roxmltree` hands back an attribute value verbatim
-/// and never asks whether an `id` is a valid XML `Name`. So the round trip cannot
-/// tell the two spellings apart, and a test that only round-trips would have
-/// blessed the wrong one.
-///
-/// 🚨 **What separates them is the markup, and that is the second assertion.** An
-/// `id` must be an XML `Name` and **unique in the document**, and this writer
-/// already mints ids from `NodeId::to_wire` for every def it emits — `grad-…`,
-/// `clip-…`, `mask-…`, `fx-…`. Writing names as ids therefore puts free text into
-/// that namespace: `"Outer group"` is not a `Name` at all, and a layer a user
-/// happened to name `clip-601d_2` would shadow a real `<clipPath>` and silently
-/// redirect its own frame's `url(#…)`. Asserting that every emitted `id` is a
-/// `Name` bites the flip at the group, and removing the writer entirely fails the
-/// first assertion with the name missing.
+/// flip: `name_attr` writing ` id="…"` instead of ` data-name="…"` → fails at the
+/// XML `Name` assertion at the group; removing the writer fails the first.
 #[test]
 fn a_layers_name_survives_the_round_trip() {
     let mut ids = IdSource::new(0x9E9E);
@@ -1467,9 +1183,8 @@ fn a_layers_name_survives_the_round_trip() {
         );
     }
 
-    // Every `id` the writer emits is still an XML `Name` — which is what says the
-    // names went somewhere else. Scanned off the markup rather than off the
-    // document, because the claim is about the file.
+    // Every `id` the writer emits is still an XML `Name`, scanned off the markup
+    // because the claim is about the file.
     for (i, _) in markup.match_indices(r#" id=""#) {
         let from = i + r#" id=""#.len();
         let value = &markup[from..][..markup[from..].find('"').expect("a closed attribute")];
@@ -1488,51 +1203,14 @@ fn a_layers_name_survives_the_round_trip() {
         );
     }
 }
-/// **The writer's own `<clipPath>` spelling comes back as a clip and is not
-/// reported lost** — §15 D650, `[A5-L6-05]`.
+/// The writer's own `<clipPath>` spelling, emitted at top level rather than inside
+/// `<defs>`, comes back as a clip and is not reported lost. Both report lists are
+/// asserted empty, since a frame and one rect is the plainest drawing the writer
+/// emits and `approximated` means "there and slightly wrong".
 ///
-/// 🚨 **One of the suite's fifteen tests was not a binding.** This file's header
-/// calls itself *"the only thing that binds"* the writer and the reader, and
-/// fourteen of the fifteen earned that by calling `svg_of` and feeding the result
-/// to `reimport`. (⚠️ **The finding says thirteen and twelve, and this comment
-/// did too until `arch-scribe` counted** — the file held thirteen tests when the
-/// review pass read it and has grown since. Nothing rests on the number, which is
-/// exactly why it went unchecked; `grep -c '^#\[test\]'` is 16 with this one, and
-/// the 16 `svg_of(` call sites include two inside
-/// `two_weights_settle_on_the_element_default_rather_than_on_either_run`.)
-/// `an_imported_clip_path_is_empty_outside_the_clip` — directly above — takes
-/// **hand-authored** markup and never touches the writer. It is honest as what it
-/// is (a renderer test: *"this is the layer where 'there is a mask node in the
-/// tree' becomes 'the ink stops'"*), and it was being counted as the suite's clip
-/// coverage, which it cannot be: both sides of a hand-written fixture agree about
-/// what SVG looks like, so only the writer's own output disagrees with you.
-///
-/// **The writer puts the artboard clip at top level rather than inside `<defs>`**,
-/// which is legal and is the spelling nothing bound. The reader's
-/// `Gradients::collect` registers a `clipPath` wherever it sits, so it works — and
-/// its *walk* had no `clipPath` arm, so the same element was also reported
-/// **skipped**. That false positive is fixed and asserted by
-/// `an_image_fill_is_reported_lost_rather_than_silently_blackened`; what is
-/// asserted here is the other half, which nothing held: that the clip is actually
-/// **read back as a clip**.
-///
-/// ⚠️ **The report lists are asserted empty, both of them.** A drawing made of a
-/// frame and one rect is the plainest thing this writer can emit, so anything on
-/// either list is a divergence by definition — and `approximated` is the half a
-/// reader forgets, since an entry there says *"there and slightly wrong"* rather
-/// than *"missing"*.
-///
-/// ⚠️ **Flip run, and the predicted site was wrong** — which is the useful half.
-/// The flip is on the *reader*: `Gradients::collect`'s
-/// `if name == "clipPath" || name == "mask"` narrowed to `mask` alone, so the
-/// writer's markup is byte-identical and only the reading of it changes. The
-/// prediction was that the report lists would stay empty and the **mask**
-/// assertion would carry it. Both fail, and the reports one goes first, at
-/// `skipped: ["clip-path"]` — an unresolvable `url(#…)` is reported by the
-/// *attribute* name rather than the element's, which is a spelling neither the
-/// finding nor this test's author had in mind. Relaxing that assertion and
-/// re-running shows the mask one failing behind it at 0 against 1, so both have
-/// teeth and the order is reports-then-structure.
+/// flip: narrowing `Gradients::collect`'s `name == "clipPath" || name == "mask"` to
+/// `mask` → fails at the report assertion (`skipped: ["clip-path"]`), and behind it
+/// at the mask-count assertion (0 against 1).
 #[test]
 fn the_writers_own_clip_spelling_round_trips() {
     let mut ids = IdSource::new(0xC11B);
@@ -1566,8 +1244,7 @@ fn the_writers_own_clip_spelling_round_trips() {
     let res = Resolved::rebuild(&doc);
     let markup = svg_of(&doc, &res, &[ab]);
 
-    // The fixture is in the state this test names: the clip is written, and it is
-    // written *outside* `<defs>`, which is the spelling nothing bound.
+    // The fixture: the clip is written outside `<defs>`.
     let defs = markup.find("<defs>").unwrap_or(markup.len());
     let clip = markup
         .find(r#"<clipPath id="clip-"#)
@@ -1594,8 +1271,7 @@ fn the_writers_own_clip_spelling_round_trips() {
         out.approximated
     );
 
-    // The clip came back *as a clip*: `svg_in` reads `clip-path` as a wrapper
-    // group holding a mask node, which is how this model spells one.
+    // `svg_in` reads `clip-path` as a wrapper group holding a mask node.
     let (back, all) = reimport(&markup);
     let masks: Vec<_> = all
         .iter()

@@ -450,8 +450,7 @@ impl Gpu {
 // --- interaction ----------------------------------------------------------
 
 /// How much of the photograph shows outside the crop window, as a multiplier on
-/// the layer's own opacity: low enough not to read as artwork, high enough that
-/// the part being given up is still readable.
+/// the layer's own opacity.
 const GHOST_ALPHA: f32 = 0.3;
 
 /// A component set's tab's padding round its text.
@@ -473,49 +472,42 @@ const GHOST_ID: NodeId = NodeId {
 };
 
 /// How close the pointer must be to grab a corner handle, in logical points.
-/// Every pointer-aimed `*_PX` allowance below is in points too, converted
-/// through `OndinApp::points_per_world`; the `px` suffix is historical.
+/// Every pointer-aimed `*_PX` allowance below is in points too.
 pub(crate) const HANDLE_PICK_PX: f32 = 9.0;
 /// The handle square, in screen px.
 const HANDLE_PX: f32 = 7.0;
 /// The handle's border. Handles are hollow, since a filled square hides the
 /// corner it is there to place.
 const HANDLE_STROKE_PX: f32 = 2.0;
-/// The crop window's dash: length, gap, and weight. Heavier and coarser than
-/// the selection hairline so the crop box never reads as the selection box.
-/// Module-level so `crop_chrome_tests` reads the constants, not copied literals.
+/// The crop window's dash: length, gap, and weight. Heavier than the selection
+/// hairline so the crop box never reads as the selection box.
 const CROP_DASH_PX: f32 = 6.0;
 const CROP_GAP_PX: f32 = 6.0;
 const CROP_STROKE_PX: f32 = 3.0;
 /// How far off a stroke-only shape (a `Line`) a click still counts, in screen
-/// points. Smaller than a handle's 9 because a line sits among other artwork.
+/// points.
 const PICK_SLOP_PX: f32 = 4.0;
 /// How far either side of an occupied frame's border a press takes the frame
-/// ([`OndinApp::frame_edge_at`]). It is the chain's last link, so a layer near
-/// the border still wins its own pixels.
+/// ([`OndinApp::frame_edge_at`]); the chain's last link, so a layer wins its pixels.
 const FRAME_EDGE_PICK_PX: f32 = 8.0;
 /// How close to a pen anchor or a path's segment counts as hitting it, in
-/// screen pt, and how close before the pen visibly snaps to it. The snap and
-/// the click must keep sharing this one number, and it also bounds where the
-/// node tool grabs a path at all.
+/// screen pt. The pen's snap and the click must share this one number.
 const PEN_PICK_PX: f32 = 7.0;
 /// What the node tool would take at a given point.
 ///
-/// The variants are tried from the most deliberate target outward: a handle
-/// (beats its anchor, since it can be dragged on top of one), an anchor (beats
-/// a box corner, which is often an extreme selected point), a box corner or
-/// side (beats a segment flush with the box edge), a segment, then a marquee.
+/// Tried in order: a handle (beats its anchor, which it can sit on), an anchor
+/// (beats a box corner), a box corner or side (beats a segment flush with it),
+/// a segment, then a marquee.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum NodeGrab {
     Anchor(PointRef),
     Handle(PointRef, Side),
     /// A corner or side of the box over the selected points, which scales the set.
     Box(Handle),
-    /// The band just outside a corner of that box, which turns the set — the
-    /// same ring a layer selection's box has.
+    /// The band just outside a corner of that box, which turns the set.
     BoxRotate,
-    /// The segment leaving this anchor, at parameter `t` — where a press lands
-    /// when it is on the path's ink but on none of its points.
+    /// The segment leaving this anchor, at parameter `t`: a press on the ink but
+    /// on none of its points.
     Segment(PointRef, f64),
 }
 
@@ -523,13 +515,11 @@ enum NodeGrab {
 /// (`app::pen_bias`, §15 D125) — or `None` when the bias is off, or when the
 /// target under the pointer is one the node tool keeps.
 ///
-/// The target picks the verb: an open end continues the path, its ink inserts
-/// a point, bare canvas starts another subpath. Middle anchors, handles and the
-/// point box keep their node-tool meanings.
+/// An open end continues the path, its ink inserts a point, bare canvas starts
+/// another subpath; middle anchors, handles and the point box keep node-tool meanings.
 enum PenVerb {
     /// An open end of the edited path: pick it up and keep drawing. Carries the
-    /// same [`PenEdit`] `pen_resume` would build, so the hover ring and the press
-    /// cannot disagree.
+    /// [`PenEdit`] `pen_resume` would build, so hover ring and press agree.
     Continue(Box<PenEdit>),
     /// The path's ink: add an anchor to the segment leaving `.0` at parameter `.1`.
     Insert(PointRef, f64),
@@ -543,62 +533,53 @@ enum PenVerb {
 const HANDLE_DRAWN: f64 = 1e-9;
 /// How close (screen pt) a dragged handle has to come to collinear with its
 /// partner, or one of the eight axes and diagonals, before it lands on it
-/// (`tools::tangent_snap`). Small because it competes with free aim.
+/// (`tools::tangent_snap`).
 const TANGENT_SNAP_PX: f32 = 4.0;
 /// The ring that marks an armed snap target: radius and weight, in screen pt.
-/// It sits on the marker's edge so it reads as the point wearing an extra
-/// stroke; deliberately not [`PEN_PICK_PX`], which is a target area.
+/// Deliberately not [`PEN_PICK_PX`], which is a target area.
 const SNAP_RING_PX: f32 = 5.0;
 const SNAP_RING_STROKE_PX: f32 = 2.0;
-/// Side of a path anchor's marker in the node tool, in screen pt — the size of
-/// a resize handle. Its corners sit just inside `PEN_PICK_PX`; raising this
-/// means raising that too, or the mark's corners stop being grabbable.
+/// Side of a path anchor's marker in the node tool, in screen pt. Its corners
+/// sit just inside `PEN_PICK_PX`; raise that too, or they stop being grabbable.
 const POINT_PX: f32 = 9.0;
-/// The marker's outline, and what it becomes under the pointer. Hover is
-/// carried by the stroke because the fill already says selected-or-not; it is
-/// laid inside the edge so the silhouette does not swell
+/// The marker's outline, and what it becomes under the pointer. Hover is on the
+/// stroke, laid inside the edge so the silhouette does not swell
 /// (`the_hover_weight_does_not_change_a_markers_silhouette`).
 const POINT_STROKE_PX: f32 = 1.0;
 const POINT_STROKE_HOVER_PX: f32 = 2.0;
-/// Radius of the dot on the end of a handle's stalk, in screen pt — a smaller
-/// version of the anchor's mark, kept in ratio with `POINT_PX`.
+/// Radius of the dot on the end of a handle's stalk, in screen pt.
 const HANDLE_DOT_PX: f32 = 3.0;
 /// How close to a side of the selection box counts as grabbing that side.
-/// There are no mid-edge squares; the band along each side is the affordance.
 const EDGE_PICK_PX: f32 = 6.0;
-/// How far outside a handle the rotation ring reaches. There is no rotate
-/// handle; the band just outside each corner rotates.
+/// How far outside a handle the rotation ring reaches.
 const ROTATE_RING_PX: f32 = 15.0;
-/// Drag distance (screen px) below which a shape-create drag is discarded, so a
-/// gesture that goes out and comes back creates nothing. A still press never
-/// gets here: it is a click, and `click_create` makes a default-sized shape.
+/// Drag distance (screen px) below which a shape-create drag is discarded. A
+/// still press is a click, and `click_create` makes a default-sized shape.
 const MIN_CREATE_PX: f64 = 3.0;
 /// Cap on how many neighbours a snap considers, so a dense viewport cannot make
 /// dragging quadratic.
 pub(crate) const SNAP_TARGET_LIMIT: usize = 200;
 /// Rotation snap step with Shift held: 15°.
 const ROTATE_SNAP: f64 = std::f64::consts::FRAC_PI_2 / 6.0;
-/// Type size for the pivot marker's glyph. Phosphor inks about `size - 4` of an
-/// em box, so 22 draws roughly 20px across.
+/// Type size for the pivot marker's glyph; Phosphor inks about `size - 4`.
 const PIVOT_GLYPH_PX: f32 = 22.0;
-/// How close the pointer must be to grab the pivot marker — the same distance
-/// a corner handle claims, since the pivot beats the handles.
+/// How close the pointer must be to grab the pivot marker — a corner handle's
+/// distance, since the pivot beats the handles.
 const PIVOT_PICK_PX: f32 = 9.0;
-/// How close (screen px) a dragged pivot has to come to one of the nine points of
-/// the box to land exactly on it.
+/// How close (screen px) a dragged pivot has to come to one of the box's nine
+/// points to land on it.
 const PIVOT_SNAP_PX: f32 = 6.0;
 /// Band at the canvas edge inside which a drag in flight scrolls the view, in
 /// points.
 const AUTOPAN_BAND: f32 = 32.0;
-/// Fastest the view auto-scrolls, in screen points per second, so the rate is
-/// the same at any zoom. Reached at the canvas edge or past it.
+/// Fastest the view auto-scrolls, in screen points per second.
 const AUTOPAN_MAX: f32 = 900.0;
-/// Longest frame the auto-scroll will integrate over, so a hitch does not
-/// throw the view (and the dragged layer) across the document.
+/// Longest frame the auto-scroll integrates over, so a hitch does not throw the
+/// view across the document.
 const AUTOPAN_MAX_DT: f32 = 1.0 / 15.0;
 
-/// The canvas band's share of [`crate::ui::edge_scroll_speed`] — the curve is shared with
-/// the layers tree so the two feel like one behaviour.
+/// The canvas band's share of [`crate::ui::edge_scroll_speed`], whose curve the
+/// layers tree shares.
 fn autopan_axis(p: f32, min: f32, max: f32) -> f32 {
     crate::ui::edge_scroll_speed(p, min, max, AUTOPAN_BAND, AUTOPAN_MAX)
 }
@@ -625,44 +606,38 @@ fn default_shape_fill() -> Color {
     Color::from_rgba8(217, 217, 217, 255)
 }
 
-/// The stroke a freshly drawn pen path and line get. The pen's preview draws
-/// with it too, so the path does not change appearance when it is finished.
+/// The stroke a freshly drawn pen path and line get, which the pen's preview
+/// shares.
 const PEN_STROKE_COLOR: Color = Color::BLACK;
 const PEN_STROKE_WIDTH: f64 = 2.0;
 
 /// The transform box and its four corners, in screen space.
 ///
-/// For a single node this is the node's own local box through its world
-/// transform, so a resize on a rotated or sheared layer moves the shape's own
-/// width and height. For a multi-selection it is the union in the set's session
-/// orientation (§15 D326); `world` is the identity while that is upright.
+/// For a single node this is its own local box through its world transform; for a
+/// multi-selection the union in the set's session orientation (§15 D326), with
+/// `world` the identity while that is upright.
 struct Handles {
     target: Target,
     /// World-space point a rotation turns about: the node's `ondin_core::Pivot`,
-    /// or the union box's centre for a multi-selection. Rotation only — an
-    /// Alt-resize holds the box's centre.
+    /// or the union box's centre. Rotation only; an Alt-resize holds the centre.
     pivot: Point,
     /// Box → world, for turning a handle's box-local direction into a screen one.
-    /// The identity for a multi-selection, whose box is already upright.
     world: Affine,
-    /// The four corners, clockwise from the top-left of the box. The box itself
-    /// is not kept: `resize_tx` recomputes it from the committed tree, since
-    /// scaling against the mid-drag preview compounds every frame.
+    /// The four corners, clockwise from the top-left. The box itself is not
+    /// kept: `resize_tx` recomputes it from the committed tree, since scaling
+    /// against the mid-drag preview compounds every frame.
     corners: [(Handle, egui::Pos2); 4],
-    /// The selection holds a locked layer: the handles are drawn and arm
-    /// nothing. `armed` answers it, so the cursor and the press agree.
+    /// The selection holds a locked layer: the handles are drawn and arm nothing.
     locked: bool,
 }
 
 /// Which pivot marker to draw: draggable, or a read-only hint that the pivot
-/// was moved. Two glyph shapes rather than two tints, so the state survives
-/// small sizes and busy artwork.
+/// was moved. Two glyph shapes rather than two tints, so it survives small sizes.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Marker {
     /// The toggle is on and this pivot is draggable.
     Editable,
-    /// An affordance on a layer whose pivot has been placed — visible on hover so
-    /// a shape that spins about a corner can say why, and nothing more.
+    /// Shown on hover on a layer whose pivot has been placed, and nothing more.
     ReadOnly,
 }
 
@@ -688,23 +663,21 @@ enum Armed {
 /// prepared when Alt went down ([`OndinApp::sync_alt_clone`]).
 pub(crate) struct AltClone {
     copies: Vec<ClonedSubtree>,
-    /// Where the copy currently sits relative to its original, in world units,
-    /// stashed by the gesture so the chrome can follow the copy
-    /// ([`OndinApp::alt_clone_offset`]).
+    /// Where the copy sits relative to its original, in world units, stashed by
+    /// the gesture so the chrome can follow ([`OndinApp::alt_clone_offset`]).
     delta: Vec2,
 }
 
 /// One layer's worth of an Alt-drag copy, with its ids already minted.
 struct ClonedSubtree {
-    /// The layer being copied. Its world transform is what the copy is offset
-    /// from, and its frame membership is what the copy's is decided by.
+    /// The layer being copied: the copy is offset from its world transform, and
+    /// its frame membership decides the copy's.
     source: NodeId,
-    /// The source's parent — where the copy lands if the drop crosses no frame
-    /// boundary.
+    /// The source's parent — where the copy lands if the drop crosses no frame.
     parent: NodeId,
     /// The remapped subtree, ready for `Operation::InsertSubtree`.
     nodes: Vec<ondin_core::Node>,
-    /// The remapped root's id, which is what gets positioned and then selected.
+    /// The remapped root's id, which gets positioned and then selected.
     root: NodeId,
 }
 
@@ -718,10 +691,8 @@ impl Handles {
             .map(|(h, _)| *h)
     }
 
-    /// The side of the box `screen` is hugging, if any.
-    ///
-    /// `Handle::EDGES[i]` runs from corner `i` to corner `i + 1`, which is what
-    /// lets the side be identified from the segment the pointer is nearest.
+    /// The side of the box `screen` is hugging, if any. `Handle::EDGES[i]` runs
+    /// from corner `i` to corner `i + 1`.
     fn grab_edge(&self, screen: egui::Pos2) -> Option<Handle> {
         Handle::EDGES
             .iter()
@@ -767,13 +738,9 @@ impl Handles {
         !(left && right)
     }
 
-    /// What a press at `screen` would do to the selection, if anything — the one
-    /// statement of the priority, so the cursor, the gesture and the hover
-    /// outline agree. Corners beat sides, sides beat rotation.
-    ///
-    /// `skewing` is Ctrl and re-reads the side bands only; corners keep
-    /// resizing. It is a parameter so the cursor and the gesture ask the same
-    /// question ([`OndinApp::begin_select_drag`]).
+    /// What a press at `screen` would do to the selection — the one statement of
+    /// the priority, so cursor, gesture and hover outline agree. Corners beat
+    /// sides, sides beat rotation. `skewing` (Ctrl) re-reads the side bands only.
     fn armed(&self, screen: egui::Pos2, skewing: bool) -> Option<Armed> {
         if self.locked {
             return None;
@@ -791,19 +758,16 @@ impl Handles {
         self.rotate_zone(screen).map(Armed::Rotate)
     }
 
-    /// Where a handle faces on screen, having been turned by the node's own
-    /// rotation. What the resize cursor points along.
+    /// Where a handle faces on screen, which the resize cursor points along.
     fn screen_direction(&self, handle: Handle) -> egui::Vec2 {
         let (ux, uy) = handle.outward();
-        // The basis alone: a direction is not affected by where the node sits.
         let [a, b, c, d, _, _] = self.world.as_coeffs();
         let v = Vec2::new(a * ux + c * uy, b * ux + d * uy);
         egui::vec2(v.x as f32, v.y as f32)
     }
 
     /// Where a side runs on screen, which the skew cursor points along. Turned a
-    /// quarter in the box's own frame, not on screen, so a sheared box's sides
-    /// report the direction they actually run.
+    /// quarter in the box's own frame, so a sheared box reports its real direction.
     fn screen_tangent(&self, handle: Handle) -> egui::Vec2 {
         let (ux, uy) = handle.outward();
         let [a, b, c, d, _, _] = self.world.as_coeffs();
@@ -871,8 +835,7 @@ impl Polyline {
 }
 
 /// A grid container's track lines and gaps in its own space
-/// ([`OndinApp::track_lines`]): each line's two ends and whether an
-/// explicit track has that edge, and each gap as a band.
+/// ([`OndinApp::track_lines`]).
 #[derive(Debug, Default)]
 struct TrackLines {
     lines: Vec<(Point, Point, bool)>,
@@ -925,8 +888,7 @@ impl OndinApp {
             ((rect.height() * ppp).round() as u32).max(1),
         );
         self.canvas_ppp = ppp;
-        // Kept for `fold_chrome_hold`, which runs before this and so reads the
-        // previous frame's.
+        // `fold_chrome_hold` runs before this and reads the previous frame's.
         self.canvas_rect = rect;
 
         self.wheel_input(ui, &resp, rect, ppp);
@@ -961,9 +923,8 @@ impl OndinApp {
 
     /// The canvas's door onto the context menu (`docs/context-menus.md` §2).
     ///
-    /// Opens on release (`secondary_clicked`) but at the press position
-    /// (`secondary_press`), so jitter does not shift the menu. Claimants are asked
-    /// in §2's order: a running mode, then a guide, then a layer, then the page.
+    /// Opens on release at the press position (`secondary_press`), so jitter does
+    /// not shift it. Claimants are asked in §2's order: mode, guide, layer, page.
     fn canvas_context_menu(
         &mut self,
         ui: &mut egui::Ui,
@@ -1025,14 +986,12 @@ impl OndinApp {
         );
     }
 
-    /// Scroll the view while a gesture is dragged into the canvas edge, so a drag
-    /// is not stopped by the window's size. Which drags qualify is
-    /// [`Drag::autopans`]'s decision.
+    /// Scroll the view while a gesture is dragged into the canvas edge; which
+    /// drags qualify is [`Drag::autopans`]'s decision.
     ///
-    /// Runs before the input handlers, so the gesture's screen→world conversion
-    /// sees the new camera this frame. It must `request_repaint`, or a still hand
-    /// at the edge gets no further frames. Snap candidates re-cull as the view
-    /// moves, on purpose: snap to what you can see.
+    /// Runs before the input handlers, so the gesture sees the new camera this
+    /// frame. It must `request_repaint`, or a still hand at the edge gets no more
+    /// frames. Snap candidates re-cull as the view moves, on purpose.
     fn autopan(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         if !self.drag.autopans() {
             return;
@@ -1047,8 +1006,7 @@ impl OndinApp {
         };
         let before = self.session.camera.center;
         self.session.camera.pan_pixels(pan);
-        // Accumulated in world units, so a cancel can put the view back without
-        // disturbing a zoom made during the same drag (`cancel_gesture`).
+        // World units, so `cancel_gesture` can undo the pan without undoing a zoom.
         self.autopan_total += self.session.camera.center - before;
         ui.ctx().request_repaint();
     }
@@ -1056,29 +1014,23 @@ impl OndinApp {
     /// The cursor over the canvas: what the armed gesture or the active tool is
     /// about to do. Panning outranks the tool; otherwise the tool decides.
     ///
-    /// Only ever claims a cursor, never resets one off-canvas: egui starts each
-    /// frame at `Default`, and a reset here would erase what the layers panel,
-    /// drawn earlier, claimed
-    /// (`app::layers_width_tests::a_cursor_does_not_survive_a_frame_and_the_last_writer_wins`).
+    /// Only claims a cursor, never resets one off-canvas: egui starts each frame
+    /// at `Default`, and a reset would erase one the layers panel claimed earlier.
     fn canvas_cursor(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         let ctx = ui.ctx();
-        // `hovered` goes false once a drag leaves the widget, so a pan dragged
-        // past the canvas edge would otherwise flick back to an arrow.
+        // `hovered` goes false once a drag leaves the widget.
         let on_canvas = resp.hovered() || resp.dragged();
         if !on_canvas {
-            // Say nothing; see this function's doc.
             return;
         }
 
         let (space, middle) = ui.input(|i| (i.key_down(egui::Key::Space), i.pointer.middle_down()));
         let panning = matches!(self.drag, Drag::Pan);
-        // Space arms a pan only in normal mode, and not while a shape is being
-        // drawn, where it repositions the box instead (`reshape_create`).
+        // Space repositions a shape being drawn instead (`reshape_create`).
         let armed = ((space && self.mode == Mode::Normal) || self.tool == Tool::Hand)
             && !matches!(self.drag, Drag::Create { .. });
 
-        // `icon` is what the platform draws when `bitmap` is absent or cannot be
-        // rasterized, so it is always the closest stock cursor to the intent.
+        // `icon` is the stock fallback when `bitmap` is absent or cannot rasterize.
         let pointer = resp.hover_pos().or(resp.interact_pointer_pos());
         let (icon, bitmap) = if panning || middle {
             (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed))
@@ -1090,17 +1042,15 @@ impl OndinApp {
         } else if self.text.is_some()
             && (resp.dragged() || pointer.is_some_and(|p| self.over_edited_text(p, rect, ppp)))
         {
-            // A live text session owns the cursor over its own layer, whatever
-            // tool opened it; `dragged()` keeps it through a selection that
-            // overshoots the box.
+            // A live text session owns the cursor over its layer; `dragged()`
+            // keeps it through a selection that overshoots the box.
             (egui::CursorIcon::Text, None)
         } else if let Some(cursor) = pointer.and_then(|p| self.ruler_cursor(p, rect)) {
             // The ruler bar takes the press from every tool, so the cursor too.
             cursor
         } else {
             match self.tool {
-                // A drawn crosshair, not the stock one — `IDC_CROSS` is 32 texels
-                // across and dwarfs everything else on the canvas.
+                // A drawn crosshair: the stock `IDC_CROSS` is 32 texels across.
                 Tool::Frame
                 | Tool::Rect
                 | Tool::Ellipse
@@ -1115,18 +1065,15 @@ impl OndinApp {
                         None => Bitmap::Crosshair,
                     }),
                 ),
-                // No platform has a pen cursor; a crosshair is the nearest stock
-                // stand-in, since the nib's job is also to mark an exact point.
                 Tool::Pen => (egui::CursorIcon::Crosshair, Some(Bitmap::Pen)),
-                // The node tool keeps the plain arrow over points, whose markers
-                // are already the affordance. The point box gets resize arrows
-                // ([`Self::point_box_cursor`]), and the pen nib shows where
-                // `pen_verb` — the same query the press runs — arms a pen verb.
+                // The plain arrow over points, whose markers are the affordance;
+                // the point box gets resize arrows ([`Self::point_box_cursor`]),
+                // and the nib shows where `pen_verb`, the press's query, arms.
                 Tool::Node => match self.point_box_cursor(resp, rect, ppp) {
                     Some(c) => c,
                     None => {
-                        // A path in flight is always the pen; otherwise only where a
-                        // verb is armed, and never mid-drag.
+                        // A path in flight is always the pen; else only where a
+                        // verb is armed, never mid-drag.
                         let armed = self.pen.is_some()
                             || (self.drag.is_none()
                                 && pointer
@@ -1138,15 +1085,13 @@ impl OndinApp {
                         }
                     }
                 },
-                // Over a text layer an I-beam (a click enters it, the same
-                // `text_layer_at` question `draw_hover_outline` asks); elsewhere
-                // the crosshair. Not re-read while a drag is in flight.
+                // An I-beam over a text layer, else the crosshair; not re-read
+                // mid-drag.
                 Tool::Text => {
                     let world = (self.drag.is_none())
                         .then(|| pointer.map(|p| self.to_world(p, rect, ppp)))
                         .flatten();
-                    // In the order a press resolves them: existing text beats an
-                    // outline to write along.
+                    // The press's order: existing text beats an outline.
                     match world {
                         Some(w) if self.text_layer_at(w).is_some() => {
                             (egui::CursorIcon::Text, None)
@@ -1158,11 +1103,9 @@ impl OndinApp {
                         _ => (egui::CursorIcon::Crosshair, Some(Bitmap::Crosshair)),
                     }
                 }
-                // The eyedropper's loupe arm above answers first; this is the
-                // fallback.
+                // The loupe arm above answers first; this is the fallback.
                 Tool::Eyedropper => (egui::CursorIcon::None, None),
-                // Image editing announces the pan (the picture has no other
-                // affordance); handles get resize cursors from `crop_hover`.
+                // Handles get resize cursors from `crop_hover`.
                 Tool::ImageEdit => match self.drag {
                     Drag::CropPan { .. } => (egui::CursorIcon::Grabbing, Some(Bitmap::HandClosed)),
                     _ => match self.crop_hover(resp, rect, ppp) {
@@ -1170,11 +1113,9 @@ impl OndinApp {
                         None => (egui::CursorIcon::Default, None),
                     },
                 },
-                // Select and Scale share every gesture, so they share the
-                // cursor logic; what differs is the **rest** state.
+                // Select and Scale differ only in the rest state.
                 Tool::Select | Tool::Scale => {
-                    // Pivot marker, then selection handles, then a guide, then
-                    // the rest cursor — the press order (`normal_mode_input`).
+                    // The press order (`normal_mode_input`): pivot, handles, guide, rest.
                     if matches!(self.drag, Drag::Pivot { .. })
                         || pointer.is_some_and(|p| self.on_pivot(p, rect, ppp).is_some())
                     {
@@ -1188,8 +1129,6 @@ impl OndinApp {
                                     None => self.rest_cursor(),
                                 }
                             }
-                            // Scale differs only in the rest state; handles keep
-                            // their directional arrows on both tools.
                             ((egui::CursorIcon::Default, None), None) => self.rest_cursor(),
                             _ => handle,
                         }
@@ -1206,9 +1145,9 @@ impl OndinApp {
         rest_cursor(self.tool)
     }
 
-    /// What the Select tool's cursor should be: whatever the handle under (or
-    /// just outside) the pointer will do, and an arrow anywhere else. The resize
-    /// direction is measured in screen space, so it is right on a rotated layer.
+    /// What the Select tool's cursor should be: what the handle under (or just
+    /// outside) the pointer will do, else an arrow. Directions are measured in
+    /// screen space, so they are right on a rotated layer.
     fn select_cursor(
         &self,
         resp: &egui::Response,
@@ -1216,8 +1155,8 @@ impl OndinApp {
         ppp: f32,
     ) -> (egui::CursorIcon, Option<Bitmap>) {
         const NONE: (egui::CursorIcon, Option<Bitmap>) = (egui::CursorIcon::Default, None);
-        // Mid-gesture the cursor reports the gesture, not what is under the
-        // pointer — a resize dragged past the opposite corner must not flicker.
+        // Mid-gesture the cursor reports the gesture, so a resize dragged past the
+        // opposite corner does not flicker.
         let handles = self.selection_handles(rect, ppp);
         match &self.drag {
             // The arrow faces from the pivot to the pointer, not the grabbed corner.
@@ -1248,31 +1187,27 @@ impl OndinApp {
             _ => {}
         }
 
-        // A selected set's `+` is a button the press resolves ahead of the box
-        // handles, so the cursor does too: the plain arrow (no control shows a
-        // pointing hand, §9.2).
+        // A selected set's `+` resolves ahead of the box handles, as the press
+        // does: the plain arrow (no control shows a pointing hand, §9.2).
         if let Some(p) = resp.hover_pos()
             && self.set_plus_at(p, rect, ppp).is_some()
         {
             return (egui::CursorIcon::Default, None);
         }
 
-        // A line's ends, before the box handles — which it does not have — and before
-        // falling through to the default arrow over the shape itself.
+        // A line's ends, then the rail handle, in the press's order.
         if let Some(p) = resp.hover_pos()
             && self.grab_line_end(p, rect, ppp).is_some()
         {
             return (egui::CursorIcon::Grab, None);
         }
-        // Then the rail handle, in the press's order.
         if let Some(p) = resp.hover_pos()
             && self.grab_rail_handle(p, rect, ppp).is_some()
         {
             return (egui::CursorIcon::Grab, None);
         }
 
-        // A spacing band, in the press's order; `spacing::hit` keeps out of the
-        // handles' radius.
+        // A spacing band, in the press's order.
         if let Some(p) = resp.hover_pos()
             && let Some((s, i)) = self.spacing_at(p, rect, ppp)
         {
@@ -1282,12 +1217,10 @@ impl OndinApp {
         let (Some(p), Some(h)) = (resp.hover_pos(), handles) else {
             return NONE;
         };
-        // The same modifier the gesture will read, from the same frame's input.
         let skewing = resp.ctx.input(|i| i.modifiers.ctrl || i.modifiers.command);
         match h.armed(p, skewing) {
             Some(Armed::Resize(handle)) => (resize_icon(h.screen_direction(handle)), None),
             Some(Armed::Skew(handle)) => (resize_icon(h.screen_tangent(handle)), None),
-            // Turned to face the corner's screen direction.
             Some(Armed::Rotate(handle)) => (
                 egui::CursorIcon::Grab,
                 Some(Bitmap::Rotate(Turn::toward(h.screen_direction(handle)))),
@@ -1297,8 +1230,7 @@ impl OndinApp {
     }
 
     /// The arrow for a corner of the point box, or `None` anywhere else in the
-    /// node tool. Measured on screen from the box's centre; mid-gesture it
-    /// reports the gesture, as `select_cursor` does.
+    /// node tool. Measured on screen from the box's centre.
     fn point_box_cursor(
         &self,
         resp: &egui::Response,
@@ -1306,7 +1238,6 @@ impl OndinApp {
         ppp: f32,
     ) -> Option<(egui::CursorIcon, Option<Bitmap>)> {
         let id = self.edited_path()?;
-        // A turn faces from the pivot to the pointer, as in `select_cursor`.
         let turning = |pivot: Point, at: Option<egui::Pos2>| {
             let facing = at
                 .map(|p| Turn::toward(p - self.to_screen(pivot, rect, ppp)))
@@ -1348,16 +1279,15 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
-        // The button is still down after a cancel, so the canvas sits the rest of
-        // the press out, or a short cancelled drag comes back as a `clicked()`.
+        // The button is still down after a cancel; sit the press out, or a short
+        // cancelled drag comes back as a `clicked()`.
         if self.gesture_cancelled {
             return;
         }
 
-        // A gesture's auto-scroll total starts and ends here, above the tool
-        // routing, since `pen_input`/`node_input`/`image_edit_input` return before
-        // `finish_drag`. Safe against a cancel only because `cancel_gesture` runs
-        // before the panels and sets `gesture_cancelled`, bailing out above.
+        // The auto-scroll total resets here, above the tool routing, since the
+        // pen, node and image-edit inputs return before `finish_drag`. Safe
+        // against a cancel because `cancel_gesture` sets `gesture_cancelled` first.
         if resp.drag_started() || resp.drag_stopped() {
             self.autopan_total = Vec2::ZERO;
         }
@@ -1374,16 +1304,14 @@ impl OndinApp {
         let panning_armed =
             space || self.tool == Tool::Hand || resp.dragged_by(egui::PointerButton::Middle);
 
-        // An armed eyedropper owns every press an armed pan does not, guides and
-        // handles included: they are chrome its sample never sees.
+        // An armed eyedropper owns every press an armed pan does not, chrome included.
         if self.dropper_armed().is_some() && !panning_armed && !matches!(self.drag, Drag::Pan) {
             self.dropper_input(ui, resp, rect, ppp);
             return;
         }
 
-        // Rulers and guides, ahead of the tools — but behind an armed pan and any
-        // selection chrome the guide lies across ([`Self::chrome_claims`], which
-        // covers line ends, the pivot and the rail handle too).
+        // Rulers and guides, ahead of the tools but behind an armed pan and any
+        // selection chrome the guide lies across ([`Self::chrome_claims`]).
         let on_handle = resp
             .hover_pos()
             .or(resp.interact_pointer_pos())
@@ -1395,9 +1323,8 @@ impl OndinApp {
             return;
         }
 
-        // The pen runs on press/drag/release: the press plants an anchor and a
-        // drag pulls its handles. A path in flight owns the pointer whichever
-        // tool armed it, so this sits ahead of the node tool's arm.
+        // A path in flight owns the pointer whichever tool armed it, so this
+        // sits ahead of the node tool's arm.
         if (self.tool == Tool::Pen || self.pen.is_some())
             && !panning_armed
             && !matches!(self.drag, Drag::Pan)
@@ -1406,34 +1333,28 @@ impl OndinApp {
             return;
         }
 
-        // The node tool too: the press decides what is grabbed, the drag moves it.
         if self.tool == Tool::Node && !panning_armed && !matches!(self.drag, Drag::Pan) {
             self.node_input(ui, resp, rect, ppp);
             return;
         }
 
-        // Image editing likewise. Routed from here rather than beside this
-        // function, so it keeps this path's guards (pan, Space, focus).
+        // Routed from here to keep this path's guards (pan, Space, focus).
         if self.tool == Tool::ImageEdit && !panning_armed && !matches!(self.drag, Drag::Pan) {
             self.image_edit_input(ui, resp, rect, ppp);
             return;
         }
 
-        // A Space+click is a pan that did not travel: one binding keeps it from
-        // reaching every click arm below.
+        // A Space+click is a pan that did not travel.
         let clicked = resp.clicked() && !panning_armed;
 
-        // One arm for every creation tool's click, dispatched on the exhaustive
-        // `Tool::click_makes`: each answer says where the size comes from when
-        // the gesture gives no box.
+        // Every creation tool's click, dispatched on the exhaustive `Tool::click_makes`.
         if clicked
             && let Some(answer) = self.tool.click_makes()
             && let Some(p) = resp.interact_pointer_pos()
         {
             let world = self.to_world(p, rect, ppp);
             match answer {
-                // Existing text is entered, then an outline is written along, then
-                // bare canvas plants a node — the order the cursor arm must match.
+                // Existing text, then an outline, then bare canvas — the cursor arm's order.
                 ClickCreate::TextNode => match self.text_layer_at(world) {
                     Some(id) => self.begin_edit_text(Some(id), Some(world)),
                     None => match self.rail_at(world) {
@@ -1441,15 +1362,13 @@ impl OndinApp {
                         None => self.begin_text(world),
                     },
                 },
-                // A loaded cursor places its picture at the file's own size.
                 ClickCreate::FittedImage => self.place_image_at(self.pixel_point(world)),
                 ClickCreate::DefaultBox => self.click_create(world, alt),
             }
             return;
         }
 
-        // A selected set's `+`, ahead of every pick since it sits over whatever is
-        // behind the set's edge.
+        // A selected set's `+`, ahead of every pick: it sits over the set's edge.
         if self.tool.selects()
             && clicked
             && let Some(p) = resp.interact_pointer_pos()
@@ -1459,8 +1378,6 @@ impl OndinApp {
             return;
         }
 
-        // Select tool clicks: pick, extend, step into a group, or open a text
-        // node.
         if self.tool.selects()
             && clicked
             && let Some(p) = resp.interact_pointer_pos()
@@ -1498,7 +1415,6 @@ impl OndinApp {
                 // The start corner takes the grid but no constraint: no extent yet.
                 self.begin_create(self.pixel_point(world));
             } else if self.tool.selects() {
-                // `begin_select_drag` refuses an Alt+Shift drag off the box's chrome.
                 self.begin_select_drag(ui, p, rect, ppp, &handles, shift);
             }
         }
@@ -1522,13 +1438,12 @@ impl OndinApp {
 
     /// Turn the leaf the hit test found into the node a click should select.
     ///
-    /// A click on any part of a group selects the whole group. Ctrl reaches
-    /// straight through to the leaf; Ctrl+Alt picks the outermost group's
-    /// immediate child. Inside `entered_group` ([`Self::double_click_pick`]) the
-    /// chain only runs up to that group, so clicks pick its contents.
+    /// A click on any part of a group selects the whole group. Ctrl reaches the
+    /// leaf; Ctrl+Alt picks the outermost group's immediate child. Inside
+    /// `entered_group` ([`Self::double_click_pick`]) the chain stops at that group.
     pub(crate) fn pick_for_click(&mut self, leaf: NodeId, ui: &egui::Ui) -> NodeId {
-        // A click outside the entered group ends the isolation, before the chain
-        // is built, so that click selects by the normal rule.
+        // A click outside the entered group ends the isolation before the chain
+        // is built.
         if let Some(g) = self.entered_group
             && !ondin_core::is_within(&self.session.doc, leaf, g)
         {
@@ -1536,8 +1451,8 @@ impl OndinApp {
         }
         let picked = self.pick_preview(leaf, ui);
 
-        // Ctrl-reaching inside a group opens the same isolation as a
-        // double-click; after `pick_preview`, which must see the old scope.
+        // Ctrl-reaching into a group opens the isolation a double-click does; after
+        // `pick_preview`, which must see the old scope.
         if ui.input(|i| i.modifiers.ctrl || i.modifiers.command)
             && let Some(outermost) =
                 ondin_core::group_chain(&self.session.doc, leaf, self.entered_group).first()
@@ -1547,9 +1462,7 @@ impl OndinApp {
         picked
     }
 
-    /// [`Self::pick_for_click`] without the side effect: what a click *would*
-    /// select, for the hover outline. The click path calls through, so the two
-    /// agree.
+    /// [`Self::pick_for_click`] without the side effect, for the hover outline.
     fn pick_preview(&self, leaf: NodeId, ui: &egui::Ui) -> NodeId {
         let (ctrl, alt) = ui.input(|i| (i.modifiers.ctrl || i.modifiers.command, i.modifiers.alt));
         let chain = ondin_core::group_chain(&self.session.doc, leaf, self.entered_group);
@@ -1559,15 +1472,14 @@ impl OndinApp {
     /// A double-click goes one level in: steps into a group, opens a text node,
     /// crops a picture, or opens a path for point editing.
     ///
-    /// One level means one, so the group step goes first: descend while there is
-    /// a group to enter (`entered_group` remembers how far), then open the content.
+    /// One level means one: descend while there is a group to enter
+    /// (`entered_group` remembers how far), then open the content.
     fn double_click_pick(&mut self, leaf: Option<NodeId>, world: Point) {
         let Some(leaf) = leaf else {
             self.entered_group = None;
             self.session.selection.clear();
             return;
         };
-        // Step one group deeper first, selecting what is under the pointer there.
         let chain = ondin_core::group_chain(&self.session.doc, leaf, self.entered_group);
         if let [outermost, rest @ ..] = chain.as_slice() {
             self.entered_group = Some(*outermost);
@@ -1577,7 +1489,7 @@ impl OndinApp {
             return;
         }
         // An instance double-clicked on its own background steps in, as `Enter`
-        // does; its group chain starts above it, so the step above misses it.
+        // does; its group chain starts above it.
         if ondin_core::component::instance_root(&self.session.doc, leaf) == Some(leaf)
             && self.entered_group != Some(leaf)
             && self
@@ -1596,9 +1508,8 @@ impl OndinApp {
             self.begin_edit_text(Some(leaf), Some(world));
             return;
         }
-        // A picture opens image editing — its only door. Behind text (an
-        // image-filled text node is type first); asked through `croppable_fill`,
-        // the predicate the mode itself acts on.
+        // A picture's only door to image editing; behind text (an image-filled
+        // text node is type first).
         if self
             .session
             .doc
@@ -1626,8 +1537,7 @@ impl OndinApp {
     /// base operand of a boolean.
     ///
     /// Inside a `Boolean`, operand order is child order (`boolean::evaluate`), so
-    /// the designation is an undoable reorder to index 0. Everywhere else it is a
-    /// designation on the selection.
+    /// it is an undoable reorder to index 0; elsewhere a designation on the selection.
     pub(crate) fn designate_key(&mut self, id: NodeId) {
         let parent = self.session.doc.get(id).and_then(|n| n.parent());
         if let Some(parent) = parent
@@ -1654,12 +1564,9 @@ impl OndinApp {
     }
 
     /// Whether the selection chrome would claim a press at `screen` — the rungs
-    /// [`Self::begin_select_drag`] walks, asked as a yes/no for
-    /// `rulers::guide_input`, which claims on press before any drag starts.
-    ///
-    /// A parallel ladder, so the two can drift;
-    /// `a_guide_does_not_steal_a_press_the_chrome_claims` drives both and asserts
-    /// they agree.
+    /// [`Self::begin_select_drag`] walks, as a yes/no for `rulers::guide_input`.
+    /// A parallel ladder; `a_guide_does_not_steal_a_press_the_chrome_claims`
+    /// asserts the two agree.
     fn chrome_claims(
         &self,
         screen: egui::Pos2,
@@ -1672,11 +1579,9 @@ impl OndinApp {
             || (self.line_ends(rect, ppp).is_some()
                 && self.grab_line_end(screen, rect, ppp).is_some())
             || self.grab_rail_handle(screen, rect, ppp).is_some()
-            // Ctrl cannot change whether the box claims a point, only how.
             || handles
                 .as_ref()
                 .is_some_and(|h| h.armed(screen, false).is_some())
-            // A container's spacing band, the rung after the handles.
             || self.spacing_at(screen, rect, ppp).is_some()
     }
 
@@ -1691,24 +1596,21 @@ impl OndinApp {
     ) {
         let world = self.to_world(screen, rect, ppp);
 
-        // What was grabbed is decided at the press origin, not where the pointer
-        // is once past egui's drag threshold, so it matches what the cursor
-        // promised; the gesture maths still runs from the live pointer.
+        // What was grabbed is decided at the press origin, not past egui's drag
+        // threshold, so it matches what the cursor promised.
         let grab = ui.input(|i| i.pointer.press_origin()).unwrap_or(screen);
         let grab_world = self.to_world(grab, rect, ppp);
 
-        // The pivot marker outranks even the handles ([`Self::on_pivot`]).
         if let Some(id) = self.on_pivot(grab, rect, ppp) {
             self.drag = Drag::Pivot { id };
             return;
         }
 
-        // A set's `+` is a button: a press that slides off it starts nothing.
+        // A press that slides off a set's `+` starts nothing.
         if self.set_plus_at(grab, rect, ppp).is_some() {
             return;
         }
 
-        // A line's endpoints, which are its handles, ahead of picking the line.
         if let Some((id, _, _)) = self.line_ends(rect, ppp)
             && let Some(which) = self.grab_line_end(grab, rect, ppp)
         {
@@ -1716,16 +1618,12 @@ impl OndinApp {
             return;
         }
 
-        // The rail handle, which sits on the type, ahead of picking the layer.
         if let Some(id) = self.grab_rail_handle(grab, rect, ppp) {
             self.drag = Drag::RailOffset { id };
             return;
         }
 
-        // Handles and sides take priority over whatever is under them, and the
-        // rotation band outside them over the canvas behind.
         if let Some(h) = handles {
-            // Ctrl is read at the press, like the position.
             let skewing = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
             match h.armed(grab, skewing) {
                 Some(Armed::Resize(handle)) => {
@@ -1740,7 +1638,6 @@ impl OndinApp {
                         target: h.target,
                         handle,
                         press: world,
-                        // Nothing asked for yet: the press must not move the box.
                         lean: Affine::IDENTITY,
                     };
                     return;
@@ -1751,7 +1648,6 @@ impl OndinApp {
                         target: h.target,
                         pivot: h.pivot,
                         start: v.y.atan2(v.x),
-                        // Nothing asked for yet: the press must not move the box.
                         turn: Affine::IDENTITY,
                     };
                     return;
@@ -1760,24 +1656,19 @@ impl OndinApp {
             }
         }
 
-        // A selected container's gap or padding band: below the handles, and
-        // above the Alt+Shift refusal, since that chord is the band's all-sides
-        // drag.
+        // A selected container's gap or padding band: above the Alt+Shift refusal,
+        // since that chord is the band's all-sides drag.
         if self.begin_spacing_drag(grab, rect, ppp) {
             return;
         }
 
-        // Alt+Shift on the artwork starts no drag, so a key-layer designation
-        // that slips past the drag threshold cannot leave an Alt-duplicate behind.
-        // Below the chrome, where the chord still means a centred proportional
-        // resize.
+        // Alt+Shift on the artwork starts no drag, so a key-layer designation that
+        // slips past the drag threshold cannot leave an Alt-duplicate behind.
         if shift && ui.input(|i| i.modifiers.alt) {
             return;
         }
 
-        // The same chain as a click's `pick_at_pointer`, plus a selected frame's
-        // whole box; the edge link keeps a press on an unselected frame's border
-        // from starting a marquee.
+        // A click's `pick_at_pointer` chain, plus a selected frame's whole box.
         let grabbed = self
             .frame_label_at(ui, grab, rect, ppp)
             .or_else(|| self.pick_leaf(grab_world))
@@ -1785,10 +1676,7 @@ impl OndinApp {
             .or_else(|| self.frame_edge_at(grab_world));
         match grabbed {
             Some(leaf) => {
-                // Same policy as a click, so dragging a grouped layer moves what
-                // clicking it would have selected.
                 let top = self.pick_for_click(leaf, ui);
-                // Dragging an unselected node selects it first, like Figma.
                 if !self.session.selection.contains(top) {
                     if shift {
                         self.session.selection.add(top);
@@ -1796,8 +1684,7 @@ impl OndinApp {
                         self.session.selection.set_one(top);
                     }
                 }
-                // A selection holding a locked layer is not dragged; the press
-                // still selected.
+                // A locked selection is not dragged; the press still selected.
                 if self.selection_locked() {
                     return;
                 }
@@ -1826,22 +1713,17 @@ impl OndinApp {
             Drag::Pan => self.pan_by_drag(ui, resp),
             Drag::Move { anchor } => {
                 let (delta, _) = self.snapped_move(world - *anchor, shift);
-                // Alt turns the move into a copy at any point in the drag,
-                // placed by the delta so far.
+                // Alt turns the move into a copy at any point in the drag.
                 self.sync_alt_clone(alt);
                 match &mut self.alt_clone {
                     Some(clone) => {
                         clone.delta = delta;
-                        // The original stays put; the copy leaves the frame on
-                        // the original's answer, since it lands where it would.
                         let tx = self.clone_tx(delta);
                         let leaving = !self.leaving_their_frames(delta).is_empty();
                         self.session.set_preview_escaping_ghosts(&tx, leaving);
                     }
                     None => {
                         if let Some(tx) = self.move_preview_tx(delta) {
-                            // Drawn unclipped only once the release would take it
-                            // out of the frame.
                             let leaving = self.leaving_their_frames(delta);
                             self.session.set_preview_escaping(&tx, &leaving);
                         }
@@ -1853,8 +1735,8 @@ impl OndinApp {
                 let tx =
                     self.resize_tx(*target, *handle, at, self.resize_opts(*target, shift, alt));
                 self.session.set_preview(&tx);
-                // The Transform card's Scale field reads out the drag. Purely an
-                // indicator: its valve fires only on the field's own engagement.
+                // The Transform card's Scale field reads out the drag; its valve
+                // fires only on the field's own engagement.
                 if self.tool == Tool::Scale {
                     self.scale_pct = self.live_scale_pct().unwrap_or(100.0);
                 }
@@ -1879,8 +1761,7 @@ impl OndinApp {
             | Drag::Segment { .. }
             | Drag::PointBox { .. }
             | Drag::PointRotate { .. } => {}
-            // Unsnapped to guides, since the pointer stands for an angle; Shift
-            // snaps it to 15° steps instead.
+            // Unsnapped to guides, since the pointer stands for an angle.
             Drag::Skew {
                 target,
                 handle,
@@ -1890,8 +1771,7 @@ impl OndinApp {
                 let (target, handle, press) = (*target, *handle, *press);
                 let (tx, lean) = self.skew_tx(target, handle, press, world, shift);
                 self.session.set_preview(&tx);
-                // Stored from the computation that made the transaction, so the
-                // drawn frame cannot disagree with it about the angle.
+                // Stored from the transaction's own computation so the drawn frame agrees.
                 if let Drag::Skew { lean: slot, .. } = &mut self.drag {
                     *slot = lean;
                 }
@@ -1905,14 +1785,12 @@ impl OndinApp {
                 let (target, pivot, start) = (*target, *pivot, *start);
                 let (tx, turn) = self.rotate_tx(target, pivot, start, world, shift);
                 self.session.set_preview(&tx);
-                // Stored from the transaction's computation, as for a skew.
                 if let Drag::Rotate { turn: slot, .. } = &mut self.drag {
                     *slot = turn;
                 }
             }
             Drag::Create { .. } => {
-                // Both mid-draw keys act on the gesture *before* the box is
-                // rebuilt from it, so this frame already shows what they did.
+                // The mid-draw keys act before the box is rebuilt from the gesture.
                 self.reshape_create(ui, world);
                 let Drag::Create { start, shape, .. } = &self.drag else {
                     return;
@@ -1937,8 +1815,7 @@ impl OndinApp {
 
     fn finish_drag(&mut self, world: Option<Point>, shift: bool, alt: bool) {
         let drag = std::mem::replace(&mut self.drag, Drag::None);
-        // A completed gesture keeps the view where it scrolled to; only a cancel
-        // unwinds it.
+        // Only a cancel unwinds the auto-scroll.
         self.autopan_total = Vec2::ZERO;
         let Some(world) = world else {
             self.alt_clone = None;
@@ -1950,11 +1827,9 @@ impl OndinApp {
                 let raw = world - anchor;
                 if raw.hypot() > 1e-4 {
                     let (delta, _) = self.snapped_move(raw, shift);
-                    // Alt drops a copy; without it the layer itself moves.
                     self.sync_alt_clone(alt);
                     // Built with the drag back in place: whether an in-flow item
-                    // leaves its layout is read off the drag's pointer
-                    // (`move_pointer`), as every previewed frame read it.
+                    // leaves its layout is read off the drag's pointer (`move_pointer`).
                     self.drag = Drag::Move { anchor };
                     let built = match &self.alt_clone {
                         Some(_) => self.clone_tx(delta),
@@ -1971,8 +1846,7 @@ impl OndinApp {
                             }
                         }
                         None => {
-                            // Asked before the commit: a main passed over by a set
-                            // of another kind is told why.
+                            // Asked before the commit, so a refused drop says why.
                             let refused_set = self.drops_into_a_set_of_another_kind(delta);
                             if self.session.commit(built)
                                 && let Some(why) = refused_set
@@ -1997,9 +1871,8 @@ impl OndinApp {
                 let tx = self.rail_offset_tx(id, world);
                 self.session.commit(tx);
             }
-            // Built by the preview's function with the drag put back. A release
-            // where every slot already draws the value commits nothing — compared
-            // against the drawn value, not the stored, so a bound slot is right.
+            // A release where every slot already draws the value commits nothing,
+            // compared against the drawn value so a bound slot is right.
             drag @ Drag::Spacing { id, .. } => {
                 self.drag = drag;
                 let built = self.band_drag_tx(world, shift, alt);
@@ -2037,8 +1910,7 @@ impl OndinApp {
             } => {
                 let (tx, lean) = self.skew_tx(target, handle, press, world, shift);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
-                    // A set has no stored frame, so its lean is kept on the
-                    // selection past the release, composed with any earlier turn.
+                    // A set has no stored frame; keep its lean on the selection.
                     let was = self.session.selection.frame();
                     self.session.selection.set_frame(lean * was);
                 }
@@ -2051,7 +1923,6 @@ impl OndinApp {
             } => {
                 let (tx, turn) = self.rotate_tx(target, pivot, start, world, shift);
                 if self.session.commit(tx) && matches!(target, Target::Selection) {
-                    // Kept past the release, as for a skew.
                     let was = self.session.selection.frame();
                     self.session.selection.set_frame(turn * was);
                 }
@@ -2066,22 +1937,18 @@ impl OndinApp {
                     let (from, to) = self.create_box(shape, start, world, shift, alt);
                     self.commit_create(id, shape, from, to);
                 } else if shape == Tool::Text {
-                    // An out-and-back drag is a click, and for text that still
-                    // plants a caret (a shape abandons it). Reachable only by
-                    // returning to the origin, since egui's drag threshold exceeds
-                    // `MIN_CREATE_PX`
-                    // (`text_gesture::egui_starts_a_drag_only_past_the_distance_a_create_needs`).
+                    // An out-and-back drag is a click, and for text that still plants
+                    // a caret (a shape abandons it); egui's drag threshold exceeds
+                    // `MIN_CREATE_PX`, so only a return to the origin gets here.
                     self.drag = Drag::None;
                     self.begin_text(start);
                 } else if shape == Tool::Image {
-                    // Likewise an image places at its fitted size.
                     self.drag = Drag::None;
                     self.place_image_at(start);
                 }
             }
             Drag::Marquee { origin, additive } => self.apply_marquee(origin, world, additive),
-            // `pivot_at` answers `None` for a marker dragged back to the centre,
-            // which clears the field.
+            // `pivot_at` answers `None` back at the centre, which clears the field.
             Drag::Pivot { id } => {
                 let pivot = self.pivot_at(id, world);
                 if self.session.doc.get(id).is_some_and(|n| n.pivot() != pivot) {
@@ -2101,11 +1968,8 @@ impl OndinApp {
     }
 
     /// Prepare the copy an Alt-drag will carry, or throw it away when Alt is
-    /// released.
-    ///
-    /// Called every frame of a move with the live key state; the capture runs
-    /// on the edge. Ids are minted once, so every [`Self::clone_tx`] — each
-    /// preview frame and the commit — describes the same copy (§6.2).
+    /// released. The capture runs on the edge; ids are minted once, so every
+    /// [`Self::clone_tx`] — each preview frame and the commit — is the same copy (§6.2).
     fn sync_alt_clone(&mut self, alt: bool) {
         if !alt {
             self.alt_clone = None;
@@ -2140,26 +2004,21 @@ impl OndinApp {
         });
     }
 
-    /// The transaction that drops the prepared copy `delta` from its original —
-    /// the whole of an Alt-drag, previewed every frame and committed once.
-    ///
-    /// The original stays put and the copy travels, landing in whatever frame it
-    /// is dropped over by the move's own rule ([`Self::move_destination`]). It
-    /// lands just above its original when it stays among its siblings, appended
-    /// otherwise; the ghost previews in the same slot (`render::Ghost::index`).
+    /// The transaction that drops the prepared copy `delta` from its original.
+    /// The copy lands in the frame the move's rule picks ([`Self::move_destination`]),
+    /// just above its original among its siblings, appended otherwise; the ghost
+    /// previews in the same slot (`render::Ghost::index`).
     fn clone_tx(&self, delta: Vec2) -> Transaction {
         let Some(clone) = &self.alt_clone else {
             return Transaction::default();
         };
         let res = &self.session.resolved;
         let moved = Affine::translate(delta);
-        // The indices already inserted at, per parent — not a count: the
-        // selection is in pick order, so an earlier insert may land above this
-        // one (as `build::insert_subtrees` does).
+        // The indices already inserted at, per parent — not a count: the selection
+        // is in pick order, so an earlier insert may land above this one.
         let mut done: Vec<(NodeId, Vec<usize>)> = Vec::new();
         let mut ops = Vec::new();
-        // The same copy-name accumulator `insert_subtrees` keeps, since copies in
-        // one transaction cannot see each other yet.
+        // Copies in one transaction cannot see each other's names yet.
         let mut names = build::CopyNames::default();
 
         for copy in &clone.copies {
@@ -2196,8 +2055,8 @@ impl OndinApp {
                 parent,
                 index: base_index + shift,
             });
-            // Projected through the destination's world transform, which differs
-            // from the original parent's once the copy crosses into a frame.
+            // Through the destination's world transform, which differs once the
+            // copy crosses into a frame.
             let to_world = res.world_transform(parent).unwrap_or(Affine::IDENTITY);
             ops.push(Operation::SetTransform {
                 id: copy.root,
@@ -2217,15 +2076,12 @@ impl OndinApp {
     /// Where `id` would land if the move committed now: `Some(parent)` when the
     /// move changes its parent, `None` when it stays where it is.
     ///
-    /// An in-flow item drops into a frame inside its container that covers most
-    /// of its moved box; else stays while the pointer is inside the container,
-    /// or (pressed on an overflowing part) while its box still meets it. Past
-    /// that, and for every other layer, the frame covering most of the moved box
-    /// decides. Only children of the root or a frame hop; a layer in a frame
-    /// inside a group hops only between that group's frames.
-    ///
-    /// Shared with [`Self::draw_frame_drop_outline`], so the highlight never
-    /// promises a frame the release does not deliver.
+    /// An in-flow item stays while the pointer is inside its container (or, if
+    /// pressed on an overflowing part, while its box still meets it) unless a
+    /// frame inside the container covers most of its box; any other layer goes to
+    /// the frame covering most of its moved box. Only children of the root or a
+    /// frame hop, and a layer in a frame inside a group only between that group's
+    /// frames. Shared with [`Self::draw_frame_drop_outline`].
     fn move_destination(&self, id: NodeId, delta: Vec2) -> Option<NodeId> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let root = doc.root();
@@ -2245,9 +2101,8 @@ impl OndinApp {
             return None;
         }
         let landed = res.world_bounds(id)? + delta;
-        // An in-flow item leaves its layout only when the pointer does: its box is
-        // where the layout put it and may overflow the frame, while the pointer is
-        // shared by every item of a block.
+        // An in-flow item leaves its layout only when the pointer does: its box
+        // may overflow the frame, while the pointer is shared by a block's items.
         if build::is_flex_item(doc, id)
             && let Some(p) = parent
         {
@@ -2263,20 +2118,15 @@ impl OndinApp {
             if self.pointer_in(p, self.move_pointer(id, delta)?) {
                 return None;
             }
-            // Pressed on the overflowing part outside the container, it stays
-            // while its box still meets the container.
             let pressed_in = self.pointer_in(p, self.move_pointer(id, Vec2::ZERO)?);
             if !pressed_in && self.box_meets(p, landed) {
                 return None;
             }
         }
-        // A layer in a frame inside a group hops only between that group's frames,
-        // and otherwise stays.
         if let Some(fence) = group_fence(doc, id) {
             let moving = self.moving_with(id);
             let destination = self.with_frames(|i| {
-                // Never the moved layer, a layer moving with it, or a frame inside
-                // either (see `frame_covering_except`).
+                // Never the moved layer, one moving with it, or a frame inside either.
                 let inside: Vec<(NodeId, KRect)> = i
                     .boxes
                     .iter()
@@ -2284,21 +2134,18 @@ impl OndinApp {
                     .filter(|(f, _)| !within_moving(doc, *f, &moving))
                     .copied()
                     .collect();
-                // And never one the component rules refuse it in.
                 self.covering_that_holds(landed, id, inside, i.components)
             })?;
             return (Some(destination) != parent).then_some(destination);
         }
-        // A frame cannot land in itself or its descendants (`Reparent` would
-        // refuse the cycle); they are excluded before the topmost is chosen.
+        // A frame cannot land in itself or its descendants (`Reparent` refuses the cycle).
         let destination = self.frame_covering_except(landed, id).unwrap_or(root);
         (Some(destination) != parent).then_some(destination)
     }
 
     /// Where the pointer is in world space for a move of `id` by `delta`: the
-    /// move's anchor carried by the delta while a move drag is under way, else —
-    /// a move asked for with no drag, as a test asks — the middle of `id`'s box
-    /// carried the same way, where a pointer that grabbed it would most likely be.
+    /// drag's anchor carried by the delta, else (no drag, as a test asks) the
+    /// middle of `id`'s box carried the same way.
     fn move_pointer(&self, id: NodeId, delta: Vec2) -> Option<Point> {
         match self.drag {
             Drag::Move { anchor } => Some(anchor + delta),
@@ -2306,10 +2153,8 @@ impl OndinApp {
         }
     }
 
-    /// Whether world point `at` is inside container `id`'s own box, through its
-    /// world transform — so a rotated container answers for its turned box, not
-    /// the upright region it covers. The committed box: the container is not what
-    /// is being moved.
+    /// Whether world point `at` is inside container `id`'s own box through its
+    /// world transform, so a rotated container answers for its turned box.
     fn pointer_in(&self, id: NodeId, at: Point) -> bool {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let (Some(local), Some(world)) =
@@ -2321,12 +2166,10 @@ impl OndinApp {
     }
 
     /// Whether the world rectangle `r` meets container `id`'s own box through its
-    /// world transform — [`Self::pointer_in`]'s twin for a box, so a rotated
-    /// container answers for its turned box.
+    /// world transform — [`Self::pointer_in`]'s twin for a box.
     ///
     /// Separating axes over the rectangle's two and the quad's two edge
-    /// directions. Open intervals, so a box that only touches an edge does not
-    /// meet it.
+    /// directions; open intervals, so a box that only touches an edge misses.
     fn box_meets(&self, id: NodeId, r: KRect) -> bool {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let (Some(local), Some(world)) =
@@ -2366,10 +2209,9 @@ impl OndinApp {
         })
     }
 
-    /// Which of the moving layers this `delta` would take out of the frame they
-    /// are in — the ones the preview must therefore draw unclipped. Asked through
-    /// [`Self::move_destination`], the release's own question, so a clipped shape
-    /// drops in the frame and an unclipped one drops out.
+    /// Which of the moving layers this `delta` would take out of their frame —
+    /// the ones the preview draws unclipped. Asked through
+    /// [`Self::move_destination`], the release's own question.
     fn leaving_their_frames(&self, delta: Vec2) -> Vec<NodeId> {
         build::outermost(&self.session.doc, self.session.selection.ids())
             .into_iter()
@@ -2381,10 +2223,9 @@ impl OndinApp {
     /// container** rather than a move — and if so, which item and the `Reorder` it
     /// asks for (`None` inside: it lands where it was).
     ///
-    /// One selected in-flow layer the move does not take out of its parent: its
-    /// place in the flow is where it is drawn, so the drag means "put it there".
-    /// In a grid the drop writes lines instead (`build::layout_drop` answers for
-    /// both). Several layers are [`Self::flex_block_reorder_of`]'s.
+    /// One selected in-flow layer the move does not take out of its parent. In a
+    /// grid the drop writes lines instead (`build::layout_drop` answers for both).
+    /// Several layers are [`Self::flex_block_reorder_of`]'s.
     fn flex_reorder_of(&self, delta: Vec2) -> Option<(NodeId, Option<Operation>)> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let [id] = build::outermost(doc, self.session.selection.ids())[..] else {
@@ -2396,10 +2237,9 @@ impl OndinApp {
         Some((id, build::layout_drop(doc, res, id, delta)))
     }
 
-    /// [`Self::flex_reorder_of`] for **several** selected layers: when every one
-    /// is an in-flow item of the same container and none leaves it, the move is a
-    /// drop of the block (`build::layout_drop_many`'s ops, empty when it lands
-    /// where it was). Anything else keeps [`Self::stays_in_flow`]'s rule.
+    /// [`Self::flex_reorder_of`] for **several** layers: when every one is an
+    /// in-flow item of the same container and none leaves it, the move drops the
+    /// block (`build::layout_drop_many`'s ops, empty when it lands where it was).
     fn flex_block_reorder_of(&self, delta: Vec2) -> Option<Vec<Operation>> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let ids = build::outermost(doc, self.session.selection.ids());
@@ -2417,12 +2257,10 @@ impl OndinApp {
     /// [`Self::move_tx`] commits, drawn the way a drag has to be drawn.
     ///
     /// `build::move_by_world`'s translation for every selected layer, so the
-    /// dragged layer stays under the hand, and then:
-    ///
-    /// - one in-flow item, or several of one container, also gain the reorder or
-    ///   grid lines the release commits, so siblings open the slot;
-    /// - any other selection drops the translation of every in-flow item that
-    ///   keeps its slot ([`Self::stays_in_flow`]), as the release does.
+    /// dragged layer stays under the hand; one in-flow item, or several of one
+    /// container, also gain the reorder or grid lines the release commits, and any
+    /// other selection drops the translation of every item that keeps its slot
+    /// ([`Self::stays_in_flow`]).
     fn move_preview_tx(&self, delta: Vec2) -> Option<Transaction> {
         let mut tx = build::move_by_world(
             &self.session.doc,
@@ -2447,8 +2285,7 @@ impl OndinApp {
 
     /// Whether `id`, moved by `delta` as one of several, **keeps its slot in its
     /// container's flow** — an in-flow flex item the move does not take out of its
-    /// parent. Both the commit and the preview ask it, so neither carries the
-    /// item's translation.
+    /// parent. Commit and preview both ask it.
     fn stays_in_flow(&self, id: NodeId, delta: Vec2) -> bool {
         build::is_flex_item(&self.session.doc, id) && self.move_destination(id, delta).is_none()
     }
@@ -2458,20 +2295,18 @@ impl OndinApp {
     /// Built by hand because a reparent projects the new transform through the
     /// destination's world transform, not the current parent's.
     fn move_tx(&self, delta: Vec2) -> Transaction {
-        // An in-flow item's move commits only its reorder (or grid lines): its
-        // container places it, so a stored translation would be invisible until
-        // the layout is removed.
+        // An in-flow item commits only its reorder (or grid lines): a stored
+        // translation would be invisible until the layout is removed.
         if let Some((_, reorder)) = self.flex_reorder_of(delta) {
             return Transaction(reorder.into_iter().collect());
         }
-        // Several items of one container move as a block.
         if let Some(reorders) = self.flex_block_reorder_of(delta) {
             return Transaction(reorders);
         }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let moved = Affine::translate(delta);
-        // Net change to each parent's child count so far: a `Reparent` index is
-        // validated against the list as it stands when the op runs.
+        // Net change to each parent's child count: a `Reparent` index is validated
+        // against the list as it stands when the op runs.
         let mut net: Vec<(NodeId, isize)> = Vec::new();
         let mut ops = Vec::new();
 
@@ -2501,7 +2336,6 @@ impl OndinApp {
                     if let Some(from) = parent {
                         bump(from, -1);
                     }
-                    // Append: on top of the frame's contents, as it was on screen.
                     let index = (self.child_count(to) as isize + shift).max(0) as usize;
                     let to_world = res.world_transform(to).unwrap_or(Affine::IDENTITY);
                     ops.push(Operation::Reparent {
@@ -2514,8 +2348,6 @@ impl OndinApp {
                         transform: to_world.inverse() * new_world,
                     });
                 }
-                // An in-flow item in a mixed selection keeps its slot; no
-                // translation is stored for it.
                 None if self.stays_in_flow(id, delta) => {}
                 None => ops.push(Operation::SetTransform {
                     id,
@@ -2528,15 +2360,11 @@ impl OndinApp {
 
     /// The frame that owns `bounds` for a move of `moved`, out of the document's
     /// artboards but those moving with it ([`Self::moving_with`]) and anything
-    /// inside them.
-    ///
-    /// Excluded before the topmost is chosen, not filtered from the answer: a
-    /// moved frame lies over its own moved box, and the frame under it must
-    /// still be a candidate.
+    /// inside them. Excluded before the topmost is chosen: a moved frame lies
+    /// over its own moved box, and the frame under it must still be a candidate.
     fn frame_covering_except(&self, bounds: KRect, moved: NodeId) -> Option<NodeId> {
         let doc = &self.session.doc;
         let moving = self.moving_with(moved);
-        // Through the frame memo: this runs per selected node per frame of a drag.
         self.with_frames(|i| {
             let others: Vec<(NodeId, KRect)> = i
                 .boxes
@@ -2549,9 +2377,8 @@ impl OndinApp {
     }
 
     /// [`frame_covering`] over `candidates`, skipping a frame the component rules
-    /// (`Self::holds`) would refuse `moved` in, before the topmost is taken so the
-    /// frame underneath is still a candidate. Skipped entirely in a document with
-    /// no components ([`FrameIndex`]'s `components`).
+    /// (`Self::holds`) would refuse `moved` in, so the frame underneath is still a
+    /// candidate. Skipped in a document with no components ([`FrameIndex`]'s `components`).
     ///
     /// [`FrameIndex`]: crate::app::FrameIndex
     fn covering_that_holds(
@@ -2571,10 +2398,8 @@ impl OndinApp {
     }
 
     /// Whether frame `f` may hold `moved` dropped into it by this move:
-    /// `component::can_hold`, and — for a main newly entering a component set —
-    /// the set taking every main moving with it together
-    /// (`variant::takes_together`), since two kinds each fit an empty set alone.
-    /// A variant already in `f` is never refused.
+    /// `component::can_hold`, and for a main entering a component set, the set
+    /// taking every main moving with it (`variant::takes_together`).
     fn holds(&self, f: NodeId, moved: NodeId) -> bool {
         ondin_core::component::can_hold(&self.session.doc, f, moved)
             && self.set_takes_moving(f, moved)
@@ -2582,8 +2407,7 @@ impl OndinApp {
 
     /// [`Self::holds`]'s second half: `true` unless `moved` is a main entering
     /// the set `f` beside mains of another kind, or of a kind other than the set's.
-    /// The moving set is [`Self::moving_with`]'s, so an Alt-drag asks `moved`
-    /// alone — its copies are instances, not mains.
+    /// An Alt-drag asks `moved` alone ([`Self::moving_with`]): its copies are instances.
     fn set_takes_moving(&self, f: NodeId, moved: NodeId) -> bool {
         let doc = &self.session.doc;
         if !ondin_core::variant::is_set(doc, f)
@@ -2599,11 +2423,9 @@ impl OndinApp {
 
     /// Whether a move of the selection by `delta` drops a main over a component
     /// set of another kind, which [`Self::covering_that_holds`] passed over — the
-    /// one refusal the release explains. Read off the plain drop rule only.
-    ///
-    /// Answers the message to say: [`SET_OF_ANOTHER_KIND`] for a main of a kind
-    /// the set's variants are not, [`SET_OF_MIXED_KINDS`] for mains of two kinds
-    /// moving into it together (an empty set fits either alone).
+    /// one refusal the release explains. Answers the message: [`SET_OF_ANOTHER_KIND`]
+    /// for a main of a kind the set's variants are not, [`SET_OF_MIXED_KINDS`] for
+    /// mains of two kinds moving into it together (an empty set fits either alone).
     fn drops_into_a_set_of_another_kind(&self, delta: Vec2) -> Option<&'static str> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         build::outermost(doc, self.session.selection.ids())
@@ -2620,14 +2442,11 @@ impl OndinApp {
                         .collect()
                 });
                 let kind = doc.get(id).expect("filtered on it").kind();
-                // The frames `covering_that_holds` passed over, topmost first — a
-                // variant lying over its set's box is one, before the set.
+                // The frames `covering_that_holds` passed over, topmost first.
                 while let Some(f) = frame_covering(landed, &candidates) {
                     if self.holds(f, id) {
                         return None;
                     }
-                    // Another kind than the set's, or than the mains moving
-                    // with it into an empty one.
                     if ondin_core::variant::is_set(doc, f) {
                         if !ondin_core::variant::fits_set(doc, f, kind, Some(id)) {
                             return Some(SET_OF_ANOTHER_KIND);
@@ -2642,12 +2461,9 @@ impl OndinApp {
             })
     }
 
-    /// The layers that move with `id` in a move of it — so none of them, nor
-    /// anything inside them, can be the frame it lands in.
-    ///
-    /// `id` and the selection's outermost roots for a plain move; `id` alone for
-    /// an Alt-drag, whose originals stay put. Read from the selection so every
-    /// caller of [`Self::move_destination`] asks the same set; a hash set so
+    /// The layers that move with `id` in a move of it — none of them, nor anything
+    /// inside them, can be the frame it lands in. `id` and the selection's
+    /// outermost roots for a plain move; `id` alone for an Alt-drag. A hash set so
     /// [`within_moving`] needs one walk up per candidate frame.
     fn moving_with(&self, id: NodeId) -> std::collections::HashSet<NodeId> {
         let mut moving = std::collections::HashSet::from([id]);
@@ -2661,17 +2477,14 @@ impl OndinApp {
     }
 
     /// The snapped pointer position for a resize, and the lines explaining it.
-    ///
     /// Snapping the pointer rather than the box keeps the anchored edge still
-    /// ([`snap::snap_point`]). Shift is the ratio constraint ([`Self::keep_ratio`]),
-    /// not a snap switch, and the ratio is applied after the snap.
+    /// ([`snap::snap_point`]); the ratio constraint is applied after the snap.
     fn snapped_resize(
         &self,
         target: Target,
         handle: Handle,
         world: Point,
     ) -> (Point, Vec<snap::Guide>) {
-        // Everything being transformed is excluded from the snap targets.
         let moving: Vec<NodeId> = match target {
             Target::Layer(id) => vec![id],
             Target::Selection => self.session.selection.ids().to_vec(),
@@ -2683,9 +2496,8 @@ impl OndinApp {
 
     /// Which world axes a resize handle travels along: [`Handle::outward`] mapped
     /// through the box's world transform, so a rotated side snaps on both axes.
-    /// The axes it does not travel along are left alone, or the anchored edge
-    /// would shift. A multi-selection uses its own frame
-    /// ([`Self::selection_frame`]), the one its handles are drawn with.
+    /// Axes it does not travel along are left alone, or the anchored edge would
+    /// shift. A multi-selection uses [`Self::selection_frame`].
     fn resize_axes(&self, target: Target, handle: Handle) -> (bool, bool) {
         /// Well inside 1/√2, so a 45° edge claims both axes rather than neither.
         const AXIS: f64 = 0.3;
@@ -2706,15 +2518,11 @@ impl OndinApp {
     }
 
     /// Whether a resize of `id` should hold its aspect ratio: Shift XOR the
-    /// proportion lock, so Shift frees a locked layer.
-    ///
-    /// A multi-selection is locked only when every member is. The Scale tool
-    /// counts as locked, since one stroke width has no answer for two factors;
-    /// released, scalars take the geometric mean ([`tools::Scaling`]).
+    /// proportion lock, so Shift frees a locked layer. A multi-selection is locked
+    /// only when every member is. The Scale tool counts as locked, since one
+    /// stroke width has no answer for two factors ([`tools::Scaling`]).
     fn keep_ratio(&self, target: Target, shift: bool) -> bool {
         let doc = &self.session.doc;
-        // The all-or-nothing rule is `tools::proportions_locked`, shared with the
-        // numeric fields.
         let locked = self.tool == Tool::Scale
             || match target {
                 Target::Layer(id) => tools::proportions_locked(doc, &[id]),
@@ -2724,8 +2532,7 @@ impl OndinApp {
     }
 
     /// The terms of a handle drag: the ratio lock, Alt, and what the active tool
-    /// says a handle drag *means* — the whole of the difference between Select and
-    /// Scale.
+    /// says it means — the whole difference between Select and Scale.
     fn resize_opts(&self, target: Target, shift: bool, alt: bool) -> tools::Resize {
         tools::Resize {
             keep_ratio: self.keep_ratio(target, shift),
@@ -2734,13 +2541,10 @@ impl OndinApp {
         }
     }
 
-    /// How far a resize in flight has scaled the selection, as a percentage —
-    /// the number the Transform card's Scale field shows while the handles are
-    /// being dragged.
-    ///
-    /// The previewed box against the committed one, since no scale is stored.
-    /// The geometric mean `sqrt(|sx·sy|)` of the two factors, as
-    /// `Scaling::scalar` uses; an axis with no extent contributes 1.
+    /// How far a resize in flight has scaled the selection, as a percentage, for
+    /// the Transform card's Scale field. The previewed box against the committed
+    /// one, as the geometric mean of the two factors (as `Scaling::scalar`); an
+    /// axis with no extent contributes 1.
     pub(crate) fn live_scale_pct(&self) -> Option<f64> {
         let (roots, before) = self.selection_union()?;
         let after = roots
@@ -2756,13 +2560,9 @@ impl OndinApp {
     }
 
     /// The resize transaction for whatever kind of node is being dragged: a
-    /// geometry edit on a shape, a recursive scale on a container.
-    ///
-    /// `opts.keep_ratio` is [`Self::keep_ratio`], `opts.symmetric` is Alt (grow
-    /// about the centre). A shape with an authored box has it edited, a path or
-    /// line has its geometry scaled about the held corner, a container recurses,
-    /// and a multi-selection scales each outermost member about the box its
-    /// handles are drawn on.
+    /// geometry edit on a shape, a recursive scale on a container, each outermost
+    /// member about the drawn box for a multi-selection. `opts.symmetric` is Alt
+    /// (grow about the centre).
     fn resize_tx(
         &self,
         target: Target,
@@ -2775,8 +2575,7 @@ impl OndinApp {
             Target::Layer(id) => id,
             Target::Selection => {
                 // The committed tree, not the preview (scaling a box being scaled
-                // compounds), and the box the chrome draws, which follows the set's
-                // turned or leaned frame.
+                // compounds), and the box the chrome draws.
                 let roots = build::outermost(doc, self.session.selection.ids());
                 let Some(sel) = self.selection_resize_box() else {
                     return Transaction(Vec::new());
@@ -2784,15 +2583,13 @@ impl OndinApp {
                 return tools::resize_selection(doc, res, &roots, sel, handle, world, opts);
             }
         };
-        // Shared with the inspector's W/H fields, and read from the committed tree.
         tools::resize_layer(doc, res, id, handle, world, opts)
     }
 
     /// Lean the dragged side, holding the one facing it still.
     ///
-    /// A skew always goes into the transform, so a shape and a group lean on
-    /// their own local box; a multi-selection leans about the upright union, as
-    /// one parallelogram. The box comes from the committed tree, as a resize's.
+    /// A skew always goes into the transform: a shape or group leans on its own
+    /// local box, a multi-selection about the upright union as one parallelogram.
     fn skew_tx(
         &self,
         target: Target,
@@ -2802,10 +2599,8 @@ impl OndinApp {
         snap_to_steps: bool,
     ) -> (Transaction, Affine) {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
-        // Built once, so neither arm can swap the two points.
         let drag = tools::SideDrag { press, at: world };
         match target {
-            // A single node's chrome leans with its own transform; no shear back.
             Target::Layer(id) => match ondin_core::local_box(doc, res, id) {
                 Some(local) => (
                     tools::skew_to_handle(doc, res, id, local, handle, drag, snap_to_steps),
@@ -2822,7 +2617,7 @@ impl OndinApp {
                 else {
                     return (Transaction(Vec::new()), Affine::IDENTITY);
                 };
-                // One shear for both the shapes and the frame drawn round them.
+                // One shear for the shapes and the frame drawn round them.
                 let Some(shear) = tools::side_shear(union, handle, drag, snap_to_steps) else {
                     return (Transaction(Vec::new()), Affine::IDENTITY);
                 };
@@ -2831,9 +2626,8 @@ impl OndinApp {
         }
     }
 
-    /// A multi-selection turns about the *shared* pivot the handles were built
-    /// from — the union box's centre — so the set holds its arrangement and
-    /// sweeps round as one thing rather than each member spinning in place.
+    /// A multi-selection turns about the shared pivot the handles were built from
+    /// (the union box's centre), so the set holds its arrangement.
     fn rotate_tx(
         &self,
         target: Target,
@@ -2849,7 +2643,6 @@ impl OndinApp {
             angle = (angle / ROTATE_SNAP).round() * ROTATE_SNAP;
         }
         match target {
-            // A single node's frame turns with its own world transform.
             Target::Layer(id) => (
                 tools::rotate_node(doc, res, id, pivot, angle),
                 Affine::IDENTITY,
@@ -2858,7 +2651,6 @@ impl OndinApp {
                 let roots = build::outermost(doc, self.session.selection.ids());
                 (
                     tools::rotate_selection(doc, res, &roots, pivot, angle),
-                    // The members' turn, handed to the frame so the box turns too.
                     tools::turn_about(pivot, angle),
                 )
             }
@@ -2866,13 +2658,9 @@ impl OndinApp {
     }
 
     /// The snap sources the top bar's **Snap** menu currently admits, with
-    /// `moving` excluded from the shape targets.
-    ///
-    /// One place resolves every toggle; one that is off contributes an empty
-    /// candidate list ([`snap::Snapping`]). The menu is the only way to switch
-    /// snapping off — no modifier does.
+    /// `moving` excluded from the shape targets. A toggle that is off contributes
+    /// an empty candidate list ([`snap::Snapping`]); no modifier switches snapping off.
     pub(crate) fn snapping(&self, moving: &[NodeId]) -> snap::Snapping {
-        // Points per world unit: the tolerance is aimed at by a pointer.
         let zoom = self.points_per_world();
         let view = self.session.camera.viewport(self.canvas_px).view;
         snap::Snapping {
@@ -2904,15 +2692,12 @@ impl OndinApp {
 
     /// Every text baseline in view, in world space, for [`snap::Snapping`].
     ///
-    /// Read off the cached `TextLayout::baselines`, never re-shaped
-    /// (`text::export_lines` would re-shape every frame of a drag). Rotated or
-    /// skewed text is excluded: its baseline is slanted, and snapping is
-    /// axis-aligned.
+    /// Read off the cached `TextLayout::baselines`, never re-shaped every frame of
+    /// a drag. Rotated or skewed text is excluded: snapping is axis-aligned.
     fn baseline_lines(&self, moving: &[NodeId], view: KRect) -> Vec<f64> {
         let mut out = Vec::new();
         for id in ondin_core::nodes_in_view(&self.session.resolved, view) {
-            // Text inside a moving layer is excluded too, as `snap::targets`
-            // does, or a group snaps to its own text's committed baseline.
+            // As `snap::targets`: a group must not snap to its own text.
             if moving.contains(&id) || crate::snap::is_inside_any(&self.session.doc, id, moving) {
                 continue;
             }
@@ -2925,7 +2710,6 @@ impl OndinApp {
             ) else {
                 continue;
             };
-            // Upright only: both off-diagonal linear terms zero.
             let m = world.as_coeffs();
             if m[1].abs() > 1e-9 || m[2].abs() > 1e-9 {
                 continue;
@@ -2941,12 +2725,9 @@ impl OndinApp {
     }
 
     /// The delta a move should actually apply, and the lines explaining it:
-    /// `raw` constrained to one axis if Shift is held, then snapped along
-    /// whichever axes are left. Shift locks the axis; it does not switch
-    /// snapping off.
-    ///
-    /// The constraint is enforced inside the snap ([`snap::snap_rect`]'s `axes`),
-    /// not by zeroing afterwards, so no snap slides the layer off the locked line.
+    /// `raw` constrained to one axis if Shift is held, then snapped along the
+    /// axes left. The constraint is enforced inside the snap ([`snap::snap_rect`]'s
+    /// `axes`), so no snap slides the layer off the locked line.
     fn snapped_move(&self, raw: Vec2, shift: bool) -> (Vec2, snap::Marks) {
         let axes = snap::move_axes(raw, shift);
         let delta = snap::constrain(raw, axes);
@@ -2984,9 +2765,9 @@ impl OndinApp {
                 .resolved
                 .world_bounds(child)
                 .is_some_and(|b| overlaps(b, area));
-            // Locks are filtered in `marquee_candidates`, shared with `Ctrl+A`.
-            // Visibility here is deliberately the node's own flag only, so a layer
-            // in a hidden group stays marquee-selectable (`context-menus.md` §5.9).
+            // Locks are filtered in `marquee_candidates`. Visibility is the node's
+            // own flag only, so a layer in a hidden group stays selectable
+            // (`context-menus.md` §5.9).
             let selectable = self.session.doc.shown(child);
             if inside && selectable {
                 picked.push(child);
@@ -3003,9 +2784,8 @@ impl OndinApp {
 
     // --- shape creation ---------------------------------------------------
 
-    /// A world point rounded to the pixel grid, when the grid is switched on.
-    /// Shape creation uses it on both ends, so a shape is born on whole pixels.
-    /// Only the grid, not alignment snapping: a drawn box is aiming at a size.
+    /// A world point rounded to the pixel grid, when the grid is on, so a shape is
+    /// born on whole pixels. Only the grid, not alignment snapping.
     fn pixel_point(&self, world: Point) -> Point {
         if !self.snap_grid {
             return world;
@@ -3013,15 +2793,10 @@ impl OndinApp {
         Point::new(world.x.round(), world.y.round())
     }
 
-    /// Where the far corner of what is being drawn actually sits: on the pixel
-    /// grid, and — while Shift is held — constrained in whatever way the shape
-    /// being drawn admits. Both the transaction and the outline read it through
-    /// [`Self::create_box`], so they agree.
-    ///
-    /// `shape` is the gesture's own tool, so the constraint cannot change mid-drag.
-    /// Box shapes, text included, get equal extents; a line gets a direction
-    /// ([`Self::axial_corner`]). The pen arm is unreachable (`Tool::drags_a_box`
-    /// excludes it) and kept so the fallthrough never squares a pen point.
+    /// Where the far corner of what is being drawn sits: on the pixel grid, and
+    /// with Shift, equal extents for boxes (text included) or a direction for a
+    /// line ([`Self::axial_corner`]). The pen arm is unreachable
+    /// (`Tool::drags_a_box`) and kept so the fallthrough never squares a pen point.
     fn create_corner(&self, shape: Tool, start: Point, world: Point, shift: bool) -> Point {
         if !shift {
             return self.pixel_point(world);
@@ -3029,18 +2804,15 @@ impl OndinApp {
         match shape {
             Tool::Line => self.axial_corner(start, world),
             Tool::Pen => self.pixel_point(world),
-            // Rounded before squaring, or each axis rounds independently and the
-            // "square" can be a pixel off.
+            // Rounded before squaring, or the "square" can be a pixel off.
             _ => squared_corner(start, self.pixel_point(world)),
         }
     }
 
-    /// **Both** ends of what is being drawn: where the press went down, and where
-    /// the pointer has reached — the pair every `tools::create_*` takes.
-    ///
-    /// With Alt the press point is the centre and the corner is mirrored through
-    /// it, lines included. Constrain first, mirror second, so Alt+Shift stays
-    /// square (or on its octant) and on the pixel grid (§15 D289).
+    /// **Both** ends of what is being drawn — the pair every `tools::create_*`
+    /// takes. With Alt the press point is the centre and the corner is mirrored
+    /// through it, lines included. Constrain first, mirror second, so Alt+Shift
+    /// stays square (or on its octant) and on the pixel grid (§15 D289).
     fn create_box(
         &self,
         shape: Tool,
@@ -3057,12 +2829,9 @@ impl OndinApp {
     }
 
     /// `world` pulled onto the nearest eighth of a turn from `start` — a
-    /// Shift-drawn line. Eighths rather than `ROTATE_SNAP`'s 15°, so the axes
-    /// are easy to hit.
-    ///
-    /// The direction is an integer step like `(±1, ±1)`, so a grid-rounded
-    /// endpoint keeps the exact angle. The length is the pointer's projection
-    /// onto it, as [`snap::constrain`] does for a move.
+    /// Shift-drawn line. The direction is an integer step like `(±1, ±1)`, so a
+    /// grid-rounded endpoint keeps the exact angle; the length is the pointer's
+    /// projection onto it, as [`snap::constrain`] does for a move.
     fn axial_corner(&self, start: Point, world: Point) -> Point {
         const OCTANT: f64 = std::f64::consts::TAU / 8.0;
         let d = world - start;
@@ -3071,8 +2840,6 @@ impl OndinApp {
         }
         let angle = (d.y.atan2(d.x) / OCTANT).round() * OCTANT;
         let step = Vec2::new(angle.cos().round(), angle.sin().round());
-        // `d` was what chose this octant, so it cannot point against the step and
-        // `t` cannot come back negative.
         let mut t = d.dot(step) / step.dot(step);
         if self.snap_grid {
             t = t.round();
@@ -3082,15 +2849,13 @@ impl OndinApp {
 
     /// Put one end of a line at `world`; the geometry is [`tools::move_line_end`]'s.
     ///
-    /// Shift constrains to eighths about the other end ([`Self::axial_corner`]),
-    /// as when drawing; otherwise the point snaps. Not both: a snapped point
-    /// forced to 45° is on neither.
+    /// Shift constrains to eighths about the other end ([`Self::axial_corner`]);
+    /// otherwise the point snaps. Not both: a snapped point forced to 45° is on neither.
     fn line_end_tx(&self, id: NodeId, which: LineEnd, world: Point, shift: bool) -> Transaction {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let Some((start_world, end_world)) = tools::line_ends_world(doc, res, id) else {
             return Transaction::default();
         };
-        // The end that is not moving is what a constraint is measured against.
         let anchor = match which {
             LineEnd::Start => end_world,
             LineEnd::End => start_world,
@@ -3098,19 +2863,15 @@ impl OndinApp {
         let target = if shift {
             self.axial_corner(anchor, world)
         } else {
-            // Both axes: an endpoint travels freely, unlike a resize handle.
             snap::snap_point(world, (true, true), &self.snapping(&[id])).at
         };
         tools::move_line_end(doc, res, id, which, target)
     }
 
-    /// The two keys a create drag reads while it is still in flight
-    /// (`docs/shortcuts.md` §9): `Space` repositions the uncommitted shape, and
-    /// `↑`/`↓` add and remove sides.
-    ///
-    /// Read here rather than through the keymap, since they mean nothing without
-    /// a drag running. `dispatch` drops a `Nudge` while a create drag is up, so
-    /// the arrows do not also move the selection.
+    /// The two keys a create drag reads in flight (`docs/shortcuts.md` §9):
+    /// `Space` repositions the uncommitted shape, `↑`/`↓` add and remove sides.
+    /// `dispatch` drops a `Nudge` while a create drag is up, so the arrows do not
+    /// also move the selection.
     fn reshape_create(&mut self, ui: &egui::Ui, world: Point) {
         let (space, up, down) = ui.input(|i| {
             (
@@ -3125,8 +2886,7 @@ impl OndinApp {
         else {
             return;
         };
-        // Space moves `start` by the motion while it is held; the far corner
-        // already tracks the pointer, so the box translates at its size.
+        // The far corner tracks the pointer, so moving `start` translates the box.
         if space {
             *start += world - *last;
         }
@@ -3146,7 +2906,6 @@ impl OndinApp {
             parent_world,
             start: world,
             shape,
-            // Where the arrows start counting; unread by shapes without sides.
             sides: match shape {
                 Tool::Star => tools::STAR_DEFAULT_POINTS,
                 _ => tools::POLYGON_DEFAULT_SIDES,
@@ -3155,10 +2914,9 @@ impl OndinApp {
         };
     }
 
-    /// Turn the live `Drag::Create` into a committed layer spanning `from`–`to`,
-    /// end the gesture, and hand the result to whatever comes next — the one tail
-    /// for both the drag's release and [`Self::click_create`]. Clears `self.drag`
-    /// on every path, or the next frame's overlay reads the gesture again.
+    /// Turn the live `Drag::Create` into a committed layer spanning `from`–`to`:
+    /// the one tail for the drag's release and [`Self::click_create`]. Clears
+    /// `self.drag` on every path, or the next frame's overlay reads it again.
     fn commit_create(&mut self, id: NodeId, shape: Tool, from: Point, to: Point) {
         let tx = self.create_tx(from, to);
         self.drag = Drag::None;
@@ -3166,11 +2924,9 @@ impl OndinApp {
             && self.session.commit(tx)
         {
             self.session.selection.set_one(id);
-            // A text box opens for typing; a shape is handed to Select.
             if shape == Tool::Text {
                 self.open_text_session(id);
             } else if shape == Tool::Image {
-                // The tool disarms only once the last queued image is spent.
                 self.placed_one_image();
             } else {
                 self.choose_tool(Tool::Select);
@@ -3180,11 +2936,9 @@ impl OndinApp {
     }
 
     /// A shape at [`tools::CLICK_CREATE_SIZE`] where the pointer clicked, for the
-    /// tools whose click answers [`ClickCreate::DefaultBox`].
-    ///
-    /// Synthesizes a short-lived `Drag::Create` and hands it to the release's
-    /// tail, rather than a second creation path. The press is the top-left
-    /// corner, or the centre with Alt.
+    /// tools whose click answers [`ClickCreate::DefaultBox`]. Synthesizes a
+    /// short-lived `Drag::Create` for the release's tail, not a second creation
+    /// path. The press is the top-left corner, or the centre with Alt.
     fn click_create(&mut self, world: Point, alt: bool) {
         self.begin_create(self.pixel_point(world));
         let Drag::Create {
@@ -3198,8 +2952,7 @@ impl OndinApp {
     }
 
     /// Build the create transaction for the in-flight `Drag::Create`. Both ends
-    /// are passed in, since under Alt the near one is mirrored
-    /// ([`Self::create_box`]) and the drag's `start` stays the press anchor.
+    /// are passed in: under Alt the near one is mirrored ([`Self::create_box`]).
     fn create_tx(&self, start: Point, corner: Point) -> Option<Transaction> {
         let Drag::Create {
             id,
@@ -3267,7 +3020,6 @@ impl OndinApp {
                 PEN_STROKE_COLOR,
                 PEN_STROKE_WIDTH,
             ),
-            // An empty node at the drawn box, in the same text defaults as a click.
             Tool::Text => tools::create_text(
                 id,
                 parent,
@@ -3277,8 +3029,7 @@ impl OndinApp {
                 corner,
                 &crate::fonts::FontService::default_text_parts(),
             ),
-            // The image fills the drawn box at its drawn aspect; `None` when the
-            // cursor has nothing left to place.
+            // `None` when the cursor has nothing left to place.
             Tool::Image => {
                 let pending = self.pending_images.first()?;
                 let (pid, entry, given) = (
@@ -3295,12 +3046,10 @@ impl OndinApp {
                     corner,
                     pid,
                     entry,
-                    // The same naming rule as the click path.
                     Some(self.image_layer_name(parent, given)),
                 )
             }
-            // Tools that do not create by dragging a box (`drags_a_box`), so a
-            // create gesture cannot have started with one armed.
+            // Not box-dragging tools (`drags_a_box`).
             Tool::Pen
             | Tool::Node
             | Tool::ImageEdit
@@ -3316,8 +3065,7 @@ impl OndinApp {
     /// The topmost frame **containing** the point, if any. No fallback — see
     /// [`Self::draw_target`], which is what creation goes through.
     fn target_artboard(&self, world: Point) -> Option<(NodeId, Affine)> {
-        // Reversed: `artboards()` is in model z-order, so the last frame
-        // containing the point is the topmost one.
+        // Reversed: `artboards()` is in z-order, so the last hit is the topmost.
         let id = self.artboards().into_iter().rev().find(|id| {
             self.session
                 .resolved
@@ -3327,9 +3075,8 @@ impl OndinApp {
         Some((id, self.session.resolved.world_transform(id)?))
     }
 
-    /// Where a layer drawn at `world` belongs: the frame under the point, or
-    /// the document root. Containment is the whole rule; there is no fallback
-    /// frame.
+    /// Where a layer drawn at `world` belongs: the frame under the point, or the
+    /// document root; there is no fallback frame.
     fn draw_target(&self, world: Point) -> (NodeId, Affine) {
         self.target_artboard(world)
             .unwrap_or_else(|| (self.session.doc.root(), Affine::IDENTITY))
@@ -3338,8 +3085,8 @@ impl OndinApp {
     // --- pen --------------------------------------------------------------
 
     /// The pen's whole gesture loop. Press plants an anchor; dragging pulls its
-    /// handles out symmetrically into a smooth point; release settles it. On
-    /// press, not click, since a click resolves only after the shaping drag.
+    /// handles out symmetrically; release settles it. On press, not click, since
+    /// a click resolves only after the shaping drag.
     fn pen_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         let (enter, pressed, released, alt, shift) = ui.input(|i| {
             (
@@ -3350,14 +3097,12 @@ impl OndinApp {
                 i.modifiers.shift,
             )
         });
-        // Escape also finishes, but `OndinApp::escape` owns it; handling it here
-        // too would let the loser undo the winner.
+        // Escape also finishes, but `OndinApp::escape` owns it.
         if enter {
             self.finish_pen(false);
             return;
         }
-        // A double-click finishes, dropping the duplicate anchor its second press
-        // planted. Counted by `ui::double_clicked`.
+        // A double-click finishes, dropping the duplicate anchor its second press planted.
         if crate::ui::double_clicked(ui, resp) {
             if let Some(pen) = self.pen.as_mut()
                 && pen.anchors.len() > 1
@@ -3378,10 +3123,9 @@ impl OndinApp {
             && let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos())
         {
             let retract = f64::from(PEN_PICK_PX) / self.points_per_world();
-            // The drag is the outgoing handle and the incoming one mirrors it,
-            // unless Alt (read live) breaks the pair. Within `PEN_PICK_PX` the
-            // handle retracts onto the anchor, or a click on a snapped anchor would
-            // leave a hair of a curve; the direction goes through `tangent_snap`.
+            // The drag is the outgoing handle; the incoming one mirrors it unless
+            // Alt breaks the pair. Within `PEN_PICK_PX` the handle retracts onto the
+            // anchor, or a click on a snapped anchor leaves a hair of a curve.
             let tangent = f64::from(TANGENT_SNAP_PX) / self.points_per_world();
             let world = self.to_world(p, rect, ppp);
             if let Some(last) = self.pen.as_mut().and_then(|s| s.anchors.last_mut()) {
@@ -3395,14 +3139,11 @@ impl OndinApp {
         }
     }
 
-    /// Where a pen anchor pressed at `world` actually lands, and the lines
-    /// explaining it.
+    /// Where a pen anchor pressed at `world` lands, and the lines explaining it.
     ///
     /// Snaps on both axes through [`Self::snapping`], excluding the node being
-    /// resumed. Only the anchor; handles snap to directions (`tools::tangent_snap`).
-    /// Shift instead constrains the segment to an eighth of a turn from the
-    /// previous anchor ([`Self::axial_corner`]), replacing the snap as in
-    /// `line_end_tx`; the first anchor has nothing to constrain.
+    /// resumed. Shift instead constrains the segment to an eighth of a turn from
+    /// the previous anchor ([`Self::axial_corner`]); the first has nothing to constrain.
     fn pen_point(&self, world: Point, shift: bool) -> (Point, Vec<snap::Guide>) {
         if shift && let Some(from) = self.pen.as_ref().and_then(|p| p.anchors.last()) {
             return (self.axial_corner(from.at, world), Vec::new());
@@ -3435,8 +3176,7 @@ impl OndinApp {
                 .info("Pen: click for a corner, drag for a curve; Enter or double-click to finish");
             return;
         }
-        // Snapped before the close test, which the rubber band also draws from,
-        // so a press closes only where the preview showed it would.
+        // Snapped before the close test, so a press closes only where the preview showed.
         let at = self.pen_point(world, shift).0;
         let points_per_world = self.points_per_world();
         let Some(pen) = self.pen.as_mut() else {
@@ -3446,17 +3186,14 @@ impl OndinApp {
             tools::pen_close_snap(&pen.anchors, at, points_per_world, f64::from(PEN_PICK_PX));
         if closes.is_some() {
             self.finish_pen(true);
-            // Swallow the rest of the press: `finish_pen` switched to Select, and
-            // the coming release would arrive as a `clicked()` that re-picks.
+            // `finish_pen` switched to Select; swallow the release, or it arrives
+            // as a `clicked()` that re-picks.
             self.gesture_cancelled = true;
             return;
         }
-        // Another open endpoint under the press joins the two runs; after closing,
-        // the more specific reading of the same gesture.
         if let Some(target) = self.pen_join_target(world)
             && self.pen_join(target)
         {
-            // Completes on the press, so swallow the release as above.
             self.gesture_cancelled = true;
             return;
         }
@@ -3466,8 +3203,8 @@ impl OndinApp {
     }
 
     /// The open endpoint at `world` that a press would join to, if there is one.
-    /// Asked by both the press and the hover ring, so they agree. The run's own
-    /// far end is a close (`pen_close_snap`), never a join.
+    /// Asked by the press and the hover ring. The run's own far end is a close
+    /// (`pen_close_snap`), never a join.
     fn pen_join_target(&self, world: Point) -> Option<PenEdit> {
         let pen = self.pen.as_ref()?;
         let target = self.pen_resume_target_in(world, self.pen_scope())?;
@@ -3480,22 +3217,19 @@ impl OndinApp {
 
     /// Join the run being drawn to the open endpoint under the pointer, and finish.
     ///
-    /// The node already held survives (paint, name, transform, z-order) and the
-    /// other is absorbed — every subpath of it — and deleted. With no node held,
-    /// the target survives. Returns whether it joined; `false` leaves the pen
-    /// untouched for the press to place an anchor.
+    /// The node already held survives and the other is absorbed and deleted; with
+    /// no node held, the target survives. `false` leaves the pen untouched for the
+    /// press to place an anchor.
     fn pen_join(&mut self, target: PenEdit) -> bool {
         let Some(pen) = self.pen.as_ref() else {
             return false;
         };
-        // `tools::join_runs` owns the orientation of the attached run.
         let mut sub = tools::join_runs(
             &pen.anchors,
             &target.subpaths[target.active],
             target.from_start,
         );
         let (host, host_world, subpaths, absorbed) = match &pen.editing {
-            // Holding a node: it keeps everything and takes the target's subpaths.
             Some(edit) => {
                 if edit.from_start {
                     // The working copy was reversed to draw; restore the order.
@@ -3505,7 +3239,6 @@ impl OndinApp {
                 list[edit.active] = sub;
                 let same = edit.id == target.id;
                 if same {
-                    // Two runs of one node: the joined one replaces the other.
                     list.remove(target.active);
                 } else {
                     list.extend(
@@ -3519,7 +3252,6 @@ impl OndinApp {
                 }
                 (edit.id, edit.world, list, (!same).then_some(target.id))
             }
-            // Nothing held: the target survives and the drawn run joins onto it.
             None => {
                 let mut list = target.subpaths.clone();
                 list[target.active] = sub;
@@ -3545,15 +3277,10 @@ impl OndinApp {
         true
     }
 
-    /// Pressing an **open** path's endpoint with the pen picks that path up and
-    /// carries on drawing it, rather than starting a new one on top of it.
-    ///
-    /// Returns whether it took the press; the endpoint is grabbed at
-    /// [`PEN_PICK_PX`].
-    ///
-    /// The pen only appends, so resuming at a path's start reverses the run
-    /// (`PenSubpath::reverse`). The resumed endpoint keeps its handles: `shaping`
-    /// stays off, since the press may sit up to `PEN_PICK_PX` off the anchor.
+    /// Pressing an **open** path's endpoint with the pen (grabbed at
+    /// [`PEN_PICK_PX`]) carries on drawing that path. The pen only appends, so
+    /// resuming at a start reverses the run (`PenSubpath::reverse`); `shaping`
+    /// stays off so the endpoint keeps its handles.
     fn pen_resume(&mut self, world: Point) -> bool {
         let Some(edit) = self.pen_resume_target(world) else {
             return false;
@@ -3564,18 +3291,16 @@ impl OndinApp {
         true
     }
 
-    /// The open path endpoint at `world`, read into the edit that would resume it.
-    /// Asked by both the press and the hover ring, so they agree.
+    /// The open path endpoint at `world`, read into the edit that would resume it;
+    /// asked by the press and the hover ring.
     fn pen_resume_target(&self, world: Point) -> Option<PenEdit> {
         self.pen_resume_target_in(world, None)
     }
 
     /// The node the pen may reach while it is armed inside an edit, and `None`
-    /// when it may reach anything — the standalone tool.
-    ///
-    /// Inside an edit every pen verb stays in the edited node; reaching another
-    /// layer would be a node merge with a second join rule (§15 D125). One
-    /// accessor, so the press and the ring answer it the same way.
+    /// when it may reach anything — the standalone tool. Inside an edit every pen
+    /// verb stays in the edited node; reaching another layer would be a node merge
+    /// with a second join rule (§15 D125).
     fn pen_scope(&self) -> Option<NodeId> {
         self.pen_bias.then(|| self.edited_path()).flatten()
     }
@@ -3583,7 +3308,6 @@ impl OndinApp {
     /// [`Self::pen_resume_target`], restricted to one node when `only` names one.
     fn pen_resume_target_in(&self, world: Point, only: Option<NodeId>) -> Option<PenEdit> {
         let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
-        // Topmost first, but a `Path` under something else is still resumable.
         hit_test(&self.session.resolved, &self.session.doc, world, slop)
             .iter()
             .filter(|id| only.is_none_or(|want| **id == want))
@@ -3595,7 +3319,6 @@ impl OndinApp {
                 let node_world = self.session.resolved.world_transform(*id)?;
                 let mut subpaths = tools::pen_anchors(path, corner_radii);
                 tools::map_subpaths(&mut subpaths, node_world);
-                // The nearer open end within the grab radius.
                 let (active, from_start) = subpaths.iter().enumerate().find_map(|(i, sub)| {
                     if sub.closed || sub.anchors.len() < 2 {
                         return None;
@@ -3616,19 +3339,17 @@ impl OndinApp {
     }
 
     /// What a press at `world` means while the pen is armed inside an edit — see
-    /// [`PenVerb`]. Asked by both the press and the cursor, so they agree.
+    /// [`PenVerb`]. Asked by the press and the cursor.
     fn pen_verb(&self, world: Point) -> Option<PenVerb> {
         let id = self.pen_scope()?;
-        // An open end first: the smallest, most deliberate target.
         if let Some(edit) = self.pen_resume_target_in(world, Some(id)) {
             return Some(PenVerb::Continue(Box::new(edit)));
         }
         match self.node_grab(world) {
             Some(NodeGrab::Segment(at, t)) => Some(PenVerb::Insert(at, t)),
-            // A handle, a middle anchor, or the point box keep their meanings.
             Some(_) => None,
-            // Empty canvas must be empty, so another layer still switches subject
-            // (`node_press`); the edited path's own fill counts as empty.
+            // Another layer still switches subject (`node_press`); the edited
+            // path's own fill counts as empty.
             None => self
                 .pick_leaf(world)
                 .is_none_or(|under| under == id)
@@ -3663,7 +3384,6 @@ impl OndinApp {
                     from_start: false,
                     minted: true,
                 });
-                // The anchor this press plants, shaped by the drag that follows.
                 // Snapped only once `editing` is set, so `pen_point` excludes the
                 // host from the targets for the first anchor too.
                 let at = self.pen_point(world, shift).0;
@@ -3671,7 +3391,6 @@ impl OndinApp {
                     pen.anchors = vec![PenAnchor::corner(at)];
                     pen.shaping = true;
                 }
-                // Non-zero fill: the winding decides solid or hole, so say so now.
                 self.session.info(
                     "New subpath in this path — draw it the other way round to cut a hole; \
                      Shift+D reverses one after the fact",
@@ -3695,15 +3414,13 @@ impl OndinApp {
             shaping: false,
             editing: Some(edit),
         });
-        // The run is about to renumber its points.
         self.points.clear();
     }
 
     // --- node tool ----------------------------------------------------------
 
     /// The path the node tool is editing: the selection, when it is a single
-    /// `Path` and the tool is armed. Derived from the selection rather than a
-    /// second "which path" field that could disagree with it.
+    /// `Path` and the tool is armed. Derived from the selection, not a second field.
     pub(crate) fn edited_path(&self) -> Option<NodeId> {
         if self.tool != Tool::Node {
             return None;
@@ -3711,8 +3428,8 @@ impl OndinApp {
         let [id] = *self.session.selection.ids() else {
             return None;
         };
-        // A locked path is not a subject — checked here, the funnel every reader
-        // passes through, since several doors arm the tool without a lock check.
+        // The funnel every reader passes through: several doors arm the tool
+        // without a lock check.
         if ondin_core::is_effectively_locked(&self.session.doc, id) {
             return None;
         }
@@ -3732,8 +3449,7 @@ impl OndinApp {
         let [id] = *self.session.selection.ids() else {
             return None;
         };
-        // A locked picture is not croppable — checked in this funnel, since the
-        // layers panel can lock or select a picture while the mode is armed.
+        // The layers panel can lock a picture while the mode is armed.
         if ondin_core::is_effectively_locked(&self.session.doc, id) {
             return None;
         }
@@ -3745,7 +3461,6 @@ impl OndinApp {
     /// — the rectangle `ImageRef::framing` is given, so gesture and renderer agree.
     fn crop_frame(&self, id: NodeId) -> Option<(Affine, KRect)> {
         let world = self.session.resolved.world_transform(id)?;
-        // The used kind, which is what the renderer frames the picture at.
         let kind = self.session.resolved.used_kind(&self.session.doc, id)?;
         let frame = {
             use ondin_core::kurbo::Shape;
@@ -3754,9 +3469,8 @@ impl OndinApp {
         (frame.width() > 0.0 && frame.height() > 0.0).then_some((world, frame))
     }
 
-    /// The transaction a crop **pan** previews and commits: one `SetFills`, with
-    /// the rectangle changed and the mode forced to `Crop`, since the picture may
-    /// be in any fit mode. Everything else is carried through untouched.
+    /// The transaction a crop **pan** previews and commits: one `SetFills` with
+    /// the rectangle changed and the mode forced to `Crop`.
     fn crop_tx(&self, id: NodeId, fill: usize, crop: KRect) -> Option<Transaction> {
         let mut fills = self.session.doc.get(id)?.paint().fills.clone();
         let Some(ondin_core::Brush::Image(img)) = fills.get_mut(fill)?.brush.literal_mut() else {
@@ -3769,11 +3483,9 @@ impl OndinApp {
 
     /// The transaction a crop **handle** drag previews and commits: the node
     /// resized, and the crop reframed so the picture does not move — one
-    /// transaction, so neither edit can show or undo without the other.
-    ///
-    /// The resize goes through [`tools::resize_layer`], aimed at the corner of
-    /// [`tools::crop_resized`]'s rectangle, so both work on the same box and
-    /// every node kind is routed correctly.
+    /// transaction, so neither edit can show or undo without the other. The resize
+    /// goes through [`tools::resize_layer`], aimed at the corner of
+    /// [`tools::crop_resized`]'s rectangle.
     #[allow(clippy::too_many_arguments)]
     fn crop_resize_tx(
         &self,
@@ -3814,10 +3526,9 @@ impl OndinApp {
     }
 
     /// What a press seeds a crop gesture from: the crop rectangle in force, and
-    /// the rectangle the whole picture occupies in the node's local space.
-    ///
-    /// Read from the committed document, the drag's fixed origin; a preview
-    /// would compound. [`Self::shown_crop`] is the on-screen twin.
+    /// the rectangle the whole picture occupies in the node's local space. Read
+    /// from the committed document, since a preview would compound;
+    /// [`Self::shown_crop`] is the on-screen twin.
     fn crop_state(&self, id: NodeId, fill: usize) -> Option<(KRect, KRect)> {
         let Some(ondin_core::Brush::Image(img)) = self
             .session
@@ -3835,9 +3546,8 @@ impl OndinApp {
         Self::crop_and_limit(&img.image, frame, self.session.doc.image(&img.image.id)?)
     }
 
-    /// The crop rectangle and the picture's box **as they are on screen**, read
-    /// through any live preview, with the frame they were measured against — the
-    /// drawing twin of [`Self::crop_state`].
+    /// The crop rectangle and the picture's box **as on screen**, read through any
+    /// live preview, with the frame measured against: [`Self::crop_state`]'s twin.
     fn shown_crop(&self, id: NodeId, fill: usize) -> Option<(KRect, KRect, KRect)> {
         let node = self.session.display_node(id)?;
         let Some(ondin_core::Brush::Image(img)) = node.paint().fills.get(fill)?.brush.literal()
@@ -3854,13 +3564,9 @@ impl OndinApp {
     }
 
     /// The rectangle this reference is cropped to in `frame`, and where the whole
-    /// picture sits around it.
-    ///
-    /// A picture not yet in `Crop` mode seeds `ImageRef::cover_crop`, the closest
-    /// rectangle a crop can name: exact for `Fill`, while a `Fit` picture loses
-    /// its letterbox, which no crop can express (`ondin_core::crop_clamped`).
-    /// The limit is asked of a reference forced to `Crop`, the state the gesture
-    /// is about to write.
+    /// picture sits around it. A picture not yet in `Crop` mode seeds
+    /// `ImageRef::cover_crop` (a `Fit` picture loses its letterbox, which no crop
+    /// can express); the limit is asked of a reference forced to `Crop`.
     fn crop_and_limit(
         img: &ondin_core::ImageRef,
         frame: KRect,
@@ -3880,9 +3586,9 @@ impl OndinApp {
         Some((crop, cropped.picture_box(frame, w, h)?))
     }
 
-    /// Whether the faded original and its outline are being shown: in `Crop`
-    /// mode only, since the other modes re-derive the position from the frame.
-    /// Asked of the displayed brush, so the ghost arrives on a drag's first frame.
+    /// Whether the faded original and its outline are shown: in `Crop` mode only,
+    /// since the other modes re-derive the position from the frame. Asked of the
+    /// displayed brush, so the ghost arrives on a drag's first frame.
     fn image_ghost_live(&self, id: NodeId, fill: usize) -> bool {
         let Some(node) = self.session.display_node(id) else {
             return false;
@@ -3896,10 +3602,9 @@ impl OndinApp {
     /// The faded whole photograph drawn behind the layer being cropped.
     ///
     /// A `Ghost` at the layer's own index, so the real fill covers the middle and
-    /// the offcut shows round it. A `Rect` at [`ondin_core::ImageRef::picture_box`]
-    /// with `whole_crop`, whatever the layer's shape, carrying the reference's
-    /// orientation and adjustments. Re-installed every frame by `draw_canvas`
-    /// (`RenderOverrides::chrome`).
+    /// the offcut shows round it: a `Rect` at [`ondin_core::ImageRef::picture_box`]
+    /// with `whole_crop`, carrying the reference's orientation and adjustments.
+    /// Re-installed every frame by `draw_canvas` (`RenderOverrides::chrome`).
     fn image_ghost(&self) -> Option<(NodeId, ondin_render::Ghost)> {
         let (id, fill) = self.edited_image()?;
         if !self.image_ghost_live(id, fill) {
@@ -3928,18 +3633,16 @@ impl OndinApp {
             },
             sampler: img.sampler,
         };
-        // Paired with its layer so the two are pixel-snapped together (`unsnapped`),
-        // or the offcut slides against the picture.
+        // Paired with its layer so the two pixel-snap together (`unsnapped`).
         Some((
             id,
             ondin_render::Ghost {
                 parent,
                 index,
                 node: ondin_render::GhostNode {
-                    // A sentinel: a real id would answer id lookups for the node,
-                    // and a minted one would spend a `seq` on a drawing.
+                    // A sentinel: a real id would answer lookups for the node, a
+                    // minted one would spend a `seq`.
                     id: GHOST_ID,
-                    // The previewed local transform, shifted to the picture's corner.
                     transform: self.session.preview_local_transform(id)?
                         * Affine::translate(limit.origin().to_vec2()),
                     kind: NodeKind::Rect {
@@ -3947,22 +3650,18 @@ impl OndinApp {
                         corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(0.0),
                     },
                     paint: ondin_core::Paint {
-                        // A node being created, so a list built whole.
                         fills: ondin_core::keyed_by_position([ondin_core::Fill {
                             brush: ondin_core::Brush::Image(image).into(),
                             visible: true,
                         }]),
                         strokes: Vec::new(),
                     },
-                    // Not the layer's effects: the offcut is chrome.
                     effects: Vec::new(),
                     text: None,
                     path: None,
-                    // Through the layer's own, so the offcut is never brighter.
                     opacity: display.opacity() * GHOST_ALPHA,
                     visible: true,
                     clip: false,
-                    // Chrome: never masks and is never masked.
                     mask: false,
                     mask_mode: ondin_core::MaskMode::default(),
                     children: Vec::new(),
@@ -3971,9 +3670,8 @@ impl OndinApp {
         ))
     }
 
-    /// The edited path's subpaths in **world** space, read fresh from the
-    /// committed document — the fixed origin an edit is computed from, since the
-    /// preview would compound mid-drag.
+    /// The edited path's subpaths in **world** space from the committed document —
+    /// the fixed origin an edit is computed from, since the preview compounds.
     fn edited_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
         let NodeKind::Path { path, corner_radii } = self.session.doc.get(id)?.kind() else {
             return None;
@@ -3984,9 +3682,9 @@ impl OndinApp {
         Some((world, subpaths))
     }
 
-    /// The same, read **through the preview** — where the points are *right now*,
-    /// including a gesture that has not committed. For anything that shows a
-    /// point, and for an incremental edit like a scrub ([`Self::nudge_points_tx`]).
+    /// The same, read **through the preview** — where the points are right now.
+    /// For anything that shows a point and for an incremental edit like a scrub
+    /// ([`Self::nudge_points_tx`]).
     fn preview_subpaths(&self, id: NodeId) -> Option<(Affine, Vec<PenSubpath>)> {
         let NodeKind::Path { path, corner_radii } = self.session.display_node(id)?.kind() else {
             return None;
@@ -4009,8 +3707,6 @@ impl OndinApp {
         let (world, frame) = self.crop_frame(id)?;
         let at = world.inverse() * self.to_world(resp.hover_pos()?, rect, ppp);
         match (self.crop_handle_at(frame, at), frame.contains(at)) {
-            // A crop handle moves the layer's edge, so the resize arrow, turned
-            // through the layer's rotation.
             (Some(h), _) => {
                 let (ox, oy) = h.outward();
                 let d = (world * Point::new(ox, oy)) - (world * Point::ZERO);
@@ -4025,7 +3721,6 @@ impl OndinApp {
     /// The crop handle under a local-space point: a corner first (it lies in two
     /// side bands), then a side.
     fn crop_handle_at(&self, frame: KRect, at: Point) -> Option<Handle> {
-        // Points, not device pixels (`points_per_world`).
         let zoom = self.points_per_world();
         Handle::CORNERS
             .into_iter()
@@ -4043,11 +3738,9 @@ impl OndinApp {
             })
     }
 
-    /// Image editing's press/drag/release, in the shape `node_input` establishes.
-    ///
-    /// A handle moves an edge of the window (and the layer) with the picture
-    /// fixed; a drag on the picture slides it under a fixed window. Neither
-    /// scales the photograph — that is resizing the layer outside this mode.
+    /// Image editing's press/drag/release. A handle moves an edge of the window
+    /// (and the layer) with the picture fixed; a drag on the picture slides it
+    /// under a fixed window. Neither scales the photograph.
     fn image_edit_input(
         &mut self,
         ui: &egui::Ui,
@@ -4063,8 +3756,7 @@ impl OndinApp {
         let Some((world, frame)) = self.crop_frame(id) else {
             return;
         };
-        // Everything below is in local space, so a rotated layer crops along its
-        // own axes.
+        // Local space, so a rotated layer crops along its own axes.
         let Some(inv) = world.inverse().into() else {
             return;
         };
@@ -4105,8 +3797,8 @@ impl OndinApp {
         };
         let at = local(p, self);
         let world_at = self.to_world(p, rect, ppp);
-        // The subject comes from the drag, captured at the press, not from
-        // `edited_image` again. `travelled` gates the commit only (below).
+        // The subject comes from the drag captured at the press; `travelled`
+        // gates the commit only.
         let (next, travelled) = match self.drag {
             Drag::CropPan {
                 id,
@@ -4136,13 +3828,12 @@ impl OndinApp {
             self.session.set_preview(&tx);
             if released {
                 self.drag = Drag::None;
-                // Only a travelled gesture commits: even a zero-delta pan forces
-                // `fit = Crop`, so a still click would flip a `Fill` picture's
-                // mode. The preview stays ungated for `image_ghost_live`.
+                // Even a zero-delta pan forces `fit = Crop`, so a still click would
+                // flip a `Fill` picture's mode. The preview stays ungated for
+                // `image_ghost_live`.
                 if travelled {
                     self.session.commit(tx);
                 } else {
-                    // Drop the preview too, or the inspector shows the flip.
                     self.session.clear_gesture_preview();
                 }
             }
@@ -4171,8 +3862,8 @@ impl OndinApp {
             return;
         };
         let world = self.to_world(p, rect, ppp);
-        // A double-click on a segment inserts an anchor, cancelling the segment
-        // drag the second press armed. Counted by `ui::double_clicked`.
+        // A double-click on a segment inserts an anchor, cancelling the drag the
+        // second press armed.
         if crate::ui::double_clicked(ui, resp)
             && let Drag::Segment { id, at, t, .. } = self.drag
         {
@@ -4188,8 +3879,7 @@ impl OndinApp {
                 self.session.set_preview(&tx);
                 if released {
                     self.drag = Drag::None;
-                    // Empty when the pointer never moved (`tools::rewrite_path`),
-                    // so a plain click leaves no undo step.
+                    // Empty when the pointer never moved: a click leaves no undo step.
                     self.session.commit(tx);
                 }
             }
@@ -4201,11 +3891,10 @@ impl OndinApp {
                     self.session.commit(tx);
                 }
             }
-            // Plain moves, Ctrl (read live) shapes the curvature.
+            // Plain moves; Ctrl (read live) shapes the curvature.
             Drag::Segment { id, at, t, grab } => {
                 let raw = world - grab;
-                // A bend moves control points, so it does not snap; a move snaps
-                // the point the press grabbed.
+                // A bend moves control points and does not snap.
                 let delta = match ctrl {
                     true => raw,
                     false => {
@@ -4252,10 +3941,10 @@ impl OndinApp {
 
     /// What the node tool would grab at `world`.
     ///
-    /// Handles outrank anchors (a retracted handle sits on its anchor), but only
-    /// a drawn one counts, matching `draw_points`: a subject anchor's
-    /// ([`Self::subject_points`]) non-zero handle. A corner's zero-length handles
-    /// would otherwise turn a second click into a curve; `Ctrl`+drag does that.
+    /// Handles outrank anchors, but only a drawn one counts, matching
+    /// `draw_points`: a subject anchor's ([`Self::subject_points`]) non-zero
+    /// handle. A corner's zero-length handles would otherwise turn a second click
+    /// into a curve; `Ctrl`+drag does that.
     fn node_grab(&self, world: Point) -> Option<NodeGrab> {
         let id = self.edited_path()?;
         let (_, subpaths) = self.edited_subpaths(id)?;
@@ -4271,8 +3960,7 @@ impl OndinApp {
         let nearest = |a: &(NodeGrab, Point), b: &(NodeGrab, Point)| {
             (a.1 - world).hypot().total_cmp(&(b.1 - world).hypot())
         };
-        // The subject, not the raw point set: a selected segment's ends draw
-        // their handles, so they must offer them too.
+        // A selected segment's ends draw their handles, so they offer them too.
         let subject = self.subject_points(id);
         let handle = anchors()
             .filter(|(at, _)| subject.contains(at))
@@ -4293,8 +3981,6 @@ impl OndinApp {
         if let Some((grab, _)) = anchor {
             return Some(grab);
         }
-        // The box over the selected points, after the points themselves (see
-        // [`NodeGrab`]).
         let zoom = self.points_per_world();
         if let Some(box_) = self.point_box(id) {
             let corner = Handle::CORNERS
@@ -4305,8 +3991,7 @@ impl OndinApp {
             if let Some((grab, _)) = corner {
                 return Some(grab);
             }
-            // Then the sides, as invisible bands; after the corners because a
-            // corner lies in two of them.
+            // Sides are invisible bands, after the corners (a corner lies in two).
             let side = Handle::EDGES
                 .into_iter()
                 .map(|h| (NodeGrab::Box(h), box_edge_distance(box_, h, world)))
@@ -4315,8 +4000,7 @@ impl OndinApp {
             if let Some((grab, _)) = side {
                 return Some(grab);
             }
-            // The ring just outside a corner rotates the set — `Handles::rotate_zone`'s
-            // rule in world space.
+            // `Handles::rotate_zone`'s rule in world space.
             let ring = (
                 f64::from(HANDLE_PICK_PX) / zoom,
                 f64::from(ROTATE_RING_PX) / zoom,
@@ -4330,12 +4014,10 @@ impl OndinApp {
                 return Some(NodeGrab::BoxRotate);
             }
         }
-        // Finally the ink between the points, numbered by core's own walk
-        // (`geometry::nearest_segment`) so a segment index means the same
-        // everywhere. Rejected first against the control hull, which contains
-        // the ink, so the per-frame `BezPath` build is skipped losslessly off the
-        // path. Not a revision-keyed cache: the subpaths are preview-aware and a
-        // preview changes without moving `EditorSession::revision`.
+        // Finally the ink, numbered by core's own walk (`geometry::nearest_segment`).
+        // Rejected first against the control hull, which contains the ink, so the
+        // per-frame `BezPath` build is skipped off the path. Not a revision-keyed
+        // cache: a preview changes without moving `EditorSession::revision`.
         let hull = subpaths
             .iter()
             .flat_map(|s| s.anchors.iter())
@@ -4355,16 +4037,14 @@ impl OndinApp {
     }
 
     /// The box over the selected points, in world space — the frame a scale
-    /// gesture is measured in, and the chrome that offers one.
-    ///
-    /// Two points at least, read from the preview so the box tracks the drag.
-    /// A single selected segment gets none: it has its own move and bend.
+    /// gesture is measured in. Two points at least, read from the preview so it
+    /// tracks the drag; a single selected segment gets none (it has its own
+    /// move and bend).
     fn point_box(&self, id: NodeId) -> Option<KRect> {
         if self.points.segment_count(id) == 1 {
             return None;
         }
         let points: Vec<PointRef> = self.subject_points(id);
-        // `points_box`'s own refusal, asked before the per-frame path rebuild.
         if points.len() < 2 {
             return None;
         }
@@ -4376,8 +4056,7 @@ impl OndinApp {
         let id = match self.edited_path() {
             Some(id) => id,
             None => {
-                // Nothing under edit yet: this press picks a path (the leaf,
-                // since a group has no points) and does no more.
+                // Nothing under edit yet: this press picks a path (the leaf) only.
                 match self.pick_leaf(world).filter(|id| self.is_path(*id)) {
                     Some(id) => self.session.selection.set_one(id),
                     None => self.session.selection.clear(),
@@ -4386,8 +4065,7 @@ impl OndinApp {
                 return;
             }
         };
-        // The pen's verbs first, when armed: they claim presses the grab would
-        // otherwise take, and [`PenVerb`] declines every target it does not claim.
+        // The pen's verbs first, when armed; [`PenVerb`] declines targets it does not claim.
         if let Some(verb) = self.pen_verb(world) {
             self.pen_verb_press(id, world, shift, verb);
             return;
@@ -4396,8 +4074,7 @@ impl OndinApp {
             Some(NodeGrab::Handle(at, side)) => {
                 self.drag = Drag::Handle { id, at, side };
             }
-            // `Ctrl`+drag pulls handles out of the anchor, mirrored unless `Alt`;
-            // a modifier because a second click is reachable by accident.
+            // `Ctrl`+drag pulls handles out of the anchor, mirrored unless `Alt`.
             Some(NodeGrab::Anchor(at)) if ctrl => {
                 self.points.set_one(id, at);
                 self.drag = Drag::Handle {
@@ -4406,12 +4083,11 @@ impl OndinApp {
                     side: Side::Out,
                 };
             }
-            // No `Alt`+click removal, deliberately: a destructive single click is
-            // one slipped modifier away; Delete does the job.
+            // No `Alt`+click removal: a destructive click is one slipped modifier away.
             Some(NodeGrab::Anchor(at)) if shift => self.points.toggle(id, at),
             Some(NodeGrab::Anchor(at)) => {
-                // Pressing an already-selected anchor keeps the set, so a
-                // multi-point drag can start from any member.
+                // An already-selected anchor keeps the set: a multi-point drag can
+                // start from any member.
                 if !self.points.contains(id, at) {
                     self.points.set_one(id, at);
                 }
@@ -4421,8 +4097,7 @@ impl OndinApp {
                     anchor: at,
                 };
             }
-            // The box scales the set; captured at press, since a per-frame read
-            // would be the box this gesture is moving.
+            // Captured at press: a per-frame read would be the box being moved.
             Some(NodeGrab::Box(handle)) => {
                 if let Some(box_) = self.point_box(id) {
                     self.drag = Drag::PointBox {
@@ -4446,10 +4121,7 @@ impl OndinApp {
             }
             // Shift extends the segment selection without arming a drag.
             Some(NodeGrab::Segment(at, _)) if shift => self.points.toggle_segment(id, at),
-            // A press on the ink selects the segment and arms its move/bend; a
-            // click that does not travel leaves no undo step.
             Some(NodeGrab::Segment(at, t)) => {
-                // Pressing an already-selected one keeps the set.
                 if !self.points.contains_segment(id, at) {
                     self.points.set_segment(id, at);
                 }
@@ -4470,8 +4142,7 @@ impl OndinApp {
                 }
                 self.points.clear();
             }
-            // Otherwise a marquee over points, reusing `Drag::Marquee`;
-            // `node_input` interprets it. Shift adds to the set.
+            // Otherwise a marquee over points (`node_input` interprets it).
             None => {
                 self.drag = Drag::Marquee {
                     origin: world,
@@ -4514,12 +4185,9 @@ impl OndinApp {
         )
     }
 
-    /// The anchors the node tool is acting on: the selected set, or — when a
-    /// segment is selected — the two anchors it runs between, so X/Y, arrows,
-    /// align and markers all treat a segment as its pair of points.
-    ///
-    /// Delete alone reads the segment itself: removing a segment leaves a gap,
-    /// removing its points heals.
+    /// The anchors the node tool is acting on: the selected set, or for a selected
+    /// segment the two anchors it runs between. Delete alone reads the segment
+    /// itself: removing a segment leaves a gap, removing its points heals.
     pub(crate) fn subject_points(&self, id: NodeId) -> Vec<PointRef> {
         let segments: Vec<PointRef> = self.points.segments(id).collect();
         if segments.is_empty() {
@@ -4528,8 +4196,7 @@ impl OndinApp {
         let Some((_, subpaths)) = self.edited_subpaths(id) else {
             return Vec::new();
         };
-        // Deduplicated: two selected segments that meet share an anchor, which
-        // must not move twice.
+        // Two selected segments that meet share an anchor, which must not move twice.
         let mut ends: Vec<PointRef> = segments
             .iter()
             .filter_map(|at| tools::segment_ends(&subpaths, *at))
@@ -4543,7 +4210,6 @@ impl OndinApp {
     /// The selected anchors of `id`, in world space — what the inspector's X/Y
     /// reads and what align counts.
     pub(crate) fn selected_point_positions(&self, id: NodeId) -> Vec<Point> {
-        // The preview, so the fields track a canvas drag.
         let Some((_, subpaths)) = self.preview_subpaths(id) else {
             return Vec::new();
         };
@@ -4554,10 +4220,8 @@ impl OndinApp {
     }
 
     /// The one selected anchor and its control point on `side`, in world space —
-    /// what the inspector's handle fields read, from the preview.
-    ///
-    /// Exactly one anchor, or nothing (the fields dim): two points have four
-    /// handles and no single answer.
+    /// what the inspector's handle fields read, from the preview. Exactly one
+    /// anchor, or nothing (the fields dim).
     pub(crate) fn selected_handle(&self, id: NodeId, side: Side) -> Option<(PointRef, Point)> {
         let [at] = *self.subject_points(id) else {
             return None;
@@ -4567,12 +4231,9 @@ impl OndinApp {
         Some((at, an.handle(side)))
     }
 
-    /// Move one control point by `delta` from wherever the **preview** has it —
-    /// the handle counterpart of `nudge_points_tx`, an increment because that is
-    /// what a scrubbed field reports.
-    ///
-    /// The mirror is preserved per [`PenAnchor::is_smooth`], since a field has no
-    /// `Alt` to hold. No retract or tangent snap: a typed number has landed.
+    /// Move one control point by `delta` from where the **preview** has it — the
+    /// handle counterpart of `nudge_points_tx`. The mirror is preserved per
+    /// [`PenAnchor::is_smooth`], since a field has no `Alt`; no retract or tangent snap.
     pub(crate) fn nudge_handle_tx(
         &self,
         id: NodeId,
@@ -4593,15 +4254,15 @@ impl OndinApp {
         tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
     }
 
-    /// Align the selected points, and distribute them — the align row's two
-    /// verbs, redirected from layers to points while the node tool is up. One
-    /// commit each.
+    /// Align the selected points: the align row's verb, redirected from layers to
+    /// points while the node tool is up. One commit.
     pub(crate) fn align_points(&mut self, axis: build::Axis, edge: build::Edge) {
         self.edit_points(Some("Aligned"), None, |subpaths, points| {
             tools::align_points(subpaths, points, axis, edge)
         });
     }
 
+    /// Distribute the selected points along `axis`, as [`Self::align_points`] aligns them.
     pub(crate) fn distribute_points(&mut self, axis: build::Axis) {
         self.edit_points(Some("Distributed"), None, |subpaths, points| {
             tools::distribute_points(subpaths, points, axis)
@@ -4619,11 +4280,8 @@ impl OndinApp {
     }
 
     /// Step the point selection one anchor along the path — `Tab` and
-    /// `Shift`+`Tab` (`app::dispatch`).
-    ///
-    /// One flat order over the whole path (`pen_anchors`' numbering), wrapping,
-    /// stepping from the subject's last point and replacing the selection. Silent,
-    /// like the arrow keys, and it reveals the point it lands on.
+    /// `Shift`+`Tab` (`app::dispatch`): one flat wrapping order over the whole
+    /// path, from the subject's last point. Silent; reveals where it lands.
     pub(crate) fn step_point(&mut self, forward: bool) {
         let Some(id) = self.edited_path() else { return };
         let Some((_, subpaths)) = self.edited_subpaths(id) else {
@@ -4651,10 +4309,8 @@ impl OndinApp {
         self.reveal_selection();
     }
 
-    /// Arrow-key nudge, applied to the selected points (`app::dispatch`).
-    ///
-    /// Silent, so a held key writes no status line per repeat, and it reveals
-    /// the selection.
+    /// Arrow-key nudge of the selected points (`app::dispatch`). Silent, so a held
+    /// key writes no status line per repeat.
     pub(crate) fn nudge_points(&mut self, delta: Vec2) {
         self.edit_points(None, Some("nudge-points"), |subpaths, points| {
             tools::move_points(subpaths, points, delta)
@@ -4692,10 +4348,8 @@ impl OndinApp {
         }
     }
 
-    /// The transaction one numeric-spacing edit produces for the point subject.
-    ///
-    /// Absolute (`space_points` names every target), so it reads the committed
-    /// subpaths without compounding.
+    /// The transaction one numeric-spacing edit produces for the point subject;
+    /// absolute, so it reads the committed subpaths.
     pub(crate) fn point_spacing_tx(&self, axis: build::Axis, gap: f64) -> Transaction {
         let Some(id) = self.edited_path() else {
             return Transaction::default();
@@ -4708,8 +4362,8 @@ impl OndinApp {
         tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
     }
 
-    /// The gaps the spacing field shows, for the point subject — from
-    /// [`Self::preview_subpaths`], or a field's own drag could not move it.
+    /// The gaps the spacing field shows, from [`Self::preview_subpaths`], or a
+    /// field's own drag could not move it.
     pub(crate) fn point_spacings(&self, axis: build::Axis) -> Vec<f64> {
         let Some(id) = self.edited_path() else {
             return Vec::new();
@@ -4733,10 +4387,8 @@ impl OndinApp {
     }
 
     /// The corner radius the radius field should show for `id`, and whether any
-    /// anchor it would write to is a corner at all (`None` dims the field).
-    ///
-    /// The largest, so adding a corner to the selection never makes the field
-    /// jump down.
+    /// anchor it would write to is a corner at all (`None` dims the field). The
+    /// largest, so adding a corner never makes the field jump down.
     pub(crate) fn corner_radius_of(&self, id: NodeId, points: Option<&[PointRef]>) -> Option<f64> {
         let (_, subpaths) = self.preview_subpaths(id)?;
         let mut any = false;
@@ -4754,10 +4406,8 @@ impl OndinApp {
     }
 
     /// Set the corner radius on `id` — the selected points, or every corner when
-    /// `points` is `None`.
-    ///
-    /// Corner anchors only: an anchor with live handles has no corner to cut.
-    /// Measured from the preview, because a field scrubs against what is shown.
+    /// `points` is `None`. Corner anchors only: one with live handles has no
+    /// corner to cut. Measured from the preview, because a field scrubs against it.
     pub(crate) fn corner_radius_tx(
         &self,
         id: NodeId,
@@ -4778,11 +4428,10 @@ impl OndinApp {
         tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
     }
 
-    /// Move the selected points by `delta` from wherever the preview has them.
-    ///
-    /// The counterpart to `points_tx`: a drag hands over its total since the
-    /// press (apply to the committed path), a scrubbed field one frame's
-    /// increment (apply to the preview, or it never accumulates).
+    /// Move the selected points by `delta` from where the preview has them. The
+    /// counterpart to `points_tx`: a drag hands over its total since the press
+    /// (applied to the committed path), a scrubbed field one frame's increment
+    /// (applied to the preview, or it never accumulates).
     pub(crate) fn nudge_points_tx(&self, id: NodeId, delta: Vec2) -> Transaction {
         let Some((world, mut subpaths)) = self.preview_subpaths(id) else {
             return Transaction::default();
@@ -4792,13 +4441,10 @@ impl OndinApp {
         tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
     }
 
-    /// The delta a node-tool drag should actually apply, and the lines explaining
-    /// it: `raw` constrained to one axis if Shift is held, then snapped along
-    /// whichever axes are left.
-    ///
-    /// The aimed point `base` snaps, not the box round the set. Shift constrains
-    /// as in [`Self::snapped_move`], and the path itself is excluded from the
-    /// targets since its bounds move with it.
+    /// The delta a node-tool drag should apply, and the lines explaining it. The
+    /// aimed point `base` snaps, not the box round the set; Shift constrains as in
+    /// [`Self::snapped_move`], and the path is excluded from the targets since its
+    /// bounds move with it.
     fn snapped_point(
         &self,
         id: NodeId,
@@ -4820,11 +4466,8 @@ impl OndinApp {
     }
 
     /// Whether a gesture has travelled far enough to be one — the gate on every
-    /// snap in the node tool.
-    ///
-    /// A snap on an unmoved click would edit the document, and `rewrite_path`
-    /// cannot catch it. The threshold is [`MIN_CREATE_PX`], so a click with a
-    /// pixel of wobble stays a click.
+    /// snap in the node tool, since a snap on an unmoved click would edit the
+    /// document and `rewrite_path` cannot catch it. The threshold is [`MIN_CREATE_PX`].
     fn gesture_travelled(&self, raw: Vec2) -> bool {
         raw.hypot() * self.points_per_world() >= MIN_CREATE_PX
     }
@@ -4836,12 +4479,10 @@ impl OndinApp {
         Some(subpaths.get(at.0)?.anchors.get(at.1)?.at)
     }
 
-    /// The pointer a point-box scale should use, and the lines explaining it.
-    ///
-    /// A resize snaps its pointer, not the box it produces (`snapped_resize`), so
-    /// the set's extreme point lands on the lattice. Only the handle's own axes
-    /// ([`Self::resize_axes`]) snap — a side band must not draw a guide for the
-    /// axis it cannot move — behind [`Self::snapped_point`]'s travel guard.
+    /// The pointer a point-box scale should use, and the lines explaining it. Only
+    /// the handle's own axes ([`Self::resize_axes`]) snap — a side band must not
+    /// draw a guide for the axis it cannot move — behind [`Self::snapped_point`]'s
+    /// travel guard.
     fn snapped_point_box(
         &self,
         id: NodeId,
@@ -4857,24 +4498,19 @@ impl OndinApp {
         (snapped.at, snapped.guides)
     }
 
-    /// The point on a segment the press grabbed, committed-side — what its snap is
-    /// measured against.
+    /// The point on a segment the press grabbed, committed-side.
     fn segment_position(&self, id: NodeId, at: PointRef, t: f64) -> Option<Point> {
         let (_, subpaths) = self.edited_subpaths(id)?;
         tools::segment_point(&subpaths, at, t)
     }
 
-    /// Move or bend the segment leaving `at`. `delta` is the total travel since the
-    /// press, already snapped when it is a move.
-    ///
-    /// One function because `Ctrl` is live and switches verbs mid-drag; both
-    /// measure from the committed path.
+    /// Move or bend the segment leaving `at`; `delta` is the total travel since
+    /// the press. One function because `Ctrl` switches verbs mid-drag.
     fn segment_tx(&self, id: NodeId, at: PointRef, t: f64, delta: Vec2, bend: bool) -> Transaction {
         let Some((world, mut subpaths)) = self.edited_subpaths(id) else {
             return Transaction::default();
         };
         if bend {
-            // The grabbed segment only: `t` names a parameter on it alone.
             tools::bend_segment(&mut subpaths, at, t, delta);
         } else {
             tools::move_points(&mut subpaths, &self.subject_points(id), delta);
@@ -4882,10 +4518,8 @@ impl OndinApp {
         tools::rewrite_path(id, world, &subpaths, self.stored_path(id))
     }
 
-    /// Scale the selected points about the box the press captured.
-    ///
-    /// Shift holds the ratio and Alt the centre, through `tools::resize_factors`;
-    /// always geometry scaling, since points are geometry.
+    /// Scale the selected points about the box the press captured: Shift holds the
+    /// ratio, Alt the centre; always geometry scaling.
     fn point_box_tx(
         &self,
         id: NodeId,
@@ -4910,10 +4544,8 @@ impl OndinApp {
         tools::rewrite_path(id, wt, &subpaths, self.stored_path(id))
     }
 
-    /// Turn the selected points about the box's centre — the ring outside a corner.
-    ///
-    /// Shift snaps to `ROTATE_SNAP` steps; otherwise unsnapped, since a lattice
-    /// says nothing about an angle.
+    /// Turn the selected points about the box's centre. Shift snaps to
+    /// `ROTATE_SNAP` steps; otherwise unsnapped.
     fn point_rotate_tx(
         &self,
         id: NodeId,
@@ -4950,13 +4582,10 @@ impl OndinApp {
         }
     }
 
-    /// The segment under `world` — the edited path's ink, at the parameter along
-    /// it — or `None` when the pointer is on one of its points, on the box over
-    /// them, or on nothing of this path at all.
-    ///
-    /// The one query behind *Add point here*'s gate and verb
-    /// (`context-menus.md` §6.5), wrapping [`Self::node_grab`] so the row means
-    /// what a click at that pixel would do.
+    /// The segment under `world` and the parameter along it, or `None` when the
+    /// pointer is on a point, the box over them, or nothing of this path. The one
+    /// query behind *Add point here* (`context-menus.md` §6.5), wrapping
+    /// [`Self::node_grab`] so the row means what a click there would do.
     pub(crate) fn segment_at(&self, world: Point) -> Option<(PointRef, f64)> {
         match self.node_grab(world)? {
             NodeGrab::Segment(at, t) => Some((at, t)),
@@ -4984,11 +4613,9 @@ impl OndinApp {
         Some((id, a, b))
     }
 
-    /// Join the two selected open ends — `context-menus.md` §6.5's last row.
-    ///
-    /// The selection-driven twin of the pen's draw-into-endpoint join, through
-    /// the same `tools::join_ends`. The new segment becomes the selection, since
-    /// the edit renumbers the run.
+    /// Join the two selected open ends — `context-menus.md` §6.5's last row, the
+    /// selection-driven twin of the pen's join. The new segment becomes the
+    /// selection, since the edit renumbers the run.
     pub(crate) fn join_points(&mut self) {
         let Some((id, a, b)) = self.join_subject() else {
             return;
@@ -5023,8 +4650,6 @@ impl OndinApp {
             self.delete_selection();
             return;
         }
-        // Compared against the stored path, so a stale reference leaves no empty
-        // undo step.
         let tx = tools::rewrite_path(id, world, &left, self.stored_path(id));
         if !tx.0.is_empty() && self.session.commit(tx) {
             // The cut renumbers, so the set is dropped rather than remapped.
@@ -5037,7 +4662,6 @@ impl OndinApp {
         let Some((world, mut subpaths)) = self.edited_subpaths(id) else {
             return Transaction::default();
         };
-        // The retract radius is `PEN_PICK_PX`: "is the pointer on the anchor".
         let zoom = self.points_per_world();
         let snap = f64::from(PEN_PICK_PX) / zoom;
         tools::pull_handle(
@@ -5061,14 +4685,11 @@ impl OndinApp {
         }
     }
 
-    /// Remove the selected points, healing each subpath — the node tool's Delete.
-    ///
-    /// Intercepted in `app::dispatch`, since keyboard actions run before the
-    /// canvas and `Action::Delete` would otherwise delete the whole layer.
+    /// Remove the selected points, healing each subpath — the node tool's Delete,
+    /// intercepted in `app::dispatch` or `Action::Delete` would delete the layer.
     pub(crate) fn delete_points(&mut self) {
         let Some(id) = self.edited_path() else { return };
-        // Selected segments are removed leaving a gap; `PointSet` holds points or
-        // segments, never both.
+        // `PointSet` holds points or segments, never both.
         let cuts: Vec<PointRef> = self.points.segments(id).collect();
         if !cuts.is_empty() {
             self.remove_segments(id, &cuts);
@@ -5090,27 +4711,21 @@ impl OndinApp {
         }
         let tx = tools::rewrite_path(id, world, &left, None);
         if self.session.commit(tx) {
-            // Every later index has shifted, so the set is dropped whole; a
-            // partial set carried across is the silent failure.
+            // Every later index has shifted; a partial set carried across would be wrong.
             self.points.clear();
         }
     }
 
     /// Turn a path's subpaths round — `Shift+D`, the node tool's direction verb.
-    ///
-    /// The subject is each run with a selected point, or every run when none is
-    /// — the corner radius's rule — and a selected path works outside point
-    /// editing too. The point selection is remapped (`PointSet::reverse_within`),
-    /// since reversing is a permutation.
+    /// The subject is each run with a selected point, or every run when none is,
+    /// and a selected path works outside point editing too. The point selection is
+    /// remapped (`PointSet::reverse_within`), since reversing is a permutation.
     pub(crate) fn reverse_subpaths(&mut self) {
-        // The node tool's path when it has one, otherwise a single selected `Path`.
         let Some(id) = self.edited_path().or_else(|| {
             let [id] = *self.session.selection.ids() else {
                 return None;
             };
-            // The lock check `edited_path` carries; here rather than in
-            // `is_path`, which is a kind predicate whose callers have their own
-            // interactability rules.
+            // The lock check `edited_path` carries; `is_path` is a kind predicate.
             if ondin_core::is_effectively_locked(&self.session.doc, id) {
                 return None;
             }
@@ -5149,7 +4764,6 @@ impl OndinApp {
     pub(crate) fn pen_backspace(&mut self) {
         let Some(pen) = self.pen.as_mut() else { return };
         pen.anchors.pop();
-        // Else the next move would shape the previous anchor's handles.
         pen.shaping = false;
         if pen.anchors.is_empty() {
             self.pen = None;
@@ -5159,7 +4773,6 @@ impl OndinApp {
 
     pub(crate) fn finish_pen(&mut self, close: bool) {
         let Some(pen) = self.pen.take() else { return };
-        // A resumed path writes back into its node; a new one mints a node.
         let resumed = pen.editing.is_some();
         let (id, tx, done) = match pen.editing {
             Some(mut edit) => {
@@ -5167,12 +4780,11 @@ impl OndinApp {
                     anchors: pen.anchors,
                     closed: close,
                 };
-                // Back into the direction it was read in — see `PenEdit::subpaths`.
+                // Back into the direction it was read in (`PenEdit::subpaths`).
                 if edit.from_start {
                     sub.reverse();
                 }
-                // A run this gesture minted and left too short goes, rather than
-                // being written as a lone `MoveTo` (`PenEdit::minted`).
+                // A minted run left too short goes, not a lone `MoveTo` (`PenEdit::minted`).
                 if edit.minted && sub.anchors.len() < 2 {
                     edit.subpaths.remove(edit.active);
                 } else {
@@ -5199,8 +4811,7 @@ impl OndinApp {
             }
         };
         if tx.0.is_empty() {
-            // A new path too short created nothing and the pen stays armed; a
-            // resumed one that changed nothing still ends its gesture.
+            // A too-short new path leaves the pen armed; a resumed one ends its gesture.
             if resumed {
                 self.end_pen_gesture(id);
             }
@@ -5212,10 +4823,9 @@ impl OndinApp {
         }
     }
 
-    /// Where a finished pen gesture leaves you: holding `id`, and back in whichever
-    /// tool armed the gesture: the node tool stays in its edit, the standalone pen
-    /// drops to Select. The point set goes either way, since the run was
-    /// renumbered.
+    /// Where a finished pen gesture leaves you: holding `id`; the node tool stays
+    /// in its edit, the standalone pen drops to Select. The point set goes either
+    /// way, since the run was renumbered.
     fn end_pen_gesture(&mut self, id: NodeId) {
         self.session.selection.set_one(id);
         if self.tool == Tool::Node {
@@ -5228,11 +4838,9 @@ impl OndinApp {
     // --- text -------------------------------------------------------------
 
     /// Open the editor on a text node that has **just been created** — the Text
-    /// tool's drag, once its box is committed, and [`Self::begin_text`]'s second
-    /// half.
-    ///
-    /// The original is empty, or closing would commit a second undo step; the
-    /// parts come off the node, so the drag's `Fixed` sizing is measured.
+    /// tool's committed drag, and [`Self::begin_text`]'s second half. The original
+    /// is empty, or closing would commit a second undo step; the parts come off
+    /// the node, so the drag's `Fixed` sizing is measured.
     fn open_text_session(&mut self, id: NodeId) {
         let Some(parts) = self
             .session
@@ -5247,7 +4855,6 @@ impl OndinApp {
             id,
             editor: TextEdit::new("", parts),
             original: (String::new(), CharSpans::default(), ParaSpans::default()),
-            // Made for this session, so an empty close removes it (§9.3).
             created: true,
             blink: Default::default(),
         });
@@ -5276,8 +4883,6 @@ impl OndinApp {
                 paragraph: parts.paragraph.clone(),
                 block: parts.block,
                 sizing: parts.sizing,
-                // Never on a rail; a click on an outline goes through
-                // `build::text_on_new_path` instead.
                 on_path: None,
                 on_path_flip: false,
                 on_path_offset: 0.0,
@@ -5302,7 +4907,6 @@ impl OndinApp {
             &mut self.session.ids,
             path,
             &parts,
-            // The click, so the type starts under the mark that offered it.
             world,
         ) {
             Ok((tx, id)) => {
@@ -5328,8 +4932,7 @@ impl OndinApp {
         }
     }
 
-    /// Where the visible world is centred — what a **paste** places at, having no
-    /// pointer to aim with.
+    /// Where the visible world is centred — what a **paste** places at.
     pub(crate) fn viewport_centre(&self) -> Point {
         self.session.camera.viewport(self.canvas_px).view.center()
     }
@@ -5338,10 +4941,9 @@ impl OndinApp {
     ///
     /// On Windows winit's drop handler carries no position, so
     /// [`os_cursor_screen_pos`] asks the OS — first, because inside a file drag
-    /// egui's own pointer is absent or stale. The drop, the replace gate and the
-    /// hover chrome all read this one function.
+    /// egui's own pointer is absent or stale.
     pub(crate) fn drop_point(&self, ctx: &egui::Context) -> Option<Point> {
-        // `latest_pos` too, because a drop's release is not an egui interaction.
+        // `latest_pos` too: a drop's release is not an egui interaction.
         os_cursor_screen_pos(ctx)
             .or_else(|| ctx.pointer_interact_pos())
             .or_else(|| ctx.pointer_latest_pos())
@@ -5351,23 +4953,18 @@ impl OndinApp {
 
     /// The fill a drop or a paste would replace, or `None` to make a new layer.
     ///
-    /// A *selected* shape under the point (§5.5a): the selection is what a drop
-    /// and a paste can share, and it makes the destructive reading opt-in.
-    /// `None` is the paste's arm; `drop_images_at` passes `Some(p)` or declines,
-    /// else a second drop would replace the first picture.
-    ///
-    /// The index is the first visible image fill, else the last fill — the top
-    /// of the paint order, not index 0 underneath.
+    /// A *selected* shape under the point (§5.5a), so replacing is opt-in. `None`
+    /// is the paste's arm; `drop_images_at` passes `Some(p)` or declines, else a
+    /// second drop would replace the first picture. The index is the first visible
+    /// image fill, else the last fill.
     pub(crate) fn image_drop_target(&self, world: Option<Point>) -> Option<(NodeId, usize)> {
         let [id] = *self.session.selection.ids() else {
             return None;
         };
-        // A locked layer's picture is not replaceable; `edited_image`'s guard
-        // never runs for a drop or paste, and both funnel through here.
+        // `edited_image`'s lock guard never runs for a drop or paste.
         if ondin_core::is_effectively_locked(&self.session.doc, id) {
             return None;
         }
-        // A drop has to land on the thing it is replacing.
         if let Some(p) = world {
             let bounds = self.session.resolved.world_bounds(id)?;
             if !bounds.contains(p) {
@@ -5379,20 +4976,16 @@ impl OndinApp {
         Some((id, index))
     }
 
-    /// The layer name a picture takes among `parent`'s children.
-    ///
-    /// A given name (a filename) is kept; otherwise it is numbered "Image n"
-    /// among the siblings. Not `CreateNode { name: None }`, which would say
-    /// "Rectangle n" since an image is a fill on a Rect (§5.5a).
+    /// The layer name a picture takes among `parent`'s children: a given name (a
+    /// filename) is kept, else "Image n". Not `CreateNode { name: None }`, which
+    /// would say "Rectangle n" since an image is a fill on a Rect (§5.5a).
     fn image_layer_name(&self, parent: NodeId, given: Option<String>) -> String {
         image_layer_name(&self.session.doc, parent, given)
     }
 
-    /// Make a layer for `image` at `world`. Returns whether it landed.
-    ///
-    /// Takes the image rather than reading `pending_images`, so a drop never
-    /// touches the Image tool's queue; that bookkeeping stays with
-    /// [`Self::place_image_at`].
+    /// Make a layer for `image` at `world`. Returns whether it landed. Takes the
+    /// image, not `pending_images`, so a drop never touches the Image tool's queue
+    /// (that stays with [`Self::place_image_at`]).
     pub(crate) fn create_image_at(&mut self, image: &LoadedImage, world: Point) -> bool {
         let (tx, node) = self.image_tx(None, image, world);
         if !self.session.commit(tx) {
@@ -5403,14 +4996,9 @@ impl OndinApp {
     }
 
     /// The transaction half of [`Self::create_image_at`]: one picture's
-    /// `CreateNode`, and the id it will have.
-    ///
-    /// Split out so a multi-file drop is one transaction and one undo step;
-    /// `commit_run` cannot merge `CreateNode`s.
-    ///
-    /// `over` is the document to read structure from (index, sibling names, blob
-    /// already embedded): a batch passes one advanced by the placements already
-    /// built; `None` reads the live document. Placement always reads the live one.
+    /// `CreateNode`, and its id. Split out so a multi-file drop is one undo step
+    /// (`commit_run` cannot merge `CreateNode`s). `over` is the document to read
+    /// structure from: a batch passes one advanced by the placements built so far.
     pub(crate) fn image_tx(
         &mut self,
         over: Option<&Document>,
@@ -5424,7 +5012,6 @@ impl OndinApp {
             image.name.clone(),
         );
         let (parent, parent_world) = self.draw_target(world);
-        // The frame's used box (the one on screen), or the visible world.
         let frame = match self.session.resolved.used_kind(&self.session.doc, parent) {
             Some(NodeKind::Artboard { size, .. }) => *size,
             _ => {
@@ -5452,29 +5039,24 @@ impl OndinApp {
         (tx, node)
     }
 
-    /// Make a text layer holding the clipboard's text and select it — what `Ctrl+V`
-    /// means on the canvas when the app's own clipboard has nothing to offer.
-    ///
-    /// Returns whether there was any text, so [`OndinApp::paste`] can treat this as
-    /// the last arm of one decision. Where it lands is
-    /// [`Self::paste_placement`]'s answer. The layer is selected, not opened for
-    /// editing.
+    /// Make a text layer holding the clipboard's text and select it (not open it
+    /// for editing) — `Ctrl+V` when the app's own clipboard has nothing. Returns
+    /// whether there was any text, so [`OndinApp::paste`] can treat this as its
+    /// last arm. Placement is [`Self::paste_placement`]'s.
     pub(crate) fn paste_text_as_layer(&mut self, at: Option<Point>) -> bool {
         let Some(text) = crate::app::system_clipboard_text() else {
             return false;
         };
         let (centre, parent, parent_world) = self.paste_placement(at);
 
-        // Shaped through a `TextEdit`: `insert` normalizes `\r\n` (a bare
-        // `TextEdit::new` would double-space every line), and the committed
-        // content and its measured box cannot disagree.
+        // Through a `TextEdit`: `insert` normalizes `\r\n` (a bare `TextEdit::new`
+        // would double-space every line).
         let mut parts = crate::fonts::FontService::default_text_parts();
         let mut editor = TextEdit::new("", parts.clone());
         editor.insert(&text);
         let mut layout = editor.text_layout();
 
-        // Wrapped to the frame's used width, or the view's, rather than run off
-        // the page as one long line.
+        // Wrapped to the frame's used width, or the view's.
         let available = match self.session.resolved.used_kind(&self.session.doc, parent) {
             Some(NodeKind::Artboard { size, .. }) => size.width,
             _ => self.session.camera.viewport(self.canvas_px).view.width(),
@@ -5482,7 +5064,6 @@ impl OndinApp {
         if let Some(sizing) = wrapped_paste_sizing(layout.size.width, available) {
             parts.sizing = sizing;
             editor.restyle(parts.clone());
-            // Re-measured, so the centring uses the wrapped box.
             layout = editor.text_layout();
         }
 
@@ -5502,13 +5083,11 @@ impl OndinApp {
                 paragraph: parts.paragraph.clone(),
                 block: parts.block,
                 sizing: parts.sizing,
-                // As `begin_text`: a pasted layer is a new one.
                 on_path: None,
                 on_path_flip: false,
                 on_path_offset: 0.0,
             },
             transform: Some(Affine::translate(local)),
-            // Core's own numbering, as `begin_text` leaves it.
             name: None,
         }]);
         if !self.session.commit(tx) {
@@ -5519,13 +5098,10 @@ impl OndinApp {
         true
     }
 
-    /// Paste SVG markup as layers (`ondin_core::svg_in`) — the arm between the
-    /// app's own clipboard and the text-layer fallback.
-    ///
-    /// Markup that will not parse falls through to a text layer silently, except
-    /// one nested too deeply, which is refused out loud. Placed by applying the
-    /// transaction to a clone, reading the bounds, and correcting the root's
-    /// transform before the one real commit.
+    /// Paste SVG markup as layers (`ondin_core::svg_in`), the arm between the
+    /// app's clipboard and the text fallback. Markup that will not parse falls
+    /// through silently, except one nested too deeply, refused out loud. Placed by
+    /// applying to a clone, reading the bounds and correcting the root's transform.
     pub(crate) fn paste_svg(&mut self, at: Option<Point>) -> bool {
         let Some(text) = crate::app::system_clipboard_text() else {
             return false;
@@ -5536,8 +5112,7 @@ impl OndinApp {
         let (centre, parent, parent_world) = self.paste_placement(at);
 
         let index = self.child_count(parent);
-        // A sink rather than `&mut self`, so the session's ids and the canvas's
-        // decode cache can be borrowed at once.
+        // A sink, so the session's ids and the decode cache are borrowed at once.
         let mut sink = SvgImages {
             images: self.canvas.images_mut(),
         };
@@ -5549,18 +5124,15 @@ impl OndinApp {
             Some(&mut sink),
         ) {
             Ok(out) => out,
-            // An SVG too deep to read is still an SVG: refused rather than
-            // pasted as a huge text layer of markup.
+            // Refused rather than pasted as a huge text layer of markup. Untested
+            // here (the clipboard is unreachable under `cfg(test)`); `svg_in` tests it.
             Err(ondin_core::svg_in::SvgError::TooDeep) => {
-                // Untested here: `system_clipboard_text` is unreachable under
-                // `cfg(test)`; `svg_in` tests the refusal.
                 self.session
                     .fail("That SVG is nested too deeply to read — nothing was pasted.");
                 return true;
             }
             Err(_) => return false,
         };
-        // Nothing drawable: fall through to a text layer.
         if out.shapes == 0 {
             return false;
         }
@@ -5570,7 +5142,6 @@ impl OndinApp {
             return false;
         }
         if let Some(bounds) = ondin_core::Resolved::rebuild(&probe).world_bounds(out.root) {
-            // A world delta into the parent's space.
             let inv = parent_world.inverse();
             let delta = (inv * centre) - (inv * bounds.center());
             if let Some(Operation::CreateNode { transform, .. }) = out
@@ -5589,8 +5160,7 @@ impl OndinApp {
         self.session.selection.set_one(out.root);
         let n = out.shapes;
         let plural = if n == 1 { "layer" } else { "layers" };
-        // Both lists said out loud, as two clauses: skipped is missing,
-        // approximated is there and slightly wrong.
+        // Skipped is missing; approximated is there and slightly wrong.
         out.skipped.sort();
         out.approximated.sort();
         let mut msg = format!("Pasted SVG — {n} {plural}");
@@ -5604,25 +5174,20 @@ impl OndinApp {
         true
     }
 
-    /// The frame a paste is aimed at — the one the selection **is, or is inside** —
-    /// and `None` for a selection on the bare canvas or no selection at all.
-    ///
-    /// The enclosing frame of the first selected node, so a frame and anything
-    /// inside it give the same answer.
+    /// The frame a paste is aimed at — the enclosing frame of the first selected
+    /// node, so a frame and anything inside it agree — or `None` for a selection
+    /// on the bare canvas or none.
     fn paste_frame(&self) -> Option<NodeId> {
         let id = *self.session.selection.ids().first()?;
         enclosing_artboard(&self.session.doc, id)
     }
 
     /// Where a text or SVG paste lands and whose child it is:
-    /// `(centre, parent, parent_world)`.
-    ///
-    /// The pointer `at` where there is one; else the centre of
-    /// [the selected frame](Self::paste_frame), parented to that frame itself
-    /// rather than `draw_target`'s (possibly nested) answer; else the middle of
-    /// the view. `app::paste_image` has no selected-frame arm.
+    /// `(centre, parent, parent_world)`: the pointer `at` where there is one; else
+    /// the centre of [the selected frame](Self::paste_frame), parented to that
+    /// frame rather than `draw_target`'s (possibly nested) answer; else the middle
+    /// of the view. `app::paste_image` has no selected-frame arm.
     fn paste_placement(&self, at: Option<Point>) -> (Point, NodeId, Affine) {
-        // A frame's centre needs the frame; the fallbacks need neither.
         let frame = self.paste_frame();
         let centre = match (
             at,
@@ -5645,8 +5210,7 @@ impl OndinApp {
     }
 
     /// One image of the loaded cursor is spent; **the tool disarms itself when the
-    /// last one is** (§5.5a, §9.4), so no cursor is left armed over an empty
-    /// queue.
+    /// last one is** (§5.5a, §9.4).
     fn placed_one_image(&mut self) {
         if !self.pending_images.is_empty() {
             self.pending_images.remove(0);
@@ -5662,22 +5226,20 @@ impl OndinApp {
     }
 
     /// Enter insert mode for an existing text node, placing the caret at the
-    /// clicked point — or selecting the whole string when there was no click,
-    /// since `Enter` on a text layer means "retype this".
+    /// clicked point, or selecting the whole string when there was no click
+    /// (`Enter` means "retype this").
     pub(crate) fn begin_edit_text(&mut self, id: Option<NodeId>, world: Option<Point>) {
         let Some(id) = id else {
             self.session.selection.clear();
             return;
         };
-        // A lock refuses, its group's included — here, where the menu row and
-        // `Enter` both arrive.
+        // A lock refuses, its group's included; the menu row and `Enter` both arrive here.
         if ondin_core::is_effectively_locked(&self.session.doc, id) {
             self.session
                 .info("This layer is locked — unlock it to edit the text");
             return;
         }
-        // The text as drawn, bound values resolved; `keep_text_bindings` keeps
-        // the binding if nothing changes.
+        // The text as drawn, bound values resolved (`keep_text_bindings`).
         let Some(kind) = self.session.doc.resolved_kind(id) else {
             return;
         };
@@ -5703,7 +5265,6 @@ impl OndinApp {
             id,
             editor,
             original,
-            // An existing layer: emptying it is not the app's cue to delete it.
             created: false,
             blink: Default::default(),
         });
@@ -5716,10 +5277,8 @@ impl OndinApp {
         Some(self.session.preview_world_transform(id)?.inverse() * world)
     }
 
-    /// The text layer under `world`, for the Text tool's click and its hover outline.
-    ///
-    /// `pick_leaf`, then filtered to text: a text node behind a rectangle is
-    /// covered, not picked past.
+    /// The text layer under `world`, for the Text tool's click and hover outline.
+    /// `pick_leaf` filtered to text: a text node behind a rectangle is covered.
     fn text_layer_at(&self, world: Point) -> Option<NodeId> {
         let id = self.pick_leaf(world)?;
         matches!(
@@ -5730,12 +5289,10 @@ impl OndinApp {
     }
 
     /// The layer whose **outline** is under `world`, for the Text tool's *type
-    /// along this path* affordance.
-    ///
-    /// Unlike [`Self::pick_leaf`] it measures distance to the outline, so an
-    /// unfilled circle counts; nearest wins, not topmost. Which kinds qualify is
-    /// `ondin_core::query::outline_at`'s rule; the tolerance here is
-    /// `PEN_PICK_PX`, the pen's segment band.
+    /// along this path* affordance. Unlike [`Self::pick_leaf`] it measures
+    /// distance to the outline, so an unfilled circle counts; nearest wins. Which
+    /// kinds qualify is `ondin_core::query::outline_at`'s rule; the tolerance is
+    /// `PEN_PICK_PX`.
     fn rail_at(&self, world: Point) -> Option<NodeId> {
         ondin_core::query::outline_at(
             &self.session.resolved,
@@ -5745,11 +5302,9 @@ impl OndinApp {
         )
     }
 
-    /// Whether `screen` is inside the box of the text node currently being edited.
-    ///
-    /// The question the I-beam asks and the one `text_mode_input` asks to decide
-    /// whether a click ends the session. Against the node's local box, so a
-    /// rotated layer answers about its own rectangle.
+    /// Whether `screen` is inside the box of the text node being edited — the
+    /// I-beam's question and `text_mode_input`'s test for whether a click ends the
+    /// session. Against the local box, so a rotated layer answers for its own rectangle.
     fn over_edited_text(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> bool {
         let Some(id) = self.text.as_ref().map(|s| s.id) else {
             return false;
@@ -5763,8 +5318,8 @@ impl OndinApp {
             .is_some_and(|b| b.contains(local))
     }
 
-    /// Move the camera by a pan drag's delta — shared by `update_drag` and
-    /// [`Self::text_mode_input`] so the two cannot drift.
+    /// Move the camera by a pan drag's delta, shared by `update_drag` and
+    /// [`Self::text_mode_input`].
     fn pan_by_drag(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         let ppp = ui.ctx().pixels_per_point();
         let d = resp.drag_delta();
@@ -5786,8 +5341,6 @@ impl OndinApp {
         };
 
         // A click inside the node moves the caret; outside, the session ends.
-        // `over_edited_text`, the I-beam's own test, so a rotated node's corners
-        // agree with the cursor.
         if resp.clicked()
             && let Some(p) = resp.interact_pointer_pos()
         {
@@ -5807,8 +5360,7 @@ impl OndinApp {
             }
         }
 
-        // The middle button pans and only the primary selects (`drag_started` is
-        // button-agnostic). Not Space, which is a character here.
+        // The middle button pans and only the primary selects; not Space, a character here.
         if resp.drag_started_by(egui::PointerButton::Middle) {
             self.drag = Drag::Pan;
         } else if resp.drag_started_by(egui::PointerButton::Primary)
@@ -5843,21 +5395,20 @@ impl OndinApp {
         }
 
         // Nothing typed into a panel reaches the text. `egui_wants_keyboard_input`
-        // over-approximates (any focus), as `input::resolve` does: failing to type
-        // is recoverable, typing into the document is not.
+        // over-approximates (any focus), as `input::resolve` does.
         let events = if ui.ctx().egui_wants_keyboard_input() {
             Vec::new()
         } else {
             ui.input(|i| i.events.clone())
         };
-        // The clipboard events carry no modifiers, so the frame's are read:
-        // `!alt` because `AltGr+C` arrives as `Event::Copy` (`docs/shortcuts.md`
-        // §L2), and `!shift` because `Ctrl+Shift+C` (centre paragraph) does too.
+        // Clipboard events carry no modifiers, so the frame's are read: `!alt`
+        // because `AltGr+C` arrives as `Event::Copy` (`docs/shortcuts.md` §L2),
+        // `!shift` because `Ctrl+Shift+C` (centre paragraph) does too.
         let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
         let mut changed = false;
         let mut finish = false;
-        // What a cut or copy took, and its toast; the clipboard write is deferred
-        // past the loop, the removal is not.
+        // A cut or copy's text and toast; the clipboard write is deferred past the
+        // loop, the removal is not.
         let mut copied: Option<(String, &'static str)> = None;
         for ev in events {
             let Some(s) = self.text.as_mut() else { break };
@@ -5870,8 +5421,6 @@ impl OndinApp {
                     s.editor.insert(&t);
                     changed = true;
                 }
-                // `Ctrl+C`/`Ctrl+X` arrive only as these events
-                // (`docs/shortcuts.md` §0).
                 egui::Event::Copy if !alt && !shift => {
                     copied = non_empty(s.editor.selected_text()).map(|t| (t, "Copied text"))
                 }
@@ -5922,10 +5471,9 @@ impl OndinApp {
                         egui::Key::Home => s.editor.move_line_start(modifiers.shift),
                         egui::Key::End => s.editor.move_line_end(modifiers.shift),
                         egui::Key::A if modifiers.command => s.editor.select_all(),
-                        // `Tab`/`Shift`+`Tab` nest and un-nest list items. Claimed
-                        // even when nothing moves: `took_tab` in
-                        // `<OndinApp as eframe::App>::ui` hands focus back so egui's
-                        // focus ring cannot deafen the session.
+                        // `Tab`/`Shift`+`Tab` nest and un-nest list items, claimed even
+                        // when nothing moves: `took_tab` in the app's `ui` hands focus
+                        // back so egui's focus ring cannot deafen the session.
                         egui::Key::Tab if !modifiers.command && !modifiers.alt => {
                             let delta = if modifiers.shift { -1 } else { 1 };
                             changed |= s.editor.step_list_level(delta);
@@ -5950,8 +5498,7 @@ impl OndinApp {
         ui.ctx().request_repaint();
     }
 
-    /// Copy the text session's selection — the menu's *Copy* row (§6.4), and the
-    /// same verb `Event::Copy` reaches through [`Self::text_mode_input`].
+    /// Copy the text session's selection — the menu's *Copy* row (§6.4).
     pub(crate) fn copy_text_selection(&mut self, ctx: &egui::Context) {
         let Some(text) = self
             .text
@@ -5984,8 +5531,7 @@ impl OndinApp {
         self.preview_session();
     }
 
-    /// Select the whole buffer — the menu's *Select all* row (§6.4), the same verb
-    /// `Ctrl+A` reaches through the session's own loop.
+    /// Select the whole buffer — the menu's *Select all* row (§6.4).
     pub(crate) fn select_all_text(&mut self) {
         if let Some(s) = self.text.as_mut() {
             s.editor.select_all();
@@ -6012,8 +5558,7 @@ impl OndinApp {
         self.session.clear_preview();
 
         if session.editor.content().is_empty() && session.created {
-            // A fresh node left empty is dropped. `created`, not an empty
-            // `original`: a pre-existing node can already be empty.
+            // `created`, not an empty `original`: a pre-existing node can be empty.
             self.session
                 .commit(Transaction(vec![Operation::DeleteNode { id: session.id }]));
             self.session.selection.clear();
@@ -6034,45 +5579,38 @@ impl OndinApp {
     }
 
     /// Re-open the live editor against a changed style, so restyling from the
-    /// inspector mid-session does not strand the caret on a stale layout.
-    ///
-    /// The editor's own spans win, since they may hold uncommitted styling. For a
-    /// write that clears spans use [`Self::text_session_restyled_after`].
+    /// inspector mid-session does not strand the caret. The editor's own spans win
+    /// (they may hold uncommitted styling); for a write that clears spans use
+    /// [`Self::text_session_restyled_after`].
     pub(crate) fn text_session_restyled(&mut self) {
         self.restyle_session(None, None);
     }
 
-    /// [`Self::text_session_restyled`] for a commit that carries span lists, so a
-    /// write that clears spans is not undone by the editor's stale list.
-    ///
-    /// The transaction is the witness, per scope: a `SetTextSpans` in it installs
-    /// that op's list (keyed to the editor's bytes, not the shorter committed
-    /// string); a scope it does not mention keeps the editor's.
+    /// [`Self::text_session_restyled`] for a commit that carries span lists. Per
+    /// scope, a `SetTextSpans` in the transaction installs that op's list (keyed
+    /// to the editor's bytes); a scope it does not mention keeps the editor's.
     pub(crate) fn text_session_restyled_after(&mut self, tx: &Transaction) {
         let Some(id) = self.text.as_ref().map(|s| s.id) else {
             return;
         };
         let (spans, para_spans) = stated_spans(tx, id);
         self.restyle_session(spans, para_spans);
-        // The commit cleared the gesture preview, so re-install the session's;
-        // safe only after a commit, never mid-drag.
+        // The commit cleared the gesture preview; safe only after a commit.
         self.preview_session();
     }
 
-    /// [`Self::text_session_restyled`] with the two span lists **given** rather than
-    /// taken off the editor — how a cancelled field scrub gets its old values back,
-    /// since a scrub over a session writes into the editor, not a preview (§9.3).
+    /// [`Self::text_session_restyled`] with the two span lists **given** — how a
+    /// cancelled field scrub gets its old values back, since a scrub over a
+    /// session writes into the editor, not a preview (§9.3).
     pub(crate) fn restyle_session_with(&mut self, spans: CharSpans, para_spans: ParaSpans) {
         self.restyle_session(Some(spans), Some(para_spans));
         self.preview_session();
     }
 
-    /// Re-open the live editor against the document's style, taking each span list
-    /// from the argument where one is given and from the editor where it is not —
-    /// the one body behind the three entry points above.
-    ///
-    /// The canvas refresh is the caller's: `valve_paragraph` reaches this
-    /// mid-drag, where re-previewing would overwrite that drag's preview.
+    /// Re-open the live editor against the document's style, each span list from
+    /// the argument where given, else from the editor: the body behind the three
+    /// entry points above. The canvas refresh is the caller's: `valve_paragraph`
+    /// reaches this mid-drag, where re-previewing would overwrite the preview.
     fn restyle_session(&mut self, spans: Option<CharSpans>, para_spans: Option<ParaSpans>) {
         let Some(id) = self.text.as_ref().map(|s| s.id) else {
             return;
@@ -6085,7 +5623,6 @@ impl OndinApp {
         let Some(parts) = TextParts::of(kind) else {
             return;
         };
-        // What the document holds right now — the new `original`.
         let stored = match kind {
             NodeKind::Text {
                 content,
@@ -6103,16 +5640,15 @@ impl OndinApp {
                 para_spans,
                 ..parts
             });
-            // The base moves with the document, or `changed()` answers yes after
-            // any outside write. The document's content, not the editor's, which
-            // may hold typed text not yet committed.
+            // The base moves with the document's content, not the editor's (which
+            // may hold uncommitted text), or `changed()` answers yes after any
+            // outside write.
             s.original = stored;
         }
     }
 
-    /// Put the live session's own state on the canvas — the `SetText` that every
-    /// session-scoped write ends with, in one place so none of `SetText`'s fields
-    /// is forgotten.
+    /// Put the live session's own state on the canvas — the `SetText` every
+    /// session-scoped write ends with.
     pub(crate) fn preview_session(&mut self) {
         let Some(s) = self.text.as_ref() else {
             return;
@@ -6123,20 +5659,17 @@ impl OndinApp {
             spans: s.editor.spans().clone(),
             para_spans: s.editor.para_spans().clone(),
         }]);
-        // The session's own layout, so `RenderOverrides::set_kind` does not shape
-        // the string a second time per keystroke.
+        // The session's own layout: no second shaping per keystroke.
         let shaped = Some((s.id, s.editor.text_layout()));
         self.session.set_session_preview(&tx, shaped);
     }
 
     // --- overlays ---------------------------------------------------------
 
-    /// Whether the **selection's** chrome is suppressed this frame — its outline,
-    /// its handles, the size badge, the pivot marker and the key layer's trace.
-    ///
-    /// One question for every reason: a path, image or pen gesture being edited
-    /// in place ([`Self::editing_in_place`]), or a value being edited in the
-    /// inspector (`ChromeHold`). It never hides the pen's own overlay.
+    /// Whether the **selection's** chrome is suppressed this frame — outline,
+    /// handles, size badge, pivot marker and key layer's trace: a path, image or
+    /// pen gesture edited in place ([`Self::editing_in_place`]), or a value being
+    /// edited in the inspector (`ChromeHold`). Never hides the pen's own overlay.
     /// [`Self::draw_grid_tracks`] asks the two halves separately.
     pub(crate) fn chrome_hidden(&self) -> bool {
         self.editing_in_place() || self.chrome_hold.holding()
@@ -6148,10 +5681,8 @@ impl OndinApp {
         self.pen.is_some() || self.edited_path().is_some() || self.edited_image().is_some()
     }
 
-    /// Outline whatever the pointer is over but has not selected.
-    ///
-    /// The exact shape, not its box, so it says what a click will pick; a
-    /// container outlines every leaf it holds.
+    /// Outline whatever the pointer is over but has not selected: the exact shape,
+    /// so it says what a click will pick; a container outlines every leaf it holds.
     fn draw_hover_outline(
         &self,
         ui: &egui::Ui,
@@ -6163,7 +5694,6 @@ impl OndinApp {
         if !self.hover_chrome_live() {
             return;
         }
-        // The Text tool outlines only a text layer it would enter.
         if self.tool == Tool::Text {
             let Some(p) = resp.hover_pos() else { return };
             let Some(id) = self.text_layer_at(self.to_world(p, rect, ppp)) else {
@@ -6196,11 +5726,9 @@ impl OndinApp {
         self.mode == Mode::Normal && self.drag.is_none() && !self.chrome_hidden()
     }
 
-    /// The layer a resting pointer is pointing *at* — what a click would take, and
-    /// what a measure would measure to — one answer, so the two cannot disagree.
-    ///
-    /// `None` when the tool does not select, the pointer is off the canvas or
-    /// over the selection's handles, or the target is already selected.
+    /// The layer a resting pointer points *at* — what a click would take and a
+    /// measure would measure to. `None` when the tool does not select, the pointer
+    /// is off the canvas or over the selection's handles, or the target is selected.
     fn hover_target(
         &self,
         ui: &egui::Ui,
@@ -6217,8 +5745,6 @@ impl OndinApp {
         {
             return None;
         }
-        // [`Self::pick_at_pointer`] itself, the click's own chain (name tag, edge,
-        // leaf), so the ring shows exactly what a click would take.
         let world = self.to_world(p, rect, ppp);
         let leaf = self.pick_at_pointer(ui, p, world, rect, ppp)?;
         let target = self.pick_preview(leaf, ui);
@@ -6226,10 +5752,9 @@ impl OndinApp {
     }
 
     /// The node tool's chrome: every anchor of the edited path, and the handles
-    /// of the ones that are selected, replacing the selection box.
-    ///
-    /// A square marks a corner, a circle a smooth point. Handles only for
-    /// selected anchors, matching what [`Self::node_grab`] offers.
+    /// of the selected ones, replacing the selection box. A square marks a corner,
+    /// a circle a smooth point; handles only for selected anchors, as
+    /// [`Self::node_grab`] offers.
     fn draw_points(
         &self,
         painter: &egui::Painter,
@@ -6238,18 +5763,15 @@ impl OndinApp {
         resp: &egui::Response,
     ) {
         let Some(id) = self.edited_path() else { return };
-        // A pen gesture in flight owns this path's picture; overlaid, its circles
-        // and these squares would contradict each other.
+        // A pen gesture in flight owns this path's picture.
         if self.pen.is_some() {
             return;
         }
-        // The preview, so the marks track a drag.
         let Some((_, subpaths)) = self.preview_subpaths(id) else {
             return;
         };
 
-        // Segments first, under the points; the trace is a segment's only
-        // affordance. `node_grab` decides both the segment trace and the
+        // Segments first, under the points; `node_grab` decides the trace and the
         // anchor's hover fill, so the chrome offers what the press takes.
         let grab = (self.drag.is_none() && !self.gesture_cancelled)
             .then(|| resp.hover_pos())
@@ -6289,8 +5811,7 @@ impl OndinApp {
             }
         }
 
-        // The point box under the markers, since an anchor wins the press
-        // ([`NodeGrab`]).
+        // Under the markers, since an anchor wins the press.
         self.draw_point_box(painter, rect, ppp);
 
         let ink = egui::Stroke::new(POINT_STROKE_PX, color::SELECT);
@@ -6304,7 +5825,6 @@ impl OndinApp {
                 if selected {
                     for side in Side::BOTH {
                         let h = an.handle(side);
-                        // Not drawn, so not grabbed ([`HANDLE_DRAWN`]).
                         if (h - an.at).hypot() <= HANDLE_DRAWN {
                             continue;
                         }
@@ -6318,8 +5838,6 @@ impl OndinApp {
                 } else {
                     color::POINT
                 };
-                // Hover thickens the outline (the fill already means selected),
-                // laid inside the edge so the silhouette does not grow.
                 let weight = match hovered_anchor == Some((s, a)) {
                     true => POINT_STROKE_HOVER_PX,
                     false => POINT_STROKE_PX,
@@ -6336,24 +5854,21 @@ impl OndinApp {
                     );
                 } else {
                     painter.circle_filled(at, POINT_PX * 0.5, fill);
-                    // A circle has no `StrokeKind`; the tessellator reaches
-                    // `r + w`, so the radius shrinks by the whole extra weight,
-                    // not half.
+                    // A circle has no `StrokeKind`; the tessellator reaches `r + w`,
+                    // so the radius shrinks by the whole extra weight, not half.
                     let radius = POINT_PX * 0.5 - (weight - POINT_STROKE_PX);
                     painter.circle_stroke(at, radius, outline);
                 }
             }
         }
 
-        // The point a double-click would add, at half opacity, exactly where
-        // `insert_point` would split; only while a segment is hovered.
+        // The point a double-click would add, where `insert_point` would split: a
+        // split line gives a corner, a split curve a smooth point.
         if let Some((seg, t)) = hovered
             && let Some(p) = tools::segment_point(&subpaths, seg, t)
         {
             let at = self.to_screen(p, rect, ppp);
             let ghost = color::SELECT.gamma_multiply(0.5);
-            // Square or circle as the insert will produce: a split line gives a
-            // corner, a split curve a smooth point.
             if tools::segment_is_straight(&subpaths, seg) {
                 painter.rect_filled(
                     egui::Rect::from_center_size(at, egui::Vec2::splat(POINT_PX)),
@@ -6366,12 +5881,9 @@ impl OndinApp {
         }
     }
 
-    /// The box over the selected points, with the four corners that scale them.
-    ///
-    /// Derived from the points, so unlike the hidden layer box it surrounds only
-    /// the subject. Four drawn corner squares; the side bands and the rotate ring
-    /// are grabbed but not drawn ([`Self::node_grab`]). Read live, while the
-    /// gesture's arithmetic uses the box captured at press.
+    /// The box over the selected points, with the four corner squares that scale
+    /// them; the side bands and rotate ring are grabbed but not drawn
+    /// ([`Self::node_grab`]). Read live, while the gesture uses the press's box.
     fn draw_point_box(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         let Some(id) = self.edited_path() else { return };
         let Some(box_) = self.point_box(id) else {
@@ -6381,7 +5893,6 @@ impl OndinApp {
             .into_iter()
             .map(|h| self.to_screen(box_handle_at(box_, h), rect, ppp))
             .collect();
-        // `CORNERS` is clockwise, so it closes into the box without rearranging.
         painter.add(egui::Shape::closed_line(
             quad.clone(),
             egui::Stroke::new(1.0, color::SELECT_DIM),
@@ -6397,12 +5908,9 @@ impl OndinApp {
     }
 
     /// Image editing's own chrome, drawn where `chrome_hidden` has taken the
-    /// selection's away: the crop window, and the outline of the whole picture
-    /// behind it.
-    ///
-    /// The window is dashed (provisional, 3/3 like the guide extension) with
-    /// hollow handles; the picture's outline is solid and is the limit a handle
-    /// stops at (`tools::crop_resized`), drawn only under `Crop`. Read through
+    /// selection's away: the dashed crop window with hollow handles, and the solid
+    /// outline of the whole picture behind it (the limit a handle stops at,
+    /// `tools::crop_resized`), drawn only under `Crop`. Read through
     /// [`Self::shown_crop`], so it tracks a drag.
     fn draw_crop_box(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         let Some((id, fill)) = self.edited_image() else {
@@ -6426,11 +5934,8 @@ impl OndinApp {
         }
     }
 
-    /// Trace the key layer, so the designation is visible rather than a fact the
-    /// align buttons keep to themselves.
-    ///
-    /// The hover outline's treatment in `color::KEY`: "key" is a distinction
-    /// within a selection, so it cannot be a shade of `color::SELECT`.
+    /// Trace the key layer, in the hover outline's treatment but `color::KEY`:
+    /// "key" is a distinction within a selection, so not a shade of `color::SELECT`.
     fn draw_key_outline(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if !self.hover_chrome_live() {
             return;
@@ -6438,8 +5943,7 @@ impl OndinApp {
         let Some(key) = self.session.selection.key() else {
             return;
         };
-        // The visibility chain, which `stroke_outlines` does not walk: a key
-        // inside a group hidden later must not be rung.
+        // The visibility chain, which `stroke_outlines` does not walk.
         if !self.shown_visible(key) {
             return;
         }
@@ -6447,12 +5951,8 @@ impl OndinApp {
         self.stroke_outlines(painter, key, rect, ppp, stroke, self.outline_view(stroke));
     }
 
-    /// A selected text node's **line box**, dashed, outside the box that carries
-    /// the handles.
-    ///
-    /// The trimmed box is what every gesture and number reads; this shows where
-    /// the rest of the line went. Dashed like the guide extension and in
-    /// `SELECT_DIM`, so the tight box wins. Nothing when trim changed nothing
+    /// A selected text node's **line box**, dashed in `SELECT_DIM` outside the
+    /// trimmed box that carries the handles. Nothing when trim changed nothing
     /// ([`ondin_core::text::TextLayout::untrimmed_bounds`] by equality), which
     /// covers every `Fixed` node.
     fn draw_text_line_boxes(
@@ -6479,8 +5979,7 @@ impl OndinApp {
                 continue;
             };
             let quad = self.local_quad(line_box, world, rect, ppp);
-            // Closed by repeating the first corner: `Shape::dashed_line` takes a
-            // polyline.
+            // `Shape::dashed_line` takes a polyline, so repeat the first corner.
             let mut closed: Vec<egui::Pos2> = quad.iter().map(|p| *p + offset).collect();
             closed.push(closed[0]);
             for shape in egui::Shape::dashed_line(&closed, stroke, DASH, GAP) {
@@ -6490,11 +5989,9 @@ impl OndinApp {
     }
 
     /// A railed text node's rail, drawn while the node is selected or edited —
-    /// otherwise the curve is invisible once its layer is consumed.
-    ///
-    /// The outline only, no anchor points: the rail has no in-place edit
-    /// (*Detach from path* is the way back). Solid `SELECT_DIM`, since a rail is
-    /// authored geometry, not notional.
+    /// otherwise the curve is invisible once its layer is consumed. Outline only
+    /// (the rail has no in-place edit; *Detach from path* is the way back), solid
+    /// `SELECT_DIM` since a rail is authored geometry.
     fn draw_text_rails(
         &self,
         painter: &egui::Painter,
@@ -6503,8 +6000,8 @@ impl OndinApp {
         offset: egui::Vec2,
     ) {
         let stroke = egui::Stroke::new(1.0, color::SELECT_DIM);
-        // The selection, plus a live session's node when it is not selected —
-        // filtered, or the usual case draws a translucent rail twice.
+        // Plus a live session's node when unselected; filtered, or the usual case
+        // draws a translucent rail twice.
         let live = self.text.as_ref().map(|s| s.id);
         let live = live.filter(|id| !self.session.selection.contains(*id));
         for id in self.session.selection.ids().iter().copied().chain(live) {
@@ -6522,17 +6019,15 @@ impl OndinApp {
             in_world.apply_affine(world);
             for sub in self.flatten_to_screen(&in_world, rect, ppp) {
                 let mut shape = sub.stroked(stroke);
-                // The Alt-clone's offset, so the rail rides the ghost.
                 shape.translate(offset);
                 painter.add(shape);
             }
         }
     }
 
-    /// A selected text node's baselines, drawn solid in `SELECT_DIM`.
-    ///
-    /// Gated on *Snap to baselines*, the switch that makes them targets. Drawn for
-    /// a rotated node too, though `baseline_lines` will not snap to a slanted one.
+    /// A selected text node's baselines, solid `SELECT_DIM`, gated on *Snap to
+    /// baselines*. Drawn for a rotated node too, though `baseline_lines` will not
+    /// snap to a slanted one.
     fn draw_text_baselines(
         &self,
         painter: &egui::Painter,
@@ -6551,7 +6046,6 @@ impl OndinApp {
             ) else {
                 continue;
             };
-            // The trimmed box's span, the one the handles are on.
             let box_ = layout.bounds();
             for local in &layout.baselines {
                 let ends = [box_.min_x(), box_.max_x()]
@@ -6562,13 +6056,9 @@ impl OndinApp {
     }
 
     /// The **measure overlay**: while `Alt` is held, the distances between what is
-    /// selected and what the pointer is over — a layer or a ruler guide, either way
-    /// round.
-    ///
-    /// A selected layer measures to a hovered layer or guide; selected guides
-    /// measure to a hovered layer or guide. A hovered guide wins over the layer
-    /// beneath, as on a press. `Alt` is unambiguous because every other `Alt`
-    /// meaning belongs to a gesture, which [`Self::hover_chrome_live`] excludes.
+    /// selected and what the pointer is over, a layer or a ruler guide either way
+    /// round; a hovered guide wins over the layer beneath. `Alt` is unambiguous
+    /// since gestures own every other `Alt` meaning ([`Self::hover_chrome_live`]).
     /// World bounding boxes, so a rotated layer is measured by its upright box.
     fn draw_measures(
         &self,
@@ -6582,7 +6072,6 @@ impl OndinApp {
             return;
         }
         let Some(p) = resp.hover_pos() else { return };
-        // Preview bounds: an inspector edit may still be previewing.
         let selected_box = self
             .session
             .selection
@@ -6591,8 +6080,7 @@ impl OndinApp {
             .filter_map(|id| self.session.preview_world_bounds(*id))
             .reduce(|a, b| a.union(b));
 
-        // An `else`, not a precedence: `Selection` never holds layers and guides
-        // at once.
+        // `Selection` never holds layers and guides at once.
         let measures = match selected_box {
             Some(from) => match self.measure_guide(p, rect, ppp) {
                 Some((axis, at)) => measure::to_guide(from, axis, at),
@@ -6606,8 +6094,6 @@ impl OndinApp {
                     }
                 }
             },
-            // Every selected guide measures, through the same `measure::to_guide`
-            // as the other direction.
             None => {
                 let guides = self.session.selection.guides();
                 if guides.is_empty() {
@@ -6647,12 +6133,9 @@ impl OndinApp {
         }
     }
 
-    /// One measure: the line, a tick across each end, and the number on a pill in
-    /// the middle of it — shared by [`Self::draw_measures`] and the equal-gap snap
-    /// overlay, so both read as one kind of claim.
-    ///
-    /// The ticks say where a short measure starts and stops once the pill covers
-    /// its middle.
+    /// One measure: the line, a tick across each end (so a short measure shows
+    /// where it stops once the pill covers its middle), and the number on a pill.
+    /// Shared by [`Self::draw_measures`] and the equal-gap snap overlay.
     fn draw_measure(
         &self,
         painter: &egui::Painter,
@@ -6689,27 +6172,20 @@ impl OndinApp {
         painter.galley(pill.min + PAD, galley, color::MEASURE_INK);
     }
 
-    /// The world rectangle a chrome outline of `stroke` can put ink into.
-    ///
-    /// The viewport, inflated by the ring's whole width — deliberate slack, as is
-    /// dividing points by `Camera::zoom`'s device pixels.
+    /// The world rectangle a chrome outline of `stroke` can put ink into: the
+    /// viewport inflated by the ring's whole width, deliberate slack (as is
+    /// dividing points by `Camera::zoom`'s device pixels).
     fn outline_view(&self, stroke: egui::Stroke) -> KRect {
         let view = self.session.camera.viewport(self.canvas_px).view;
         let pad = f64::from(stroke.width) / self.session.camera.zoom;
         view.inflate(pad, pad)
     }
 
-    /// Stroke the exact outline of `id`, recursing into containers.
-    ///
-    /// `view` is the world box to reject against, from [`Self::outline_view`]; an
-    /// off-screen subtree paints nothing and builds no paths.
-    ///
-    /// `bounds_cover_subtree` is `scene.rs`'s predicate — a frame with clipping
-    /// off does not bound its children — but the box is
-    /// [`crate::session::EditorSession::preview_world_bounds`], not `ink_bounds`,
-    /// since a ring traces the outline only. Hidden nodes (via `display_node`, so
-    /// an eye preview counts) skip with their subtree; a hidden ancestor of `id`
-    /// is the caller's check.
+    /// Stroke the exact outline of `id`, recursing into containers; `view` (from
+    /// [`Self::outline_view`]) rejects off-screen subtrees. `bounds_cover_subtree`
+    /// is `scene.rs`'s predicate, but with `preview_world_bounds`, not `ink_bounds`,
+    /// since a ring traces the outline only. Hidden nodes (via `display_node`)
+    /// skip with their subtree; a hidden ancestor of `id` is the caller's check.
     fn stroke_outlines(
         &self,
         painter: &egui::Painter,
@@ -6740,9 +6216,8 @@ impl OndinApp {
         {
             return;
         }
-        // A frame is traced by its box below. `Resolved::local_path`, not the bare
-        // `geometry::local_path`, so a boolean traces its result rather than its
-        // operands. Committed geometry, previewed transform.
+        // `Resolved::local_path`, not `geometry::local_path`, so a boolean traces
+        // its result. Committed geometry, previewed transform.
         if !matches!(node.kind(), NodeKind::Artboard { .. })
             && let Some(path) = self.session.resolved.local_path(&self.session.doc, id)
             && let Some(world) = self.session.preview_world_transform(id)
@@ -6754,9 +6229,8 @@ impl OndinApp {
             }
             return;
         }
-        // Text and artboards have a box but no outline; containers have neither.
-        // A boolean with no derived outline is traced by its box, never by its
-        // operands.
+        // Text and artboards have a box but no outline; a boolean with no derived
+        // outline is traced by its box, never its operands.
         match node.kind() {
             NodeKind::Text { .. } | NodeKind::Artboard { .. } | NodeKind::Boolean { .. } => {
                 if let Some(quad) = self.selection_quad(id, rect, ppp) {
@@ -6771,22 +6245,17 @@ impl OndinApp {
         }
     }
 
-    /// The wheel: scroll pans, `Shift`+scroll pans sideways, `Ctrl`+scroll
-    /// zooms at the cursor.
-    ///
-    /// Read from the raw `MouseWheel` events, not egui's smoothed deltas, so a
-    /// zoom notch is a step rather than a tween. Gated on the canvas being
-    /// hovered, since `Context::input` is global.
-    ///
-    /// A trackpad pinch arrives as `Ctrl`+wheel; winit raises `PinchGesture`
-    /// only on macOS/iOS, so `egui::Event::Zoom` is not handled here.
+    /// The wheel: scroll pans, `Shift`+scroll pans sideways, `Ctrl`+scroll zooms
+    /// at the cursor. Read from raw `MouseWheel` events, so a zoom notch is a step,
+    /// and gated on hover since `Context::input` is global. A trackpad pinch
+    /// arrives as `Ctrl`+wheel (winit raises `PinchGesture` only on macOS/iOS), so
+    /// `egui::Event::Zoom` is not handled.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         /// Zoom per pixel of wheel travel, as egui's own `scroll_zoom_speed`.
         const ZOOM_SPEED: f64 = 1.0 / 200.0;
 
-        // The canvas's own overlay areas (origin fields, image editing's *Done*
-        // pill) shield the press but must not swallow the wheel; every other
-        // overlay keeps it.
+        // The canvas's own overlay areas (origin fields, *Done* pill) must not
+        // swallow the wheel; every other overlay keeps it.
         let Some(hover) = resp.hover_pos().or_else(|| {
             let p = ui.ctx().pointer_hover_pos()?;
             let [id] = *self.session.selection.ids() else {
@@ -6845,8 +6314,7 @@ impl OndinApp {
                 ((hover.x - rect.min.x) * ppp) as f64,
                 ((hover.y - rect.min.y) * ppp) as f64,
             );
-            // Clamped per event: a trackpad can deliver a whole gesture's worth
-            // of travel in one frame, and an unbounded step jumps the view.
+            // Clamped: a trackpad can deliver a whole gesture in one frame.
             let factor = (zoom as f64 * ZOOM_SPEED).exp().clamp(0.2, 5.0);
             self.session.camera.zoom_by(factor, local, self.canvas_px);
         }
@@ -6858,8 +6326,7 @@ impl OndinApp {
     ///
     /// [`hit_test`] minus occupied frames, whose background passes presses to the
     /// marquee; an empty frame and the name tag ([`Self::frame_label_at`]) stay
-    /// clickable. A frame inside a group or an instance is not skipped: it picks
-    /// as part of that group, and `group_chain` resolves the click.
+    /// clickable. A frame inside a group or an instance is not skipped.
     pub(crate) fn pick_leaf(&self, world: Point) -> Option<NodeId> {
         let doc = &self.session.doc;
         hit_test(&self.session.resolved, doc, world, self.pick_slop())
@@ -6872,18 +6339,15 @@ impl OndinApp {
             })
     }
 
-    /// The picking allowance a hit test gets, in **world** units — [`PICK_SLOP_PX`] at
-    /// the current zoom, so the band under the pointer is the same size on screen
-    /// whatever the magnification.
+    /// The picking allowance a hit test gets, in **world** units: [`PICK_SLOP_PX`]
+    /// at the current zoom.
     fn pick_slop(&self) -> f64 {
         f64::from(PICK_SLOP_PX) / self.points_per_world()
     }
 
-    /// Logical points per world unit — what every pointer allowance on the canvas
-    /// is divided by to become world units. Points, not `camera.zoom`'s device
-    /// pixels, so a target does not shrink as the display scale grows.
-    ///
-    /// Framing (`reveal_selection`'s margin) is not an allowance and stays in
+    /// Logical points per world unit — what every pointer allowance is divided by.
+    /// Points, not `camera.zoom`'s device pixels, so a target does not shrink as
+    /// the display scale grows. Framing (`reveal_selection`'s margin) stays in
     /// device pixels.
     pub(crate) fn points_per_world(&self) -> f64 {
         self.session.camera.zoom.max(1e-6) / f64::from(self.canvas_ppp.max(1e-3))
@@ -6896,10 +6360,8 @@ impl OndinApp {
         })
     }
 
-    /// A frame the user has already selected and whose box `world` falls in.
-    ///
-    /// Once a frame is the selection, dragging from inside it moves it rather
-    /// than starting a marquee.
+    /// A selected frame whose box `world` falls in: dragging from inside it moves
+    /// it rather than starting a marquee.
     fn selected_frame_at(&self, world: Point) -> Option<NodeId> {
         self.session.selection.ids().iter().copied().find(|id| {
             self.is_occupied_frame(*id)
@@ -6911,18 +6373,15 @@ impl OndinApp {
         })
     }
 
-    /// An **occupied** frame whose border passes within [`FRAME_EDGE_PICK_PX`] of `world`
-    /// — `context-menus.md` §2's C5, *"or on its edge"*. The edge, not the
-    /// whole box, so the interior stays the marquee's.
-    ///
-    /// The band is the world box, so a rotated frame's is its axis-aligned
-    /// bounds. `.rev()`: `artboards` is paint order, so the last match of two
-    /// nested frames is the inner one.
+    /// An **occupied** frame whose border passes within [`FRAME_EDGE_PICK_PX`] of
+    /// `world` — `context-menus.md` §2's C5. The edge, so the interior stays the
+    /// marquee's. The band is the world box, so a rotated frame's is its
+    /// axis-aligned bounds. `.rev()`: `artboards` is paint order, so the last of
+    /// two nested matches is the inner one.
     fn frame_edge_at(&self, world: Point) -> Option<NodeId> {
         let slop = f64::from(FRAME_EDGE_PICK_PX) / self.points_per_world();
         self.artboards().into_iter().rev().find(|id| {
-            // Visibility and lock here, since `Selection::set_one` filters
-            // nothing; only the name tag takes a locked frame.
+            // `Selection::set_one` filters nothing; only the name tag takes a locked frame.
             self.is_occupied_frame(*id)
                 && self.shown_visible(*id)
                 && !ondin_core::is_effectively_locked(&self.session.doc, *id)
@@ -6933,11 +6392,9 @@ impl OndinApp {
         })
     }
 
-    /// Whether `id` is actually on screen: it and every ancestor switched on.
-    ///
-    /// Read through [`crate::session::EditorSession::display_node`], so the
-    /// layer tree's eye previews. Visibility only, not `locked`: a locked frame
-    /// is still seen.
+    /// Whether `id` is on screen: it and every ancestor switched on, read through
+    /// [`crate::session::EditorSession::display_node`] so the eye previews.
+    /// Visibility only, not `locked`.
     pub(crate) fn shown_visible(&self, id: NodeId) -> bool {
         let mut cursor = Some(id);
         while let Some(c) = cursor {
@@ -6952,13 +6409,11 @@ impl OndinApp {
         true
     }
 
-    /// What a click at `screen` picks — the **one** chain, asked by every door
-    /// that resolves a pointer to a layer (`context-menus.md` §2 C1, C5).
-    ///
-    /// The name tag first (an occupied frame's handle, since [`Self::pick_leaf`]
-    /// skips it), then the leaf, then [`Self::frame_edge_at`] last so a layer near
-    /// a border wins. [`Self::begin_select_drag`] adds
-    /// [`Self::selected_frame_at`] on top, which this chain must not.
+    /// What a click at `screen` picks — the **one** chain every door uses
+    /// (`context-menus.md` §2 C1, C5): the name tag (an occupied frame's handle,
+    /// which [`Self::pick_leaf`] skips), then the leaf, then [`Self::frame_edge_at`]
+    /// so a layer near a border wins. [`Self::begin_select_drag`] adds
+    /// [`Self::selected_frame_at`], which this chain must not.
     fn pick_at_pointer(
         &self,
         ui: &egui::Ui,
@@ -6972,10 +6427,8 @@ impl OndinApp {
             .or_else(|| self.frame_edge_at(world))
     }
 
-    /// The frame whose name tag is under `screen`, if any.
-    ///
-    /// `.rev()`: the list is paint order and [`Self::draw_frame_labels`] lets the
-    /// last tag win the pixel, so the click must pick the tag that is visible.
+    /// The frame whose name tag is under `screen`. `.rev()`: the list is paint
+    /// order and [`Self::draw_frame_labels`] lets the last tag win the pixel.
     fn frame_label_at(
         &self,
         ui: &egui::Ui,
@@ -6989,11 +6442,8 @@ impl OndinApp {
         })
     }
 
-    /// Where a frame's name tag sits, and the text of it.
-    ///
-    /// Above the frame's top-left corner and *outside* it, so the tag never
-    /// covers artwork: 5px in from the left edge, with 5px between the bottom
-    /// of the text and the top of the frame.
+    /// Where a frame's name tag sits, and its text: above the top-left corner and
+    /// *outside* the frame, so it never covers artwork.
     fn frame_label(
         &self,
         ui: &egui::Ui,
@@ -7007,8 +6457,6 @@ impl OndinApp {
 
         let node = self.session.doc.get(id)?;
         let is_main = node.component();
-        // A frame, or a group that is a main (for its chip); a group instance
-        // has none.
         let tagged = match node.kind() {
             NodeKind::Artboard { .. } => true,
             NodeKind::Group => is_main,
@@ -7022,11 +6470,9 @@ impl OndinApp {
         if !is_main && tag_withheld(&self.session.doc, id) {
             return None;
         }
-        // A hidden frame has no name tag, and so cannot be picked by it.
         if !self.shown_visible(id) {
             return None;
         }
-        // The frame's own top-left, so the tag tracks the box the user sees.
         let corner = self.selection_quad(id, rect, ppp)?[0];
         let doc = &self.session.doc;
         // A component set's tag is a tab: glyph, name, then the clash or (while
@@ -7047,7 +6493,7 @@ impl OndinApp {
             );
         };
         // A mode the node sets follows its name on every tag, dim; an inherited
-        // one stays off the canvas. Never elided, like the name.
+        // one stays off the canvas.
         let mode = node.mode().and_then(|m| doc.variables().mode(m));
         let mode_word = |job: &mut egui::text::LayoutJob, ink| {
             if let Some(m) = mode {
@@ -7074,9 +6520,8 @@ impl OndinApp {
                 words(&mut job, &count, 8.0, theme::text::DIM);
             }
         } else if is_main {
-            // A main: a filled hexagon on a violet chip. The outline glyph holds
-            // the cell unpainted and `draw_frame_labels` fills it, Phosphor
-            // Regular having no filled one.
+            // A filled hexagon on a violet chip: the outline glyph holds the cell
+            // unpainted and `draw_frame_labels` fills it (no filled Phosphor one).
             if clashing {
                 glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
             }
@@ -7092,9 +6537,9 @@ impl OndinApp {
                 words(&mut job, &count, 8.0, color::COMPONENT_INK_DIM);
             }
         } else if ondin_core::component::instance_root(doc, id) == Some(id) {
-            // An instance: outline hexagon and a violet label, trailing its
-            // main's name when renamed, a path when entered. Only while selected
-            // or entered, since it picks like a group and the tag is no handle.
+            // An instance: outline hexagon and a violet label, trailing its main's
+            // name when renamed, a path when entered. Only while selected or
+            // entered, since it picks like a group and the tag is no handle.
             if !self.session.selection.contains(id) && self.entered_instance() != Some(id) {
                 return None;
             }
@@ -7132,20 +6577,18 @@ impl OndinApp {
                 if clashing { 4.0 } else { 0.0 },
                 egui::Color32::PLACEHOLDER,
             );
-            // *Hero / Desktop · Dark*.
             mode_word(&mut job, color::text_a(179));
         }
         let galley = ui.painter().layout_job(job);
         let size = galley.size();
         if is_set {
-            // Fused to the frame's top edge: the tab's padded box sits on it.
+            // Fused to the frame's top edge.
             let min = egui::pos2(corner.x, corner.y - size.y - SET_TAB_PAD.y * 2.0);
             let tab = egui::Rect::from_min_size(min, size + SET_TAB_PAD * 2.0);
             return Some((tab, galley));
         }
         if is_main {
-            // The chip's padded box, a point wider at the right while it ends on
-            // the name rather than the count, which reads balanced by eye.
+            // A point wider at the right while it ends on the name, not the count.
             let tail = if self.session.selection.contains(id) {
                 0.0
             } else {
@@ -7172,9 +6615,8 @@ impl OndinApp {
             .and_then(|g| ondin_core::component::instance_root(&self.session.doc, g))
     }
 
-    /// The hue of the chrome that belongs to the whole selection — its handles
-    /// and its size badge: `COMPONENT` when every selected layer is a main or an
-    /// instance, `SELECT` otherwise.
+    /// The hue of the whole selection's chrome (handles, size badge): `COMPONENT`
+    /// when every selected layer is a main or an instance, `SELECT` otherwise.
     fn selection_hue(&self) -> egui::Color32 {
         let ids = self.session.selection.ids();
         if !ids.is_empty()
@@ -7188,9 +6630,8 @@ impl OndinApp {
         }
     }
 
-    /// Where the `+` of the one selected component set sits on screen — the
-    /// middle of its bottom edge — or `None` when the selection is not a single
-    /// set on screen.
+    /// Where the `+` of the one selected component set sits: the middle of its
+    /// bottom edge, or `None` when the selection is not a single set on screen.
     fn set_plus(&self, rect: egui::Rect, ppp: f32) -> Option<(NodeId, egui::Pos2)> {
         let set = self.session.selection.single()?;
         if !ondin_core::variant::is_set(&self.session.doc, set) || !self.shown_visible(set) {

@@ -1,33 +1,21 @@
 //! Where this machine's own files live: the library index, the cover cache and
 //! the font cache (§15 D969).
 //!
-//! `dirs::cache_dir()/ondin` on Linux and macOS, and **`OndinData` beside it on
-//! Windows**, because there `dirs::cache_dir()` is `%LocalAppData%` and
-//! `%LocalAppData%\Ondin` is **the Velopack installer's root** — the pack id
-//! (`release.yml`'s `--packId Ondin`, permanent per §15 D956) joined onto the
-//! same folder, and NTFS compares names without regard to case. Setup over a
-//! root that is not empty renames it aside and deletes it once the install
-//! succeeds, a repair does the same, and uninstall empties it. The covers and
-//! the fonts would come back; `library.json` holds every star on the machine,
-//! which nothing else records (`library::cache`'s module doc), and it went with
-//! them behind a dialog that asked about an *application*.
+//! `dirs::cache_dir()/ondin` on Linux and macOS, and `OndinData` beside it on
+//! Windows, because there `%LocalAppData%\Ondin` is the Velopack installer's root
+//! (the permanent pack id, §15 D956; NTFS ignores case). Setup, repair and uninstall
+//! delete a root they own, and `library.json` holds the only record of the stars.
+//! The installer owns that folder whole, so the first path component must differ.
 //!
-//! ⚠️ **Another name under the root would not do**: the installer owns
-//! `%LocalAppData%\Ondin` whole, so the first path component has to differ. And
-//! the pack id cannot move instead — it is the identity every installed copy
-//! updates by.
-//!
-//! The old Windows spelling is still read once, by [`adopt_legacy`], so an index
-//! written before this moved is carried across rather than abandoned.
+//! The old Windows spelling is read once by [`adopt_legacy`].
 
 use std::path::{Path, PathBuf};
 
 /// The folder's name on Linux and macOS, where nothing else owns it.
 const DIR_NAME: &str = "ondin";
 
-/// The folder's name on Windows: anything but the installer's pack id,
-/// `Ondin`, in any case — which the tests below hold it to, reading the pack
-/// id out of the Release workflow.
+/// The folder's name on Windows: anything but the installer's pack id, `Ondin`, in
+/// any case; the tests hold it to that.
 const WINDOWS_DIR_NAME: &str = "OndinData";
 
 /// This machine's data folder, or `None` where the platform has no cache folder.
@@ -35,8 +23,8 @@ pub fn root() -> Option<PathBuf> {
     Some(root_in(&dirs::cache_dir()?, cfg!(windows)))
 }
 
-/// [`root`], falling back to the temporary folder — the font cache's answer to
-/// a machine with no cache folder, which it had before this module existed.
+/// [`root`], falling back to the temporary folder (the font cache's answer to a
+/// machine with no cache folder).
 pub fn root_or_temp() -> PathBuf {
     root_in(
         &dirs::cache_dir().unwrap_or_else(std::env::temp_dir),
@@ -69,20 +57,16 @@ pub enum Adopted {
     Copied,
     /// An old file is there and could not be read or copied.
     ///
-    /// ⚠️ **The caller must not write the new file this session.** An empty
-    /// index written at the new path would be read from then on, and the old
-    /// one — the stars — would never be looked at again. It is
-    /// `LocalIndex::unreadable`'s latch, reached from one step earlier.
+    /// The caller must not write the new file this session: an empty index there
+    /// would be read from then on and the old one (the stars) never looked at again.
     Blocked,
 }
 
 /// Copy `old` to `new` if `new` does not exist yet and `old` does.
 ///
-/// **A copy of the bytes, not a parse**: a damaged old file arrives damaged, so
-/// the three-way read at the new path sees it and latches exactly as it would
-/// have at the old one. **And a copy, not a move**: the old folder belongs to
-/// the installer, which deletes it on its own schedule, and an older build run
-/// in the meantime still finds its file.
+/// A copy of the bytes, not a parse, so a damaged file is latched as unreadable at
+/// the new path just as at the old. A copy, not a move: the old folder belongs to
+/// the installer, and an older build run meanwhile still finds its file.
 pub fn adopt_legacy(old: &Path, new: &Path) -> Adopted {
     if new.exists() {
         return Adopted::Nothing;
@@ -101,19 +85,13 @@ pub fn adopt_legacy(old: &Path, new: &Path) -> Adopted {
 mod tests {
     use super::*;
 
-    /// The installer's pack id: `--packId` in `.github/workflows/release.yml`,
-    /// which the first test reads to keep the two in step.
+    /// The installer's pack id, `--packId` in `.github/workflows/release.yml`.
     const INSTALL_ID: &str = "Ondin";
 
-    /// The Windows folder is not the installer's, compared the way NTFS
-    /// compares, and the installer's id is the one the Release workflow packs
-    /// with (§15 D969, `[R3-L5-01]`).
+    /// The Windows folder is not the installer's (compared as NTFS does), and the
+    /// workflow still packs with `INSTALL_ID`, which keeps the first check meaningful.
     ///
-    /// **Flip-check, run**: `WINDOWS_DIR_NAME = "ondin"` — the spelling every
-    /// build before D969 used — fails the first assertion; so does `"ONDIN"`.
-    /// The second assertion is what keeps the first meaningful: a pack id
-    /// renamed in the workflow without this constant would leave the first
-    /// comparing against a name nothing installs to.
+    /// flip: `WINDOWS_DIR_NAME = "ondin"` or `"ONDIN"` → fails at the first assertion.
     #[test]
     fn the_windows_folder_is_not_the_installers_root() {
         let cache = Path::new(r"C:\Users\someone\AppData\Local");
@@ -165,10 +143,9 @@ mod tests {
 
     /// The four cases of the one-time copy.
     ///
-    /// **Flip-check, run**: dropping the `new.exists()` early return fails the
-    /// third case with `Copied` for `Nothing` — the old file's bytes would
-    /// overwrite the index this machine has written since — and answering
-    /// `Nothing` on a read error that is not `NotFound` fails the fourth.
+    /// flip: drop the `new.exists()` early return in `adopt_legacy` → third case
+    /// gets `Copied` for `Nothing`; answer `Nothing` on a non-`NotFound` read error
+    /// → the fourth fails.
     #[test]
     fn the_old_index_is_copied_once_and_never_over_a_new_one() {
         let dir = scratch("adopt");
@@ -194,8 +171,7 @@ mod tests {
         assert_eq!(adopt_legacy(&old, &new), Adopted::Nothing);
         assert_eq!(std::fs::read(&new).unwrap(), b"{}");
 
-        // An old path that exists and cannot be read — a folder in its place —
-        // blocks, so the caller does not write an empty index over the move.
+        // An old path that exists but cannot be read (a folder) blocks.
         std::fs::remove_file(&new).unwrap();
         std::fs::remove_file(&old).unwrap();
         std::fs::create_dir_all(&old).unwrap();

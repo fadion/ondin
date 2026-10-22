@@ -1,4 +1,5 @@
-//! ondin-export — SVG, PNG, JPEG, and the AI-handoff JSON snapshot (§7).
+//! ondin-export — SVG, PNG, JPEG, the AI-handoff JSON snapshot, and code export's
+//! HTML/CSS ([`mod@code`]) (§7).
 //!
 //! SVG is a pure function of core state (also a model-completeness gate). PNG and
 //! JPEG go through the CPU renderer (no GPU) and differ only in the encoder at the
@@ -36,6 +37,7 @@
 #![deny(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 #![allow(rustdoc::private_intra_doc_links)]
 
+pub mod code;
 pub mod jpeg;
 pub mod plan;
 pub mod png;

@@ -2042,7 +2042,8 @@ pub(crate) fn path_d(path: &ondin_core::kurbo::BezPath) -> String {
 }
 
 /// Format a float compactly: integers without a decimal point, else trimmed.
-fn fmt(v: f64) -> String {
+/// Shared with the code export, whose CSS numbers want the same spelling.
+pub(crate) fn fmt(v: f64) -> String {
     // A non-finite number is written as `0`: `NaN`/`inf` is no SVG `<number>` and
     // would make the whole file unparseable. A floor; producers are guarded at their
     // own ends (e.g. [`effect_region`]).

@@ -1,19 +1,12 @@
 //! `EditorSession` — everything an editing session is, with no GPU in it (§9.2).
 //!
 //! Owns the document, history, resolved layer, id source, selection, camera and
-//! save state, and is the only place they are mutated. Deliberately free of
-//! `wgpu`/`egui` types for three reasons:
+//! save state, and is the only place they are mutated. Free of `wgpu`/`egui`
+//! types so it can be unit-tested without a graphics device, `ondin serve` (§8.2)
+//! can run it without a window, and MCP handlers (§8.3) can submit transactions
+//! through [`EditorSession::commit`], the path the UI uses.
 //!
-//! 1. it can be unit-tested without a graphics device, which is how the
-//!    id-collision and dirty-tracking bugs below are pinned down;
-//! 2. `ondin serve` (§8.2) needs exactly this state without a window, and a
-//!    second implementation would drift from the GUI's;
-//! 3. it is where §8.3's single-writer op queue plugs in — MCP handlers submit
-//!    transactions and the owning loop drains them through [`EditorSession::commit`],
-//!    the same path the UI uses.
-//!
-//! Rendering lives in `canvas.rs`, which borrows `render_inputs()` and owns the
-//! wgpu resources.
+//! Rendering lives in `canvas.rs`, which borrows `render_inputs()`.
 
 use crate::view::Camera;
 use ondin_core::Brush;
@@ -36,8 +29,7 @@ use std::time::{Duration, Instant};
 const RUN_WINDOW: Duration = Duration::from_millis(600);
 
 /// What the status line is reporting. Errors are kept distinct so the chrome
-/// can colour them — a failed commit used to be discarded with `let _ =` and
-/// the user simply saw nothing happen.
+/// can colour them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StatusKind {
     Info,
@@ -48,16 +40,13 @@ pub enum StatusKind {
 pub struct Status {
     pub text: String,
     pub kind: StatusKind,
-    /// When it was written: the editor's floating status bar shows a message for
-    /// a few seconds from here and then lets it go (§15 D1025). Writing the same
-    /// sentence again restarts the clock, which is the point — it happened again.
+    /// When it was written: the floating status bar shows a message for a few
+    /// seconds from here. Writing the same sentence again restarts the clock.
     pub at: Instant,
 }
 
 impl Default for Status {
-    /// Empty. The status line reports what just happened, and at startup nothing
-    /// has — a standing "Ready" is a label that never changes and so says
-    /// nothing.
+    /// Empty: the status line reports what just happened, and at startup nothing has.
     fn default() -> Self {
         Self {
             text: String::new(),
@@ -69,21 +58,15 @@ impl Default for Status {
 
 /// What is selected: some nodes, or some guides.
 ///
-/// A newtype rather than a bare `Vec` so multi-select rules (dedupe, prune on
-/// delete, "the single selection") live in one place instead of being re-derived
-/// at every call site — and, since guides arrived, so that the *exclusivity*
-/// between the two kinds of subject is structural rather than a rule every call
-/// site has to remember. A guide and a layer are never selected together:
-/// nothing acts on both (there is no transform, no paint and no z-order in
-/// common), so a mixed selection would be a state with no operations. Every
-/// mutator below therefore clears the other half.
+/// A newtype so multi-select rules (dedupe, prune on delete, "the single
+/// selection") live in one place, and so the exclusivity between the two kinds of
+/// subject is structural: a guide and a layer are never selected together, since
+/// nothing acts on both. Every mutator therefore clears the other half.
 ///
-/// **Both halves are lists, and the exclusivity is unchanged by that.** Guides
-/// multi-select by Shift+click, so what used to be one `Option<GuideId>` is a
-/// `Vec`; what has not moved is that [`Self::is_empty`], [`Self::len`] and
+/// **Both halves are lists**, but [`Self::is_empty`], [`Self::len`] and
 /// [`Self::single`] answer about **layers** and read a guide selection as empty
-/// however many guides it holds. Widening the guide half without holding that
-/// line is what would let node code start treating guides as layers.
+/// however many guides it holds; otherwise node code would start treating guides
+/// as layers.
 #[derive(Default, Clone, Debug)]
 pub struct Selection {
     ids: Vec<NodeId>,
@@ -91,37 +74,18 @@ pub struct Selection {
     /// rather than merely included in. Align moves everything to its edge, and
     /// `build::boolean` makes it the base operand.
     ///
-    /// **Explicit, not "the last one clicked".** Deriving it from `ids` order was
-    /// the first design and it fails on two counts. Align would stop aligning to
-    /// the selection's union for everybody — losing "align these to each other",
-    /// which is the common case and the one that has always worked — and the
-    /// canvas mark would then be drawn on some member of *every* multi-selection,
-    /// which is noise that reads as a bug rather than as an answer. `None` is
-    /// therefore the ordinary state and means "no key": today's behaviour,
-    /// unchanged, until someone asks for something else.
+    /// **Explicit, not "the last one clicked"**: deriving it from `ids` order would
+    /// stop align aligning to the selection's union. `None` means "no key".
     key: Option<NodeId>,
     guides: Vec<GuideId>,
     /// The orientation a **multi-selection's** frame has been left in by a turn or
-    /// a lean, with the ids it was measured for (§15 D326).
+    /// a lean, with the ids it was measured for (§15 D326). A set has no stored
+    /// frame in the document, so the box would otherwise snap upright on release.
     ///
-    /// A set has no stored frame of its own in the document — it is not a group —
-    /// so the box drawn round one is derived every frame. Derived from *world* axes
-    /// it can only ever be upright, which meant that releasing a rotation snapped
-    /// the frame back square while the shapes stayed turned. This is the missing
-    /// piece of state: what the frame is turned by, kept for as long as the
-    /// selection is.
-    ///
-    /// **Guarded twice, because there are two ways to lose it and neither guard
-    /// covers both.** Every method that changes `ids` calls
-    /// [`Selection::forget_frame`], which is what makes *reselecting the same
-    /// layers* a new selection — a thing the ids cannot see, since they are equal.
-    /// And the orientation carries the ids it was measured for, which is what stops
-    /// a future mutator that forgets to call it from leaving an orientation on a
-    /// different set.
-    ///
-    /// The id key alone was tried first and is not enough on its own: `clear()`
-    /// followed by selecting the same pair again matched the stored entry and
-    /// **resurrected** the old orientation. A test covers that path by name.
+    /// **Guarded twice, because neither guard covers both losses**: every method
+    /// that changes `ids` calls [`Selection::forget_frame`] (reselecting the same
+    /// layers is a new selection the ids cannot see), and the orientation carries
+    /// its ids so a mutator that forgets the call cannot leave it on another set.
     frame: Option<(Vec<NodeId>, Affine)>,
 }
 
@@ -133,15 +97,8 @@ impl Selection {
     pub fn guides(&self) -> &[GuideId] {
         &self.guides
     }
-    /// Whether `id` is one of the selected guides.
-    ///
-    /// What the canvas asks per guide as it draws them. **There is deliberately no
-    /// `guide() -> Option<GuideId>` beside this.** One existed — the guide half's
-    /// [`Self::single`] — and nothing wanted it once the selection became a list:
-    /// every reader either acts on all of them (the inspector's fields, Delete, the
-    /// nudge, the picker's write) or asks about one by name, which is this. A
-    /// `guide()` left in place is a method whose whole meaning is "and is it the
-    /// only one", waiting for a caller that means `has_guide` to reach for it.
+    /// Whether `id` is one of the selected guides. **There is deliberately no
+    /// `guide() -> Option<GuideId>`**: it would invite a caller that means this.
     pub fn has_guide(&self, id: GuideId) -> bool {
         self.guides.contains(&id)
     }
@@ -153,20 +110,11 @@ impl Selection {
         self.guides.clear();
         self.guides.push(id);
     }
-    /// Drop the guide half and leave the layers alone.
-    ///
-    /// For *View ▸ Lock guides*, which makes guides unselectable and so has to let
-    /// go of any it is holding — but has nothing to say about layers. [`Self::clear`]
-    /// was the first implementation and was wrong for the reason the exclusivity
-    /// invariant makes easy to miss: with layers selected there are no guides to
-    /// drop, so the only thing clearing achieved there was deselecting the user's
-    /// work.
+    /// Drop the guide half and leave the layers alone (*View ▸ Lock guides*).
     pub fn clear_guides(&mut self) {
         self.guides.clear();
     }
-    /// Shift+click semantics for guides: add if absent, remove if already
-    /// selected — [`Self::toggle`]'s counterpart, and it clears the layers for
-    /// the same reason `toggle` clears the guides.
+    /// Shift+click semantics for guides: [`Self::toggle`]'s counterpart.
     pub fn toggle_guide(&mut self, id: GuideId) {
         self.ids.clear();
         self.key = None;
@@ -179,18 +127,12 @@ impl Selection {
     }
     /// Whether any **layers** are selected.
     ///
-    /// A selected guide reads as empty here, and so does [`Self::len`] and
-    /// [`Self::single`]. That is deliberate and is what every caller wants:
-    /// they gate node work — move, align, nudge, delete a layer — and a guide
-    /// is not a subject for any of it. What it is *not* is "nothing is
-    /// selected"; ask [`Self::nothing`] for that.
+    /// A selected guide reads as empty here, and so do [`Self::len`] and
+    /// [`Self::single`]; for "nothing is selected", ask [`Self::nothing`].
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
     /// Whether nothing at all is selected — no layers **and** no guides.
-    ///
-    /// The question the chrome asks when it wants to know whether the inspector
-    /// has a subject, as opposed to whether the node operations have one.
     pub fn nothing(&self) -> bool {
         self.ids.is_empty() && self.guides.is_empty()
     }
@@ -211,22 +153,13 @@ impl Selection {
     }
     /// The key layer — see [`Self::key`] the field.
     ///
-    /// **`None` below two layers, whatever is stored.** A key says "this one, not
-    /// the others", so with nothing to contrast against it has no meaning: align
-    /// falls back to the container and the canvas has nothing to mark. Answering
-    /// that here rather than at each call site is what stops the three consumers
-    /// disagreeing about it. The stored value survives, so shrinking a selection
-    /// to one and growing it back does not silently lose the designation.
+    /// **`None` below two layers, whatever is stored**; the stored value survives
+    /// shrinking the selection to one and growing it back.
     pub fn key(&self) -> Option<NodeId> {
         self.key.filter(|_| self.ids.len() >= 2)
     }
-    /// Designate `id` the key layer, or clear the designation if it already is
-    /// one — the same click both ways, so there is a way back to aligning
-    /// against the selection's union without deselecting everything.
-    ///
-    /// Ignores an `id` that is not selected: the key is one *of* the selection,
-    /// and a key sitting outside it would align the others to a layer the user
-    /// cannot see is involved.
+    /// Designate `id` the key layer, or clear the designation if it already is one.
+    /// Ignores an `id` that is not selected.
     pub fn set_key(&mut self, id: NodeId) {
         if !self.contains(id) {
             return;
@@ -260,9 +193,7 @@ impl Selection {
         match self.ids.iter().position(|c| *c == id) {
             Some(i) => {
                 self.ids.remove(i);
-                // Deselecting the key gives up the designation. Keeping it would
-                // leave a key that is not in the selection, which `set_key`
-                // refuses to create in the first place.
+                // A key outside the selection is one `set_key` refuses to create.
                 self.key.take_if(|k| *k == id);
             }
             None => self.ids.push(id),
@@ -276,10 +207,8 @@ impl Selection {
         }
     }
     /// What this selection's frame is turned by — `IDENTITY` unless a turn or a
-    /// lean has left one on *exactly* these ids (§15 D326).
-    ///
-    /// The id comparison is the invalidation: change the selection and this answers
-    /// the identity again, without any mutator having said so.
+    /// lean has left one on *exactly* these ids. The id comparison is the
+    /// invalidation.
     pub fn frame(&self) -> Affine {
         match &self.frame {
             Some((ids, f)) if *ids == self.ids => *f,
@@ -287,21 +216,13 @@ impl Selection {
         }
     }
 
-    /// Leave `f` as this selection's frame orientation.
-    ///
-    /// Callers compose rather than replace — `set_frame(turn * selection.frame())` —
-    /// so a lean after a turn keeps both.
+    /// Leave `f` as this selection's frame orientation; callers compose
+    /// (`set_frame(turn * selection.frame())`) so a lean after a turn keeps both.
     pub fn set_frame(&mut self, f: Affine) {
         self.frame = Some((self.ids.clone(), f));
     }
 
-    /// Give up any stored frame orientation.
-    ///
-    /// **Called by every method that changes `ids`**, including the ones that end up
-    /// with the *same* ids — selecting the same two layers again is a new selection
-    /// to the hand that did it, and the id key cannot tell the two apart. A new
-    /// mutator of `ids` owes a call to this; the id key is what limits the damage if
-    /// it does not.
+    /// Give up any stored frame orientation. A new mutator of `ids` owes a call.
     fn forget_frame(&mut self) {
         self.frame = None;
     }
@@ -314,9 +235,8 @@ impl Selection {
         self.ids.retain(|id| !gone(*id));
         self.key.take_if(|id| gone(*id));
         self.guides.retain(|id| doc.guide(*id).is_some());
-        // **Only when it actually dropped something.** This runs after every commit
-        // and every undo, so forgetting unconditionally would throw the orientation
-        // away on the very commit that just set it (§15 D326).
+        // Only when it dropped something: this runs after every commit, including
+        // the one that just set the orientation.
         if self.ids.len() != before {
             self.forget_frame();
         }
@@ -330,24 +250,22 @@ impl Selection {
 /// A node as it should currently be *shown*: the committed node with any live
 /// gesture's override read through it.
 ///
-/// Panels and overlays go through this instead of `Document`. Reading the
-/// document directly during a drag makes a control snap back to the committed
-/// value every frame, which breaks accumulating gestures like a `DragValue`.
+/// Panels and overlays go through this instead of `Document`: reading the
+/// document during a drag makes a control snap back to the committed value every
+/// frame, which breaks accumulating gestures like a `DragValue`.
 pub struct DisplayNode<'a> {
     node: &'a Node,
     over: Option<&'a NodeOverride>,
-    /// The **used** kind under the override (§15 D868) — where container layout
-    /// sized the node, which is the document's kind until it sizes something.
-    /// `None` for [`EditorSession::committed_node`], whose one job is to report
-    /// the value a commit is about to overwrite, which is the specified one.
+    /// The **used** kind — where container layout sized the node. `None` for
+    /// [`EditorSession::committed_node`], which reports the value a commit is about
+    /// to overwrite.
     used: Option<&'a NodeKind>,
-    /// The layout as laid out where a gap or a padding is bound — its bound slots
-    /// their variables' numbers (§15 D1058) — `None` where nothing is bound, or
-    /// for [`EditorSession::committed_node`], `used`'s reason.
+    /// The layout with bound gaps and paddings resolved; `None` where nothing is
+    /// bound or for [`EditorSession::committed_node`].
     drawn: Option<ondin_core::container::Display>,
-    /// Whether the layer is shown, a bound visibility resolved (§15 D1059).
+    /// Whether the layer is shown, a bound visibility resolved.
     shown: bool,
-    /// The opacity it draws at, a bound one resolved (§15 D1072).
+    /// The opacity it draws at, a bound one resolved.
     opacity: f32,
 }
 
@@ -358,29 +276,22 @@ impl<'a> DisplayNode<'a> {
     pub fn locked(&self) -> bool {
         self.node.locked()
     }
-    /// No override behind this one: clipping is a checkbox that commits at
-    /// once, so there is never a pending version of it to read through.
+    /// No override behind this one: clipping commits at once, so there is no
+    /// pending version to read through.
     pub fn clip(&self) -> bool {
         self.node.clip()
     }
-    /// No override behind this one either, and for the same reason: the chain
-    /// button commits the moment it is clicked, so there is never a pending
-    /// version of the lock to read through.
+    /// No override behind this one either: the chain button commits on click.
     pub fn proportions_locked(&self) -> bool {
         self.node.proportions_locked()
     }
     /// The override's kind, then the used one, then the document's.
     ///
-    /// ⚠️ **Shown, not typed**: a control that computes an edit *from* this is
-    /// computing it from where layout put the node — which is the rule now, not a
-    /// debt (§15 D874): tools and controls compute from used geometry, and
-    /// `build::keep_insets`, at the top of `commit_inner`, turns a placement written
-    /// for a pinned layer into its insets. What survives of the old warning is a
-    /// text's *mode*: an auto-width text stretched by insets is drawn as
-    /// `AutoHeight(w)`, and one a flex or grid container stretched as a `Fixed`
-    /// box, so an edit must not take its mode from here — the doors read it from
-    /// the node (`tools::gesture_text_sizing`), and a bake keeps it
-    /// (`build::baked_ops`, §15 D940).
+    /// **Shown, not typed**: edits compute from used geometry, and
+    /// `build::keep_insets` turns a placement for a pinned layer into insets. A
+    /// text's *mode* is the exception — stretching changes how it is drawn
+    /// (`AutoHeight(w)`, `Fixed`) — so read it from the node
+    /// (`tools::gesture_text_sizing`); a bake keeps it (`build::baked_ops`).
     pub fn kind(&self) -> &'a NodeKind {
         self.over
             .and_then(|o| o.kind.as_ref())
@@ -393,37 +304,36 @@ impl<'a> DisplayNode<'a> {
             .unwrap_or_else(|| self.node.paint())
     }
     /// The opacity the layer draws at — a live preview's, else a bound one
-    /// resolved (§15 D1072), never the 0 a binding's literal holds.
+    /// resolved, never the 0 a binding's literal holds.
     pub fn opacity(&self) -> f32 {
         self.over.and_then(|o| o.opacity).unwrap_or(self.opacity)
     }
-    /// Whether the layer is shown — a bound visibility resolved (§15 D1059),
-    /// the eye's state, a live preview's included.
+    /// Whether the layer is shown — a bound visibility resolved, a live preview's
+    /// included.
     pub fn visible(&self) -> bool {
         self.over.and_then(|o| o.visible).unwrap_or(self.shown)
     }
-    /// The layer's insets inside its frame (§15 D871), a live inset scrub's
-    /// included — **with an override behind it**, so a field being dragged reads the
-    /// value it is dragging and accumulates rather than snapping back each frame.
+    /// The layer's insets inside its frame, a live inset scrub's included — **with
+    /// an override behind it**, so a dragged field accumulates rather than snapping
+    /// back each frame.
     pub fn insets(&self) -> ondin_core::Insets {
         self.over
             .and_then(|o| o.insets)
             .unwrap_or_else(|| *self.node.insets())
     }
-    /// The layer's layout as a container (§15 D869), a live Container-card scrub's
-    /// included — [`Self::insets`]' rule, so a gap or a padding being dragged reads
-    /// the value it is dragging (§15 D878).
+    /// The layer's layout as a container, a live Container-card scrub's included —
+    /// [`Self::insets`]' rule.
     ///
-    /// **As laid out** (§15 D1058): a bound gap or padding reads its variable's
-    /// number, never the 0 its literal holds — the override's layout is stored
-    /// resolved by the preview, the document's is resolved in `drawn`.
+    /// **As laid out**: a bound gap or padding reads its variable's number, never
+    /// the 0 its literal holds — the override's layout is stored resolved by the
+    /// preview, the document's is resolved in `drawn`.
     pub fn display(&self) -> Option<ondin_core::container::Display> {
         self.over
             .and_then(|o| o.display.clone())
             .unwrap_or_else(|| self.drawn.clone().or_else(|| self.node.display().cloned()))
     }
-    /// The layer's layout-item properties (§15 D875, D914), a live Item-card scrub's
-    /// included — [`Self::insets`]' rule again.
+    /// The layer's layout-item properties, a live Item-card scrub's included —
+    /// [`Self::insets`]' rule.
     pub fn item(&self) -> ondin_core::container::LayoutItem {
         self.over
             .and_then(|o| o.item)
@@ -431,11 +341,9 @@ impl<'a> DisplayNode<'a> {
     }
     /// The layer's effect stack (§5.3a).
     ///
-    /// **With an override behind it, unlike `clip` and `proportions_locked`
-    /// above.** Every number in an effect popover is scrubbable, so each one needs
-    /// a live preview or it is the unscrubbable field §15 D245 is about — which is
-    /// the same reason `RenderOverrides` carries `SetEffects` at all rather than
-    /// filing it with the operations that change nothing drawn.
+    /// **With an override behind it, unlike `clip` and `proportions_locked`**:
+    /// every number in an effect popover is scrubbable and needs a live preview,
+    /// which is why `RenderOverrides` carries `SetEffects`.
     pub fn effects(&self) -> &'a [ondin_core::Keyed<ondin_core::Effect>] {
         self.over
             .and_then(|o| o.effects.as_deref())
@@ -458,144 +366,85 @@ pub struct EditorSession {
     /// Uncommitted gesture preview, as per-node patches over the committed
     /// state (§6.2, invariant 5). Empty when no gesture is live.
     ///
-    /// Costs O(nodes the gesture touches). The earlier implementation cloned
-    /// the whole document, applied the pending transaction and re-resolved it
-    /// every frame — correct, but O(nodes) including re-shaping every text
-    /// node, on every mouse move. While a main component's layer is edited,
-    /// [`Self::preview_follows`] reads each copy's old value off a one-node
-    /// scratch (`Document::peek`; it cloned the whole document each frame until
-    /// the `v0.4.1..7d0c666` release review), though `keep_insets` still clones
-    /// where a pinned layer is placed; otherwise it is one scan of the links
+    /// Costs O(nodes the gesture touches). While a main component's layer is
+    /// edited, [`Self::preview_follows`] reads each copy's old value off a one-node
+    /// scratch (`Document::peek`); otherwise it is one scan of the links
     /// (`propagate::touches_copied`).
     overrides: RenderOverrides,
-    /// The live text-editing session's own transaction, kept for as long as the
-    /// session's content is what `overrides` stands for — see
-    /// [`Self::set_session_preview`] and the clear in [`Self::try_commit`].
+    /// The live text-editing session's own transaction, kept while the session's
+    /// content is what `overrides` stands for — see [`Self::set_session_preview`]
+    /// and the clear in [`Self::try_commit`].
     ///
-    /// 🚨 **It is kept so a gesture laid *over* it can be wound back to it rather
-    /// than cleared** (§15 D109's bug at the *set* side, §15 D609, `[S16.4-L1-03]`). The two
-    /// previews share one override set, so an inspector field engaged during a
-    /// live session replaced the session's content with the field's own patch and
-    /// took the typed text off the canvas — and nothing put it back, because
-    /// `preview_session` is event-driven rather than per-frame. With the
-    /// transaction here, [`Self::set_preview`] can compose the two and
-    /// [`Self::clear_gesture_preview`] can rebuild this one alone.
-    ///
-    /// **`Some` is also the answer to "does a session hold this preview"**, which
-    /// is what the flag it replaces meant. Two spellings of one fact is how they
-    /// come to disagree.
-    ///
-    /// The already-shaped layout [`Self::set_session_preview`] takes is
-    /// deliberately *not* kept beside it: rebuilding without one is "correct and
-    /// merely slower" (§15 D592), and the rebuild happens once per gesture rather
-    /// than once per keystroke.
+    /// **Kept so a gesture laid *over* it can be wound back to it rather than
+    /// cleared**: the previews share one override set and `preview_session` is
+    /// event-driven, so nothing would restore the typed text after an inspector
+    /// field replaced it. The already-shaped layout is deliberately not kept:
+    /// rebuilding without one is correct and happens once per gesture.
     session_preview: Option<Transaction>,
-    /// Whether `overrides` also carries an **in-flight gesture's** patch — a drag
-    /// or a field scrub, as against the standing session preview above.
-    ///
-    /// The two are independent, which is the whole of §15 D609, `[S16.4-L1-03]`: all four
-    /// combinations are reachable, and one `bool` could not tell "a session with a
-    /// scrub over it" from "a session alone". [`Self::has_gesture_preview`] reads
-    /// this and `cancel_gesture` reads that.
+    /// Whether `overrides` also carries an **in-flight gesture's** patch, as
+    /// against the standing session preview above. All four combinations are
+    /// reachable, so one `bool` could not tell "a session with a scrub over it"
+    /// from "a session alone".
     preview_holds_gesture: bool,
     /// The pivot a live edit is showing, and the layer it belongs to.
     ///
-    /// **`RenderOverrides` cannot carry it, and by design.** A pivot is baked by
-    /// the gesture that reads it rather than composed into a transform (§15 D55),
-    /// so the renderer has nothing to do with one and
-    /// `RenderOverrides::from_transaction` absorbs `SetPivot` as a no-op. What a
-    /// moved pivot changes is *chrome* — the marker, and the point the panel's two
-    /// angle fields turn about — which is the same reason guides need
-    /// `OndinApp::preview_guide` beside every preview.
-    ///
-    /// It lives here rather than beside `guide_previews` because
-    /// [`Self::preview_pivot`] is the one door all five readers already come
-    /// through, and because it is filled from [`Self::set_preview`] rather than
-    /// from a fork every call site owes — a debt guides are still paying.
-    ///
-    /// The inner `Option` is the pivot's own, so previewing a *clear* back to the
-    /// box centre is expressible: the outer says whether an edit is live, the
-    /// inner what it is showing.
+    /// **`RenderOverrides` cannot carry it, by design**: a pivot is baked by the
+    /// gesture that reads it, so `RenderOverrides::from_transaction` absorbs
+    /// `SetPivot` as a no-op. The inner `Option` is the pivot's own, so previewing a
+    /// *clear* back to the box centre is expressible; the outer says whether an
+    /// edit is live.
     pivot_preview: Option<(NodeId, Option<Pivot>)>,
     /// Whether the document has edits not yet written to `path`.
     dirty: bool,
     /// The revision a write now in flight will put on disk, if one is
-    /// (`library::writer`, §15 D393).
+    /// (`library::writer`).
     ///
-    /// ⚠️ **This is a third state of the save dot's tooltip and not a second
-    /// spelling of `dirty`.** While a write is in flight the document still differs
-    /// from its file — the bytes have not landed — so `dirty` stays `true` and the
-    /// dot stays red (§15 D962). What changes is only the sentence: *Saving…* rather than
-    /// *Unsaved*, which are the same fact and very different news.
-    ///
-    /// **The revision is here rather than a `bool` because a write can be
-    /// overtaken.** An edit committed while the serialise is in the worker's
-    /// hands means the file will hold something the session has already moved
-    /// past, and marking it clean on arrival would be a lie the user has no way
-    /// to see. [`Self::finish_save`] compares before it believes.
+    /// While a write is in flight `dirty` stays `true` and only the save dot's
+    /// sentence changes (*Saving…*). **A revision rather than a `bool` because a
+    /// write can be overtaken**: marking the session clean on arrival after a later
+    /// edit would be a lie; [`Self::finish_save`] compares first.
     saving: Option<u64>,
     /// The verb and moment of the last run commit, while the run is still open —
     /// see [`Self::commit_run`].
     run: Option<(&'static str, Instant)>,
-    /// The style the browser's *Edit* opened (§15 D1063): while set, a write of
-    /// its slot on a layer bound to it is an edit of the style itself
-    /// (`style::edit_through`, at the commit door), so the inspector's cards edit
-    /// every user at once.
+    /// The style the browser's *Edit* opened: while set, a write of its slot on a
+    /// layer bound to it is an edit of the style itself (`style::edit_through`, at
+    /// the commit door), so the inspector's cards edit every user at once.
     pub style_edit: Option<ondin_core::style::StyleId>,
-    /// When the document last matched what is on disk. `None` for a document
-    /// that has never been read from or written to a file — the top bar's save
-    /// dot reports that as red, because nothing of it exists on disk.
+    /// When the document last matched what is on disk. `None` for a document never
+    /// read from or written to a file.
     saved_at: Option<Instant>,
     /// Bumped by every change to the document — a commit, an undo, a redo, a
     /// document adopted — and what a cache of something *derived from* the
-    /// document keys on to know it has gone stale. Undo and redo bump it since
-    /// §15 D928; before that `finish_save` read a save queued before an undo as
-    /// current.
-    ///
-    /// **Not `dirty`, which is a different question.** That one asks whether the
-    /// document differs from the file and goes back to `false` on a save; this one
-    /// only ever goes up, because a save changes nothing about what a render of the
-    /// artwork would produce. The Export panel's preview is what it exists for
-    /// (§7): rendering a layer is far too expensive to do per frame and exactly
-    /// cheap enough to do per edit.
+    /// document keys on. **Not `dirty`**: this only goes up, because a save changes
+    /// nothing a render would produce.
     revision: u64,
-    /// How many commits this session has seen — `revision` without undo and
-    /// redo. [`FlexReceipt`] reads it: a redo puts the receipt's step back on top
-    /// of the history, which moves the revision and must not end the receipt
-    /// (§15 D880, D928). And a cut's move (`OndinApp::cut_move`) reads it through
-    /// [`Self::commits`], by the same argument: an undo and a redo with no commit
-    /// between them are the same history, and one commit between them is not.
+    /// How many commits this session has seen — `revision` without undo and redo.
+    /// [`FlexReceipt`] and a cut's move (`OndinApp::cut_move`, through
+    /// [`Self::commits`]) read it: an undo and a redo with no commit between are
+    /// the same history.
     commits: u64,
     /// What the last commit's resize did to flex items' growth — see
     /// [`FlexReceipt`] and [`Self::flex_receipt`], which is the only reader.
     flex_receipt: Option<FlexReceipt>,
-    /// The styles and the variables the last commit's passes detached, by
-    /// name — what [`said_detached`] worded onto the status — so a door whose
-    /// own report overwrites that status can carry them in it
-    /// ([`Self::last_detached`], §15 D1079).
+    /// The styles and the variables the last commit's passes detached, by name —
+    /// what [`said_detached`] worded onto the status — so a door whose own report
+    /// overwrites that status can carry them ([`Self::last_detached`]).
     last_detached: (Vec<String>, Vec<String>),
     status: Status,
 }
 
 /// **The flex-item properties a resize changed on the user's behalf** — the
-/// Item card's receipt (§15 D880).
+/// Item card's receipt.
 ///
 /// A resize of an in-flow item writes `flex-grow: 0`, `flex-shrink: 0` and, on a
-/// stretched cross axis, `align-self: start` — or `end`, dragged by the cross
-/// axis's start edge (`build::keep_flex_sizes`, §15 D875, D905) — none of which the
-/// user typed. The card names them and offers Undo.
+/// stretched cross axis, `align-self` (`build::keep_flex_sizes`), none of which the
+/// user typed.
 ///
-/// **Its Undo is the whole step, never the flips alone.** The flips are what make
-/// the resize hold, so undoing them and keeping the size would hand the space back
-/// and the drag would snap — and they are one transaction with it anyway. So the
-/// receipt is only true while that step is the top of the history: it records the
-/// commit count and the undo depth straight after the commit, and
-/// [`EditorSession::flex_receipt`] answers `None` the moment either moves — the
-/// next commit, an undo, a merged run. **The commit count, not the revision**,
-/// since §15 D928 made undo and redo move the revision: a redo puts this step
-/// back on top, and the receipt with it. Selection is not part of it: selecting
-/// something else and coming back finds the step still on top, and Undo still
-/// undoes exactly it.
+/// **Its Undo is the whole step, never the flips alone**, so the receipt is true
+/// only while that step is the top of the history: it records the commit count
+/// (not the revision, which undo and redo move) and the undo depth, and
+/// [`EditorSession::flex_receipt`] answers `None` once either moves.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlexReceipt {
     /// Each item the commit changed, with its properties before and after.
@@ -684,19 +533,12 @@ impl EditorSession {
     /// Whether a **gesture** has a preview installed — a drag or a field scrub in
     /// flight, as against a live text session's standing one.
     ///
-    /// `cancel_gesture`'s test for "is there anything to unwind", for the half of it
-    /// egui cannot be asked. It used to ask `Context::dragged_id`, and that is
-    /// unreliable on the one frame it is consulted: egui clears `dragged` on the
-    /// release of **any** button, so a right-click whose press and release land in
-    /// the same rendered frame — a fast click, or a frame boundary falling between
-    /// the two — takes the drag away before the cancel can see it. Reported as
-    /// right-click resetting a value "almost always", and confirmed by
-    /// `panels::typography::cancel_gate::a_right_click_short_enough_to_fit_one_frame_takes_the_drag_away`.
-    /// ⚠️ **`preview_holds_gesture` and not `!preview_holds_session`**, which is
-    /// what this read until §15 D609, `[S16.4-L1-03]`. A scrub engaged *over* a live text
-    /// session is both at once, and the old spelling answered `false` for it — so
-    /// right-clicking to cancel that scrub fell through to `ctx.dragged_id()`,
-    /// the one witness the paragraph above says must never stand alone.
+    /// `cancel_gesture`'s test for "is there anything to unwind": egui cannot be
+    /// asked, since it clears `dragged` on the release of **any** button, so a
+    /// right-click whose press and release share a frame takes the drag away first
+    /// (`panels::typography::cancel_gate::a_right_click_short_enough_to_fit_one_frame_takes_the_drag_away`).
+    /// A scrub over a live text session is both, so this reads
+    /// `preview_holds_gesture`, not the negation of a session flag.
     pub fn has_gesture_preview(&self) -> bool {
         !self.overrides.is_empty() && self.preview_holds_gesture
     }
@@ -724,12 +566,11 @@ impl EditorSession {
     /// preview.
     ///
     /// For the one caller that must not see its own preview: a *commit* compares the
-    /// value it is about to write against the value already there, and reading that
-    /// through the override means comparing an edit against a preview of itself —
-    /// which is §15 D109's bug, and D155's. Clearing the preview first is the wrong
-    /// way to get this: a preview may belong to a **live text session**
-    /// ([`Self::set_session_preview`]) rather than to the gesture in hand, and
-    /// clearing that takes uncommitted text off the canvas.
+    /// value it is about to write against the one already there, and reading that
+    /// through the override compares an edit against a preview of itself. Clearing
+    /// the preview first is wrong: it may belong to a **live text session**
+    /// ([`Self::set_session_preview`]), and clearing it takes uncommitted text off
+    /// the canvas.
     pub fn committed_node(&self, id: NodeId) -> Option<DisplayNode<'_>> {
         let node = self.doc.get(id)?;
         Some(DisplayNode {
@@ -737,14 +578,13 @@ impl EditorSession {
             over: None,
             used: None,
             drawn: None,
-            // What shows, not the literal (§15 D1059): a binding is not a
-            // preview, so the committed answer resolves it too.
+            // What shows, not the literal: a binding is not a preview.
             shown: self.doc.shown(id),
             opacity: self.doc.drawn_opacity(id),
         })
     }
 
-    /// The box a group with a layout is drawn as (§15 D869), a live gesture's
+    /// The box a group with a layout is drawn as, a live gesture's
     /// included — the preview's own if it re-laid the group, else the committed
     /// one. `None` for anything that is not such a group.
     pub fn preview_frame(&self, id: NodeId) -> Option<ondin_core::kurbo::Size> {
@@ -763,10 +603,9 @@ impl EditorSession {
     /// The node's **local** transform including any live gesture — its own, not
     /// composed through its ancestors.
     ///
-    /// [`Self::preview_world_transform`]'s twin, for the one caller that is
-    /// building something to be drawn *as a child of the same parent*: the scene
-    /// walk composes a ghost's transform under its parent's world, so handing it
-    /// a world transform would apply the parent chain twice.
+    /// [`Self::preview_world_transform`]'s twin, for the scene walk, which composes
+    /// a ghost's transform under its parent's world: a world transform would apply
+    /// the parent chain twice.
     pub fn preview_local_transform(&self, id: NodeId) -> Option<Affine> {
         self.doc.get(id)?;
         Some(self.overrides.transform_of(&self.doc, &self.resolved, id))
@@ -774,12 +613,10 @@ impl EditorSession {
 
     /// Install the artwork explaining the mode that is open, or take it away.
     ///
-    /// **Called unconditionally once a frame**, from `OndinApp::draw_canvas`,
-    /// which is the whole design: a `set_preview` replaces the overrides
-    /// wholesale, so anything that has to outlive a commit either gets
-    /// re-established after the input or gets re-established at every call site
-    /// that ever touches a preview. `preview_guide` is what the second one looks
-    /// like; this is the first.
+    /// **Called unconditionally once a frame**, from `OndinApp::draw_canvas`: a
+    /// `set_preview` replaces the overrides wholesale, so anything that must outlive
+    /// a commit is re-established after the input rather than at every call site
+    /// that touches a preview.
     pub fn set_chrome_ghost(&mut self, glued: Option<(NodeId, ondin_render::Ghost)>) {
         self.overrides.set_chrome_ghost(glued);
     }
@@ -801,10 +638,8 @@ impl EditorSession {
 
     /// World bounds including any live gesture.
     ///
-    /// Falls back to the resolved value whenever nothing in the subtree is
-    /// overridden — the common case, and the only one that has to be fast.
-    /// Otherwise it recomputes, which is why selection outlines and handles
-    /// track a drag exactly instead of lagging a frame behind.
+    /// Falls back to the resolved value whenever nothing is overridden — the
+    /// common case; otherwise it recomputes so outlines and handles track a drag.
     pub fn preview_world_bounds(&self, id: NodeId) -> Option<Rect> {
         if self.overrides.is_empty() {
             return self.resolved.world_bounds(id);
@@ -812,8 +647,7 @@ impl EditorSession {
         let node = self.doc.get(id)?;
         let display = self.display_node(id)?;
         let world = self.preview_world_transform(id)?;
-        // A group with a layout is the box its layout made (§15 D869), not its
-        // children's union — `Resolved`'s bounds rule, through the preview.
+        // A group with a layout is the box its layout made, not its children's union.
         if let Some(frame) = self.preview_frame(id) {
             return Some(geometry::transform_rect(
                 world,
@@ -821,7 +655,7 @@ impl EditorSession {
             ));
         }
 
-        // The paint as drawn, a bound stroke width its number (§15 D1073).
+        // The paint as drawn, a bound stroke width its number.
         let own = geometry::world_bounds_of_parts(
             display.kind(),
             &self.doc.resolved_paint(id, display.paint()),
@@ -838,10 +672,8 @@ impl EditorSession {
 
     /// The node's own box in its **local** space, including any live gesture.
     ///
-    /// The selection outline and its handles are drawn from this rather than
-    /// from [`Self::preview_world_bounds`], so they follow the shape's own
-    /// rectangle under rotation instead of the axis-aligned region it covers
-    /// (`ondin_core::local_box`).
+    /// The selection outline and handles are drawn from this, so they follow the
+    /// shape's own rectangle under rotation (`ondin_core::local_box`).
     pub fn preview_local_box(&self, id: NodeId) -> Option<Rect> {
         if self.overrides.is_empty() {
             return ondin_core::local_box(&self.doc, &self.resolved, id);
@@ -853,9 +685,7 @@ impl EditorSession {
         if let Some(frame) = self.preview_frame(id) {
             return Some(Rect::from_origin_size(Point::ZERO, frame));
         }
-        // A boolean's box is its *result's*, and mid-gesture the result is the one
-        // the preview re-derived — so the selection outline and the dimensions badge
-        // track the shape being reshaped rather than the operands feeding it.
+        // A boolean's box is its *result's*, as the preview re-derived it.
         if let Some(path) = self
             .overrides
             .boolean_path(id)
@@ -881,60 +711,29 @@ impl EditorSession {
     /// Where the node's transforms pivot, in its own local space, resolved
     /// against the box a live gesture is showing.
     ///
-    /// The pivot never enters `RenderOverrides` — nothing about it renders, and
-    /// the gestures that read it bake it into a transform (§15) — so it is carried
-    /// beside them in `pivot_preview` instead. The **box** it may be a fraction of
-    /// does go through the overrides, which is why this is not simply
-    /// `ondin_core::pivot_world`: a group being resized has to resolve its pivot
-    /// against the box on screen, or the marker slides out from under the pointer
-    /// for the length of the drag.
-    ///
-    /// **Both halves are previewed, and they are previewed for different gestures.**
-    /// A resize moves the box under a pivot that has not changed; the inspector's
-    /// origin fields move the pivot inside a box that has not. The canvas marker
-    /// drag is the one that previews *neither* through here — it paints itself from
-    /// the live pointer (`draw_pivot`), because it has a pointer and this does not.
+    /// The pivot is carried in `pivot_preview` but the **box** it may be a fraction
+    /// of goes through the overrides, so this is not simply
+    /// `ondin_core::pivot_world`. Both halves are previewed, for different
+    /// gestures: a resize moves the box, the inspector's origin fields move the
+    /// pivot. The canvas marker drag paints from the live pointer (`draw_pivot`).
     pub fn preview_pivot(&self, id: NodeId) -> Option<Point> {
         self.preview_pivot_in(id, self.preview_local_box(id)?)
     }
 
     /// [`Self::preview_pivot`] against a box the caller already has.
     ///
-    /// 🚨 **This exists because `selection_handles` was walking the same subtree
-    /// twice in one call** (§15 D764). That function asks `preview_local_box(id)`
-    /// for its own `box_` and then asked `preview_pivot(id)`, which asks
-    /// `preview_local_box(id)` again — and `previewed_pivot` answers `Some` for any
-    /// existing node, so the second walk always happened. With four production call
-    /// sites, that is **eight of the fourteen `query::local_box` asks a frame** that
-    /// §15 D741 measured, from one function, for one box.
-    ///
-    /// ⚠️ **D741 says *"the fourteen asks are fourteen different functions … there
-    /// is no single caller to hoist"*, and that is false** — this is the hoist, it
-    /// needed no cache and no change to `Resolved`, and it is worth 43% of that
-    /// entry's number. The arithmetic said so all along: `[S12.1-L4-03]` measured
-    /// 0.6431 ms per selection-box build against `[S4.1-L4-08]`'s 0.3490 ms per
-    /// `local_box` call — a factor of 1.84, which is two walks. **Two findings
-    /// measured the same work and neither divided.**
-    ///
-    /// ⚠️ **The pivot is a fraction *of* a box, so passing one in is not an
-    /// optimisation shortcut** — it is the honest signature. `preview_pivot` is the
-    /// convenience for callers that have no box, and it is written in terms of this
-    /// so the two cannot disagree about what `pivot_point` is applied to.
+    /// Exists so `selection_handles`, which already holds the box, does not walk
+    /// the subtree a second time (§15 D764); `preview_pivot` is written in terms of
+    /// this so the two cannot disagree.
     pub fn preview_pivot_in(&self, id: NodeId, box_: Rect) -> Option<Point> {
         Some(geometry::pivot_point(self.previewed_pivot(id)?, box_))
     }
 
     /// The node's stored pivot, or the one a live edit is showing in its place —
-    /// **`None` for "not moved"**, which is the state [`Self::preview_pivot`]
-    /// resolves to the box's centre and cannot report back.
-    ///
-    /// That distinction is the whole reason this is a second reader: the marker's
-    /// badge names a *placement*, so it must not be drawn over a layer whose origin
-    /// has been dragged or typed back to the middle. Asking the committed node
-    /// instead left the badge on for the length of the edit that removed it.
-    ///
-    /// The outer `Option` is still "is there such a node", as everywhere else here;
-    /// the pivot's own absence is the inner value.
+    /// **`None` for "not moved"**, which [`Self::preview_pivot`] resolves to the
+    /// box's centre and cannot report back; the marker's badge names a *placement*
+    /// and must not show over a layer reset to the middle. The outer `Option` is
+    /// "is there such a node".
     pub fn previewed_pivot(&self, id: NodeId) -> Option<Option<Pivot>> {
         let node = self.doc.get(id)?;
         Some(match self.pivot_preview {
@@ -947,44 +746,19 @@ impl EditorSession {
 
     /// Show `tx` applied, without touching history (invariant 5).
     ///
-    /// A transaction that cannot be represented as overrides — or that would
-    /// not apply — clears the preview instead of leaving the previous frame's
-    /// stale one on screen. Nothing the app previews is structural, so in
-    /// practice this always succeeds; see `RenderOverrides::from_transaction`.
-    /// **The pivot is picked out of the transaction here** rather than in a fork
-    /// each caller owes, because the overrides genuinely cannot hold it (see
-    /// `pivot_preview`) and a preview that silently drops part of its transaction
-    /// is the shape of §15 D245: a field re-reading a base its own preview is not
-    /// in scrubs against a value that never moves.
+    /// A transaction that cannot be represented as overrides, or would not apply,
+    /// clears the preview. **The pivot is picked out of the transaction here**
+    /// because the overrides cannot hold it.
     ///
-    /// Last one wins, which is only reachable through a transaction naming two
-    /// layers' pivots — nothing authors one, and if something does it wants the
-    /// map `guide_previews` is.
-    /// 🚨 **A live text session's preview is composed with, not replaced**
-    /// (§15 D609, `[S16.4-L1-03]`). The session's `SetText` is uncommitted content the
-    /// document does not have (§9.3), so building the overrides from `tx` alone
-    /// took the typed text off the canvas the moment an inspector field engaged —
-    /// and left it off, because the clear at the other end of the valve had no
-    /// session preview left to exempt and `preview_session` runs on change rather
-    /// than per frame. This is D109's exemption at the *set* side, where the two
-    /// fixes it records were both on the *clear* side.
-    ///
-    /// **The session's operations go first**, which is the order the two are
-    /// authored in: the session's content is the base the field's patch is being
-    /// previewed over, and `RenderOverrides::absorb` is last-one-wins per field.
-    /// A field that edits the session's own node — the Transform card's X, which
-    /// is what the finding was measured on — therefore wins the transform and
-    /// leaves the text alone.
-    ///
-    /// ⚠️ **A canvas gesture cannot reach this branch**: `Mode::TextInsert` owns
-    /// the pointer while a session is live, so the composing callers are the three
-    /// inspector valves. It is spelled here rather than at them for D109's own
-    /// reason — *"add no third spelling"*.
+    /// **A live text session's preview is composed with, not replaced**: building
+    /// from `tx` alone would take the typed text off the canvas for good, since
+    /// `preview_session` runs on change. The session's operations go first
+    /// (`RenderOverrides::absorb` is last-one-wins per field). Only the inspector
+    /// valves compose; `Mode::TextInsert` owns the pointer during a session.
     pub fn set_preview(&mut self, tx: &Transaction) {
         // **A resized flex item holds its size in the preview as the commit will
-        // make it** (§15 D904): the growth, `align-self` and size keyword the
-        // commit door adds (`build::keep_flex_sizes`), without which the preview's
-        // re-layout stretched or grew the item straight back every frame.
+        // make it**: the growth, `align-self` and size keyword `keep_flex_sizes`
+        // adds, or the preview's re-layout stretches the item back every frame.
         let holds = ondin_core::build::flex_holds(&self.doc, &self.resolved, tx);
         let mut ops = match &self.session_preview {
             Some(session) => session.0.clone(),
@@ -1004,46 +778,26 @@ impl EditorSession {
         )
         .unwrap_or_default();
         self.preview_holds_gesture = true;
-        // From the gesture's own operations, never the follows: a `SetPivot` on
-        // a main's layer follows onto its copies, and the last of those would
-        // name a copy, leaving the main's origin fields scrubbing against a node
-        // their preview is not on (§15 D245's shape; `arch-scribe`, step 6).
+        // From the gesture's own operations, never the follows: a `SetPivot` on a
+        // main's layer follows onto its copies, and the last of those would name a
+        // copy, leaving the main's origin fields scrubbing against another node.
         self.pivot_preview = tx.0.iter().rev().find_map(|op| match op {
             Operation::SetPivot { id, pivot } => Some((*id, *pivot)),
             _ => None,
         });
     }
 
-    /// What a previewed edit owes the copies of whatever mains it touches — the
-    /// commit door's field pass (`propagate::propagate`) run over the edit **as the
-    /// door rewrites it** (§5.3d's *preview*, build step 6), handed to
-    /// `RenderOverrides::from_transaction_following` to be laid out rather than
-    /// taken for the hand's.
+    /// What a previewed edit owes the copies of whatever mains it touches: the
+    /// commit door's field pass (`propagate::propagate`) run **as the door rewrites
+    /// the edit** (`keep_insets`, `keep_flex_sizes`), for
+    /// `RenderOverrides::from_transaction_following` to lay out. Field pass only —
+    /// the structural pass would blank the preview (§6.2). Empty for an edit that
+    /// touches no main (`propagate::touches_copied`).
     ///
-    /// **As the door rewrites it**, because the commit runs `keep_insets` and
-    /// `keep_flex_sizes` before the pass: a pinned layer's move reaches its copies
-    /// as insets as well as a transform, and an in-flow item's move reaches them
-    /// as nothing (`kept_flow_translations` drops it). Over the raw edit a pinned
-    /// copy previewed at its main's local placement — off by an instance's extra
-    /// width — and a flex item's copies were dragged along with it (`arch-scribe`,
-    /// reading step 6). The holds are in `tx` already, so a held size reaches the
-    /// copies as it does in the commit — the pass run before them previewed the
-    /// copy stretched (§15 D904's defect, arriving on the copy).
-    ///
-    /// **The field pass only.** What the structural pass removes or moves is not
-    /// representable as overrides and would blank the whole preview (§6.2), and
-    /// what it adds it mints ids for — so a main's gained or lost child reaches its
-    /// instances on release. Empty, at the cost of one scan of the links, for an
-    /// edit that touches no main (`propagate::touches_copied`).
-    ///
-    /// ⚠️ **A pinned copy the follows give a transform and no insets has its own
-    /// insets restated.** A copy with its own value for the inset a move changes
-    /// takes the move's transform (it still held its main's) and not its insets
-    /// (it overrides them), and `RenderOverrides::relayout` re-places only a layer
-    /// with an insets or kind override — so it previewed at its main's placement
-    /// while the commit, which places a pinned layer by its insets, left it where
-    /// it was. Read by `arch-scribe` as the case the layout split could not reach,
-    /// then reproduced (`a_copy_pinned_by_its_own_inset_previews_unmoved_by_its_mains_move`).
+    /// **A pinned copy the follows give a transform and no insets has its own insets
+    /// restated**: `RenderOverrides::relayout` re-places only a layer with an insets
+    /// or kind override
+    /// (`a_copy_pinned_by_its_own_inset_previews_unmoved_by_its_mains_move`).
     fn preview_follows(&self, tx: &Transaction) -> Transaction {
         if !ondin_core::propagate::touches_copied(&self.doc, tx) {
             return Transaction::default();
@@ -1079,21 +833,14 @@ impl EditorSession {
 
     /// Preview the uncommitted state of a **live text-editing session**.
     ///
-    /// The same override, marked as belonging to the session rather than to a
-    /// gesture — which is what exempts it from the clear [`Self::try_commit`] does.
-    /// A drag's preview is stale the moment anything commits; a session's stands for
-    /// content and styling that will not be committed until the session ends (§9.3),
-    /// so an unrelated commit must not take the live text off the canvas.
-    /// `shaped` is the session's own already-shaped layout for the node the
-    /// transaction is about — see [`RenderOverrides::from_transaction_shaped`]
-    /// (§15 D592). `None` is correct and merely slower; it is what a caller with
-    /// no layout in hand passes.
+    /// The same override, marked as the session's, which exempts it from the clear
+    /// [`Self::try_commit`] does: a session's stands for content not committed
+    /// until it ends (§9.3). `shaped` is the session's already-shaped layout for
+    /// the node (see [`RenderOverrides::from_transaction_shaped`]); `None` is
+    /// correct and merely slower.
     pub fn set_session_preview(&mut self, tx: &Transaction, shaped: Option<(NodeId, TextLayout)>) {
-        // Text typed into a main's layer reaches its copies as it is typed (build
-        // step 6, [`Self::preview_follows`]) — the copies shaped afresh, the
-        // session's own node from `shaped`. The session's own transaction is what
-        // is kept below, so a rebuild of it (`clear_gesture_preview`) runs the pass
-        // afresh rather than over its result.
+        // The session's own transaction is what is kept below, so a rebuild
+        // (`clear_gesture_preview`) runs the follows pass afresh.
         let follows = self.preview_follows(tx);
         self.overrides = RenderOverrides::from_transaction_following(
             &self.doc,
@@ -1108,51 +855,27 @@ impl EditorSession {
             _ => None,
         });
         self.session_preview = Some(tx.clone());
-        // Any gesture patch that was composed over the previous session preview is
-        // gone with it. The valve re-installs its own on the next engaged frame —
-        // it previews unconditionally while engaged — so this is at most one
-        // frame's worth, and saying `true` here would leave a phantom gesture for
-        // `cancel_gesture` to unwind.
+        // A gesture patch composed over the previous session preview is gone with
+        // it; the valve re-installs its own next frame, and `true` here would leave
+        // a phantom gesture for `cancel_gesture` to unwind.
         self.preview_holds_gesture = false;
     }
 
-    /// [`Self::clear_preview`] for a **cancelled gesture**, which must leave a live
-    /// text session's preview where it is.
-    ///
-    /// **The exemption `try_commit` already has, at the other place that clears.**
-    /// The two previews share one override set plus a flag, so `clear_preview` drops
-    /// both — and a right-click cancelling an inspector scrub took the session's
-    /// uncommitted *text* off the canvas with it, leaving the canvas showing the last
-    /// commit while every panel went on reading the editor. Reported as a paragraph
-    /// field's value "resetting on the text but staying in the field": two readings
-    /// of one edit, from two sources, after one of them had been thrown away.
-    ///
-    /// A cancelled gesture has no result to withdraw from the session — the session's
-    /// preview is not the gesture's to drop.
-    ///
-    /// 🚨 **"Leave it where it is" became "put it back", and the difference is the
-    /// composed preview** (§15 D609, `[S16.4-L1-03]`). Once [`Self::set_preview`] composes a
-    /// gesture over a live session, the override set holds both — so doing nothing
-    /// would leave the cancelled or committed field's patch on the canvas for the
-    /// rest of the session. Rebuilding from the session's own transaction is the
-    /// same answer as before wherever there is no gesture to remove, and the right
-    /// one where there is.
+    /// [`Self::clear_preview`] for a **cancelled gesture**, which must spare a live
+    /// text session's uncommitted *text*. Because [`Self::set_preview`] composes a
+    /// gesture over the session, this rebuilds from the session's own transaction.
     pub fn clear_gesture_preview(&mut self) {
         match self.session_preview.take() {
-            // ⚠️ Rebuilt without the session's already-shaped layout, which
-            // `set_session_preview` is handed and this does not keep: correct and
-            // merely slower (§15 D592), once per gesture rather than once per key.
+            // Rebuilt without the session's already-shaped layout, which this does
+            // not keep: correct, merely slower, once per gesture.
             Some(session) => self.set_session_preview(&session, None),
             None => self.clear_preview(),
         }
     }
 
-    /// Preview `tx`, drawing `leaving` outside their parent's clip — the layers
-    /// this move would take out of the frame they are in
-    /// (`RenderOverrides::escape_clip`).
-    ///
-    /// The caller decides which those are, from the same rule the *release* uses,
-    /// so that a shape drawing in full is a promise about what dropping it does.
+    /// Preview `tx`, drawing `leaving` outside their parent's clip
+    /// (`RenderOverrides::escape_clip`). The caller picks them by the rule the
+    /// *release* uses, so a shape drawing in full promises what dropping it does.
     pub fn set_preview_escaping(&mut self, tx: &Transaction, leaving: &[NodeId]) {
         self.set_preview(tx);
         for id in leaving {
@@ -1194,16 +917,10 @@ impl EditorSession {
     /// Commit `tx` as one of a **run** of `verb` edits: consecutive ones fold into
     /// a single undo step (`History::commit_into_run`).
     ///
-    /// **The policy lives here and the mechanism lives in core**, which is the
-    /// split that matters. History can say when a merge is *sound*; only the app
-    /// knows when two edits are one decision, and the answer is about keys and
-    /// gestures: the same verb, nothing else committed in between, no pointer press
-    /// between them ([`Self::end_edit_run`]), and close enough in time to read as
-    /// one burst.
-    ///
-    /// The window is feel, not correctness — four taps of an arrow key are one
-    /// nudge and a tap a minute later is not, and there is no structural difference
-    /// between them to appeal to. Held-key repeat is far inside it either way.
+    /// **The policy lives here and the mechanism in core**: only the app knows when
+    /// two edits are one decision — the same verb, nothing committed between, no
+    /// pointer press between ([`Self::end_edit_run`]), and close in time. The window
+    /// is feel, not correctness.
     pub fn commit_run(&mut self, tx: Transaction, verb: &'static str) -> bool {
         if tx.0.is_empty() {
             return true;
@@ -1226,14 +943,8 @@ impl EditorSession {
         applied
     }
 
-    /// End the current run, so the next [`Self::commit_run`] starts an undo step
-    /// of its own.
-    ///
-    /// Called on any pointer press: a click is a new intent, and it is also how the
-    /// subject changes — nudge one point, click another, nudge that one, and the
-    /// two bursts have to be two steps even though the verb and the node are the
-    /// same. Everything else that ends a run does so by simply committing, since a
-    /// plain commit ends one.
+    /// End the current run, so the next [`Self::commit_run`] starts an undo step of
+    /// its own. Called on any pointer press.
     pub fn end_edit_run(&mut self) {
         self.run = None;
         self.history.end_run();
@@ -1256,21 +967,20 @@ impl EditorSession {
             return Ok(());
         }
         // **While the browser's *Edit* is open, an edit of the style's users is an
-        // edit of the style** (§15 D1063) — first, so every pass below reads the
-        // style's edit and `style::settle` writes it back onto every user.
+        // edit of the style** — first, so every pass below reads the style's edit and
+        // `style::settle` writes it back onto every user.
         let tx = match self.style_edit {
             Some(s) => ondin_core::style::edit_through(&self.doc, tx, s),
             None => tx,
         };
-        // **Every placement a tool writes is where it wants the layer drawn**
-        // (§15 D874), and for a layer pinned by insets that has to become new
-        // insets — here, once, rather than in every tool. A no-op on any edit that
-        // places nothing pinned. Before the no-op test below, because the
-        // conversion is also what recognises a pinned layer written back to where
-        // it is already drawn as changing nothing.
+        // **Every placement a tool writes is where it wants the layer drawn**, and
+        // for a layer pinned by insets that has to become new insets — here, once,
+        // rather than in every tool. Before the no-op test below, because the
+        // conversion also recognises a pinned layer written back to where it is
+        // drawn as changing nothing.
         let tx = ondin_core::build::keep_insets(&self.doc, &self.resolved, tx);
-        // The items this edit sets itself, so the receipt below names only what
-        // `keep_flex_sizes` added on the user's behalf.
+        // The items this edit sets itself, so the receipt names only what
+        // `keep_flex_sizes` added.
         let asked: Vec<NodeId> =
             tx.0.iter()
                 .filter_map(|op| match op {
@@ -1278,41 +988,37 @@ impl EditorSession {
                     _ => None,
                 })
                 .collect();
-        // And a resized flex item keeps the size it was dragged to (§15 D875), and
-        // an in-flow item its stored translation (§15 D877).
+        // A resized flex item keeps the size it was dragged to, and an in-flow item
+        // its stored translation.
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
         // Where the binding passes below start appending their detaches, so the
-        // floating status can name the variables they cut (§15 D1071).
+        // floating status can name the variables they cut.
         let asked_ops = tx.0.len();
-        // And a radius written over a bound corner detaches it (§15 D1041, D1038
-        // (2)) — before `propagate`, so a copy bound as its main was follows the
-        // detach as well as the radius.
+        // A radius written over a bound corner detaches it — before `propagate`, so
+        // a copy bound as its main was follows the detach as well as the radius.
         let tx = ondin_core::build::keep_corner_bindings(&self.doc, tx);
-        // And a gap or a padding written over a bound slot the same way (§15
-        // D1058), at the same place for the same reason.
+        // A gap or a padding written over a bound slot, the same way.
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
-        // And a visibility written over a bound layer (§15 D1059).
+        // A visibility written over a bound layer.
         let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
-        // And an opacity written over a bound layer (§15 D1072), the same one half.
+        // An opacity written over a bound layer.
         let tx = ondin_core::build::keep_opacity_bindings(&self.doc, tx);
-        // And a stroke's width written over its binding (§15 D1073), by corners'
-        // two halves — rewritten in the list, not appended, so the widths the
-        // pass cuts are read here, around it, for the floating status (D1071).
+        // A stroke's width written over its binding is rewritten in the list, not
+        // appended, so the widths the pass cuts are read around it for the status.
         let widths_bound = stroke_widths_bound(&tx);
         let tx = ondin_core::build::keep_stroke_width_bindings(&self.doc, tx);
         let widths_cut = stroke_widths_cut(&self.doc, &tx, &widths_bound);
-        // And an effect's numbers (§15 D1074), the same way and read the same
-        // way around the pass.
+        // An effect's numbers, read around the pass the same way.
         let numbers_bound = effect_numbers_bound(&tx);
         let tx = ondin_core::build::keep_effect_bindings(&self.doc, tx);
         let numbers_cut = effect_numbers_cut(&self.doc, &tx, &numbers_bound);
-        // And a width or a height written over a bound axis, or made computed by
-        // the edit (§15 D1061) — after `keep_flex_sizes`, whose holds on a resized
-        // item are among the layout writes it reads.
+        // A width or a height written over a bound axis, or made computed by the
+        // edit — after `keep_flex_sizes`, whose holds are among the layout writes it
+        // reads.
         let tx = ondin_core::build::keep_size_bindings(&self.doc, Some(&self.resolved), tx);
-        // And a text's content or family written over its binding (§15 D1069)
-        // — before `propagate`, whose `style::settle` writes a newly applied
-        // text style's family after this has detached the binding it replaces.
+        // A text's content or family written over its binding — before `propagate`,
+        // whose `style::settle` writes a newly applied text style's family after this
+        // has detached the binding it replaces.
         let tx = ondin_core::build::keep_text_bindings(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
@@ -1331,46 +1037,25 @@ impl EditorSession {
         let cut = (styles_cut.clone(), vars_cut.clone());
         let detached = said_detached(styles_cut, vars_cut);
         let held = self.growth_held(&tx, &asked);
-        // And either can empty a transaction outright — `keep_insets` one pinned
-        // layer written back where it already is, `keep_flex_sizes` a translation
-        // alone on an in-flow item — which the test above has already let through
-        // and `changes_nothing` below does not answer `true` for.
+        // Either pass can empty a transaction outright (`keep_insets` on a pinned
+        // layer written back where it is, `keep_flex_sizes` on a translation alone
+        // on an in-flow item), which `changes_nothing` below does not catch.
         if tx.0.is_empty() {
             self.clear_gesture_preview();
             return Ok(());
         }
         // **A completed interaction that changed nothing is not an undo step**
-        // (§15 D428).
-        // The empty test above is not this one and never was: a click into a
-        // value field and straight back out, a resize handle pressed and released
-        // without moving, a drop that lands rows where they already are, all
-        // produce a *full* transaction whose every operation writes back the
-        // value that is already there. Committing it dirtied the document, fired
-        // autosave and the crash snapshot, and put a step in the history that
-        // undoes to the picture it undid from — so `Ctrl+Z` did nothing visible
-        // and had to be pressed twice.
-        //
-        // **Here rather than at the doors**, because there are of the order of a
-        // hundred of them and the round that found this counted eleven already
-        // broken across three routes — click, type and drag — with three
-        // different per-door guards proposed and none of them able to cover the
-        // next door. `Transaction::changes_nothing` is asked of the whole
-        // transaction, for the reason written on it.
-        //
-        // ⚠️ **The preview is still dropped.** A no-op commit is the *end of a
-        // gesture* even though it is not an edit, and the clear at the bottom of
-        // this function is the only thing several callers rely on to take the
-        // ghost off the canvas. Returning before it left the preview standing
-        // over the committed document — which is the stale-snapshot failure that
-        // comment describes, arriving by a new door.
+        // (§15 D428): a click into a field and back out, or a handle released
+        // without moving, writes back what is there and would dirty the document
+        // and add a step that undoes to the same picture. Checked here rather than
+        // at the doors. **The preview is still dropped**: a no-op commit ends the
+        // gesture, and the clear below takes the ghost off the canvas.
         if tx.changes_nothing(&self.doc) {
             self.clear_gesture_preview();
             return Ok(());
         }
         if !run {
-            // A plain commit is a new decision, so it closes any run — which is
-            // what keeps an unrelated edit landing between two nudges from letting
-            // them merge across it.
+            // A plain commit is a new decision, so it closes any run.
             self.run = None;
         }
         let dirty = match run {
@@ -1378,20 +1063,11 @@ impl EditorSession {
             false => self.history.commit(&mut self.doc, tx)?,
         };
         // **The one place a caught boolean panic becomes something the user sees.**
-        // `evaluate` answers `None`, which is also what a correct empty result
-        // answers, so nothing downstream can tell them apart and the shape simply
-        // vanished (§15 D239). `boolean::failures` moving across this update is the
-        // signal, and this is the span to read it over: a commit is the whole of an
-        // edit, so one message stands for however many booleans it re-evaluated at
-        // whatever depth.
-        //
-        // **The transient half, and it says so.** `Status` holds one message, so a
-        // caller that reports on its own edit afterwards ("Pasted 3 layers") wins
-        // this slot — which is the right way round, and is why the durable half is
-        // the layers row's warning colour (`Resolved::boolean_failed`) rather than
-        // this line. Undo and redo update outside this function and keep their own
-        // "Undo": arriving back at a broken boolean is not news about the undo, and
-        // the row still wears the mark.
+        // `evaluate` answers `None` for a panic and for a correct empty result alike,
+        // so only `boolean::failures` moving across this update tells them apart.
+        // This is the transient half: a caller reporting on its own edit afterwards
+        // wins the status slot; the durable half is the layers row's warning colour
+        // (`Resolved::boolean_failed`).
         let failures = ondin_core::boolean::failures();
         self.resolved.update(&self.doc, &dirty);
         if ondin_core::boolean::failures() != failures {
@@ -1399,17 +1075,11 @@ impl EditorSession {
         }
         self.selection.retain_existing(&self.doc);
         self.dirty = true;
-        // **A counter, not a hash of the document.** Anything that caches a
-        // *rendering* of the document needs to know when it has gone stale, and
-        // the only cheap answer is "something was committed since". Here rather
-        // than at the call sites, so no commit has to remember.
-        //
-        // ⚠️ **Undo and redo do not come through this door, and bump it
-        // themselves** (`Self::undo`, `Self::redo`, §15 D928). Until then they
-        // did not bump it at all, so every reader keyed on the revision —
-        // `FrameIndex`, the Export preview, the recovery gate, `finish_save` — was
-        // stale after one, and the last of those marked the session clean over a
-        // file that did not hold it (§15 D616's amendment).
+        // **A counter, not a hash of the document**: anything caching a *rendering*
+        // needs only "something was committed since". Undo and redo do not come
+        // through this door and bump it themselves; every reader keyed on it
+        // (`FrameIndex`, the Export preview, the recovery gate, `finish_save`)
+        // depends on that.
         self.revision = self.revision.wrapping_add(1);
         self.commits = self.commits.wrapping_add(1);
         // Recorded after the bump, so the receipt names this commit; a run's
@@ -1419,35 +1089,15 @@ impl EditorSession {
             commit: self.commits,
             depth: self.history.undo_depth(),
         });
-        // **A commit makes any preview stale by definition**, so it goes here
-        // rather than at the call sites that remembered to.
-        //
-        // `edit_valve` always cleared it, and every control that commits *without*
-        // going through the valve — a segmented cell, a paragraph field, an axis
-        // slider — did not. That is a bug with a long reach, because the panels read
-        // the document back through `display_node`, which applies the overrides: a
-        // preview left over from an interrupted drag is a **stale snapshot every
-        // later write is then built from**, so each new edit silently reverts to it.
-        // Reported twice, as "drag to set a value doesn't work" on the paragraph
-        // fields and as "after I set a colour the controls become unresponsive — I
-        // can slide a slider and it resets immediately to the value it had".
-        //
-        // A preview outliving its own gesture is easy to arrange: `edit_valve`
-        // previews on `dragged()` and clears on `drag_stopped()`, and a widget that
-        // stops existing mid-drag — a tab switched, a section collapsed, a row
-        // rebuilt under a different id — never delivers the second.
-        //
-        // **A text session's preview is the exception and is left alone.** It is
-        // not a gesture's: it stands for uncommitted content and styling for the
-        // whole session (§9.3), so clearing it on an unrelated commit would drop the
-        // live text off the canvas until the next keystroke. Spelled once, in
-        // [`Self::clear_gesture_preview`] — a cancelled gesture owes the identical
-        // exemption and did not have it, which is how the same bug arrived a third
-        // time from the other direction.
+        // **A commit makes any preview stale by definition**: a leftover one is read
+        // back by `display_node` as a **stale snapshot every later write is built
+        // from**, and a widget that vanishes mid-drag never delivers the
+        // `drag_stopped()` that clears it. A text session's preview is the exception
+        // (§9.3), spelled once in [`Self::clear_gesture_preview`].
         self.clear_gesture_preview();
-        // **A door that detached a style or a variable says so** (D1038 (2), §15
-        // D1063, D1071) — the canvas, *Paste properties*, MCP — before any
-        // caller's own report, which overwrites it.
+        // **A door that detached a style or a variable says so** — the canvas,
+        // *Paste properties*, MCP — before any caller's own report, which
+        // overwrites it.
         if let Some(said) = detached {
             self.info(said);
         }
@@ -1457,16 +1107,10 @@ impl EditorSession {
 
     /// The items whose growth `tx` stops that the edit did not set itself —
     /// [`FlexReceipt::held`], read off the transaction `keep_flex_sizes` handed
-    /// back, before it is applied. Only `flex-grow`, `flex-shrink`, `flex-basis`
-    /// (cleared with the growth since §15 D935), `align-self` and a grid item's
-    /// `justify-self` count: a size keyword going back to
-    /// `auto` is the resize itself, shown in the Transform card's W and H (§15
-    /// D879).
-    ///
-    /// ⚠️ **`justify-self` was missing until §15 D922**, so a grid item resized
-    /// across alone — the one axis a grid holds with it (§15 D913's second
-    /// ruling) — had its stretch released with no receipt at all, and the Item
-    /// card's words for it could only appear beside an `align-self` flip.
+    /// back, before it is applied. Only `flex-grow`, `flex-shrink`, `flex-basis`,
+    /// `align-self` and a grid item's `justify-self` count: a size keyword going
+    /// back to `auto` is the resize itself, shown in the Transform card's W and H.
+    /// `justify-self` matters for a grid item resized across alone.
     fn growth_held(
         &self,
         tx: &Transaction,
@@ -1495,29 +1139,20 @@ impl EditorSession {
     /// Take the last transaction back. **Answers whether the document actually
     /// moved** — `false` for the end of the history and for a failure.
     ///
-    /// The `bool` exists for the caller, not for this function: state that
-    /// *indexes into* the document lives on `OndinApp` and not here, so the app
-    /// has to be told when the ground under it has shifted. `Selection` is the
-    /// half that lives on the session and is guarded a line below;
-    /// `OndinApp::points` and `OndinApp::pen` are the half that is not, and
-    /// [`crate::app::OndinApp::undo`] is where they are dropped (§15 D568).
-    ///
-    /// **Not "an undo happened"** — pressing `Ctrl+Z` at the bottom of the stack
-    /// must not deselect anything, so the answer is about the document rather
-    /// than about the keystroke.
+    /// The `bool` is for the caller: state that *indexes into* the document
+    /// (`OndinApp::points`, `OndinApp::pen`) lives on `OndinApp` and is dropped in
+    /// [`crate::app::OndinApp::undo`] when the ground shifts. **Not "an undo
+    /// happened"**: `Ctrl+Z` at the bottom of the stack must not deselect anything.
     pub fn undo(&mut self) -> bool {
-        // An undo is never part of a run — the burst it would merge into is the
-        // thing being taken back. `History` says so too; this is the app-side half
-        // of the same fact.
+        // An undo is never part of a run; `History` says so too.
         self.run = None;
         match self.history.undo(&mut self.doc) {
             Ok(Some(dirty)) => {
                 self.resolved.update(&self.doc, &dirty);
                 self.selection.retain_existing(&self.doc);
                 self.dirty = true;
-                // The document moved, so every reader keyed on the revision has
-                // to see it — `finish_save` above all, which otherwise marks the
-                // session clean over a save queued before the undo (§15 D928).
+                // `finish_save` above all must see it, or it marks the session
+                // clean over a save queued before the undo.
                 self.revision = self.revision.wrapping_add(1);
                 self.info("Undo");
                 true
@@ -1541,8 +1176,7 @@ impl EditorSession {
                 self.resolved.update(&self.doc, &dirty);
                 self.selection.retain_existing(&self.doc);
                 self.dirty = true;
-                // As `Self::undo`. `commits` stays put, which is what lets a
-                // redo bring the step's receipt back (`FlexReceipt`).
+                // `commits` stays put, so a redo brings the step's receipt back.
                 self.revision = self.revision.wrapping_add(1);
                 self.info("Redo");
                 true
@@ -1575,8 +1209,7 @@ impl EditorSession {
         self.saved_at = path.is_some().then(Instant::now);
         self.path = path;
         self.dirty = false;
-        // A different document entirely, so anything derived from the old one is
-        // stale — the strongest reason there is to bump this.
+        // A different document, so anything derived from the old one is stale.
         self.revision = self.revision.wrapping_add(1);
     }
 
@@ -1585,16 +1218,11 @@ impl EditorSession {
     /// bounds, hit-testing and selection rectangles stop describing the wrong
     /// face (§5.4a).
     ///
-    /// Any in-flight preview is dropped rather than re-shaped: a font landing
-    /// mid-gesture is rare, and rebuilding the overrides would need the pending
-    /// transaction, which the session does not keep for a *gesture*.
-    ///
-    /// ⚠️ It does keep a live text session's ([`Self::session_preview`], since
-    /// §15 D609, `[S16.4-L1-03]`), so this is now a deliberate `clear_preview` rather than a
-    /// forced one: re-shaping the session's text against the newly registered
-    /// family is what `preview_session` does on the next keystroke, and the
-    /// alternative — rebuilding here — would re-shape the whole node on a frame
-    /// that is already re-shaping every text node in the document.
+    /// Any in-flight preview is dropped rather than re-shaped: the session does not
+    /// keep a *gesture's* transaction. A live text session's
+    /// ([`Self::session_preview`]) is dropped too, deliberately: `preview_session`
+    /// re-shapes it on the next keystroke, and rebuilding here would re-shape the
+    /// node on a frame already re-shaping every text node.
     pub fn fonts_changed(&mut self) {
         self.resolved.invalidate_text(&self.doc);
         self.clear_preview();
@@ -1610,22 +1238,14 @@ impl EditorSession {
     /// Record that this document is known **not** to match its file, without an
     /// edit having been made.
     ///
-    /// ⚠️ **Deliberately one-way**, which is why it takes no argument and cannot
-    /// clear the flag: [`Self::mark_saved`] is the only road back to clean, as it
-    /// always was. Setting `dirty` is not the whole of it — `saved_at` goes too,
-    /// or the top bar's save dot would go green over a document that
-    /// differs from its file, which is the one sentence it must never be able to
-    /// say (see [`Self::saved_ago`]).
+    /// **Deliberately one-way**: it cannot clear the flag, since
+    /// [`Self::mark_saved`] is the only road back to clean. `saved_at` goes too, or
+    /// the save dot would go green over a document that differs from its file (see
+    /// [`Self::saved_ago`]).
     ///
-    /// **Two callers, and they are the same claim from opposite ends.** A
-    /// document restored from a crash snapshot (`library::recovery`) has never
-    /// been written anywhere — the snapshot is not the file — so it is unsaved by
-    /// construction, and the app must not be able to think otherwise. And the
-    /// autosave tests, whose rules are all of the form "given a dirty document,
-    /// does the interval do X": reaching that state through a real edit would
-    /// drag a whole fixture document into a test that is about a timer. This was
-    /// `mark_dirty_for_test` and `#[cfg(test)]` until recovery gave it a
-    /// production caller.
+    /// Callers: a document restored from a crash snapshot (`library::recovery`) is
+    /// unsaved by construction, and the autosave tests reach "a dirty document"
+    /// without a fixture edit.
     pub fn mark_unsaved(&mut self) {
         self.dirty = true;
         self.saved_at = None;
@@ -1636,16 +1256,14 @@ impl EditorSession {
         self.path = Some(path);
         self.dirty = false;
         self.saved_at = Some(Instant::now());
-        // A synchronous save has just made whatever was in flight irrelevant —
-        // it wrote the same path, later, from the same session. `save_file`
-        // settles before it writes, so in practice there is nothing here to
-        // clear; clearing it anyway is what stops the tooltip sticking on *Saving…*
-        // if that order is ever changed.
+        // `save_file` settles before it writes, so there is nothing to clear in
+        // practice; clearing anyway stops the tooltip sticking on *Saving…* if that
+        // order changes.
         self.saving = None;
     }
 
-    /// A write of `at` has been queued: the save dot's tooltip says *Saving…* until it lands
-    /// (`library::writer`, §15 D393).
+    /// A write of `at` has been queued: the save dot's tooltip says *Saving…* until
+    /// it lands (`library::writer`).
     pub fn begin_save(&mut self, at: u64) {
         self.saving = Some(at);
     }
@@ -1657,42 +1275,29 @@ impl EditorSession {
 
     /// A queued write is over and did not land.
     ///
-    /// ⚠️ **Only `saving` clears, and it must.** The session stays dirty, which is
-    /// the truth and is what makes the next interval try again — but without this
-    /// the tooltip sticks on *Saving…* for the rest of the session and
-    /// `OndinApp::autosave_tick`'s `is_saving` gate never opens again, so one
-    /// failed write turns autosave off silently. That is exactly the state this
-    /// whole feature exists to avoid, arrived at from the other side, and it is
-    /// the shape of bug a third state invites: a state entered in one place and
-    /// left in only one of two.
+    /// **Only `saving` clears, and it must.** The session stays dirty, so the next
+    /// interval tries again; without the clear the tooltip sticks on *Saving…* and
+    /// `OndinApp::autosave_tick`'s `is_saving` gate never opens again, silently
+    /// turning autosave off.
     pub fn save_failed(&mut self) {
         self.saving = None;
     }
 
     /// A queued write of revision `at` has reached `path`.
     ///
-    /// ⚠️ **Three guards, and each answers a different way of being stale.** The
-    /// first is `saving == Some(at)`, in the body below with its own note: it
-    /// says this result is about the write currently being waited on. The
-    /// revision says the session has not moved on since the clone was taken — an
-    /// edit during the serialise means the file is already behind, and calling it
-    /// clean would put *Saved · just now* over work that is on disk nowhere. The
-    /// path says this is still the same document — `open_path` and `recover`
-    /// settle before they adopt, so a mismatch should be unreachable, and the
-    /// consequence if it ever is would be marking a *new* document clean because
-    /// the *old* one was written.
+    /// **Three guards, each answering a different way of being stale.**
+    /// `saving == Some(at)` says this result is about the write being waited on. The
+    /// revision says the session has not moved on since the clone was taken, or
+    /// calling it clean would put *Saved · just now* over work that is on disk
+    /// nowhere. The path says this is still the same document (`open_path` and
+    /// `recover` settle before they adopt, so a mismatch should be unreachable).
     ///
-    /// Either way `saving` clears: the write is over, whatever it turned out to
-    /// be worth. A superseded one leaves the session dirty and the next interval
-    /// picks the new revision up.
-    ///
-    /// Returns whether the session went clean, which is the one thing a caller
-    /// wants to key a side effect on — `export_on_save` re-exports after a save
-    /// that *counted*, and a superseded write is not one.
+    /// Either way `saving` clears; a superseded write leaves the session dirty for
+    /// the next interval. Returns whether the session went clean, which
+    /// `export_on_save` keys on.
     pub fn finish_save(&mut self, path: &std::path::Path, at: u64) -> bool {
-        // ⚠️ **Cleared only for the write it is actually about.** A `take()` here
-        // would let an older result end the *Saving…* of a newer write still in
-        // flight, which is the tooltip going quiet while the disk is still busy.
+        // **Cleared only for the write it is about**: a `take()` here would let an
+        // older result end the *Saving…* of a newer write still in flight.
         if self.saving != Some(at) {
             return false;
         }
@@ -1717,13 +1322,9 @@ impl EditorSession {
 
     /// What to call the open document — the name the user typed, not the file.
     ///
-    /// ⚠️ **The stem is a slug now, so it cannot be the answer on its own.**
-    /// This read `path.file_stem()` until the library landed, which was right
-    /// while a filename was whatever somebody typed into a save dialog and is
-    /// wrong the moment it is derived: the top bar would say `landing-v4` for a
-    /// document called "Landing v4". `library::scan::display_name` is the shared
-    /// rule, and it is shared precisely so the library and the title bar cannot
-    /// disagree about one document.
+    /// **The stem is a slug, so it cannot be the answer on its own** (`landing-v4`
+    /// for "Landing v4"). `library::scan::display_name` is the rule shared with the
+    /// library so the two cannot disagree.
     pub fn document_title(&self) -> String {
         let stem = self
             .path
@@ -1732,8 +1333,7 @@ impl EditorSession {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         match crate::library::scan::display_name(self.doc.meta(), &stem) {
-            // Both empty is a document that has never been saved and never been
-            // named — the starter document, which is what "Untitled" is for.
+            // Never saved and never named: the starter document.
             name if name.trim().is_empty() => "Untitled".to_string(),
             name => name,
         }
@@ -1746,9 +1346,9 @@ impl EditorSession {
     }
 
     /// What the last commit's passes detached, as `(styles, variables)` by
-    /// name — empty after a commit that detached nothing or did not land. For
-    /// a door whose own report replaces the status the commit wrote, so the
-    /// detach is said in it rather than lost under it (§15 D1079).
+    /// name — empty after a commit that detached nothing or did not land. For a
+    /// door whose own report replaces the status the commit wrote, so the detach is
+    /// said in it rather than lost under it.
     pub fn last_detached(&self) -> &(Vec<String>, Vec<String>) {
         &self.last_detached
     }
@@ -1779,15 +1379,13 @@ impl EditorSession {
 /// The canvas ground a document starts on, and the one the Appearance panel's
 /// reset button returns to: the design's near-black `#171718`.
 ///
-/// Lives in core, because it is also what a file written before the ground was
-/// saved means (`io::schema`). Re-exported here so the panels can keep asking
-/// the session's own module for it.
+/// Lives in core because it is also what a file written before the ground was
+/// saved means (`io::schema`); re-exported for the panels.
 pub use ondin_core::DEFAULT_CANVAS_BACKGROUND;
 
-/// The styles the commit detached where the edit wrote over them (D1038 (2),
-/// §15 D1063), by name, for [`said_detached`]. Empty when none was, and when
-/// the edit itself detached something — the capsule's *Detach* and the `⋯`
-/// menu's are asked for, and say nothing (F2).
+/// The styles the commit detached where the edit wrote over them, by name, for
+/// [`said_detached`]. Empty when the edit itself detached something — the
+/// capsule's *Detach* and the `⋯` menu's are asked for, and say nothing.
 /// `user` is how many of `tx`'s operations the edit wrote before the commit's
 /// own passes.
 fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Vec<String> {
@@ -1822,14 +1420,12 @@ fn styles_detached(doc: &Document, tx: &Transaction, user: usize) -> Vec<String>
 }
 
 /// The variables the commit's binding passes cut where the edit wrote over a
-/// bound field (D1038 (2), §15 D1071) — a gap, a padding, a radius, a
-/// visibility, a size, a text's content or family, an opacity (§15 D1072) —
-/// read off the `Set*Vars` the passes append between `from` and `to`
-/// (`build::keep_corner_bindings` and its siblings each push rather than
-/// rewrite), against the bindings
-/// the document holds. Empty when the edit itself set a binding of those kinds
-/// — a chip's detach, a reset, a bind — which says what it means, as
-/// [`styles_detached`]' asked-for detach does.
+/// bound field — a gap, a padding, a radius, a visibility, a size, a text's
+/// content or family, an opacity — read off the `Set*Vars` the passes append
+/// between `from` and `to` (`build::keep_corner_bindings` and its siblings each
+/// push rather than rewrite), against the bindings the document holds. Empty when
+/// the edit itself set a binding of those kinds, as [`styles_detached`]' asked-for
+/// detach is.
 fn variables_detached(doc: &Document, tx: &Transaction, from: usize, to: usize) -> Vec<String> {
     use ondin_core::VarId;
     // Each slot's binding before the op and after it.
@@ -1881,7 +1477,7 @@ fn variables_detached(doc: &Document, tx: &Transaction, from: usize, to: usize) 
 
 /// Every stroke `tx` writes with its width bound, as (layer, stroke, variable)
 /// — read before `build::keep_stroke_width_bindings`, which rewrites a cut
-/// binding inside the list rather than appending an op (§15 D1073).
+/// binding inside the list rather than appending an op.
 fn stroke_widths_bound(tx: &Transaction) -> Vec<(NodeId, ondin_core::ItemId, ondin_core::VarId)> {
     tx.0.iter()
         .filter_map(|op| match op {
@@ -1898,8 +1494,7 @@ fn stroke_widths_bound(tx: &Transaction) -> Vec<(NodeId, ondin_core::ItemId, ond
 
 /// The variables `bound`'s strokes lost in `tx`, the pass run — each a width
 /// the edit wrote over its binding, by name, for [`said_detached`]. A stroke the
-/// edit itself unbinds — a chip's detach — never enters `bound`, so it is not
-/// said, F2's rule as [`variables_detached`] keeps it.
+/// edit itself unbinds never enters `bound`, so it is not said.
 fn stroke_widths_cut(
     doc: &Document,
     tx: &Transaction,
@@ -1924,7 +1519,7 @@ fn stroke_widths_cut(
 }
 
 /// Every effect number `tx` writes bound, as (layer, effect, slot, variable) —
-/// [`stroke_widths_bound`]' twin for `build::keep_effect_bindings` (§15 D1074).
+/// [`stroke_widths_bound`]' twin for `build::keep_effect_bindings`.
 fn effect_numbers_bound(
     tx: &Transaction,
 ) -> Vec<(NodeId, ondin_core::ItemId, usize, ondin_core::VarId)> {
@@ -1967,9 +1562,8 @@ fn effect_numbers_cut(
 }
 
 /// What the floating status says when the commit detached something the edit
-/// wrote over (D1038 (2)): *Detached surface/raised*, *Detached space/gap*, or
-/// a count — *3 styles*, *2 variables*, *3 styles and variables* — `None` when
-/// nothing was (§15 D1063, D1071).
+/// wrote over: *Detached surface/raised*, *Detached space/gap*, or a count —
+/// *3 styles*, *2 variables*, *3 styles and variables* — `None` when nothing was.
 pub(crate) fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<String> {
     match (styles.as_slice(), vars.as_slice()) {
         ([], []) => None,
@@ -1985,11 +1579,9 @@ pub(crate) fn said_detached(styles: Vec<String>, vars: Vec<String>) -> Option<St
 
 /// A per-process-random actor id (§5.2, invariant 3).
 ///
-/// Core deliberately has no RNG policy, so the app supplies one. `RandomState`
-/// is seeded by the OS once per process and perturbed per instance, and the
-/// clock breaks ties between processes started from the same image — together
-/// far more than enough for two sessions never to pick the same actor, which is
-/// what keeps ids from colliding across files and (later) across peers.
+/// Core has no RNG policy, so the app supplies one: `RandomState` is OS-seeded
+/// per process and the clock breaks ties, enough for two sessions never to pick
+/// the same actor, which keeps ids from colliding across files and peers.
 fn random_actor() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
@@ -2023,11 +1615,7 @@ fn starter_document() -> (Document, IdSource) {
                 size: Size::new(800.0, 600.0),
             },
             transform: None,
-            // `None`, so it is numbered like any other frame — "Frame 1". It was
-            // `Some("Frame")`, which was right when a fresh frame was called plainly
-            // "Frame" and became the one frame in the app whose name did not match
-            // what the tool makes (§15 D127). Still not "Artboard 1": D21's rule is
-            // about the *word*, and the number was never the part it objected to.
+            // `None`, so it is numbered like any other frame — "Frame 1".
             name: None,
         },
         Operation::CreateNode {
@@ -2074,21 +1662,15 @@ fn starter_document() -> (Document, IdSource) {
                 on_path_offset: 0.0,
             },
             transform: Some(Affine::translate((80.0, 420.0))),
-            // `None`, so it is numbered like any other text layer — "Text 1" —
-            // which is the same correction the artboard above carries and for the
-            // same reason (§15 D127). It was `Some("Heading")`, and however well
-            // that described 72pt bold type it made this the one layer in a fresh
-            // document whose name the tool would never have written.
+            // `None`, so it is numbered like any other text layer — "Text 1".
             name: None,
         },
     ]))
     .expect("seed starter document");
 
     doc.apply(&Transaction(vec![
-        // **The frame's white ground, and it is a fill now like the two below it**
-        // (§15 D400) — it used to ride in on `CreateNode` as a field of the kind,
-        // which is why it was the one paint in this document not written here.
-        // New nodes, so lists built whole (`ondin_core::keyed_by_position`).
+        // The frame's white ground is a fill like the two below it. New nodes, so
+        // lists built whole (`ondin_core::keyed_by_position`).
         Operation::SetFills {
             id: artboard,
             fills: keyed_by_position([Fill {
@@ -2118,8 +1700,7 @@ fn starter_document() -> (Document, IdSource) {
 
 #[cfg(test)]
 mod tests {
-    //! These exist because the session used to be welded to a `wgpu` device,
-    //! which is why none of the bugs below were caught by the test suite.
+    //! Session tests, run without a graphics device.
 
     use super::*;
 
@@ -2145,19 +1726,13 @@ mod tests {
         id
     }
 
-    /// **A door's edit over a bound field names what it cut; an asked-for
-    /// detach says nothing** (D1038 (2), §15 D1071). A rect's W and H bound to
-    /// `size/w` and `size/h`: a size written over W alone says *Detached
-    /// size/w*; over both, *Detached 2 variables*; and the chip's own detach —
-    /// `detach_size_ops`, a `SetSizeVars` among the edit's own operations —
-    /// leaves the status as it was (F2's rule for a style's capsule).
+    /// A door's edit over a bound field names what it cut (W alone, then both), and
+    /// the chip's own detach (`detach_size_ops`) says nothing.
     ///
-    /// ⚠️ **Flip, run, and it does not bite**: `variables_detached` without its
-    /// asked-for test stays green, because every binding pass leaves a node
-    /// whose binding the edit sets to the edit (`keep_size_bindings`'
-    /// `sets_vars`), so the chip's detach appends nothing to read. The test
-    /// decides only an edit that sets one layer's binding and writes over
-    /// another's — a reset across several layers — which nothing here drives.
+    /// Coverage finding: dropping `variables_detached`' asked-for test stays green,
+    /// because `keep_size_bindings`' `sets_vars` already leaves a node whose binding
+    /// the edit sets, so the chip's detach appends nothing to read. Only an edit
+    /// setting one layer's binding and writing over another's would decide it.
     #[test]
     fn a_detach_the_commit_makes_is_said_and_one_asked_for_is_not() {
         use ondin_core::{Cell, Mode, VarKind, Variable};
@@ -2216,9 +1791,7 @@ mod tests {
 
     #[test]
     fn creating_after_adopting_a_document_does_not_collide() {
-        // The open-a-file bug: the id source used to survive `replace_document`
-        // while the document under it was swapped, so the next create re-minted
-        // an id the file already contained and silently failed.
+        // The id source must be re-seeded with the adopted document's ids.
         let mut s = EditorSession::new();
         for _ in 0..5 {
             add_rect(&mut s);
@@ -2248,37 +1821,18 @@ mod tests {
         assert!(!s.is_dirty(), "a failed edit must not dirty the document");
     }
 
-    /// **G16's loss, end to end**: a completed interaction that changed nothing
-    /// used to leave a document that was dirty, an undo step that undoes to the
-    /// picture it undid from, and — through `is_dirty` — an autosave and a crash
-    /// snapshot written for it.
+    /// A *full* transaction writing back what is already there is no undo step, no
+    /// dirt and no revision bump (so `empty_transactions_are_a_no_op` does not cover
+    /// it), and it still ends the gesture: the preview must not outlive it.
     ///
-    /// The transaction here is a *full* one, not an empty one, which is why
-    /// `empty_transactions_are_a_no_op` below did not already cover this: the
-    /// review found eleven doors emitting exactly this shape across three routes
-    /// (click, type and drag), and the empty test at the commit seam let every
-    /// one of them through.
-    ///
-    /// ⚠️ **The preview is still dropped, and that assertion is not decoration.**
-    /// Several callers rely on the commit to take a ghost off the canvas, so a
-    /// guard that returned before the clear would trade an undo step for a
-    /// gesture preview standing over the committed document — the stale-snapshot
-    /// failure `commit_inner` is already annotated for, arriving by a new door.
-    ///
-    /// Flip-checked by disabling the `changes_nothing` guard at `commit_inner`:
-    /// predicted to fail on the undo-depth assertion, and it did, `left: 2
-    /// right: 1`. ⚠️ **It said `can_undo` first and that assertion was vacuous** —
-    /// the setup's own `add_rect` is an undo step, so `!can_undo` was false
-    /// before the interesting commit ever ran and the test failed against the
-    /// *fixture*. A depth taken before and compared after is what asks the
-    /// question; `can_undo` could only ever have asked it on a session with no
-    /// history at all, which is not the session anybody edits in.
+    /// flip: `commit_inner`'s `changes_nothing` guard disabled → fails at the
+    /// undo-depth assertion. The depth is compared against one taken before, since
+    /// `can_undo` is already true from the fixture's own `add_rect`.
     #[test]
     fn an_edit_that_writes_back_what_is_already_there_is_not_an_undo_step() {
         let mut s = EditorSession::new();
         let id = add_rect(&mut s);
-        // Saved *after* the rect, so `dirty` below is about this commit alone and
-        // the undo depth to beat is the one the setup legitimately left.
+        // Saved *after* the rect, so `dirty` below is about this commit alone.
         s.mark_saved(PathBuf::from("x.ondin"));
         let (depth, revision) = (s.history.undo_depth(), s.revision);
 
@@ -2329,7 +1883,6 @@ mod tests {
         s.mark_saved(PathBuf::from("x.ondin"));
         assert!(!s.is_dirty());
 
-        // Undo is itself a change relative to what is on disk.
         s.undo();
         assert!(s.is_dirty());
     }
@@ -2360,8 +1913,7 @@ mod tests {
         assert!(s.commit(Transaction(vec![Operation::DeleteNode { id: r }])));
         assert!(s.selection.is_empty(), "deleted node must leave selection");
 
-        // Undo brings it back, but selection stays cleared rather than holding
-        // a stale id — re-selecting is the caller's business.
+        // Undo brings it back, but selection stays cleared.
         s.undo();
         assert!(s.doc.contains(r));
     }
@@ -2376,8 +1928,7 @@ mod tests {
         }]));
         assert!(s.has_preview());
 
-        // An invalid follow-up must drop the preview, not keep showing the old
-        // one as if the gesture were still valid.
+        // An invalid follow-up must drop the preview.
         s.set_preview(&Transaction(vec![Operation::SetOpacity {
             id: r,
             opacity: 9.0,
@@ -2415,7 +1966,6 @@ mod tests {
 
     #[test]
     fn preview_bounds_track_a_move_without_touching_the_document() {
-        // What selection outlines and transform handles read during a drag.
         let mut s = EditorSession::new();
         let r = add_rect(&mut s);
         let before = s.preview_world_bounds(r).expect("bounds");
@@ -2459,9 +2009,8 @@ mod tests {
     }
 
     /// A main frame laid out by `display` holding two rects, the first with
-    /// `insets`, and an instance of it beside — for the live preview of a main's
-    /// edit (build step 6).
-    /// Returns the session, the main's first rect and its copy in the instance.
+    /// `insets`, and an instance of it beside. Returns the session, the main's
+    /// first rect and its copy in the instance.
     fn main_and_instance(
         display: Option<ondin_core::container::Display>,
         insets: ondin_core::Insets,
@@ -2520,19 +2069,16 @@ mod tests {
         (s, a, copy)
     }
 
-    /// **A main's edit reaches its instance's copy while it is made, and lands where
-    /// the commit puts it** (build step 6, §5.3d's *preview*). Three edits of the
-    /// main's first rect, each previewed and then committed: a move in a plain
-    /// frame, a move of a layer pinned by insets (which the commit turns into new
-    /// insets, `keep_insets`), and a resize of a flex item (which the commit holds,
-    /// `keep_flex_sizes` — measured here for the held size at the box level, and on
-    /// stored values by `a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`).
-    /// In each, the copy's previewed box moved, and it equals the box
-    /// the commit then gives it. Flips, both run: `set_preview` without its
-    /// `propagate` call leaves the copy unmoved and fails *"the copy follows the
-    /// preview"* on the first edit; the pass run *before* the flex holds are added
-    /// fails the third, the copy previewed stretched to its frame's 200 where the
-    /// commit holds it at 45 — §15 D904's defect, arriving on the copy.
+    /// A main's edit reaches its instance's copy while it is made, and the previewed
+    /// box equals the committed one (§5.3d's *preview*): a move in a plain frame, a
+    /// move of a layer pinned by insets (`keep_insets`), and a resize of a flex item
+    /// (`keep_flex_sizes`; stored values are covered by
+    /// `a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`).
+    ///
+    /// flip: `set_preview` without its `propagate` call → fails at *"the copy
+    /// follows the preview"* on the first edit. flip: the pass run before the flex
+    /// holds are added → fails the third, the copy previewed stretched to 200 where
+    /// the commit holds it at 45.
     #[test]
     fn a_mains_edit_reaches_its_copy_in_the_preview_as_the_commit_will_place_it() {
         use ondin_core::container::{Display, Flex};
@@ -2579,32 +2125,19 @@ mod tests {
         }
     }
 
-    /// **A tool's transform write on a main's in-flow flex item follows onto its
-    /// copy bit for bit** — the flex instance's exact-equality path §5.3d had left
-    /// unmeasured, the kept flow translations. `rotate_node` and a left-handle
-    /// `resize_layer` each compose on the item's **slot** and write a transform
-    /// the door then rewrites (`kept_flow_translations`: the stored translation
-    /// kept, the new linear part taken) — so the value the main stores is the
-    /// door's arithmetic, never the tool's, and a copy that took anything else
-    /// would read as an override from then on, silently. The instance is resized
-    /// to 437.5 × 213 first, so the copy is laid unlike the main's item — the row
-    /// stretches it 213 tall where the main's is 200; the slot's origin is (0, 0)
-    /// in both, so it is the **height** doing this work, not the width (the
-    /// lesson of build step 5, whose fixtures were all instances the size of
-    /// their main): a follow computed from the copy's own slot would differ.
+    /// A tool's transform write on a main's in-flow flex item follows onto its copy
+    /// bit for bit. `rotate_node` and a left-handle `resize_layer` compose on the
+    /// item's **slot** and the door rewrites the transform
+    /// (`kept_flow_translations`: stored translation kept, new linear part taken),
+    /// so a copy that took the tool's value would read as an override silently. The
+    /// instance is resized to 437.5 × 213 first so the copy is laid unlike the
+    /// main's item; the **height** does the work, since the slot origin is (0, 0)
+    /// in both. A left-handle resize on the turned item writes a transform the door
+    /// drops whole, so there the size is what follows.
     ///
-    /// Measured: it follows exactly — `propagate` runs after `keep_flex_sizes` in
-    /// `commit_inner`, so the follow carries the door's value, not the tool's —
-    /// and the next edit still follows, so nothing was left reading as an
-    /// override. The left-handle resize on the turned item writes a transform the
-    /// door then drops whole (the shift kept at the stored translation changes
-    /// nothing), so there the size is what follows.
-    ///
-    /// Flip, run: `commit_inner`'s `propagate` handed the transaction as it
-    /// arrived, before `keep_insets` and `keep_flex_sizes` — the follows made from
-    /// the tool's write — fails *"a rotate: the transform followed exactly"*, the
-    /// copy's translation (37.51, −0.47) — the slot the tool composed on —
-    /// against the main's kept (20, 20).
+    /// flip: `commit_inner`'s `propagate` handed the transaction before `keep_insets`
+    /// and `keep_flex_sizes` → fails at *"a rotate: the transform followed
+    /// exactly"*.
     #[test]
     fn a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly() {
         use crate::preview::Handle;
@@ -2685,36 +2218,24 @@ mod tests {
         }
     }
 
-    /// **Where the copy's own container places it, the preview places it too**
-    /// (build step 6 — the three defects `arch-scribe` read in its first cut, each
-    /// reproduced here before it was fixed):
+    /// Where the copy's own container places it, the preview places it too. Cases,
+    /// one test each so a flip says which it reaches:
     /// - a **right-pinned copy in an instance wider than its main**, the main's
-    ///   layer moved: the commit's `keep_insets` makes the move insets, which the
-    ///   copy follows and is pinned by against its own width — previewed from the
-    ///   raw move it was drawn at the main's local placement, 100 to the left;
+    ///   layer moved: `keep_insets` makes the move insets, which the copy is pinned
+    ///   by against its own width;
     /// - an **instance root pinned right in a host frame**, its main resized: the
-    ///   root's follow is its size alone, and the commit's resolve keeps its right
-    ///   edge — taken for the hand's resize, it grew from its left;
+    ///   root's follow is its size alone and the commit keeps its right edge;
     /// - a **main's in-flow flex item moved**: the commit drops the translation
-    ///   (`kept_flow_translations`), so the copy stays in its slot — previewed from
-    ///   the raw move, with the follow taken for a drag, it was dragged along with
-    ///   the main's.
+    ///   (`kept_flow_translations`), so the copy stays in its slot;
+    /// - a `SetPivot` on a main's layer: the pivot preview names the main's layer,
+    ///   not the copy the last follow names.
     ///
-    /// And a `SetPivot` on a main's layer, which follows onto the copy: the pivot
-    /// preview names the main's layer, not the copy the last follow names. One
-    /// test per case, so a flip says which of them it reaches.
-    ///
-    /// Flips, each run over all four:
-    /// - `from_transaction_following` handing the follows to the layout passes as
-    ///   the hand's fails this one (x0 1055 where the commit puts 1155) and the
-    ///   pinned root's (x0 470 against 410 — grown from its left), not the flex
-    ///   one;
-    /// - `preview_follows` over the raw edit rather than the door's fails this one
-    ///   alone, the same 100;
-    /// - **the flex case fails only with both**, the copy previewed dragged to
-    ///   (1150, 90): the door drops the move's follow and the layout passes take no
-    ///   follow for a drag, two defences, either enough;
-    /// - the pivot read from the follows as well fails *"the main's pivot"*.
+    /// flip: `from_transaction_following` handing the follows to the layout passes
+    /// as the hand's → fails this one and the pinned root's, not the flex one.
+    /// flip: `preview_follows` over the raw edit → fails this one alone. The flex
+    /// case fails only with both flips (the door drops the move's follow and the
+    /// layout passes take no follow for a drag; either is enough). flip: the pivot
+    /// read from the follows → fails *"the main's pivot"*.
     #[test]
     fn a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it() {
         use ondin_core::{Insets, LengthPct};
@@ -2835,14 +2356,10 @@ mod tests {
         );
     }
 
-    /// A pinned copy with **its own value for the inset a move changes** and its
-    /// main's transform: the move's insets reach it as nothing (it overrides that
-    /// inset) while its transform follows, and the commit draws it by its own
-    /// insets, unmoved. `arch-scribe` read this as the case the layout split could
-    /// not reach — a copy with a transform follow and no insets override is never
-    /// queued for re-placing. Run before `preview_follows` restated the insets, it
-    /// failed: previewed x0 1055, the main's placement, where the commit leaves
-    /// 1070.
+    /// A pinned copy with **its own value for the inset a move changes**: its
+    /// transform follows the main's but the commit draws it by its own insets,
+    /// unmoved. Without `preview_follows` restating the insets it previews at the
+    /// main's placement.
     #[test]
     fn a_copy_pinned_by_its_own_inset_previews_unmoved_by_its_mains_move() {
         use ondin_core::{Insets, LengthPct};
@@ -2908,29 +2425,12 @@ mod tests {
         );
     }
 
-    /// **The origin readout has to follow a live preview, or its field cannot be
-    /// scrubbed** — §15 D245's shape, in the one place the overrides genuinely
-    /// cannot carry the value.
+    /// `preview_pivot_in` answers what `preview_pivot` does, and `previewed_pivot`
+    /// answers `Some` for any existing node, so `preview_pivot` always walks the box.
     ///
-    /// A scrubbed field re-reads its base every frame and adds that frame's delta.
-    /// `edit_valve` only *previews* while the pointer is down, so a base taken from
-    /// the committed node resets to the original on every frame: the number never
-    /// moves, the marker never moves, and typing works — which is exactly the report
-    /// D245 came in as.
-    /// **The two spellings agree, and `preview_pivot` always walked** (§15 D764).
-    ///
-    /// `preview_pivot_in` exists so a caller holding the box does not re-walk the
-    /// subtree for it; the value must be identical or the eight asks it removes
-    /// were not the same work. The second assertion is the one that says the
-    /// duplication was unconditional rather than occasional: `previewed_pivot`
-    /// answers `Some` for any node that exists, so the `?` in `preview_pivot` never
-    /// short-circuits ahead of the box walk, and `selection_handles`' four call
-    /// sites each paid for two.
-    ///
-    /// **Flip:** making `preview_pivot_in` ignore its argument and call
-    /// `preview_local_box` itself keeps the first assertion green — it is the same
-    /// box — and the point of the second is that nothing else here would notice.
-    /// The saving is established by reading the call site, which this names.
+    /// Coverage finding: making `preview_pivot_in` ignore its argument keeps the
+    /// first assertion green (it is the same box); the saving is established by
+    /// reading the call site in `selection_handles`.
     #[test]
     fn the_pivot_against_a_box_the_caller_has_is_the_pivot() {
         let mut s = EditorSession::new();
@@ -2948,6 +2448,10 @@ mod tests {
         );
     }
 
+    /// The origin readout follows a live preview: a scrubbed field re-reads its base
+    /// every frame and `edit_valve` only *previews* while the pointer is down, so a
+    /// base taken from the committed node would reset each frame and the number
+    /// would never move.
     #[test]
     fn the_origin_readout_follows_a_live_preview_rather_than_the_committed_node() {
         let mut s = EditorSession::new();
@@ -2959,7 +2463,6 @@ mod tests {
             "an untouched layer pivots on its centre"
         );
 
-        // What one frame of a scrub commits through the valve.
         let placed = ondin_core::geometry::pivot_placed_at(
             &NodeKind::Rect {
                 size: Size::new(10.0, 10.0),
@@ -2986,7 +2489,7 @@ mod tests {
             "and the document must not have been touched"
         );
 
-        // Previewing the *clear* is expressible too — the state a 50/50 asks for.
+        // Previewing the *clear* is expressible too.
         s.set_preview(&Transaction(vec![Operation::SetPivot {
             id: r,
             pivot: None,
@@ -3007,8 +2510,7 @@ mod tests {
 
     #[test]
     fn two_sessions_pick_different_actors() {
-        // Cross-session id collisions are what a fixed actor id caused; a random
-        // one is the property multiplayer will also need (§5.2).
+        // A fixed actor id would collide ids across sessions (§5.2).
         let a = EditorSession::new();
         let b = EditorSession::new();
         assert_ne!(a.ids.actor(), b.ids.actor());
@@ -3027,11 +2529,8 @@ mod tests {
         guide
     }
 
-    /// Guides and layers are never selected together, whichever way round the
-    /// two arrive. Every mutator has to clear the other half, and this is the
-    /// only place that says so — the inspector, Delete and the canvas all read
-    /// the pair as "one kind or the other" and would each be subtly wrong if a
-    /// mixed selection could exist.
+    /// Guides and layers are never selected together, whichever way round the two
+    /// arrive: every mutator clears the other half.
     #[test]
     fn selecting_a_guide_and_selecting_layers_are_exclusive() {
         let mut s = EditorSession::new();
@@ -3043,7 +2542,6 @@ mod tests {
         assert_eq!(s.selection.guides(), [guide.id]);
         assert!(s.selection.ids().is_empty(), "the layer must have let go");
 
-        // And back the other way, through each of the four node mutators.
         for select in [
             Selection::set_one,
             Selection::add,
@@ -3058,18 +2556,16 @@ mod tests {
             );
         }
 
-        // The two emptiness questions are different, and the canvas colour
-        // picker's orphan rule turns on which one it asks: with a guide
-        // selected there are no *layers*, but the inspector does have a
-        // subject, so the picker the empty inspector opened has to close.
+        // The two emptiness questions differ, and the canvas colour picker's orphan
+        // rule turns on which it asks: with a guide selected there are no *layers*,
+        // but the inspector has a subject.
         s.selection.set_guide(guide.id);
         assert!(s.selection.is_empty(), "no layers are selected");
         assert!(!s.selection.nothing(), "but something is");
         s.selection.clear();
         assert!(s.selection.nothing());
 
-        // Deleting the guide prunes it from the selection, as deleting a node
-        // does — `retain_existing` runs on every commit and undo.
+        // Deleting the guide prunes it, as deleting a node does.
         s.selection.set_guide(guide.id);
         assert!(s.commit(Transaction(vec![Operation::RemoveGuide { id: guide.id }])));
         assert!(s.selection.guides().is_empty());
@@ -3079,14 +2575,10 @@ mod tests {
         assert!(s.selection.guides().is_empty());
     }
 
-    /// Several guides at once, by Shift+click — and the layer half of the
-    /// selection stays empty through all of it.
-    ///
-    /// **The invariant the widening could have broken**: `is_empty`, `len` and
-    /// `single` answer about layers, so *two* selected guides must still read as
-    /// no layers, not as two of them. Every caller gating node work asks one of
-    /// those three, and a guide passing that gate would be handed to `align`,
-    /// `nudge` or `outermost` as though it were a node id.
+    /// Several guides at once, by Shift+click, with the layer half empty throughout:
+    /// `is_empty`, `len` and `single` answer about layers, so *two* selected guides
+    /// must read as no layers, or a guide would reach `align`, `nudge` or
+    /// `outermost` as a node id.
     #[test]
     fn guides_multi_select_without_ever_reading_as_layers() {
         let mut s = EditorSession::new();
@@ -3103,14 +2595,11 @@ mod tests {
         assert!(s.selection.has_guide(a.id) && s.selection.has_guide(b.id));
         assert!(!s.selection.has_guide(c.id));
 
-        // The layer half is untouched, however many guides are held.
         assert!(s.selection.is_empty(), "two guides are still no layers");
         assert_eq!(s.selection.len(), 0);
         assert_eq!(s.selection.single(), None);
         assert!(!s.selection.nothing());
 
-        // Toggling the same one again takes it back out — the way back from a
-        // three-guide selection without starting over.
         s.selection.toggle_guide(b.id);
         assert_eq!(s.selection.guides(), [a.id]);
 
@@ -3126,34 +2615,25 @@ mod tests {
         assert!(s.selection.ids().is_empty());
         assert_eq!(s.selection.guides(), [a.id]);
 
-        // Pruning keeps the survivors rather than clearing the set: removing one
-        // of two guides must not deselect the other.
+        // Pruning keeps the survivors.
         s.selection.toggle_guide(b.id);
         assert!(s.commit(Transaction(vec![Operation::RemoveGuide { id: a.id }])));
         assert_eq!(s.selection.guides(), [b.id]);
     }
 
-    /// *View ▸ Lock guides* has to let go of any guide it is holding — locked means
-    /// unselectable, and a guide left selected would be *selected but
-    /// unselectable*. It has nothing to say about **layers**.
-    ///
-    /// The distinction is easy to lose to the exclusivity invariant: because a
-    /// guide selection and a layer selection cannot coexist, "there is only ever
-    /// one of the two to drop" reads as though clearing everything were harmless.
-    /// It is not — with layers selected there are no guides to drop, so clearing
-    /// achieved nothing except deselecting the user's work.
+    /// *View ▸ Lock guides* lets go of any held guide (locked means unselectable)
+    /// but leaves **layers** alone; clearing everything would only deselect the
+    /// user's work.
     #[test]
     fn clearing_guides_leaves_a_layer_selection_alone() {
         let mut s = EditorSession::new();
         let (rect, other) = (add_rect(&mut s), add_rect(&mut s));
         let guide = add_guide(&mut s, 40.0);
 
-        // Holding guides: they go.
         s.selection.set_guide(guide.id);
         s.selection.clear_guides();
         assert!(s.selection.guides().is_empty());
 
-        // Holding layers: they stay, key included.
         s.selection.set(vec![rect, other]);
         s.selection.set_key(other);
         s.selection.clear_guides();
@@ -3163,9 +2643,7 @@ mod tests {
 
     // --- the key layer ----------------------------------------------------
 
-    /// The designation is explicit and reversible by the same gesture, which is
-    /// the only way back to aligning against the selection's union without
-    /// dropping the selection and rebuilding it.
+    /// The designation is explicit and reversible by the same gesture.
     #[test]
     fn designating_the_key_twice_clears_it() {
         let mut s = EditorSession::new();
@@ -3179,8 +2657,7 @@ mod tests {
         assert_eq!(s.selection.key(), None, "the same click undesignates");
     }
 
-    /// A key has to be one *of* the selection. A key outside it would align the
-    /// others to a layer nothing shows is involved.
+    /// A key has to be one *of* the selection.
     #[test]
     fn a_layer_outside_the_selection_cannot_be_made_key() {
         let mut s = EditorSession::new();
@@ -3190,10 +2667,8 @@ mod tests {
         assert_eq!(s.selection.key(), None);
     }
 
-    /// **A key means nothing with nothing to contrast against.** Below two layers
-    /// `key()` answers `None` however the selection got there, so align falls back
-    /// to the container and the canvas has nothing to mark — one rule, in one
-    /// place, rather than three consumers each remembering it.
+    /// Below two layers `key()` answers `None` however the selection got there, but
+    /// the designation survives growing the selection back.
     #[test]
     fn a_key_is_not_reported_for_a_selection_of_one() {
         let mut s = EditorSession::new();
@@ -3205,14 +2680,11 @@ mod tests {
         assert_eq!(s.selection.len(), 1);
         assert_eq!(s.selection.key(), None, "one layer, so no key");
 
-        // ...but the designation survives, so growing the selection back does not
-        // silently lose it.
         s.selection.toggle(a);
         assert_eq!(s.selection.key(), Some(b));
     }
 
-    /// Deselecting the key gives it up. Keeping it would leave a key outside the
-    /// selection — the state `set_key` refuses to create in the first place.
+    /// Deselecting the key gives it up; it does not come back on re-selection.
     #[test]
     fn deselecting_the_key_drops_the_designation() {
         let mut s = EditorSession::new();
@@ -3222,14 +2694,11 @@ mod tests {
 
         s.selection.toggle(b);
         assert_eq!(s.selection.key(), None);
-        // And it does not come back when b is re-selected: the designation was
-        // given up, not parked.
         s.selection.toggle(b);
         assert_eq!(s.selection.key(), None);
     }
 
-    /// Replacing the selection replaces the key with it — including the marquee,
-    /// which goes through `set` and whose ordering is arbitrary anyway.
+    /// Replacing the selection replaces the key with it, the marquee's `set` included.
     #[test]
     fn replacing_the_selection_clears_the_key() {
         let mut s = EditorSession::new();

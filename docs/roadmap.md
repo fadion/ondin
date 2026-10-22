@@ -7,20 +7,18 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
-**What was measured (2026-10-20):** comments are **8.4 MB of the 17 MB of Rust (49%)**:
-`ondin-app` 5.3 of 10.5 MB, `ondin-core` 2.3 of 4.8 MB, `ondin-render` 0.5 of 1.0 MB,
-`ondin-export` 0.3 of 0.7 MB. About 4.7 MB of that sits in test code and 3.7 MB in production.
-The worst files: `panels/inspector.rs`, `canvas.rs` and `app.rs` each carry 650–710 KB of
-comments, about half of each file. Next come `dashboard.rs`, `typography.rs`, `core/text.rs`,
-`ui.rs`, `tools/mod.rs` and `svg_in.rs`, at 240–320 KB each. 1,175 doc runs are 20 lines or
-longer. D-number citations appear 8,700 times.
+**Where it stands (2026-10-22):** a first pass has covered every file that had more than ~60
+comment lines over 25%. Comments are **4.2 MB of the 13.2 MB of Rust (32% by bytes, 19% by
+lines)**, down from 49% by bytes; D-number citations appear about 2,700 times. Most of what is
+left is in the files trimmed first, which still hold 75–225 KB of comments each:
+`canvas.rs`, `panels/inspector.rs`, `app.rs`, `panels/typography.rs`, core `text.rs`,
+`dashboard.rs`, `ui.rs`, `tools/mod.rs`, core `build.rs` and `svg_in.rs`. Two files the first
+pass skipped carry the same weight: `panels/component.rs` and `panels/layout.rs`.
 
-**Why:** an agent reading code pays for every comment line, so half of every code read is prose.
-Much of that prose is the same history the docs had: amendment trails, "found in session N",
-flip-check write-ups, §15 citation chains and counts that have gone stale. The docs went
-state-only on 2026-10-18 (CLAUDE.md 175 → 11 KB, architecture 1.5 MB → a 4 KB index and
-per-subsystem files). The comments are the last place that history piles up, and they are read
-far more often than the docs.
+**Why:** an agent reading code pays for every comment line. Much of that prose was the same
+history the docs had: amendment trails, "found in session N", flip-check write-ups, §15
+citation chains and counts that have gone stale. The comments are read far more often than the
+docs.
 
 **The rule to apply** is `AGENTS.md`'s *Code comments*, in force for new comments since
 2026-10-20. For the trim, one addition: an existing `§15 D<n>` citation may stay as a bare
@@ -33,31 +31,21 @@ pointer when the archived reasoning matters; otherwise drop it.
   edit carries off its item.
 - Comment-only changes. Each batch runs `cargo fmt`, `cargo check --all-targets`, the doc gate
   (`--document-private-items`) and `cargo test`, then commits per crate or per large file.
-- After each batch, `git diff` should show no change outside `//` lines (`git diff -U0 | grep '^[+-]' | grep -v '^[+-][[:space:]]*//'` returns only the file headers).
-- Order: across every crate, most comment lines first. Done (19–31% comments now): in
-  `ondin-app`, `inspector.rs`, `canvas.rs`, `app.rs`, `dashboard.rs`, `typography.rs`,
-  `ui.rs`, `tools/mod.rs`, `layers.rs`, `menu.rs`, `input.rs`, `rulers.rs`,
-  `panels/export.rs`, `fonts/mod.rs`, `session.rs`, `panels/picker.rs`, `panels/paint.rs`,
-  `library/cover.rs`, `cursor.rs`, `snap.rs`, `settings.rs`, `main.rs`, `atomic.rs` and
-  `library/relocate.rs`, `chrome.rs`, `prefs.rs`, `measure.rs` and the `library/` modules
-  `scan.rs`, `recovery.rs`, `state.rs`, `store.rs` and `project.rs`; in `ondin-core`,
-  `text.rs`, `svg_in.rs`, `build.rs`, `image.rs`, `typography.rs`, `boolean.rs`,
-  `resolve.rs`, `geometry.rs`, `document.rs`, `op.rs`, `query.rs`, `io/schema.rs`,
-  `layout.rs`, `naming.rs` and `component.rs`; in `ondin-render`, `scene.rs`, `images.rs`,
-  `renderer.rs`, `effects.rs`, `gpu.rs`, `cpu.rs`, `fx_gpu.rs` and `tests/gpu_effects.rs`;
-  in `ondin-export`, `svg.rs`, `snapshot.rs`, `tests/svg_roundtrip.rs` and
-  `tests/goldens.rs`. Smaller files go several to an agent. Trimmed but still 34–41%, being mostly one-line docs on constants, variants and
-  fields: `theme.rs`, `preview.rs`, core `node.rs` and core `effect.rs`.
+- Order: most comment bytes first. Files under ~250 comment lines go several to an agent.
+  Files that are mostly one-line docs on constants, variants and fields (`theme.rs`,
+  `preview.rs`, core `node.rs`) sit at 34–41% by lines and have little left to cut.
 - One agent per file at a time: two in one file break each other's exact-match edits. A range
   of ~6,000 lines is one agent; the next starts at the item the last one names.
+- Agents must not write a `flip:` claim they have not run, and must report a stated flip the
+  test cannot reach. They do not move docs; they report a doc sitting on the wrong item, and
+  the orchestrator moves it.
 - rustfmt pulls a one-line `//` between array elements onto the element above; keep such a
   comment two lines long or delete it.
-- The comment-only check that also catches trailing comments: strip `^\s*//` and blank lines
-  from `HEAD` and from the file, and `diff` the two.
+- The comment-only check: strip `^\s*//` lines from `HEAD` and from the file, `diff` the two,
+  and drop blank-only hunks. A removed trailing comment shows up as a code-line change.
 
-**Cost:** about 300k subagent tokens per 6,000-line range, so roughly 13M for the rest of the
-tree; Sonnet does the test modules as well as the default model. Target: comments down to about
-15–20% of the source.
+**Cost:** about 150–250k Sonnet tokens per agent at ~1,000 comment lines each. Target: comments
+down to about 15–20% of the source by bytes.
 
 ## Later · Components and layout
 

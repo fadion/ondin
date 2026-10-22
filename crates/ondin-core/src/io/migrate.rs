@@ -10,16 +10,9 @@ use serde_json::Value;
 
 /// Migrate a raw document value up to the current schema version.
 ///
-/// ⚠️ **The range check is done in the header's own denomination and the value is
-/// never narrowed** (§15 D638). The header is whatever `serde_json` parsed, so it
-/// can be any `u64`, and `as u32` before the comparison makes `version > CURRENT`
-/// mean something other than what it reads as: `8589934592` (2³³) truncates to
-/// **0** and is migrated through the whole v0→v4 chain as though it were the
-/// oldest file this loader knows, and `u64::MAX` was refused with a message
-/// naming `4294967295` — a version the file does not claim. Comparing first is
-/// the whole fix; below `CURRENT` the value provably fits, and the `match` runs
-/// on the same `u64` rather than on a second copy that could disagree with the
-/// one the guard read.
+/// The range check is made on the header's own `u64` and the value is never
+/// narrowed (§15 D638): `as u32` first would truncate 2³³ to 0 and migrate it as
+/// the oldest file, and name a version the file does not claim in the refusal.
 pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
     loop {
         let version = value
@@ -55,13 +48,10 @@ fn migrate_0_to_1(value: &mut Value) {
 }
 
 /// v1 → v2. A rect's single `corner_radius` became per-corner `corner_radii`
-/// (§5.3), so an old file's one number is spread over all four corners — which
-/// is exactly the shape it described.
+/// (§5.3); an old file's one number is spread over all four corners.
 ///
-/// A node whose `kind` is not a `Rect`, or a `Rect` already carrying
-/// `corner_radii`, is left alone: the loop has to tolerate anything the JSON
-/// can hold, because rejecting here would turn a slightly odd file into a
-/// failure to open rather than a `DocumentDto` parse error that says why.
+/// A node that is not a `Rect`, or already carries `corner_radii`, is left alone:
+/// rejecting here would hide the `DocumentDto` parse error that says why.
 fn migrate_1_to_2(value: &mut Value) {
     if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
         for node in nodes {
@@ -90,27 +80,17 @@ fn migrate_1_to_2(value: &mut Value) {
     value["schema_version"] = Value::from(2u32);
 }
 
-/// v2 → v3. The text attribute model (§5.4, `typography.rs`) split one flat
-/// `TextStyle` into three scopes, and two of its fields changed shape rather than
-/// merely gaining neighbours — which is exactly what a version bump is for. The
-/// rest of the growth is additive and rides `#[serde(default)]`.
+/// v2 → v3. The text attribute model (§5.4, `typography.rs`) split `TextStyle`
+/// into three scopes; the rest of the growth is additive under `#[serde(default)]`.
 ///
-/// 1. **`line_height` was a bare multiplier**, and is now
-///    `Option<Length>` — `None` for Auto (the font's own), `{"Em": m}` for a
-///    multiple of the font size. A v2 file's number is `Em(m)`: exactly what it
-///    meant. Leaving serde to do it would default the field to `None` and
-///    silently retype every document ever saved.
-/// 2. **`align` moved out of the character defaults** and into the paragraph
-///    scope, where it belongs and where a per-paragraph version can later find
-///    it. `Left`/`Right` are preserved verbatim rather than mapped to
-///    `Start`/`End`: an old file said *left*, and turning that into "the start
-///    edge, whichever that is" would flip the alignment of the first RTL
-///    document anyone opened.
+/// 1. `line_height` was a bare multiplier and is now `Option<Length>`: a v2
+///    number `m` loads as `{"Em": m}`; serde alone would default it to `None`.
+/// 2. `align` moved from the character defaults to the paragraph scope.
+///    `Left`/`Right` are preserved verbatim, not mapped to `Start`/`End`, which
+///    would flip an old file's alignment in an RTL document.
 ///
-/// Anything that is not a `Text` node, or a `Text` node already carrying the new
-/// shape, is left alone — the loop has to tolerate whatever the JSON holds,
-/// because rejecting here turns a slightly odd file into a failure to open
-/// rather than a `DocumentDto` parse error that says why.
+/// A node that is not `Text`, or already carries the new shape, is left alone:
+/// rejecting here would hide the `DocumentDto` parse error that says why.
 fn migrate_2_to_3(value: &mut Value) {
     if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
         for node in nodes {
@@ -131,10 +111,8 @@ fn migrate_2_to_3(value: &mut Value) {
             let Some(obj) = text.as_object_mut() else {
                 continue;
             };
-            // `skip_serializing_if` keeps a default paragraph block out of the
-            // file, so only a document that had a non-default alignment gains a
-            // key here — and `Start` is the new default, which is what a v2
-            // `Left` file re-saves as only if it *was* left-aligned anyway.
+            // A default paragraph block is not written, so only a non-default
+            // alignment gains a key here.
             if let Some(align) = align.filter(|a| a.as_str() != Some("Start")) {
                 obj.insert("paragraph".into(), serde_json::json!({ "align": align }));
             }
@@ -148,20 +126,13 @@ fn migrate_2_to_3(value: &mut Value) {
 /// `{"Artboard": {"size": …}}` with the brush prepended to that node's `fills` as
 /// an ordinary visible entry.
 ///
-/// **Prepended, not appended, and it matters on exactly one shape of file.** The
-/// list is the z-order, bottom first, and a frame's background was painted behind
-/// everything the frame's own paint drew. A v3 frame could not have a fill —
-/// `SetFills` refused an `Artboard` — so today that list is always empty and the
-/// two are the same operation; the rule is written the way it is so a file some
-/// future reader hands this function does not have its ground painted on top of
-/// its own artwork.
+/// Prepended, not appended: the list is z-order, bottom first, and the background
+/// was painted behind the frame's own paint. A v3 frame could not have a fill, so
+/// the list is normally empty and the two agree; prepending keeps the ground
+/// from landing on top of artwork in any other file.
 ///
-/// A `null` background — which is how "no ground" was written — contributes no
-/// fill, which is exactly what it meant. A node that is not an `Artboard`, or an
-/// `Artboard` already carrying no `background` key, is left alone: the loop has to
-/// tolerate anything the JSON can hold, because rejecting here turns a slightly
-/// odd file into a failure to open rather than a `DocumentDto` parse error that
-/// says why.
+/// A `null` background (how "no ground" was written) contributes no fill. A node
+/// that is not an `Artboard`, or has no `background` key, is left alone.
 fn migrate_3_to_4(value: &mut Value) {
     if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
         for node in nodes {
@@ -174,14 +145,11 @@ fn migrate_3_to_4(value: &mut Value) {
             else {
                 continue;
             };
-            // The `Fill` shape: a brush and a flag. A background was always drawn
-            // when it was there, so `true` is what every one of them meant.
+            // A background was always drawn, so `visible: true`.
             let fill = serde_json::json!({ "brush": bg, "visible": true });
-            // `paint` is not `skip_serializing_if`, so every node this writer ever
-            // emitted has one with both lists in it — but a hand-edited file may
-            // not, and losing the ground is a worse answer than filling in the
-            // field the loader is about to read. Built up a level at a time so a
-            // frame carrying strokes and no `fills` key keeps its strokes.
+            // Every written node has `paint` with both lists, but a hand-edited
+            // file may not, and losing the ground is worse than filling the field
+            // in. Built a level at a time so existing strokes are kept.
             let paint = node.as_object_mut().map(|n| {
                 n.entry("paint")
                     .or_insert_with(|| serde_json::json!({ "fills": [], "strokes": [] }))
@@ -202,17 +170,13 @@ fn migrate_3_to_4(value: &mut Value) {
 /// v4 → v5: every item of a node's five item lists gains an id (§15 D980).
 ///
 /// `paint.fills`, `paint.strokes`, `effects`, `exports` and `grids` — each item is
-/// given `"id": "0:<index>"`, `ItemId::positional`'s wire form. **Deterministic**,
-/// so a migrated document saves to the same bytes twice (invariant 9), and unique
-/// within the list it numbers, which is the only uniqueness an item id owes. A v4
-/// file holds no instances, so there is no match across nodes for a positional id
-/// to get wrong; the ids a session mints later are actor 0's only improbably
-/// (`session::random_actor` is an unguarded hash), and `reserve_existing_ids`
-/// starts such a session past every item id in use, which is the actual guard.
+/// given `"id": "0:<index>"`, `ItemId::positional`'s wire form. Deterministic, so a
+/// migrated document saves to the same bytes twice (invariant 9), and unique
+/// within its list. A v4 file holds no instances, so no cross-node match can go
+/// wrong; `reserve_existing_ids` starts a later session past every item id in use.
 ///
-/// An item that somehow already carries an `id` keeps it, and a list that is not
-/// an array, or an item that is not an object, is left for the loader to refuse
-/// with a message — the tolerance `migrate_3_to_4` states for the same reason.
+/// An item that already carries an `id` keeps it, and a list that is not an array
+/// or an item that is not an object is left for the loader to refuse.
 fn migrate_4_to_5(value: &mut Value) {
     fn number(list: Option<&mut Value>) {
         let Some(items) = list.and_then(Value::as_array_mut) else {
@@ -239,28 +203,22 @@ fn migrate_4_to_5(value: &mut Value) {
     value["schema_version"] = Value::from(5u32);
 }
 
-/// v5 → v6: the vault (§15 D1012). **A number and nothing else** — a v5 file has
-/// no vault and no origins, which is exactly what v6 reads absent keys as.
+/// v5 → v6: the vault (§15 D1012). A number and nothing else: a v5 file has no
+/// vault and no origins, which v6 reads from absent keys.
 ///
-/// The bump is for the older build's sake, which §5.11 names as a reason of its
-/// own: a v5 reader has no `deny_unknown_fields`, so it would drop the `vault`
-/// key and refuse the file over the vault itself — *"non-root node … has no
-/// parent"*, the first check to meet it (`tests/kits.rs` pins that message) —
-/// rather than over its age. With the bump it says the file is newer than it,
-/// which is true.
+/// The bump is for the older build's sake (§5.11): a v5 reader would drop the
+/// `vault` key and refuse the file with *"non-root node … has no parent"*
+/// (`tests/kits.rs` pins that message) instead of saying it is newer.
 fn migrate_5_to_6(value: &mut Value) {
     value["schema_version"] = Value::from(6u32);
 }
 
-/// v6 → v7: variables and modes (§5.3f, §15 D1039). **A number and nothing
-/// else**, `migrate_5_to_6`'s reason exactly: a v6 file has no variables, no
-/// modes and no bindings, which is what v7 reads absent keys as, and a v6 reader
-/// would drop the `variables` key and then refuse a bound fill as a malformed
-/// brush — the wrong complaint.
+/// v6 → v7: variables and modes (§5.3f, §15 D1039). A number and nothing else, for
+/// `migrate_5_to_6`'s reason: a v6 file has no variables, modes or bindings, and a
+/// v6 reader would drop `variables` and refuse a bound fill as a malformed brush.
 ///
-/// **The published document too** (§5.11's debt, D1037 premise (i)): it is a
-/// document of the outer one's version, nested where the ladder does not look,
-/// so its number is moved here with the outer one's.
+/// The published document is nested where the ladder does not look, so its number
+/// moves with the outer one's (§5.11, D1037).
 fn migrate_6_to_7(value: &mut Value) {
     value["schema_version"] = Value::from(7u32);
     if let Some(inner) = value
@@ -272,13 +230,11 @@ fn migrate_6_to_7(value: &mut Value) {
     }
 }
 
-/// v7 → v8: step 2's bindings (§15 D1058) — a container's gaps and padding
-/// bound to number variables. **A number and nothing else** again: a v7 file
-/// binds none, which is what v8 reads the absent key as. The bump is for the
-/// older build, and here it is not a wrong complaint it saves but a **silent**
-/// one: a v7 reader would drop `spacing_vars` without a word and lay every bound
-/// gap and padding out at the 0 its literal holds. The published document's
-/// number moves with the outer one's, `migrate_6_to_7`'s rule.
+/// v7 → v8: a container's gaps and padding bound to number variables (§15
+/// D1058). A number and nothing else: a v7 file binds none. The bump is for the
+/// older build, which would silently drop `spacing_vars` and lay bound gaps and
+/// padding out at their literal 0. The published document's number moves too, as
+/// in `migrate_6_to_7`.
 fn migrate_7_to_8(value: &mut Value) {
     value["schema_version"] = Value::from(8u32);
     if let Some(inner) = value

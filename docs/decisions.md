@@ -96,7 +96,8 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D81** SVG text is one `<text>` per line and one `<tspan>` per run. **D611** A layer's name is written as `data-name`.
 - **D394** SVG import (`svg_in`, roxmltree) is a paste path into one `Transaction`. What it cannot hold is reported, never lost silently. **D806** It has a small CSS cascade.
 - **D274** Export settings live on the layer and are saved with the document.
-- **D1098** Code export (designed, not built) is one DOM core writing HTML/CSS, React and Vue, with every downgrade reported.
+- **D1098** Code export is one DOM core writing HTML/CSS, React and Vue, with every downgrade reported. Plain HTML/CSS is built; React and Vue are not.
+- Code export's CSS tier holds only what headless Chrome draws as the canvas does: an all-sides stroke as an offset `outline`, per-side `border`s only inside, on square corners and a childless layer, linear, concentric radial and similarity sweep gradients, one zero-spread drop shadow, and an automatic line height as the canvas's px. The rest goes to inline SVG.
 
 ## Files, library and storage
 

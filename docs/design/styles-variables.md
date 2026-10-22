@@ -150,7 +150,7 @@ A vendored kit's variables and styles sit **in the consumer's own tables**, each
 - **Chrome**: the `--` list, the swatch Variables face, the browser and *Apply style…* list kits' last, each under its mark and name. The browser's kit header carries the mapping per mode column (a click opens the kit's modes and *Match by name*); kit groups fold under `\u{2}kit\u{2}path`; rows are inert (count selects users; no rename, cells, menu or *Duplicate*); a kit's style offers *Select* only. The update toast and popover count variables and styles updated/removed (old → new, with a removal's detach count); a kit header reads *· v8 → v9* while an update waits. Not built: a kit variable no held main reads can't be bound.
 
 ### Not built / deferred
-- **CSS-custom-property export** belongs to code export (HTML/CSS and framework code), a later feature: a tree-shaken `tokens.css` with the default mode on `:root` and others as `[data-mode="…"]`, styles resolved into each user with variables kept as `var()` (§15 D1098). §7 writes paint as presentation attributes today.
+- **CSS-custom-property export** belongs to code export (§7, §15 D1098), which today writes every bound value as its number: a tree-shaken `tokens.css` with the default mode on `:root` and others as `[data-mode="…"]`, styles resolved into each user with variables kept as `var()`. Aliases must be redeclared in every mode block: measured in Chrome, an alias declared only on `:root` keeps the default mode's value inside a `[data-mode]` subtree. The unit for a bound opacity is still owed (D1072). The SVG writer writes paint as presentation attributes.
 - The swatch Variables face's row hover preview (D1038).
 
 ### Traps

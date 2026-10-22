@@ -1,6 +1,6 @@
 # 7. ondin-export
 
-The export crate: SVG, PNG, JPEG, the MCP snapshot, the export plan and the CLI. It also documents the SVG writer's mirror, the `svg_in` reader, where the two meet.
+The export crate: SVG, PNG, JPEG, code export (HTML/CSS), the MCP snapshot, the export plan and the CLI. It also documents the SVG writer's mirror, the `svg_in` reader, where the two meet.
 
 ## 7. ondin-export
 
@@ -65,7 +65,24 @@ The export crate: SVG, PNG, JPEG, the MCP snapshot, the export plan and the CLI.
 - An image fill the table cannot answer for exports as the **missing-image placeholder** (`emit_missing`, off `ondin_core::missing_placeholder`, with `clipPath` `mi-<node>-<slot>`), never as a dangling `url(#...)`, and forces stacking. A stroke with an unanswerable image writes `none` (the canvas draws nothing). A frame's ground is an ordinary fill and goes through the same path.
 - **Two-walk gate**: `ondin-export/tests/two_walks.rs` compares the *ink set* (which nodes each walk puts paint down for, through a unique solid colour per node) between this emitter and the scene walk (§4 invariant 11). The two recorded divergences were of that kind.
 - **Variables** arrive as resolved values: each node's paint is taken through `Document::resolved_paint` in the mode in force there; helpers read only literal brushes; a bound corner arrives as `rx` through the used kind. Paint is presentation attributes; `style` appears only for an alpha mask's `mask-type`.
-- **No HTML/CSS export exists.** Code export is designed (§15 D1098) and not built: a DOM core with HTML/CSS, React and Vue emitters, a pipeline separate from `ExportSpec` -> `plan` -> `PlannedFile` (which it asks for raster assets), and a report of every downgrade modelled on `Export`'s `approximated`. CSS custom-property export belongs there.
+
+### Code export
+
+- `code::html::html_of(doc, res, origins) -> CodeExport` writes plain HTML/CSS: `index.html`, one `styles.css` (one class per element, slugged from the layer name, the kind's name standing in, a numeric suffix on repeats), `assets/*.png` and `report.txt`. One core (`code::walk`) builds the element tree and an emitter prints it; only the plain HTML emitter exists, and it writes an instance out as its layers. The pipeline is separate from `ExportSpec` -> `plan` -> `PlannedFile` and asks the SVG and PNG writers for what CSS cannot draw (§15 D1098).
+- **`CodeExport`** carries two lists, kept apart as `Export`'s are: `approximated` (the page draws differently from the canvas; this list is the contract) and `positioned` (draws right, but as fixed positions or a picture: a group without `display`, a layer written as SVG).
+- **Values are resolved**: bound paint, effects and opacity are written as their numbers. No `var()` and no `tokens.css` yet.
+- **Three tiers per layer**, the first that draws it exactly, judged on the layer's own features (its children choose their own; `Walk::css_blocker`):
+  1. CSS on a `div`: frames, groups, rects, ellipses and text (a `p` per paragraph, a `span` per run whose face differs from the node's).
+  2. The subtree as inline SVG through `svg::svg_of_reported`: other kinds, masks, and paint or effects with no CSS form below.
+  3. A 2× PNG through `png::raster_of` when the SVG writer itself reports an approximation; reported as approximated.
+- **Placement**: every element is positioned (`relative` in a flow, `absolute` out of one) so siblings paint in tree order. An out-of-flow layer gets `left`/`top` at its slot (`container::slot_of`) and its linear transform as a `matrix()` about the box centre, CSS's default `transform-origin`; a group without a layout has no box and turns about its origin. Insets inside a frame or a laid-out container are written as `left`/`right`/`top`/`bottom` in their own units. Flex and grid are written under the model's names, `Start`/`End` as `flex-start`/`flex-end`. A flow item that is neither text nor a laid-out container gets `min-width`/`min-height` of its own size, so the layout does not squeeze it below it as it would an empty `div`.
+- **CSS forms**, measured in headless Chrome against the CPU renderer:
+  - **Strokes**: an all-sides stroke is an `outline` (which follows `border-radius`) offset by −w inside, −w/2 centred, 0 outside; on square corners a centred or outside one goes to SVG unless mitred with a limit of at least √2. A per-side stroke is `border`s only when inside, square-cornered and on a layer with no children: through a rounded corner CSS tapers one width into the next where the canvas splits the arc. One solid, undashed stroke at most.
+  - **Gradients**: linear (pad or repeat) at any angle under any affine; a concentric, growing radial under an axis-aligned transform; a sweep as a non-repeating `conic-gradient` under a rotation and uniform scale. Reflect, a focal or shrinking radial and non-sRGB interpolation go to SVG, as do image fills.
+  - **Effects** are one `filter`: blurs, then the drop shadow, each at `effect::deviation` (radius × 0.5). Only one drop shadow, with zero spread, since CSS chains `drop-shadow()`s; spread, inner shadows and colour filters go to SVG.
+  - **Corner radii** are clamped per corner to half the short side, so CSS's proportional scaling never applies.
+  - **Text** is CSS with at most one fill, solid, and no stroke, off a path; otherwise SVG. An automatic line height is written as the px the canvas laid (`TextLayout::line_height`), because `normal` reads a different metrics table per browser and platform; a run of another size or font under it is reported, as are line limits, box trim, hanging indents and list markers. Fonts are named, never shipped.
+- **Fidelity bar**: `ondin-export/tests/code_fidelity.rs` screenshots each fixture's page in headless Chrome (`ONDIN_BROWSER`, else the usual install paths; skipped with a note when none is found, failing when `CI` is set) and compares it with `png::raster_of` by mean channel error per 8×8 cell over white. Text fixtures are compared after one 3×3 box blur at a lower limit, with the bundled Inter given to the page. A fixture must report nothing approximated.
 
 ### Raster
 
@@ -87,12 +104,12 @@ The export crate: SVG, PNG, JPEG, the MCP snapshot, the export plan and the CLI.
 
 ### CLI
 
-- `ondin export <file> [--svg|--png|--json] [--scale <n>|--width <px>|--height <px>] [-o out]` runs headless, no GPU. `ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]` runs the **document's own** export settings (every layer carrying any); it is a different command, so `--all --png` is refused.
+- `ondin export <file> [--svg|--png|--json|--html] [--scale <n>|--width <px>|--height <px>] [-o out]` runs headless, no GPU. `--html` writes the code export of the top-level layers as a zip, and a count line on stderr when the report is not empty. `ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]` runs the **document's own** export settings (every layer carrying any); it is a different command, so `--all --png` is refused.
 - On Windows a release `ondin.exe` is GUI-subsystem with no console, so the CLI is reached through the console twin `ondin.com` beside it, which runs `ondin.exe` with its own standard handles. It exits with the child's code whole (no clamp to a byte) and puts the child in a kill-on-close job object so Ctrl+C ends the export. A non-Unicode argument is refused with exit 2.
 - One document: a second positional is refused naming both files. `-o` takes a filename and refuses an argument beginning with `-` (otherwise `-o --png` swallowed the format flag and wrote SVG into a file named `--png`).
 - With no `-o` it writes into the folder holding the `.ondin` (`.` only if no parent).
 - **Exit 1 when no file is produced** (gate is on the rendered set, not on "has settings": a raster spec over an empty group writes nothing and must fail; an SVG spec always writes a file and exits 0).
-- Size flags are the panel's three questions (`ExportScale` variants). They are **refused** on `--svg`/`--json` and `--all`, and only one at a time (the same flag twice is refused; `--png --svg` takes the last, since formats have an obvious ordering). The derived output name is not decorated with `@2x`. `Width`/`Height` resolve against the box the render frames.
+- Size flags are the panel's three questions (`ExportScale` variants). They are **refused** on every format but `--png` and on `--all`, and only one at a time (the same flag twice is refused; `--png --svg` takes the last, since formats have an obvious ordering). The derived output name is not decorated with `@2x`. `Width`/`Height` resolve against the box the render frames.
 - `--scale-override` (for `--all`) *overrules* a size the document carries; the file still decides which layers export and at what formats. It parses the row vocabulary via `ExportScale::from_label` (`2x`, `512w`, `512h`, bare number = `x`). It lives in `PlanOptions`, because the scale is half the filename through `ExportScale::marker`. Specs that become identical under an override collapse to one file; the dedupe runs only under an override.
 - When `viewport_at`'s cap reduces a size the command says so on stderr, in the spec's vocabulary (`200000w`, not `655.350x`).
 
@@ -139,3 +156,4 @@ The canvas ground and the guides are in none of SVG, PNG or the snapshot: the gr
 - Raster finishing order trim -> pad -> composite is the meaning of each step.
 - A snapshot change that alters bytes needs a bump even if it adds no key; two stale version numbers have sat in prose before.
 - `all_in_document_order` vs `in_document_order`: the first keeps nested exporting layers, the second filters to outermost.
+- Code export writes an all-sides stroke as an `outline`, not a `border` (a border sits only inside the box), and an automatic line height as px, not `normal`. The obvious CSS for each draws wrong; `strokes_match_the_canvas` and `text_matches_the_canvas` in `code_fidelity.rs` pin them, and only where a browser is found.

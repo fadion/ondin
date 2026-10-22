@@ -30,16 +30,18 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Later · Code export (HTML/CSS, React, Vue)
 
-Designed in §15 D1098; nothing built.
+Designed in §15 D1098. Plain HTML/CSS and `ondin export --html` are built (`export.md`, *Code
+export*).
 
-- **The trigger** — Exports panel if per-framework options fit, else a menu; no new context-menu rows.
-- **The build** — DOM core and report, three emitters, `tokens.css` and the zip, three doors (GUI,
-  `ondin export`, an MCP tool). The MCP tool lands with `architecture.md` §8.4 and `tools.rs` in one
-  commit (D726's gate). The first build commit owes D1098 its citation.
-- **Fidelity goldens** (D1098 (11)) — headless browser vs CPU PNG; which browser and how CI runs it.
-- **Owed before tier 1**: which stroke alignment a CSS `border` writes exactly; the gradient tier; the
-  unit for a bound opacity (D1072).
-- **The alias trap** (D1098 (6)) — check aliases re-declared per mode block in a real browser.
+- **The GUI door** — Exports panel if per-framework options fit, else a menu; no new context-menu
+  rows.
+- **React and Vue emitters, with components** (D1098 (1), (2), (9)).
+- **`tokens.css` and variables as `var()`** (D1098 (6), (7)) — aliases redeclared in every mode block;
+  the unit for a bound opacity is still owed (D1072).
+- **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
+- **Image fills as `background-image`** — they go to inline SVG today.
+- **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
+  has not run on CI's Linux and macOS legs; unverified until it does.
 - **Text styles as classes** — revisit once real exports exist (D1098 (7)).
 - **A per-layer HTML tag field** — parked, new model (D1098 (3)).
 

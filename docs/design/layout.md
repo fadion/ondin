@@ -49,7 +49,7 @@ The model is CSS under CSS's names (`display: flex`, `display: grid`), explicitl
 - Text wraps at the available width.
 - What the user sets (specified) and what is drawn (used) are separate values.
 
-Code export is designed, not built; it would write this model as CSS and report departures.
+Code export (§7) writes this model as CSS under the same names, `Start`/`End` as `flex-start`/`flex-end`; a group without `display` is written as absolutely positioned children and reported.
 
 ### Property set
 

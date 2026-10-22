@@ -38,10 +38,12 @@ pointer when the archived reasoning matters; otherwise drop it.
   `ondin-app`, `inspector.rs`, `canvas.rs`, `app.rs`, `dashboard.rs`, `typography.rs`,
   `ui.rs`, `tools/mod.rs`, `layers.rs`, `menu.rs`, `input.rs`, `rulers.rs`,
   `panels/export.rs`, `fonts/mod.rs`, `session.rs`, `panels/picker.rs`, `panels/paint.rs`,
-  `library/cover.rs` and `cursor.rs`; in `ondin-core`, `text.rs`, `svg_in.rs`, `build.rs`,
-  `image.rs`, `typography.rs`, `boolean.rs`, `resolve.rs`, `geometry.rs`, `document.rs` and
-  `op.rs`; in `ondin-render`, `scene.rs`, `images.rs` and `renderer.rs`; in `ondin-export`,
-  `svg.rs`. Trimmed but still 34–41%, being mostly one-line docs on constants, variants and
+  `library/cover.rs`, `cursor.rs`, `snap.rs`, `settings.rs`, `main.rs`, `atomic.rs` and
+  `library/relocate.rs`; in `ondin-core`, `text.rs`, `svg_in.rs`, `build.rs`, `image.rs`,
+  `typography.rs`, `boolean.rs`, `resolve.rs`, `geometry.rs`, `document.rs`, `op.rs` and
+  `query.rs`; in `ondin-render`, `scene.rs`, `images.rs`, `renderer.rs`, `effects.rs`,
+  `gpu.rs`, `cpu.rs` and `tests/gpu_effects.rs`; in `ondin-export`, `svg.rs`. Smaller files
+  go several to an agent. Trimmed but still 34–41%, being mostly one-line docs on constants, variants and
   fields: `theme.rs`, `preview.rs`, core `node.rs` and core `effect.rs`.
 - One agent per file at a time: two in one file break each other's exact-match edits. A range
   of ~6,000 lines is one agent; the next starts at the item the last one names.

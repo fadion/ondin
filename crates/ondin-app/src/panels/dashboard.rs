@@ -6076,11 +6076,67 @@ mod tests {
         assert_eq!(grid_cols(100.0), 1, "and a narrow body is one column");
     }
 
+    /// On the frame the search overlay closes its field is not drawn, so egui holds
+    /// no focus; `search.is_some()` alone keeps that frame's arrow off the grid.
+    /// Calls `dashboard_keys` with nothing drawn to reach that frame.
+    /// flip: deleting `self.dash.search.is_some() ||` from `dashboard_keys` → fails
+    /// at "an open search owns the arrows even with no field drawn".
+    #[test]
+    fn an_open_search_owns_the_keys_on_a_frame_its_field_is_not_drawn() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "keys-unfocused");
+        let mut doc = ondin_core::Document::new(app.session.ids.mint());
+        store::file_document(&root, None, "Alpha", &mut doc).unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+        let entries = app.visible_entries();
+        assert!(!entries.is_empty(), "fixture: the library lists the file");
+
+        let arrow = |app: &mut OndinApp| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+                events: vec![egui::Event::Key {
+                    key: egui::Key::ArrowDown,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Default::default(),
+                }],
+                ..Default::default()
+            };
+            let mut act = None;
+            let _ = ctx.run_ui(input, |ui| {
+                assert!(
+                    !ui.ctx().egui_wants_keyboard_input(),
+                    "fixture: nothing has focus"
+                );
+                app.dashboard_keys(ui.ctx(), &entries, &mut act);
+            });
+        };
+
+        app.dash.search = Some(String::new());
+        arrow(&mut app);
+        assert_eq!(
+            app.dash.selected, None,
+            "an open search owns the arrows even with no field drawn"
+        );
+
+        // Control: the same frame with the search shut reaches the keymap.
+        app.dash.search = None;
+        arrow(&mut app);
+        assert!(
+            app.dash.selected.is_some(),
+            "with no search the arrow selects"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Arrows move the selection, `Escape` puts it back, `Enter` opens it and `Delete`
     /// asks first — and none reaches the library while the search overlay, the file
-    /// menu or the filter dropdown has the keyboard. Removing only the
-    /// `search.is_some()` guard stays green (focus settles inside the pass). flip:
-    /// the guard back to `menu_for.is_some()` → fails at "the filter dropdown is open".
+    /// menu or the filter dropdown has the keyboard. The `search.is_some()` guard on
+    /// its own is pinned by `an_open_search_owns_the_keys_on_a_frame_its_field_is_not_drawn`.
+    /// flip: the guard back to `menu_for.is_some()` → fails at "the filter dropdown is open".
     #[test]
     fn the_keyboard_moves_the_selection_opens_it_and_asks_before_deleting() {
         let ctx = egui::Context::default();

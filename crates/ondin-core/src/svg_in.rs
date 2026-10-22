@@ -1,12 +1,11 @@
 //! SVG import — markup in, a [`Transaction`] out (§7.1).
 //!
-//! The inverse of `ondin_export::svg`, kept in core rather than beside it: reading is
-//! model construction and needs nothing but the model, so it is testable without a
-//! graphics context. The two mappings can drift; the round-trip test in
-//! `ondin-export/tests/svg_roundtrip.rs` is what binds them.
+//! The inverse of `ondin_export::svg`, kept in core because reading is model
+//! construction and testable without a graphics context. The two mappings can drift;
+//! the round-trip test in `ondin-export/tests/svg_roundtrip.rs` binds them.
 //!
 //! The entry point is a paste: `import` takes a string and a parent, mints its own ids
-//! and hands back one transaction, the same shape as every builder in [`crate::build`].
+//! and hands back one transaction, like every builder in [`crate::build`].
 //!
 //! ## Grammars
 //!
@@ -27,11 +26,6 @@
 //! silhouette-offset-blur-flood *shadow chain*, drop or inner, in any number and in
 //! the order the markup lays them out (see [`FilterRead`]).
 //!
-//! A gradient inherits its stops and position through `xlink:href` (how Inkscape writes
-//! all of them) and carries a `gradientTransform` that composes inside the units
-//! mapping; skipping either yields a drawing with no gradients. See
-//! [`gradient_chain`], [`Paint::mapping`] and [`transform_gradient`].
-//!
 //! ## What it does not read, and says so
 //!
 //! **[`Import::skipped`]** is what is missing: a `<filter>` primitive with no kind here
@@ -50,8 +44,7 @@
 //! does for the whole presentation block.
 //!
 //! The one structural loss is the paragraph: the writer emits one `<text>` per line, so
-//! a two-line text layer comes back as two layers in the right places. Rejoining them
-//! would mean inventing the line height that places every line after the first.
+//! a two-line layer comes back as two layers; rejoining them would invent a line height.
 
 use crate::id::{IdSource, NodeId};
 use crate::image::Brush;
@@ -64,30 +57,25 @@ use peniko::Color;
 /// How deeply nested an SVG's elements may be before the walk gives up; a deeper
 /// subtree is skipped and reported.
 ///
-/// Far tighter than [`crate::io::MAX_TREE_DEPTH`] on purpose: the walk recurses
-/// (`children → node → node_ignoring → children`), and a clipped or masked element
-/// becomes a wrapper plus a clip node, so SVG nesting multiplies in the document. A
-/// tree past `MAX_TREE_DEPTH` would import and save but refuse to reopen. The XML
-/// parser recurses too; [`MAX_XML_DEPTH`] bounds that.
+/// Far tighter than [`crate::io::MAX_TREE_DEPTH`] on purpose: a clipped element becomes
+/// a wrapper plus a clip node, so SVG nesting multiplies in the document, and a tree
+/// past `MAX_TREE_DEPTH` would save but refuse to reopen.
 const MAX_SVG_NESTING: usize = 64;
 
 /// How many nodes one import may emit before the rest is skipped and reported.
 ///
 /// [`MAX_SVG_NESTING`] bounds depth, not width: a `<defs>` of groups each
-/// instantiating the next twice expands exponentially from a tiny file, and an
-/// allocation failure aborts. `use_depth` counts nesting only and `nodes_limit`
-/// bounds parsed XML nodes, so neither bounds the output. 50,000 sits above real
-/// artwork. It bounds the importer, not the paste: `Document::apply` of that many
-/// siblings is quadratic in `op_create`'s `child_names` walk.
+/// instantiating the next twice expands exponentially from a tiny file. 50,000 sits
+/// above real artwork. It bounds the importer, not the paste: `Document::apply` of
+/// that many siblings is quadratic in `op_create`'s `child_names` walk.
 const MAX_SVG_NODES: usize = 50_000;
 
 /// How many CSS rules one stylesheet may declare before the rest is skipped and
 /// reported.
 ///
 /// `Css::declaration` walks every rule for every element and property, so a huge
-/// sheet is cubic in the file. 2,048 leaves headroom over real exports; past it the
-/// sheet is reported through [`Css::complex`] and shapes take their presentation
-/// attributes instead.
+/// sheet is cubic in the file. Past the limit the sheet is reported through
+/// [`Css::complex`] and shapes take their presentation attributes instead.
 const MAX_CSS_RULES: usize = 2_048;
 
 /// What one `import` produced.
@@ -100,25 +88,21 @@ pub struct Import {
     /// The size the markup declares — its `viewBox`, else its `width`/`height`.
     /// `None` when it declares neither.
     pub size: Option<Size>,
-    /// How many shapes were created. `0` is not an error here (an `<svg>` holding
-    /// only a `<defs>` is valid), but a pasting caller will want to refuse it.
+    /// How many shapes were created. `0` is not an error (an `<svg>` holding only a
+    /// `<defs>` is valid), but a pasting caller will want to refuse it.
     pub shapes: usize,
-    /// Element names met and not understood, deduplicated and in the order first
-    /// met. The caller owes the user this list.
+    /// Element names met and not understood, deduplicated, in first-met order.
     pub skipped: Vec<String>,
-    /// Features read but not exactly — a `<mask>` whose luminance and alpha readings
-    /// differ, or clip units resolved in the wrong space. Distinct from
-    /// [`Self::skipped`]: that says a thing is missing, this says it is slightly wrong.
+    /// Features read but not exactly; unlike [`Self::skipped`], the thing is there but
+    /// slightly wrong.
     pub approximated: Vec<String>,
 }
 
 /// What the host does with the bytes an `<image>` carries.
 ///
 /// A callback because core can do neither half: the pixel size needs decoding
-/// (`ondin-render`), the id is a content hash from an app-only crate, and the bytes
-/// must reach the renderer's decode cache. The caller is the same one a drop and a
-/// file dialog use (`OndinApp::load_image_bytes`). `None` for bytes that will not
-/// decode, which skips the `<image>` rather than failing the import.
+/// (`ondin-render`) and the id is a content hash from an app-only crate. `None` for
+/// bytes that will not decode skips the `<image>` rather than failing the import.
 pub trait ImageSink {
     fn place(
         &mut self,
@@ -153,8 +137,8 @@ fn push_collapsed(out: &mut String, text: &str) {
 /// The ink a resolved style fills with, its own `fill-opacity` folded in — and
 /// `None` for a gradient, which a character span cannot hold.
 ///
-/// Folding the opacity keeps it comparable with the node's own
-/// [`crate::typography::TextStyle::color`], which [`Builder::text_node`] builds the same way.
+/// Comparable with the node's own [`crate::typography::TextStyle::color`], which
+/// [`Builder::text_node`] builds the same way.
 fn solid_fill(s: &Style) -> Option<Color> {
     match &s.fill {
         Some(Paint::Solid(c)) => Some(c.multiply_alpha(s.fill_opacity)),
@@ -226,22 +210,18 @@ impl std::fmt::Display for SvgError {
 /// How deeply the markup may nest before [`import`] refuses it unparsed.
 ///
 /// `roxmltree` recurses and has no depth option, so deeply nested `<g>` overflowed
-/// the 1 MiB main-thread stack (an uncatchable abort) before any builder budget was
-/// consulted; [`nests_deeper_than`] reads the depth off the text first. The parser
-/// alone survives ~170 levels in debug, so 96 keeps room for the egui frame the paste
-/// runs under. It is 1.5x [`MAX_SVG_NESTING`]: a document 65–96 deep still imports
-/// with the deeper subtrees skipped and reported.
+/// the 1 MiB main-thread stack (an uncatchable abort); [`nests_deeper_than`] reads the
+/// depth off the text first. The parser survives ~170 levels in debug, so 96 leaves
+/// room for the egui frame, and a document 65–96 deep still imports.
 pub const MAX_XML_DEPTH: usize = 96;
 
 /// Whether `svg`'s elements nest deeper than `limit`, read from the text without
 /// parsing it.
 ///
 /// Conservative in the direction that refuses. Comments, CDATA, processing
-/// instructions and quoted attribute values are stepped over. A `<!DOCTYPE>`
-/// internal subset can declare an entity whose value is markup and `roxmltree`
-/// expands references ten deep, so the deepest markup in any quoted doctype string is
-/// counted ten times on top of the document's depth. Malformed text answers `false`
-/// and is left to the parser to refuse.
+/// instructions and quoted attribute values are stepped over. A doctype entity may
+/// hold markup that `roxmltree` expands ten deep, so the deepest markup in any quoted
+/// doctype string counts ten times. Malformed text answers `false` for the parser.
 fn nests_deeper_than(svg: &str, limit: usize) -> bool {
     /// `roxmltree`'s own entity-reference depth (its `EntityReferenceLoop`).
     const ENTITY_DEPTH: usize = 10;
@@ -329,9 +309,8 @@ fn nests_deeper_than(svg: &str, limit: usize) -> bool {
     false
 }
 
-/// The deepest element nesting in a fragment of markup — an entity value — by
-/// the same stepping [`nests_deeper_than`] does, without the doctype arm (an
-/// entity value cannot hold one).
+/// The deepest element nesting in an entity value, stepped as [`nests_deeper_than`]
+/// does but without the doctype arm.
 fn markup_depth(fragment: &str) -> usize {
     let (mut depth, mut deepest) = (0usize, 0usize);
     let b = fragment.as_bytes();
@@ -360,10 +339,9 @@ fn markup_depth(fragment: &str) -> usize {
 
 impl std::error::Error for SvgError {}
 
-/// A cheap, non-allocating "is this worth parsing at all", asked of every clipboard
-/// string: does it start (after any prolog) with `<svg` or `<!DOCTYPE svg`. Not a
-/// parse; [`import`] does that and reports why it fails. `app::looks_like_svg` is
-/// only the byte-to-`str` adapter, so paste and drop share this one answer.
+/// A cheap, non-allocating "is this worth parsing", asked of every clipboard string:
+/// does it start (after any prolog) with `<svg` or `<!DOCTYPE svg`. `app::looks_like_svg`
+/// is only the byte-to-`str` adapter, so paste and drop share this answer.
 pub fn looks_like_svg(s: &str) -> bool {
     let head = before_root(s);
     head.starts_with("<svg") || head.starts_with("<!DOCTYPE svg")
@@ -372,10 +350,8 @@ pub fn looks_like_svg(s: &str) -> bool {
 /// `s` with everything that may legally precede the root element removed.
 ///
 /// Skips an `<?xml …?>` declaration and any leading comments (Illustrator writes a
-/// generator comment before the doctype).
-///
-/// A byte-order mark is still refused: it would reach `roxmltree` as well, so
-/// admitting one here only trades the refusal for a parser error.
+/// generator comment before the doctype). A byte-order mark is still refused: the
+/// parser would refuse it anyway.
 fn before_root(s: &str) -> &str {
     let s = s.trim_start();
     let mut head = s.strip_prefix("<?xml").map_or(s, |rest| {
@@ -397,8 +373,7 @@ fn before_root(s: &str) -> &str {
 /// Read `svg` and build the nodes it describes under `parent`.
 ///
 /// The subtree is wrapped in one `Group` whichever way the markup is shaped: a paste
-/// is one undo step and one selection, and the `<svg>` root's transform and `viewBox`
-/// need a container to live on.
+/// is one undo step and one selection, and the root's `viewBox` needs a container.
 pub fn import<'s>(
     svg: &str,
     ids: &'s mut IdSource,
@@ -407,9 +382,8 @@ pub fn import<'s>(
     // `None` where the caller has nowhere to put pictures; an `<image>` is then skipped.
     images: Option<&'s mut dyn ImageSink>,
 ) -> Result<Import, SvgError> {
-    // `allow_dtd`: roxmltree refuses a `<!DOCTYPE>` by default and SVG 1.1 files open
-    // with one. Safe because roxmltree bounds entity expansion and never resolves an
-    // external entity; `nodes_limit` is the second belt on untrusted clipboard input.
+    // SVG 1.1 files open with a `<!DOCTYPE>`; roxmltree bounds entity expansion and
+    // never resolves an external one, and `nodes_limit` is the second belt.
     let opts = roxmltree::ParsingOptions {
         allow_dtd: true,
         nodes_limit: 500_000,
@@ -444,7 +418,6 @@ pub fn import<'s>(
     };
 
     let group = out.ids.mint();
-    // Through `push` like every other op so the `ops` invariant has no exemption.
     out.push(Operation::CreateNode {
         id: group,
         parent,
@@ -458,21 +431,18 @@ pub fn import<'s>(
     // The root's own presentation attributes count: Figma writes `<svg fill="none">`,
     // and starting from SVG's initial values would fill every child black.
     let inherited = resolve(root, &Style::initial(), &out.gradients);
-    // Reported once for the sheet, not once per element it should have matched.
     if out.gradients.css.complex {
         out.skip("style (complex selector)");
     }
-    // A resampled stop list is there and slightly wrong: `approximate`, not `skip`.
+    // A resampled stop list is there and slightly wrong; a pattern is not there.
     if out.gradients.resampled {
         out.approximate("gradient (too many stops)");
     }
-    // A pattern is not there (the shape takes its inherited fill): `skip`.
     if out.gradients.patterns {
         out.skip("pattern (image fill)");
     }
     out.children(root, group, &inherited);
-    // After the walk, because an unreadable `fill` is a fact about an element, not the
-    // defs; hence the `Cell`. The paint is absent, so `skip`.
+    // After the walk: an unreadable `fill` is a fact about an element, hence the `Cell`.
     if out.gradients.unreadable_paint.get() {
         out.skip("fill or stroke (unreadable value)");
     }
@@ -494,10 +464,8 @@ pub fn import<'s>(
     })
 }
 
-/// The `width`/`height` the markup claims, or its `viewBox`'s.
-///
-/// `viewBox` second: the caller wants the size the drawing will occupy, which is
-/// `width`/`height`, and [`view_transform`] makes the drawing agree.
+/// The `width`/`height` the markup claims, or its `viewBox`'s: the caller wants the
+/// size the drawing will occupy, and [`view_transform`] makes the drawing agree.
 fn declared_size(root: roxmltree::Node<'_, '_>) -> Option<Size> {
     if let Some(s) = declared_pair(root) {
         return Some(s);
@@ -507,12 +475,9 @@ fn declared_size(root: roxmltree::Node<'_, '_>) -> Option<Size> {
 
 /// The layer name an element carries: `data-name` if it has one, else `id`.
 ///
-/// `ondin_export::svg::name_attr` writes `data-name`, so this is the other half of
-/// the pair; `id` is the fallback for Illustrator and Inkscape files. One function so
-/// no element kind misses the attribute.
+/// `ondin_export::svg::name_attr` writes `data-name`; `id` is the fallback for
+/// Illustrator and Inkscape files. `None` makes `op_create` generate a name.
 fn element_name(el: roxmltree::Node<'_, '_>) -> Option<String> {
-    // Through `naming::usable`, like the rename fields; `None` makes `op_create`
-    // generate a name, as for an element with no `id`.
     el.attribute("data-name")
         .or_else(|| el.attribute("id"))
         .and_then(crate::naming::usable)
@@ -556,11 +521,9 @@ fn view_transform(root: roxmltree::Node<'_, '_>) -> Affine {
     Affine::translate((dx, dy)) * Affine::scale(s) * Affine::translate((-vb.x0, -vb.y0))
 }
 
-/// The inherited half of SVG's presentation attributes.
-///
-/// `fill`, `stroke`, the stroke's shape properties and `fill-rule` inherit; `opacity`,
-/// `transform` and `display` do not (a `Group` node applies them to its subtree), so
-/// those are read per element.
+/// The inherited half of SVG's presentation attributes; `opacity`, `transform` and
+/// `display` do not inherit (a `Group` applies them to its subtree), so they are read
+/// per element.
 #[derive(Clone)]
 struct Style {
     fill: Option<Paint>,
@@ -576,8 +539,7 @@ struct Style {
     stroke_opacity: f32,
     /// `currentColor`'s value, which is what the `color` property is for.
     current: Color,
-    /// The font properties inherit like paint (Inkscape puts `font-family` on a `<g>`,
-    /// and a `<tspan>` may set its own size). The family is the raw list, unresolved:
+    /// The font properties inherit like paint. The family is the raw list, unresolved:
     /// picking from it needs the machine's fonts and reporting a miss is not pure.
     font_family: Option<String>,
     font_size: f64,
@@ -615,8 +577,8 @@ enum Paint {
     /// `gradientTransform`.
     ///
     /// The transform is carried, not baked in: it composes inside the
-    /// [`GradientUnits`] mapping, unknown until the painted shape is — see [`Paint::brush`].
-    /// The gradient is boxed so every `Solid` does not pay for its inline stops.
+    /// [`GradientUnits`] mapping, unknown until the painted shape is ([`Paint::brush`]).
+    /// Boxed so every `Solid` does not pay for the inline stops.
     Gradient(Box<peniko::Gradient>, GradientUnits, Affine),
 }
 
@@ -667,14 +629,11 @@ fn property<'a>(el: roxmltree::Node<'a, '_>, name: &str, css: &Css<'a>) -> Optio
     css.declaration(el, name).or_else(|| el.attribute(name))
 }
 
-/// One `name: value` out of a `;`-separated declaration block.
-///
-/// The returned slice borrows from the document, so nothing is copied.
+/// One `name: value` out of a `;`-separated declaration block, borrowed from the document.
 fn declaration<'a>(block: &'a str, name: &str) -> Option<&'a str> {
     block.split(';').find_map(|decl| {
         let (k, v) = decl.split_once(':')?;
-        // `!important` is stripped, not parsed: there is no important ordering here,
-        // and left on it makes a good value unreadable.
+        // Stripped, not parsed: there is no important ordering here.
         let v = v.trim();
         let v = v
             .strip_suffix("!important")
@@ -687,8 +646,8 @@ fn declaration<'a>(block: &'a str, name: &str) -> Option<&'a str> {
 /// The document's `<style>` rules: a small cascade engine over compounds of type,
 /// class, id and `*`, joined by descendant and child combinators.
 ///
-/// Selectors needing more than an ancestor walk (`+`, `~`, `:pseudo`, `[attr]`) are
-/// counted and ignored rather than half-matched, as is a malformed one: repairing
+/// Selectors needing more than an ancestor walk (`+`, `~`, `:pseudo`, `[attr]`) or
+/// malformed ones are counted and ignored rather than half-matched: repairing
 /// `.a > > .b` into `.a > .b` would apply a wider rule than was written.
 #[derive(Default)]
 struct Css<'a> {
@@ -748,8 +707,7 @@ enum Combinator {
 }
 
 /// A selector: the compound the element itself must match, and the chain of
-/// ancestors to its left. `chain` runs right to left, so `chain[0]` is immediately
-/// left of the subject; the subject is the cheap filter most rules fail on.
+/// ancestors to its left, running right to left (`chain[0]` is next to the subject).
 struct Sel<'a> {
     subject: Compound<'a>,
     chain: Vec<(Combinator, Compound<'a>)>,
@@ -760,8 +718,7 @@ impl Sel<'_> {
         self.subject.matches(el) && match_chain(&self.chain, el)
     }
 
-    /// Specificity as one number on a 100/10/1 scale; a selector with more than nine
-    /// classes would carry into the next place, which real stylesheets do not reach.
+    /// Specificity as one number on a 100/10/1 scale; more than nine classes would carry.
     fn specificity(&self) -> u32 {
         let (mut i, mut c, mut t) = self.subject.specificity();
         for (_, comp) in &self.chain {
@@ -774,14 +731,11 @@ impl Sel<'_> {
     }
 }
 
-/// Whether `el`'s ancestors satisfy `chain`, which runs right to left.
-///
-/// A descendant combinator must backtrack (`.a > .b .c` fails on the nearest `.b`
-/// while a `.b` further up has `.a` as its parent), but recursion over ancestors is
-/// exponential on a tiny file. An element's ancestors are a path, so this is
-/// subsequence matching as a table over `(chain index, ancestor index)`, in
-/// `O(chain × depth)`. `g(i, j)` below is "can `chain[i..]` be satisfied using
-/// ancestors from the `j`-th upwards", and the answer is `g(0, 0)`.
+/// Whether `el`'s ancestors satisfy `chain`. A descendant combinator must backtrack
+/// (`.a > .b .c` fails on the nearest `.b` while a `.b` further up has `.a` as its
+/// parent), but recursion is exponential on a tiny file. So this is subsequence
+/// matching as a table, `O(chain × depth)`: `g(i, j)` is "can `chain[i..]` be
+/// satisfied using ancestors from the `j`-th up".
 fn match_chain(chain: &[(Combinator, Compound<'_>)], el: roxmltree::Node<'_, '_>) -> bool {
     if chain.is_empty() {
         return true;
@@ -794,20 +748,17 @@ fn match_chain(chain: &[(Combinator, Compound<'_>)], el: roxmltree::Node<'_, '_>
         cur = p.parent_element();
     }
     let n = path.len();
-    // `row[j]` is `g(i + 1, j)`, seeded with `g(chain.len(), _) = true`: an empty
-    // remainder is satisfied wherever it is asked.
+    // `row[j]` is `g(i + 1, j)`, seeded true: an empty remainder is always satisfied.
     let mut row = vec![true; n + 1];
     for (comb, comp) in chain.iter().rev() {
         let mut next = vec![false; n + 1];
         match comb {
-            // The parent and nothing else, so there is one `j` to consider.
             Combinator::Child => {
                 for j in 0..n {
                     next[j] = comp.matches(path[j]) && row[j + 1];
                 }
             }
-            // Any ancestor at or above `j`. Accumulated from the top down, which
-            // is what turns the old inner loop into one pass.
+            // Any ancestor at or above `j`, accumulated from the top down.
             Combinator::Descendant => {
                 let mut acc = false;
                 for j in (0..n).rev() {
@@ -824,9 +775,8 @@ fn match_chain(chain: &[(Combinator, Compound<'_>)], el: roxmltree::Node<'_, '_>
 impl<'a> Css<'a> {
     /// The winning declaration for `name` on `el`, or `None` if no rule matches.
     ///
-    /// Specificity is summed across the whole selector, one id beating any number of
-    /// classes. The ancestor walk in `Sel::matches` is deliberately last, so most
-    /// rules fail the cheap tests first.
+    /// The ancestor walk in `Sel::matches` is deliberately last, so most rules fail
+    /// the cheap tests first.
     fn declaration(&self, el: roxmltree::Node<'_, '_>, name: &str) -> Option<&'a str> {
         let mut best: Option<(u32, &'a str)> = None;
         for (sel, spec, block) in &self.rules {
@@ -845,8 +795,7 @@ impl<'a> Css<'a> {
 /// One compound selector — `rect`, `.a`, `#b`, `*`, or any of those run together —
 /// or `None` if it holds anything this reader does not do.
 ///
-/// An empty compound is `None`, not `*`: `.a > > .b` tokenizes to one, and reading it
-/// as `*` would silently widen the rule.
+/// An empty compound is `None`, not `*`: `.a > > .b` tokenizes to one.
 fn parse_compound(s: &str) -> Option<Compound<'_>> {
     if s.is_empty() {
         return None;
@@ -952,8 +901,8 @@ fn parse_css(text: &str) -> (Vec<(Sel<'_>, u32, &str)>, bool) {
         let Some((sels, block)) = chunk.split_once('{') else {
             continue;
         };
-        // A rule with a CSS comment is dropped and reported: every value is a slice of
-        // the document, so stripping comments would need a copy this cannot outlive.
+        // Dropped and reported: values are slices of the document, so stripping comments
+        // would need a copy.
         if sels.contains("/*") || block.contains("/*") || block.contains("*/") {
             complex = true;
             continue;
@@ -983,22 +932,18 @@ fn parse_css(text: &str) -> (Vec<(Sel<'_>, u32, &str)>, bool) {
 struct Builder<'a, 'd, 'input> {
     ids: &'a mut IdSource,
     /// Append only through [`Self::push`], which keeps [`Self::child_counts`] true; a
-    /// bare `ops.push` of a `CreateNode` makes [`Self::index_in`] answer one low and
-    /// the children arrive in the wrong order.
+    /// bare `ops.push` of a `CreateNode` makes [`Self::index_in`] answer one low.
     ops: Vec<Operation>,
-    /// How many nodes this import has emitted, against [`MAX_SVG_NODES`]. Separate
-    /// from [`Self::shapes`], which counts only what a user would call a shape.
+    /// Nodes emitted, against [`MAX_SVG_NODES`]; unlike [`Self::shapes`] it counts all.
     created: usize,
-    /// How many children each parent has been given so far, so [`Self::index_in`]
-    /// is a lookup rather than a quadratic scan of `ops`.
+    /// Children given to each parent so far, so [`Self::index_in`] is a lookup.
     child_counts: rustc_hash::FxHashMap<NodeId, usize>,
     shapes: usize,
     skipped: Vec<String>,
     approximated: Vec<String>,
     gradients: Gradients<'d, 'input>,
     /// Whether the walk is inside a `<clipPath>`, where the fill rule comes from
-    /// `clip-rule`. A flag because it holds for a subtree and threading a parameter
-    /// would touch every arm of [`Self::node`].
+    /// `clip-rule`.
     in_clip: bool,
     /// How deep the walk is inside `<use>` instances, so a reference cycle stops.
     use_depth: usize,
@@ -1025,11 +970,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         }
     }
 
-    /// Walk `el`'s element children into `parent`, in document order (paint order,
-    /// which is already this app's bottom-to-top child order).
-    ///
-    /// The one choke point of the element recursion, so the depth bound lives here;
-    /// past it the subtree is skipped and reported.
+    /// Walk `el`'s element children into `parent`, in document order (this app's
+    /// bottom-to-top child order). The one choke point of the element recursion, so
+    /// the depth bound lives here.
     fn children(&mut self, el: roxmltree::Node<'d, 'input>, parent: NodeId, inherited: &Style) {
         if self.depth >= MAX_SVG_NESTING {
             self.skip("deeply nested elements");
@@ -1044,16 +987,10 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
 
     /// One element wrapped in a group with its clip beneath it.
     ///
-    /// Our mask node clips the run of siblings above it, so a wrapper holding
-    /// `[clip, content]` is exactly SVG's `clip-path`.
-    ///
-    /// The transform goes on the clip, not the wrapper: `userSpaceOnUse` resolves in the
-    /// referencing element's space, which includes its own `transform`, so the wrapper
-    /// stays at the identity and both children carry `el`'s transform.
-    ///
-    /// `clip-path` is [`MaskMode::Shape`] and `<mask>` is [`MaskMode::Alpha`]. SVG's mask
-    /// is luminance, which agrees only for opaque white; [`luminance_equivalent`]
-    /// decides whether that is reported.
+    /// A mask node clips the siblings above it, so a wrapper holding `[clip, content]`
+    /// is `clip-path`; the transform goes on both children, since `userSpaceOnUse`
+    /// includes the element's own. `<mask>` is [`MaskMode::Alpha`] where SVG's is
+    /// luminance; [`luminance_equivalent`] decides whether the gap is reported.
     #[allow(clippy::too_many_arguments)]
     fn masked(
         &mut self,
@@ -1066,8 +1003,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         ignore: &[&str],
     ) -> Option<NodeId> {
         // A container clips itself rather than getting a wrapper (Figma's outermost
-        // `<g>` carries `clip-path`); its own first child clips the run above it and
-        // needs no transform. Not when the other clip attribute is still to be
+        // `<g>` carries `clip-path`) — unless the other clip attribute is still to be
         // consumed: two masks in one parent are two runs, so one would do nothing.
         let other = if attr == "clip-path" {
             "mask"
@@ -1082,8 +1018,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
 
         let index = self.index_in(parent);
         let wrapper = if hoist {
-            // The element builds first; `CreateNode`'s index inserts, so the clip at
-            // index 0 goes beneath its existing children.
+            // `CreateNode`'s index inserts, so the clip at 0 lands beneath its children.
             self.node_ignoring(el, parent, inherited, &ig)?
         } else {
             let wrapper = self.ids.mint();
@@ -1115,10 +1050,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             parent: wrapper,
             index: 0,
             kind: NodeKind::Group,
-            // Hoisted, the clip is already in the element's space; wrapped, it carries
-            // the element's transform.
             transform: (!hoist).then(|| element_transform(el)),
-            // Named, so it is not "Group 4" in the layer tree.
             name: Some(if attr == "clip-path" { "Clip" } else { "Mask" }.to_string()),
         });
         self.push(Operation::SetMask {
@@ -1157,9 +1089,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         self.ops.push(op);
     }
 
-    /// Whether the node budget is spent — see [`MAX_SVG_NODES`]. Asked at the top of
-    /// [`Self::node_ignoring`] rather than at each push, so the last element built is
-    /// whole.
+    /// Whether the node budget is spent ([`MAX_SVG_NODES`]). Asked at the top of
+    /// [`Self::node_ignoring`], not at each push, so the last element built is whole.
     fn out_of_budget(&mut self) -> bool {
         if self.created >= MAX_SVG_NODES {
             self.skip("too many elements");
@@ -1168,10 +1099,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         false
     }
 
-    /// The next child index under `parent`, counted from the ops built so far.
-    ///
-    /// Read before the `CreateNode` it indexes, never after: [`Self::push`] bumps the
-    /// count.
+    /// The next child index under `parent`. Read before the `CreateNode` it indexes,
+    /// never after: [`Self::push`] bumps the count.
     fn index_in(&self, parent: NodeId) -> usize {
         self.child_counts.get(&parent).copied().unwrap_or(0)
     }
@@ -1195,9 +1124,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             return None;
         }
         let mut style = resolve(el, inherited, &self.gradients);
-        // Inside a `<clipPath>` the rule is `clip-rule`, not `fill-rule`. Applied here
-        // rather than in `resolve` because it depends on where the walk is; the
-        // overridden style descends, so a `<g>`'s `clip-rule` inherits.
+        // Inside a `<clipPath>` the rule is `clip-rule`; applied here, not in `resolve`,
+        // because it depends on where the walk is.
         if self.in_clip
             && let Some(v) = property(el, "clip-rule", &self.gradients.css)
         {
@@ -1207,9 +1135,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 FillRule::NonZero
             };
         }
-        // A clip or a mask becomes a mask node in a wrapper. `clip-path` goes first:
-        // an element with both is clipped, then masked, one wrapper each. Both are
-        // read as properties, since `style="clip-path:url(#c)"` is legal.
+        // `clip-path` goes first: an element with both is clipped, then masked, one
+        // wrapper each. Read as properties, since `style="clip-path:url(#c)"` is legal.
         for (attr, mode) in [("clip-path", MaskMode::Shape), ("mask", MaskMode::Alpha)] {
             if ignore.contains(&attr) {
                 continue;
@@ -1245,18 +1172,15 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 self.children(el, id, &style);
                 Some(id)
             }
-            // Definitions are read by lookup, never walked: `<defs>` and `<symbol>`
-            // (drawn only through a `<use>`) must not paste as shapes, and `<style>` is
-            // read up front by `Gradients::collect`. `clipPath` and `mask` are
-            // definitions wherever they sit, already registered by id; reaching the
-            // unknown-element arm would report a used clip as skipped.
+            // Definitions are read by lookup, never walked: `<symbol>` is drawn only
+            // through a `<use>`. `clipPath` and `mask` are registered by id wherever they
+            // sit; the unknown-element arm would report a used clip as skipped.
             "defs" | "title" | "desc" | "metadata" | "symbol" | "style" | "clipPath" | "mask" => {
                 None
             }
-            // `<use>` is a deep copy: a group with the use's transform and `x`/`y`
-            // around the same walk that built the original. `width`/`height` on a
-            // `<symbol>` or `<svg>` target would set a viewport and are ignored, but
-            // reported.
+            // `<use>` is a deep copy: a group with the use's transform and `x`/`y`. A
+            // `width`/`height` on a `<symbol>` or `<svg>` target would set a viewport;
+            // it is ignored and reported.
             "use" => {
                 let href = el
                     .attribute("href")
@@ -1265,8 +1189,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     self.skip("use (unresolved)");
                     return None;
                 };
-                // A `<use>` can reference something that contains it; a depth cap is
-                // the cheap cycle check, and nothing real nests instances 16 deep.
+                // A depth cap is the cheap cycle check; nothing real nests 16 deep.
                 if self.use_depth >= 16 {
                     self.skip("use (recursive)");
                     return None;
@@ -1367,9 +1290,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     &style,
                 ))
             }
-            // A point list is a `Path`, not a `Polygon`: `NodeKind::Polygon` is a regular
-            // n-gon, and reading every `<polygon>` as one would regularize an arbitrary
-            // outline. The round-trip test asserts geometry, not kind, because of this.
+            // A point list is a `Path`: `NodeKind::Polygon` is a regular n-gon, which
+            // would regularize an arbitrary outline.
             "polygon" | "polyline" => {
                 let pts = numbers(el.attribute("points").unwrap_or_default());
                 if pts.len() < 4 {
@@ -1426,8 +1348,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     self.skip("image (undecodable)");
                     return None;
                 };
-                // Once per distinct picture: the id is a content hash, and a second
-                // `AddImage` would invert into removing an entry still in use.
+                // Once per picture: a second `AddImage` would invert into removing an
+                // entry still in use.
                 if !self.added.contains(&image) {
                     self.added.push(image.clone());
                     self.push(Operation::AddImage {
@@ -1435,8 +1357,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                         entry,
                     });
                 }
-                // SVG's default (`meet`) is contain; `slice` asks for cover, and `none`
-                // asks for a stretch this model cannot express, so it is reported.
+                // `meet` is contain, `slice` cover; `none` is a stretch the model lacks.
                 let par = el
                     .attribute("preserveAspectRatio")
                     .unwrap_or("xMidYMid meet");
@@ -1486,9 +1407,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                     self.skip("path (bad d)");
                     return None;
                 };
-                // kurbo accepts `1e999`, and a non-finite coordinate makes the saved
-                // document unopenable and `Document::apply` refuse the transaction, so
-                // skip the one path. `numbers()` is the same filter for attributes.
+                // kurbo accepts `1e999`; a non-finite coordinate makes the saved document
+                // unopenable and `Document::apply` refuse the transaction.
                 if !crate::node::path_is_finite(&path) {
                     self.skip("path (a coordinate is not finite)");
                     return None;
@@ -1517,16 +1437,10 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
 
     /// A `<text>` element, as one text node per positioned run.
     ///
-    /// A `<tspan>` carrying its own `x` or `y` starts a new node (Illustrator: one per
-    /// line); one without is a style run in the current node (this app's writer). A
-    /// multi-line paragraph of ours comes back as several layers, a decided non-goal to
-    /// rejoin: the only signal is indistinguishable from a stack of separate labels.
-    ///
-    /// A `<tspan>`'s colour and font scope (size, weight, italic, family) become
-    /// character spans over the bytes it contributed; they are collected against
-    /// `pending`, and [`Builder::text_node`] shifts them for its trim. A `<tspan>`
-    /// gradient fill or one-sided stroke is reported. Any new `Style` field must be
-    /// compared below or it is lost silently.
+    /// A positioned `<tspan>` starts a new node (Illustrator: one per line); a bare one
+    /// is a style run, becoming character spans that [`Builder::text_node`] shifts for
+    /// its trim. Rejoining paragraphs is a decided non-goal. Any new `Style` field must
+    /// be compared below or it is lost silently.
     fn text(
         &mut self,
         el: roxmltree::Node<'d, 'input>,
@@ -1534,7 +1448,6 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         inherited: &Style,
     ) -> Vec<NodeId> {
         let mut made = Vec::new();
-        // The element's own anchor is the fallback for a run that states none.
         let mut pending = String::new();
         let mut at = (
             property(el, "x", &self.gradients.css)
@@ -1544,22 +1457,18 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 .and_then(parse_len)
                 .unwrap_or(0.0),
         );
-        // `<textPath>` holds the runs and a curve places the type, so `x`/`y` mean
-        // nothing. Only the first is read (a text node holds one rail); the rest are
-        // reported.
+        // Only the first `<textPath>` is read (a text node holds one rail).
         let rail_el = el.children().find(|c| c.has_tag_name("textPath"));
         if el.children().filter(|c| c.has_tag_name("textPath")).count() > 1 {
             self.skip("text (second textPath on one element)");
         }
-        // The style the runs inherit; Illustrator's `<textPath>` carries its own `fill`
-        // and `font-*`.
+        // Illustrator's `<textPath>` carries its own `fill` and `font-*`.
         let resolved = match rail_el {
             Some(tp) => resolve(tp, inherited, &self.gradients),
             None => inherited.clone(),
         };
-        // `startOffset` is kept as a percentage only: the field is a fraction so it
-        // survives the rail being scaled, and a length would need the arc length
-        // `PathWarp` owns, so a length is reported and dropped.
+        // `startOffset` is kept as a percentage only: a length would need the arc
+        // length `PathWarp` owns, so it is reported and dropped.
         let rail_offset = rail_el
             .and_then(|tp| tp.attribute("startOffset"))
             .map(str::trim)
@@ -1576,26 +1485,21 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             })
             .unwrap_or(0.0);
         let rail = rail_el.and_then(|tp| self.rail_of(tp));
-        // The element whose children are the runs.
         let body = rail_el.unwrap_or(el);
         let inherited = &resolved;
         let mut run_style = inherited.clone();
         let outer = element_transform(el);
-        // The element a run came from, which is not always the `<text>`: a positioned
-        // `<tspan>` supplies its run's id, opacity and font.
+        // A positioned `<tspan>` supplies its run's id, opacity and font.
         let mut run_el = el;
-        // The spans the finished node owes, as `(start, end)` into `pending`, cleared
-        // with it. One entry per attribute, the shape `Spans::set` takes.
+        // The spans the finished node owes, as `(start, end)` into `pending`.
         let mut spans: Vec<(usize, usize, crate::typography::CharAttr)> = Vec::new();
 
-        // Flattened first, at any depth; see `text_pieces`.
         let mut pieces = Vec::new();
         self.text_pieces(body, inherited, &mut pieces);
 
         for piece in pieces {
             let (text, child, s) = match piece {
                 TextPiece::Break(child, s) => {
-                    // The run so far ends here, at the position it was given.
                     if let Some(id) = self.text_node(
                         run_el,
                         el,
@@ -1624,9 +1528,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             };
             let start = pending.len();
             push_collapsed(&mut pending, text);
-            // Text from the element the run is needs no span. Beyond the self-
-            // comparisons, the gradient arm would double-report a positioned
-            // `<tspan fill="url(#g)">` here and from `text_node`.
+            // The run's own element needs no span; the gradient arm below would
+            // double-report a positioned `<tspan fill="url(#g)">` with `text_node`.
             if child == run_el {
                 continue;
             }
@@ -1645,10 +1548,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             if s.stroke.is_some() != run_style.stroke.is_some() {
                 self.approximate("text (per-run style)");
             }
-            // The font scope. The family list is a preference order, resolved and
-            // reported by [`Builder::pick_family`]. A value equal to the node's own is
-            // pushed anyway and dropped by `Spans::normalize`, so `"Foo, Arial"` against
-            // `"Arial"` cannot disagree with the model.
+            // A value equal to the node's own is pushed anyway and dropped by
+            // `Spans::normalize`, so `"Foo, Arial"` against `"Arial"` cannot disagree.
             if s.font_size != run_style.font_size {
                 spans.push((start, end, CharAttr::Size(s.font_size)));
             }
@@ -1683,12 +1584,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     }
 
     /// A `<text>`'s content flattened into runs, at whatever depth the file states
-    /// them.
-    ///
-    /// One piece per text node, carrying the innermost element it came from and that
-    /// element's resolved [`Style`], so depth does not matter and interleaving works:
-    /// `<tspan>x<tspan>y</tspan>z</tspan>` yields three pieces and `z` reads the outer
-    /// tspan's style. A `Break` is emitted before the pieces inside it.
+    /// them: one piece per text node, with the innermost element it came from and that
+    /// element's resolved [`Style`], so `<tspan>x<tspan>y</tspan>z</tspan>` is three
+    /// pieces and `z` reads the outer tspan's style.
     fn text_pieces(
         &self,
         node: roxmltree::Node<'d, 'input>,
@@ -1715,12 +1613,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         }
     }
 
-    /// The curve a `<textPath>` names, in the referencing element's own user space; the
-    /// inverse of `svg::collect_defs`, which puts the rail in `<defs>` as a `<path>`.
-    ///
-    /// The target's own `transform` is ignored, per SVG (unlike `<use>`), but reported.
-    /// `None`, with a report, for a missing `href`, an absent target, no `d` or an
-    /// unparseable one; it must not come back as straight text.
+    /// The curve a `<textPath>` names, the inverse of `svg::collect_defs`. The target's
+    /// own `transform` is ignored, per SVG (unlike `<use>`), but reported. `None`, with
+    /// a report, for a missing `href`, an absent target or no usable `d`.
     fn rail_of(&mut self, tp: roxmltree::Node<'d, 'input>) -> Option<BezPath> {
         let Some(href) = tp
             .attribute("href")
@@ -1757,9 +1652,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     /// reporting a substitution when it has none of them.
     ///
     /// A `font-family` is a preference order, so the head is not taken regardless.
-    /// Shared by [`Builder::text_node`] and the `<tspan>` runs so they substitute
-    /// alike. `None` means nothing was available and the substitution is already
-    /// reported (deduplicated by name).
+    /// `None` means nothing was available and the substitution is already reported.
     fn pick_family(&mut self, list: &str) -> Option<String> {
         let found = list
             .split(',')
@@ -1775,14 +1668,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     /// One text node holding `content`, with its first baseline at `at`.
     ///
     /// SVG places text by baseline and this model by box, so the text is laid out
-    /// headlessly (`text::layout`) to get the shaped ascent between the two.
-    /// `text-anchor` is folded into the placement: `middle` shifts the box half its width.
-    ///
-    /// `runs` are the per-run ranges [`Builder::text`] collected, indexed into the
-    /// untrimmed `content`; this function's trim is the only thing that knows what it
-    /// removed, so it shifts them. The front trim is structurally zero
-    /// ([`push_collapsed`] never emits leading space) and guards a change to
-    /// collapsing; the back trim and the `min` run.
+    /// headlessly to get the shaped ascent; `text-anchor` is folded into the placement.
+    /// `runs` are span ranges against the untrimmed `content`, which this trim shifts;
+    /// its front trim is structurally zero ([`push_collapsed`] emits no leading space).
     // `clippy::duplicated_attributes` is silent on an item inside an `impl`, so a
     // repeat of the attribute below is caught by `tests/duplicated_attributes.rs`.
     #[allow(clippy::too_many_arguments)]
@@ -1799,17 +1687,15 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         rail: Option<&BezPath>,
         rail_offset: f64,
     ) -> Option<NodeId> {
-        // The same [`XML_SPACE`] set [`push_collapsed`] collapses; they must not drift,
-        // because `lead` re-bases every span's byte range onto the trimmed string.
+        // The same [`XML_SPACE`] set [`push_collapsed`] collapses; `lead` re-bases every
+        // span's byte range.
         let lead = content.len() - content.trim_start_matches(XML_SPACE).len();
         let content = content.trim_matches(XML_SPACE);
         if content.is_empty() {
             return None;
         }
-        // Font properties come from the resolved `style`, not `el`, since they inherit.
-        // Through the setters, not a struct literal: `TextStyle::set` clamps size and
-        // weight and a span goes through the same clamp, so a raw default could never
-        // equal an out-of-range span and `normalize` would keep it.
+        // Through the setters, not a struct literal: spans go through the same size and
+        // weight clamp, so a raw default could never equal an out-of-range span.
         let mut ts = crate::typography::TextStyle::default()
             .with(CharAttr::Size(style.font_size))
             .with(CharAttr::Weight(style.weight))
@@ -1819,16 +1705,13 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         {
             ts.set(CharAttr::Family(f));
         }
-        // Through the setter so `fill-opacity` is quantized to the 1/255 the hex field
-        // can express (`typography::canonical_color`); an `f32` 0.5 alpha could never
-        // coalesce with a default. The invisible-span guard is `ink` in `text`, not this.
+        // Through the setter so `fill-opacity` is quantized to 1/255
+        // (`typography::canonical_color`); an `f32` 0.5 alpha could never coalesce.
         if let Some(c) = solid_fill(style) {
             ts.set(crate::typography::CharAttr::Color(Some(c)));
         } else if style.fill.is_some() {
-            // A gradient on the text itself: `TextStyle::color` is a colour, so the text
-            // takes the default ink and this report. Here because this is the only place
-            // that sees a whole node's fill, and a positioned `<tspan>` arrives as its
-            // own node.
+            // `TextStyle::color` is a colour, so a gradient falls back to the default
+            // ink; reported here, the only place that sees a whole node's fill.
             self.approximate("text (gradient fill)");
         }
 
@@ -1841,9 +1724,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             }
         }
         // A span covering every byte is a default: hoist it onto the node style, else
-        // this app's own output (one `<tspan>` per style run, font on the tspan) would
-        // carry a full-coverage span over a node saying otherwise. `set` then `clear`
-        // over the range, per kind, leaves other attributes' spans alone.
+        // this app's own output (font on a lone `<tspan>`) would carry a full-coverage
+        // span over a node saying otherwise.
         let whole: Vec<CharAttr> = spans
             .as_slice()
             .iter()
@@ -1857,8 +1739,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         }
         let para_spans = crate::typography::ParaSpans::default();
         let mut paragraph = crate::typography::ParagraphStyle::default();
-        // On a rail the anchor becomes `align` rather than a shift: railed text has no
-        // `x` to shift from, and the anchor is where along the curve the type sits.
+        // On a rail the anchor becomes `align`: railed text has no `x` to shift from.
         if rail.is_some() {
             paragraph.align = match style.anchor {
                 Anchor::Middle => crate::typography::TextAlign::Center,
@@ -1877,8 +1758,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             block: &block,
             sizing: &sizing,
             on_path: rail,
-            // Always `false`: our writer writes a flip as a reversed rail, which draws
-            // identically, and only SVG 2's `side="right"` would say otherwise.
+            // Our writer writes a flip as a reversed rail; only SVG 2's `side="right"`
+            // would say otherwise.
             on_path_flip: false,
             on_path_offset: rail_offset,
         });
@@ -1912,9 +1793,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 on_path_flip: false,
                 on_path_offset: rail_offset,
             },
-            // The `<text>`'s transform (`outer`), not `el`'s: `el` may be a `<tspan>`,
-            // which carries none. A rail places the node itself, so the baseline
-            // arithmetic would move the type off the curve by an ascent.
+            // The `<text>`'s transform (`outer`), not `el`'s: `el` may be a `<tspan>`. A
+            // rail places the node itself; the baseline shift would lift it off the curve.
             transform: Some(if rail.is_some() {
                 outer
             } else {
@@ -1923,7 +1803,6 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             name: element_name(el),
         });
         self.shapes += 1;
-        // The `<text>`'s own chrome as well as this run's — see `chrome`'s `over`.
         self.chrome(el, id, style.current, Some(text_el));
         Some(id)
     }
@@ -1931,12 +1810,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     /// A `<rect>` with its two corner radii already clamped, as whichever of the
     /// model's three shapes holds it *exactly*.
     ///
-    /// SVG's rounded rect has an ellipse at each corner and ours a circle, so one
-    /// attribute pair spans three kinds:
-    ///
-    /// - `rx == ry` — a [`NodeKind::Rect`] with that radius.
-    /// - both radii at half their side — the shape is an [`NodeKind::Ellipse`].
-    /// - anything else — a [`NodeKind::Path`], the only exact form.
+    /// SVG's rounded rect has an ellipse at each corner and ours a circle: `rx == ry`
+    /// is a [`NodeKind::Rect`], both radii at half their side an [`NodeKind::Ellipse`],
+    /// anything else a [`NodeKind::Path`], the only exact form.
     fn rounded_rect(
         &mut self,
         el: roxmltree::Node<'_, 'input>,
@@ -2012,8 +1888,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         style: &Style,
     ) -> NodeId {
         let id = self.ids.mint();
-        // The element's transform, then the shape's placement inside it: `rotate(45)`
-        // on a `<rect x="10">` turns about the user origin, not the corner.
+        // `rotate(45)` on a `<rect x="10">` turns about the user origin, not the corner.
         let transform = element_transform(el) * local;
         let bounds = crate::geometry::local_path(&kind)
             .map(|p| kurbo::Shape::bounding_box(&p))
@@ -2039,7 +1914,6 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             })
             .into_iter()
             .collect();
-        // Lists for a node just made are built whole, as every list below is.
         if !fills.is_empty() {
             self.push(Operation::SetFills {
                 id,
@@ -2058,8 +1932,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 cap: style.stroke_cap,
                 dashes: style.dashes.clone(),
                 dash_offset: style.dash_offset,
-                // `dash_fit` is ours: the markup already holds the fitted numbers, and
-                // `true` would re-fit them.
+                // The markup already holds fitted dashes; `dash_fit: true` would re-fit.
                 miter_limit: style.miter_limit,
                 dash_fit: false,
                 // SVG strokes are always centred.
@@ -2088,12 +1961,9 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     /// The two properties every element carries and neither inherits: its own
     /// opacity, and whether it is drawn at all.
     ///
-    /// `display="none"` becomes a hidden layer rather than nothing.
-    ///
-    /// `over` is the `<text>` a positioned `<tspan>` hangs under, for `text_node`'s
-    /// runs after the first: the `<tspan>` carries none of these properties, so they
-    /// compose with it (opacity multiplies, either `display` or `visibility` hides)
-    /// rather than being replaced by it.
+    /// `display="none"` becomes a hidden layer rather than nothing. `over` is the
+    /// `<text>` a positioned `<tspan>` hangs under: its properties compose with the
+    /// `<tspan>`'s (opacity multiplies, either `display` or `visibility` hides).
     fn chrome(
         &mut self,
         el: roxmltree::Node<'_, 'input>,
@@ -2101,8 +1971,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
         current: Color,
         over: Option<roxmltree::Node<'_, 'input>>,
     ) {
-        // Both read before either is written: the reads borrow `self.gradients` and
-        // the writes `self.ops`.
+        // Reads borrow `self.gradients`, writes `self.ops`: read both first.
         let css = &self.gradients.css;
         let prop = |name: &str| property(el, name, css);
         let outer = |name: &str| {
@@ -2125,9 +1994,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             || hides(prop("visibility"), "visibility")
             || hides(outer("display"), "display")
             || hides(outer("visibility"), "visibility");
-        // `filter` is read as a property (Inkscape writes it into `style`). The run's
-        // own wins over the outer element's: filters do not compose, the model holds
-        // one effect stack per node.
+        // The run's own `filter` wins over the outer element's: the model holds one
+        // effect stack per node.
         let filter = prop("filter").or_else(|| outer("filter")).map(|v| {
             let read = self
                 .gradients
@@ -2171,10 +2039,8 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
 
 impl Paint {
     /// The affine that carries this paint's gradient from the coordinates it was
-    /// written in to the shape's own space. Identity for a solid.
-    ///
-    /// Shared so the report and the brush cannot disagree about the composition
-    /// (see [`Paint::brush`]).
+    /// written in to the shape's own space. Identity for a solid. Shared so the
+    /// report and the brush cannot disagree.
     fn mapping(&self, bounds: kurbo::Rect, local: Affine) -> Affine {
         match self {
             Paint::Solid(_) => Affine::IDENTITY,
@@ -2197,8 +2063,7 @@ impl Paint {
     ///
     /// Tests the ratio of the mapping's singular values, not whether the matrix looks
     /// diagonal (a rotation is representable; see [`transform_gradient`]). The
-    /// threshold is numerical noise, not a visibility judgement; `1e-6` rather than
-    /// `0.0` is only insurance, since a similarity's ratio is exactly `1.0`.
+    /// threshold is numerical noise, not a visibility judgement.
     fn squashed_radial(&self, bounds: kurbo::Rect, local: Affine) -> bool {
         if !matches!(
             self,
@@ -2216,21 +2081,17 @@ impl Paint {
     /// Fold an opacity into the paint, and resolve a gradient against the shape it is
     /// on.
     ///
-    /// Both `gradientUnits` need a mapping. `local` is the shape's placement inside its
-    /// element's user space (a rect's `x`/`y`); our brush is written in the shape's own
-    /// space, while a `userSpaceOnUse` gradient is written in the space that placement
-    /// was measured in.
+    /// `local` is the shape's placement inside its element's user space (a rect's
+    /// `x`/`y`); our brush is in the shape's own space, a `userSpaceOnUse` gradient in
+    /// the space that placement was measured in.
     fn brush(&self, bounds: kurbo::Rect, local: Affine, alpha: f32) -> Brush {
         match self {
             Paint::Solid(c) => Brush::Solid(c.multiply_alpha(alpha)),
             Paint::Gradient(g, _, _) => {
                 let mut g = (**g).clone();
-                // [`Paint::mapping`]: the unit square onto the shape's box for
-                // `objectBoundingBox`, the inverse placement for `userSpaceOnUse`.
                 let m = self.mapping(bounds, local);
-                // Baked where exact, carried where not: linear points take any affine,
-                // radial circles only a similarity, so only a squash survives as a
-                // transform and the geometry stays in the shape's own space.
+                // Baked where exact: linear points take any affine, radial circles only
+                // a similarity, so only a squash survives as a carried transform.
                 let transform = if self.squashed_radial(bounds, local) {
                     m
                 } else {
@@ -2258,20 +2119,15 @@ fn transform_gradient(kind: peniko::GradientKind, t: Affine) -> peniko::Gradient
         let q = t * Point::new(v.x, v.y);
         peniko::kurbo::Point::new(q.x, q.y)
     };
-    // A radius has no direction, so it scales by `sqrt(|determinant|)`, the geometric
-    // mean of the axes. Not the diagonal: that is the scale only without rotation, and
-    // `matrix(0, -1.33, -1.33, 0, …)` (Inkscape's rotated highlight) has `a == d == 0`
-    // and would collapse the radius. A radial reaching here is a similarity, so it is
-    // exact; a squash is routed to the brush's transform by [`Paint::brush`].
+    // A radius scales by `sqrt(|determinant|)`, not the diagonal: Inkscape's rotated
+    // highlight `matrix(0, -1.33, -1.33, 0, …)` has `a == d == 0` and would collapse.
     let s = t.determinant().abs().sqrt() as f32;
     match kind {
         peniko::GradientKind::Linear(l) => {
-            // Mapping the two endpoints is not mapping the gradient: its iso-lines are
-            // perpendicular to `start → end` in the written space, and only a similarity
-            // keeps that, so a non-square `objectBoundingBox` tilts the bands. The exact
-            // answer is still linear; transform the covector: the parameter at `q` is
-            // `(q − T·start) · u` with `u = Tₗᵢₙ⁻ᵀ·d / |d|²`, which peniko reads back as
-            // `u / |u|²` laid off from the mapped start.
+            // Mapping the endpoints is not mapping the gradient: iso-lines stay
+            // perpendicular to `start → end` only under a similarity, so a non-square
+            // `objectBoundingBox` would tilt the bands. Transform the covector instead:
+            // the parameter at `q` is `(q − T·start) · u`, `u = Tₗᵢₙ⁻ᵀ·d / |d|²`.
             let d = l.end - l.start;
             let len2 = d.hypot2();
             let c = t.as_coeffs();
@@ -2282,8 +2138,7 @@ fn transform_gradient(kind: peniko::GradientKind, t: Affine) -> peniko::Gradient
             let u =
                 kurbo::Vec2::new(inv[0] * d.x + inv[1] * d.y, inv[2] * d.x + inv[3] * d.y) / len2;
             let start = p(l.start);
-            // A degenerate gradient (zero length) or a singular transform has no
-            // direction to correct; the endpoint mapping is as good as anything.
+            // A zero-length gradient or singular transform has no direction to correct.
             let end = if len2 > 0.0 && u.hypot2() > 0.0 && crate::build::affine_is_invertible(t) {
                 let e = start + u / u.hypot2();
                 peniko::kurbo::Point::new(e.x, e.y)
@@ -2312,10 +2167,9 @@ fn transform_gradient(kind: peniko::GradientKind, t: Affine) -> peniko::Gradient
 /// A gradient and everything it inherits from, nearest first.
 ///
 /// SVG's gradient inheritance is per attribute: a gradient with no `x1` takes the
-/// referenced one's, one with no `<stop>` children takes its stops, and so on. Inkscape
-/// writes every gradient this way (a stop-holding element plus a positioned one per
-/// use, joined by `xlink:href`). A broken link costs only the attributes behind it,
-/// as in a browser. The depth cap of eight stops a cycle.
+/// referenced one's, one with no `<stop>` children takes its stops. Inkscape writes
+/// every gradient this way. A broken link costs only the attributes behind it, as in
+/// a browser; the depth cap of eight stops a cycle.
 fn gradient_chain<'a, 'input>(
     el: roxmltree::Node<'a, 'input>,
     ids: &rustc_hash::FxHashMap<&'a str, roxmltree::Node<'a, 'input>>,
@@ -2351,29 +2205,22 @@ fn gradient_chain<'a, 'input>(
 
 /// Every gradient in the document, by id.
 ///
-/// Collected in one pass, because a `fill` may reference a gradient defined after it
-/// and `xlink:href` inheritance can need a second lookup.
+/// Collected up front, because a `fill` may reference a gradient defined after it.
 struct Gradients<'a, 'input> {
-    // Keyed on `&'a str`, the document borrow: an id read off a node cannot outlive
-    // the tree it was read from.
     by_id: rustc_hash::FxHashMap<&'a str, (peniko::Gradient, GradientUnits, Affine)>,
     /// `<clipPath>` and `<mask>` elements by id, kept as nodes: their contents are
-    /// ordinary markup, built by the same walk as a shape.
+    /// built by the same walk as a shape.
     clips: rustc_hash::FxHashMap<&'a str, roxmltree::Node<'a, 'input>>,
-    /// Every element carrying an id, which `<use href="#x">` needs. Kept separate from
-    /// the two maps above so a lookup cannot return a gradient where a clip belongs.
+    /// Every element carrying an id, which `<use href="#x">` needs.
     ids: rustc_hash::FxHashMap<&'a str, roxmltree::Node<'a, 'input>>,
     /// The document's `<style>` rules — see [`Css`].
     css: Css<'a>,
-    /// Whether the document holds a `<pattern>`, a paint server this reader does not
-    /// read. This app's own writer emits every image fill as one, so without this
-    /// report a re-imported picture silently becomes a black rectangle (the inherited
-    /// initial fill). A flag, reported once for the file.
+    /// Whether the document holds a `<pattern>`, which this reader does not read. This
+    /// app's writer emits every image fill as one, so without the report a re-imported
+    /// picture silently becomes a black rectangle.
     patterns: bool,
-    /// Whether any `fill` or `stroke` carried a value this reader could not parse.
-    ///
-    /// A `Cell` because `resolve` sees this by shared reference and sets it while
-    /// walking elements; the other flags are facts about the defs, settled in `collect`.
+    /// Whether any `fill` or `stroke` carried a value this reader could not parse. A
+    /// `Cell` because `resolve` sets it through a shared reference.
     unreadable_paint: std::cell::Cell<bool>,
     /// Whether any gradient's stop list was resampled down to [`MAX_GRADIENT_STOPS`].
     resampled: bool,
@@ -2382,17 +2229,14 @@ struct Gradients<'a, 'input> {
 /// The most stops this reader keeps from one `<linearGradient>`/`<radialGradient>`.
 ///
 /// Bounds a gradient's payload, which neither `nodes_limit` nor [`MAX_SVG_NODES`]
-/// sees: every shape naming a gradient gets its own copy of the list, which ends up
-/// in the `Document` and the saved JSON (6,000 stops on 6,000 rects held 864 MB).
-/// Real gradients are single digits to dozens, so a file hitting 256 is generated and
-/// resampling it is honest.
+/// sees: every shape naming a gradient gets its own copy of the list, in the
+/// `Document` and the saved JSON. Real gradients are single digits to dozens.
 const MAX_GRADIENT_STOPS: usize = 256;
 
 /// Every `<style>` element's full text content, keyed by [`roxmltree::Node::id`].
 ///
 /// Owned and built by the caller, because the rules borrow it: a sheet interrupted by
-/// an XML comment is two text nodes with no single `&str` to point at, and `Css`
-/// outlives `collect`, so the caller declares this above the `Builder`.
+/// an XML comment is two text nodes with no single `&str` to point at.
 fn style_sheets(doc: &roxmltree::Document<'_>) -> rustc_hash::FxHashMap<roxmltree::NodeId, String> {
     doc.descendants()
         .filter(roxmltree::Node::is_element)
@@ -2424,9 +2268,8 @@ impl<'a, 'input> Gradients<'a, 'input> {
             let name = el.tag_name().name();
             patterns |= name == "pattern";
             if name == "style" {
-                // Every text child (see `style_sheets`), not `text()`: an XML comment
-                // inside `<style>` (the legacy `<style><!-- … --></style>` idiom) would
-                // end the sheet and send every classed shape to the initial black.
+                // Every text child, not `text()`: the legacy `<style><!-- … --></style>`
+                // idiom would otherwise end the sheet and blacken every classed shape.
                 if let Some(sheet) = sheets.get(&el.id()) {
                     let (rules, complex) = parse_css(sheet);
                     css.rules.extend(rules);
@@ -2439,8 +2282,7 @@ impl<'a, 'input> Gradients<'a, 'input> {
             if name == "clipPath" || name == "mask" {
                 clips.entry(id).or_insert(el);
             }
-            // First wins for all three id maps (`clips`, `ids`, `by_id`), as in a
-            // browser, so one document never has two answers for an id.
+            // First wins for all three id maps, as in a browser.
             ids.entry(id).or_insert(el);
         }
         for el in doc.descendants().filter(roxmltree::Node::is_element) {
@@ -2451,7 +2293,6 @@ impl<'a, 'input> Gradients<'a, 'input> {
             let Some(id) = el.attribute("id") else {
                 continue;
             };
-            // Everything below reads the chain, not the element; see [`gradient_chain`].
             let chain = gradient_chain(el, &ids);
             let mut stops: Vec<peniko::ColorStop> = chain
                 .iter()
@@ -2467,12 +2308,10 @@ impl<'a, 'input> Gradients<'a, 'input> {
             if stops.is_empty() {
                 continue;
             }
-            // SVG corrects a descending offset up, so the model holds what the file
-            // means. The render boundary does the same for hand-edited files; neither
-            // covers the other.
+            // SVG corrects a descending offset up, so the model holds what the file means.
             crate::image::make_stops_monotonic(&mut stops);
-            // Capped at `MAX_GRADIENT_STOPS`, resampled evenly rather than truncated
-            // (which squeezes the ramp into the front) or refused (which loses the paint).
+            // Resampled evenly rather than truncated (which squeezes the ramp into the
+            // front) or refused (which loses the paint).
             if stops.len() > MAX_GRADIENT_STOPS {
                 let n = stops.len();
                 stops = (0..MAX_GRADIENT_STOPS)
@@ -2507,15 +2346,12 @@ impl<'a, 'input> Gradients<'a, 'input> {
             };
             let mut g = peniko::Gradient::new_linear((0.0, 0.0), (0.0, 0.0));
             g.kind = kind;
-            // `spreadMethod` is `extend`: a reflected ramp is how brushed-metal sheens
-            // are written, and padding it leaves the outer half flat.
             g.extend = match attr("spreadMethod") {
                 Some("reflect") => peniko::Extend::Reflect,
                 Some("repeat") => peniko::Extend::Repeat,
                 _ => peniko::Extend::Pad,
             };
             g.stops = stops.as_slice().into();
-            // `or_insert`: first wins, as for `ids` above.
             by_id.entry(id).or_insert((g, units, xform));
         }
         Self {
@@ -2529,9 +2365,7 @@ impl<'a, 'input> Gradients<'a, 'input> {
         }
     }
 
-    /// Resolve a `<use>`'s `href`, a bare `#id` rather than a `url(#id)`, so
-    /// [`reference()`] is not used. The `()` disambiguates from Rust's `reference`
-    /// primitive type.
+    /// Resolve a `<use>`'s `href`, a bare `#id` rather than a `url(#id)`.
     fn element(&self, href: &str) -> Option<roxmltree::Node<'a, 'input>> {
         self.ids.get(href.trim().strip_prefix('#')?).copied()
     }
@@ -2546,10 +2380,8 @@ impl<'a, 'input> Gradients<'a, 'input> {
         self.clips.get(reference(value)?).copied()
     }
 
-    /// Resolve a `filter="url(#id)"` value to the `<filter>` it names.
-    ///
-    /// Off [`Self::ids`] with a tag check, which stops `filter="url(#some-gradient)"`
-    /// from resolving.
+    /// Resolve a `filter="url(#id)"` value to the `<filter>` it names; the tag check
+    /// stops `filter="url(#some-gradient)"` from resolving.
     fn filter(&self, value: &str) -> Option<roxmltree::Node<'a, 'input>> {
         let el = *self.ids.get(reference(value)?)?;
         el.has_tag_name("filter").then_some(el)
@@ -2558,50 +2390,38 @@ impl<'a, 'input> Gradients<'a, 'input> {
 
 /// The filter shapes this model can hold, read out of a `<filter>` element.
 ///
-/// A `<filter>` is an image-processing graph and an effect stack is four kinds, so
-/// most arrangements are still a skip. Read: a lone `<feGaussianBlur>` (Inkscape's
-/// Blur slider), a lone `<feDropShadow>`, and the shadow chain (silhouette, optional
-/// inversion and dilation, offset, blur, flood cut to the silhouette) that this app's
-/// writer emits (`ondin_export::svg::shadow_graph`) and older files write by hand.
-///
-/// [`crate::effect::EffectKind::Filters`] is written but cannot be read back: its
-/// 20-value `feColorMatrix` does not determine the brightness and contrast that made
-/// it, and guessing would invent values. A filter is all or nothing: one unrecognised
-/// primitive refuses the element, since a half-read filter is wrong silently.
+/// Read: a lone `<feGaussianBlur>`, a lone `<feDropShadow>`, and the shadow chain
+/// that `ondin_export::svg::shadow_graph` emits. [`crate::effect::EffectKind::Filters`]
+/// cannot be read back: its `feColorMatrix` does not determine the brightness and
+/// contrast that made it. A filter is all or nothing, since a half-read one is wrong
+/// silently.
 struct FilterRead {
     /// In document order, which is stack order, so nothing is sorted.
     effects: Vec<crate::effect::Effect>,
-    /// Some `stdDeviation` named two unequal numbers. The model's blur is isotropic,
-    /// so the mean is used and the caller reports it.
+    /// Some `stdDeviation` named two unequal numbers; the isotropic mean is used.
     uneven: bool,
 }
 
 /// The filter region is not modelled and deliberately not reported.
 ///
-/// Every `<filter>` clips to a region (default `-10% -10% 120% 120%`) and
-/// [`crate::effect::EffectKind::LayerBlur`] has none, but regions are nearly always
-/// generated to fit the blur (Inkscape fits 2.4 σ per axis, so fractions are not
-/// comparable across axes and a naive comparison gives false positives).
-/// [`crate::effect::BLUR_CUTOFF`] reaches 3 σ, adding about 1.6% of the kernel's
-/// tail. Judging an authored region needs the shape's bounds, which `chrome` lacks.
+/// Every `<filter>` clips to a region and [`crate::effect::EffectKind::LayerBlur`] has
+/// none, but regions are nearly always generated to fit the blur, and a naive
+/// comparison gives false positives. Judging an authored region needs the shape's
+/// bounds, which `chrome` lacks.
 const _FILTER_REGION_IS_NOT_MODELLED: () = ();
 
 /// A `<filter>` as an effect stack, or `None` for anything this cannot hold.
 ///
-/// A linear walk in document order: every producer of the idioms above emits the
-/// primitives in the order they compose, so a result-and-`in` graph needs no
-/// topological sort. A file that names its results out of order is refused, not
-/// misread.
-///
-/// `current` is the referencing element's `color`, for `flood_color`'s `currentColor`
-/// (a `<filter>` in `<defs>` has no inherited paint).
+/// A linear walk in document order: producers emit primitives in the order they
+/// compose, so no topological sort; a file naming its results out of order is
+/// refused, not misread. `current` is the referencing element's `color`, for
+/// `flood_color`'s `currentColor`.
 fn effects_of<'a>(
     def: roxmltree::Node<'a, '_>,
     css: &Css<'a>,
     current: Color,
 ) -> Option<FilterRead> {
-    // `primitiveUnits="objectBoundingBox"` makes `stdDeviation` a fraction; refusing is
-    // the only honest answer without the bounds, and it is rare.
+    // `objectBoundingBox` makes `stdDeviation` a fraction; refuse without the bounds.
     if def.attribute("primitiveUnits") == Some("objectBoundingBox") {
         return None;
     }
@@ -2641,11 +2461,10 @@ fn effects_of<'a>(
             ));
             i += 1;
         } else if p.has_tag_name("feGaussianBlur") {
-            // A blur belonging to a shadow was consumed by `shadow_chain`, so this one
-            // blurs the drawing itself.
+            // A shadow's blur was consumed by `shadow_chain`; this one blurs the drawing.
             let (dev, uneven) = deviation_of(p.attribute("stdDeviation")?)?;
             out.uneven |= uneven;
-            // A zero deviation disables the primitive: the identity, not a skip.
+            // A zero deviation is the identity, not a skip.
             if dev > 0.0 {
                 out.effects.push(crate::effect::Effect::new(
                     crate::effect::EffectKind::LayerBlur {
@@ -2658,9 +2477,8 @@ fn effects_of<'a>(
             && p.attribute("dx").is_none()
             && p.attribute("dy").is_none()
         {
-            // The identity primitive, read rather than refused: a filter with no
-            // primitives renders nothing, so the writer emits a bare `<feOffset/>` for
-            // an all-neutral stack (`ondin_export::svg::effect_def`).
+            // The writer emits a bare `<feOffset/>` for an all-neutral stack, since a
+            // filter with no primitives renders nothing.
             i += 1;
         } else if p.has_tag_name("feMerge") {
             // Assembly, not an effect: its inputs were read already.
@@ -2674,9 +2492,8 @@ fn effects_of<'a>(
 
 /// Whether `p` begins a shadow chain rather than acting on the layer itself.
 ///
-/// The silhouette is either a `feColorMatrix` keeping only alpha (this app's writer,
-/// since `SourceAlpha` would ignore earlier stack changes) or `SourceAlpha` itself
-/// (hand-authored files).
+/// The silhouette is a `feColorMatrix` keeping only alpha (this app's writer, since
+/// `SourceAlpha` would ignore earlier stack changes) or `SourceAlpha` itself.
 fn starts_shadow(p: roxmltree::Node<'_, '_>) -> bool {
     p.attribute("in") == Some("SourceAlpha") || is_alpha_matrix(p)
 }
@@ -2697,8 +2514,8 @@ fn is_alpha_matrix(p: roxmltree::Node<'_, '_>) -> bool {
 /// One shadow, read from `prims[start..]`. Returns it, whether it is an inner
 /// shadow, and the index after the last primitive it consumed.
 ///
-/// The offset and the blur are accepted in either order: they give the same picture,
-/// and this app's writer offsets first while hand-written files blur first.
+/// The offset and the blur are accepted in either order: this app's writer offsets
+/// first, hand-written files blur first.
 fn shadow_chain<'a>(
     prims: &[roxmltree::Node<'a, '_>],
     start: usize,
@@ -2707,13 +2524,11 @@ fn shadow_chain<'a>(
     uneven: &mut bool,
 ) -> Option<(crate::effect::Shadow, bool, usize)> {
     let mut i = start;
-    // The silhouette, when it is a primitive of its own.
     if is_alpha_matrix(prims[i]) {
         i += 1;
     }
     let at = |i: usize| prims.get(i).copied();
 
-    // Everything outside the layer, which an inner shadow casts from.
     let mut inner = false;
     if let Some(p) = at(i)
         && p.has_tag_name("feComponentTransfer")
@@ -2728,8 +2543,7 @@ fn shadow_chain<'a>(
         i += 1;
     }
 
-    // The dilation's sign depends on the shadow: the writer picks the operator as
-    // `(spread > 0) != inner`, so `dilate` is not simply "positive".
+    // The writer picks the operator as `(spread > 0) != inner`.
     let mut spread = 0.0;
     if let Some(p) = at(i)
         && p.has_tag_name("feMorphology")
@@ -2765,15 +2579,13 @@ fn shadow_chain<'a>(
         }
         i += 1;
     }
-    // A silhouette neither moved nor softened is a recolour, not a shadow; refuse it.
-    // Tested on the values, not on which primitives were present: a zero `dx`/`dy`
-    // and zero `stdDeviation` set both flags yet change nothing. `spread` is
-    // deliberately not in the test, so a spread-only halo is still refused.
+    // Neither moved nor softened is a recolour, not a shadow. Tested on the values (a
+    // zero `dx`/`dy` sets the flags yet changes nothing); `spread` is deliberately
+    // absent, so a spread-only halo is still refused.
     if offset == kurbo::Vec2::ZERO && blur == 0.0 {
         return None;
     }
 
-    // The flood fills the region and the composite cuts it to the silhouette.
     let flood = at(i).filter(|p| p.has_tag_name("feFlood"))?;
     let color = flood_color(flood, css, current)?;
     i += 1;
@@ -2805,16 +2617,14 @@ fn shadow_chain<'a>(
 /// A `stdDeviation` as one number, and whether it named two unequal ones.
 ///
 /// Zero is a value, not a refusal: a hard-edged offset shadow (`stdDeviation="0"`) is
-/// an ordinary idiom the model holds exactly. Negative is refused, per SVG, and
-/// `is_finite` guards junk files.
+/// an ordinary idiom. Negative is refused, per SVG.
 fn deviation_of(v: &str) -> Option<(f64, bool)> {
     let (dev, uneven) = match numbers(v).as_slice() {
         [s] => (*s, false),
         [x, y] => ((x + y) * 0.5, (x - y).abs() > 1e-9),
         _ => return None,
     };
-    // Clamped so the radius it becomes stays within `effect::MAX_BLUR`, which
-    // `Document::apply` would otherwise refuse the whole import for.
+    // Clamped to `effect::MAX_BLUR`, which `Document::apply` refuses the import over.
     let cap = crate::effect::MAX_BLUR * crate::effect::BLUR_DEVIATION;
     (dev.is_finite() && dev >= 0.0).then_some((dev.min(cap), uneven))
 }
@@ -2822,10 +2632,9 @@ fn deviation_of(v: &str) -> Option<(f64, bool)> {
 /// `flood-color` and `flood-opacity` as one colour.
 ///
 /// Both are read through [`property`], since Inkscape writes filter primitives through
-/// `style=""` and the shadow would otherwise default to opaque black.
+/// `style=""`.
 fn flood_color<'a>(p: roxmltree::Node<'a, '_>, css: &Css<'a>, current: Color) -> Option<Color> {
     let base = match property(p, "flood-color", css) {
-        // `currentColor` resolves against the referencing element's `color`;
         // `parse_paint_color` does not know the keyword.
         Some("currentColor") => current,
         Some(v) => parse_paint_color(v)?,
@@ -2841,8 +2650,7 @@ fn flood_color<'a>(p: roxmltree::Node<'a, '_>, css: &Css<'a>, current: Color) ->
 /// what SVG's `<mask>` means.
 ///
 /// They agree on opaque white (the common mask) and are opposites for black.
-/// Conservative: any paint not an opaque near-white colour (gradient, grey, partial
-/// alpha, `currentColor`) answers `false` and the mask is reported approximated.
+/// Conservative: any paint but an opaque near-white answers `false`.
 fn luminance_equivalent(def: roxmltree::Node<'_, '_>, css: &Css<'_>) -> bool {
     def.descendants()
         .filter(roxmltree::Node::is_element)
@@ -2850,7 +2658,7 @@ fn luminance_equivalent(def: roxmltree::Node<'_, '_>, css: &Css<'_>) -> bool {
         .all(|el| {
             let prop = |name: &str| property(el, name, css);
             let Some(v) = prop("fill") else {
-                // No fill is SVG's initial black, where the readings disagree most.
+                // No fill is SVG's initial black, where the readings disagree.
                 return false;
             };
             match parse_paint_color(v) {
@@ -2867,7 +2675,7 @@ fn luminance_equivalent(def: roxmltree::Node<'_, '_>, css: &Css<'_>) -> bool {
 /// The id inside a `url(#id)`, and `None` for anything else.
 ///
 /// The paren closing `url(` is the first one: Inkscape writes a fallback after the
-/// reference (`url(#g) rgb(0, 0, 0)`), and reading to the last `)` yields a bogus id.
+/// reference (`url(#g) rgb(0, 0, 0)`).
 fn reference(value: &str) -> Option<&str> {
     let rest = value.trim().strip_prefix("url(")?;
     let inner = rest[..rest.find(')')?].trim();
@@ -2878,9 +2686,8 @@ fn reference(value: &str) -> Option<&str> {
 
 /// One `<stop>` as a colour stop, or `None` where it is not one.
 ///
-/// The offset rejects NaN (which `f64::clamp` propagates, and `serde_json` writes as
-/// `null`, so the document would never reopen) but not infinities: `1e999` means "at
-/// the end" and clamps to 1.0, so `!is_nan()`, not `is_finite()`. A NaN offset drops
+/// The offset rejects NaN (`clamp` propagates it and `serde_json` writes `null`) but
+/// not infinities: `1e999` means "at the end" and clamps to 1.0. A NaN offset drops
 /// to 0.0 like a missing one rather than losing the stop.
 fn stop_of(el: roxmltree::Node<'_, '_>, css: &Css<'_>) -> Option<peniko::ColorStop> {
     let prop = |name: &str| property(el, name, css);
@@ -2895,7 +2702,6 @@ fn stop_of(el: roxmltree::Node<'_, '_>, css: &Css<'_>) -> Option<peniko::ColorSt
     let color = prop("stop-color")
         .and_then(parse_paint_color)
         .unwrap_or(Color::BLACK);
-    // Clamped like `fill-opacity`: `multiply_alpha` does no range work of its own.
     let alpha = prop("stop-opacity")
         .and_then(parse_len)
         .unwrap_or(1.0)
@@ -2914,11 +2720,9 @@ fn resolve(el: roxmltree::Node<'_, '_>, inherited: &Style, gradients: &Gradients
     if let Some(v) = prop("color").and_then(parse_paint_color) {
         s.current = v;
     }
-    // The parse is guarded, not assigned: `None` means unpainted, so a value peniko
-    // refuses (`var(--brand)`) must leave the inherited paint standing, as CSS drops
-    // an invalid declaration. Only `none`, `transparent` and a `url(#…)` with a dead
-    // reference mean unpainted; the last must not fall back to the inherited paint or
-    // an unresolvable image reference comes back opaque black.
+    // `None` means unpainted, so a value peniko refuses (`var(--brand)`) must leave the
+    // inherited paint standing, as CSS drops an invalid declaration. A dead `url(#…)`
+    // is unpainted too, or an unresolvable image reference comes back opaque black.
     let unpainted = |v: &str| {
         let v = v.trim();
         matches!(v, "none" | "transparent") || v.starts_with("url(")
@@ -2955,7 +2759,6 @@ fn resolve(el: roxmltree::Node<'_, '_>, inherited: &Style, gradients: &Gradients
         };
     }
     if let Some(v) = prop("stroke-dasharray") {
-        // `none` is the way a child turns an inherited dash pattern off.
         s.dashes = if v.trim() == "none" {
             Vec::new()
         } else {
@@ -2981,7 +2784,6 @@ fn resolve(el: roxmltree::Node<'_, '_>, inherited: &Style, gradients: &Gradients
     if let Some(v) = prop("stroke-opacity").and_then(parse_len) {
         s.stroke_opacity = v.clamp(0.0, 1.0) as f32;
     }
-    // The font half, which inherits exactly as the paint half does.
     if let Some(v) = prop("font-family") {
         s.font_family = Some(v.to_string());
     }
@@ -3022,12 +2824,10 @@ fn parse_paint(v: &str, current: Color, gradients: &Gradients<'_, '_>) -> Option
         return Some(Paint::Solid(current));
     }
     if v.starts_with("url(") {
-        // A reference that does not resolve uses the fallback colour, else is `none`,
-        // not black.
+        // A reference that does not resolve uses the fallback colour, else is `none`.
         if let Some((g, units, xform)) = gradients.get(v) {
             return Some(Paint::Gradient(Box::new(g), units, xform));
         }
-        // The fallback starts after the first `)`, as in [`reference`].
         let fallback = v
             .strip_prefix("url(")
             .and_then(|rest| rest.find(')').map(|i| rest[i + 1..].trim()))?;
@@ -3056,8 +2856,7 @@ fn parse_len(v: &str) -> Option<f64> {
 /// The numbers in a whitespace- or comma-separated list.
 ///
 /// Non-finite values are dropped, as in [`parse_len`]: `1e999` is infinity, which
-/// `serde_json` writes as `null`, and `Document::apply` refuses it (`OpError::NonFinite`),
-/// failing the whole import. Dropped, not clamped, since no finite substitute is right.
+/// `Document::apply` refuses, failing the whole import. No finite substitute is right.
 fn numbers(v: &str) -> Vec<f64> {
     v.split(|c: char| c.is_whitespace() || c == ',')
         .filter(|s| !s.is_empty())
@@ -3105,10 +2904,8 @@ fn parse_transform(v: &str) -> Affine {
             ("skewY", [a]) => Affine::new([1.0, a.to_radians().tan(), 0.0, 1.0, 0.0, 0.0]),
             _ => continue,
         };
-        // A singular transform is dropped, not carried: `build::local_for_world`
-        // inverts the parent's world, and a singular one yields `NaN` coefficients
-        // that the next autosave writes as an unopenable file.
-        // `build::affine_is_invertible` is the shared, threshold-free predicate.
+        // A singular transform is dropped: `build::local_for_world` inverts the
+        // parent's world, and the `NaN` it yields makes an unopenable file.
         if !crate::build::affine_is_invertible(t) {
             continue;
         }
@@ -3310,7 +3107,6 @@ mod tests {
             Some(Brush::Solid(c)) => c.to_rgba8().to_u8_array(),
             other => panic!("a solid fill, got {other:?}"),
         };
-        // `ids[0]` is the group, which takes no paint of its own.
         assert_eq!(fill(ids[1]), [0, 255, 0, 255], "style beats the attribute");
         assert_eq!(
             fill(ids[2]),
@@ -3544,7 +3340,6 @@ mod tests {
         let peniko::GradientKind::Linear(l) = g.gradient.kind else {
             panic!("linear")
         };
-        // The rect's `x` is on its transform, so the box is 0..50, not 100..150.
         assert!((l.start.x - 0.0).abs() < 1e-9, "{:?}", l.start);
         assert!((l.end.x - 50.0).abs() < 1e-9, "{:?}", l.end);
         assert_eq!(g.gradient.stops.len(), 2);
@@ -3555,8 +3350,8 @@ mod tests {
         );
     }
 
-    /// A duplicate id is first-wins in every id map; `#h` inherits from `#g` through
-    /// `ids`, so the `href` path and the fill path must agree (Chrome paints red).
+    /// A duplicate id is first-wins in every id map, so the `href` path and the fill
+    /// path agree (Chrome paints red).
     ///
     /// flip: `by_id.entry(id).or_insert(…)` back to `by_id.insert(id, …)` → fails at the `seen` assertion.
     #[test]
@@ -3577,7 +3372,6 @@ mod tests {
         let ids = shapes(&doc, &out);
         assert_eq!(ids.len(), 2, "the fixture is two rects");
 
-        // Both read before either is asserted, so a failure shows the pair.
         let seen: Vec<&str> = ids
             .iter()
             .enumerate()
@@ -3617,8 +3411,7 @@ mod tests {
         (g.gradient.clone(), l)
     }
 
-    /// A gradient inherits stops and position through `xlink:href`; the stops sit
-    /// behind the href and the position in front, so inheriting only one fails.
+    /// A gradient inherits stops and position through `xlink:href`.
     #[test]
     fn a_gradient_inherits_stops_and_position_through_xlink_href() {
         let (doc, out) = imported(
@@ -3674,8 +3467,7 @@ mod tests {
         assert!((l.end.x - 50.0).abs() < 1e-9, "{:?}", l.end);
     }
 
-    /// `gradientTransform` composes inside the `gradientUnits` mapping: `scale(2,1)`
-    /// over `x2="25"` reaches 50, where a dropped transform lands at 25.
+    /// `gradientTransform` composes inside the `gradientUnits` mapping.
     #[test]
     fn a_gradient_transform_applies_inside_the_units_mapping() {
         let (doc, out) = imported(
@@ -3693,11 +3485,9 @@ mod tests {
         assert!((l.end.x - 50.0).abs() < 1e-9, "{:?}", l.end);
     }
 
-    /// A non-uniform transform keeps a linear gradient's bands square to its own space:
-    /// squashing y by 1/4 under a 45° gradient tilts the vector to 76°, not the naive
-    /// 14° of the mapped endpoints.
+    /// A non-uniform transform keeps a linear gradient's bands square to its own space.
     ///
-    /// flip: the covector replaced with `p(l.end)` → fails at the `l.end` assertion (the only test that bites; the axis-aligned ones stay green).
+    /// flip: the covector replaced with `p(l.end)` → fails at the `l.end` assertion (the only test that bites).
     #[test]
     fn a_squashed_transform_keeps_a_linear_gradients_bands_square_to_its_own_space() {
         let (doc, out) = imported(
@@ -3712,7 +3502,6 @@ mod tests {
                </svg>"##,
         );
         let (_, l) = first_linear(&doc, &out);
-        // u = Tₗᵢₙ⁻ᵀ·d/|d|² = (1, 4)·40/3200 = (0.0125, 0.05); |u|² = 0.0026563
         assert!((l.start.to_vec2()).hypot() < 1e-9, "{:?}", l.start);
         assert!(
             (l.end.x - 4.705_882_35).abs() < 1e-6 && (l.end.y - 18.823_529_4).abs() < 1e-6,
@@ -3799,7 +3588,7 @@ mod tests {
 
     /// A 2% squash is carried on the brush transform and a similarity is baked.
     ///
-    /// flip: threshold `1.000_001` back to `1.05` → fails at the first assertion; dropping it to `1.0` does not bite the second (the ratio of a similarity is exactly 1.0).
+    /// flip: threshold `1.000_001` back to `1.05` → fails at the first assertion; `1.0` does not bite the second.
     #[test]
     fn a_squash_under_the_old_deadband_is_carried_and_a_similarity_is_not() {
         let of = |xform: &str| {
@@ -3826,7 +3615,6 @@ mod tests {
             Affine::IDENTITY,
             "a squash too small to see is still a squash"
         );
-        // A similarity: the two circles hold it exactly.
         assert_eq!(
             of("rotate(37) scale(3)"),
             Affine::IDENTITY,
@@ -3914,8 +3702,7 @@ mod tests {
         );
     }
 
-    /// The first node's effect stack, named apart from the free `effects_of`, which
-    /// reads the markup.
+    /// The first node's effect stack.
     fn stack_of(doc: &Document, out: &Import) -> Vec<crate::effect::Effect> {
         crate::item::values(doc.get(shapes(doc, out)[0]).unwrap().effects())
     }
@@ -3951,9 +3738,9 @@ mod tests {
         }
     }
 
-    /// An absurd finite `stdDeviation` imports as a blur clamped to
-    /// `effect::MAX_BLUR`, not a refused import. Flip: `deviation_of` without its
-    /// `min` → the import's `apply` refuses with `BlurTooLarge` and this panics.
+    /// An absurd finite `stdDeviation` imports clamped to `effect::MAX_BLUR`.
+    ///
+    /// flip: `deviation_of` without its `min` → `apply` refuses with `BlurTooLarge` and this panics.
     #[test]
     fn an_absurd_deviation_imports_clamped_to_the_blur_cap() {
         let (doc, out) = imported(
@@ -4019,9 +3806,7 @@ mod tests {
         }
     }
 
-    /// A filter this cannot hold is skipped whole and reported, never half read (an
-    /// unknown primitive after a readable one, a dead reference, `objectBoundingBox`
-    /// primitive units).
+    /// A filter this cannot hold is skipped whole and reported, never half read.
     ///
     /// flip: `effects_of`'s final `return None` to `i += 1` → fails at the first def's emptiness assertion.
     #[test]
@@ -4141,8 +3926,7 @@ mod tests {
         );
     }
 
-    /// An inverted silhouette is an inner shadow and the dilation's sign flips with it;
-    /// all four combinations are asserted.
+    /// An inverted silhouette is an inner shadow and the dilation's sign flips with it.
     ///
     /// flip: `if dilate != inner` to `if dilate` → fails at the `true dilate` case (`3.0` against `-3.0`).
     #[test]
@@ -4187,8 +3971,7 @@ mod tests {
         }
     }
 
-    /// `<feDropShadow>` is one primitive; its spec defaults (offset 2, deviation 2,
-    /// opaque black) are asserted so an omitted attribute is not a zero.
+    /// `<feDropShadow>` is one primitive, with the spec's defaults for omitted attributes.
     #[test]
     fn a_lone_fe_drop_shadow_is_one_primitive_saying_the_whole_thing() {
         let (doc, out) = filtered(
@@ -4233,7 +4016,6 @@ mod tests {
         let (doc, out) = filtered(r#"<feDropShadow dx="1" dy="1" stdDeviation="2"/>"#);
         assert_eq!(shadow(&stack_of(&doc, &out), 0).0.blur, 4.0);
 
-        // A lone zero blur is the identity: no effect and no complaint.
         let (doc, out) = filtered(r#"<feGaussianBlur stdDeviation="0"/>"#);
         assert!(
             out.skipped.is_empty(),
@@ -4249,7 +4031,7 @@ mod tests {
     }
 
     /// A chain that neither moves nor softens is a recolour and is refused, even with
-    /// both primitives present; two controls prove chains are still read.
+    /// both primitives present.
     ///
     /// flip: the guard back to `!seen_offset && !seen_blur` → fails at "a chain that neither moves nor softens is not a shadow".
     #[test]
@@ -4275,7 +4057,6 @@ mod tests {
             "and refusing it is a loss worth reporting"
         );
 
-        // Control one: it moves.
         let (doc, out) = chain("4", "0");
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         let (s, inner) = shadow(&stack_of(&doc, &out), 0);
@@ -4283,7 +4064,6 @@ mod tests {
         assert_eq!(s.offset, kurbo::Vec2::new(4.0, 0.0));
         assert_eq!(s.blur, 0.0, "hard-edged, read out of a hand-written chain");
 
-        // Control two: it softens without moving.
         let (doc, out) = chain("0", "2");
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         let (s, _) = shadow(&stack_of(&doc, &out), 0);
@@ -4291,8 +4071,7 @@ mod tests {
         assert_eq!(s.blur, 4.0);
     }
 
-    /// `flood-color="currentColor"` resolves against the referencing element's `color`
-    /// (asserted green, not black).
+    /// `flood-color="currentColor"` resolves against the referencing element's `color`.
     ///
     /// flip: the `Some("currentColor")` arm removed → fails at the `skipped` assertion with `["filter"]`.
     #[test]
@@ -4349,8 +4128,7 @@ mod tests {
         );
     }
 
-    /// Document order is stack order; the trailing `feMerge` lists them differently
-    /// and reading it would swap the pair.
+    /// Document order is stack order, not the trailing `feMerge`'s.
     #[test]
     fn a_stack_of_several_effects_comes_back_in_the_order_it_was_written() {
         let (doc, out) = filtered(
@@ -4538,7 +4316,6 @@ mod tests {
             !doc.get(inside[1]).unwrap().mask(),
             "and the content above it is not"
         );
-        // The clip's own geometry is the 40-square, not the 100-square it clips.
         assert_eq!(
             world_box(&doc, inside[0]),
             kurbo::Rect::new(0.0, 0.0, 40.0, 40.0)
@@ -4547,7 +4324,6 @@ mod tests {
 
     /// A duplicate `<clipPath>` id resolves to the first definition (the same map serves `<mask>`).
     ///
-    /// The sizes are 40 and 90, not 100, so an ignored clip cannot read as the first one.
     /// flip: `Gradients::collect`'s `clips.entry(id).or_insert(el)` → `clips.insert(id, el)` → fails at the box assertion.
     #[test]
     fn a_duplicate_clip_path_id_resolves_to_the_first_definition() {
@@ -4574,8 +4350,7 @@ mod tests {
         );
     }
 
-    /// The clip moves with the element it clips: a shape's clip carries the transform itself,
-    /// a container's inherits the group's, and both routes land on the same boxes.
+    /// The clip moves with the element it clips, whether wrapped (a shape) or hoisted (a container).
     ///
     /// flip: moving the transform from the clip to the wrapper → fails at the content assertion (it is applied twice).
     #[test]
@@ -4590,7 +4365,6 @@ mod tests {
                 doc.get(inside[0]).unwrap().mask(),
             )
         };
-        // A container, which clips itself: the clip carries no transform of its own.
         let hoisted = clip_and_content(
             r##"<svg xmlns="http://www.w3.org/2000/svg">
                   <g transform="translate(50,0)" clip-path="url(#c)">
@@ -4599,7 +4373,6 @@ mod tests {
                   <defs><clipPath id="c"><rect width="40" height="40"/></clipPath></defs>
                 </svg>"##,
         );
-        // A shape, which takes a wrapper: the clip carries the transform itself.
         let wrapped = clip_and_content(
             r##"<svg xmlns="http://www.w3.org/2000/svg">
                   <rect transform="translate(50,0)" width="100" height="100" clip-path="url(#c)"/>
@@ -4621,7 +4394,7 @@ mod tests {
         }
     }
 
-    /// A clipped container clips itself; only a clipped shape gets a wrapper (an outer `<g clip-path>` would otherwise add a level to every paste).
+    /// A clipped container clips itself; only a clipped shape gets a wrapper.
     #[test]
     fn a_clipped_container_clips_itself_rather_than_gaining_a_wrapper() {
         let (doc, out) = imported(
@@ -4649,7 +4422,7 @@ mod tests {
         );
     }
 
-    /// An element with both a clip and a mask nests them (wrapper plus hoist); two masks in one parent would be two runs and one would do nothing.
+    /// An element with both a clip and a mask nests them (wrapper plus hoist).
     ///
     /// flip: dropping the "other attribute still pending" half of the hoist test → fails at the first count.
     #[test]
@@ -4782,7 +4555,6 @@ mod tests {
         assert_eq!(out.size, Some(Size::new(120.0, 80.0)));
         assert_eq!(out.shapes, 4, "three shapes and the clip's own rect");
 
-        // One group, holding its clip and its three shapes — no wrapper on top.
         let g = doc.get(out.root).unwrap().children()[0];
         let inside = doc.get(g).unwrap().children().to_vec();
         assert_eq!(inside.len(), 4);
@@ -4897,10 +4669,8 @@ mod tests {
         );
     }
 
-    /// An XML comment inside `<style>` does not truncate the sheet; both reports stay empty
-    /// because an unstyled shape would silently be black.
+    /// An XML comment inside `<style>` does not truncate the sheet.
     ///
-    /// The whitespace-then-comment row fails through a different branch than the leading comment.
     /// flip: reading the sheet with `el.text()` → fails at the first row's `.b` (black against green).
     #[test]
     fn a_comment_inside_a_style_block_does_not_truncate_the_sheet() {
@@ -4947,7 +4717,6 @@ mod tests {
              branch: `text()` finds the newline and returns it"
         );
 
-        // Controls: these always worked; CDATA shows the cause is comments, not interleaving.
         assert_eq!(case(".a{fill:#ff0000}<!--c-->").0, RED, "control: trailing");
         assert_eq!(
             case(".a{fill:#ff0000}.b{fill:#00ff00}"),
@@ -4959,7 +4728,6 @@ mod tests {
             (RED, GREEN),
             "control: roxmltree merges CDATA with text, so this was never broken"
         );
-        // The initial fill is black.
         assert_eq!(
             case(".a{fill:#ff0000}").1,
             BLACK,
@@ -5001,9 +4769,8 @@ mod tests {
         );
     }
 
-    /// Descendant and child combinators and compound selectors; the grandchild that `>` must not reach
-    /// is what separates a combinator from a lookup, and the higher-specificity rule is written first
-    /// so document order cannot explain the result.
+    /// Descendant and child combinators and compound selectors; the higher-specificity
+    /// rule is written first so document order cannot explain the result.
     ///
     /// flip: `Combinator::Child` walking all ancestors, or `Sel::matches` skipping `chain` → fails at the grandchild assertion.
     #[test]
@@ -5029,7 +4796,7 @@ mod tests {
             "every selector here is one this reads: {:?}",
             out.skipped
         );
-        // `shapes` walks every descendant, so the two `<g>`s are in this list: the rects are 1, 2, 4 and 5.
+        // The two `<g>`s are in this list: the rects are 1, 2, 4 and 5.
         let ids = shapes(&doc, &out);
         let fill = |id| {
             let Some(Brush::Solid(c)) = doc.get(id).unwrap().paint().fills[0].brush.literal()
@@ -5066,8 +4833,8 @@ mod tests {
 
     /// A long descendant selector over deep nesting returns; a recursive matcher would be exponential.
     ///
-    /// There is no wall-clock assertion, only the suite's timeout. The leading compound is `nope` so the
-    /// rule reaches the matcher (`declaration` checks the property and specificity first) and loses there.
+    /// No wall-clock assertion, only the suite's timeout. The leading compound is `nope` so
+    /// the rule reaches the matcher and loses there.
     #[test]
     fn a_long_selector_over_deep_nesting_returns() {
         const LEVELS: usize = 60;
@@ -5096,7 +4863,6 @@ mod tests {
     /// A stylesheet past `MAX_CSS_RULES` is reported, and the rules read before the cap still paint.
     ///
     /// flip: disabling the cap's branch → fails at the report assertion (the fill stays green).
-    /// Raising `MAX_CSS_RULES` is not a flip: the fixture is defined in terms of it.
     #[test]
     fn a_stylesheet_past_the_rule_cap_is_reported_and_what_it_read_still_paints() {
         let mut sheet = String::from("rect{fill:#00ff00}");
@@ -5128,8 +4894,8 @@ mod tests {
         );
     }
 
-    /// `.a > .b .c` matches through the second `.b` up the tree: greedy and backtracking walks agree
-    /// except when a `>` sits left of a descendant.
+    /// `.a > .b .c` matches through the second `.b` up the tree: greedy and backtracking
+    /// walks differ only when a `>` sits left of a descendant.
     ///
     /// flip: the descendant arm taking the first matching ancestor without reconsidering → fails at the fill (black against green).
     #[test]
@@ -5163,10 +4929,10 @@ mod tests {
         );
     }
 
-    /// A selector list keeps its readable members when another is valid CSS this importer cannot read,
-    /// as a browser does; the unreadable member is reported.
+    /// A selector list keeps its readable members when another is valid CSS this importer
+    /// cannot read, as a browser does; the unreadable member is reported. A list with a
+    /// syntactically invalid member is applied the same way, where a browser would drop it.
     ///
-    /// A list with a syntactically invalid member is applied the same way, which a browser would drop.
     /// flip: dropping the whole rule when any member is unreadable → fails at the fill (black).
     #[test]
     fn a_selector_list_keeps_its_readable_members_as_a_browser_does() {
@@ -5320,8 +5086,7 @@ mod tests {
         );
     }
 
-    /// A `<text>`'s opacity and visibility reach every run it splits into, and a `<tspan>`'s own opacity
-    /// nests multiplicatively (0.3 x 0.5).
+    /// A `<text>`'s opacity and visibility reach every run it splits into, and a `<tspan>`'s own opacity multiplies.
     ///
     /// flip: `Some(text_el)` in `text_node` back to `None` → fails at "the `<text>`'s opacity reaches the second run".
     #[test]
@@ -5349,7 +5114,6 @@ mod tests {
             "and so does `display=\"none\"` — a hidden layer is hidden whole"
         );
 
-        // The `<tspan>`'s own opacity nests inside the `<text>`'s rather than replacing it.
         let (doc, out) = imported(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" opacity="0.3">A<tspan x="0" y="60" opacity="0.5">B</tspan></text>
@@ -5409,7 +5173,6 @@ mod tests {
              spelling carries"
         );
 
-        // A nested positioned tspan places a second run.
         let (_, _, made) = spans_of(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20">a<tspan><tspan x="0" y="60">b</tspan></tspan></text>
@@ -5418,10 +5181,9 @@ mod tests {
         assert_eq!(made, 2, "a nested positioned tspan is still a break");
     }
 
-    /// Text after a nested `<tspan>` takes the enclosing tspan's style, since `text_pieces` yields one piece per text node.
+    /// Text after a nested `<tspan>` takes the enclosing tspan's style.
     ///
-    /// flip: `text_pieces` yielding one piece per element → fails at "y reads the inner one's" (12 against 40);
-    /// the tail assertion stays green under that flip and only pins the ordering.
+    /// flip: `text_pieces` yielding one piece per element → fails at "y reads the inner one's" (the tail assertion stays green).
     #[test]
     fn text_after_a_nested_tspan_reads_the_outer_ones_style() {
         let (doc, out) = imported(
@@ -5439,7 +5201,6 @@ mod tests {
         };
         assert_eq!(content.trim(), "xyz", "the fixture: {content:?}");
 
-        // Sizes are read through `Spans::resolve`, the shaper's own door.
         let NodeKind::Text { style, .. } = node.kind() else {
             panic!("a text node");
         };
@@ -5460,8 +5221,7 @@ mod tests {
         );
     }
 
-    /// A `<tspan>` with its own position starts a new layer; one without joins the text
-    /// (this app writes a tspan per style run, Illustrator a tspan per line).
+    /// A `<tspan>` with its own position starts a new layer; one without joins the text.
     #[test]
     fn a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not() {
         let (doc, split) = imported(
@@ -5489,8 +5249,8 @@ mod tests {
         assert_eq!(content, "one two");
     }
 
-    /// An unpositioned `<tspan fill>` becomes a colour span over exactly its own bytes: the range is clamped
-    /// to trimmed content, and a tspan repeating the node's colour mints nothing (compared through `ink`).
+    /// An unpositioned `<tspan fill>` becomes a colour span over exactly its own bytes,
+    /// clamped to the trimmed content; one repeating the node's colour mints nothing.
     ///
     /// flip: dropping the `min` in `text_node` → fails at the trimmed-space case;
     /// reverting `TextStyle::set` to a raw assignment → fails only at the quantized-alpha assertion.
@@ -5529,7 +5289,6 @@ mod tests {
         };
         assert_eq!(c.to_rgba8().to_u8_array(), [255, 0, 0, 255]);
 
-        // A trailing space inside the coloured run: the span must not run past the trimmed content.
         let (doc, out) = imported(
             r##"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" fill="#0000ff">one <tspan fill="#ff0000">two </tspan></text>
@@ -5548,7 +5307,6 @@ mod tests {
             "clamped to the trimmed content, not the 8 it was collected at"
         );
 
-        // The same colour twice is the default said again, not a span.
         let (doc, out) = imported(
             r##"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" fill="#0000ff" fill-opacity="0.5">one <tspan fill="#0000ff" fill-opacity="0.5">two</tspan></text>
@@ -5564,7 +5322,6 @@ mod tests {
             "and nothing is reported lost: {:?}",
             out.approximated
         );
-        // The stored alpha is quantized to 1/255, the only value the opacity control can reproduce.
         let alpha = default.expect("an ink").components[3];
         assert!(
             (f64::from(alpha) - 128.0 / 255.0).abs() < 1e-6,
@@ -5572,8 +5329,8 @@ mod tests {
         );
     }
 
-    /// A `<tspan>`'s size, weight, italic and family become spans, each compared independently.
-    /// The family goes through `Builder::pick_family` like the node's own; a run naming only missing families gets a report and no span.
+    /// A `<tspan>`'s size, weight, italic and family become spans, each compared independently;
+    /// a run naming only missing families gets a report and no span.
     ///
     /// flip: dropping the `Weight` push → fails the first case; `pick_family` taking the list's head regardless of availability → fails the third.
     #[test]
@@ -5591,7 +5348,6 @@ mod tests {
                 .collect()
         };
 
-        // A run stating a size and a weight gives two spans over the same bytes.
         let (doc, out) = imported(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" font-size="20">one <tspan font-size="32" font-weight="700">two</tspan></text>
@@ -5602,7 +5358,6 @@ mod tests {
             panic!("a Text node")
         };
         assert_eq!(content, "one two", "one node, both runs");
-        // 20, not the default 16, so an importer ignoring the `<text>`'s `font-size` fails here.
         assert_eq!(style.font_size, 20.0, "the node keeps the <text>'s size");
         let mut list = kinds(&doc, id);
         list.sort_by_key(|e| format!("{:?}", e.2));
@@ -5612,7 +5367,6 @@ mod tests {
             "exactly the two the run stated, over exactly its bytes"
         );
 
-        // Italic alone, so the kinds are independent.
         let (doc, out) = imported(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20">one <tspan font-style="italic">two</tspan></text>
@@ -5624,7 +5378,6 @@ mod tests {
             "italic alone"
         );
 
-        // A family nothing here has: reported, and no span.
         let (doc, out) = imported(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20">one <tspan font-family="Nonexistent Face XYZ">two</tspan></text>
@@ -5642,8 +5395,7 @@ mod tests {
         );
     }
 
-    /// A span covering every byte is hoisted onto the node (this app's own writer puts font properties on a single-run tspan);
-    /// a run covering part of the content keeps its span.
+    /// A span covering every byte is hoisted onto the node; a run covering part of the content keeps its span.
     ///
     /// flip: dropping the `clear` → fails at `spans.is_empty()`; dropping the whole block → fails at the node's weight reading 400.
     #[test]
@@ -5657,7 +5409,6 @@ mod tests {
             (style.weight, spans.as_slice().to_vec())
         };
 
-        // Full coverage.
         let (weight, spans) = node(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" font-weight="400"><tspan font-weight="700">ab</tspan></text>
@@ -5666,7 +5417,6 @@ mod tests {
         assert_eq!(weight, 700, "the run's weight became the node's");
         assert!(spans.is_empty(), "and left nothing behind: {spans:?}");
 
-        // Two agreeing runs: `normalize` merges them into one span before the hoist.
         let (weight, spans) = node(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" font-weight="400"><tspan font-weight="700">a</tspan><tspan font-weight="700">b</tspan></text>
@@ -5675,7 +5425,6 @@ mod tests {
         assert_eq!(weight, 700, "two runs agreeing are still one default");
         assert!(spans.is_empty(), "{spans:?}");
 
-        // Partial coverage is the control.
         let (weight, spans) = node(
             r#"<svg xmlns="http://www.w3.org/2000/svg">
                  <text x="0" y="20" font-weight="400">a<tspan font-weight="700">b</tspan></text>
@@ -5687,7 +5436,6 @@ mod tests {
     }
 
     /// A size below `MIN_FONT_SIZE` clamps on both the node and the span, so no override span is minted.
-    /// Both sizes are out of range, which makes them equal only after clamping.
     ///
     /// flip: building `ts` with a raw `font_size: style.font_size` literal → fails at the node-size assertion (0.1 against 1.0).
     #[test]
@@ -5729,7 +5477,6 @@ mod tests {
             "a gradient on a run has nowhere to go"
         );
 
-        // A gradient on the `<text>` itself is a node-level loss, reported once and not per run.
         let (doc, out) = imported(&format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg">{defs}
                  <text x="0" y="20" fill="url(#g)">one <tspan>two</tspan></text>
@@ -5745,7 +5492,7 @@ mod tests {
         };
         assert!(spans.is_empty(), "and mints no span either");
 
-        // A positioned `<tspan>` with a gradient is its own node; the `positioned` shortcut in `text` stops a second report.
+        // A positioned `<tspan>` is its own node; the `child == run_el` check in `text` stops a second report.
         let (doc, out) = imported(&format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg">{defs}
                  <text x="0" y="20" fill="#0000ff">one <tspan x="50" y="40" fill="url(#g)">two</tspan></text>
@@ -5762,7 +5509,7 @@ mod tests {
             "one gradient, one report — not one per direction it was noticed from"
         );
 
-        // The `style=""` spelling must be read through `property`, not `has_attribute` (Inkscape writes it there).
+        // The `style=""` spelling (Inkscape's) must be read through `property`.
         let (_, out) = imported(&format!(
             r##"<svg xmlns="http://www.w3.org/2000/svg">{defs}
                  <text x="0" y="20" fill="#0000ff">one <tspan style="fill:url(#g)">two</tspan></text>
@@ -5787,8 +5534,8 @@ mod tests {
         assert_eq!(content, "Hello world");
     }
 
-    /// Only XML's four whitespace characters collapse: no-break, figure and ideographic spaces survive,
-    /// including a leading one that `text_node`'s trims must not eat (`lead` re-bases span ranges on them).
+    /// Only XML's four whitespace characters collapse: no-break, figure and ideographic spaces
+    /// survive, including a leading one that `text_node`'s trims must not eat.
     ///
     /// flip: `c.is_whitespace()` back in `push_collapsed` → fails at the NBSP assertion;
     /// the wide `trim()`/`trim_start()` back in `text_node` → fails at the ideographic one.
@@ -5814,7 +5561,6 @@ mod tests {
             "a leading ideographic space is content, and `trim` used to eat it"
         );
 
-        // Controls: the rule is no narrower than before, and still collapses real XML whitespace.
         assert_eq!(
             text_of("a\u{feff}b"),
             "a\u{feff}b",
@@ -5857,7 +5603,6 @@ mod tests {
         );
         assert_eq!(out.shapes, 3);
         let ids = shapes(&doc, &out);
-        // `ids[0]` is the group.
         let (a, b, c) = (
             world_box(&doc, ids[1]),
             world_box(&doc, ids[2]),
@@ -5872,7 +5617,6 @@ mod tests {
             (a.width() - b.width()).abs() < 1.0,
             "the same word at the same size is the same width: {a:?} {b:?}"
         );
-        // The offset is the difference in their anchors (a drop shadow).
         assert!(
             (a.x0 - b.x0 - 10.0).abs() < 0.5 && (a.y0 - b.y0 - 10.0).abs() < 0.5,
             "ten units apart on both axes: {a:?} {b:?}"
@@ -5908,7 +5652,7 @@ mod tests {
     }
 
     /// A bomb of nested `<g>`s is reported and the built tree stays within `crate::io::MAX_TREE_DEPTH`;
-    /// 30 levels is the control and comes through whole. Depth is counted iteratively because `shapes()` recurses.
+    /// 30 levels is the control and comes through whole.
     ///
     /// flip: raising `MAX_SVG_NESTING` far above the fixture → the harness dies with `STATUS_STACK_OVERFLOW`, not an assertion.
     #[test]
@@ -5939,14 +5683,12 @@ mod tests {
             deepest
         }
 
-        // The control: an ordinary depth comes through whole and says nothing.
         let (doc, out) = imported(&bomb(30));
         assert_eq!(out.shapes, 1, "30 levels is an ordinary export");
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         assert_eq!(max_depth(&doc, out.root), 31, "the group chain is kept");
 
-        // 90 sits between the two bounds, the only band where the builder's own skip is visible
-        // (deeper is refused whole by `MAX_XML_DEPTH`).
+        // Only between the two bounds is the builder's own skip visible.
         const { assert!(MAX_SVG_NESTING < 90 && 90 < MAX_XML_DEPTH) };
         let (doc, out) = imported(&bomb(90));
         assert!(
@@ -5965,9 +5707,8 @@ mod tests {
         );
     }
 
-    /// `<use>`'s depth cap bounds nesting, not branching: the node budget stops a doubling `<use>` bomb.
-    /// The budget counts nodes (groups included), so `Import::shapes` after a refusal is not the budget;
-    /// the 1,024-shape control must come through whole.
+    /// `<use>`'s depth cap bounds nesting, not branching: the node budget stops a doubling `<use>` bomb,
+    /// and the 1,024-shape control comes through whole.
     ///
     /// flip: `MAX_SVG_NODES` = `usize::MAX` → fails at the `skipped` assertion; the control stays green.
     #[test]
@@ -5988,7 +5729,6 @@ mod tests {
                  <use href='#g0'/></svg>"
             )
         }
-        // The control: an ordinary amount of instancing comes through whole.
         let (_, out) = imported(&bomb(10));
         assert_eq!(out.shapes, 1024, "1,024 shapes is not a bomb");
         assert!(
@@ -5997,7 +5737,6 @@ mod tests {
             out.skipped
         );
 
-        // The bomb: refused, reported, and bounded.
         let (_, out) = imported(&bomb(14));
         assert!(
             out.skipped.iter().any(|s| s == "too many elements"),
@@ -6011,8 +5750,7 @@ mod tests {
         );
     }
 
-    /// A gradient stop offset of `nan` still saves and reloads (`f64::clamp` propagates NaN, and serde writes it as `null`).
-    /// The infinities are controls: they clamp to 1.0 and 0.0 rather than being dropped.
+    /// A gradient stop offset of `nan` still saves and reloads; the infinities are controls (they clamp).
     ///
     /// flip: removing `.filter(|f| !f.is_nan())` from `stop_of` → fails at the `io::load` assertion.
     #[test]
@@ -6032,7 +5770,6 @@ mod tests {
         let saved = crate::io::save(&doc).expect("a document with a gradient saves");
         crate::io::load(&saved).expect("and opens again — this is the whole finding");
 
-        // Controls: if either moves, the NaN filter went too wide.
         for (off, want) in [("1e999", 1.0f32), ("-1e999", 0.0)] {
             let (doc, _) = imported(&svg(off));
             let saved = crate::io::save(&doc).expect("saves");
@@ -6045,8 +5782,7 @@ mod tests {
         }
     }
 
-    /// A descending stop list is clamped up on import (SVG's rule: `[0, 0.8, 0.2, 1]` means `[0, 0.8, 0.8, 1]`), not sorted.
-    /// This keeps the model right; the render boundary's `color::brush_to_backend` applies the same rule separately.
+    /// A descending stop list is clamped up on import (`[0, 0.8, 0.2, 1]` means `[0, 0.8, 0.8, 1]`), not sorted.
     ///
     /// flip: removing the `make_stops_monotonic` call in `Gradients::collect` → fails at stop 2 (`0.2` against `0.8`).
     #[test]
@@ -6066,13 +5802,12 @@ mod tests {
             "the third stop collapses onto the second — SVG's clamp, not a sort"
         );
 
-        // The control: an ascending list is untouched.
         let ok = svg.replace("offset='0.2'", "offset='0.9'");
         assert_eq!(all_stop_offsets(&imported(&ok).0), vec![0.0, 0.8, 0.9, 1.0]);
     }
 
-    /// `!important` is stripped before `parse_paint`, and an unreadable `fill` leaves the inherited paint standing and is reported;
-    /// `fill='none'` is the control and still means unpainted (told apart by its text).
+    /// `!important` is stripped before `parse_paint`, and an unreadable `fill` leaves the inherited paint
+    /// standing and is reported; `fill='none'` still means unpainted.
     ///
     /// flip: removing the `!important` strip → fails at the first assertion (black against red);
     /// returning the `fill` arm to a plain assignment → fails at "the green survived".
@@ -6086,7 +5821,6 @@ mod tests {
             other => panic!("expected exactly one fill, got {}", other.len()),
         };
 
-        // `!important` is stripped, so the value behind it parses like any other.
         let (doc, out) = imported(
             "<svg xmlns='http://www.w3.org/2000/svg'><style>.a{fill:#ff0000 !important;}</style>\
              <rect class='a' width='10' height='10'/></svg>",
@@ -6099,7 +5833,6 @@ mod tests {
             out.skipped
         );
 
-        // A value this reader cannot read leaves the inherited paint standing (CSS drops an invalid declaration).
         let (doc, out) = imported(
             "<svg xmlns='http://www.w3.org/2000/svg'><g fill='#00ff00'>\
              <rect style='fill:var(--brand)' width='10' height='10'/></g></svg>",
@@ -6117,7 +5850,6 @@ mod tests {
             out.skipped
         );
 
-        // The control: `none` also parses to `None`, and means unpainted.
         let (doc, out) = imported(
             "<svg xmlns='http://www.w3.org/2000/svg'><g fill='#00ff00'>\
              <rect fill='none' width='10' height='10'/></g></svg>",
@@ -6135,9 +5867,8 @@ mod tests {
         );
     }
 
-    /// A gradient's stop list is resampled to `MAX_GRADIENT_STOPS` (each shape holds its own copy, so memory is quadratic)
-    /// and reported once as approximated; a gradient under the cap is kept exactly with nothing reported.
-    /// It asserts the stop count held, not a wall clock.
+    /// A gradient's stop list is resampled to `MAX_GRADIENT_STOPS` and reported once as approximated;
+    /// a gradient under the cap is kept exactly with nothing reported.
     ///
     /// flip: deleting the resample block in `Gradients::collect` → fails at the stop-count assertion (600 against 256).
     #[test]
@@ -6172,7 +5903,6 @@ mod tests {
             out.approximated,
             out.skipped
         );
-        // Resampling keeps the ends, which truncating would not.
         let offs = all_stop_offsets(&doc);
         assert!(
             offs[0] == 0.0 && (offs[MAX_GRADIENT_STOPS - 1] - 1.0).abs() < 1e-6,
@@ -6181,7 +5911,6 @@ mod tests {
             offs[MAX_GRADIENT_STOPS - 1]
         );
 
-        // The control: a gradient under the cap is kept exactly.
         let (doc, out) = imported(&file(64));
         assert_eq!(all_stop_offsets(&doc).len(), 64);
         assert!(
@@ -6239,7 +5968,6 @@ mod tests {
     /// flip: raising `MAX_SVG_NESTING` far above the fixture → the test binary dies with `STATUS_STACK_OVERFLOW`, with no assertion message.
     #[test]
     fn a_clip_path_cycle_stops_rather_than_recursing_forever() {
-        // Self-referential: `#a` holds a rect clipped by `#a`.
         let (_, out) = imported(
             "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>\
              <defs><clipPath id='a'><rect clip-path='url(#a)' width='9' height='9'/></clipPath></defs>\
@@ -6251,7 +5979,6 @@ mod tests {
             out.skipped
         );
 
-        // Mutual: `#a` holds a shape clipped by `#b`, `#b` one clipped by `#a`.
         let (_, out) = imported(
             "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>\
              <defs>\
@@ -6318,7 +6045,7 @@ mod tests {
     }
 
     /// The depth scan steps over comments, CDATA, PIs, quoted attribute values and self-closed tags,
-    /// measures depth not size (20,000 siblings), and counts an entity holding markup ten times.
+    /// measures depth not size, and counts an entity holding markup ten times.
     ///
     /// flip: dropping the `ENTITY_DEPTH * entity_depth` term → fails at "an entity holding markup counts ten times".
     #[test]

@@ -15298,8 +15298,7 @@ mod effects_multi_tests {
         EffectKind::DropShadow(Default::default())
     }
 
-    /// None of them has effects: adding gives it to all of them, as one step. The card rests
-    /// shut, so the `+` is pressed on a collapsed header.
+    /// None of them has effects: adding gives it to all of them, as one step, from a collapsed header.
     #[test]
     fn adding_over_an_agreeing_empty_selection_reaches_every_layer() {
         let mut card = Card::new(vec![Vec::new(), Vec::new(), Vec::new()]);
@@ -15335,7 +15334,6 @@ mod effects_multi_tests {
         let same = vec![drop_shadow()];
         let mut card = Card::new(vec![same.clone(), same.clone(), same]);
         assert!(card.says("Drop shadow"), "the shared row is shown");
-        // The eye is 28 square, one item-spacing (6) right of the row's field.
         let out = card.settle();
         let field = out
             .shapes
@@ -15355,8 +15353,7 @@ mod effects_multi_tests {
     }
 
     /// They disagree: the card says so, draws no rows, and the `+` replaces every layer's stack
-    /// (unlike the Fill panel, whose `+` is inert). `shared_effects` answering `None` carries the
-    /// replacement; the bite is `s.len() == 1` on the layer that started with two effects.
+    /// (unlike the Fill panel, whose `+` is inert); the bite is `s.len() == 1` on the two-effect layer.
     #[test]
     fn a_disagreement_is_stated_and_the_plus_replaces_every_stack() {
         let mut card = Card::new(vec![
@@ -15393,7 +15390,6 @@ mod effects_multi_tests {
     fn the_card_opens_itself_over_a_disagreement() {
         let mut card = Card::new(vec![vec![drop_shadow()], Vec::new()]);
         assert!(!card.app.collapsed_panels.contains("Effects"));
-        // Make them agree on nothing.
         let ids = card.ids.clone();
         card.app
             .session
@@ -15402,7 +15398,6 @@ mod effects_multi_tests {
                 effects: Vec::new(),
             }]))
             .expect("clear");
-        // A fresh subject re-reads the resting state, so the selection is re-set.
         card.app.session.selection.set(ids.clone());
         card.app.synced_selection.remove("Effects");
         card.settle();
@@ -15412,11 +15407,10 @@ mod effects_multi_tests {
         );
     }
 
-    /// The detached picker does not outlive the row that opened it, and a click through it does
-    /// not replace another layer's stack when the selection widens to a disagreement. Two
-    /// independent halves, asserted separately: `slot_transaction`'s `Effect` arm reads each
-    /// subject's own list, and `picker_ui` orphans a `PaintSlot::Effect` when `shared_effects` is
-    /// `None`. The agreeing-selection control shows the widened write still works.
+    /// The detached picker does not outlive its row, and a click through it does not replace
+    /// another layer's stack when the selection widens to a disagreement. Two halves:
+    /// `slot_transaction`'s `Effect` arm reads each subject's own list, and `picker_ui` orphans a
+    /// `PaintSlot::Effect` when `shared_effects` is `None`.
     #[test]
     fn a_widened_selection_cannot_replace_another_layers_effect_stack() {
         use ondin_core::peniko::Color;
@@ -15442,7 +15436,6 @@ mod effects_multi_tests {
         let (a, b) = (card.ids[0], card.ids[1]);
         card.app.session.selection.set(vec![a, b]);
 
-        // The card draws no rows because the two stacks disagree.
         assert!(
             card.app.shared_effects(&[a, b]).is_none(),
             "fixture: the layers must disagree, or the card would be drawing rows"
@@ -15450,7 +15443,6 @@ mod effects_multi_tests {
         let before = card.app.session.doc.get(b).expect("b").effects().to_vec();
         assert_eq!(before.len(), 2, "fixture: B has two effects");
 
-        // The picker's half, through the real `picker_ui`: its row is not on screen, so it must go.
         card.app.picker = Some(crate::panels::picker::Picker::new(
             a,
             PaintSlot::Effect(0),
@@ -15481,7 +15473,6 @@ mod effects_multi_tests {
              layer blur and an inner shadow and neither is A's shadow"
         );
 
-        // The control: with the two agreeing, one colour over the whole selection still works.
         let mut card = Card::new(vec![
             vec![shadow(Color::BLACK)],
             vec![shadow(Color::BLACK)],
@@ -15521,8 +15512,7 @@ mod multi_lock_tests {
     use ondin_core::kurbo::{Affine, Rect, Size};
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
 
-    /// Two 20×20 rects at (0, 0) and (80, 40), both selected: a union of 100 × 60, so
-    /// the aspect is 0.6 and every paired number below can be checked by hand.
+    /// Two 20×20 rects at (0, 0) and (80, 40), both selected: a 100 × 60 union, aspect 0.6.
     fn two_rects(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -15567,8 +15557,7 @@ mod multi_lock_tests {
         ));
     }
 
-    /// Typing a width over a locked set carries the height, and over a mixed one does not;
-    /// duplicated from the keyboard's test so the two doors are asked separately.
+    /// Typing a width over a locked set carries the height, and over a mixed one does not.
     #[test]
     fn a_typed_width_over_a_locked_set_carries_the_height() {
         let ctx = egui::Context::default();
@@ -15586,7 +15575,6 @@ mod multi_lock_tests {
         assert_eq!(locked.width(), 150.0, "the field's own axis");
         assert_eq!(locked.height(), 90.0, "and the height follows at 0.6");
 
-        // One member unlocked: not a locked set, so the height stays.
         let (mut app, a, b) = two_rects(&ctx);
         lock(&mut app, &[a]);
         let tx = app.multi_transform_tx(MultiField::W, MultiEdit::Absolute(150.0));
@@ -15600,8 +15588,7 @@ mod multi_lock_tests {
         );
     }
 
-    /// The chain button sets, it does not toggle: over a mixed set (which reads unlocked) one
-    /// press locks every member, whereas toggling each would stay mixed.
+    /// The chain button sets, it does not toggle: over a mixed set one press locks every member.
     #[test]
     fn the_chain_button_drives_a_mixed_set_to_one_state_in_one_step() {
         let ctx = egui::Context::default();
@@ -15636,7 +15623,6 @@ mod multi_lock_tests {
             "and it is one undo step, not one per layer"
         );
 
-        // Pressing again from all-locked releases the whole set.
         let tx = super::lock_all_tx(app.session.selection.ids(), false);
         app.session.commit(tx);
         assert!(
@@ -15669,9 +15655,8 @@ mod multi_lock_tests {
     }
 }
 
-/// What each of the multi-selection Transform card's fields means: the direction of the X and Y
-/// arms and all of `multi_angle_tx` (which axis a move goes along, nudge versus land, the skew
-/// clamp, scale surviving a rotation, where `shared_angle` stops calling a set `Mixed`).
+/// What each of the multi-selection Transform card's fields means: the X and Y arms' direction
+/// and all of `multi_angle_tx`.
 #[cfg(test)]
 mod multi_field_tests {
     use super::{MultiEdit, MultiField};
@@ -15682,8 +15667,7 @@ mod multi_field_tests {
     use ondin_core::kurbo::{Affine, Rect, Size};
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
 
-    /// Two 20×20 rects at (0, 0) and (80, 40) under the transforms given, both selected; with two
-    /// identities that is `multi_lock_tests::two_rects`, a union of 100 × 60.
+    /// Two 20×20 rects at (0, 0) and (80, 40) under the transforms given, both selected.
     fn two(ctx: &egui::Context, ta: Affine, tb: Affine) -> (OndinApp, NodeId, NodeId) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -15738,8 +15722,7 @@ mod multi_field_tests {
         build::Basis::of(w).orientation.skew
     }
 
-    /// X moves along x, Y moves along y, and neither resizes: `multi_transform_tx`'s X and Y arms
-    /// decide which `Vec2` component takes the delta. Y is asserted separately as a second literal.
+    /// X moves along x, Y along y, and neither resizes: `multi_transform_tx`'s arms pick the `Vec2` component.
     #[test]
     fn a_nudged_x_moves_the_union_sideways_and_a_nudged_y_moves_it_down() {
         let ctx = egui::Context::default();
@@ -15780,7 +15763,6 @@ mod multi_field_tests {
             "and Y along y, and only along y"
         );
 
-        // Absolute puts the box's reported edge at the number (`to(now)` ignores `now`).
         let (mut app, a, b) = turned(&ctx, 0.0, 0.0);
         let tx = app.multi_transform_tx(MultiField::X, MultiEdit::Absolute(-40.0));
         app.session.commit(tx);
@@ -15791,8 +15773,7 @@ mod multi_field_tests {
         );
     }
 
-    /// A nudge keeps the differences (0° and 40° nudged by 5 become 5° and 45°); an absolute
-    /// lands them together (both 30°).
+    /// A nudge keeps the differences (0° and 40° become 5° and 45°); an absolute lands both at 30°.
     #[test]
     fn a_nudged_angle_keeps_the_differences_and_an_absolute_lands_them_together() {
         let ctx = egui::Context::default();
@@ -15863,8 +15844,7 @@ mod multi_field_tests {
     }
 
     /// The Skew field stops at `tools::MAX_SKEW`, short of the vertical where the matrix has no
-    /// inverse. Asserted through a commit and read-back, which also covers `build::local_for_world`.
-    /// Unclamped, 200° would silently lean 20° (`tan` has period π).
+    /// inverse; unclamped, 200° would silently lean 20° (`tan` has period π).
     #[test]
     fn a_skew_past_the_limit_stops_at_max_skew() {
         let ctx = egui::Context::default();
@@ -15880,7 +15860,6 @@ mod multi_field_tests {
             );
         }
 
-        // The other end is a second literal in the same call.
         let (mut app, a, _b) = turned(&ctx, 0.0, 0.0);
         let tx = app.multi_transform_tx(MultiField::Skew, MultiEdit::Absolute(-200.0));
         app.session.commit(tx);
@@ -15891,8 +15870,7 @@ mod multi_field_tests {
         );
     }
 
-    /// `shared_angle` calls a set `Mixed` only past what the field can show: `EPS` is in radians
-    /// (about 0.05°), so the window is bracketed at 0.04° (agreeing) and 0.06° (mixed).
+    /// `shared_angle` calls a set `Mixed` only past `EPS` (about 0.05°): bracketed at 0.04° and 0.06°.
     #[test]
     fn a_shared_angle_reports_mixed_only_past_what_the_field_can_show() {
         let ctx = egui::Context::default();
@@ -15909,7 +15887,6 @@ mod multi_field_tests {
             "0.06° apart is outside it and shows Mixed"
         );
 
-        // `Skew` takes the lean rather than the angle; the two share one constant.
         let (app, _a, _b) = turned(&ctx, 0.0, 0.06);
         assert!(
             app.shared_angle(MultiField::Skew).is_some(),
@@ -15917,14 +15894,11 @@ mod multi_field_tests {
         );
     }
 
-    /// A member whose basis cannot be split is skipped, not flattened. `multi_angle_tx` rebuilds
-    /// from `Basis::of`, which would flatten a rank-1 layer even on a zero nudge (a lost focus),
-    /// since its `unchanged` filter sees a differing matrix. The ordinary sibling distinguishes
-    /// "refuses everything" from "skips what it cannot do".
+    /// A member whose basis cannot be split is skipped, not flattened: `multi_angle_tx` rebuilds
+    /// from `Basis::of`, which would flatten a rank-1 layer even on a zero nudge.
     #[test]
     fn a_member_with_no_exact_basis_is_skipped_rather_than_flattened() {
         let ctx = egui::Context::default();
-        // Rank-1 but finite, so no non-finite guard sees it.
         let rank_one = Affine::new([1.0, 2.0, 2.0, 4.0, 0.0, 0.0]);
         assert_eq!(rank_one.determinant(), 0.0, "the fixture is singular");
 
@@ -15939,7 +15913,6 @@ mod multi_field_tests {
         };
         let (a_before, b_before) = (stored(&app, a), stored(&app, b));
 
-        // A nudge of zero: the field losing focus with nothing typed into it.
         let tx = app.multi_transform_tx(MultiField::Rotation, MultiEdit::Nudge(0.0));
         app.session.commit(tx);
         assert_eq!(
@@ -15947,8 +15920,7 @@ mod multi_field_tests {
             a_before,
             "the rank-1 member is left exactly where it was"
         );
-        // Within an ulp, not equal: a zero nudge on a rotated layer round-trips through `Basis::of`
-        // one ulp off, and the `unchanged` filter compares with `==`. That is not this test's subject.
+        // A zero nudge on a rotated layer round-trips through `Basis::of` one ulp off, which is not this test's subject.
         for (got, want) in stored(&app, b).iter().zip(b_before.iter()) {
             assert!(
                 (got - want).abs() < 1e-9,
@@ -15959,7 +15931,6 @@ mod multi_field_tests {
             );
         }
 
-        // A real edit skips the same member and still moves the rest.
         let tx = app.multi_transform_tx(MultiField::Rotation, MultiEdit::Nudge(15.0));
         app.session.commit(tx);
         assert_eq!(
@@ -15977,9 +15948,8 @@ mod multi_field_tests {
 }
 
 /// The multi-selection Transform card's typed path, driven through real pointer and key events,
-/// because the subject is when a valve fires (which frame a `DragValue` reports `changed()` and
-/// writes its parsed string back), which `multi_transform_tx` does not show. The field's rect is
-/// found by drawing it, never guessed: `multi_number` returns its `Response`.
+/// since the subject is which frame a `DragValue` reports `changed()`. The field's rect is found
+/// by drawing it: `multi_number` returns its `Response`.
 #[cfg(test)]
 mod multi_valve_tests {
     use super::{MultiEdit, MultiField, Prefix};
@@ -16030,8 +16000,7 @@ mod multi_valve_tests {
         }
     }
 
-    /// One frame with the W field alone in a `Ui` (handed the width the panel would hand it),
-    /// returning the rect it was laid out in.
+    /// One frame with the W field alone in a `Ui`, returning the rect it was laid out in.
     fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) -> egui::Rect {
         let mut out = egui::Rect::NOTHING;
         let _ = ctx.run_ui(
@@ -16059,7 +16028,7 @@ mod multi_valve_tests {
         out
     }
 
-    /// A press or release on `pos`; a press and release without movement puts a `DragValue` into text-edit mode.
+    /// A press or release on `pos`; without movement it puts a `DragValue` into text-edit mode.
     fn click(pos: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos,
@@ -16100,9 +16069,8 @@ mod multi_valve_tests {
         }
     }
 
-    /// A typed number on the multi card is one undo step, as on the single-layer card: the
-    /// keystrokes preview, and the remembered typed value (the `pending` arm in `multi_number`)
-    /// commits once on the falling edge.
+    /// A typed number on the multi card is one undo step: keystrokes preview, and the `pending`
+    /// arm in `multi_number` commits once on the falling edge.
     #[test]
     fn typing_a_multi_width_leaves_exactly_one_step_in_the_history() {
         let ctx = egui::Context::default();
@@ -16134,9 +16102,8 @@ mod multi_valve_tests {
         assert_eq!(union_width(&app), 100.0, "and one undo puts all of it back");
     }
 
-    /// `Escape` abandons a typed multi edit: egui hands back what was typed and merely drops
-    /// focus, so the valve must refuse itself (`cancel_gesture` sees `dragged_id` empty).
-    /// The width assertion bites; the count does not, since both paths spend the engagement once.
+    /// `Escape` abandons a typed multi edit: egui hands back what was typed and drops focus, so
+    /// the valve must refuse itself. The width assertion bites; the count does not.
     #[test]
     fn escape_abandons_a_typed_multi_edit() {
         let ctx = egui::Context::default();
@@ -16167,11 +16134,9 @@ mod multi_valve_tests {
         );
     }
 
-    /// A bare click through a field commits nothing. This is a symptom guard over three
-    /// independent doors (the engagement latch, the box fields' no-op guard, and
-    /// `EditorSession::commit_inner` dropping a `changes_nothing` transaction), so it stays green
-    /// when any one is removed and is no evidence for any of them; the mechanisms are pinned by `a_zero_nudge_builds_no_transaction_at_all` and
-    /// `typing_a_multi_width_leaves_exactly_one_step_in_the_history`.
+    /// A bare click through a field commits nothing. A symptom guard over three independent doors
+    /// (the engagement latch, the box fields' no-op guard, `commit_inner` dropping a
+    /// `changes_nothing` transaction): green when any one is removed, so no evidence for any.
     #[test]
     fn a_bare_click_through_a_multi_field_commits_nothing() {
         let ctx = egui::Context::default();
@@ -16198,9 +16163,8 @@ mod multi_valve_tests {
         );
     }
 
-    /// The builder half of the same claim: the box fields skip a no-op write, as the angle fields
-    /// do. `build::move_by_world` and `tools::resize_selection` emit one op per member, so a zero
-    /// nudge would otherwise build `N` writes. W and H share one guard.
+    /// The builder half: the box fields skip a no-op write, or a zero nudge would build one op per
+    /// member (`build::move_by_world`, `tools::resize_selection`). W and H share one guard.
     #[test]
     fn a_zero_nudge_builds_no_transaction_at_all() {
         let ctx = egui::Context::default();
@@ -16220,7 +16184,6 @@ mod multi_valve_tests {
                 tx.0.len()
             );
         }
-        // The control: a real edit still builds one op per member.
         let tx = app.multi_transform_tx(MultiField::X, MultiEdit::Nudge(10.0));
         assert_eq!(tx.0.len(), 2, "a real move writes both members");
         assert!(
@@ -16230,8 +16193,7 @@ mod multi_valve_tests {
     }
 
     /// A scrub previews while dragging and commits once on `drag_stopped()`, clearing the total so
-    /// the next field picked up does not start from it; the last assertion is the one that sees
-    /// the clear.
+    /// the next field does not start from it; the last assertion sees the clear.
     #[test]
     fn a_scrubbed_multi_width_is_one_step_and_leaves_no_total_behind() {
         let ctx = egui::Context::default();
@@ -16271,10 +16233,8 @@ mod multi_valve_tests {
         );
     }
 
-    /// One layer and two print the same number: the multi card trims trailing zeros as the
-    /// single-layer fields do, and a shared corner radius of 4.5 reads 4.5, not 4. Asserted on the
-    /// painted galleys of both cards over one document, two frames each; the two assertions
-    /// guard separate formatters.
+    /// One layer and two print the same number: a shared corner radius of 4.5 reads 4.5, not 4,
+    /// on the painted galleys of both cards; the two assertions guard separate formatters.
     #[test]
     fn a_number_reads_the_same_with_one_layer_selected_and_with_two() {
         fn text_of(shape: &egui::Shape, into: &mut Vec<String>) {
@@ -16309,7 +16269,6 @@ mod multi_valve_tests {
         };
 
         let ctx = egui::Context::default();
-        // Both rects get a corner radius of 4.5, as a half-unit scrub or a 90% scale produces.
         let (mut app, a, b) = two_rects(&ctx);
         let tx = ondin_core::set_corner_radius_all(&app.session.doc, &[a, b], 4.5);
         app.session.commit(tx);
@@ -16335,7 +16294,6 @@ mod multi_valve_tests {
              Painted: {multi:?}"
         );
 
-        // The control: the single-layer card over the same document prints the same strings.
         app.session.selection.set(vec![a]);
         let single = painted(&mut app, &ctx, false, a);
         assert!(
@@ -16358,9 +16316,8 @@ mod rhythm_tests {
     const PANE: f32 = 296.0;
 
     /// Every control-shaped box a pass painted, as rows top to bottom and each row left to right.
-    ///
-    /// Picked by its hairline (stroked, 18 to 34 points tall), a census rather than a list, so a
-    /// new control is measured without being added; cards, popup surfaces and highlights drop out.
+    /// Picked by its hairline (stroked, 18 to 34 points tall), so a new control is measured
+    /// without being added.
     fn control_rows(out: &egui::FullOutput) -> Vec<Vec<egui::Rect>> {
         let mut v: Vec<egui::Rect> = Vec::new();
         for cs in &out.shapes {
@@ -16383,8 +16340,7 @@ mod rhythm_tests {
         });
         let mut rows: Vec<Vec<egui::Rect>> = Vec::new();
         for r in v {
-            // Same y is not the same row: a popover `Area` beside the panel can share a y, so
-            // anything further than a panel's width starts a row of its own.
+            // A popover `Area` beside the panel can share a y, so anything further than a panel's width starts a new row.
             let far = |row: &Vec<egui::Rect>| r.left() - row[row.len() - 1].right() > PANE;
             match rows.last_mut() {
                 Some(row) if (row[0].center().y - r.center().y).abs() < 4.0 && !far(row) => {
@@ -16396,8 +16352,7 @@ mod rhythm_tests {
         rows
     }
 
-    /// Four passes, because a widget's interaction state is last frame's and the
-    /// panels read their own responses to size things.
+    /// Four passes, because interaction state is last frame's and panels size from their own responses.
     fn pass(app: &mut OndinApp, ctx: &egui::Context) -> egui::FullOutput {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
@@ -16416,8 +16371,7 @@ mod rhythm_tests {
         out
     }
 
-    /// A rect that is painted before its first frame: `sync_paint_collapse` folds the Fill and
-    /// Stroke cards shut on the frame a node arrives unpainted and later paint does not reopen them.
+    /// A rect painted before its first frame: `sync_paint_collapse` shuts the Fill and Stroke cards when a node arrives unpainted.
     fn painted_rect(app: &mut OndinApp) -> NodeId {
         let mut ids = ondin_core::IdSource::new(1);
         let root = ids.mint();
@@ -16449,7 +16403,6 @@ mod rhythm_tests {
                 id,
                 strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
                     width: 2.0,
-                    // Per-side, so the two rows of widths are drawn; a default stroke has none.
                     sides: ondin_core::StrokeSides::Custom {
                         top: 1.0,
                         right: 1.0,
@@ -16501,15 +16454,12 @@ mod rhythm_tests {
 
     /// Every panel and popover stacks and spaces its controls as the Transform card does:
     /// `ui::CARD_COL_GAP` between two on a row, `ui::CARD_ROW_GAP` between two rows of a card.
-    ///
-    /// Only row gaps under 20 points are read as within a card: card padding and eyebrows are
-    /// larger, and a popover drawn over the panel gives negative gaps. `IMAGE_CARD_GAP` needs a
-    /// decoded texture, so its equality with the panel pitch is asserted at the end instead.
+    /// Only row gaps under 20 points count as within a card; `IMAGE_CARD_GAP` needs a decoded
+    /// texture, so its equality with the panel pitch is asserted at the end.
     #[test]
     fn every_panel_keeps_the_transform_cards_rhythm() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // One warm-up pass lays out the fonts.
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut app = OndinApp::headless(&ctx);
 
@@ -16544,8 +16494,7 @@ mod rhythm_tests {
                 if let Some(p) = prev {
                     let below = p.iter().fold(f32::MIN, |a, r| a.max(r.bottom()));
                     let g = row[0].top() - below;
-                    // Two rows are only stacked if they share a column; a popover's rows
-                    // interleave with the panel's in y.
+                    // Rows stack only within a column; a popover's rows interleave with the panel's in y.
                     let span = |r: &Vec<egui::Rect>| {
                         (
                             r.iter().fold(f32::MAX, |a, k| a.min(k.left())),
@@ -16557,7 +16506,7 @@ mod rhythm_tests {
                         prev = Some(row);
                         continue;
                     }
-                    // Zero must count (two flush rows); only negative gaps from an overlapping popover are excluded.
+                    // Zero counts (flush rows); only an overlapping popover's negative gaps are excluded.
                     if (0.0..20.0).contains(&g) && (g - ui::CARD_ROW_GAP).abs() >= 0.26 {
                         wrong.push(format!("{tag}: y{:.0} down at {g:.1}", row[0].top()));
                     }
@@ -16567,8 +16516,7 @@ mod rhythm_tests {
         };
 
         painted_rect(&mut app);
-        // The latch is set after a first pass: the frame on which the subject changes runs
-        // `forget_stroke_chrome`, which clears it.
+        // Set after a first pass: the frame on which the subject changes runs `forget_stroke_chrome`, which clears it.
         let _ = pass(&mut app, &ctx);
         app.stroke_sides_open.push(0);
         let out = pass(&mut app, &ctx);
@@ -16598,8 +16546,7 @@ mod rhythm_tests {
             wrong.join("\n  ")
         );
 
-        // The two pitches nothing above can reach: the image card needs a decoded texture, and a
-        // popover's sections are separated by their eyebrow.
+        // The two pitches nothing above reaches: the image card needs a texture, a popover's sections an eyebrow.
         assert_eq!(
             IMAGE_CARD_GAP,
             ui::CARD_ROW_GAP,
@@ -16656,11 +16603,8 @@ mod rhythm_tests {
         id
     }
 
-    /// Three frames and a rectangle, all selected, with each frame's grid list set
-    /// from `lists`. Returns the frame ids in document order.
-    ///
-    /// The rectangle is in the selection so the `frame_subjects` filter is observable: a rule
-    /// taking the whole selection would write a `SetLayoutGrids` to a node that cannot hold one.
+    /// Three frames and a rectangle, all selected, with each frame's grid list set from `lists`;
+    /// returns the frame ids. The rectangle makes the `frame_subjects` filter observable.
     fn frames_with_lists(app: &mut OndinApp, lists: &[Vec<LayoutGrid>]) -> Vec<NodeId> {
         let mut ids = ondin_core::IdSource::new(1);
         let root = ids.mint();
@@ -16676,8 +16620,7 @@ mod rhythm_tests {
                 kind: NodeKind::Artboard {
                     size: Size::new(393.0, 852.0),
                 },
-                // Side by side: coincident frames make "the union grew" true of both a per-frame
-                // and a rigid-body resize, which is vacuous.
+                // Side by side: coincident frames would make "the union grew" vacuous.
                 transform: Some(Affine::translate((500.0 * i as f64, 0.0))),
                 name: None,
             });
@@ -16741,8 +16684,7 @@ mod rhythm_tests {
                     .collect();
             }
         }
-        // The `+` click is stood in for by the calls the button makes, through `grid_add` rather
-        // than a copy of its rule, which would only check its own arithmetic.
+        // The `+` click is stood in for by `grid_add`, not a copy of its rule.
         if click_plus {
             let subjects = app.frame_subjects();
             match grid_add(app.shared_grids(&subjects).as_deref()) {
@@ -16768,13 +16710,11 @@ mod rhythm_tests {
             ondin_core::item::values(app.session.doc.get(id).expect("a frame").grids())
         };
 
-        // 1. Nothing anywhere: collapsed, and the card says so.
         let mut app = OndinApp::headless(&ctx);
         let frames = frames_with_lists(&mut app, &[vec![], vec![], vec![]]);
         let (said, collapsed) = grid_panel_pass(&ctx, &mut app, false);
         assert!(collapsed, "an empty panel should rest closed");
-        // A collapsed card draws no body; opened by hand it stays open, since
-        // `sync_paint_collapse` re-asserts only on a fresh subject and the empty transition.
+        // Opened by hand it stays open: `sync_paint_collapse` re-asserts only on a fresh subject and the empty transition.
         assert!(
             !said.iter().any(|t| t == "No layout grid"),
             "a closed card drew its body: {said:?}"
@@ -16787,15 +16727,13 @@ mod rhythm_tests {
         );
         app.collapsed_panels.insert("Layout grid");
 
-        // The `+` opens it and writes one grid to every frame.
         let (_, collapsed) = grid_panel_pass(&ctx, &mut app, true);
         assert!(!collapsed, "the + left the panel shut");
         for f in &frames {
             assert_eq!(grids(&app, *f).len(), 1, "a frame missed the +");
         }
 
-        // 2. All three agree: the card shows the rows, and an edit reaches all of
-        //    them. Two grids apiece, so the removal below has something to leave.
+        // 2. All three agree: the card shows the rows, and an edit reaches all of them.
         let mut app = OndinApp::headless(&ctx);
         let two = vec![cols, rows];
         let frames = frames_with_lists(&mut app, &[two.clone(), two.clone(), two.clone()]);
@@ -16808,14 +16746,12 @@ mod rhythm_tests {
             !said.iter().any(|t| t.starts_with("Mixed")),
             "an agreeing selection reported a disagreement: {said:?}"
         );
-        // An edit through the panel's own writer lands on every frame at once.
         app.write_grids(&subjects, &[cols]);
         for f in &frames {
             assert_eq!(grids(&app, *f), vec![cols], "an edit missed a frame");
         }
 
-        // 3. One frame differs: the card is open, says so, and draws no rows —
-        //    and the `+` replaces rather than appends.
+        // 3. One frame differs: open, says so, no rows; the `+` replaces.
         let mut app = OndinApp::headless(&ctx);
         let frames = frames_with_lists(&mut app, &[vec![cols], vec![cols], vec![rows]]);
         let (said, collapsed) = grid_panel_pass(&ctx, &mut app, false);
@@ -16840,7 +16776,6 @@ mod rhythm_tests {
              exists to avoid"
         );
 
-        // The rectangle never took a grid in any of the three.
         let rect = *app.session.selection.ids().last().expect("the rectangle");
         assert!(
             app.session
@@ -16854,15 +16789,13 @@ mod rhythm_tests {
     }
 
     /// Over several frames a template lights only where they agree, and applying one sets each
-    /// frame's own box. Transform's W and H resize the set as a rigid body, so the assertion is on
-    /// each frame's size and on the union having grown past one template's width.
+    /// frame's own box (Transform's W and H resize the set as a rigid body).
     #[test]
     fn a_template_over_several_frames_sets_each_of_their_own_boxes() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
         let mut app = OndinApp::headless(&ctx);
-        // Three frames at one size, so they agree, plus the rectangle.
         let frames = frames_with_lists(&mut app, &[vec![], vec![], vec![]]);
         let subjects = app.frame_subjects();
         assert_eq!(subjects, frames);
@@ -16872,7 +16805,6 @@ mod rhythm_tests {
             "the fixture's frames do not agree, so nothing below is about agreement"
         );
 
-        // One frame dragged off the shared size: nothing lights any more.
         app.session
             .try_commit(Transaction(vec![Operation::SetGeometry {
                 id: frames[1],
@@ -16885,7 +16817,6 @@ mod rhythm_tests {
             "one frame off the size still reported a shared one"
         );
 
-        // Applying a template (through the panel's own writer) brings them back into agreement.
         let ipad = Size::new(834.0, 1194.0);
         app.apply_frame_template(&subjects, ipad);
         for (i, f) in frames.iter().enumerate() {
@@ -16898,7 +16829,6 @@ mod rhythm_tests {
         assert_eq!(app.shared_frame_size(&subjects), Some(ipad));
         assert_eq!(preset_named(ipad), Some("iPad Pro 11\""));
 
-        // The union is wider than one template, so this is not a rigid-body resize.
         let union = app.multi_union().expect("a union");
         assert!(
             union.width() > ipad.width,
@@ -16911,8 +16841,7 @@ mod rhythm_tests {
 
     /// A grid's colour all the way round: read, written, previewed, and carried off a removed row.
     /// Four `PaintSlot` seams with no drawing. `grids[0]` is asserted every time, since checking
-    /// only grid 1 passes for a write that replaces the list or colours every entry; the `Grid`
-    /// arm must not widen as the `Effect` arm does.
+    /// only grid 1 passes for a write that colours every entry.
     #[test]
     fn a_grids_colour_reads_writes_and_previews_through_its_own_slot() {
         let ctx = egui::Context::default();
@@ -16946,7 +16875,6 @@ mod rhythm_tests {
             after[0].color, default,
             "the write reached the other grid too"
         );
-        // The whole record, so fields nobody listed are covered too.
         assert_eq!(
             after[1],
             LayoutGrid {
@@ -16956,7 +16884,7 @@ mod rhythm_tests {
             "the write moved something other than the colour"
         );
 
-        // The drag's half: the preview goes to the buffer the canvas reads; the document keeps the committed colour.
+        // A drag previews into the canvas's buffer; the document keeps the committed colour.
         let blue = ondin_core::peniko::Color::from_rgba8(40, 90, 220, 64);
         let tx = app.slot_transaction(id, slot, Brush::Solid(blue));
         app.preview_grid(&tx);
@@ -16972,8 +16900,7 @@ mod rhythm_tests {
             "the row went on showing the committed colour through a drag"
         );
 
-        // A transaction changing something other than a colour must not touch this buffer, or the
-        // picker and the fields' `grid_scrub` would fight over one grid.
+        // A non-colour transaction must leave this buffer alone, or the picker and `grid_scrub` fight over one grid.
         app.in_flight.grid_paint = None;
         let mut list = app.session.doc.get(id).expect("the frame").grids().to_vec();
         list[1].count = 3;
@@ -16986,7 +16913,7 @@ mod rhythm_tests {
             "a field edit wrote into the picker's preview buffer"
         );
 
-        // A picker on grid 1 follows it down to 0 when grid 0 goes, and is dropped when its own row goes.
+        // A picker on grid 1 follows it to 0 when grid 0 goes, and is dropped when its own row goes.
         app.picker = Some(Picker::new(id, PaintSlot::Grid(1), egui::pos2(0.0, 0.0)));
         app.remap_grid_slots(id, 0);
         assert_eq!(
@@ -17001,9 +16928,8 @@ mod rhythm_tests {
         );
     }
 
-    /// The Frame templates panel lights the frame's own size and nothing else. `preset_named` is
-    /// tested in `frame_grid_tests`; this pins that the panel asks it about the real size. Counted
-    /// off the lit ground, since a resting cell paints none.
+    /// The Frame templates panel lights the frame's own size and nothing else, counted off the lit
+    /// ground (a resting cell paints none).
     #[test]
     fn the_templates_panel_lights_the_frames_own_size_and_nothing_else() {
         let ctx = egui::Context::default();
@@ -17059,8 +16985,7 @@ mod rhythm_tests {
         assert_eq!(lit(Size::new(321.0, 654.0)), 0, "a custom size lit a cell");
     }
 
-    /// The vertical gap between each pair of consecutive control rows of the Layout grid panel,
-    /// drawn on its own so the rows are the panel's and one grid's block can be told from the next.
+    /// The vertical gap between each pair of consecutive control rows of the Layout grid panel, drawn on its own.
     fn grid_panel_gaps(n: usize) -> Vec<f32> {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -17091,9 +17016,8 @@ mod rhythm_tests {
             .collect()
     }
 
-    /// One grid's five rows sit at the card's own pitch, and two grids sit twice that apart
-    /// (`GRID_ROW_GAP`). The row count is asserted too, since a missing row changes the length
-    /// and not any gap.
+    /// One grid's five rows sit at the card's own pitch, two grids `GRID_ROW_GAP` apart; the row
+    /// count is asserted too, since a missing row changes the length and not any gap.
     #[test]
     fn a_layout_grids_rows_keep_the_cards_pitch_and_two_grids_sit_twice_it_apart() {
         let one = grid_panel_gaps(1);
@@ -17107,7 +17031,7 @@ mod rhythm_tests {
         let two = grid_panel_gaps(2);
         assert_eq!(two.len(), 9, "two grids draw ten rows");
 
-        // Collected and asserted once, so a regression reports every gap it moved; the join and the pitch are two numbers.
+        // Collected and asserted once, so a regression reports every gap it moved.
         let mut wrong: Vec<String> = Vec::new();
         let mut want = |tag: &str, gaps: &[f32], join: Option<usize>| {
             for (i, g) in gaps.iter().enumerate() {
@@ -17132,9 +17056,8 @@ mod rhythm_tests {
         );
     }
 
-    /// A hidden grid's controls are inert, and its eye and its `x` are not. Asserted on the state
-    /// (the `enabled` flag egui records per widget rect) rather than on the ink or a synthetic
-    /// click, and measured against the empty panel plus exactly two rather than a literal.
+    /// A hidden grid's controls are inert, and its eye and its `x` are not. Asserted on egui's
+    /// per-widget `enabled` flag, against the empty panel plus exactly two.
     #[test]
     fn switching_a_grid_off_leaves_only_its_eye_and_its_x_live() {
         let ctx = egui::Context::default();
@@ -17157,8 +17080,7 @@ mod rhythm_tests {
                     .expect("grids to draw");
             }
             for _ in 0..4 {
-                // Held open by hand: `sync_paint_collapse` shuts an empty panel, and a collapsed
-                // baseline would still count 2 while comparing different things.
+                // Held open by hand: `sync_paint_collapse` shuts an empty panel, which would skew the baseline.
                 app.collapsed_panels.remove("Layout grid");
                 let _ = ctx.run_ui(input.clone(), |ui| {
                     ui.set_max_width(PANE);
@@ -17198,10 +17120,8 @@ mod rhythm_tests {
     }
 
     /// Drawing the Layout grid panel does not repair the grid it draws: out-of-range stored
-    /// values (`count` 0, negative `margin`, `size` 0.5) must stay as they are, with no undo step
-    /// and no dirty flag. A symptom guard over `ui::value_field_f64`'s
-    /// `clamp_existing_to_range(false)`; the mechanism is pinned in `ui.rs`. The default grid
-    /// is only a harness control and cannot show that the panel still writes.
+    /// values (`count` 0, negative `margin`, `size` 0.5) stay, with no undo step and no dirty flag.
+    /// A symptom guard over `ui::value_field_f64`'s `clamp_existing_to_range(false)`.
     #[test]
     fn drawing_the_grid_panel_does_not_repair_the_grid_it_draws() {
         let ctx = egui::Context::default();
@@ -17211,8 +17131,7 @@ mod rhythm_tests {
             screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
             ..Default::default()
         };
-        // Three frames, no events. The grid goes in before `adopt_document` so a dirty session
-        // means the panel did it.
+        // The grid goes in before `adopt_document`, so a dirty session means the panel did it.
         let after = |grid: LayoutGrid| {
             let mut app = OndinApp::headless(&ctx);
             let id = frame_with_grids(&mut app, 0);
@@ -17223,8 +17142,7 @@ mod rhythm_tests {
             }]))
             .expect("the grid to draw");
             app.session.adopt_document(doc, None);
-            // Re-selected: `adopt_document` clears the selection and `inspector_layout_grids`
-            // draws nothing for an empty one.
+            // Re-selected: `adopt_document` clears the selection, and an empty one draws nothing.
             app.session.selection.set_one(id);
             assert!(
                 !app.session.is_dirty(),
@@ -17244,8 +17162,7 @@ mod rhythm_tests {
                     }
                 });
             }
-            // Precondition: a card showing a grid has far more clickable controls than an empty
-            // one; a floor rather than a number.
+            // Precondition: a card showing a grid has far more clickable controls than an empty one.
             assert!(
                 drawn > 20,
                 "fixture: the panel drew only {drawn} clickable controls over three \
@@ -17295,14 +17212,12 @@ mod rhythm_tests {
     }
 }
 
-/// The two rules the Frame templates panel and the layout-grid rows are made of,
-/// both lifted out of the drawing so they can be checked without one.
+/// The two rules the Frame templates panel and the layout-grid rows are made of, checked without drawing.
 #[cfg(test)]
 mod frame_grid_tests {
     use super::*;
 
     /// Every template resolves to its own name, and a size that is nobody's resolves to nothing.
-    /// The whole table is walked: it guards uniqueness and catches a transposed pair.
     #[test]
     fn every_preset_names_itself_and_anything_else_is_custom() {
         for (_, entries) in FRAME_PRESETS {
@@ -17323,9 +17238,8 @@ mod frame_grid_tests {
         assert_eq!(preset_named(Size::new(394.0, 852.0)), None);
     }
 
-    /// The grid scrub's state machine (`panels::export`'s `quality_step` with another payload).
-    /// The cancel case is asserted with `changed` set: egui can still report that frame's motion
-    /// when a right-click lands, and checking `changed` first would commit it.
+    /// The grid scrub's state machine. The cancel case is asserted with `changed` set: egui can
+    /// still report that frame's motion when a right-click lands.
     #[test]
     fn a_grid_scrub_holds_while_dragged_commits_once_and_obeys_a_cancel() {
         let base = LayoutGrid::new(GridAxis::Columns);
@@ -17392,9 +17306,8 @@ mod frame_grid_tests {
 #[cfg(test)]
 mod mixed_opacity_tests {
     //! A Mixed opacity field the user has not moved writes nothing: `paint_row` seeds its `pct`
-    //! from `Spread::base()`, and `edit_valve` commits on the engaged-to-released transition a bare
-    //! click produces. Over an agreeing selection `build::edit_fills_all` filters per node and
-    //! `commit_inner` drops the empty transaction, so that case is the control.
+    //! from `Spread::base()`, and `edit_valve` commits on the transition a bare click produces.
+    //! An agreeing selection is the control.
 
     use crate::app::OndinApp;
     use crate::panels::paint::PaintList;
@@ -17454,10 +17367,8 @@ mod mixed_opacity_tests {
         }
     }
 
-    /// Draw the mixed row, click into its opacity field, and finish the gesture.
-    ///
-    /// In a 320-wide row the opacity field spans about x = 200 to 255, the destructive `x` 260 to
-    /// 285 and the eye 290 to 315; the caller asserts the aim did not hit the `x`.
+    /// Draw the mixed row, click into its opacity field, and finish the gesture. In a 320-wide row
+    /// the field spans about x = 200 to 255, the `x` 260 to 285, the eye 290 to 315.
     fn click_the_opacity_field(ctx: &egui::Context, app: &mut OndinApp) {
         click_at(ctx, app, egui::pos2(225.0, 14.0));
     }
@@ -17486,8 +17397,7 @@ mod mixed_opacity_tests {
         };
         pass(app, vec![egui::Event::PointerMoved(at), key(true)]);
         pass(app, vec![key(false)]);
-        // `Enter`: `edit_valve` commits on the `!engaged && was_engaged` transition, so a click
-        // that leaves the field focused has not finished the gesture.
+        // `edit_valve` commits on the `!engaged && was_engaged` transition, so only `Enter` finishes the gesture.
         pass(
             app,
             vec![egui::Event::Key {
@@ -17502,9 +17412,8 @@ mod mixed_opacity_tests {
         pass(app, Vec::new());
     }
 
-    /// A bare click through a mixed opacity field writes nothing. The agreeing control runs the
-    /// identical events and shows the harness reaches the field; the `Enter` is load-bearing,
-    /// since a valve test that only presses and releases tests nothing.
+    /// A bare click through a mixed opacity field writes nothing; the agreeing control shows the
+    /// harness reaches the field. The `Enter` is load-bearing.
     #[test]
     fn a_bare_click_through_a_mixed_opacity_field_writes_nothing() {
         let ctx = egui::Context::default();
@@ -17535,9 +17444,8 @@ mod mixed_opacity_tests {
         assert_eq!(app.session.history.undo_depth(), 0);
     }
 
-    /// The mixed row's `x` clears the paint on every target in the selection (and drops the
-    /// picker), and its eye hides it. Both verbs share one test because their aim points are close
-    /// (see `click_the_opacity_field`), so each confirms the other's aim.
+    /// The mixed row's `x` clears the paint on every target (and drops the picker), and its eye
+    /// hides it. One test, since the aim points are close and each confirms the other's.
     #[test]
     fn the_mixed_rows_x_clears_every_fill_and_its_eye_hides_them() {
         let ctx = egui::Context::default();
@@ -17607,11 +17515,9 @@ mod paint_hex_field_tests {
         (colour, depth)
     }
 
-    /// Drive the field once, optionally typing `typed` into it, leave it by pressing `exit`, and
-    /// report the colour, the undo depth and whether the buffer survived.
-    ///
-    /// `Enter` confirms and `Escape` abandons though egui reports the same `lost_focus()` for
-    /// both. A fresh `egui::Context` per run, or the second run's click never takes focus.
+    /// Drive the field once, optionally typing `typed`, leave it by pressing `exit`, and report the
+    /// colour, the undo depth and whether the buffer survived. A fresh `egui::Context` per run, or
+    /// the second run's click never takes focus.
     fn drive_exiting(typed: Option<&str>, exit: egui::Key) -> ([f32; 4], usize, bool) {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -17682,8 +17588,7 @@ mod paint_hex_field_tests {
             // `select_all_on_focus` has selected the seeded text, so this replaces it.
             frame(&mut app, vec![egui::Event::Text(t.into())]);
         }
-        // Three frames of the exit key, one more than `lost_focus()` is true on, so the
-        // settling frame is driven too.
+        // One more frame than `lost_focus()` is true on, so the settling frame is driven too.
         for _ in 0..3 {
             frame(
                 &mut app,
@@ -17708,9 +17613,8 @@ mod paint_hex_field_tests {
     }
 
     /// A click into the hex field that types nothing changes nothing: not the colour, the undo
-    /// history or the saved bytes. The text is seeded from `ui::hex_of` (8 bits per channel), so
-    /// the comparison must be on bytes, and this field bypasses `edit_valve`'s engagement latch
-    /// while `lost_focus()` is true on two consecutive frames. The typed edit is the control.
+    /// history or the saved bytes (the text is seeded from 8-bit `ui::hex_of`, so compare bytes).
+    /// The typed edit is the control.
     #[test]
     fn a_bare_click_through_the_hex_field_changes_nothing() {
         let (colour, depth) = drive(None);
@@ -17733,10 +17637,9 @@ mod paint_hex_field_tests {
         assert_eq!(depth, 1, "control: and once, not twice");
     }
 
-    /// `Escape` abandons a typed colour: egui hands back what was typed and surrenders focus, so
-    /// `lost_focus()` alone reads a cancel as a confirm; `ui::defocus_commits` says the rule once.
-    /// `Enter` in `a_bare_click_through_the_hex_field_changes_nothing` is the control. This drives
-    /// the field alone and cannot see the `Escape` ladder in `OndinApp::escape`.
+    /// `Escape` abandons a typed colour: `lost_focus()` alone reads a cancel as a confirm, so
+    /// `ui::defocus_commits` says the rule once. It drives the field alone and cannot see the
+    /// `Escape` ladder in `OndinApp::escape`.
     #[test]
     fn escape_abandons_a_typed_hex_instead_of_committing_it() {
         let (colour, depth, buffered) = drive_exiting(Some("336699"), egui::Key::Escape);
@@ -17758,9 +17661,8 @@ mod paint_hex_field_tests {
 mod mixed_corner_radius_tests {
     //! A bare click through the single corner-radius field does not flatten a mixed set.
     //!
-    //! The field shows `largest(corners)` while the four disagree, and putting that number through
-    //! `edit_valve` as `GeometryPatch::CornerRadius` would set all four. Over an agreeing set the
-    //! write is a no-op that `Transaction::changes_nothing` absorbs, so only the mixed case shows.
+    //! The field shows `largest(corners)` while the four disagree, and writing that back as
+    //! `GeometryPatch::CornerRadius` would set all four; only the mixed case shows it.
 
     use crate::app::OndinApp;
     use crate::theme;
@@ -17768,11 +17670,9 @@ mod mixed_corner_radius_tests {
     use ondin_core::kurbo::{RoundedRectRadii, Size};
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
 
-    /// The corner-radius field's centre. A mis-aimed press here writes nothing and the test goes
-    /// green for the wrong reason. In a 320-wide card the row is y = 46 to 74, the opacity field's
-    /// focusable box x = 47 to 134, the radius field's x = 178 to 265, the per-corner button's
-    /// x = 272 to 310, at every pixel scale. The focusable band is the `DragValue`'s ground; the
-    /// prefix strip takes no focus but still scrubs.
+    /// The corner-radius field's centre; a mis-aimed press writes nothing and goes green for the
+    /// wrong reason. In a 320-wide card the row is y = 46 to 74, the opacity field x = 47 to 134,
+    /// the radius field x = 178 to 265, the per-corner button x = 272 to 310, at every pixel scale.
     const RADIUS_FIELD: egui::Pos2 = egui::pos2(200.0, 60.0);
 
     /// One 80×60 rect with the given radii, selected.
@@ -17810,7 +17710,7 @@ mod mixed_corner_radius_tests {
     }
 
     /// One frame of the Appearance card. It reads `display_node`, not `doc`: a live drag lives in
-    /// the preview, and a committed re-read would re-seed every frame and make the guard vacuous.
+    /// the preview, and a committed re-read would make the guard vacuous.
     fn frame(ctx: &egui::Context, app: &mut OndinApp, id: NodeId, events: Vec<egui::Event>) {
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -17855,8 +17755,7 @@ mod mixed_corner_radius_tests {
         }
     }
 
-    /// Press, release, `Enter`, settle. The `Enter` is load-bearing: `edit_valve` commits on the
-    /// `!engaged && was_engaged` transition, so a click leaving the field focused tests nothing.
+    /// Press, release, `Enter`, settle; the `Enter` is load-bearing, as in `click_the_opacity_field`.
     fn bare_click(ctx: &egui::Context, app: &mut OndinApp, id: NodeId) {
         frame(ctx, app, id, Vec::new());
         frame(
@@ -17874,9 +17773,8 @@ mod mixed_corner_radius_tests {
         frame(ctx, app, id, Vec::new());
     }
 
-    /// The same field, moved `dx` points right over six steps, then released; the commit lands on
-    /// the release frame. `dx` must be at least 8: below egui's drag threshold the press is just
-    /// a bare click.
+    /// The same field, moved `dx` points right over six steps, then released. `dx` must be at
+    /// least 8: below egui's drag threshold the press is a bare click.
     fn drag(ctx: &egui::Context, app: &mut OndinApp, id: NodeId, dx: f32) {
         frame(ctx, app, id, Vec::new());
         frame(
@@ -17897,8 +17795,7 @@ mod mixed_corner_radius_tests {
         frame(ctx, app, id, Vec::new());
     }
 
-    /// A bare click through a mixed corner-radius field writes nothing; the drag control shows the
-    /// aim point is the radius field and the guard has not turned it off.
+    /// A bare click through a mixed corner-radius field writes nothing; the drag control shows the aim is right.
     #[test]
     fn a_bare_click_through_a_mixed_corner_radius_field_writes_nothing() {
         let ctx = egui::Context::default();
@@ -17920,7 +17817,6 @@ mod mixed_corner_radius_tests {
             "nor an autosave and a crash-snapshot write"
         );
 
-        // The control: a 60-point drag at 0.25 units per point takes 10 to 25 and flattens on purpose.
         let ctx = egui::Context::default();
         let (mut app, id) = one_rect(&ctx, RoundedRectRadii::new(10.0, 0.0, 0.0, 0.0));
         drag(&ctx, &mut app, id, 60.0);
@@ -17937,8 +17833,7 @@ mod mixed_corner_radius_tests {
         );
     }
 
-    /// An agreeing set is untouched either way: `Transaction::changes_nothing` absorbs the write.
-    /// A control for the guard's blast radius, and no evidence about the mixed case.
+    /// An agreeing set is untouched either way (`changes_nothing` absorbs the write): a control only.
     #[test]
     fn a_bare_click_through_an_agreeing_corner_radius_field_was_always_clean() {
         let ctx = egui::Context::default();
@@ -17948,9 +17843,8 @@ mod mixed_corner_radius_tests {
         assert_eq!(app.session.history.undo_depth(), 0);
     }
 
-    /// The number a mixed field shows is the largest of the four, the seed a drag counts from:
-    /// a seed of `0` would drop every corner to nothing before the first scrub moved up. Two
-    /// fixtures put the radius on different corners so no single-corner spelling satisfies both.
+    /// A mixed field shows the largest of the four, the seed a drag counts from (a seed of `0`
+    /// would drop every corner to nothing). Two fixtures use different corners.
     #[test]
     fn a_mixed_corner_radius_field_shows_the_largest_of_the_four() {
         let ctx = egui::Context::default();
@@ -18018,10 +17912,8 @@ mod mixed_corner_radius_tests {
 
 #[cfg(test)]
 mod dash_list_field_tests {
-    //! Opening the custom dash list and closing it must not rewrite the numbers.
-    //!
-    //! Focus is taken with `request_focus`/`surrender_focus` on the field's explicit
-    //! id rather than by aiming a click at the row.
+    //! Opening the custom dash list and closing it must not rewrite the numbers. Focus is taken
+    //! with `request_focus`/`surrender_focus` on the field's explicit id.
 
     use super::{dash_list_text, parse_dash_list};
     use crate::app::OndinApp;
@@ -18033,8 +17925,7 @@ mod dash_list_field_tests {
         egui::Id::new(("stroke-dash-list", 0_usize))
     }
 
-    /// Draw the dash field one frame, with `focused` deciding whether it holds
-    /// the keyboard. Returns what the field handed back.
+    /// Draw the dash field one frame, `focused` deciding whether it holds the keyboard.
     fn frame(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -18092,7 +17983,7 @@ mod dash_list_field_tests {
         assert_eq!(printed, "5, 10");
         assert_ne!(parse_dash_list(&printed), Some(s.dashes.clone()));
 
-        // The buffer is staged, not typed: `request_focus` before a frame leaves `gained_focus` false.
+        // Staged, not typed: `request_focus` before a frame leaves `gained_focus` false.
         assert_eq!(frame(&ctx, &mut app, &s, true, None), None, "the click in");
         let out = frame(&ctx, &mut app, &s, false, Some(&printed));
         assert!(
@@ -18119,10 +18010,8 @@ mod dash_list_field_tests {
 
 #[cfg(test)]
 mod shipped_shared_readout_tests {
-    //! The four `_shown` readouts the panel calls (`shown_over_fills`,
-    //! `shown_over_strokes`, `shared_opacity_shown`, `shared_radius_shown`).
-    //! They read `display_node`, the previewed tree, and agree to the tolerances in
-    //! `build::RADIUS_AGREEMENT` and `build::OPACITY_AGREEMENT`.
+    //! The four `_shown` readouts the panel calls (`shown_over_fills`, `shown_over_strokes`,
+    //! `shared_opacity_shown`, `shared_radius_shown`), read off `display_node`.
 
     use super::*;
     use crate::app::OndinApp;
@@ -18298,10 +18187,9 @@ mod shipped_shared_readout_tests {
     }
 }
 
-/// The inspector subjects other than a painted layer — guides, point editing and
-/// the empty canvas — driven through `inspector_ui` so the dispatch is covered too.
-/// Unreached: `points_transform`'s increment form (needs a selected anchor) and
-/// `guide_actions`' remove-all/remove precedence (one click cannot hit both buttons).
+/// The inspector subjects other than a painted layer (guides, point editing, the empty canvas),
+/// driven through `inspector_ui`. Unreached: `points_transform`'s increment form and
+/// `guide_actions`' remove-all/remove precedence.
 #[cfg(test)]
 mod subject_tests {
     use super::*;
@@ -18311,7 +18199,7 @@ mod subject_tests {
 
     const PANE: f32 = 296.0;
 
-    /// Every galley a pass painted, recursively: an `egui::Frame` paints as a `Shape::Vec`, so a top-level scan misses card titles.
+    /// Every galley a pass painted, recursively (an `egui::Frame` paints as a `Shape::Vec`).
     fn text_of(shape: &egui::Shape, into: &mut Vec<String>) {
         match shape {
             egui::Shape::Text(t) => into.push(t.galley.text().to_string()),
@@ -18320,8 +18208,7 @@ mod subject_tests {
         }
     }
 
-    /// A document with one painted rect and two guides (vertical at 40, horizontal at 90), nothing selected.
-    /// The rect makes "no FILL card" meaningful for the guide subject.
+    /// One painted rect and two guides (vertical at 40, horizontal at 90), nothing selected.
     fn stage(ctx: &egui::Context) -> (OndinApp, NodeId, GuideId, GuideId) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -18369,7 +18256,7 @@ mod subject_tests {
         (app, rect, v, h)
     }
 
-    /// Four passes of the whole inspector (interaction state is last frame's), returning every galley painted.
+    /// Four passes of the whole inspector, returning every galley painted.
     fn drawn(ctx: &egui::Context, app: &mut OndinApp) -> Vec<String> {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -18536,7 +18423,6 @@ mod subject_tests {
             "only a vertical guide is selected, so the horizontal target is stranded"
         );
 
-        // The control: while the axis is on screen the target survives the frame.
         let (mut app, _rect, _v, h2) = stage(&ctx);
         app.session.selection.toggle_guide(h2);
         app.in_flight.guide_position_drag = Some((GuideAxis::Horizontal, 999.0));
@@ -18623,8 +18509,8 @@ mod subject_tests {
         );
     }
 
-    /// One frame of the guide Transform card's fields alone, returning the rect of the first one:
-    /// the topmost stroked box between 18 and 34 points tall, since the rect is found by drawing, not guessed.
+    /// One frame of the guide Transform card's fields alone, returning the first one's rect: the
+    /// topmost stroked box between 18 and 34 points tall.
     fn guide_frame(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -18671,8 +18557,8 @@ mod subject_tests {
 
     /// A bare click through a guide's position field commits nothing; typing into it commits once.
     ///
-    /// Two independent guards (the `!interacting` gate and `changes_nothing` absorbing a no-op
-    /// `SetGuidePosition`) each suffice, so only removing both fails, at `1` against `0`.
+    /// Two guards (the `!interacting` gate, `changes_nothing` absorbing a no-op `SetGuidePosition`)
+    /// each suffice, so only removing both fails, at `1` against `0`.
     #[test]
     fn a_bare_click_through_a_guide_position_field_commits_nothing() {
         let ctx = egui::Context::default();
@@ -18707,7 +18593,6 @@ mod subject_tests {
             "a click through the field and away again is not an edit"
         );
 
-        // The control: typed digits do commit, so the pointer was on the field.
         let (mut app, _rect, v, _h) = stage(&ctx);
         app.session.selection.toggle_guide(v);
         for _ in 0..2 {
@@ -18793,7 +18678,6 @@ mod subject_tests {
             "and one press is one undo step, not one per guide"
         );
 
-        // The control: the verb beside it takes only what is selected.
         let (mut app, _rect, v, _h) = stage(&ctx);
         app.session.selection.toggle_guide(v);
         app.remove_selected_guides();
@@ -18858,7 +18742,7 @@ mod paint_write_tests {
 
     /// A fill list edited over a selection lands on each layer's own item ids.
     ///
-    /// flip: `write_fill_list` handing the anchor's ids to every layer (`all` = `SetFills { fills: e.to_vec() }`) → fails at the second rect's id assertion.
+    /// flip: `write_fill_list` handing the anchor's ids to every layer → fails at the second rect's id assertion.
     #[test]
     fn a_selection_fill_edit_keeps_each_layers_item_ids() {
         let ctx = egui::Context::default();
@@ -18924,7 +18808,7 @@ mod paint_write_tests {
 
     /// The five list writers over a main, its instance and a plain frame, selected together:
     /// removing row 0 keeps each layer's own survivor id, the `+` gives all three one id, and a
-    /// wholesale longer write keeps ids by position with one shared id past the end.
+    /// longer write keeps ids by position.
     ///
     /// flip: a step-1 writer handed the anchor's ids verbatim → fails at "the plain frame's own survivor".
     #[test]
@@ -18984,7 +18868,7 @@ mod paint_write_tests {
             ..LayoutGrid::new(GridAxis::Columns)
         };
         let export = |s| ExportSpec::new(ExportFormat::Png, ExportScale::Times(s));
-        // The main's items are minted, the plain frame's positional; the instance takes the main's by propagation.
+        // The main's items are minted, the plain frame's positional; the instance takes the main's.
         let s = &mut app.session.ids;
         let two = |s: &mut ondin_core::IdSource| [s.mint_item(), s.mint_item()];
         let [f0, f1] = two(s);
@@ -19038,7 +18922,6 @@ mod paint_write_tests {
                 exports: pos([export(1.0), export(2.0)]),
             },
         ])));
-        // The five lists' ids on one layer, in the table's order.
         fn ids_of(n: &ondin_core::Node) -> [Vec<ItemId>; 5] {
             fn of<T>(l: &[Keyed<T>]) -> Vec<ItemId> {
                 l.iter().map(|k| k.id).collect()
@@ -19062,7 +18945,6 @@ mod paint_write_tests {
         let subjects = [m, i, p];
         app.session.selection.set(subjects.to_vec());
 
-        // 1. Row 0 removed through each card's writer.
         let mut next = app.fills_in_scope(PaintScope::Selection);
         assert_eq!(next.len(), 2, "the selection agrees on its fills");
         next.remove(0);
@@ -19097,7 +18979,6 @@ mod paint_write_tests {
             );
         }
 
-        // 2. The `+`, one row added to all three.
         let mut next = app.fills_in_scope(PaintScope::Selection);
         next.push(Keyed::new(app.session.ids.mint_item(), fill(3)));
         app.write_fill_list(PaintScope::Selection, next);
@@ -19124,7 +19005,6 @@ mod paint_write_tests {
             "an edit made to the main and its instance together is no override"
         );
 
-        // 3. A wholesale write one longer than the lists.
         let before = [read(&app, m), read(&app, p)];
         app.write_grids(&subjects, &[grid(1), grid(2), grid(3)]);
         let tx = app.exports_tx(&subjects, &[export(1.0), export(2.0), export(4.0)]);
@@ -19181,7 +19061,7 @@ mod paint_write_tests {
             "the control: a real change still writes the list"
         );
 
-        // Mid-drag the preview already carries the new value; comparing against it would drop the release's transaction.
+        // Mid-drag the preview already carries the new value; comparing against it would drop the release.
         app.session.commit(tx);
         let (mut app, id) = striped(&ctx, 3);
         let preview = app.strokes_tx(PaintScope::Node(id), changed.clone());
@@ -19195,14 +19075,13 @@ mod paint_write_tests {
     }
 
     /// A reorder renumbers the paint chrome (picker, hex buffer, options popup, sides rows, dash text);
-    /// a removal drops the chrome that named the paint that went; a fill's reorder leaves stroke chrome alone.
+    /// a removal drops the chrome naming the paint that went; a fill's reorder leaves stroke chrome alone.
     ///
-    /// flip: `moved` short-circuited to `Some(slot)` → fails at the picker assertions; the `stroke_menu`/`stroke_sides_open`/`stroke_dash_text` block bypasses `moved`, so it needs its own flip (leaving them unmapped).
+    /// flip: `moved` short-circuited to `Some(slot)` → fails at the picker assertions; the `stroke_menu`/`stroke_sides_open`/`stroke_dash_text` block bypasses `moved`.
     #[test]
     fn a_reorder_carries_the_paint_chrome_and_a_removal_drops_it() {
         let ctx = egui::Context::default();
 
-        // A reorder: the paint at 0 goes to 2 and the other two shuffle down.
         let (mut app, id) = striped(&ctx, 3);
         app.picker = Some(Picker::new(id, PaintSlot::Stroke(0), egui::Pos2::ZERO));
         app.paint_hex = Some((id, PaintSlot::Stroke(0), "ff0000".into()));
@@ -19237,7 +19116,6 @@ mod paint_write_tests {
             "and the dash text mid-typing"
         );
 
-        // A removal: index 1 has gone, so anything naming it has nowhere to go.
         let (mut app, id) = striped(&ctx, 3);
         app.picker = Some(Picker::new(id, PaintSlot::Stroke(1), egui::Pos2::ZERO));
         app.paint_hex = Some((id, PaintSlot::Stroke(1), "ff0000".into()));
@@ -19263,7 +19141,6 @@ mod paint_write_tests {
         );
         assert_eq!(app.stroke_dash_text, None, "and the dash text");
 
-        // A fill's reorder says nothing about a stroke's index.
         let (mut app, id) = striped(&ctx, 3);
         app.picker = Some(Picker::new(id, PaintSlot::Stroke(1), egui::Pos2::ZERO));
         app.stroke_menu = Some(1);
@@ -19354,9 +19231,7 @@ mod paint_write_tests {
     }
 
     /// The mixed alignment dropdown lands its pick on every selected stroke, and offers exactly three rows (no `Mixed`).
-    ///
-    /// Row coordinates in a 320-wide row: the combo opens at (60, 14), its popup rows draw at
-    /// y = 38.5, 66.5, 94.5 (x = 15), and the popup appears the frame after the release.
+    /// In a 320-wide row the combo opens at (60, 14) and its popup rows draw at y = 38.5, 66.5, 94.5 (x = 15).
     ///
     /// flip: neutering the `if let Some(a) = picked` commit → fails at the first alignment assertion.
     #[test]
@@ -19446,7 +19321,6 @@ mod paint_write_tests {
             "as one undo step"
         );
 
-        // The aim control: the same click with the popup shut writes nothing.
         let ctx = egui::Context::default();
         let (mut app, a, b) = two_stroked(&ctx, (StrokeAlign::Center, StrokeAlign::Inside));
         let pass = |app: &mut OndinApp, events: Vec<egui::Event>| {
@@ -19483,7 +19357,6 @@ mod paint_write_tests {
     fn the_per_stroke_alignment_dropdown_lands_its_pick() {
         let ctx = egui::Context::default();
         let (mut app, a, _) = two_stroked(&ctx, (StrokeAlign::Center, StrokeAlign::Center));
-        // One layer, so the panel draws the per-stroke row rather than the mixed one.
         app.session.selection.set_one(a);
         let stroke = app.session.doc.get(a).expect("node").paint().strokes[0].clone();
 
@@ -19511,7 +19384,6 @@ mod paint_write_tests {
             modifiers: Default::default(),
         };
 
-        // The open popup's rows and where they are drawn, in a frame of their own.
         let popup_rows = |app: &mut OndinApp| {
             let out = ctx.run_ui(
                 egui::RawInput {
@@ -19540,7 +19412,7 @@ mod paint_write_tests {
             v
         };
 
-        // Warm-up frame: egui hit-tests a press against the previous frame's rects.
+        // Warm-up: egui hit-tests a press against the previous frame's rects.
         pass(&mut app, Vec::new());
         let combo = egui::pos2(60.0, 14.0);
         pass(
@@ -19548,7 +19420,6 @@ mod paint_write_tests {
             vec![egui::Event::PointerMoved(combo), key(combo, true)],
         );
         pass(&mut app, vec![key(combo, false)]);
-        // The popup's rows land at the same `y`s as the mixed row's.
         assert_eq!(
             popup_rows(&mut app),
             vec![
@@ -19571,7 +19442,6 @@ mod paint_write_tests {
             "the pick is reported back to the caller"
         );
 
-        // The aim control: the same click with the popup shut reports nothing.
         let ctx = egui::Context::default();
         let (mut app, a, _) = two_stroked(&ctx, (StrokeAlign::Center, StrokeAlign::Center));
         app.session.selection.set_one(a);
@@ -19604,7 +19474,7 @@ mod paint_write_tests {
     }
 
     /// The picker leaves the mixed row only once it has gone: still mixed keeps the slot, agreed
-    /// moves to `Selection(Fill, 0)`, no fills leaves the slot for `slot_brush` to close.
+    /// moves to `Selection(Fill, 0)`, no fills leaves it for `slot_brush` to close.
     ///
     /// flip: removing the `p.slot = to` write in `retarget_mixed_paint` → fails at the middle (agreed) case only.
     #[test]
@@ -19656,7 +19526,6 @@ mod paint_write_tests {
             app
         };
 
-        // Still mixed: different-length lists disagree however they are coloured.
         let mut app = staged(vec![solid(red)], vec![solid(red), solid(red)]);
         assert!(
             app.fills_shown(PaintScope::Selection).is_mixed(),
@@ -19669,7 +19538,6 @@ mod paint_write_tests {
             "the stand-in is still what the panel draws, so the slot stays"
         );
 
-        // Agreed: the panel starts drawing a real list and the stand-in has gone.
         let mut app = staged(vec![solid(red)], vec![solid(red)]);
         assert!(
             !app.fills_shown(PaintScope::Selection).is_mixed(),
@@ -19682,7 +19550,6 @@ mod paint_write_tests {
             "and the picker follows onto the row that replaced it"
         );
 
-        // Nothing at all: closing belongs to `slot_brush`, not here.
         let mut app = staged(Vec::new(), Vec::new());
         app.retarget_mixed_paint(ondin_core::PaintTarget::Fill);
         assert_eq!(
@@ -19694,7 +19561,7 @@ mod paint_write_tests {
 
     /// A click over the mixed row, through `write_slot`, carries the picker onto the row that replaces it.
     ///
-    /// flip: removing the `SelectionAll` branch of `retarget_after` → fails at the picker slot assertion; removing `write_slot`'s `retarget_after` call also fails `frame_fill_tests::a_click_over_a_group_colors_row_takes_the_picker_with_it`.
+    /// flip: removing the `SelectionAll` branch of `retarget_after` → fails at the picker slot assertion.
     #[test]
     fn a_click_over_the_mixed_row_carries_the_picker_onto_the_row_that_replaces_it() {
         let ctx = egui::Context::default();
@@ -19756,7 +19623,7 @@ mod paint_write_tests {
 
     /// A `Selection`-scoped list write (fills and strokes) reaches every target; a `Node`-scoped one reaches exactly one.
     ///
-    /// flip: either `Selection` arm handed `&[]`, or either `Node` arm pointed at the selection's first member → fails at that arm's assertion.
+    /// flip: a `Selection` arm handed `&[]`, or a `Node` arm pointed at the first member → fails at that arm's assertion.
     #[test]
     fn a_selection_scoped_list_write_reaches_every_target_and_a_node_one_reaches_one() {
         let ctx = egui::Context::default();
@@ -19873,10 +19740,9 @@ mod paint_write_tests {
         );
     }
 
-    /// An effect colour reaches every selected layer's own stack: the write is selection-wide,
-    /// and each subject's list is read from that subject (layer B carries an extra blur).
+    /// An effect colour reaches every selected layer's own stack (layer B carries an extra blur).
     ///
-    /// flip: `selection.ids()` → `&[id]` → fails at the widening; reading the anchor's `effects().to_vec()` for every layer → fails at B's stack length.
+    /// flip: `selection.ids()` → `&[id]` → fails at the widening; reading the anchor's effects for every layer → fails at B's stack length.
     #[test]
     fn an_effect_colour_reaches_every_selected_layers_own_stack() {
         let ctx = egui::Context::default();
@@ -19963,7 +19829,6 @@ mod paint_write_tests {
             "while that layer keeps the rest of its own stack (D476)"
         );
 
-        // The anchor's row retyped under the picker: a write with nowhere to land does nothing.
         app.session.commit(Transaction(vec![Operation::SetEffects {
             id: a,
             effects: ondin_core::keyed_by_position([ondin_core::Effect::new(
@@ -19980,8 +19845,8 @@ mod paint_write_tests {
     }
 }
 
-/// What the mixed paint row reports, over a headless app and a selection.
-/// Not covered: `paint_row`'s `door`, a hover-text guard (a tooltip's ink never reaches `FullOutput`).
+/// What the mixed paint row reports, over a headless app and a selection. Not covered:
+/// `paint_row`'s `door`, a hover-text guard (a tooltip's ink never reaches `FullOutput`).
 #[cfg(test)]
 mod mixed_spread_tests {
     use super::*;
@@ -20082,7 +19947,6 @@ mod mixed_spread_tests {
             "and the spread says so directly"
         );
 
-        // The stroke half of the same rule.
         assert!(
             app.shown_over_strokes(|s| s.visible).bare,
             "two layers with no strokes are bare on that side too"
@@ -20216,7 +20080,7 @@ mod slot_decision_tests {
         (app, made)
     }
 
-    /// A key layer that `outermost` drops (selected alongside its own ancestor) is not the box the set aligns to.
+    /// A key layer that `outermost` drops (selected beside its ancestor) is not the box the set aligns to.
     ///
     /// flip: dropping `.filter(|k| ids.contains(k))` in `align_target` → fails at the union assertion.
     #[test]
@@ -20231,7 +20095,7 @@ mod slot_decision_tests {
             "the control: a surviving key is the box the set aligns to"
         );
 
-        // `set_key` ignores an id outside the selection, so the key is selected alongside its own ancestor.
+        // `set_key` ignores an id outside the selection.
         let (mut app, ids) = three(&ctx);
         let mut src = ondin_core::IdSource::new(0x51E);
         let (tx, group) = build::group(
@@ -20320,7 +20184,7 @@ mod slot_decision_tests {
         );
     }
 
-    /// An effect row with no colour answers `None`, not a placeholder, which closes a picker left on a retyped row.
+    /// An effect row with no colour answers `None`, not a placeholder, so a picker left on a retyped row closes.
     ///
     /// flip: replacing the colourless arm with a solid black → fails at the blur assertion.
     #[test]
@@ -20358,7 +20222,7 @@ mod slot_decision_tests {
 
     /// The Dashed and Custom arms of `pattern_for` keep the numbers they are handed.
     ///
-    /// flip: Dashed's two floors `0.0` → `1.0` → fails at the zero-gap assertion; Custom's `s.dashes.len() > 2` → `> 3` → fails at the three-number assertion.
+    /// flip: Dashed's floors `0.0` → `1.0` → fails at the zero-gap assertion; Custom's `> 2` → `> 3` → fails at the three-number one.
     #[test]
     fn the_dashed_and_custom_arms_keep_the_numbers_they_are_handed() {
         let stroke = |dashes: Vec<f64>| Stroke {
@@ -20384,7 +20248,7 @@ mod slot_decision_tests {
 }
 
 /// `TEMPLATE_BOX_MIN`, the floor that keeps an extreme template a picture rather than a hairline.
-/// A resting cell has no ground and no stroke, so its single `rect_filled` is the fitted picture.
+/// A resting cell paints one `rect_filled`, the fitted picture.
 #[cfg(test)]
 mod template_cell_tests {
     use super::*;
@@ -20459,7 +20323,7 @@ mod quarters_row_tests {
     /// The card width the real panel lays a Transform row out in.
     const CARD: f32 = 222.0;
 
-    /// The four button faces of one `quarters_row`, left to right, after two passes (the first only hands out ids and sizes).
+    /// The four button faces of one `quarters_row`, left to right, after two passes.
     fn buttons(scope: TurnScope) -> Vec<egui::Rect> {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -20487,7 +20351,7 @@ mod quarters_row_tests {
 
     /// The four buttons split the card evenly and fill it.
     ///
-    /// flip: divisor `4.0` → `3.0` → fails at the fill assertion (the row overflows), leaving the evenness loop green; the loop catches a fourth button given a different width.
+    /// flip: divisor `4.0` → `3.0` → fails at the fill assertion only; the evenness loop catches a button of a different width.
     #[test]
     fn the_four_buttons_split_the_card_evenly_and_fill_it() {
         let bs = buttons(TurnScope::Selection);
@@ -20504,9 +20368,9 @@ mod quarters_row_tests {
         );
     }
 
-    /// Both scopes lay the row out identically; it goes red only if someone re-splits the row per scope.
+    /// Both scopes lay the row out identically.
     ///
-    /// flip: giving `TurnScope::Node` its own `/ 5.0` split inside `quarters_row` → fails here, not in the test above.
+    /// flip: giving `TurnScope::Node` its own `/ 5.0` split inside `quarters_row` → fails here, not above.
     #[test]
     fn both_scopes_lay_the_row_out_identically() {
         // Any id: the scope's id reaches `rotate_quarter` on a click, not the layout.
@@ -20546,7 +20410,7 @@ mod colour_panel_tests {
         app
     }
 
-    /// Draw the card and report where the reset glyph was painted and its colour; located by glyph so a re-layout cannot silently miss.
+    /// Draw the card and report where the reset glyph was painted and its colour, located by glyph.
     fn reset_glyph(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -20564,7 +20428,7 @@ mod colour_panel_tests {
         fn walk(s: &egui::Shape, v: &mut Vec<Glyph>) {
             match s {
                 egui::Shape::Text(t) => {
-                    // `override_text_color` is `None` here: `painter().text` bakes the colour into the job's section format.
+                    // `painter().text` bakes the colour into the job's section format, so `override_text_color` is `None`.
                     let colour = t
                         .override_text_color
                         .or_else(|| t.galley.job.sections.first().map(|s| s.format.color));
@@ -20582,7 +20446,7 @@ mod colour_panel_tests {
             .iter()
             .find(|(t, _, _)| t == icon::ARROW_COUNTER_CLOCKWISE)
             .unwrap_or_else(|| panic!("the reset glyph is drawn, in {v:?}"));
-        // The glyph's top-left; the 28×28 button box surrounds it, so a few points in lands inside.
+        // The glyph's top-left; a few points in lands inside the 28×28 button.
         (egui::pos2(pos.x + 4.0, pos.y + 6.0), *colour)
     }
     /// Where the reset is, ignoring how it is painted.
@@ -20592,8 +20456,8 @@ mod colour_panel_tests {
 
     /// The canvas reset is painted dead on the default and puts the ground back otherwise.
     ///
-    /// flip: `enabled_if(resettable)` → `enabled_if(false)` → fails at the glyph colour assertion only (a disabled button still reports its click);
-    /// the `&& resettable` re-test after `.clicked()` is unpinned, since `changes_nothing` absorbs the no-op commit.
+    /// flip: `enabled_if(resettable)` → `enabled_if(false)` → fails at the glyph colour assertion only;
+    /// the `&& resettable` re-test after `.clicked()` is unpinned (`changes_nothing` absorbs the commit).
     #[test]
     fn the_canvas_reset_is_dead_on_the_default_and_puts_the_ground_back_otherwise() {
         let ctx = egui::Context::default();
@@ -20614,7 +20478,6 @@ mod colour_panel_tests {
             modifiers: Default::default(),
         };
 
-        // Already the default: the button is dead and a click on it writes nothing.
         assert_eq!(ground(&app), default, "the fixture starts on the default");
         let (at, dead_colour) = reset_glyph(&ctx, &mut app, Vec::new());
         let depth = app.session.history.undo_depth();
@@ -20630,7 +20493,6 @@ mod colour_panel_tests {
             "a dead reset writes nothing"
         );
 
-        // Changed: the button is live and the click puts the ground back.
         let moved = ondin_core::peniko::Color::from_rgba8(90, 20, 20, 255);
         app.session
             .try_commit(Transaction(vec![Operation::SetCanvasBackground {
@@ -20662,8 +20524,7 @@ mod colour_panel_tests {
 
 #[cfg(test)]
 mod select_by_color_lock_tests {
-    //! The Group Colors reticle counts locked layers and does not select them;
-    //! the status message reconciles the census count with the selection.
+    //! The Group Colors reticle counts locked layers without selecting them; the status message reconciles the two.
 
     use crate::app::OndinApp;
     use ondin_core::kurbo::{Affine, Size};
@@ -20817,8 +20678,8 @@ mod select_by_color_lock_tests {
     }
 }
 
-/// The Position card, driven through the app's own methods on a headless app (so edits take the real commit path).
-/// The fixture is a 300×200 frame holding a 100×50 rect at (40, 30); assertions are on where the rect is drawn.
+/// The Position card, driven through the app's own methods on a headless app. The fixture is a
+/// 300×200 frame holding a 100×50 rect at (40, 30); assertions are on where the rect is drawn.
 #[cfg(test)]
 mod inset_card_tests {
     use super::*;
@@ -20886,7 +20747,7 @@ mod inset_card_tests {
         }
     }
 
-    /// Typing an inset into an in-flow item leaves its other axis where it is drawn (`b` is stored at y 120 but laid at y 0).
+    /// Typing an inset into an in-flow item leaves its other axis where it is drawn (`b` is stored at y 120, laid at y 0).
     ///
     /// flip: dropping `baked_placement` in `typed_inset_ops` → fails at "y kept" (120 against 0).
     #[test]
@@ -20951,7 +20812,6 @@ mod inset_card_tests {
             let (a0, b0) = (drawn(&app, a), drawn(&app, b));
             let ops = app.inset_flip_ops(&[a, b], Pin::Left, true);
             app.session.commit(Transaction(ops));
-            // A third of 300 is not exact in binary.
             let near =
                 |r: KRect, s: KRect| (r.x0 - s.x0).abs() < 1e-9 && (r.x1 - s.x1).abs() < 1e-9;
             assert!(near(drawn(&app, a), a0), "A stays: {:?}", drawn(&app, a));
@@ -21077,7 +20937,7 @@ mod inset_card_tests {
 
     /// The card is offered to a child of a group with a layout and pins it against the group's box.
     ///
-    /// flip: deleting `inset_subjects`' group arm → fails at the first assertion; deleting `inset_placement`'s group arm → fails at "the top is pinned where it is".
+    /// flip: deleting `inset_subjects`' group arm → fails at the first assertion; `inset_placement`'s → fails at "the top is pinned where it is".
     #[test]
     fn a_laid_groups_child_gets_the_card_and_pins_against_the_groups_box() {
         use ondin_core::container::{Display, Flex};
@@ -21149,7 +21009,7 @@ mod inset_card_tests {
             ui.set_max_width(284.0);
             app.inspector_insets(ui);
         });
-        // Inside a layout a pin takes the layer out of the flow, so the header says Absolute.
+        // A pin takes the layer out of the flow, so the header says Absolute.
         assert!(
             out.shapes.iter().any(|cs| matches!(
                 &cs.shape,
@@ -21159,7 +21019,7 @@ mod inset_card_tests {
         );
     }
 
-    /// Pinning an item out of a hugging container never moves it: the inset is measured against the box the group will have (−20, not 20).
+    /// Pinning an item out of a hugging container never moves it: the inset is measured against the group's future box (−20, not 20).
     ///
     /// flip: `toggle_pin` committing its ops without `OndinApp::kept_in_place` → fails at "pinning moved it" (x 90 against 130).
     #[test]
@@ -21278,10 +21138,10 @@ mod inset_card_tests {
         );
     }
 
-    /// The card is laid out as the mockup: the diagram 74 wide spanning the two field rows, four fields
-    /// beside it, `auto` on unpinned fields, the top held at its distance and no Absolute badge in a plain frame.
+    /// The card layout: the diagram 74 wide spanning the two field rows, four fields beside it,
+    /// `auto` on unpinned fields, the top held at its distance, no Absolute badge in a plain frame.
     ///
-    /// flip: the `auto` formatter off → fails at "left and bottom, unpinned"; the top never held → fails at the same line; the badge's `laid` dropped → fails at "no badge in a plain frame".
+    /// flip: the `auto` formatter off, or the top never held → fails at "left and bottom, unpinned"; the badge's `laid` dropped → fails at "no badge in a plain frame".
     #[test]
     fn the_card_is_laid_out_as_the_mockup() {
         let (mut app, _frame, rect) = app_with_pinnable();
@@ -21321,7 +21181,7 @@ mod inset_card_tests {
         let fields: Vec<egui::Rect> = grounds
             .iter()
             .copied()
-            // Beside the well, not under it: the second centre button is also a 28-tall ground.
+            // Beside the well: the second centre button is also a 28-tall ground.
             .filter(|r| {
                 r.height() == ui::CONTROL_H && r.left() > well.right() && r.top() < well.bottom()
             })
@@ -21360,8 +21220,7 @@ mod inset_card_tests {
     /// A point where nothing in the card is drawn; a click here takes focus away from a field.
     const AWAY: egui::Pos2 = egui::pos2(5.0, 850.0);
 
-    /// One frame of the Position card at the inspector column's 284, with
-    /// `events`; every text run it painted, with its rect.
+    /// One frame of the Position card at the inspector column's 284, with `events`; every text run painted, with its rect.
     fn card_frame(
         ctx: &egui::Context,
         app: &mut OndinApp,
@@ -21431,7 +21290,7 @@ mod inset_card_tests {
     }
 
     /// An inset field only clicked through pins nothing (`inset_field`'s guard `set.is_none() && v == shown`).
-    /// Each click is asserted to have focused the field, or a missed click would pass with the guard gone.
+    /// Each click is asserted to have focused the field, or a miss would pass with the guard gone.
     ///
     /// flip: guard made `false && set.is_none() && v == shown` → fails at "a click through R pinned nothing" (`right: Some(Px(160.0))`).
     #[test]
@@ -21469,9 +21328,9 @@ mod inset_card_tests {
         }
     }
 
-    /// A number typed into an unpinned inset field pins it in one step, and the unit suffix then converts it in place, through real events.
+    /// A number typed into an unpinned inset field pins it in one step, and the unit suffix then converts it in place.
     ///
-    /// flip: guard cut to `set.is_none()` → fails at "typed into R" (the test above stays green); `inset_field`'s suffix arm made `if false && flip && …` → fails at "the suffix converted R".
+    /// flip: guard cut to `set.is_none()` → fails at "typed into R"; the suffix arm made `if false && flip && …` → fails at "the suffix converted R".
     #[test]
     fn a_typed_inset_pins_it_and_its_unit_suffix_converts_it() {
         use ondin_core::LengthPct;
@@ -21531,10 +21390,10 @@ mod multi_xy_flex_tests {
     //! The multi-selection Transform card's X and Y over flex items.
     use super::*;
 
-    /// X and Y do nothing to a selection mixing an in-flow item with a free rect (an 80-point scrub moves neither, no undo step).
+    /// X and Y do nothing to a selection mixing an in-flow item with a free rect (no move, no undo step).
     ///
     /// flip: `inspector_multi_transform`'s `ui::disable_unless(ui, laid_out.is_none(), …)` made `true` → fails at "nothing moved";
-    /// `laid_out_xy` answering `None` → fails there and in `only_one_containers_items_are_told_to_drag_to_reorder`.
+    /// `laid_out_xy` answering `None` → fails there too.
     #[test]
     fn x_and_y_are_inert_over_a_selection_with_an_in_flow_item() {
         use ondin_core::container::{AlignItems, Display, Flex};
@@ -21568,7 +21427,6 @@ mod multi_xy_flex_tests {
                 name: None,
             },
             rect(a, row, 0, 40.0, (0.0, 0.0)),
-            // Free, beside the frame: moved by an X edit if one gets through.
             rect(b, root, 1, 60.0, (500.0, 300.0)),
             Operation::SetDisplay {
                 id: row,
@@ -21653,9 +21511,9 @@ mod multi_xy_flex_tests {
     }
 
     /// The X/Y tooltip promises a reorder only where a drag makes one: `drags_as_a_block` decides and
-    /// `laid_out_xy` words it (asserted directly, since a tooltip's text never reaches a headless frame).
+    /// `laid_out_xy` words it (asserted directly: a tooltip's text never reaches a headless frame).
     ///
-    /// flip: dropping the same-container clause → fails at "items of two rows"; dropping the in-flow clause → fails only at "two free rects";
+    /// flip: dropping the same-container clause → fails at "items of two rows"; the in-flow clause → fails only at "two free rects";
     /// `laid_out_xy` asking the opposite of `drags_as_a_block` → fails at "one row's items are told to drag".
     #[test]
     fn only_one_containers_items_are_told_to_drag_to_reorder() {

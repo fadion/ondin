@@ -107,46 +107,16 @@ mod tests {
         assert_eq!(format!("{id:?}"), "1a2b:42");
     }
 
-    /// **What `from_wire` accepts, pinned** — §15 D662, `[S2.2-L6-08]`.
+    /// Pins what `NodeId::from_wire`, which reads untrusted bytes, accepts today.
     ///
-    /// 🚨 **This file's two tests covered `mint` and the `Debug` format, and
-    /// nothing at all covered the parser.** `NodeId::from_wire` sits behind
-    /// `io/schema.rs`'s `parse_id` and therefore behind every node id, every
-    /// `parent`, every entry of every `children` list and — through
-    /// `GuideId::from_wire` — every guide id in every file the app opens. It is
-    /// the one function here that reads **untrusted bytes**, and `tests/io.rs`
-    /// exercises it only through well-formed saves of its own making.
-    ///
-    /// **This pins current behaviour and does not tighten it**, deliberately.
-    /// **Five** of the accepted spellings are strings `NodeId::to_wire` can never
-    /// produce — a leading `+` on either half, uppercase hex, leading zeroes on
-    /// either half — and a sixth, `"0:0"`, names an id the minter guarantees is
-    /// never minted (`IdSource::new` starts `seq` at 1; plain backticks because
-    /// `cargo doc` cannot see inside a `#[cfg(test)]` module, so a `[link]` here is
-    /// decoration no gate can validate — §15 D319). ⚠️ **The eighth row is neither
-    /// — `"ffffffffffffffff:1"` is what `to_wire` produces for a `u64::MAX` actor,
-    /// so it is a boundary case rather than an alias.** This comment and the test's
-    /// own *name* said six until `arch-scribe` counted the table. None is a defect:
-    /// every
-    /// alias parses to the **same** `NodeId` as its canonical form, so
-    /// `into_document`'s duplicate check still catches a file that spells one node
-    /// two ways, and a non-canonically spelled cross-reference still resolves.
-    ///
-    /// ⚠️ **Whether they should be *rejected* is a ruling and is left open.** The
-    /// case for it is §5.2's own words — the wire form is *"compact and
-    /// diff-**readable**"* — and a diff is only readable if one id has one
-    /// spelling. (⚠️ *"diff-friendly"* is `NodeId::to_wire`'s doc one screen up,
-    /// and this comment credited it to §5.2 until `arch-scribe` read both; a
-    /// quotation attributed to the wrong owner is session 14's `Prefs::ephemeral`
-    /// shape and neither gate nor census can see one.) The cost of tightening is
-    /// that it narrows what `io::load` accepts, which is a
-    /// compatibility decision rather than a repair. The table below is written so
-    /// that tightening it is a *visible* edit: move a row from `accepted` to the
-    /// rejected list and the intent is on the diff.
-    ///
-    /// ⚠️ **`"1a2b:"` and `":42"` are already rejected**, which is the control
-    /// saying the parser is not simply permissive: an empty half fails
-    /// `from_str_radix`/`parse` rather than defaulting to zero.
+    /// Five spellings (a leading `+` on either half, uppercase hex, leading zeroes
+    /// on either half) are aliases `to_wire` never produces, and `"0:0"` names an
+    /// id the minter never mints. Each alias parses to the same `NodeId` as its
+    /// canonical form, so the duplicate check still catches a file spelling one
+    /// node twice. Whether to reject them is an open ruling (it narrows what
+    /// `io::load` accepts); moving a row from `accepted` to the rejected list makes
+    /// that edit visible. `"1a2b:"` and `":42"` are already rejected: an empty
+    /// half does not default to zero.
     #[test]
     fn from_wire_accepts_the_canonical_form_and_five_aliases_of_it() {
         let canonical = NodeId {
@@ -218,21 +188,13 @@ mod tests {
         }
     }
 
-    /// **`skip_to` never moves the counter backwards** — invariant 3's whole
-    /// mechanism, and it had no direct test (§15 D662, `[S2.2-L6-08]`).
+    /// `skip_to` never moves the counter backwards, which keeps a deleted node's id
+    /// from being re-minted. `document::reserve_existing_ids` calls it with `seq + 1`
+    /// for every id in a loaded file: a high id pushes the counter past it, a low
+    /// one must not pull it back.
     ///
-    /// A deleted node's id must never be re-minted, and the only thing standing
-    /// between the app and that is this one `max`.
-    /// `document::reserve_existing_ids` calls it with `seq + 1` for every id in a
-    /// loaded file, so a file holding a high id must push the counter past it —
-    /// and a file holding a *low* one must not pull it back, which is the half a
-    /// plain assignment would break and the half nothing asserted.
-    ///
-    /// ⚠️ **Flip run**, `self.next_seq = seq` in place of the `max`, and the
-    /// predicted site was right: *"a lower seq must not pull the counter back"*,
-    /// 2 against 3. The three other assertions stay green under it, which is why
-    /// the backwards case has to be here at all — every other thing this function
-    /// does is the same under both spellings.
+    /// flip: `self.next_seq = seq` in place of the `max` → fails at "a lower seq
+    /// must not pull the counter back"; the other assertions stay green.
     #[test]
     fn skip_to_only_ever_moves_the_counter_forward() {
         let mut src = IdSource::new(0xABCD);

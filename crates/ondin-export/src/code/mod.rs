@@ -15,6 +15,7 @@
 mod css;
 mod dom;
 pub mod html;
+mod tokens;
 mod walk;
 
 /// One file of a code export, at its path inside the export's folder.

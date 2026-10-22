@@ -9,15 +9,18 @@
 use super::Report;
 use super::css::{self, px};
 use super::dom::{Child, Classes, Element};
+use super::tokens::{self, Tokens};
 use crate::svg::fmt;
 use ondin_core::container::{
     self, AlignContent, AlignItems, Dimension, Display, FlexDirection, FlexWrap, GridAutoFlow,
     JustifyContent, LengthPct,
 };
+use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
+use ondin_core::variable::VarId;
 use ondin_core::{
-    Brush, Document, EffectKind, Fill, Node, NodeId, NodeKind, Resolved, Stroke, StrokeAlign,
-    StrokeSides, TextSizing, TextStyle,
+    Brush, BrushSource, Document, EffectKind, Fill, Node, NodeId, NodeKind, Resolved, Stroke,
+    StrokeAlign, StrokeSides, TextSizing, TextStyle,
 };
 
 /// The page the walk builds, and what it saw on the way.
@@ -26,6 +29,8 @@ pub(crate) struct Page {
     pub report: Report,
     /// Pictures the page links to, by path under the export's folder.
     pub assets: Vec<(String, Vec<u8>)>,
+    /// `tokens.css`, when the page reads a variable.
+    pub tokens: Option<String>,
 }
 
 /// How a layer sits in its parent's element.
@@ -47,6 +52,7 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Page {
         classes: Classes::default(),
         report: Report::default(),
         assets: Vec::new(),
+        tokens: Tokens::new(doc),
     };
     let mut root = Element::new("div", walk.classes.mint("page", "page"));
     root.set("position", "relative");
@@ -68,13 +74,26 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Page {
                 boxed: false,
             },
         ) {
+            let mut el = el;
+            // The mode its ancestors set, which the export does not hold.
+            let inherited = node
+                .parent()
+                .and_then(|p| doc.mode_at(p))
+                .filter(|m| Some(*m) != doc.variables().default_mode());
+            if node.mode().is_none()
+                && let Some(mode) = inherited.and_then(|m| walk.tokens.mode(m))
+            {
+                el.attrs.push(("data-mode", mode.to_string()));
+            }
             root.children.push(Child::Element(el));
         }
     }
+    let tokens = walk.tokens.css(doc);
     Page {
         root,
         report: walk.report,
         assets: walk.assets,
+        tokens,
     }
 }
 
@@ -84,6 +103,7 @@ struct Walk<'a> {
     classes: Classes,
     report: Report,
     assets: Vec<(String, Vec<u8>)>,
+    tokens: Tokens,
 }
 
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
@@ -257,30 +277,63 @@ impl Walk<'_> {
         let mut el = Element::new("div", self.classes.mint(node.name(), kind.default_name()));
         let bx = self.box_rect(node);
         self.place(&mut el, node, &kind, bx, place);
+        if let Some(mode) = node.mode().and_then(|m| self.tokens.mode(m)) {
+            el.attrs.push(("data-mode", mode.to_string()));
+        }
+        if let Some(var) = node.visible_var()
+            && tokens::varies(doc, var)
+        {
+            self.report.approximate(format!(
+                "{} {}: its visibility is bound to a variable and written for one mode",
+                kind_word(node),
+                label(node)
+            ));
+        }
 
-        let opacity = doc.drawn_opacity(id);
-        if opacity < 1.0 {
-            el.set("opacity", fmt(f64::from(opacity.max(0.0))));
+        if let Some(var) = node.opacity_var() {
+            el.set("opacity", self.tokens.opacity(var));
+        } else {
+            let opacity = doc.drawn_opacity(id);
+            if opacity < 1.0 {
+                el.set("opacity", fmt(f64::from(opacity.max(0.0))));
+            }
         }
         self.effects(&mut el, node);
 
         match &kind {
             NodeKind::Rect { corner_radii, size } => {
-                let half = size.width.min(size.height) * 0.5;
+                let half = size.width.min(size.height).max(0.0) * 0.5;
                 // Clamped per corner as the outline is, so CSS's own proportional
-                // scaling never has an overlap to resolve.
+                // scaling never has an overlap to resolve — against the bound size
+                // when there is one, since it changes with the mode.
+                let sized = node.size_vars().iter().any(Option::is_some);
+                let half_css = if sized {
+                    let w = self.axis_size(node, 0, size.width);
+                    let h = self.axis_size(node, 1, size.height);
+                    format!("calc(min({w}, {h}) / 2)")
+                } else {
+                    px(half)
+                };
+                let bound = node.corner_vars();
                 let r = [
                     corner_radii.top_left,
                     corner_radii.top_right,
                     corner_radii.bottom_right,
                     corner_radii.bottom_left,
-                ]
-                .map(|r| r.clamp(0.0, half.max(0.0)));
-                if r.iter().any(|r| *r > 0.0) {
-                    let all: Vec<String> = r.iter().map(|r| px(*r)).collect();
+                ];
+                if r.iter().any(|r| *r > 0.0) || bound.iter().any(Option::is_some) {
+                    let all: Vec<String> = r
+                        .iter()
+                        .zip(bound)
+                        .map(|(r, var)| match var {
+                            Some(v) => format!("min({}, {half_css})", self.tokens.px_floored(v)),
+                            None if sized && *r > 0.0 => format!("min({}, {half_css})", px(*r)),
+                            None => px(r.clamp(0.0, half)),
+                        })
+                        .collect();
                     el.set(
                         "border-radius",
-                        if r.iter().all(|x| *x == r[0]) {
+                        if all.iter().all(|x| *x == all[0]) {
                             all[0].clone()
                         } else {
                             all.join(" ")
@@ -306,7 +359,7 @@ impl Walk<'_> {
         if let Some(display) = doc.resolved_display(id)
             && container::is_container(&kind)
         {
-            self.display(&mut el, &display);
+            self.display(&mut el, &display, node.spacing_vars());
         } else if matches!(kind, NodeKind::Group) {
             self.report.position(format!(
                 "group {}: no layout, so its children are absolutely positioned",
@@ -397,10 +450,12 @@ impl Walk<'_> {
                     && let Some(b) = bx
                 {
                     if item.min_width == Dimension::Auto {
-                        el.set("min-width", px(b.width()));
+                        let w = self.axis_size(node, 0, b.width());
+                        el.set("min-width", w);
                     }
                     if item.min_height == Dimension::Auto {
-                        el.set("min-height", px(b.height()));
+                        let h = self.axis_size(node, 1, b.height());
+                        el.set("min-height", h);
                     }
                 }
                 if let Some(m) = css::matrix(css::linear(node.transform())) {
@@ -445,11 +500,20 @@ impl Walk<'_> {
         }
     }
 
+    /// A box's own size on `axis` (0 width, 1 height): its bound variable's, else
+    /// `used` px.
+    fn axis_size(&mut self, node: &Node, axis: usize, used: f64) -> String {
+        match node.size_vars()[axis] {
+            Some(v) => self.tokens.px_floored(v),
+            None => px(used),
+        }
+    }
+
     /// Width and height as specified: a shape's or a frame's own size, a group's
     /// `LayoutItem` sizes (`auto` hugging, as the model reads it), a text box's
     /// sizing mode. An axis `stretched` between two insets is left to them.
     fn sizes(
-        &self,
+        &mut self,
         el: &mut Element,
         node: &Node,
         kind: &NodeKind,
@@ -457,6 +521,8 @@ impl Walk<'_> {
         stretched: (bool, bool),
     ) {
         let item = node.item();
+        // A bound size stands for the kind's own size, the axis's px.
+        let [bound_w, bound_h] = node.size_vars();
         let (w, h): (Option<String>, Option<String>) = match kind {
             NodeKind::Group => {
                 if node.display().is_none() {
@@ -466,8 +532,14 @@ impl Walk<'_> {
                 }
             }
             NodeKind::Artboard { size } if node.display().is_some() => (
-                Some(own_or(item.width, size.width)),
-                Some(own_or(item.height, size.height)),
+                Some(match (item.width, bound_w) {
+                    (Dimension::Auto, Some(v)) => self.tokens.px_floored(v),
+                    (d, _) => own_or(d, size.width),
+                }),
+                Some(match (item.height, bound_h) {
+                    (Dimension::Auto, Some(v)) => self.tokens.px_floored(v),
+                    (d, _) => own_or(d, size.height),
+                }),
             ),
             NodeKind::Text { sizing, .. } => match sizing {
                 TextSizing::Auto => (None, None),
@@ -476,7 +548,10 @@ impl Walk<'_> {
             },
             _ => {
                 let s = bx.map(|b| b.size()).unwrap_or_default();
-                (Some(px(s.width)), Some(px(s.height)))
+                (
+                    Some(self.axis_size(node, 0, s.width)),
+                    Some(self.axis_size(node, 1, s.height)),
+                )
             }
         };
         if let Some(w) = w.filter(|_| !stretched.0) {
@@ -502,39 +577,80 @@ impl Walk<'_> {
     /// checked that each has a form.
     fn paint(&mut self, el: &mut Element, node: &Node, size: Size) {
         let paint = self.doc.resolved_paint(node.id(), node.paint());
+        // The resolved list for the tier's checks, the stored one for bindings;
+        // resolving keeps every item in place.
+        let stored = node.paint();
         let layers: Vec<String> = paint
             .fills
             .iter()
-            .filter(|f| f.visible)
+            .zip(&stored.fills)
+            .filter(|(f, _)| f.visible)
             .rev()
-            .filter_map(|f| css::background_layer(f.brush.drawn(), size))
+            .filter_map(|(f, s)| match s.brush {
+                BrushSource::Bound { var, alpha } => {
+                    let c = self.tokens.color(var, alpha);
+                    Some(format!("linear-gradient({c}, {c})"))
+                }
+                BrushSource::Literal(_) => css::background_layer(f.brush.drawn(), size),
+            })
             .collect();
         if !layers.is_empty() {
             el.set("background", layers.join(", "));
         }
         let kind = self.res.used_kind_of(node);
-        let Some(s) = paint.strokes.iter().find(|s| s.visible && s.width > 0.0) else {
+        let Some((s, raw)) = paint
+            .strokes
+            .iter()
+            .zip(&stored.strokes)
+            .find(|(s, _)| s.visible && s.width > 0.0)
+        else {
             return;
         };
-        let Brush::Solid(c) = s.brush.drawn() else {
-            return;
+        let c = match raw.brush {
+            BrushSource::Bound { var, alpha } => self.tokens.color(var, alpha),
+            BrushSource::Literal(_) => {
+                let Brush::Solid(c) = s.brush.drawn() else {
+                    return;
+                };
+                css::color(*c, 1.0)
+            }
         };
-        let c = css::color(*c, 1.0);
         let sides = ondin_core::geometry::effective_sides(kind, s);
         if sides.is_all() {
             let w = s.width;
-            el.set("outline", format!("{} solid {c}", px(w)));
-            let offset = match s.align {
-                StrokeAlign::Inside => -w,
-                StrokeAlign::Center => -w * 0.5,
-                StrokeAlign::Outside => 0.0,
-            };
-            if offset != 0.0 {
-                el.set("outline-offset", px(offset));
+            match raw.width_var {
+                Some(var) => {
+                    let width = self.tokens.px_floored(var);
+                    el.set("outline", format!("{width} solid {c}"));
+                    let k = match s.align {
+                        StrokeAlign::Inside => Some("-1"),
+                        StrokeAlign::Center => Some("-0.5"),
+                        StrokeAlign::Outside => None,
+                    };
+                    if let Some(k) = k {
+                        el.set("outline-offset", format!("calc({width} * {k})"));
+                    }
+                }
+                None => {
+                    el.set("outline", format!("{} solid {c}", px(w)));
+                    let offset = match s.align {
+                        StrokeAlign::Inside => -w,
+                        StrokeAlign::Center => -w * 0.5,
+                        StrokeAlign::Outside => 0.0,
+                    };
+                    if offset != 0.0 {
+                        el.set("outline-offset", px(offset));
+                    }
+                }
             }
         } else {
             el.set("box-sizing", "border-box");
             let [t, r, b, l] = side_widths(sides, s.width);
+            // A bound width is every drawn side's, but for custom widths, which
+            // carry their own numbers.
+            let bound = raw
+                .width_var
+                .filter(|_| !matches!(sides, StrokeSides::Custom { .. }));
             for (w, prop) in [
                 (t, "border-top"),
                 (r, "border-right"),
@@ -542,7 +658,11 @@ impl Walk<'_> {
                 (l, "border-left"),
             ] {
                 if w > 0.0 {
-                    el.set(prop, format!("{} solid {c}", px(w)));
+                    let width = match bound {
+                        Some(var) => self.tokens.px_floored(var),
+                        None => px(w),
+                    };
+                    el.set(prop, format!("{width} solid {c}"));
                 }
             }
         }
@@ -552,22 +672,39 @@ impl Walk<'_> {
     /// the model casts shadows from the blurred layer.
     fn effects(&mut self, el: &mut Element, node: &Node) {
         let effects = self.doc.resolved_effects(node.id(), node.effects());
+        // Resolved for the numbers, stored for the bindings, item for item.
+        let both: Vec<_> = effects
+            .iter()
+            .zip(node.effects())
+            .filter(|(e, _)| e.visible)
+            .map(|(e, s)| (e.kind.clone(), s.vars))
+            .collect();
         let mut parts = Vec::new();
-        for e in effects.iter().filter(|e| e.visible) {
-            if let EffectKind::LayerBlur { radius } = e.kind {
-                parts.push(format!(
-                    "blur({})",
-                    px(ondin_core::effect::deviation(radius))
-                ));
+        for (kind, vars) in &both {
+            if let EffectKind::LayerBlur { radius } = kind {
+                let blur = match vars[EFFECT_BLUR] {
+                    Some(v) => format!("calc({} * 0.5)", self.tokens.px_floored(v)),
+                    None => px(ondin_core::effect::deviation(*radius)),
+                };
+                parts.push(format!("blur({blur})"));
             }
         }
-        for e in effects.iter().filter(|e| e.visible) {
-            if let EffectKind::DropShadow(s) = &e.kind {
+        for (kind, vars) in &both {
+            if let EffectKind::DropShadow(s) = kind {
+                let x = match vars[EFFECT_X] {
+                    Some(v) => self.tokens.px(v),
+                    None => px(s.offset.x),
+                };
+                let y = match vars[EFFECT_Y] {
+                    Some(v) => self.tokens.px(v),
+                    None => px(s.offset.y),
+                };
+                let blur = match vars[EFFECT_BLUR] {
+                    Some(v) => format!("calc({} * 0.5)", self.tokens.px_floored(v)),
+                    None => px(ondin_core::effect::deviation(s.blur)),
+                };
                 parts.push(format!(
-                    "drop-shadow({} {} {} {})",
-                    px(s.offset.x),
-                    px(s.offset.y),
-                    px(ondin_core::effect::deviation(s.blur)),
+                    "drop-shadow({x} {y} {blur} {})",
                     css::color(s.color, 1.0)
                 ));
             }
@@ -577,8 +714,9 @@ impl Walk<'_> {
         }
     }
 
-    /// A container's own layout declarations.
-    fn display(&mut self, el: &mut Element, display: &Display) {
+    /// A container's own layout declarations; `bound` its gap and padding
+    /// bindings, in `Display::spacing`'s order.
+    fn display(&mut self, el: &mut Element, display: &Display, bound: [Option<VarId>; 6]) {
         let pad = display.padding();
         let (column_gap, row_gap) = display.gaps();
         match display {
@@ -628,14 +766,26 @@ impl Walk<'_> {
                 el.set("align-content", align_content(g.align_content));
             }
         }
-        if row_gap != 0.0 {
-            el.set("row-gap", px(row_gap));
+        let mut length = |v: f64, var: Option<VarId>| match var {
+            Some(var) => Some(self.tokens.px(var)),
+            None => (v != 0.0).then(|| px(v)),
+        };
+        if let Some(g) = length(column_gap, bound[0]) {
+            el.set("column-gap", g);
         }
-        if column_gap != 0.0 {
-            el.set("column-gap", px(column_gap));
+        if let Some(g) = length(row_gap, bound[1]) {
+            el.set("row-gap", g);
         }
-        if pad.iter().any(|p| *p != 0.0) {
-            el.set("padding", pad.map(px).join(" "));
+        let sides: Vec<Option<String>> = (0..4).map(|i| length(pad[i], bound[2 + i])).collect();
+        if sides.iter().any(Option::is_some) {
+            el.set(
+                "padding",
+                sides
+                    .into_iter()
+                    .map(|s| s.unwrap_or_else(|| "0".into()))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
         }
     }
 
@@ -660,15 +810,35 @@ impl Walk<'_> {
         let ink = paint
             .fills
             .iter()
-            .find(|f| f.visible)
-            .map(|f| f.brush.drawn().clone());
+            .zip(&node.paint().fills)
+            .find(|(f, _)| f.visible)
+            .map(|(f, stored)| (f.brush.drawn().clone(), &stored.brush));
         match ink {
-            Some(Brush::Solid(c)) => el.set("color", css::color(c, 1.0)),
+            Some((_, BrushSource::Bound { var, alpha })) => {
+                let c = self.tokens.color(*var, *alpha);
+                el.set("color", c);
+            }
+            Some((Brush::Solid(c), _)) => el.set("color", css::color(c, 1.0)),
             // Text with no ink is black, as on the canvas.
             _ => el.set("color", "#000000"),
         }
         for (p, v) in face(style, None) {
             el.set(p, v);
+        }
+        let [content_var, family_var] = node.text_vars();
+        if let Some(var) = family_var {
+            el.set(
+                "font-family",
+                format!("{}, sans-serif", self.tokens.var(var)),
+            );
+        }
+        if let Some(var) = content_var
+            && tokens::varies(self.doc, var)
+        {
+            self.report.approximate(format!(
+                "text {}: its content is bound to a variable and written for one mode",
+                label(node)
+            ));
         }
         // CSS's `normal` reads a different metrics table per browser and platform,
         // so an automatic line height is written as the height the canvas laid.

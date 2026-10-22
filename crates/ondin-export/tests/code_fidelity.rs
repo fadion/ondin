@@ -894,6 +894,291 @@ fn text_matches_the_canvas() {
     holds_within("text", &doc, &res, 1, MAX_TEXT_CELL_ERROR);
 }
 
+/// Variables as `var()` in two modes: one frame in the default, one set to Dark
+/// with a Light frame inside. A fill bound through an alias (at full and half
+/// alpha), and bound radius, gap, opacity, width, stroke width and shadow blur.
+///
+/// flip: `Tokens::css` declaring aliases on `:root` only → 136.7 in the dark
+/// frame, whose alias keeps the light colour; its default block on `:root` alone
+/// → 136.7 at the light frame nested in the dark one.
+#[test]
+fn variables_match_the_canvas_in_every_mode() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    d.apply(vec![
+        Operation::AddMode {
+            mode: Mode {
+                id: light,
+                name: "Light".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: dark,
+                name: "Dark".into(),
+            },
+            index: 1,
+            cells: vec![],
+        },
+    ]);
+    let var = |d: &mut Doc, name: &str, kind, a: Cell, b: Cell| {
+        let id = d.ids.mint_var();
+        d.apply(vec![Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind,
+                cells: [(light, a), (dark, b)].into_iter().collect(),
+                origin: None,
+                forked: None,
+            },
+        }]);
+        id
+    };
+    let brand = var(
+        &mut d,
+        "brand/500",
+        VarKind::Color,
+        Cell::Color(Color::from_rgba8(230, 70, 50, 255)),
+        Cell::Color(Color::from_rgba8(60, 120, 240, 255)),
+    );
+    let accent = var(
+        &mut d,
+        "accent",
+        VarKind::Color,
+        Cell::Alias(brand),
+        Cell::Alias(brand),
+    );
+    let radius = var(
+        &mut d,
+        "radius",
+        VarKind::Number,
+        Cell::Number(6.0),
+        Cell::Number(18.0),
+    );
+    let gap = var(
+        &mut d,
+        "gap",
+        VarKind::Number,
+        Cell::Number(8.0),
+        Cell::Number(24.0),
+    );
+    let fade = var(
+        &mut d,
+        "fade",
+        VarKind::Number,
+        Cell::Number(100.0),
+        Cell::Number(40.0),
+    );
+    let num = |d: &mut Doc, name: &str, a: f64, b: f64| {
+        var(d, name, VarKind::Number, Cell::Number(a), Cell::Number(b))
+    };
+    let wide = num(&mut d, "wide", 40.0, 70.0);
+    let line = num(&mut d, "line", 2.0, 6.0);
+    let soft = num(&mut d, "soft", 4.0, 12.0);
+
+    for (i, mode) in [None, Some(dark)].into_iter().enumerate() {
+        let f = d.frame(None, 0.0, i as f64 * 90.0, 260.0, 80.0, "Board");
+        d.apply(vec![
+            Operation::SetMode { id: f, mode },
+            Operation::SetDisplay {
+                id: f,
+                display: Some(Display::Flex(Flex {
+                    align_items: AlignItems::Center,
+                    padding: [10.0; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetSpacingVars {
+                id: f,
+                vars: [Some(gap), None, None, None, None, None],
+            },
+        ]);
+        for j in 0..3 {
+            let r = d.rect(f, 0.0, 0.0, 50.0, 50.0, 0.0);
+            d.apply(vec![
+                Operation::SetFills {
+                    id: r,
+                    fills: keyed_by_position([Fill {
+                        brush: BrushSource::Bound {
+                            var: accent,
+                            alpha: if j == 1 { 0.5 } else { 1.0 },
+                        },
+                        visible: true,
+                    }]),
+                },
+                Operation::SetCornerVars {
+                    id: r,
+                    vars: [Some(radius), Some(radius), None, Some(radius)],
+                },
+            ]);
+            if j == 2 {
+                d.apply(vec![
+                    Operation::SetOpacityVar {
+                        id: r,
+                        var: Some(fade),
+                    },
+                    Operation::SetSizeVars {
+                        id: r,
+                        vars: [Some(wide), None],
+                    },
+                ]);
+            }
+            if j == 0 {
+                d.stroke(r, 0.0, StrokeAlign::Center, StrokeSides::All);
+                let mut strokes = d.doc.get(r).unwrap().paint().strokes.clone();
+                strokes[0].value.width_var = Some(line);
+                d.apply(vec![Operation::SetStrokes { id: r, strokes }]);
+            }
+            if j == 1 {
+                let mut shadow = Effect::new(EffectKind::DropShadow(Shadow {
+                    offset: Vec2::new(0.0, 3.0),
+                    blur: 0.0,
+                    spread: 0.0,
+                    color: Color::from_rgba8(0, 0, 0, 120),
+                }));
+                shadow.vars[2] = Some(soft);
+                d.apply(vec![Operation::SetEffects {
+                    id: r,
+                    effects: keyed_by_position([shadow]),
+                }]);
+            }
+        }
+        // The default mode set inside another: back to the light accent.
+        if mode.is_some() {
+            let inner = d.add(
+                Some(f),
+                NodeKind::Artboard {
+                    size: Size::new(40.0, 40.0),
+                },
+                Affine::IDENTITY,
+                "Light again",
+            );
+            d.apply(vec![
+                Operation::SetMode {
+                    id: inner,
+                    mode: Some(light),
+                },
+                Operation::SetFills {
+                    id: inner,
+                    fills: keyed_by_position([Fill {
+                        brush: BrushSource::Bound {
+                            var: accent,
+                            alpha: 1.0,
+                        },
+                        visible: true,
+                    }]),
+                },
+            ]);
+        }
+    }
+    let (doc, res) = d.done();
+    holds("variables", &doc, &res);
+    let export = html_of(&doc, &res, doc.get(doc.root()).unwrap().children());
+    let tokens =
+        String::from_utf8(export.file("tokens.css").expect("tokens.css").to_vec()).unwrap();
+    assert!(
+        tokens.contains(
+            "[data-mode=\"dark\"] {\n  --brand-500: #3c78f0;\n  --accent: var(--brand-500);"
+        ),
+        "the alias is redeclared in the dark block:\n{tokens}"
+    );
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    for read in [
+        "outline: max(0px, calc(var(--line) * 1px)) solid #14141e",
+        "outline-offset: calc(max(0px, calc(var(--line) * 1px)) * -0.5)",
+        "color-mix(in srgb, var(--accent) 50%, transparent)",
+        "drop-shadow(0 3px calc(max(0px, calc(var(--soft) * 1px)) * 0.5)",
+        "opacity: calc(var(--fade) / 100)",
+        "width: max(0px, calc(var(--wide) * 1px))",
+        "min-width: max(0px, calc(var(--wide) * 1px))",
+        "column-gap: calc(var(--gap) * 1px)",
+        "min(max(0px, calc(var(--radius) * 1px)), 25px)",
+        "min(max(0px, calc(var(--radius) * 1px)), calc(min(max(0px, calc(var(--wide) * 1px)), 50px) / 2))",
+    ] {
+        assert!(css.contains(read), "styles.css lacks `{read}`:\n{css}");
+    }
+}
+
+/// A text's bound colour and a single side's bound width are `var()` too, not the
+/// default mode's numbers.
+#[test]
+fn bound_text_colour_and_side_width_are_written_as_var() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let mode = d.ids.mint_mode();
+    d.apply(vec![Operation::AddMode {
+        mode: Mode {
+            id: mode,
+            name: "Base".into(),
+        },
+        index: 0,
+        cells: vec![],
+    }]);
+    let (ink, edge) = (d.ids.mint_var(), d.ids.mint_var());
+    for (id, name, kind, cell) in [
+        (ink, "ink", VarKind::Color, Cell::Color(Color::BLACK)),
+        (edge, "edge", VarKind::Number, Cell::Number(3.0)),
+    ] {
+        d.apply(vec![Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind,
+                cells: [(mode, cell)].into_iter().collect(),
+                origin: None,
+                forked: None,
+            },
+        }]);
+    }
+    let f = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    let t = d.add(
+        Some(f),
+        NodeKind::Text {
+            content: "Ink".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        Affine::translate((10.0, 10.0)),
+        "Label",
+    );
+    d.apply(vec![Operation::SetFills {
+        id: t,
+        fills: keyed_by_position([Fill {
+            brush: BrushSource::Bound {
+                var: ink,
+                alpha: 1.0,
+            },
+            visible: true,
+        }]),
+    }]);
+    let r = d.rect(f, 10.0, 50.0, 80.0, 30.0, 0.0);
+    d.stroke(r, 0.0, StrokeAlign::Inside, StrokeSides::Top);
+    let mut strokes = d.doc.get(r).unwrap().paint().strokes.clone();
+    strokes[0].value.width_var = Some(edge);
+    d.apply(vec![Operation::SetStrokes { id: r, strokes }]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains("color: var(--ink)"), "{css}");
+    assert!(
+        css.contains("border-top: max(0px, calc(var(--edge) * 1px)) solid"),
+        "{css}"
+    );
+}
+
 /// A feature the SVG writer approximates goes to a PNG and is reported, not
 /// passed off as exact.
 #[test]

@@ -98,6 +98,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D274** Export settings live on the layer and are saved with the document.
 - **D1098** Code export is one DOM core writing HTML/CSS, React and Vue, with every downgrade reported. Plain HTML/CSS is built; React and Vue are not.
 - Code export's CSS tier holds only what headless Chrome draws as the canvas does: an all-sides stroke as an offset `outline`, per-side `border`s only inside, on square corners and a childless layer, linear, concentric radial and similarity sweep gradients, one zero-spread drop shadow, and an automatic line height as the canvas's px. The rest goes to inline SVG.
+- Code export's number variables are unitless in `tokens.css`, the unit added at the use site (`calc(var(--x) * 1px)`, `calc(var(--x) / 100)` for opacity), because one number can bind both a length and an opacity percentage.
 
 ## Files, library and storage
 

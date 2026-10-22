@@ -36,8 +36,6 @@ export*).
 - **The GUI door** — Exports panel if per-framework options fit, else a menu; no new context-menu
   rows.
 - **React and Vue emitters, with components** (D1098 (1), (2), (9)).
-- **`tokens.css` and variables as `var()`** (D1098 (6), (7)) — aliases redeclared in every mode block;
-  the unit for a bound opacity is still owed (D1072).
 - **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
 - **Image fills as `background-image`** — they go to inline SVG today.
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and

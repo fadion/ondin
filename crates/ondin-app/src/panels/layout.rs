@@ -1,41 +1,36 @@
 //! The **Container** and **Item** cards — container layout's inspector
-//! (`architecture.md` §5.3c, §15 D878), built from the maintainer's mockup
-//! (`design/Layout Cards.dc.html`, and `LayoutGlyph.dc.html` for the pictures).
+//! (`architecture.md` §5.3c).
 //!
 //! **Container** is a frame's or a group's layout — `display`, and under `flex` its
 //! direction, wrap, three alignments, two gaps and its padding; under `grid` its
 //! flow, two track lists, four alignments, gaps and padding (the child module
-//! `grid`, §15 D920). **Item** is a layer's place in its parent's layout —
-//! `flex-grow`, `flex-shrink`, `flex-basis` and `align-self` in a flex container,
-//! its lines and both self-alignments in a grid, and the four size limits in
-//! either — or, for a layer out of the flow, why it is out and the one button that
-//! brings it back. Every label is a CSS property's name
-//! and every value a CSS value (§15 D867), **written in sentence case** —
-//! `justify-content` reads *Justify content*, `flex-start` *Flex start* (§15 D884).
+//! `grid`). **Item** is a layer's place in its parent's layout — `flex-grow`,
+//! `flex-shrink`, `flex-basis` and `align-self` in a flex container, its lines and
+//! both self-alignments in a grid, and the four size limits in either — or, for a
+//! layer out of the flow, why it is out and the one button that brings it back.
+//! Every label is a CSS property's name and every value a CSS value, **in sentence
+//! case**: `justify-content` reads *Justify content*, `flex-start` *Flex start*.
 //!
 //! **Cards run from the layer in its parent to its children**: Transform, Position,
 //! Item, then Container and the Layout grid, then paint. A frame that is both an item
 //! and a container gets both cards, Item first.
 //!
-//! **Neither card has a header badge** — the mockup's *flex · row*, *out of flow*,
-//! *in flow* — and that is ruled, not an omission (§15 D897): a badge is for a
-//! state a card has nowhere else to say, which is why the Position card has
-//! *Absolute* (`OndinApp::panel_badged`). The Item card says out-of-flow in a whole
-//! block, and Container's badge would repeat the display row under it.
+//! **Neither card has a header badge**: a badge is for a state a card has nowhere
+//! else to say, which is why the Position card has *Absolute*
+//! (`OndinApp::panel_badged`). The Item card says out-of-flow in a whole block, and
+//! Container's badge would repeat the display row under it.
 //!
-//! Three things the cards say that are rulings rather than readings:
+//! Rulings the cards state rather than read:
 //!
-//! - **A hidden layer is out of the flow** (§15 D881) — the Item card says so in
-//!   words, which is what made the session's default a ruling.
-//! - **A resize's flips come with a receipt** (§15 D880): the growth a resize stops
-//!   is named, with an Undo that is the whole step (`session::FlexReceipt`).
-//! - **Sizing modes are offered per kind** (§15 D879): the W and H fields' unit is a
-//!   menu of only the modes that mean something different for that layer
-//!   ([`size_modes`]), and typing or dragging a number writes px.
+//! - **A hidden layer is out of the flow** — the Item card says so in words.
+//! - **A resize's flips come with a receipt**: the growth a resize stops is named,
+//!   with an Undo that is the whole step (`session::FlexReceipt`).
+//! - **Sizing modes are offered per kind**: the W and H fields' unit is a menu of
+//!   only the modes that mean something different for that layer ([`size_modes`]),
+//!   and typing or dragging a number writes px.
 //!
-//! The fourth is a consequence, not a ruling: **an in-flow item's X and Y are
-//! inert** (§15 D882), because its container places it and a typed position would
-//! be dropped at the commit door (`build::keep_flex_sizes`, §15 D877's amendment).
+//! **An in-flow item's X and Y are inert**: its container places it and a typed
+//! position would be dropped at the commit door (`build::keep_flex_sizes`).
 
 use super::component::OverrideMark;
 use crate::app::OndinApp;
@@ -51,20 +46,18 @@ use ondin_core::kurbo::Size;
 use ondin_core::{NodeId, NodeKind, Operation, Transaction};
 
 /// Grid's rows of both cards — the track lists, `grid-auto-flow`, the grid
-/// alignments, and an item's lines (§15 D920). A child module so it shares this
-/// file's private pieces: `glyph_combo`, `shared`, `edited`, the gap and padding
-/// rows.
+/// alignments, and an item's lines. A child module so it shares this file's
+/// private pieces: `glyph_combo`, `shared`, `edited`, the gap and padding rows.
 mod grid;
 
 // --- the pictures ---------------------------------------------------------
 
-/// One of the mockup's layout pictures (`LayoutGlyph.dc.html`), drawn on its
-/// 16-unit grid rather than taken from the icon font, which has nothing for a
-/// justification.
+/// One of the layout pictures, drawn on a 16-unit grid rather than taken from the
+/// icon font, which has nothing for a justification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Glyph {
     /// `display: none` — three squares scattered, children keeping their own places.
-    /// **Never an eye**: the mockup's note is that `none` must not read as hidden.
+    /// **Never an eye**: `none` must not read as hidden.
     DisplayNone,
     DisplayFlex,
     DisplayGrid,
@@ -167,7 +160,7 @@ const fn edge(x1: f32, y1: f32, x2: f32, y2: f32, a: f32) -> Mark {
     }
 }
 
-/// The container's four sides, as the mockup draws them.
+/// The container's four sides.
 const fn left(a: f32) -> Mark {
     edge(1.5, 2.0, 1.5, 14.0, a)
 }
@@ -217,8 +210,8 @@ fn justify_marks(j: JustifyContent) -> Vec<Mark> {
     }
 }
 
-/// Every mark of `g`, drawn for a `row` that does not wrap in reverse — the
-/// orientation the mockup draws them in. [`Orient`] turns them from there.
+/// Every mark of `g`, drawn for a `row` that does not wrap in reverse.
+/// [`Orient`] turns them from there.
 fn marks(g: Glyph) -> Vec<Mark> {
     use AlignItems as A;
     match g {
@@ -271,9 +264,8 @@ fn marks(g: Glyph) -> Vec<Mark> {
                 bar(9.0, 3.0, 3.0, 9.0),
             ],
         },
-        // **`align-content` reuses the justifications on the cross axis** — the
-        // mockup's own rule — so a row's lines are the justify pictures turned
-        // through the diagonal. `stretch` is the one drawn for itself.
+        // `align-content` reuses the justifications on the cross axis; `stretch` is
+        // the one drawn for itself.
         Glyph::Content(AlignContent::Stretch) => vec![
             top(1.0),
             bottom(1.0),
@@ -303,11 +295,9 @@ fn content_as_justify(c: AlignContent) -> JustifyContent {
 /// How a [`Glyph`] is turned to match its container: through the diagonal for a
 /// column, and mirrored along whichever axis runs backwards.
 ///
-/// ⚠️ **Not a rotation, which is what the mockup's glyph file does** (its `rot`
-/// prop). A rotation that takes a row's justify-start — its wall on the left — to a
-/// column's wall on the top takes align-start's wall from the top to the *right*,
-/// where a column's cross start is on the left. The diagonal takes both where they
-/// belong, so it is one rule for every picture instead of an angle per kind.
+/// ⚠️ **Not a rotation**: one that takes a row's justify-start wall (left) to a
+/// column's (top) takes align-start's wall from the top to the *right*, where a
+/// column's cross start is on the left. The diagonal takes both where they belong.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Orient {
     transpose: bool,
@@ -407,11 +397,10 @@ const GLYPH_GAP: f32 = 6.0;
 
 // --- names ------------------------------------------------------------------
 //
-// **CSS's names, in sentence case** (§15 D884): `flex-start` reads *Flex start*,
-// `justify-content` *Justify content* — the first letter raised and the hyphens
-// gone, and nothing else changed, so each is still the CSS name a reader can look
-// up. The model, the file and the snapshot keep CSS's own spelling; only the chrome
-// is dressed. Inside a sentence (the receipt) they are lower-cased again.
+// **CSS's names, in sentence case**: `flex-start` reads *Flex start* — first letter
+// raised, hyphens gone, so each is still the CSS name a reader can look up. The
+// model, the file and the snapshot keep CSS's spelling; inside a sentence (the
+// receipt) the names are lower-cased again.
 
 pub(crate) fn justify_name(j: JustifyContent) -> &'static str {
     match j {
@@ -446,8 +435,8 @@ pub(crate) fn content_name(c: AlignContent) -> &'static str {
     }
 }
 
-/// What each `flex-direction` cell does, for its tooltip (§15 D886): the name,
-/// then the way the items run.
+/// What each `flex-direction` cell does, for its tooltip: the name, then the way
+/// the items run.
 const DIRECTION_TIPS: [&str; 4] = [
     "Row — items run left to right",
     "Row reverse — items run right to left",
@@ -455,15 +444,14 @@ const DIRECTION_TIPS: [&str; 4] = [
     "Column reverse — items run bottom to top",
 ];
 
-/// What each `flex-wrap` cell does, for its tooltip (§15 D886).
+/// What each `flex-wrap` cell does, for its tooltip.
 const WRAP_TIPS: [&str; 3] = [
     "No wrap — every item stays on one line, shrinking to fit",
     "Wrap — items that do not fit start a new line",
     "Wrap reverse — new lines stack the other way",
 ];
 
-/// What each `display` cell does, for its tooltip (§15 D886). `grid`'s said why
-/// it could not be picked until the grid step built it (§15 D920).
+/// What each `display` cell does, for its tooltip.
 const DISPLAY_TIPS: [&str; 3] = [
     "None — children keep their own places",
     "Flex — lay the children out in a row or a column",
@@ -512,19 +500,8 @@ fn shared<T: Copy + PartialEq, S>(all: &[S], f: impl Fn(&S) -> T) -> Option<T> {
 /// disagrees — showing one of the values would read as a claim that it is *the*
 /// value.
 ///
-/// §15 D130's rule, "Mixed" wherever five letters fit, and the mockup's screen
-/// 08. It read a dash, copying `typography::mixed_text`, until §15 D892 closed
-/// D878's *Fix* verdict on it — the maintainer's ruling that the layout cards
-/// follow D130 before grid copies them. The unit beside a mixed sizing mode
-/// reads a dash ([`size_field`]), and **that dash is not a mixed marker**: the
-/// digits already say "Mixed", and the dash says *no single unit*. It is the only
-/// dash a size field's unit still draws — §15 D895 put the same one beside a
-/// keyword, and §15 D906 took the unit away there altogether, the keyword in the
-/// digits already saying how the size is set (the release review's
-/// `[R2-L8-06]`). Room was never the reason (`ui::Suffix` is laid out to its text
-/// and holds *fit content* — cut with an ellipsis only where a narrow field
-/// leaves its digits too little, §15 D1081); an earlier line here said it was. The mixed segment
-/// rows use `ui::segment_mixed`, one of D130's two dashes (§15 D892).
+/// The unit beside a mixed sizing mode reads a dash ([`size_field`]) that is **not
+/// a mixed marker**: the digits say "Mixed", the dash says *no single unit*.
 fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
         return d.custom_formatter(|_, _| ui::MIXED_WORD.into());
@@ -536,20 +513,12 @@ fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
 /// is whether its number changed this frame — **held through the frame the
 /// engagement ends**, which is the frame `OndinApp::edit_valve` commits on.
 ///
-/// 🚨 **Without it every number field in these cards committed nothing** (§15
-/// D885). They built their transaction only when the number moved *this frame*,
-/// and read that number through the preview (`display_node`, which has to be read
-/// or a scrub goes nowhere). On the release frame nothing moves, the field shows
-/// the value its own preview installed, so the transaction handed to the valve on
-/// the one frame it commits was empty — and the valve then dropped the preview.
-/// Reported as a gap or a padding that follows the scrub and snaps back to zero.
-/// The Position card never had it because a pinned inset's field builds its edit
-/// unconditionally; these cannot, because a click in and out of a field must not
-/// write the value it was showing (a mixed selection's first, or a keyword's
-/// resolved size) to every subject.
-///
-/// One accessor for the read and the write — `data_mut` inside `data_mut`
-/// deadlocks (`CLAUDE.md`).
+/// 🚨 **Without it every number field in these cards commits nothing**: nothing
+/// moves on the release frame (the field shows the value its own preview
+/// installed), so the valve gets an empty transaction and drops the preview. The
+/// fields cannot build unconditionally, because a click in and out must not write
+/// the value shown (a mixed selection's first, a keyword's resolved size) to every
+/// subject. One accessor for the read and the write — nested `data_mut` deadlocks.
 pub(crate) fn edited(resp: &egui::Response, moved: bool) -> bool {
     let engaged = resp.dragged() || resp.has_focus();
     let id = resp.id.with("layout-field-edited");
@@ -562,8 +531,7 @@ pub(crate) fn edited(resp: &egui::Response, moved: bool) -> bool {
 
 // --- sizing modes -------------------------------------------------------------
 
-/// How a W or H — or a basis, or a limit — is set: CSS's four ways of saying a
-/// size (§15 D879).
+/// How a W or H — or a basis, or a limit — is set: CSS's four ways of saying a size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SizeMode {
     Px,
@@ -585,7 +553,7 @@ impl SizeMode {
     }
 
     /// The mode as the unit's menu lists it — the units as they are, the two
-    /// keywords in sentence case (§15 D884).
+    /// keywords in sentence case.
     fn label(self) -> &'static str {
         match self {
             SizeMode::Px => "px",
@@ -606,17 +574,15 @@ impl SizeMode {
 }
 
 /// The modes a W or H field offers for a layer of `kind` — **only those that mean
-/// something different for it** (§15 D879).
+/// something different for it**.
 ///
 /// `container::style_of` tells only three of CSS's four apart, and which two it
-/// merges depends on the kind: a **frame**'s `auto` is its stored size, which is
-/// `px`, and `fit-content` hugs its children; a **group with a layout** has no stored
-/// size, so `auto` and `fit-content` both hug; a **shape** is sized by its own
-/// geometry either way. So a frame offers `px` and, with a layout of its own to hug,
-/// `fit-content`; a group with a layout `px` and `auto`; a shape only `px`. `%`
-/// joins any of them that is `laid_out` — in its parent's flow — and that layout can
-/// resize (`container::can_stretch`, or the group's box); a percentage of nothing is
-/// not a mode. **Fewer than two means no menu at all.**
+/// merges depends on the kind: a **frame**'s `auto` is its stored size (`px`); a
+/// **group with a layout** has no stored size, so `auto` and `fit-content` both hug;
+/// a **shape** is sized by its own geometry. So a frame offers `px` and, with a
+/// layout to hug, `fit-content`; a group with a layout `px` and `auto`; a shape only
+/// `px`. `%` joins any that is `laid_out` and can resize (`container::can_stretch`,
+/// or the group's box). **Fewer than two means no menu at all.**
 pub(crate) fn size_modes(kind: &NodeKind, has_display: bool, laid_out: bool) -> Vec<SizeMode> {
     let mut modes = vec![SizeMode::Px];
     let resizable = match kind {
@@ -662,7 +628,7 @@ fn plain_mode(d: Dimension) -> SizeMode {
 }
 
 /// A segmented cell's tooltip up to its dash — *Row reverse* out of *Row reverse —
-/// items run right to left* — as an override mark names the value (§15 D981).
+/// items run right to left* — as an override mark names the value.
 fn tip_word(tips: &[&'static str], i: Option<usize>) -> String {
     i.and_then(|i| tips.get(i))
         .and_then(|t| t.split(" —").next())
@@ -671,9 +637,9 @@ fn tip_word(tips: &[&'static str], i: Option<usize>) -> String {
 }
 
 /// A layout compared by its **mode** alone — none, flex or grid — for the
-/// `display` cells' override mark (§15 D981): a copy whose gap differs is still a
-/// flex like its main, and that difference is the gap field's mark, not this one.
-/// Its reset writes the main's whole layout, as the mode it names comes with it.
+/// `display` cells' override mark: a copy whose gap differs is still a flex like
+/// its main, and that difference is the gap field's mark. Its reset writes the
+/// main's whole layout, as the mode it names comes with it.
 #[derive(Clone)]
 struct ByMode(Option<Display>);
 
@@ -684,7 +650,7 @@ impl PartialEq for ByMode {
 }
 
 /// The source's layout item out of a field reset — what an Item card field's
-/// override mark compares against (`OndinApp::sub_mark`, §15 D981).
+/// override mark compares against (`OndinApp::sub_mark`).
 pub(crate) fn item_of(op: &Operation) -> Option<LayoutItem> {
     match op {
         Operation::SetLayoutItem { item, .. } => Some(*item),
@@ -692,7 +658,7 @@ pub(crate) fn item_of(op: &Operation) -> Option<LayoutItem> {
     }
 }
 
-/// A stored size as an override mark's tooltip names it (§15 D981): the number
+/// A stored size as an override mark's tooltip names it: the number
 /// in its unit, or the keyword — *Reset to main · 50%*, *· fit content*.
 pub(crate) fn dimension_words(d: &Dimension) -> String {
     match *d {
@@ -711,36 +677,31 @@ pub(crate) struct SizeEdit {
     /// rather than an edit, as a unit flip is (`ui::value_field_suffixed`).
     pub picked: Option<SizeMode>,
     /// The number, from the frame it was typed or dragged away from what it showed
-    /// through the frame the field lets go ([`edited`], §15 D885) — so the valve's
-    /// committing frame has it too.
+    /// through the frame the field lets go ([`edited`]) — so the valve's committing
+    /// frame has it too.
     pub typed: Option<f64>,
-    /// The override mark's ↺ was clicked (§15 D981).
+    /// The override mark's ↺ was clicked.
     pub reset: bool,
 }
 
-/// A value field whose unit is a **menu of sizing modes** (§15 D879).
+/// A value field whose unit is a **menu of sizing modes**.
 ///
-/// **What the digits show is the maintainer's rule, §15 D895: a number where the
-/// number is a real size of the layer, the keyword where the property is unset.**
+/// **The digits show a number where the number is a real size of the layer, the
+/// keyword where the property is unset.**
 ///
-/// - `number` given: the size in the unit the mode names — px, a percentage, or
-///   for a keyword the size it resolved to, the keyword standing where the unit
-///   would be. The Transform card's W and H always pass one: a hugging frame
-///   *is* 150 wide, and Figma's and Framer's W fields say so the same way.
+/// - `number` given: the size in the unit the mode names — for a keyword, the size
+///   it resolved to, the keyword standing where the unit would be. The Transform
+///   card's W and H always pass one.
 /// - `number` absent and the mode a keyword: the keyword in the digits' place,
-///   `under` beneath it so a scrub starts from there, and **no unit at all** — the
-///   Position card's unpinned inset (§15 D890). The Item card's basis and limits:
-///   an unset `min-width` has no number worth showing. It carried a dash for the
-///   unit that opened the menu until the maintainer ruled it out (§15 D906): the
-///   keyword already says how the size is set, and typing or dragging a number is
-///   how to leave it, landing in px with the menu back.
+///   `under` beneath it so a scrub starts from there, and **no unit at all** (the
+///   Position card's unpinned inset, the Item card's basis and limits); typing or
+///   dragging a number leaves it, landing in px with the menu back.
 /// - `number` absent and no mode: the selection disagrees, and the digits read
-///   "Mixed" ([`mixed_if`], §15 D892).
+///   "Mixed" ([`mixed_if`]).
 ///
 /// Typing or dragging writes the number in px, or in % while the mode is %.
-///
-/// `mark` is an instance's override mark on the field (§15 D981), its ↺ answered
-/// as [`SizeEdit::reset`].
+/// `mark` is an instance's override mark on the field, its ↺ answered as
+/// [`SizeEdit::reset`].
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn size_field(
     ui: &mut egui::Ui,
@@ -764,7 +725,7 @@ pub(crate) fn size_field(
         ui,
         size,
         prefix,
-        // No unit under a keyword (§15 D906).
+        // No unit under a keyword.
         word.is_none().then_some(Suffix {
             text: match (number, mode) {
                 (Some(_), Some(m)) => m.word(),
@@ -786,38 +747,32 @@ pub(crate) fn size_field(
         },
     );
     let mut picked = None;
-    // **Anchored on the unit, right edges together** (§15 D907). It hung off the
-    // number's response, whose rect starts at the prefix, so a click on the unit at
-    // the field's right end opened the menu under the letter at its left — and, in
-    // the Transform card's W, over the field beside it.
+    // Anchored on the unit, right edges together: the number's response starts at the
+    // prefix, so the menu would open under the letter at the field's left.
     if let Some(unit) = unit {
         egui::Popup::menu(&unit)
             .align(egui::RectAlign::BOTTOM_END)
             .show(|ui| {
                 ui::menu_rows(ui);
-                // The dropdowns' row padding — the theme's `button_padding.x`, which
-                // a `ComboBox`'s rows inherit and `Popup::menu`'s own style cuts to
-                // 2, leaving "px" touching the highlight's edges. `y` is one of the
-                // two values `ui::MENU_ROW_H`'s floor is proved against
+                // The dropdowns' row padding: `Popup::menu`'s own style cuts `x` to 2,
+                // leaving "px" touching the highlight. `y` is one of the two values
+                // `ui::MENU_ROW_H`'s floor is proved against
                 // (`a_menu_rows_height_does_not_depend_on_its_state`).
                 ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
                 for m in modes {
                     let row = ui
                         .selectable_label(mode == Some(*m), m.label())
                         .on_hover_text(m.describe());
-                    // **The lit row picks nothing** (§15 D943): re-picking the
-                    // mode already set converted the drawn size into it — an edit,
-                    // and on a growing item a jump. Since the conversion reads the
-                    // specified value, the jump is gone and `%`'s rounding is what
-                    // is left: a stored `33.33%` re-picked wrote `33.3%` (§15 D948).
+                    // The lit row picks nothing: re-picking the mode already set would
+                    // write a conversion, and `%`'s rounding would turn a stored
+                    // `33.33%` into `33.3%`.
                     if row.clicked() && mode != Some(*m) {
                         picked = Some(*m);
                     }
                 }
             });
     }
-    // Held until the valve's committing frame, not just the frame the number
-    // moved on ([`edited`], §15 D885).
+    // Held until the valve's committing frame ([`edited`]).
     let typed = edited(&resp, v != start).then_some(v);
     SizeEdit {
         resp,
@@ -830,22 +785,20 @@ pub(crate) fn size_field(
 // --- a dropdown with pictures -----------------------------------------------
 
 /// A dropdown whose face and rows lead with a layout [`Glyph`], with the CSS
-/// property's name inside the face — the mockup's field, where the name is the
-/// label and the picture says which value at a glance.
+/// property's name inside the face as the label, the picture saying which value at
+/// a glance.
 ///
-/// `shown` is `None` for *mixed*: "Mixed" on the face, nothing lit in the list —
-/// the stroke-alignment combo's rule, which is that mixed is a report and not a
-/// value. `auto` is an extra first row whose face reads `Auto · <inherited>`
+/// `shown` is `None` for *mixed*: "Mixed" on the face, nothing lit in the list.
+/// `auto` is an extra first row whose face reads `Auto · <inherited>`
 /// (`align-self`), with the inherited value's picture.
 ///
-/// **A held value `options` does not offer gets a lit row of its own, last** (§15
-/// D923), so the list always lights what the face names — grid's menus leave
-/// `baseline` out (§15 D919) and a grid can still hold it, from flex or a file,
-/// and the face read *Baseline* over a list with nothing lit.
+/// **A held value `options` does not offer gets a lit row of its own, last**, so
+/// the list always lights what the face names — grid's menus leave `baseline` out
+/// and a grid can still hold it, from flex or a file.
 ///
-/// `mark` is an instance's override mark (§15 D981): the label at full brightness
-/// with the dot after it, and the open list led by its reset
-/// (`component::menu_reset_row`) — answered as the second return value.
+/// `mark` is an instance's override mark: the label at full brightness with the dot
+/// after it, the open list led by its reset (`component::menu_reset_row`), answered
+/// as the second return value.
 #[allow(clippy::too_many_arguments)]
 fn glyph_combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
@@ -1003,7 +956,6 @@ fn display_cell(p: &egui::Painter, i: usize, rect: egui::Rect, on: bool) {
         (Glyph::DisplayFlex, "Flex"),
         (Glyph::DisplayGrid, "Grid"),
     ][i];
-    // `grid` was drawn disabled until the grid step built it (§15 D920).
     let ink = if on { color::TEXT } else { theme::text::DIM };
     let galley = p.layout_no_wrap(
         word.to_owned(),
@@ -1034,9 +986,9 @@ fn display_cell(p: &egui::Painter, i: usize, rect: egui::Rect, on: bool) {
 /// answers, in the order the card names them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OutOfFlow {
-    /// Pinned by insets: `position: absolute` (§15 D874).
+    /// Pinned by insets: `position: absolute`.
     Absolute,
-    /// Hidden: CSS's `display: none`, ruled in §15 D881.
+    /// Hidden: CSS's `display: none`.
     Hidden,
     /// A mask: it clips its siblings and is never laid out.
     Mask,
@@ -1090,8 +1042,8 @@ impl OndinApp {
     }
 
     /// The **Container** card: `display`, and under `flex` or `grid` everything
-    /// that layout has (§15 D878, D920). Drawn for any selection with a frame or a
-    /// group in it; every edit applies to each of them.
+    /// that layout has. Drawn for any selection with a frame or a group in it; every
+    /// edit applies to each of them.
     pub(super) fn inspector_container(&mut self, ui: &mut egui::Ui) {
         let subjects = self.container_subjects();
         if subjects.is_empty() {
@@ -1120,7 +1072,7 @@ impl OndinApp {
                 _ => None,
             })
             .collect();
-        // The `display` cells' mark, by mode alone ([`ByMode`], §15 D981).
+        // The `display` cells' mark, by mode alone ([`ByMode`]).
         let mode_mark = self.sub_mark(
             &subjects,
             |op| match op {
@@ -1140,8 +1092,8 @@ impl OndinApp {
                 .to_owned()
             },
         );
-        // A style slot since §15 D1075 (D1038 (5)): the `⋯`, and the capsule over
-        // a styled container — expanded, the whole card greyed (F7).
+        // A style slot: the `⋯`, and the capsule over a styled container — expanded,
+        // the whole card greyed.
         let _ = self.style_card(
             ui,
             "Container",
@@ -1150,10 +1102,9 @@ impl OndinApp {
             None,
             |app, ui| {
                 let full = ui.available_width();
-                // Nothing raised while the selection disagrees — `segmented`'s mixed
-                // reading, an index past the last cell — and the first cell's picture
-                // traded for `ui::segment_mixed`'s dash, the Type panel's convention
-                // and one of D130's two dashes; blank read as a bug (§15 D892).
+                // Mixed: nothing raised (an index past the last cell) and the first
+                // cell's picture traded for `ui::segment_mixed`'s dash; blank reads
+                // as a bug.
                 let (pick, reset) = ui::segmented_marked(
                     ui,
                     full,
@@ -1188,18 +1139,13 @@ impl OndinApp {
     /// Give every subject the layout of `display` cell `to` — none, flex or grid.
     ///
     /// **Taking it away keeps every child where it is drawn** — its used transform
-    /// and size written back as its own (`build::baked`, §15 D929), and a frame that
-    /// was hugging its children keeps the size it hugged to. Without that, `none`
-    /// would send every child back to wherever its stored transform last had it,
-    /// which is a place it has not been drawn since the layout was set: the
-    /// Position card's unpin rule, for the same reason (§15 D878).
-    /// `build::keep_flex_sizes` lets the children's transforms stand, because the
-    /// same transaction relays their parent (§15 D877's amendment).
+    /// and size written back (`build::baked`), a hugging frame keeping the size it
+    /// hugged to — or `none` would send every child back to a stored transform it
+    /// has not been drawn at since the layout was set. `build::keep_flex_sizes` lets
+    /// those transforms stand, because the same transaction relays their parent.
     ///
-    /// **Switching between flex and grid keeps the padding and the gaps** (§15
-    /// D920) — the properties the two share by name — and starts the rest at CSS's
-    /// defaults; the children's item records keep both layouts' properties, so what
-    /// they had under the other layout is waiting for them.
+    /// **Switching between flex and grid keeps the padding and the gaps** and starts
+    /// the rest at CSS's defaults.
     fn set_display(&mut self, subjects: &[NodeId], to: usize) {
         let doc = &self.session.doc;
         let res = &self.session.resolved;
@@ -1230,13 +1176,10 @@ impl OndinApp {
                     display: Some(display),
                 }),
                 (None, true) => {
-                    // **Every child, not only the in-flow ones** (§15 D929): a
-                    // laid group's pinned children are placed against its box,
-                    // and with the layout gone the group has none — so they too
-                    // are written where they are drawn, their insets kept (inert
-                    // under a plain group, and live again if the layout comes
-                    // back). And a child that is a container with a layout of its
-                    // own keeps the size this layout gave it (`build::baked`).
+                    // Every child, not only the in-flow ones: a laid group's pinned
+                    // children are placed against a box the group loses with its
+                    // layout, so they too are written where they are drawn, insets
+                    // kept (`build::baked`).
                     for child in node.children() {
                         ops.extend(ondin_core::build::baked(doc, res, *child));
                     }
@@ -1269,8 +1212,8 @@ impl OndinApp {
     }
 
     /// Every subject's flex layout with `f` applied, as the ops that change one —
-    /// **from the committed document**, D51's rule for a transaction a valve both
-    /// previews and commits.
+    /// **from the committed document**, as a transaction a valve both previews and
+    /// commits must be.
     fn flex_tx(&self, subjects: &[NodeId], f: impl Fn(&mut Flex)) -> Transaction {
         self.display_tx(subjects, |d| {
             if let Display::Flex(flex) = d {
@@ -1280,8 +1223,7 @@ impl OndinApp {
     }
 
     /// Every subject's layout, flex or grid, with `f` applied — [`Self::flex_tx`]
-    /// for what both layouts share (the gaps, the padding) and for grid's own rows
-    /// (§15 D920). From the committed document, D51's rule.
+    /// for what both layouts share (the gaps, the padding) and for grid's own rows.
     fn display_tx(&self, subjects: &[NodeId], f: impl Fn(&mut Display)) -> Transaction {
         Transaction(
             subjects
@@ -1299,9 +1241,9 @@ impl OndinApp {
         )
     }
 
-    /// The rows under `display: flex` — the mockup's order: direction and wrap,
-    /// the three alignments, the gaps, the padding. `laid` is every subject's
-    /// layout, for the rows flex shares with grid.
+    /// The rows under `display: flex`: direction and wrap, the three alignments, the
+    /// gaps, the padding. `laid` is every subject's layout, for the rows flex shares
+    /// with grid.
     fn flex_rows(
         &mut self,
         ui: &mut egui::Ui,
@@ -1320,7 +1262,7 @@ impl OndinApp {
         // subject's when the selection disagrees.
         let orient = |g: Glyph| Orient::of(g, &first);
         let wraps = wrap != Some(FlexWrap::NoWrap);
-        // An instance's overridden flex fields (§15 D981), each its own mark.
+        // An instance's overridden flex fields, each its own mark.
         let direction_mark = self.flex_mark(
             subjects,
             |f| f.direction,
@@ -1454,8 +1396,8 @@ impl OndinApp {
             let tx = self.flex_tx(subjects, |f| f.align_items = a);
             self.commit_edit(tx);
         }
-        // **Dimmed in place rather than removed** while nothing wraps — the
-        // mockup's note: toggling wrap must not shift the card under the pointer.
+        // Dimmed in place rather than removed while nothing wraps: toggling wrap
+        // must not shift the card under the pointer.
         let (pick, reset) = glyph_combo(
             ui,
             "flex-align-content",
@@ -1478,10 +1420,9 @@ impl OndinApp {
         }
 
         // --- the gaps: between items first ------------------------------------
-        // **The first field is always the gap between items** — `column-gap` in a
-        // row, `row-gap` in a column — and a selection that disagrees about
-        // direction reads in row order (the mockup's two rules). Between lines
-        // means nothing on one line.
+        // The first field is always the gap between items — `column-gap` in a row,
+        // `row-gap` in a column — and a selection that disagrees about direction
+        // reads in row order.
         let column = direction.is_some_and(|d| !d.is_row());
         self.gap_row(ui, subjects, laid, !column, wraps, full);
 
@@ -1492,7 +1433,7 @@ impl OndinApp {
     /// The two gaps, side by side — `column-gap` first when `column_first`, and
     /// the second field dimmed unless `second_live`. Flex puts the gap between its
     /// items first and dims the one between lines on one line; grid shows both,
-    /// columns first (§15 D920).
+    /// columns first.
     fn gap_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -1531,8 +1472,7 @@ impl OndinApp {
                 };
                 let shown =
                     shared(laid, get).filter(|_| !self.spacing_partly_bound(subjects, slots));
-                // An instance's overridden gap (§15 D981) — its binding first
-                // (§15 D1058).
+                // An instance's overridden gap — its binding first.
                 let mark = OverrideMark::and(
                     self.spacing_vars_mark(subjects, slots),
                     self.display_mark(
@@ -1545,17 +1485,13 @@ impl OndinApp {
                         |v| super::component::mark_num(*v),
                     ),
                 );
-                // **Live while it carries a mark**, inert or not: the ↺ is the
-                // prefix strip's own press (`ui::value_field_marked`), which a
-                // disabled field does not sense — so an instance's row gap
-                // overridden under a main that has since stopped wrapping showed a
-                // mark whose reset could not be clicked, only the card header's
-                // chip and *Reset all* reaching it. The field takes a typed value
-                // then too, which the model holds and a wrap later lays out.
+                // Live while it carries a mark, inert or not: the ↺ is the prefix
+                // strip's own press (`ui::value_field_marked`), which a disabled
+                // field does not sense, so its reset could not be clicked.
                 let live = is_first || second_live || mark.is_some();
                 ui::disable_unless(ui, live, |ui| {
-                    // **Bound, the field is a chip** (§15 D1058, D1038 A1): the
-                    // CSS name trailing it gives way, the glyph naming the field.
+                    // Bound, the field is a chip: the CSS name trailing it gives way,
+                    // the glyph naming the field.
                     if self.bound_field_ui(ui, key, half.x, &mark) {
                         return;
                     }
@@ -1595,7 +1531,7 @@ impl OndinApp {
     /// four sides — L R over T B, the Position card's order — with the button at
     /// the end of the row. **Open by itself whenever two opposite sides differ**, so
     /// the two fields never have to stand for a pair they do not describe. Either
-    /// layout's (§15 D920).
+    /// layout's.
     fn padding_rows(
         &mut self,
         ui: &mut egui::Ui,
@@ -1611,10 +1547,10 @@ impl OndinApp {
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
         // A side's bit in a `FieldKey::Spacing` — padding follows the two gaps in
-        // a `SpacingVars` (§15 D1058).
+        // a `SpacingVars`.
         let bit = |side: usize| 1u8 << (2 + side);
-        // **Opposite sides bound apart are uneven too** (§15 D1058): the pair's
-        // one field could only say *Mixed* for them, and the sides say what each is.
+        // Opposite sides bound apart are uneven too: the pair's one field could only
+        // say *Mixed* for them.
         let unpaired = subjects.iter().any(|id| {
             let v = self
                 .session
@@ -1658,9 +1594,8 @@ impl OndinApp {
                 .filter(|_| !self.spacing_partly_bound(subjects, slots));
                 let mut v = shown.unwrap_or(first_or_zero(&paddings, sides[0]));
                 let start = v;
-                // An instance's overridden padding on either of the pair's sides
-                // (§15 D981) — its binding first (§15 D1058); the reset puts back
-                // both.
+                // An instance's overridden padding on either of the pair's sides — its
+                // binding first; the reset puts back both.
                 let mark = OverrideMark::and(
                     self.spacing_vars_mark(subjects, slots),
                     self.display_mark(
@@ -1776,8 +1711,8 @@ impl OndinApp {
         }
     }
 
-    /// The **Item** card: a layer's place in its parent's flow (§15 D878) — or, out
-    /// of it, why, and the button that brings it back.
+    /// The **Item** card: a layer's place in its parent's flow — or, out of it, why,
+    /// and the button that brings it back.
     pub(super) fn inspector_item(&mut self, ui: &mut egui::Ui) {
         let subjects = self.item_subjects();
         let Some(&anchor) = subjects.first() else {
@@ -1810,8 +1745,8 @@ impl OndinApp {
     }
 
     /// Why the layer is out of the flow, in words, and the one button that puts it
-    /// back — each reason with its own (the mockup's 07). The button acts on every
-    /// subject out for the same reason.
+    /// back — each reason with its own. The button acts on every subject out for the
+    /// same reason.
     fn out_of_flow_block(
         &mut self,
         ui: &mut egui::Ui,
@@ -1819,10 +1754,8 @@ impl OndinApp {
         anchor: NodeId,
         why: OutOfFlow,
     ) {
-        // **Plain words, not CSS's** (§15 D889): the title was `position: absolute`
-        // and the sentence named "insets" and the Position card, which read as
-        // jargon about jargon. What the user needs is what holds the layer and
-        // what the layout does about it.
+        // Plain words, not CSS's: what holds the layer and what the layout does
+        // about it.
         let (glyph, title, body, button, button_glyph) = match why {
             OutOfFlow::Absolute => (
                 icon::CROSSHAIR_SIMPLE,
@@ -1891,8 +1824,7 @@ impl OndinApp {
         let res = &self.session.resolved;
         let ops: Vec<Operation> = match why {
             // Where it is drawn, kept — then the insets go. `keep_flex_sizes` lets
-            // the transform stand, because the same edit changes its flow (§15
-            // D877's amendment).
+            // the transform stand, because the same edit changes its flow.
             OutOfFlow::Absolute => same
                 .iter()
                 .flat_map(|id| {
@@ -1929,7 +1861,7 @@ impl OndinApp {
         self.commit_edit(Transaction(ops));
     }
 
-    /// An Item card field's override mark over `subjects` (§15 D981) — one property
+    /// An Item card field's override mark over `subjects` — one property
     /// of the layout item, which the comparison resets only whole.
     fn item_mark<V: PartialEq + Clone>(
         &self,
@@ -1949,7 +1881,7 @@ impl OndinApp {
         )
     }
 
-    /// A Container card field's override mark over `subjects` (§15 D981): `get`
+    /// A Container card field's override mark over `subjects`: `get`
     /// reads the field out of a layout, `None` where that layout has no such field —
     /// a flex field where the main is a grid — which marks nothing, the `display`
     /// cells' own mark saying so instead ([`ByMode`]).
@@ -1978,12 +1910,10 @@ impl OndinApp {
         )
     }
 
-    /// An instance's overridden **binding** on a spacing field's slots (D1038 A6,
-    /// §15 D1058) — a copy bound to another variable than its main's, or bound
-    /// where the main is not: both literals 0, so invisible to
-    /// [`Self::display_mark`]. Joined to that mark by the caller, binding first,
-    /// so the tip names the main's variable — the radius field's arrangement
-    /// (§15 D1048).
+    /// An instance's overridden **binding** on a spacing field's slots — a copy bound
+    /// to another variable than its main's, or bound where the main is not: both
+    /// literals 0, so invisible to [`Self::display_mark`]. Joined to that mark by the
+    /// caller, binding first, so the tip names the main's variable.
     fn spacing_vars_mark(&self, subjects: &[NodeId], slots: u8) -> Option<OverrideMark> {
         use super::binding::spacing_slots;
         let table = self.session.doc.variables();
@@ -2021,10 +1951,9 @@ impl OndinApp {
         )
     }
 
-    /// Whether some of a spacing field's places are bound and some are not —
-    /// D1038 A4's second case, which reads the plain grey *Mixed* whatever the
-    /// numbers laid out (§15 D1058): a number there would stand for a binding on
-    /// one layer and a literal on another.
+    /// Whether some of a spacing field's places are bound and some are not, which
+    /// reads the plain grey *Mixed* whatever the numbers: a number there would
+    /// stand for a binding on one layer and a literal on another.
     fn spacing_partly_bound(&self, subjects: &[NodeId], slots: u8) -> bool {
         let doc = &self.session.doc;
         let mut any = false;
@@ -2102,9 +2031,9 @@ impl OndinApp {
     }
 
     /// The flowing subjects' rows: grow and shrink, basis and `align-self` in a
-    /// flex container, or the lines and both self-alignments in a grid (§15
-    /// D920); the four limits behind a disclosure; and the receipt of a resize
-    /// that changed any of them (§15 D880).
+    /// flex container, or the lines and both self-alignments in a grid; the four
+    /// limits behind a disclosure; and the receipt of a resize that changed any of
+    /// them.
     fn item_rows(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
         let items: Vec<LayoutItem> = subjects
             .iter()
@@ -2140,8 +2069,8 @@ impl OndinApp {
             .unwrap_or_default();
         let flipped_grow = receipt.iter().any(|(w, n)| w.grow != n.grow);
         let flipped_shrink = receipt.iter().any(|(w, n)| w.shrink != n.shrink);
-        // A resize clears the basis with the growth (§15 D935): named, or a basis
-        // set by hand went with no word on an item whose growth was already 0.
+        // A resize clears the basis with the growth: named, or a hand-set basis
+        // would go unannounced on an item whose growth was already 0.
         let cleared_basis = receipt.iter().any(|(w, n)| w.basis != n.basis);
         let flipped_align = receipt.iter().any(|(w, n)| w.align_self != n.align_self);
         let flipped_justify = receipt
@@ -2151,9 +2080,8 @@ impl OndinApp {
         // The first subject's drawn box, which a mode picked from a unit converts.
         let drawn = self.session.preview_local_box(subjects[0]);
 
-        // **A grid item has its lines and its two self-alignments where a flex
-        // item has grow, shrink, basis and `align-self`** (§15 D920); the limits
-        // and the receipt below are both layouts'.
+        // A grid item has its lines and two self-alignments where a flex item has
+        // grow, shrink, basis and `align-self`; the limits and receipt are both layouts'.
         if let Some(grid) = &parent_grid {
             self.grid_item_rows(
                 ui,
@@ -2180,9 +2108,7 @@ impl OndinApp {
         // --- the receipt --------------------------------------------------------
         if !receipt.is_empty() {
             // Each property is said from the items whose property the resize
-            // changed, every distinct value named once — `receipt.first()`'s
-            // alone said *"justify self to start"* over two items held at
-            // opposite ends, `start` and `end` (`[X6.3-L1-04]`).
+            // changed, every distinct value named once.
             let values = |changed: &dyn Fn(&LayoutItem, &LayoutItem) -> bool,
                           say: &dyn Fn(&LayoutItem) -> Option<String>|
              -> Option<String> {
@@ -2211,7 +2137,7 @@ impl OndinApp {
                 said.push("flex basis to auto".to_owned());
             }
             // Mid-sentence, so lower-cased back from the menu's sentence case —
-            // grid's names for a grid item (§15 D920).
+            // grid's names for a grid item.
             let name = |a: AlignItems| match (&parent_grid, a) {
                 (Some(_), AlignItems::Start) => "start",
                 (Some(_), AlignItems::End) => "end",
@@ -2269,9 +2195,8 @@ impl OndinApp {
         }
     }
 
-    /// A flex item's rows: grow and shrink, basis and `align-self` (§15 D878),
-    /// each accented while the last resize's receipt names it (§15 D880) —
-    /// `flipped` is grow, shrink, align.
+    /// A flex item's rows: grow and shrink, basis and `align-self`, each accented
+    /// while the last resize's receipt names it — `flipped` is grow, shrink, align.
     #[allow(clippy::too_many_arguments)]
     fn flex_item_rows(
         &mut self,
@@ -2312,7 +2237,7 @@ impl OndinApp {
                 let mut v = shown.unwrap_or_else(|| get(&first));
                 let start = v;
                 let at = egui::Rect::from_min_size(ui.cursor().min, half);
-                // An instance's overridden grow or shrink (§15 D981).
+                // An instance's overridden grow or shrink.
                 let mark = self.item_mark(
                     subjects,
                     get,
@@ -2398,8 +2323,7 @@ impl OndinApp {
         accent(ui, at, flipped_align);
     }
 
-    /// The four size limits behind their disclosure — either layout's item
-    /// (§15 D878, D920).
+    /// The four size limits behind their disclosure — either layout's item.
     #[allow(clippy::too_many_arguments)]
     fn limit_rows(
         &mut self,
@@ -2409,13 +2333,10 @@ impl OndinApp {
         drawn: Option<ondin_core::kurbo::Rect>,
         full: f32,
     ) {
-        // Read per item, and *Mixed* where the items disagree on **which**
-        // limits are set — the first item's count alone read "All auto" over a
-        // selection another item of which had a limit set (`[X6.2-L1-04]`), and
-        // a shared *count* read "1 set" over one item's min width and another's
-        // max height, a sentence true of each and of no limit (§15 D948). The
-        // values may still differ under a shared pattern: the fields below say
-        // *Mixed* for those, as every field reads `shared` (§15 D892).
+        // *Mixed* where the items disagree on which limits are set: a shared count
+        // alone would read "1 set" over one item's min width and another's max
+        // height. Values may still differ under a shared pattern; the fields say
+        // *Mixed* for those.
         let pattern = |i: &LayoutItem| {
             [i.min_width, i.max_width, i.min_height, i.max_height].map(|d| d != Dimension::Auto)
         };
@@ -2512,7 +2433,7 @@ impl OndinApp {
     /// One [`size_field`] row over a basis or a limit along an axis (`horizontal`),
     /// full width: typing writes px (or % while the mode is %), and a mode picked
     /// from the unit converts each subject's specified length in its own container
-    /// ([`specified_along`], §15 D943) — so switching the unit moves nothing.
+    /// ([`specified_along`]) — so switching the unit moves nothing.
     /// `drawn` is the first subject's drawn length, where a scrub under a keyword
     /// starts.
     #[allow(clippy::too_many_arguments)]
@@ -2555,15 +2476,11 @@ impl OndinApp {
             modes,
             mark.as_ref().map(OverrideMark::field),
         );
-        // An instance's overridden length, put back (§15 D981).
         self.reset_marked(edit.reset, &mark);
         if let Some(m) = edit.picked {
-            // **Each subject's own value, converted in its own container** (§15
-            // D943, the release review's `[X6.2-L1-03]`) — the first subject's
-            // drawn size was converted once and written to every one, so a mixed
-            // `100px`/`160px` basis picked to px made both 100. And converted from
-            // what is **specified** (`specified_along`, `[X6.2-L1-01]`), not from
-            // what is drawn.
+            // Each subject's own value, converted in its own container from what it
+            // **specifies** (`specified_along`): a mixed `100px`/`160px` basis picked
+            // to px must not become 100 for both.
             let doc = &self.session.doc;
             let ops = subjects
                 .iter()
@@ -2609,14 +2526,12 @@ impl OndinApp {
         self.edit_valve(&edit.resp, tx);
     }
 
-    /// W's or H's sizing mode for layer `id` from the Transform card — the ops a
-    /// mode picked from the unit's menu writes (§15 D879). Each converts what the
-    /// axis **specifies** rather than the size it is drawn ([`specified_along`],
-    /// §15 D943): `px` writes it on the picked axis only — for a kind
-    /// `resizable_size` reads; text goes through `baked_ops`' used kind, which
-    /// keeps its stored mode at the drawn extents, so a W gives an auto-width label
-    /// `AutoHeight` and an H fixes the box (§15 D948) — `%` converts it against
-    /// the container's content box, and a keyword hands the size to the layout.
+    /// The ops a mode picked from W's or H's unit menu writes for layer `id`. Each
+    /// converts what the axis **specifies**, not the size drawn ([`specified_along`]):
+    /// `px` writes it on the picked axis only (text goes through `baked_ops`' used
+    /// kind, so a W gives an auto-width label `AutoHeight` and an H fixes the box),
+    /// `%` converts against the container's content box, a keyword hands the size
+    /// to the layout.
     pub(super) fn size_mode_tx(
         &self,
         id: NodeId,
@@ -2635,9 +2550,8 @@ impl OndinApp {
             drawn.height
         };
         let mut ops = Vec::new();
-        // What the axis **specifies**, converted (§15 D943): for a grown or shrunk
-        // item the drawn size is the specified one plus the line's share, and a
-        // switch that wrote it back handed the share over twice.
+        // What the axis specifies, converted: a grown or shrunk item's drawn size
+        // includes the line's share, which writing it back would hand over twice.
         let extent = node
             .parent()
             .and_then(|p| self.content_extent(p, horizontal));
@@ -2650,10 +2564,8 @@ impl OndinApp {
             // A group's px is its box; anything else's is its stored size, written
             // where it is drawn, with the keyword back to `auto`.
             (SizeMode::Px, NodeKind::Group) => Dimension::Px(length),
-            // **The picked axis only** (§15 D943, the release review's
-            // `[X6.2-L1-02]`): the stored size takes `length` on it and keeps its
-            // own on the other. The whole used size was written, so a stretched
-            // height became the stored one and outlived the stretch.
+            // The picked axis only: the stored size takes `length` on it and keeps
+            // its own on the other, so a stretched height does not outlive the stretch.
             (SizeMode::Px, k)
                 if crate::tools::resizable_size(k).is_some()
                     && !matches!(k, NodeKind::Text { .. }) =>
@@ -2704,19 +2616,14 @@ impl OndinApp {
 }
 
 /// The length a size or a basis **specifies** along one axis, for a unit switch
-/// to convert (§15 D943): its own number — px as it is, a percentage of `extent` —
-/// and for `auto` the stored size a shape or a frame has (its CSS size, §15 D872);
-/// `drawn` only where nothing is specified, a keyword the layout resolves.
+/// to convert: its own number — px as it is, a percentage of `extent` — and for
+/// `auto` the stored size a shape or a frame has; `drawn` only where nothing is
+/// specified, a keyword the layout resolves.
 ///
-/// **Not the drawn size**, which D879 converted: for an item a flex line grew or
-/// shrank, the drawn size is the specified one plus the line's share, and writing
-/// it back as the specified size handed the item its share twice — a growing item
-/// picked from `px` to `%` jumped from 165 to 227 wide, its sibling squeezed. The
-/// specified length converts to itself, so the switch moves nothing, grown or not.
-///
-/// `kind` is the node's at its specified size, a bound width or height resolved
-/// (`Document::resolved_kind`, §15 D1061): the stored literal there is 0, and a
-/// bound `auto` axis converted to `Percent(0)`.
+/// **Not the drawn size**: for a grown or shrunk item that includes the line's
+/// share, which writing it back would hand over twice. `kind` is the node's at its
+/// specified size, a bound width or height resolved (`Document::resolved_kind`);
+/// the stored literal there is 0.
 fn specified_along(
     kind: &NodeKind,
     dim: Dimension,
@@ -2754,8 +2661,7 @@ fn first_or_zero(paddings: &[[f64; 4]], side: usize) -> f64 {
 }
 
 /// "Pinned to its container's top and right edges" — which of a layer's edges
-/// hold it, in the Item card's sentence about why it is out of the flow (§15
-/// D889).
+/// hold it, in the Item card's sentence about why it is out of the flow.
 fn pinned_edges(insets: &ondin_core::Insets) -> String {
     let names: Vec<&str> = [
         (insets.top.is_some(), "top"),
@@ -2781,16 +2687,15 @@ mod tests {
     //! The Container and Item cards, flex's rows and grid's, driven whole through
     //! the `Panel` harness — and the pure pieces beside them.
     //!
-    //! Plain backticks throughout, per §15 D319 — `cargo doc` builds without the
-    //! `test` cfg, so a link here is checked by nothing (the release review's
-    //! `[R2-L8-04]`).
+    //! Plain backticks throughout: `cargo doc` builds without the `test` cfg, so a
+    //! link here is checked by nothing.
     use super::*;
     use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii};
     use ondin_core::{Document, GeometryPatch, IdSource, Insets, LengthPct};
 
-    /// A 400×200 frame laying out a row — gap 10, padding 20, CSS's default
-    /// `align-items: stretch` — of two rects, 40 and 60 wide, both stored at
-    /// (300, 150) so that anything placing them by their own transform shows.
+    /// A 400×200 frame laying out a row (gap 10, padding 20, `stretch`) of two rects,
+    /// 40 and 60 wide, both stored at (300, 150) so a placement by their own
+    /// transform shows.
     struct Scene {
         app: OndinApp,
         frame: NodeId,
@@ -2854,14 +2759,11 @@ mod tests {
             .commit(Transaction(vec![Operation::SetLayoutItem { id, item }]));
     }
 
-    /// **A reset is not a resize** (`OndinApp::commit_reset`, §15 D981). An instance
-    /// of a 50-wide main sits in the scene's flex row, growing (`flex-grow: 1`), its
-    /// own width overridden to 80 — so it is drawn wider than it is stored. Its W
-    /// reset writes the main's 50, and the instance goes on growing: the growth is
-    /// its placement, its own (§5.3d). Flip, run: `OndinApp::items_stated` handing
-    /// the transaction back without the stated items lets the commit door's
-    /// `build::flex_holds` read the reset as the hand's resize and fails *"still
-    /// grows"*, grow 0. Found by `arch-scribe` reading the batch.
+    /// A size reset (`OndinApp::commit_reset`) is not a resize: a growing instance
+    /// whose width was overridden keeps growing after the reset.
+    ///
+    /// flip: `OndinApp::items_stated` handing the transaction back without the
+    /// stated items → fails at *"still grows"*.
     #[test]
     fn a_size_reset_leaves_a_growing_instance_growing() {
         let mut s = scene();
@@ -2926,16 +2828,11 @@ mod tests {
         ));
     }
 
-    /// **The Container and Item cards' override marks** (§15 D981). The scene's
-    /// frame is made a main and an instance of it placed; the instance's column
-    /// gap and its first item's grow are overridden. The gap's mark resets the gap
-    /// alone, back to the main's 10; direction, padding and the `display` cells are
-    /// unmarked — the instance is a flex like its main, so the mode mark, which
-    /// compares by mode (`ByMode`), stays quiet. Grow is marked and shrink is not.
-    /// With the instance's layout taken away, the mode is marked and the gap is
-    /// not: a copy with no layout has no gap to reset (`sub_mark`'s write-nothing
-    /// skip). Flip: comparing `ByMode` by the whole layout marks the mode over the
-    /// gap and fails *"the mode follows"*.
+    /// An instance marks only the layout fields it overrides: the gap resets alone,
+    /// the `display` cells stay quiet while it is a flex like its main, and with its
+    /// layout taken away the mode is marked and the gap is not.
+    ///
+    /// flip: comparing `ByMode` by the whole layout → fails at *"the mode follows"*.
     #[test]
     fn an_instance_marks_its_own_layout_fields_and_no_others() {
         let mut s = scene();
@@ -3066,11 +2963,7 @@ mod tests {
         );
     }
 
-    /// **The sizing menu offers only the modes that mean something different for
-    /// the layer** (`size_modes`, §15 D879) — the table in its doc, cell by cell.
-    /// A frame's `auto` and a shape's `fit-content` never appear, since each is the
-    /// layer's `px`; `%` only where a laid-out parent gives it something to be a
-    /// percentage of, and only for a kind the layout can resize.
+    /// `size_modes` offers only the modes that differ for the kind, cell by cell.
     #[test]
     fn the_size_menu_offers_only_modes_that_differ_for_the_kind() {
         use SizeMode::*;
@@ -3110,10 +3003,8 @@ mod tests {
         );
     }
 
-    /// Where a picture's wall lands — the midpoint of a start alignment's edge
-    /// line, which says which side it is on and nothing about which way the line
-    /// was drawn (a first endpoint would, and a quarter turn reverses it on a wall
-    /// that is on the right side all the same).
+    /// Where a picture's wall lands — the midpoint of a start alignment's edge line,
+    /// which says which side it is on and not which way the line was drawn.
     fn wall(g: Glyph, flex: Flex) -> (f32, f32) {
         let o = Orient::of(g, &flex);
         marks(g)
@@ -3125,15 +3016,13 @@ mod tests {
             .expect("a start alignment has a wall")
     }
 
-    /// **The pictures turn with the layout through the diagonal, not by a
-    /// rotation** (`Orient`): in a column, `justify-content: flex-start`'s wall is
-    /// on top and `align-items: flex-start`'s on the left, the two starts a column
-    /// has. `row-reverse` puts the justify wall on the right, and `wrap-reverse`
-    /// the align wall at the bottom — CSS swapping cross-start and cross-end.
+    /// `Orient` turns the pictures through the diagonal, not by a rotation: in a
+    /// column the justify wall is on top and the align wall on the left;
+    /// `row-reverse` puts the justify wall on the right, `wrap-reverse` the align
+    /// wall at the bottom.
     ///
-    /// **Flip run**, the transpose replaced with a quarter turn clockwise
-    /// (`(x, y) → (16 − y, x)`): fails on *"align-start in a column"*, the wall
-    /// at x 14.5 — on the right — the predicted site.
+    /// flip: the transpose replaced with a quarter turn → fails at *"align-start in
+    /// a column"*.
     #[test]
     fn the_pictures_turn_with_the_layout_through_the_diagonal() {
         let column = Flex {
@@ -3170,17 +3059,13 @@ mod tests {
         );
     }
 
-    /// **A resize's receipt lasts exactly as long as its step is the top of the
-    /// history** (`session::FlexReceipt`, §15 D880). An item property set by hand
-    /// is no receipt; a resize that stops growth is one, naming what it flipped;
-    /// an undo takes it away and a redo, putting the step back on top, brings it
-    /// back; the next commit ends it.
+    /// A resize's receipt (`session::FlexReceipt`) lasts exactly as long as its step
+    /// is the top of the history: undo takes it away, redo brings it back, the next
+    /// commit ends it.
     ///
-    /// **Flip run**, the undo-depth half of `flex_receipt`'s test dropped: fails on
-    /// *"an undo takes it away"* — undo does not move the session's commit count, so
-    /// the count alone cannot see it — the predicted site. And the receipt keying on
-    /// the *revision* instead, which undo and redo move since §15 D928: fails on
-    /// *"a redo puts the step back on top"*, the redo having moved it on.
+    /// flip: the undo-depth half of `flex_receipt`'s test dropped → fails at *"an
+    /// undo takes it away"*; keying the receipt on the revision → fails at *"a redo
+    /// puts the step back on top"*.
     #[test]
     fn a_resize_leaves_a_receipt_until_anything_else_is_committed() {
         let mut s = scene();
@@ -3234,13 +3119,10 @@ mod tests {
         );
     }
 
-    /// **A resize that clears a basis says so** (§15 D935): `a` with `basis:
-    /// 100px` and no growth to stop, resized — the commit clears the basis, and the
-    /// receipt names it, where it counted grow, shrink and the self-alignments
-    /// only and so said nothing for an item whose growth was already 0.
+    /// A resize that clears a basis on an item with no growth to stop still leaves a
+    /// receipt naming it.
     ///
-    /// **Flip run**, `growth_held` without its basis clause: fails on *"a
-    /// receipt"*, `None`, the predicted site.
+    /// flip: `growth_held` without its basis clause → fails at *"a receipt"*.
     #[test]
     fn a_resize_that_clears_the_basis_leaves_a_receipt_saying_so() {
         let mut s = scene();
@@ -3253,8 +3135,7 @@ mod tests {
             .session
             .commit(Transaction(vec![Operation::SetGeometry {
                 id: s.a,
-                // Along the row only: the height is the stretched 160 it is
-                // drawn at, so nothing but the basis can be named.
+                // Along the row only, so nothing but the basis can be named.
                 geometry: GeometryPatch::Size(Size::new(60.0, 160.0)),
             }]));
         let receipt = s.app.session.flex_receipt().expect("a receipt");
@@ -3269,12 +3150,11 @@ mod tests {
         p.run("Resizing set flex basis to auto.");
     }
 
-    /// **`display: none` keeps every child where it is drawn**, and a frame that
-    /// hugged its children the size it hugged to (`OndinApp::set_display`, §15
-    /// D878) — the rects are stored at (300, 150) and laid at the row's slots.
+    /// `display: none` (`OndinApp::set_display`) keeps every child where it is drawn
+    /// and a hugging frame at the size it hugged to.
     ///
-    /// **Flip run**, the children's `baked_ops` dropped: fails on *"a stayed where
-    /// it was drawn"*, the rect back at its stored x 300 — the predicted site.
+    /// flip: the children's `baked_ops` dropped → fails at *"a stayed where it was
+    /// drawn"*.
     #[test]
     fn display_none_keeps_every_child_where_it_is_drawn() {
         let mut s = scene();
@@ -3311,29 +3191,14 @@ mod tests {
         );
     }
 
-    /// **`display: none` keeps a laid group's pinned children, and a laid group
-    /// its laid box** (§15 D929, the release review's `[R1-L2-03]`) — the two
-    /// children the arm skipped when it baked only the in-flow ones.
+    /// `display: none` keeps (a) a laid group's pinned children and (b) a grown laid
+    /// group's box. ⚠️ (a)'s group is outside a flow on purpose: a laid group that is
+    /// itself an item loses its padding and growth with its layout, and its parent
+    /// then places everything inside differently.
     ///
-    /// (a) A group at (500, 300), outside any flow, lays out a row of `a` and `b`
-    /// beside `c`, pinned to its top right and stored at (0, 0): `c` is drawn
-    /// against the group's laid box, which the group no longer has once its
-    /// layout is gone, so it fell back to (0, 0) — 140 px left of where it was.
-    /// (b) The scene's frame holds a group with a row of its own and `grow: 1`,
-    /// drawn as wide as the frame's row leaves it; with the frame's layout gone
-    /// the group is a layout root, and its `auto` box shrank to hug its children.
-    ///
-    /// ⚠️ **(a)'s group is outside a flow on purpose.** A laid group that is itself
-    /// an item loses its padding and its growth with its layout, so its box — and
-    /// with it the slot its parent places it at — changes, and everything inside
-    /// moves with it. That is the parent's layout answering a different box, not
-    /// a child left behind; a first draft of this test put the group in the
-    /// frame's row and measured exactly that 20 px.
-    ///
-    /// **Flip run**, the arm baking only `is_flex_item` children again: fails on
-    /// *"c stayed against where the box was"*, the predicted site; (b) needs the
-    /// container half of `build::baked`, which core's
-    /// `a_grown_laid_group_keeps_its_box_when_wrapped` flips.
+    /// flip: the arm baking only `is_flex_item` children → fails at *"c stayed
+    /// against where the box was"*; (b) needs the container half of `build::baked`,
+    /// which core's `a_grown_laid_group_keeps_its_box_when_wrapped` flips.
     #[test]
     fn display_none_keeps_a_laid_groups_pinned_children_and_a_grown_groups_box() {
         let mut s = scene();
@@ -3392,8 +3257,7 @@ mod tests {
         s.app.set_display(&[g], 0);
         assert_eq!(drawn(&s.app, c), c0, "c stayed against where the box was");
 
-        // (b): the group, emptied of its pinned child's layout, moved into the
-        // frame's row and grown.
+        // (b): a group with a row of its own, in the frame's row and grown.
         let (h, r) = (s.app.session.ids.mint(), s.app.session.ids.mint());
         assert!(s.app.session.commit(Transaction(vec![
             Operation::CreateNode {
@@ -3430,10 +3294,9 @@ mod tests {
         assert_eq!(drawn(&s.app, h), h0, "the grown group kept its laid box");
     }
 
-    /// **A mode picked from the W/H menu moves nothing** (`size_mode_tx`, §15
-    /// D879): a hugging frame switched to px keeps the width it hugged to, now as
-    /// its stored size; an item switched to % gets the percentage of the content
-    /// box it already fills, 40 of 110 (the hugging frame's 150 less 40 of padding).
+    /// A mode picked from the W/H menu (`size_mode_tx`) moves nothing: a hugging
+    /// frame switched to px keeps its hugged width as its stored size; an item
+    /// switched to % gets the percentage of the content box it already fills.
     #[test]
     fn a_mode_picked_from_the_size_menu_moves_nothing() {
         let mut s = scene();
@@ -3486,23 +3349,14 @@ mod tests {
         p.click(choice);
     }
 
-    /// **A unit switch on a growing item moves nothing** (§15 D943, the release
-    /// review's `[X6.2-L1-01]`): `a` and `b` with `basis: 40px` and `60px` and
-    /// `grow: 1` are laid 165 and 185 wide. Picking `%` for `a`'s basis converted
-    /// its **drawn** 165 — the basis plus its share of the line — into `45.8%`, and
-    /// the line then added the share again: 227.4 wide, `b` squeezed. Now the
-    /// specified 40px converts, `11.1%`, and `a` stays 165. Re-picking the lit
-    /// unit is no edit at all.
+    /// A unit switch on a growing item moves nothing, and re-picking the lit unit
+    /// is no edit.
     ///
-    /// **Flip runs**: the pick converting the drawn length again fails on *"drawn
-    /// where it was"*, 227.4 against 165, the predicted site. ⚠️ **The lit-row
-    /// filter in `size_field` deleted does not bite on `px`**, though *"the lit
-    /// row is no step"* was predicted to fail: converting the *specified* 40px
-    /// into px is 40px, which changes nothing and so commits nothing. **It bites
-    /// on `%`** (§15 D948): the conversion rounds to a tenth of a percent, so
-    /// re-picking the lit `%` over a stored `33.33%` wrote `33.3%` — an edit
-    /// nobody made, and a step. With the filter deleted the test fails on
-    /// *"the lit % is no step either"* — the predicted site.
+    /// flip: the pick converting the drawn length → fails at *"drawn where it
+    /// was"*. ⚠️ The lit-row filter in `size_field` deleted does **not** bite on
+    /// `px` (converting the specified 40px into px changes nothing); it bites on
+    /// `%`, where the tenth-of-a-percent rounding turns `33.33%` into `33.3%` →
+    /// fails at *"the lit % is no step either"*.
     #[test]
     fn a_unit_switch_on_a_growing_item_moves_nothing() {
         let mut s = scene();
@@ -3549,17 +3403,11 @@ mod tests {
         );
     }
 
-    /// **A unit picked over a mixed selection converts each item's own value**
-    /// (§15 D943, `[X6.2-L1-03]`): `a`'s basis `25%` and `b`'s `160px`, both
-    /// selected, the unit reading `–`, `px` picked. The first item's value was
-    /// converted once and written to both, so `b` took `a`'s width.
+    /// A unit picked over a mixed selection (`25%` and `160px`) converts each item's
+    /// own value; it also pins the px row's conversion.
     ///
-    /// **Flip run**, the anchor's converted value written to every subject: fails
-    /// on *"b keeps its own"*, `Px(90)` — `a`'s 25% of 360 — against 160, the
-    /// predicted site. **And it is what pins the px row's conversion**, which the
-    /// release review's `[X6.2-L6-01]` found unpinned before D943: the row writing
-    /// `Px(0.0)` in `dimension_row` — a pick that would collapse the item — fails
-    /// on the same line, `Px(0.0)` against 160.
+    /// flip: the anchor's converted value written to every subject → fails at *"b
+    /// keeps its own"*; `dimension_row` writing `Px(0.0)` → fails at the same line.
     #[test]
     fn a_unit_picked_over_a_mixed_selection_converts_each_item() {
         let mut s = scene();
@@ -3578,14 +3426,9 @@ mod tests {
         assert_eq!(drawn(&p.app, b).width(), b0, "and is drawn where it was");
     }
 
-    /// **W's `px` writes the picked axis only** (§15 D943, `[X6.2-L1-02]`): `a` is
-    /// stored 40 × 30 and drawn 160 tall, stretched across the row; W's px wrote
-    /// the whole used size, 40 × 160, so the stretch outlived itself — with the
-    /// row set to `align-items: start`, `a` stayed 160 tall. Now the stored height
-    /// stays 30.
+    /// W's `px` writes the picked axis only: a stretched `a` keeps its stored height.
     ///
-    /// **Flip run**, the whole used kind baked again: fails on *"the height
-    /// untouched"*, 160 against 30, the predicted site.
+    /// flip: the whole used kind baked → fails at *"the height untouched"*.
     #[test]
     fn a_px_pick_writes_the_picked_axis_only() {
         let mut s = scene();
@@ -3602,24 +3445,14 @@ mod tests {
         assert_eq!(size.width, 36.0, "the width the 10% specified, of 360");
     }
 
-    /// **A text's W `px` keeps it the width it is drawn, and its height still
-    /// follows its lines; its H `px` fixes the box** (§15 D948): an auto-width
-    /// label in a 300-wide column, `width: 50%`, wraps at 150, and W's px gives
-    /// it `AutoHeight(150)` — drawn where it was. Then `height: 20%`, 60 tall, and
-    /// H's px gives `Fixed(150 × 60)`, drawn where it was.
+    /// A text's W `px` keeps it the width it is drawn while its height follows its
+    /// lines (`AutoHeight`); its H `px` fixes the box. The text arm bakes the used
+    /// kind rather than the picked axis because `baked_ops` keeps the stored mode at
+    /// the drawn extents (`ondin_core::build::kept_text_mode`); every other kind
+    /// reaching it offers `px` alone, so no menu picks it.
     ///
-    /// ⚠️ **Written to pin a defect and found none.** The session's close listed
-    /// the text arm — `baked_ops` over the used kind, not the picked axis only —
-    /// as left alone; read, it looked as though an auto-width label would be
-    /// baked back to `Auto` and unwrap. It is not: `baked_ops` keeps the stored
-    /// mode at the drawn extents (`ondin_core::build::kept_text_mode`, §15 D940),
-    /// which for `Auto` drawn at a fixed width is `AutoHeight`. Every other kind
-    /// that reaches the arm — a line, a path, a boolean — offers `px` alone, and
-    /// `size_modes` with fewer than two modes draws no menu, so nothing picks it.
-    ///
-    /// **Flip run**, text routed through the shapes' picked-axis arm: fails on
-    /// *"W's px: the width the axis specified"* with `Auto` — the label
-    /// unwrapped, the predicted site.
+    /// flip: text routed through the shapes' picked-axis arm → fails at *"W's px:
+    /// the width the axis specified"*.
     #[test]
     fn a_texts_px_pick_keeps_its_width_and_lets_its_lines_set_the_height() {
         let (mut p, text, _) = text_column(AlignItems::Start);
@@ -3696,8 +3529,8 @@ mod tests {
     }
 
     /// One card drawn headlessly in the inspector column's 284, with real pointer
-    /// events — the harness the field-scrub tests share (§15 D885, D901). `card`
-    /// is which card: `inspector_container` or `inspector_item`.
+    /// events — the harness the field-scrub tests share. `card` is which card:
+    /// `inspector_container` or `inspector_item`.
     struct Panel {
         ctx: egui::Context,
         app: OndinApp,
@@ -3775,19 +3608,11 @@ mod tests {
         }
     }
 
-    /// **A scrub on a Container field lands, as one undo step** (§15 D885) — the
-    /// Column gap, then the left-and-right padding, each pressed on its digits,
-    /// dragged 80 points and let go, through the real card and the real valve.
+    /// A scrub on the Column gap, then the left-and-right padding, lands as one undo
+    /// step each, through the real card and valve.
     ///
-    /// Every number field in these cards used to follow the drag and snap back on
-    /// release: it built its transaction only on a frame where the number moved,
-    /// and the release frame is the one frame the valve commits on and the one
-    /// frame nothing moves. No test drove a field before this one; the cards'
-    /// tests called the methods the fields call.
-    ///
-    /// **Flip run**, `edited` answering `moved` alone (the latch dropped, which is
-    /// the code as it was): fails on *"the gap landed"* with the gap back at 10 —
-    /// the predicted site.
+    /// flip: `edited` answering `moved` alone (the latch dropped) → fails at *"the
+    /// gap landed"*.
     #[test]
     fn a_scrub_on_a_container_field_lands_as_one_undo_step() {
         let s = scene();
@@ -3820,14 +3645,11 @@ mod tests {
         assert_eq!(padding[0], 20.0, "and top was left alone");
     }
 
-    /// **The Item card's fields land too** (§15 D885's other half, never driven
-    /// until §15 D901): `a`'s Flex grow scrubbed from 0, then its basis scrubbed
-    /// from the `auto` in its digits — each pressed on its digits, dragged 80
-    /// points and let go, one undo step apiece. The basis starts from the drawn
-    /// width under the word (§15 D895's `under`), so it lands in px above 40.
+    /// A scrub on `a`'s Flex grow, then its basis (from the `auto` in its digits,
+    /// starting at the drawn width, so it lands in px above 40), lands as one undo
+    /// step each.
     ///
-    /// **Flip run**, `edited` answering `moved` alone: fails on *"the grow
-    /// landed"*, grow back at 0 — the predicted site.
+    /// flip: `edited` answering `moved` alone → fails at *"the grow landed"*.
     #[test]
     fn a_scrub_on_an_item_field_lands_as_one_undo_step() {
         let s = scene();
@@ -3973,16 +3795,12 @@ mod tests {
         }
     }
 
-    /// **A W typed into a stretched auto-width label keeps its mode** (§15 D940,
-    /// the release review's `[X5.1-L1-03]` / `[X6.1-L1-03]`): the label in a
-    /// stretching column is drawn as a 300-wide `Fixed` box, and typing 40 into W
-    /// read that `Fixed` as the mode and stored `Fixed(40 × 19)` — one line high,
-    /// its wrapped lines hanging over the rect. Unstretched, the same keystrokes
-    /// give `AutoHeight` at the width drawn and the rect moves down under the
-    /// lines; now both do.
+    /// A W typed into a stretched auto-width label (drawn as a 300-wide `Fixed` box)
+    /// keeps its mode: `AutoHeight` at the width asked, the rect below the wrapped
+    /// lines.
     ///
-    /// **Flip run**, `tools::gesture_text_sizing` answering the drawn sizing:
-    /// fails on *"the mode kept"*, a `Fixed` box, the predicted site.
+    /// flip: `tools::gesture_text_sizing` answering the drawn sizing → fails at *"the
+    /// mode kept"*.
     #[test]
     fn a_width_typed_into_a_stretched_label_keeps_its_mode() {
         let (mut p, text, rect) = text_column(AlignItems::Stretch);
@@ -3990,8 +3808,7 @@ mod tests {
         let at = p.run("300");
         type_number(&mut p, at, "40");
         // 40 asked, 53.73 drawn: a wrapping item is never narrower than its widest
-        // word in a flex line (§15 D872), and the field reads the preview back — the
-        // review's unstretched control stored the same 53.7.
+        // word in a flex line, and the field reads the preview back.
         assert!(
             matches!(
                 stored_sizing(&p.app, text),
@@ -4006,14 +3823,10 @@ mod tests {
         );
     }
 
-    /// **A click into W and out again commits nothing** (§15 D940, `[X6.1-L1-04]`)
-    /// — an unstretched auto-width label, W focused and left with `Enter`, no
-    /// number typed. It wrote the drawn width back as `AutoHeight(147.17)`: an
-    /// undo step with nothing drawn differently, and a label that stopped growing
-    /// with its words.
+    /// A click into W and out again with no number typed commits nothing: the label
+    /// stays `Auto`.
     ///
-    /// **Flip run**, the W/H arm's `_ if !typed` guard deleted: fails on *"still auto"*,
-    /// `AutoHeight(…)` against `Auto`, the predicted site.
+    /// flip: the W/H arm's `_ if !typed` guard deleted → fails at *"still auto"*.
     #[test]
     fn a_click_through_w_commits_nothing() {
         let (mut p, text, _) = text_column(AlignItems::Start);
@@ -4029,19 +3842,11 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
     }
 
-    /// **A stretched item's H scrubs, and the preview follows it** (§15 D904) —
-    /// `a`, stretched to the row's 160, its H pressed on its digits and dragged 80
-    /// points, through the real card and the real valve. It lands taller, out of
-    /// the stretch, as one step.
+    /// A stretched item's H scrubs in the Transform card: it lands taller, out of the
+    /// stretch, as one step. The field reads back through the preview, so the preview
+    /// must not stretch it straight back to 160 on each frame.
     ///
-    /// The field reads its size back through the preview, which re-lays the row on
-    /// every frame of the scrub; with the item still `align-self: stretch` there,
-    /// the preview put it straight back to 160, so each frame's scrub started from
-    /// 160 again and the release committed 160. Reported as "it doesn't let me
-    /// update the height in Transform".
-    ///
-    /// **Flip run**, `set_preview` without the holds: fails on *"the height
-    /// landed"* at 160 — the predicted site.
+    /// flip: `set_preview` without the holds → fails at *"the height landed"*.
     #[test]
     fn a_stretched_items_height_scrubs_in_the_transform_card() {
         let s = scene();
@@ -4063,18 +3868,13 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth + 1, "as one step");
     }
 
-    /// **The sizing menu opens under the unit that was clicked** (§15 D907) — W's
-    /// `px`, at the right-hand end of the field, clicked; the menu's `%` row is
-    /// found beneath it, its text within a few points of the unit's. It opened
-    /// under the number's response, which starts at the prefix, so the menu hung
-    /// under the "W" at the field's far end.
+    /// The sizing menu opens under the unit that was clicked, with room either side
+    /// of the lit row's text.
     ///
-    /// **Flip runs**: the popup anchored on the number's response with its default
-    /// alignment, as it was, fails on *"under the unit"*, the row's text centred at
-    /// x 46 against the unit's 126 — the predicted site. The row padding dropped
-    /// fails on *"room either side"* at 2 and 2.2 points, `Popup::menu`'s own style —
-    /// which the first cut of this assertion did **not** catch: searched from the
-    /// front, it measured against the rotation field's ground under the popup.
+    /// flip: the popup anchored on the number's response with its default alignment
+    /// → fails at *"under the unit"*; the row padding dropped → fails at *"room
+    /// either side"*. The highlight is searched from the end of the shapes: from the
+    /// front it finds the rotation field's ground under the popup.
     #[test]
     fn the_size_menu_opens_under_its_unit() {
         let s = scene();
@@ -4099,9 +3899,7 @@ mod tests {
             unit.x
         );
 
-        // The lit row — `px`, the mode W is in — and the highlight behind its text.
-        // Searched from the end: the popup paints last, and the fields under it have
-        // grounds that contain the same point.
+        // The lit row (`px`, W's mode) and the highlight behind its text.
         let out = p.frame(Vec::new());
         let text = out
             .shapes
@@ -4136,18 +3934,13 @@ mod tests {
         );
     }
 
-    /// **A stretched item dragged by its top handle previews as it lands** —
-    /// shorter, its bottom held at the row's (§15 D904, D905). The preview used to
-    /// stretch it straight back until the release; and the release, aligning it to
-    /// the start, moved it to the top of the row — away from the edge the user held.
+    /// A stretched item dragged by its top handle previews as it lands: shorter, its
+    /// bottom held at the row's.
     ///
-    /// **Flip runs**, each failing on *"the preview follows the handle"*:
-    /// `set_preview` without the holds, the preview still 20..180;
-    /// `resized_from_cross_start` answering `false`, at 20..90 — the holds are in
-    /// the preview and aligned to the start, which is the jump the release made;
-    /// and `RenderOverrides`' `flex_relayout` falling back to the document's
-    /// transform where `item_placed` answers `local: None`, at 150..220 — the rect's
-    /// stored y, since the end-aligned slot is exactly the tool's shifted origin.
+    /// flip, each → fails at *"the preview follows the handle"*: `set_preview`
+    /// without the holds; `resized_from_cross_start` answering `false`;
+    /// `RenderOverrides`' `flex_relayout` falling back to the document's transform
+    /// where `item_placed` answers `local: None`.
     #[test]
     fn a_stretched_item_dragged_by_its_top_previews_as_it_lands() {
         let mut s = scene();
@@ -4179,19 +3972,13 @@ mod tests {
         );
     }
 
-    /// **A field over a selection that disagrees reads "Mixed", and a basis at
-    /// `auto` reads `auto`** — the maintainer's rulings of §15 D892 and D895,
-    /// asserted on the Item card's painted text for two rects that disagree about
-    /// `flex-grow` and agree on an `auto` basis.
+    /// On the Item card's painted text, a field over a selection that disagrees
+    /// reads "Mixed" and a basis at `auto` reads `auto`.
     ///
-    /// **Flip runs**: `mixed_if` back to a dash fails on *"the grow field says
-    /// so"*, "Mixed" counted 0 against 1, predicted. The keyword word dropped from
-    /// `size_field` (the basis back on the number path) fails on **the same
-    /// line**, 2 against 1 — not on *"the basis reads its keyword"* as predicted:
-    /// with no number and no word the basis's digits read "Mixed" too, which is
-    /// exactly the confusion D892 would have introduced without D895. The unit
-    /// handed back to the keyword face (§15 D906's `word.is_none()` gate dropped)
-    /// fails on *"and has no unit"*, 1 against 0, predicted.
+    /// flip: `mixed_if` back to a dash → fails at *"the grow field says so"*; the
+    /// keyword dropped from `size_field` → fails at the same line (the basis's
+    /// digits read "Mixed" too), not at *"the basis reads its keyword"*; the
+    /// `word.is_none()` gate dropped → fails at *"and has no unit"*.
     #[test]
     fn a_mixed_field_reads_mixed_and_an_unset_basis_reads_auto() {
         let mut s = scene();
@@ -4218,16 +4005,12 @@ mod tests {
         assert_eq!(count("–"), 0, "and has no unit (§15 D906): {texts:?}");
     }
 
-    /// **A segment row over containers that disagree marks the mixed state**
-    /// (§15 D892): two frames, a row and a column, selected together — the
-    /// direction row raises nothing and draws `ui::segment_mixed`'s dash where its
-    /// first arrow was, the Type panel's convention. It drew nothing at all, which
-    /// `segment_mixed`'s own doc says reads as a bug. The display and wrap rows
-    /// agree and draw no dash, and no Container field has a unit, so one dash is
-    /// the whole count.
+    /// A row and a column selected together: the direction row draws
+    /// `ui::segment_mixed`'s dash where its first arrow was. The display and wrap
+    /// rows agree and no Container field has a unit, so one dash is the whole count.
     ///
-    /// **Flip run**, the direction row's `None if i == 0` arm deleted: fails on
-    /// *"the direction row says it is mixed"*, 0 against 1, predicted.
+    /// flip: the direction row's `None if i == 0` arm deleted → fails at *"the
+    /// direction row says it is mixed"*.
     #[test]
     fn a_segment_row_over_containers_that_disagree_marks_it() {
         let mut s = scene();
@@ -4270,10 +4053,9 @@ mod tests {
         assert_eq!(dashes, 1, "the direction row says it is mixed");
     }
 
-    /// **Each card offers itself for what it describes and draws without
-    /// panicking** — Container for the frame, Item for the rects, both for a
-    /// selection of the two, the out-of-flow block for a pinned rect, and the
-    /// display row alone for a frame with no layout.
+    /// Each card offers itself for what it describes and draws without panicking:
+    /// Container for the frame, Item for the rects, both for a mix, the out-of-flow
+    /// block for a pinned rect, the display row alone for a frame with no layout.
     #[test]
     fn each_card_offers_itself_for_what_it_describes() {
         let mut s = scene();
@@ -4295,9 +4077,9 @@ mod tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let draw = |app: &mut OndinApp, selection: Vec<NodeId>| {
             app.session.selection.set(selection);
-            // The inspector column's own width (`OndinApp::inspector_column`): the
-            // gap fields carry their CSS name as a unit, and at 240 — the Position
-            // card's test width — a half-width one has no room left for its digits.
+            // The inspector column's own width (`OndinApp::inspector_column`): at 240 a
+            // half-width gap field, which carries its CSS name as a unit, has no room
+            // left for its digits.
             let _ = ctx.run_ui(Default::default(), |ui| {
                 ui.set_max_width(284.0);
                 app.inspector_item(ui);
@@ -4316,8 +4098,7 @@ mod tests {
         draw(&mut s.app, vec![s.frame]);
         draw(&mut s.app, vec![s.a]);
         draw(&mut s.app, vec![s.frame, s.a]);
-        // The limits' disclosure open, and padding that differs side to side —
-        // which opens the four side fields by itself.
+        // The limits' disclosure open, and uneven padding (opens the side fields).
         ctx.data_mut(|d| d.insert_temp(egui::Id::new("flex-item-limits"), true));
         let tx = s
             .app
@@ -4348,14 +4129,10 @@ mod tests {
             .unwrap_or_else(|| panic!("no {text:?} on the {label} row"))
     }
 
-    /// **Each size limit's field writes its own limit** (`limit_rows`, the release
-    /// review's `[X6.2-L6-01]`): the *Min / max* disclosure opened by a click, and
-    /// a number typed over each row's `auto` — 30, 120, 20 and 140 — lands in the
-    /// limit that row names and in no other. Nothing in the suite had typed into a
-    /// limit, so a `Max width` row writing `min_width` passed it whole.
+    /// Each size limit's field (`limit_rows`) writes its own limit and no other.
     ///
-    /// **Flip run**, the `Max width` row's setter writing `min_width`: fails on
-    /// *"each limit its own number"*, `[Px(120), Auto, …]` — the predicted site.
+    /// flip: the `Max width` row's setter writing `min_width` → fails at *"each limit
+    /// its own number"*.
     #[test]
     fn each_limit_field_writes_its_own_limit() {
         let s = scene();
@@ -4391,14 +4168,11 @@ mod tests {
         );
     }
 
-    /// **The first gap field is the gap between items** — `column-gap` in a row,
-    /// `row-gap` in a column (`flex_rows`, the mockup's rule in the comment above
-    /// its `gap_row` call; `[X6.2-L6-01]`). Read off where each field's CSS name
-    /// is painted, the scene's row first and then the same frame turned into a
-    /// column.
+    /// The first gap field is the gap between items: `column-gap` in a row,
+    /// `row-gap` in a column (`flex_rows`).
     ///
-    /// **Flip run**, `gap_row` handed `column_first: true` whatever the direction:
-    /// fails on *"a column: row-gap first"* — the predicted site.
+    /// flip: `gap_row` handed `column_first: true` whatever the direction → fails at
+    /// *"a column: row-gap first"*.
     #[test]
     fn a_columns_first_gap_field_is_row_gap() {
         let s = scene();
@@ -4421,15 +4195,11 @@ mod tests {
         );
     }
 
-    /// **Padding that differs side to side opens the four side fields by
-    /// itself** (`padding_rows`, `[X6.2-L6-01]`), so the two paired fields never
-    /// stand for a pair they do not describe: closed over the scene's even 20,
-    /// and open over 4, 8, 12, 16 with no click — each side's field reading its
-    /// own side. `each_card_offers_itself_for_what_it_describes` drew this state
-    /// and asserted nothing about it.
+    /// Padding that differs side to side opens the four side fields by itself
+    /// (`padding_rows`); even padding leaves them closed.
     ///
-    /// **Flip run**, `open = asked` (the `uneven` term dropped): fails on
-    /// *"uneven: open by itself"*, `[0, 0, 0, 0]` — the predicted site.
+    /// flip: `open = asked` (the `uneven` term dropped) → fails at *"uneven: open by
+    /// itself"*.
     #[test]
     fn uneven_padding_opens_the_side_fields_by_itself() {
         let s = scene();
@@ -4448,25 +4218,13 @@ mod tests {
         }
     }
 
-    /// **Each Container mark's ↺ resets its own field, through the production
-    /// closures** (`[X9.2-L6-04]`, §15 D981) — the scene's frame made a main and
-    /// an instance of it placed, the instance's column gap 24, row gap 30 and
-    /// padding 4, 8, 12, 16 where the main's — a wrapping row — are 10, 0 and 20
-    /// all round; then a
-    /// click on the Column gap's glyph, the Row gap's, and the *L* side's letter,
-    /// each the prefix strip whose click is the reset (`ui::value_field_marked`).
+    /// Each Container mark's ↺ resets its own field, through the production
+    /// closures: clicks on the Column gap's glyph, the Row gap's and the *L* side's
+    /// letter (`ui::value_field_marked`'s prefix strip) on an instance that differs
+    /// from its main. Grid's rows and the Item card have their own tests below.
     ///
-    /// `an_instance_marks_its_own_layout_fields_and_no_others` handed
-    /// `display_mark` closures it wrote itself, so no production `get`/`put` was
-    /// ever run: the review's flip of `gap_row`'s put — the column gap's ↺ writing
-    /// the main's value into the row gap — passed all fifty layout tests.
-    ///
-    /// **Flip run**, that put made `*(if is_column_gap { r } else { c }) = v`:
-    /// fails at *"the column gap's ↺: the column gap back"*, 24 against 10, the
-    /// predicted site. The grid's rows and the Item card's marks are driven by
-    /// `each_grid_container_marks_reset_writes_its_own_field`,
-    /// `each_flex_item_marks_reset_writes_its_own_field` and
-    /// `each_grid_item_marks_reset_writes_its_own_field`.
+    /// flip: `gap_row`'s put made `*(if is_column_gap { r } else { c }) = v` → fails
+    /// at *"the column gap's ↺: the column gap back"*.
     #[test]
     fn each_container_marks_reset_writes_its_own_field() {
         let mut s = scene();
@@ -4609,19 +4367,14 @@ mod tests {
         }
     }
 
-    /// **Each flex Item mark's ↺ resets its own field, through the production
-    /// closures** (`[X9.2-L6-04]`'s remainder, §15 D981) — `a`'s copy in an instance
-    /// of the scene's frame, its grow 2, shrink 3, basis 80px and `align-self:
-    /// center` where its main's are 0, 1, auto and auto; then a click on *Flex
-    /// grow*'s label, *Flex shrink*'s, *Flex basis*'s (each the prefix strip whose
-    /// click is the reset — `ui::value_field_marked`, `size_field`), and the reset
-    /// row of *Align self*'s list.
+    /// Each flex Item mark's ↺ resets its own field, through the production
+    /// closures: clicks on *Flex grow*'s, *Flex shrink*'s and *Flex basis*'s labels
+    /// and the reset row of *Align self*'s list, on a copy whose four properties
+    /// differ from its main's.
     ///
-    /// **Flips run**, each the plausible swapped `put`: (1) `flex_item_rows`' grow
-    /// and shrink put made `if !is_grow` — fails at *"grow's ↺: grow back"*, 2
-    /// against 0, the predicted site. (2) *Flex basis*'s put made `i.min_width = d`
-    /// (`dimension_row`'s closure from its caller) — fails at *"basis's ↺: basis
-    /// back"*, `Px(80.0)` against `Auto`, the predicted site.
+    /// flip: `flex_item_rows`' grow and shrink put made `if !is_grow` → fails at
+    /// *"grow's ↺: grow back"*; *Flex basis*'s put made `i.min_width = d` → fails at
+    /// *"basis's ↺: basis back"*.
     #[test]
     fn each_flex_item_marks_reset_writes_its_own_field() {
         let mut s = scene();
@@ -4686,24 +4439,16 @@ mod tests {
         assert_eq!(item(&p.app), main, "align-self's ↺: the copy is its main's");
     }
 
-    /// **Each grid Container mark's ↺ resets its own field** (`[X9.2-L6-04]`'s
-    /// remainder, §15 D981): an instance of `grid_scene`'s grid — `100px 1fr`
-    /// columns, no rows, flow row, `justify-items: normal` — with its own flow
-    /// column, columns `1fr`, rows `40px` and `justify-items: center`; then a click
-    /// on the lit *Column* cell (a segmented control's reset, `ui::segmented_marked`),
-    /// on *Grid template columns*' label, on *Grid template rows*', and on the reset
-    /// row of *Justify items*' list. The gaps and padding are `gap_row` and
-    /// `padding_rows`, flex's, driven by
+    /// Each grid Container mark's ↺ resets its own field: clicks on the lit *Column*
+    /// cell (`ui::segmented_marked`), *Grid template columns*' and *rows*' labels and
+    /// the reset row of *Justify items*' list, on a copy that differs from its main in
+    /// each. The gaps and padding are flex's, driven by
     /// `each_container_marks_reset_writes_its_own_field`.
     ///
-    /// **Flips run**, each the plausible swapped `put`: (1) `track_list`'s put made
-    /// `with_list(g, !rows, &l)` — fails at *"the columns' ↺: columns back"*, the
-    /// predicted site, the main's columns written into the rows. (2) *Justify
-    /// items*' put made `g.align_items = v` (the same type, the row two below):
-    /// predicted at *"justify-items' ↺"*, it failed earlier, at `combo_reset`'s
-    /// *"no run begins …Reset to main"* — the swapped put writes the main's `None`
-    /// over a copy whose `align-items` is already `None`, so `sub_mark` finds the
-    /// reset would write nothing and draws no mark at all.
+    /// flip: `track_list`'s put made `with_list(g, !rows, &l)` → fails at *"the
+    /// columns' ↺: columns back"*; *Justify items*' put made `g.align_items = v` →
+    /// fails earlier, at `combo_reset`'s *"no run begins …Reset to main"*, because
+    /// `sub_mark` then finds the reset would write nothing and draws no mark.
     #[test]
     fn each_grid_container_marks_reset_writes_its_own_field() {
         let mut s = grid_scene();
@@ -4786,15 +4531,12 @@ mod tests {
         );
     }
 
-    /// **Each grid Item mark's ↺ resets its own field** (`[X9.2-L6-04]`'s remainder,
-    /// §15 D981): `a`'s copy in an instance of `grid_scene`'s grid, its own
-    /// `grid-column: 2 / auto`, `grid-row: 1 / span 2` and `justify-self: center`;
-    /// then a click on *Grid column*'s label, *Grid row*'s, and the reset row of
-    /// *Justify self*'s list.
+    /// Each grid Item mark's ↺ resets its own field: clicks on *Grid column*'s and
+    /// *Grid row*'s labels and the reset row of *Justify self*'s list, on a copy
+    /// that differs from its main in each.
     ///
-    /// **Flip run**, the lines' put made `if !rows` (`grid_item_rows`' swapped
-    /// `put`): fails at *"grid-column's ↺: the column back"*, the predicted site —
-    /// the main's column written into the row.
+    /// flip: the lines' put in `grid_item_rows` made `if !rows` → fails at
+    /// *"grid-column's ↺: the column back"*.
     #[test]
     fn each_grid_item_marks_reset_writes_its_own_field() {
         use ondin_core::container::{GridLines, GridPlacement};
@@ -4864,15 +4606,11 @@ mod tests {
         );
     }
 
-    /// **An overridden row gap's ↺ can be clicked on a row that does not wrap** —
-    /// an instance of the scene's frame (a row, `nowrap`) with its own row gap 30
-    /// against the main's 0. The row gap's field is disabled while the row does
-    /// not wrap, and its ↺ is the prefix strip's press, which a disabled field does
-    /// not sense: the mark showed and its click did nothing.
+    /// An overridden row gap's ↺ can be clicked on a row that does not wrap, where
+    /// the field is disabled and a disabled field does not sense the prefix press.
     ///
-    /// **Flip run**, `gap_row`'s `live` without `|| mark.is_some()` (the code as it
-    /// was): fails at *"the row gap's ↺ on a row that does not wrap"*, 30 against
-    /// 0, the predicted site.
+    /// flip: `gap_row`'s `live` without `|| mark.is_some()` → fails at *"the row
+    /// gap's ↺ on a row that does not wrap"*.
     #[test]
     fn an_inert_row_gaps_mark_still_resets() {
         let mut s = scene();
@@ -4903,14 +4641,10 @@ mod tests {
         ondin_core::container::tracks_css(l)
     }
 
-    /// **An *Align items* pick writes the value picked, and nothing else**
-    /// (`flex_rows`, `[X6.2-L6-01]`): the combo opened from its face and its
-    /// *Center* row clicked — `align-items: center`, the rest of the layout as it
-    /// was. No test had picked from a Container combo.
+    /// An *Align items* pick (`flex_rows`) writes the value picked and nothing else.
     ///
-    /// **Flip run**, the pick writing `AlignItems::Start` whatever was clicked:
-    /// fails on *"align-items, and nothing else"*, `Start` against `Center` — the
-    /// predicted site.
+    /// flip: the pick writing `AlignItems::Start` whatever was clicked → fails at
+    /// *"align-items, and nothing else"*.
     #[test]
     fn an_align_items_pick_writes_the_value_picked() {
         let s = scene();
@@ -4938,7 +4672,7 @@ mod tests {
         );
     }
 
-    // --- grid's rows (§15 D920) -------------------------------------------------
+    // --- grid's rows -------------------------------------------------
 
     /// `scene` with the frame's row turned into a grid of `100px 1fr` columns —
     /// its gap 10 and padding 20 kept, as picking *Grid* keeps them.
@@ -5053,13 +4787,11 @@ mod tests {
         }
     }
 
-    /// **Picking *Grid* lays the frame out as a grid and keeps what the two share**
-    /// (§15 D920): the padding and the gaps travel from the flex row, and nothing
-    /// else — the tracks start empty, CSS's `none`. Driven through the display
-    /// row's cell, which was disabled until the grid step.
+    /// Picking *Grid* keeps the padding and the gaps from the flex row and nothing
+    /// else — the tracks start empty, CSS's `none`.
     ///
-    /// **Flip run**, `set_display`'s `kept` returning the fresh layout untouched:
-    /// fails on *"the padding travelled"* at 0, the predicted site.
+    /// flip: `set_display`'s `kept` returning the fresh layout untouched → fails at
+    /// *"the padding travelled"*.
     #[test]
     fn picking_grid_keeps_the_padding_and_the_gaps() {
         let s = scene();
@@ -5074,9 +4806,8 @@ mod tests {
         assert!(g.columns.is_empty() && g.rows.is_empty(), "no tracks yet");
     }
 
-    /// **The column list's `+` adds a `1fr` track, the cross removes one, and its
-    /// count says how many tracks the list makes** — `100px 1fr` reads *2 tracks*,
-    /// grows to `100px 1fr 1fr`, and loses its first to `1fr 1fr`.
+    /// The column list's `+` adds a `1fr` track, the cross removes one, and the count
+    /// reads the track total.
     #[test]
     fn a_track_is_added_with_the_plus_and_removed_with_the_cross() {
         let s = grid_scene();
@@ -5095,13 +4826,11 @@ mod tests {
         assert_eq!(css(&p.app), "1fr 1fr", "the first entry's cross");
     }
 
-    /// **The CSS line applies on Enter and never on Escape** (`ui::defocus_commits`,
-    /// §15 D841): `100px 1fr` retyped `200px repeat(2, 1fr)` and Enter lands as the
-    /// list; retyped `50px` and Escape leaves it; retyped `100` — no unit — is
-    /// refused with its reason under the field, and the list stays.
+    /// The CSS line applies on Enter and never on Escape (`ui::defocus_commits`); a
+    /// list with no unit is refused with its reason under the field.
     ///
-    /// **Flip run**, `css_field` committing on a bare `lost_focus()`: fails on
-    /// *"Escape abandons it"* with `50px` landed, the predicted site.
+    /// flip: `css_field` committing on a bare `lost_focus()` → fails at *"Escape
+    /// abandons it"*.
     #[test]
     fn the_css_line_applies_on_enter_and_never_on_escape() {
         let s = grid_scene();
@@ -5135,17 +4864,13 @@ mod tests {
         s
     }
 
-    /// **A click in and out of a *Mixed* template line writes nothing** (§15
-    /// D941, the release review's `[X6.3-L1-01]`): two grids with different
-    /// columns selected, the CSS line reading empty under its *Mixed* hint,
-    /// focused and left with `Enter`. The untouched empty buffer compared unequal
-    /// to the `None` a mixed selection shows, so it was committed — and an empty
-    /// list is `none`: both grids lost every column, in one undo step.
+    /// A click in and out of a *Mixed* template line (two grids with different
+    /// columns) writes nothing: an empty buffer must not compare unequal to the
+    /// `None` a mixed selection shows, or both grids lose every column.
     ///
-    /// **Flip run**, `css_field` comparing against `shown` again: fails on
-    /// *"both grids keep their columns"*, both `none`, the predicted site. (A first
-    /// draft clicked the first *Mixed* on the card — the list's summary on its
-    /// head row — and passed under the flip, focusing nothing.)
+    /// flip: `css_field` comparing against `shown` → fails at *"both grids keep
+    /// their columns"*. The click must land on the second *Mixed*; the first is the
+    /// list's summary and focuses nothing.
     #[test]
     fn a_click_through_a_mixed_template_line_writes_nothing() {
         let mut s = grid_scene();
@@ -5174,8 +4899,7 @@ mod tests {
         let mut p = Panel::new(s.app, OndinApp::inspector_container);
         p.app.session.selection.set(vec![frame_id, other]);
         let depth = p.app.session.history.undo_depth();
-        // The second *Mixed*: the first is the column list's summary on its head
-        // row, and the CSS line's hint sits under it.
+        // The second *Mixed*: the first is the column list's summary.
         let at = p.runs(ui::MIXED_WORD)[1];
         p.click(at);
         p.frame(vec![key(egui::Key::Enter)]);
@@ -5191,13 +4915,9 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
     }
 
-    /// **Picking a `minmax()` end's lit unit changes nothing** (§15 D941,
-    /// `[X6.3-L1-02]`): `minmax(200px, 1fr)`'s min `px` clicked, and the menu's
-    /// `px` — the lit row — clicked. The menu answered every row with the kind's
-    /// default, so the lit one wrote `minmax(100px, 1fr)`.
+    /// Picking a `minmax()` end's lit unit changes nothing.
     ///
-    /// **Flip run**, the `k != kind` filter deleted: fails on *"unchanged"*,
-    /// `minmax(100px, 1fr) 50px`, the predicted site.
+    /// flip: the `k != kind` filter deleted → fails at *"unchanged"*.
     #[test]
     fn picking_a_minmax_ends_lit_unit_changes_nothing() {
         let s = grid_with_columns("minmax(200px, 1fr) 50px");
@@ -5223,17 +4943,12 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
     }
 
-    /// **`0` typed over a keyword lands** (§15 D941, `[X6.3-L1-03]`):
-    /// `minmax(auto, 1fr)`'s min, reading `auto`, retyped `0` — CSS's
-    /// `minmax(0, 1fr)`, an `fr` column that may shrink below its content. The
-    /// hidden number under a keyword is 0, so a typed 0 never moved it and nothing
-    /// committed.
+    /// `0` typed over a keyword lands (`minmax(auto, 1fr)` becomes
+    /// `minmax(0, 1fr)`) although the hidden number under a keyword is already 0;
+    /// a letter typed over it writes nothing.
     ///
-    /// **Flip run**, the keystroke clause deleted: fails on *"minmax(0, 1fr)"*,
-    /// the template unchanged, the predicted site. And a letter typed over the
-    /// keyword writes nothing: the first cut counted any keystroke, and `x` then
-    /// wrote the hidden 0 as `0px` — `arch-scribe`'s reading, measured; the clause
-    /// accepting any character fails on *"a letter is no number"*.
+    /// flip: the keystroke clause deleted → fails at *"minmax(0, 1fr)"*; the clause
+    /// accepting any character → fails at *"a letter is no number"*.
     #[test]
     fn zero_typed_over_a_keyword_lands() {
         let s = grid_with_columns("minmax(auto, 1fr)");
@@ -5254,9 +4969,8 @@ mod tests {
         );
     }
 
-    /// **A grid item's card has its lines and self-alignments where a flex item's
-    /// has grow, shrink and basis** (§15 D920), and **a line is typed as CSS**:
-    /// `a`'s column start retyped `2` and its end `span 2` land as
+    /// A grid item's card has its lines and self-alignments in place of flex's rows,
+    /// and a line is typed as CSS: a column start `2` and end `span 2` land as
     /// `2 / span 2`.
     #[test]
     fn a_grid_items_lines_are_typed_as_css() {
@@ -5266,7 +4980,7 @@ mod tests {
         p.app.session.selection.set(vec![a]);
         p.run("Grid column");
         // A glyph combo's label and face are one galley; `auto` reads what the
-        // container's items row resolves to, `normal` (§15 D915).
+        // container's items row resolves to, `normal`.
         p.run("Justify selfAuto · Normal");
         let out = p.frame(Vec::new());
         assert!(
@@ -5295,15 +5009,11 @@ mod tests {
         ondin_core::container::tracks_css(&grid_of(app, id).columns)
     }
 
-    /// **A track row's grip drops its entry in the slot it is let go over, as one
-    /// undo step** (§15 D920, which pinned `reordered`'s arithmetic alone): the
-    /// first of `100px 1fr`'s grips dragged below the second row's middle lands
-    /// it last, `1fr 100px`, and the insertion line is drawn while the button is
-    /// held and gone once it is let go.
+    /// A track row's grip drops its entry in the slot it is let go over, as one undo
+    /// step; the insertion line is drawn while the button is held and gone after.
     ///
-    /// **Flip run**, the list's `released |= grip.drag_stopped()` dropped — the
-    /// release no longer reaching the commit: fails on *"dropped last"* with the
-    /// list as it was, the predicted site.
+    /// flip: the list's `released |= grip.drag_stopped()` dropped → fails at
+    /// *"dropped last"*.
     #[test]
     fn a_track_rows_grip_drag_reorders_the_list() {
         let s = grid_scene();
@@ -5323,15 +5033,11 @@ mod tests {
         assert!(!reorder_line(&p.shapes()), "and gone with the drag");
     }
 
-    /// **A grip drag let go where no grip saw it is over, and draws nothing
-    /// later** (§15 D920's amendment, read and not tested until now): a drag
-    /// begun on a grip, the selection changed to an item with the button still
-    /// down and let go there, and the frame selected again — then a press on
-    /// nothing at all draws no insertion line and reorders nothing.
+    /// A grip drag let go where no grip saw it (the selection changed mid-drag) draws
+    /// no insertion line and reorders nothing on a later press.
     ///
-    /// **Flip run**, the clean-up's `remove::<TrackDrag>` dropped: fails on *"no
-    /// line follows a later press"*, the stale drag's line drawn under the new
-    /// press — the predicted site, and the symptom `arch-scribe` read.
+    /// flip: the clean-up's `remove::<TrackDrag>` dropped → fails at *"no line
+    /// follows a later press"*.
     #[test]
     fn a_grip_drag_let_go_elsewhere_draws_nothing_later() {
         let s = grid_scene();
@@ -5361,15 +5067,13 @@ mod tests {
         assert_eq!(columns_css(&p.app, frame_id), "100px 1fr", "nothing moved");
     }
 
-    /// **A refusal stays under the CSS line only while the line reads what was
-    /// refused, and only until the field is engaged again** (§15 D920's
-    /// amendment): `100` refused, then a `+` changes the list and the reason
-    /// goes; refused again, then the field clicked into, and it goes too.
+    /// A refusal stays under the CSS line only while the line reads what was refused
+    /// and until the field is engaged again.
     ///
-    /// **Flip runs**: `refusal` answering whatever was stored, the `about ==
-    /// shown` test dropped, fails on *"a `+` makes it about a list that is gone"*;
-    /// `css_field`'s removal on `gained_focus` dropped fails on *"gone once the
-    /// field is engaged again"* — each the predicted site.
+    /// flip: `refusal` answering whatever was stored (the `about == shown` test
+    /// dropped) → fails at *"a `+` makes it about a list that is gone"*;
+    /// `css_field`'s removal on `gained_focus` dropped → fails at *"gone once the
+    /// field is engaged again"*.
     #[test]
     fn a_refusal_lasts_until_the_list_or_the_field_moves_on() {
         const WHY: &str = "100 needs a unit: px, % or fr";
@@ -5396,18 +5100,14 @@ mod tests {
         );
     }
 
-    /// **A grid item's resize receipt outlines the row it names** (§15 D922) — `a`
-    /// set to `justify-self: stretch` by hand, then resized narrower: the
-    /// commit holds it with `start`, the receipt says *"justify self"*, and the
-    /// Item card strokes the Justify self row in the accent and not the Align
-    /// self row. Until D922 there was **no receipt at all** — `growth_held` read
-    /// grow, shrink and `align-self` and not `justify-self`, the one grid holds a
-    /// width with — and the row was not outlined had there been one; flex's
-    /// align-self row always was (§15 D880).
+    /// A grid item's resize receipt outlines the row it names: a `justify-self:
+    /// stretch` item resized narrower is held with `start`, the receipt says
+    /// *"justify self"*, and the Justify self row is stroked in the accent, not the
+    /// Align self row.
     ///
-    /// **Flip runs**: `grid_item_rows` handed `[false, false]` fails on *"the
-    /// justify row outlined"*; `growth_held`'s `justify_self` term dropped, as
-    /// the code was, fails on *"a receipt"* — each the predicted site.
+    /// flip: `grid_item_rows` handed `[false, false]` → fails at *"the justify row
+    /// outlined"*; `growth_held`'s `justify_self` term dropped → fails at *"a
+    /// receipt"*.
     #[test]
     fn a_grid_items_resize_receipt_outlines_the_row_it_names() {
         let mut s = grid_scene();
@@ -5456,23 +5156,15 @@ mod tests {
         assert!(!outlined(row("Align self")), "and not the align row");
     }
 
-    /// **The *Min / max* summary does not read "All auto" over a selection one
-    /// item of which has a limit** (`[X6.2-L1-04]`) — `b` given `min-width:
-    /// 100px`, `a` none: `a` alone reads *All auto*, `b` alone *1 set*, and the
-    /// two together neither (they read *Mixed*, which is not asserted: other
-    /// fields of the card say *Mixed* too). The summary counted the first item's
-    /// limits only, and `a` is always first, in document order.
+    /// The *Min / max* summary counts every item: it does not read "All auto" over a
+    /// selection one item of which has a limit, and a shared count is not a shared
+    /// summary — one limit each, but different ones, reads neither *1 set* nor
+    /// *All auto*; the same limit at different values reads *1 set*. (*Mixed* is not
+    /// asserted: other fields say it too.)
     ///
-    /// **And a shared count is not a shared summary** (§15 D948): `a` given a
-    /// max height, so each item has one limit set — a different one — and the
-    /// two together read neither *1 set* nor *All auto*. Given the **same**
-    /// limit at another value (`a`'s min width 60), they read *1 set*, the
-    /// values left to the fields to call mixed.
-    ///
-    /// **Flip runs**: the count read off `items.first()` again fails on *"not
-    /// All auto over both"*; the summary shared by count rather than by pattern
-    /// fails on *"one limit each, but not the same one"* — each the predicted
-    /// site.
+    /// flip: the count read off `items.first()` → fails at *"not All auto over
+    /// both"*; the summary shared by count rather than pattern → fails at *"one
+    /// limit each, but not the same one"*.
     #[test]
     fn the_limits_summary_counts_every_item() {
         let mut s = scene();
@@ -5503,15 +5195,11 @@ mod tests {
         );
     }
 
-    /// **A receipt over two items held at opposite ends names both values**
-    /// (`[X6.3-L1-04]`) — `a` and `b` set to `justify-self: stretch`, then in one
-    /// commit `a` narrowed from its right edge and `b` from its left: the commit
-    /// holds `a` with `start` and `b` with `end`, and the card says *"justify self
-    /// to start / end"*. It read `receipt.first()`'s value alone — *"to
-    /// start"* — naming nothing of `b`'s.
+    /// A receipt over two items held at opposite ends (`start` and `end`) names both
+    /// values: *"justify self to start / end"*.
     ///
-    /// **Flip run**, `values` keeping only its first item's value: fails on
-    /// *"both values named"* — the predicted site.
+    /// flip: `values` keeping only its first item's value → fails at *"both values
+    /// named"*.
     #[test]
     fn a_receipt_over_items_held_at_opposite_ends_names_both() {
         let mut s = grid_scene();
@@ -5570,20 +5258,15 @@ mod tests {
         );
     }
 
-    /// **A grid item holding `baseline` across reads *Baseline · Start*, and its
-    /// list lights a row saying so** (§15 D923) — `a`'s `justify-self: baseline`,
-    /// carried from a file, which the justify rows do not offer: a grid treats it
-    /// as `start` on its inline axis. The face names what is held and what is
-    /// drawn; opened, the list has a row reading the same, and that row is the
-    /// selected one. **And `align-self: baseline` reads *Baseline*** — the block
-    /// axis draws it, so the align rows offer and name it plainly (§15 D939); this
-    /// test held it on the align row until then, on taffy's TODO's word.
+    /// A grid item holding `justify-self: baseline` (carried from a file; a grid
+    /// treats it as `start` on its inline axis) reads *Baseline · Start*, and its
+    /// list lights a row saying so. `align-self: baseline` reads plain *Baseline*,
+    /// the block axis drawing it.
     ///
-    /// **Flip runs**: `glyph_combo`'s held row dropped fails at *"a row for
-    /// \"Baseline · Start\""*; `items_name`'s `baseline` arm dropped fails at the
-    /// face, no run reading *Justify selfBaseline · Start* — each the predicted
-    /// site. The align row's `align_items_name` arm dropped fails at *"Align
-    /// selfBaseline"*.
+    /// flip: `glyph_combo`'s held row dropped → fails at *"a row for \"Baseline ·
+    /// Start\""*; `items_name`'s `baseline` arm dropped → fails at the face, no run
+    /// reading *Justify selfBaseline · Start*; the align row's `align_items_name`
+    /// arm dropped → fails at *"Align selfBaseline"*.
     #[test]
     fn a_held_baseline_in_a_grid_reads_as_start_on_a_lit_row() {
         let mut s = scene();
@@ -5643,16 +5326,13 @@ mod tests {
         p.click(row);
     }
 
-    /// **A list CSS does not accept is refused under the line, with CSS's
-    /// reason, and writes nothing** (`track_list`'s `is_valid` gate, the release
-    /// review's `[X6.3-L6-01]`): `minmax(1fr, 1fr)` parses — and an `fr` minimum
-    /// is one CSS refuses. Without the gate it reached the operation, which
-    /// refused it too, but as the status line's *Edit failed* with nothing under
-    /// the field.
+    /// A list CSS does not accept (`minmax(1fr, 1fr)` parses, but an `fr` minimum is
+    /// refused) is refused under the line with CSS's reason and writes nothing
+    /// (`track_list`'s `is_valid` gate).
     ///
-    /// **Flip run**, the gate's `is_valid()` forced `true`: fails on *"the reason,
-    /// under the line"*, 0 against 1 — the predicted site; the list and the undo
-    /// depth hold either way, the document refusing it a second time.
+    /// flip: the gate's `is_valid()` forced `true` → fails at *"the reason, under the
+    /// line"*; the list and undo depth hold either way, the document refusing it a
+    /// second time.
     #[test]
     fn a_list_css_does_not_accept_is_refused_under_the_line() {
         const WHY: &str = "CSS does not accept that list";
@@ -5667,13 +5347,11 @@ mod tests {
         assert_eq!(p.runs(WHY).len(), 1, "the reason, under the line");
     }
 
-    /// **A number typed into a track keeps the track's kind** (`track_fields`,
-    /// `[X6.3-L6-01]`): `100px 1fr`'s `1` retyped `3` is `3fr`, and its `100`
-    /// retyped `120` is `120px` — the unit beside each field is the kind's, and
-    /// typing changes the number under it.
+    /// A number typed into a track (`track_fields`) keeps the track's kind: `1`
+    /// retyped `3` is `3fr`, `100` retyped `120` is `120px`.
     ///
-    /// **Flip run**, the typed number always landing as `TrackBreadth::Px`: fails
-    /// on *"still a share"*, `100px 3px` — the predicted site.
+    /// flip: the typed number always landing as `TrackBreadth::Px` → fails at *"still
+    /// a share"*.
     #[test]
     fn a_track_number_typed_keeps_the_tracks_kind() {
         let s = grid_scene();
@@ -5686,17 +5364,13 @@ mod tests {
         assert_eq!(columns_css(&p.app, frame_id), "120px 3fr", "still a length");
     }
 
-    /// **Each `minmax()` field writes its own end** (`track_fields`,
-    /// `[X6.3-L6-01]`): `minmax(100px, 1fr)`'s minimum retyped `150`, then its
-    /// maximum `2` — `minmax(150px, 2fr)`, each end the one its field shows.
+    /// Each `minmax()` field (`track_fields`) writes its own end.
     ///
-    /// **Flip run**, the ends' `to` closure reading `!is_min`: fails on *"the
-    /// minimum"* — the predicted site — but at `minmax(100px, 100px)`, not the
-    /// predicted `minmax(100px, 150px)`. The field reads its number back through
-    /// the valve's preview, which under the flip moved the maximum and left the
-    /// minimum at 100, so the committing frame held 100 again — read from the
-    /// code, not instrumented. (The same flip also fails
-    /// `zero_typed_over_a_keyword_lands`, whose `auto` is a minimum too.)
+    /// flip: the ends' `to` closure reading `!is_min` → fails at *"the minimum"*
+    /// with `minmax(100px, 100px)`: the field reads its number back through the
+    /// valve's preview, which moved the maximum, so the committing frame held 100
+    /// again (read from the code, not instrumented). The same flip also fails
+    /// `zero_typed_over_a_keyword_lands`.
     #[test]
     fn a_minmax_field_writes_its_own_end() {
         let s = grid_with_columns("minmax(100px, 1fr)");
@@ -5717,12 +5391,10 @@ mod tests {
         );
     }
 
-    /// **A `repeat()`'s count and its track each take what is typed into them**
-    /// (`track_fields`, `[X6.3-L6-01]`): `repeat(2, 1fr)`'s count retyped `3`,
-    /// then its track's `1` retyped `2` — `repeat(3, 2fr)`.
+    /// A `repeat()`'s count and its track each take what is typed into them
+    /// (`track_fields`): `repeat(2, 1fr)` becomes `repeat(3, 2fr)`.
     ///
-    /// **Flip run**, the count's commit writing `repeat: *repeat` (the count it
-    /// had): fails on *"the count"*, `repeat(2, 1fr)` — the predicted site.
+    /// flip: the count's commit writing `repeat: *repeat` → fails at *"the count"*.
     #[test]
     fn a_repeats_count_and_track_take_what_is_typed() {
         let s = grid_with_columns("repeat(2, 1fr)");
@@ -5735,16 +5407,12 @@ mod tests {
         assert_eq!(columns_css(&p.app, frame_id), "repeat(3, 2fr)", "the track");
     }
 
-    /// **Each of the grid Container's picks writes the property it names, and
-    /// nothing else** (`grid_container_rows`, `[X6.3-L6-01]`): *Column* on the
-    /// auto-flow row, then *Center* from each of the four alignment combos — each
-    /// step asserted against the whole grid, the one field changed. No test had
-    /// picked any of them.
+    /// Each of the grid Container's picks (`grid_container_rows`) writes the
+    /// property it names and nothing else, each step asserted against the whole grid.
     ///
-    /// **Flip runs**, each failing at its own step, the predicted site: the
-    /// auto-flow cell writing `Row` whatever was clicked fails on *"auto-flow"*;
-    /// the *Justify items* pick writing `align_items` fails on
-    /// *"justify-items"*.
+    /// flip, each failing at its own step: the auto-flow cell writing `Row` whatever
+    /// was clicked → fails at *"auto-flow"*; the *Justify items* pick writing
+    /// `align_items` → fails at *"justify-items"*.
     #[test]
     fn each_grid_container_pick_writes_the_property_it_names() {
         let s = grid_scene();
@@ -5770,14 +5438,10 @@ mod tests {
         assert_eq!(grid_of(&p.app, frame_id), want, "align-content");
     }
 
-    /// **A grid item's two self-alignments each write their own axis**
-    /// (`grid_item_rows`, `[X6.3-L6-01]`): *End* picked from *Justify self* sets
-    /// `justify-self` and leaves `align-self` unset; *Center* from *Align self*
-    /// then sets `align-self` and leaves `justify-self` at `end`.
+    /// A grid item's two self-alignments (`grid_item_rows`) each write their own axis
+    /// and leave the other alone.
     ///
-    /// **Flip run**, the two picks' writes swapped (*Justify self* writing
-    /// `align_self` and *Align self* `justify_self`): fails on *"justify-self takes
-    /// it"*, `(None, Some(End))` — the predicted site.
+    /// flip: the two picks' writes swapped → fails at *"justify-self takes it"*.
     #[test]
     fn a_grid_items_self_picks_write_their_own_axis() {
         let s = grid_scene();
@@ -5803,15 +5467,12 @@ mod tests {
         );
     }
 
-    /// **A gap binds through the Container card, and a number typed over its chip
-    /// detaches it** (§15 D1058): `--` typed into the *Column gap* field opens
-    /// the list for that field; bound to `space/4` (8), the row lays `b` out 8
-    /// after `a` and the field is the chip, its CSS name gone; a 6 typed over the
-    /// chip and `Enter` leave the gap 6 and unbound.
+    /// A gap binds through the Container card, and a number typed over its chip
+    /// detaches it: `--` opens the list for the field, a bound field is the chip
+    /// with its CSS name gone, and a typed 6 leaves the gap 6 and unbound.
     ///
-    /// Flip, run: `gap_row` without its `bound_field_ui` arm fails at
-    /// `p.run("space/4")` — *no run reads "space/4"*, the plain field drawn over a
-    /// 0 literal.
+    /// flip: `gap_row` without its `bound_field_ui` arm → fails at
+    /// `p.run("space/4")`.
     #[test]
     fn a_gap_binds_through_the_container_card_and_detaches_when_typed_over() {
         use super::super::binding::{COLUMN_GAP, FieldKey, Retype};

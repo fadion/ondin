@@ -1,18 +1,14 @@
-//! The rules a document's components and instances must satisfy (§5.3d, §15 D978).
+//! The rules a document's components and instances must satisfy (§5.3d).
 //!
-//! An instance is a **linked copy**: its nodes are ordinary stored nodes, each
-//! carrying [`crate::Node::link`] — the node it was copied from, one level up. A
-//! main component is a frame or group with [`crate::Node::component`] set. That
-//! link is the first reference from one node to another — a guide's owner, the
-//! only earlier cross-reference, runs from a guide to a node — and §15 D405
-//! declined one for exactly the semantics it owes. It is held to
-//! account the way the owner is (§15 D491): [`check`] runs after the last op of
-//! every transaction in `Document::apply`, and on load.
+//! An instance is a linked copy: its nodes are ordinary stored nodes, each
+//! carrying [`crate::Node::link`], the node it was copied from one level up. A
+//! main component is a frame or group with [`crate::Node::component`] set.
+//! [`check`] runs after the last op of every transaction in `Document::apply`,
+//! and on load.
 //!
-//! **What this module does not do** is keep instances in step with their mains —
-//! that is the commit-time pass (§5.3d, build step 3). Under compare-values
-//! (§15 D979 (a)) a value an instance holds is never *invalid*, only an override,
-//! so nothing here compares values: the rules are all about structure and links.
+//! Keeping instances in step with their mains is the commit-time pass, not this
+//! module. A value an instance holds is never invalid, only an override, so the
+//! rules here are all about structure and links.
 
 use crate::document::Document;
 use crate::id::NodeId;
@@ -42,9 +38,9 @@ pub enum LinkRule {
     /// A main component contains, at some depth, an instance of itself.
     ComponentCycle,
     /// A swap on a node that is not a nested copy inside an outer instance, or
-    /// naming something that is not a main of the node's own kind (§15 D983).
+    /// naming something that is not a main of the node's own kind.
     Swap,
-    /// A variant or component-property rule (§15 D982).
+    /// A variant or component-property rule.
     Variant(crate::variant::VariantRule),
 }
 
@@ -68,23 +64,21 @@ impl std::fmt::Display for LinkRule {
 /// Check every component rule over `nodes`, answering the first node that breaks
 /// one and the rule it broke.
 ///
-/// **Free when the document has no components**: one pass to find that no node is
-/// a main or linked, and nothing else — so the post-condition costs an ordinary
-/// document one scan beside the clone `apply` already makes.
+/// Free when the document has no components: one scan to find that no node is a
+/// main or linked.
 ///
 /// The rules, in the terms of §5.3d:
 /// - every link resolves, and not to the node itself;
 /// - `component` only on an `Artboard` or a `Group`, never with a link, and never
 ///   beneath a main or a linked node;
-/// - an **instance root** is a linked node whose source is a main, or whose source
+/// - an instance root is a linked node whose source is a main, or whose source
 ///   is itself an instance root (a nested instance copied with its outer main); a
 ///   link chain must end at a main;
-/// - every linked node **except one linked straight to a main** belongs to the
+/// - every linked node except one linked straight to a main belongs to the
 ///   nearest instance root above it, and its source lies strictly inside that
 ///   root's source; within one instance, no two such nodes share a source. A
-///   nested copy's root is held to this like a member — only a link to a main
-///   itself (an instance, or a local instance inside another) is placed freely;
-///   a **swapped** root's source, for its members, is its swap (§15 D983);
+///   nested copy's root is held to this like a member; a swapped root's source,
+///   for its members, is its swap;
 /// - a swap sits only on a nested copy inside an outer instance (`swap::can_swap`)
 ///   and names a main of the copy's own kind;
 /// - no main contains, at any depth, an instance of a main it shows — through
@@ -163,12 +157,10 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
         if is_root(n) {
             main_of(n.id)?;
         }
-        // **Only a link straight to a main is placed freely** — an instance, or a
-        // local instance inside some other instance. A nested copy's root (linked
-        // to an instance root inside an outer main) belongs to the instance around
-        // it like any member: it was copied with that main, and a layer elsewhere
-        // linked to the nested instance inside main B would otherwise pass
-        // anywhere, and two of them could share it.
+        // Only a link straight to a main is placed freely. A nested copy's root
+        // (linked to an instance root inside an outer main) belongs to the
+        // instance around it like any member; otherwise a layer elsewhere linked
+        // to a nested instance would pass anywhere, and two could share it.
         if nodes[&src].component {
             continue;
         }
@@ -176,10 +168,8 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
             .filter_map(|a| nodes.get(&a))
             .find(|a| is_root(a))
             .ok_or((n.id, LinkRule::Membership))?;
-        // A swapped root's members are copies of its swap's nodes (§15 D983) —
-        // and of what its slot adds of its own: a layer the outer main put into
-        // the slot carries across a swap (§15 D1003 (3)), still following the
-        // slot — a nested instance among them ([`slot_adds`]).
+        // A swapped root's members are copies of its swap's nodes, and of what its
+        // slot adds of its own, nested instances included ([`slot_adds`]).
         let root_src = root.swap.or(root.link).expect("an instance root is linked");
         let slot_own = root.swap.is_some() && root.link.is_some_and(|l| slot_adds(nodes, l, src));
         if !inside(src, root_src) && !slot_own {
@@ -206,9 +196,9 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
     Ok(())
 }
 
-/// Each main → the mains **shown** by the instances inside it, at any depth below
-/// it and itself excluded (`swap::shown_main`: a swap counts, the chain it
-/// replaces does not) — the graph a component cycle is a cycle in.
+/// Each main → the mains shown by the instances inside it, at any depth below it
+/// and itself excluded (`swap::shown_main`: a swap counts, the chain it replaces
+/// does not) — the graph a component cycle is a cycle in.
 pub(crate) fn uses(nodes: &FxHashMap<NodeId, Node>) -> FxHashMap<NodeId, Vec<NodeId>> {
     let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
     let mut uses: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
@@ -228,7 +218,7 @@ pub(crate) fn uses(nodes: &FxHashMap<NodeId, Node>) -> FxHashMap<NodeId, Vec<Nod
 /// Whether `n` is an instance root: linked to a main, or to an instance root —
 /// equivalently, its chain of links ends at a main. A member's chain ends at an
 /// unlinked node inside a main instead, which is how the two are told apart.
-/// A swap does not change the answer: the link still names the slot (§15 D983).
+/// A swap does not change the answer: the link still names the slot.
 pub(crate) fn is_instance_root(nodes: &FxHashMap<NodeId, Node>, n: &Node) -> bool {
     let mut at = n;
     for _ in 0..=nodes.len() {
@@ -243,18 +233,15 @@ pub(crate) fn is_instance_root(nodes: &FxHashMap<NodeId, Node>, n: &Node) -> boo
     false
 }
 
-/// Whether `src` — the source of a layer inside a **swapped** copy whose slot is
-/// `slot` — is a layer the slot adds of its own (§15 D1003 (3)): inside the
-/// slot, and copying nothing of the main the slot shows, its chain of content
-/// sources (`swap::content_source`) never landing there. That is
-/// `variant::rewrite`'s own test for what a swap keeps (`Base::of_node`), so
-/// [`check`] and [`settle_links`] admit exactly the layers the rewrite left.
+/// Whether `src` — the source of a layer inside a swapped copy whose slot is
+/// `slot` — is a layer the slot adds of its own: inside the slot, and copying
+/// nothing of the main the slot shows, its chain of content sources
+/// (`swap::content_source`) never landing there. That is `variant::rewrite`'s own
+/// test for what a swap keeps (`Base::of_node`), so [`check`] and [`settle_links`]
+/// admit exactly the layers the rewrite left.
 ///
-/// **Not "linked to nothing"**, which is what this asked until a nested instance
-/// the outer main dropped into the slot — or a group holding one — came out of
-/// every swap refused `Membership` by `check` or, where `settle_links` ran, cut
-/// to plain layers: its source is an instance root, linked to its own main, and
-/// the rewrite had kept its copy (D983's amendment building D1003 (3)).
+/// A slot-added layer may itself be linked (a nested instance, or a group holding
+/// one), so "linked to nothing" is the wrong test.
 pub(crate) fn slot_adds(nodes: &FxHashMap<NodeId, Node>, slot: NodeId, src: NodeId) -> bool {
     let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
     let inside = |id: NodeId, outer: NodeId| {
@@ -284,14 +271,10 @@ pub(crate) fn slot_adds(nodes: &FxHashMap<NodeId, Node>, slot: NodeId, src: Node
 /// already walked from an earlier start, and not on this path, has nothing new
 /// below it.
 ///
-/// **An explicit stack, not recursion** (`[R1-L2-04]`). This runs on every load
-/// and every `Document::apply`, and a crafted file can make the graph as long as
-/// it has mains while its tree stays two levels deep — under
-/// `io::MAX_TREE_DEPTH`, which bounds only the recursion the loader knew about.
-/// Recursing once per main overflowed the stack, and a stack overflow is an
-/// abort, not a panic: nothing catches it (§15 D416's rule, by a new axis). The
-/// path is a set for the same reason the walk is a loop — `path.contains` made
-/// the old search quadratic in the chain's length as well.
+/// An explicit stack, not recursion: this runs on every load and apply, and a
+/// crafted file can make the graph as long as it has mains while its tree stays
+/// under `io::MAX_TREE_DEPTH`. A stack overflow aborts, and nothing catches it.
+/// The path is a set so the search is not quadratic in the chain's length.
 fn reaches_itself(
     start: NodeId,
     uses: &FxHashMap<NodeId, Vec<NodeId>>,
@@ -334,8 +317,7 @@ pub fn can_be_main(doc: &Document, id: NodeId) -> bool {
 
 /// Why a layer cannot be made a main component — in place ([`why_not_main`]) or
 /// wrapped in a new frame first ([`why_not_wrap`]) — so a menu row and the chord
-/// can say *which* rule, rather than one sentence standing for all of them
-/// (`[X11.2-L2-05]`).
+/// can say which rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotMain {
     /// The layer is missing, or is not a frame or a group (in place only — the
@@ -346,25 +328,20 @@ pub enum NotMain {
     /// It sits inside a main or an instance — or, for a wrap, the parent the new
     /// frame would be made in is one or sits in one: `LinkRule::NestedMain`.
     Inside,
-    /// It is an instance root (§15 D1003 (12): detach it first).
+    /// It is an instance root (detach it first).
     Instance,
     /// It is a set, or holds a main or a set: making it a main nests that main
     /// (`LinkRule::NestedMain`) or that set (`VariantRule::SetKind`).
     Holds,
-    /// It would be a variant of a set whose variants are another kind (§15 D1003
-    /// (5): one kind per set).
+    /// It would be a variant of a set whose variants are another kind (one kind
+    /// per set).
     SetKind,
 }
 
-/// Why `id` could not be made a main component **in place**, or `None` when it
-/// can — [`check`]'s own rules, and `variant::check`'s, asked ahead so a menu row
-/// can say so rather than the commit refusing.
-///
-/// 🚨 **The subtree is asked too** (`[X2-L2-01]`). This read the node and its
-/// ancestors only, so a page frame holding a main — the common "Components"
-/// frame — passed, and *Create component* on it was refused at the commit as
-/// `NestedMain`; a frame holding a set the same way as `SetKind`. Its own doc
-/// promised the commit's rules, and the commit asks the whole tree.
+/// Why `id` could not be made a main component in place, or `None` when it can —
+/// [`check`]'s own rules, and `variant::check`'s, asked ahead so a menu row can
+/// say so rather than the commit refusing. The subtree is asked too, as the
+/// commit asks the whole tree.
 pub fn why_not_main(doc: &Document, id: NodeId) -> Option<NotMain> {
     let nodes = doc.node_map();
     let Some(n) = nodes.get(&id) else {
@@ -394,16 +371,14 @@ pub fn why_not_main(doc: &Document, id: NodeId) -> Option<NotMain> {
     None
 }
 
-/// [`why_not_main`] for *Create component*'s **wrap**: `members` framed where
-/// they stand (`build::frame`) and the frame made the main. `None` when the
-/// commit will take it.
+/// [`why_not_main`] for *Create component*'s wrap: `members` framed where they
+/// stand (`build::frame`) and the frame made the main. `None` when the commit
+/// will take it.
 ///
 /// The new frame is made in the members' parent, so that parent — not a member —
-/// is what must not be or sit in a main or an instance (`[X2-L2-01]`: a rect
-/// inside a main, or a local layer inside an instance, was offered the row and
-/// refused at the commit; two members of one instance the same, X11.2's note),
-/// and no member may hold a main or a set. Members with no one parent answer
-/// `None` here and are `build::frame`'s to refuse, with its own error.
+/// must not be or sit in a main or an instance, and no member may hold a main or
+/// a set. Members with no one parent answer `None` and are `build::frame`'s to
+/// refuse.
 pub fn why_not_wrap(doc: &Document, members: &[NodeId]) -> Option<NotMain> {
     let nodes = doc.node_map();
     let parent = members
@@ -453,15 +428,13 @@ fn holds_main_or_set(doc: &Document, id: NodeId) -> bool {
 
 /// Whether `parent` can take `moved` as a child under the component and variant
 /// rules — the half of "can this land here" that `build::can_parent`, a question
-/// about two kinds, cannot see (`[X2-L2-02]`, §15 D876's *"every place that says
-/// in advance what `apply` will accept has to ask them too"*). False when:
+/// about two kinds, cannot see. False when:
 ///
 /// - `moved` is or holds a main or a set and `parent` is or sits in a main or an
 ///   instance — `LinkRule::NestedMain`, `VariantRule::SetKind`;
 /// - `moved` is or holds a set and `parent` is or sits in a set — `SetKind`;
 /// - `moved` is a main, `parent` a set, and the set's variants are another kind
-///   (§15 D1003 (5): one kind per set — refused at this door, never at the
-///   loader);
+///   (one kind per set — refused at this door, never at the loader);
 /// - `moved` holds an instance whose shown main is the main `parent` sits in, or
 ///   one that reaches it through instances — `LinkRule::ComponentCycle`.
 ///
@@ -473,9 +446,8 @@ pub fn can_hold(doc: &Document, parent: NodeId, moved: NodeId) -> bool {
     let Some(m) = nodes.get(&moved) else {
         return false;
     };
-    // **Staying is never refused**: whatever a layer already in `parent` breaks,
-    // it already breaks — and a variant of a mixed set the loader admitted (D1003
-    // (5)) would otherwise leave its set on a nudge.
+    // Staying is never refused: a variant of a mixed set the loader admitted
+    // would otherwise leave its set on a nudge.
     if m.parent == Some(parent) {
         return true;
     }
@@ -550,11 +522,8 @@ pub fn instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
 /// Every instance of `main` in the document — each instance root whose chain of
 /// links ends at it, nested copies included — in id order.
 ///
-/// **Never one inside the vault** (§15 D1023, the kits QA review's finding): a
-/// kit main nesting `main` holds a copy of it there, which no one can see, pick
-/// or edit. Iterating the node map met it, so *Select all instances* put a vault
-/// node in the selection — an inspector edit then writing into a vendored main —
-/// and every count of a main's instances counted it.
+/// Never one inside the vault: a kit main nesting `main` holds a copy there that
+/// no one can see, pick or edit, and it must not be selected or counted.
 pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
     let nodes = doc.node_map();
     let mut out: Vec<NodeId> = nodes
@@ -568,33 +537,30 @@ pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
     out
 }
 
-/// The main an instance root **shows**: its chain of links' end, or the swap
-/// that takes the chain's place where one sits on it (§15 D983,
-/// `swap::shown_main`) — what *Instance of*, *Select all instances*, *Go to main*
-/// and the properties an instance offers all mean by its main.
+/// The main an instance root shows: its chain of links' end, or the swap that
+/// takes the chain's place where one sits on it (`swap::shown_main`) — what
+/// *Instance of*, *Select all instances*, *Go to main* and the properties an
+/// instance offers all mean by its main.
 pub fn main_of(doc: &Document, root: NodeId) -> Option<NodeId> {
     crate::swap::shown_main(doc.node_map(), root)
 }
 
-/// Links into `gone` **climb past it**: every node `among` admits whose link
-/// names a node in `gone` is relinked to the first source above that is not in
-/// `gone`, or cut when there is none.
+/// Links into `gone` climb past it: every node `among` admits whose link names a
+/// node in `gone` is relinked to the first source above that is not in `gone`, or
+/// cut when there is none.
 ///
-/// The one rule behind every way a link's target disappears (§5.3d's *"one rule
-/// for every way a link is cut"*):
-/// - **deleting a main** (§15 D979 (c)): its instances' own links climb to
-///   nothing, so they detach and keep their look, while a nested instance copied
-///   with them climbs to *its* main and stays an instance;
-/// - **deleting a node inside a main**: each counterpart is cut loose and kept as
-///   the instance's own layer (or climbs, when the deleted child was itself a
-///   nested copy, to the nested main's node — the first bullet's case), so instance-side work is never destroyed by an
-///   edit to the main — until build step 4 can tell an untouched counterpart from
-///   a changed one, which is when the untouched ones start being deleted with it;
-/// - **detaching** ([`detach`]) is the same climb, past the instance's own main.
+/// The one rule behind every way a link's target disappears (§5.3d):
+/// - deleting a main: its instances' own links climb to nothing, so they detach
+///   and keep their look, while a nested instance copied with them climbs to its
+///   own main and stays an instance;
+/// - deleting a node inside a main: each counterpart is cut loose and kept as the
+///   instance's own layer (or climbs, when the deleted child was itself a nested
+///   copy), so instance-side work is never destroyed by an edit to the main;
+/// - detaching ([`detach`]) is the same climb, past the instance's own main.
 ///
-/// **A swapped copy lands by `swap::landed`** (§15 D983): one whose climb ends at a
-/// main, or at nothing, becomes an instance of the main it shows. And a swap
-/// naming a main in `gone` is cleared.
+/// A swapped copy lands by `swap::landed`: one whose climb ends at a main, or at
+/// nothing, becomes an instance of the main it shows. A swap naming a main in
+/// `gone` is cleared.
 pub fn relink_past(
     doc: &Document,
     gone: &FxHashSet<NodeId>,
@@ -628,8 +594,8 @@ pub fn relink_past(
                 },
             ]
         } else {
-            // A swap made on what it climbs past is its to carry (`[X5-L1-01]`),
-            // unless that main goes too.
+            // A swap made on what it climbs past is its to carry, unless that
+            // main goes too.
             crate::swap::land_ops_through(doc, n, to, met.filter(|s| !gone.contains(s)))
         };
         ops.dedup();
@@ -641,8 +607,7 @@ pub fn relink_past(
 }
 
 /// The ops that keep every link valid when the subtrees under `deleted` go — the
-/// [`relink_past`] the Delete verb owes (§15 D979 (c)). Empty in a document with
-/// no instances.
+/// [`relink_past`] the Delete verb owes. Empty in a document with no instances.
 pub fn relink_for_delete(doc: &Document, deleted: &[NodeId]) -> Vec<Operation> {
     let gone: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, deleted)
         .into_iter()
@@ -650,19 +615,17 @@ pub fn relink_for_delete(doc: &Document, deleted: &[NodeId]) -> Vec<Operation> {
     relink_past(doc, &gone, |id| !gone.contains(&id))
 }
 
-/// **Detach** the instance rooted at `root`: it becomes ordinary layers that keep
+/// Detach the instance rooted at `root`: it becomes ordinary layers that keep
 /// their current look (§5.3d).
 ///
 /// The root and every node that belongs to it are cut loose. A nested instance
-/// inside it is not detached with it: its links climb past this instance's main
-/// to the nested main's own nodes ([`relink_past`]), so it stays an instance of
-/// that main. Links to anything else — a local instance of some other main —
-/// are left alone. `None` when `root` is not an instance root.
+/// inside it stays an instance of its own main: its links climb past this
+/// instance's main to the nested main's nodes ([`relink_past`]). Links to
+/// anything else are left alone. `None` when `root` is not an instance root.
 ///
-/// A **swapped** root (§15 D983) is detached from what it shows: its members are
-/// copies of its swap's nodes, so those are the links cut, and its own link and
-/// swap both go. A swapped copy nested inside it lands by `swap::landed` — an
-/// instance of what it shows.
+/// A swapped root is detached from what it shows: its members are copies of its
+/// swap's nodes, so those are the links cut, and its own link and swap both go. A
+/// swapped copy nested inside it lands by `swap::landed`.
 pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
     let nodes = doc.node_map();
     let r = nodes.get(&root)?;
@@ -721,37 +684,32 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
     Some(Transaction(ops))
 }
 
-/// The links a transaction's **structural** edits owe (§5.3d), so that no door
-/// that moves, deletes or regroups layers has to know about components. A
-/// commit-time pass, `build::keep_insets`' shape: `EditorSession::commit_inner`
-/// runs it over every transaction.
+/// The links a transaction's structural edits owe (§5.3d), so that no door that
+/// moves, deletes or regroups layers has to know about components.
+/// `EditorSession::commit_inner` runs it over every transaction.
 ///
 /// The transaction is applied to a scratch copy (`Document::apply_unchecked`) and
 /// the tree it leaves is asked two things:
-/// - **links into deleted nodes climb past them** ([`relink_past`]'s rule) — the
+/// - links into deleted nodes climb past them ([`relink_past`]'s rule) — the
 ///   Delete verb does this itself, but `build::ungroup`, *Flatten*, *Outline* and
 ///   text-on-a-new-path delete nodes too, and an ungrouped main is a deleted main;
-/// - **every linked node still belongs to its instance**: an instance root above
-///   it whose source contains its source, and no other node of that instance on
-///   the same source. What fails is cut — a layer dragged out of its instance, the
-///   members of an instance whose root an ungroup dissolved — except a nested copy
-///   whose outer instance lost its link in this edit, which climbs past its source
-///   as [`detach`] climbs it (`[X2-L2-03]`), carrying a swap on a node it passes
-///   (`swap::land_ops_through`, §15 D983's amendment building D1003 (3)–(5)).
-///   Asked top-down, so a cut nested root cuts its members; and where two nodes
-///   of one instance share a source, **the one the transaction did not touch
-///   keeps it**.
+/// - every linked node still belongs to its instance: an instance root above it
+///   whose source contains its source, and no other node of that instance on the
+///   same source. What fails is cut, except a nested copy whose outer instance
+///   lost its link in this edit, which climbs past its source as [`detach`] does,
+///   carrying a swap on a node it passes (`swap::land_ops_through`). Asked
+///   top-down, so a cut nested root cuts its members; where two nodes of one
+///   instance share a source, the one the transaction did not touch keeps it.
 ///
-/// A link straight to a main is placed anywhere, as [`check`] allows. Empty for
-/// a document with no links or a transaction with no structural op.
+/// A link straight to a main is placed anywhere, as [`check`] allows. Empty for a
+/// document with no links or a transaction with no structural op.
 ///
-/// **And the swaps it leaves** (§15 D983, `swap::tidy`): a climb lands a swapped
-/// copy by `swap::landed`, and once the links are settled a swap that no longer
-/// stands — its main gone, its node no longer linked, or linked straight to a
-/// main — is cleared or turned into the link it stands for. Asked before the
-/// membership below, which reads a swapped root's members against its swap. A
-/// transaction that only writes links or swaps — a detach, a reset — asks this
-/// too where the document holds a swap.
+/// It also settles the swaps it leaves (`swap::tidy`): once the links are settled
+/// a swap that no longer stands — its main gone, its node no longer linked, or
+/// linked straight to a main — is cleared or turned into the link it stands for.
+/// That runs before the membership pass, which reads a swapped root's members
+/// against its swap, and also for a transaction that only writes links or swaps
+/// where the document holds a swap.
 pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     let before = doc.node_map();
     let structural = tx.0.iter().any(|op| {
@@ -880,8 +838,8 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             let src = nodes[&id].link.expect("filtered to linked nodes");
             let root =
                 std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
-            // A swapped root's members are copies of its swap's nodes (§15 D983),
-            // or of a layer its slot adds of its own (§15 D1003 (3), as `check`).
+            // A swapped root's members are copies of its swap's nodes or of a
+            // layer its slot adds, as in `check`.
             let root_src = |r: NodeId| nodes[&r].swap.or(nodes[&r].link).expect("a root is linked");
             let slot_own = |r: NodeId| {
                 nodes[&r].swap.is_some() && nodes[&r].link.is_some_and(|l| slot_adds(nodes, l, src))
@@ -907,19 +865,14 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             break;
         }
     }
-    // **A nested copy whose outer instance this edit detached climbs, as
-    // `detach` climbs it** (`[X2-L2-03]`): an ungrouped main is a deleted main,
-    // and deleting one leaves the nested instances inside its instances
-    // instances of their own main — but on an ungroup the nested source survives
-    // (lifted out), nothing climbed, and the membership cut them to plain layers.
-    // Only where the copy's outer root is still around it and lost its link here:
-    // a nested copy the user moved out of its instance is still cut. **The walk
-    // is `detach`'s, swap and all** (`swap::climb`, `land_ops_through`): a copy
-    // following a swap made one link up — `r3` copying `r2`, swapped to Heart
-    // inside the group main — climbs past `r2` and takes its swap, or it lands
-    // showing Star while its layers, climbing on past `r2`'s, link to Heart's and
-    // `check` refuses the ungroup as `Membership`. It landed with `land_ops` in
-    // `c84a940` (§15 D983's amendment building D1003 (3)–(5)).
+    // A nested copy whose outer instance this edit detached climbs, as `detach`
+    // climbs it: on an ungroup the nested source survives (lifted out), so
+    // nothing climbed and the membership cut it to plain layers. Only where the
+    // copy's outer root is still around it and lost its link here; a nested copy
+    // the user moved out of its instance is still cut. The walk is `detach`'s,
+    // swap and all (`swap::climb`, `land_ops_through`): a copy following a swap
+    // made one link up must take that swap, or it shows the wrong main while its
+    // layers link elsewhere and `check` refuses the ungroup as `Membership`.
     let detached: Vec<NodeId> = {
         let mut v: Vec<NodeId> = cut.iter().copied().collect();
         v.sort();
@@ -970,7 +923,7 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     for id in cut {
         ops.push(Operation::SetLink { id, link: None });
         // A swapped copy cut loose is plain layers, as an unswapped one is: its
-        // members are cut with it (§15 D983).
+        // members are cut with it.
         if nodes.get(&id).is_some_and(|n| n.swap.is_some()) {
             ops.push(Operation::SetSwap { id, swap: None });
         }
@@ -978,9 +931,8 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     ops
 }
 
-/// How a copy of a **main** lands (§15 D979 (e)): as an instance of it, which is
-/// what copy and paste, duplicate and Alt-drag do, or as a new main — *Duplicate
-/// as component*.
+/// How a copy of a main lands: as an instance of it, which is what copy and
+/// paste, duplicate and Alt-drag do, or as a new main — *Duplicate as component*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MainCopy {
     Instance,
@@ -989,20 +941,19 @@ pub enum MainCopy {
 
 /// Settle the links of `copy` — `template` run through `remap_subtree`, index for
 /// index — for where it is about to land in `doc`. Answers whether the copy became
-/// an **instance** of the main it was copied from.
+/// an instance of the main it was copied from.
 ///
 /// - A copy of a main in this document becomes an instance of it under
 ///   [`MainCopy::Instance`]: every copied node links to the node it was copied
-///   from, and the copy is not itself a main. Its names stay the main's (§15
-///   D981), which is why the caller skips the copy-numbering then.
+///   from, and the copy is not itself a main. Its names stay the main's, which is
+///   why the caller skips the copy-numbering then.
 /// - Otherwise links are settled one at a time. A link `remap_subtree` pointed
 ///   inside the copy stays (a main copied with its instance). A link to a node not
-///   in this document is dropped — a paste from another document (§15 D979 (d)).
-///   An instance root's link stays: its copy is a new instance of the same source.
-///   **A member's link stays only if its instance root came along**; a member
-///   copied on its own becomes the copy's own layer, which is what keeps a
-///   duplicate inside its own instance from claiming its original's source
-///   (`LinkRule::SharedSource`).
+///   in this document is dropped (a paste from another document). An instance
+///   root's link stays: its copy is a new instance of the same source. A member's
+///   link stays only if its instance root came along; a member copied on its own
+///   becomes the copy's own layer, which keeps a duplicate inside its own
+///   instance from claiming its original's source (`LinkRule::SharedSource`).
 pub(crate) fn settle_copy(
     doc: &Document,
     template: &[Node],
@@ -1042,28 +993,22 @@ pub(crate) fn settle_copy(
         }
         let keep = nodes.contains_key(&link) && (is_instance_root(nodes, t) || root_above(t));
         if !keep {
-            // **A dropped link takes the swap with it** (`[X5-L1-04]`): a swapped
-            // copy whose slot is not here lands as an instance of what it shows
-            // when that main is (`swap::landed`), and as plain layers when it is
-            // not. The swap was left for `settle_links`' tidy, which a document
-            // holding no link before the paste never reaches — and `check`
-            // refused a plain copy and paste.
+            // A dropped link takes the swap with it: a swapped copy whose slot is
+            // not here lands as an instance of what it shows when that main is
+            // (`swap::landed`), else as plain layers. `settle_links`' tidy is not
+            // reached for a document holding no link before the paste.
             (c.link, c.swap) = crate::swap::landed(doc, c, None);
             if c.link.is_none() {
                 c.swap = None;
             }
         }
     }
-    // A **nested instance copied on its own** — its root linked to the nested copy
+    // A nested instance copied on its own — its root linked to the nested copy
     // inside some outer main, with no outer instance coming along — belongs to no
-    // instance where it lands, so it climbs one level up, `detach`'s rule for a
-    // nested instance: its root and its members relink past that nested copy to
-    // the nested main's own nodes, and it lands as a plain instance of that main.
-    //
-    // **Every such nested instance in the copy, not only one at its root**
-    // (`[X2-L1-03]`): Ctrl+D of a member group holding a nested instance left the
-    // instance's frame cut and its children still linked members — a half-linked
-    // copy — while the same nested copy copied alone climbed.
+    // instance where it lands, so it climbs one level up, `detach`'s rule: its
+    // root and members relink past that nested copy to the nested main's own
+    // nodes. This covers every such nested instance in the copy, not only one at
+    // its root, or a member group holding one lands half-linked.
     let climbers: Vec<&Node> = template
         .iter()
         .filter(|t| {
@@ -1104,7 +1049,7 @@ pub(crate) fn settle_copy(
                 }
             }
             // A swapped copy landing alone is an instance of what it shows
-            // (§15 D983, `swap::landed`); its members already link there.
+            // (`swap::landed`); its members already link there.
             (c.link, c.swap) = crate::swap::landed(doc, c, to);
         }
     }

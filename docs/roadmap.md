@@ -5,57 +5,6 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
-## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
-
-**Where it stands (2026-10-22):** comments are **3.8 MB of the 12.8 MB of Rust (29.5% by
-bytes, 17.5% by lines)**, down from 49% by bytes; D-number citations appear about 2,100 times.
-By crate: `ondin-app` 26%, `ondin-core` 34%, `ondin-render` 35%, `ondin-export` 33%.
-
-The twelve heaviest `ondin-app` and core files have had two passes; a second pass cuts 20–30%
-of a file's comment bytes, and what is left is one-line reasons. The first pass chose files by
-comment *lines*, which missed files whose comments are few but long. What is left, heaviest
-first:
-- Integration tests never trimmed: core `tests/build.rs`, `tests/io.rs`, `tests/resolve.rs`,
-  `ondin-export/tests/svg.rs`, `ondin-render/tests/overrides.rs` (35–40% each).
-- Core sources never trimmed: `container.rs`, `kit.rs`, `variant.rs` (34–43%).
-- Core sources with one pass, still 34–41% by bytes: `document.rs`, `typography.rs`,
-  `image.rs`, `op.rs`.
-
-Select by comment bytes, not lines:
-`for f in $(git ls-files 'crates/*.rs'); do awk -v f=$f '/^[[:space:]]*\/\//{b+=length($0)+1} {t+=length($0)+1} END{printf "%d %d %s\n",b/1024,b*100/t,f}' $f; done | sort -rn`.
-
-**Why:** an agent reading code pays for every comment line. Much of that prose was the same
-history the docs had: amendment trails, "found in session N", flip-check write-ups, §15
-citation chains and counts that have gone stale. The comments are read far more often than the
-docs.
-
-**The rule to apply** is `AGENTS.md`'s *Code comments*, in force for new comments since
-2026-10-20. For the trim, one addition: an existing `§15 D<n>` citation may stay as a bare
-pointer when the archived reasoning matters; otherwise drop it.
-
-**How:**
-- One agent per file, or per line range for the files over ~500 KB. Disjoint files, so several
-  can run at once.
-- **`Edit` only.** No script rewrites, per CLAUDE.md. `doc-run-guard` flags any doc comment an
-  edit carries off its item.
-- Comment-only changes. Each batch runs `cargo fmt`, `cargo check --all-targets`, the doc gate
-  (`--document-private-items`) and `cargo test`, then commits per crate or per large file.
-- Order: most comment bytes first. Files under ~250 comment lines go several to an agent.
-  Files that are mostly one-line docs on constants, variants and fields (`theme.rs`,
-  `preview.rs`, core `node.rs`) sit at 34–41% by lines and have little left to cut.
-- One agent per file at a time: two in one file break each other's exact-match edits. A range
-  of ~6,000 lines is one agent; the next starts at the item the last one names.
-- Agents must not write a `flip:` claim they have not run, and must report a stated flip the
-  test cannot reach. They do not move docs; they report a doc sitting on the wrong item, and
-  the orchestrator moves it.
-- rustfmt pulls a one-line `//` between array elements onto the element above; keep such a
-  comment two lines long or delete it.
-- The comment-only check: strip `^\s*//` lines from `HEAD` and from the file, `diff` the two,
-  and drop blank-only hunks. A removed trailing comment shows up as a code-line change.
-
-**Cost:** about 150–250k Sonnet tokens per agent at ~1,000 comment lines each. Target: comments
-down to about 15–20% of the source by bytes.
-
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

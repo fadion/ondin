@@ -1,29 +1,19 @@
-//! The half of the library that does **not** travel: what this machine knows
-//! about documents it has opened (§15 D366).
+//! The half of the library that does not travel: what this machine knows about
+//! documents it has opened (§15 D366).
 //!
-//! **The dividing line is "would you expect this on your other laptop".** The
-//! name, the project and the creation date would, so they live in the document
-//! (`ondin_core::meta`) inside a base folder the user can point at a sync
-//! client. *Last opened* would not — "recent" means recent *here*, and a file
-//! somebody else touched on another machine appearing at the top of this one's
-//! Recent list would be a bug rather than a feature.
+//! The dividing line is "would you expect this on your other laptop". The name,
+//! project and creation date would, so they live in the document
+//! (`ondin_core::meta`); *last opened* would not, since "recent" means recent here.
 //!
-//! So this lives beside the font cache in [`crate::machine_dir::root`] —
-//! `dirs::cache_dir()/ondin`, except on Windows, where that folder is the
-//! installer's and this one is `OndinData` (§15 D969).
+//! It lives beside the font cache in [`crate::machine_dir::root`]
+//! (`dirs::cache_dir()/ondin`; `OndinData` on Windows, §15 D969).
 //!
-//! ⚠️ **It is *local*, and that is not the same as disposable** — this paragraph
-//! said it was, and [`LocalIndex::load`] used to be written on that argument.
-//! Deleting it loses the ordering of the Recent list, which refills as documents
-//! are opened, **and every star on the machine**, which does not: a star is
-//! something a person did, nothing else records it, and no amount of using the
-//! app brings one back. That is why the read reports an unreadable file
-//! ([`LocalIndex::unreadable`]) instead of collapsing it into "no file".
+//! Local is not disposable: deleting it loses the Recent order, which refills,
+//! and every star on the machine, which nothing else records. So the read reports
+//! an unreadable file ([`LocalIndex::unreadable`]) instead of treating it as
+//! "no file".
 //!
-//! ⚠️ **Keyed on the document id, not the path.** A path key goes stale the first
-//! time a document is renamed — which the dashboard makes a one-click action —
-//! and the entry it leaves behind would keep a document in Recent under a name
-//! that no longer exists.
+//! Keyed on the document id, not the path, which goes stale on rename.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -37,43 +27,28 @@ pub struct LocalIndex {
     pub opened: HashMap<String, u64>,
     /// The documents starred here, by id.
     ///
-    /// ⚠️ **Per-machine, which is a choice and may be the wrong one.** A star
-    /// reads as a fact about the *document*, so a user with a synced library
-    /// will reasonably expect it on their other laptop. It is here anyway
-    /// because the alternative is a field in `DocumentMeta`, which makes
-    /// starring rewrite the whole `.ondin` — a 12 MB write and a sync upload for
-    /// one click on a star. Worth revisiting if the two ever stop being the only
-    /// options.
+    /// Per-machine by choice: a star reads as a fact about the document, but the
+    /// alternative is a field in `DocumentMeta`, so starring would rewrite the
+    /// whole `.ondin` and re-upload it through a sync client.
     pub starred: std::collections::HashSet<String>,
-    /// The last few search queries typed here, newest first.
-    ///
-    /// Local without an argument: a search is something a person did at a
-    /// keyboard, not a property of the library. Nothing sweeps it — unlike
-    /// [`Self::opened`] and [`Self::starred`], a stale query is a *string* and
-    /// refers to nothing that could have been deleted.
+    /// The last few search queries typed here, newest first. Never swept: a
+    /// stale query is a string that refers to nothing.
     pub recent_searches: Vec<String>,
     /// For each document, the kits it inserted from here, most recent first —
-    /// the insert picker's *last use* order (§5.3e, 3E; §15 D1014).
-    ///
-    /// Local for `opened`'s reason: "the kit I used last" is what this machine's
-    /// hand did, and a sync client would carry another laptop's habits in. Keyed
-    /// on the *document*, since the order is the picker's in that document.
+    /// the insert picker's last-use order (§5.3e, 3E; §15 D1014). Local for
+    /// `opened`'s reason.
     pub kit_use: HashMap<String, Vec<String>>,
     /// For each document, the kit versions its update notice was told *Later*
-    /// for — the notice does not nag again for those, and a newer publish grows
-    /// it back (§5.3e, 5C; §15 D1016). Local for [`Self::kit_use`]'s reason.
+    /// for; a newer publish brings the notice back (§5.3e, 5C; §15 D1016).
     pub kit_later: HashMap<String, HashMap<String, u32>>,
     /// Set when `library.json` exists but could not be read (§15 D418).
     ///
-    /// ⚠️ **A latch on writing, the same one
-    /// [`super::state::Library::projects_unreadable`] is** — and it is here
-    /// because the argument the module head made for *not* having one was wrong
-    /// about which fields this file holds. With this set, the app has an empty
-    /// index and a file on disk that is not empty, so the next `save` would
-    /// finish what the corruption started. Every write checks it; see
+    /// A latch on writing, like [`super::state::Library::projects_unreadable`]:
+    /// the app runs on an empty index while the file on disk is not empty, so the
+    /// next `save` would finish what the corruption started. See
     /// [`Self::save_to`].
     ///
-    /// `#[serde(skip)]`: it is a fact about *this* read, never a stored one.
+    /// `#[serde(skip)]`: a fact about this read, never stored.
     #[serde(skip)]
     pub unreadable: bool,
 }
@@ -81,23 +56,13 @@ pub struct LocalIndex {
 impl LocalIndex {
     /// Read it, or an empty one — recording which of the two it was.
     ///
-    /// ⚠️ **This file used to argue it needed no three-way read and the
-    /// argument was wrong**, in a way worth keeping because both halves of it
-    /// are still written in this module. `load`'s reasoning was *"this file is
-    /// derived and local; the worst an overwrite costs is a Recent list that has
-    /// forgotten"*; fourteen lines below it [`Self::save_to`] says *"nothing can
-    /// reconstruct which documents this machine has opened, so a torn index
-    /// silently loses the Recent list **and every star**"*. The second is right,
-    /// and the stars are exactly what the first omits — they are user intent,
-    /// not derived data, and nothing anywhere else records them.
+    /// An unreadable file sets [`Self::unreadable`] rather than collapsing into
+    /// "no file": stars are user intent, not derived data. Reading it as empty is
+    /// right, since the app must run; writing that emptiness back is what the
+    /// latch declines.
     ///
-    /// So an unreadable file now sets [`Self::unreadable`] rather than being
-    /// collapsed into "no file", and the *write* is what declines. Reading it as
-    /// empty is still correct: the app has to run, and an empty Recent list is a
-    /// survivable frame. What was not survivable was writing that emptiness back.
-    ///
-    /// Answers an empty index without looking when [`index_is_reachable`] says
-    /// the machine's file is off limits, which is what a test gets (§15 D807).
+    /// Answers an empty index without looking when [`index_is_reachable`] is
+    /// false, as under test (§15 D807).
     pub fn load() -> Self {
         if !index_is_reachable() {
             return Self::default();
@@ -105,10 +70,8 @@ impl LocalIndex {
         let Some(p) = path() else {
             return Self::default();
         };
-        // The folder moved off the Windows installer's root (§15 D969); an index
-        // written at the old spelling is carried across once, before the first
-        // read. One that is there and cannot be carried latches, the same as an
-        // unreadable file here would.
+        // An index at the old Windows root (§15 D969) is carried across once,
+        // before the first read; one that cannot be carried latches.
         if let Some(old) = crate::machine_dir::legacy_root().map(|r| r.join(FILE_NAME))
             && crate::machine_dir::adopt_legacy(&old, &p) == crate::machine_dir::Adopted::Blocked
         {
@@ -120,24 +83,15 @@ impl LocalIndex {
         Self::load_from(&p)
     }
 
-    /// [`Self::load`] against an explicit path, so the failure it is built
-    /// around can be driven by a test.
+    /// [`Self::load`] against an explicit path, so a test can drive its failures.
     ///
-    /// ⚠️ **`load` itself is untestable and that is the point of this pair.**
-    /// `path()` reads `dirs::cache_dir()` with no injection point, so a probe
-    /// driving `load` would read — and a probe driving `save` would *overwrite* —
-    /// the developer's own library index. §15 D370 exists because a test once
-    /// did exactly that to `prefs.json`, and §15 D807 because the suite was
-    /// doing it here: [`index_is_reachable`] is why a test now gets nothing out
-    /// of `load` and cannot write through `save` at all, and this pair is still
-    /// where every decision either of them makes is asserted.
+    /// `path()` has no injection point, so a test driving `load` or `save` would
+    /// read or overwrite the developer's own index (§15 D370, D807); every
+    /// decision either makes lives in this pair instead.
     pub fn load_from(path: &std::path::Path) -> Self {
         match std::fs::read(path) {
-            // No file yet is the ordinary state of a fresh install, and it is
-            // the one case where writing an empty index is right. Matched on the
-            // error *kind* rather than on a follow-up `exists()`, which is
-            // `Projects::read`'s idiom and avoids a second stat that can
-            // disagree with the first.
+            // No file is a fresh install, where writing an empty index is right.
+            // Matched on the error kind, not a follow-up `exists()` stat.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
             Err(_) => Self {
                 unreadable: true,
@@ -155,9 +109,8 @@ impl LocalIndex {
 
     /// Write it, ignoring failure.
     ///
-    /// ⚠️ **First line, before anything resolves a path**, which is
-    /// `Prefs::save`'s own shape and is load-bearing for the same reason: the
-    /// damage is silent and permanent. See [`index_is_reachable`] (§15 D807).
+    /// The reachability check stays the first line, before any path resolves, as
+    /// in `Prefs::save`: the damage is silent and permanent (§15 D807).
     pub fn save(&self) {
         if !index_is_reachable() {
             return;
@@ -168,16 +121,11 @@ impl LocalIndex {
 
     /// [`Self::save`] against an explicit path.
     ///
-    /// Atomic (`crate::atomic`, §15 D378). ⚠️ **A cache, and still not one of the
-    /// files that module exempts**: covers and font data are exempt because they
-    /// are *derived* — a torn one is regenerated from the document it came from —
-    /// and this is not. Nothing can reconstruct which documents this machine has
-    /// opened, so a torn index silently loses the *Recent* list and every star.
-    ///
-    /// Which is why it also refuses to write over a file it could not read: the
-    /// doors are ordinary — every `open_path`, every star, every duplicate, every
-    /// search — so without the latch a single half-synced file costs every star
-    /// on the machine at the first click after launch.
+    /// Atomic (`crate::atomic`, §15 D378): unlike covers and font data it is not
+    /// derived, so a torn index would lose the Recent list and every star. It
+    /// also refuses to write over a file it could not read; every open, star,
+    /// duplicate and search saves, so without the latch one half-synced file
+    /// costs every star at the first click.
     pub fn save_to(&self, path: &std::path::Path) {
         if self.unreadable {
             return;
@@ -199,15 +147,10 @@ impl LocalIndex {
 
     /// Whether this machine has recorded anything about this library.
     ///
-    /// **The witness that separates a fresh install from a library that has gone
-    /// missing** ([`super::state::Library::root_unavailable`]). Both show an
-    /// unreadable base folder and no documents; only one of them has a file here
-    /// saying that this computer has opened or starred something in it.
-    ///
-    /// Both sets, because either one alone is evidence: a user who has starred a
-    /// document and never re-opened it has an empty `opened` map, and one whose
-    /// stars were all on documents they have since deleted has an empty
-    /// `starred` set.
+    /// The witness that separates a fresh install from a library that has gone
+    /// missing ([`super::state::Library::root_unavailable`]): both show an
+    /// unreadable base folder and no documents, but only the latter has history
+    /// here. Both sets are checked, as either can be empty alone.
     pub fn is_empty(&self) -> bool {
         self.opened.is_empty() && self.starred.is_empty()
     }
@@ -226,68 +169,38 @@ impl LocalIndex {
 
     /// Drop entries for documents that no longer exist.
     ///
-    /// Called after a scan, with the ids that survived. Without it the map grows
-    /// for the life of the install — every document ever deleted keeps its row —
-    /// and since the key is an id there is nothing about a stale row to notice.
+    /// Called after a scan, with the ids that survived, so the maps do not grow
+    /// for the life of the install.
     pub fn retain_known(&mut self, live: &std::collections::HashSet<String>) {
         self.opened.retain(|id, _| live.contains(id));
-        // ⚠️ **The starred set is swept too, and it is the one that would rot
-        // silently.** An `opened` entry for a deleted document is invisible —
-        // nothing draws it. A `starred` one is invisible *and* comes back:
-        // restore the document from the trash and it is mysteriously starred
-        // again, months later, because nothing ever cleared the id.
+        // Starred is swept too: a stale id would silently re-star a document
+        // restored from the trash.
         self.starred.retain(|id| live.contains(id));
-        // A deleted document's kit order is unreachable; a deleted kit in a live
-        // document's order is harmless — the picker orders the kits it finds by
-        // it and ignores the rest — so only the documents are swept.
+        // A deleted kit in a live document's order is harmless (the picker
+        // ignores it), so only the documents are swept.
         self.kit_use.retain(|id, _| live.contains(id));
         self.kit_later.retain(|id, _| live.contains(id));
     }
 }
 
-/// Whether this process may resolve [`path`] at all — `false` under
-/// `cfg(test)`, which is the injection point this module said it did not have
-/// (§15 D807).
+/// Whether this process may resolve [`path`] at all: `false` under `cfg(test)`,
+/// so a test never reads or writes the developer's own `library.json` (§15 D807).
 ///
-/// 🚨 **Running the suite edited the developer's own *Recent searches*.**
-/// [`LocalIndex::save`] writes `dirs::cache_dir()/ondin/library.json` and
-/// [`LocalIndex::load`] reads it, and the app fixture redirects the **base
-/// folder**, which is a different knob — so anything driving the app reached the
-/// real file. The first run of `a_remembered_search_is_deduped_promoted_capped_and_shown`
-/// found its fixture already populated from a previous run, and the arrows test
-/// had been writing there for longer. §11's *"a test may not write outside the
-/// repository"* held here by test discipline rather than by construction.
-///
-/// **A `cfg!` rather than a flag set by a constructor, and the reason is
-/// [`super::state::Library::open`].** `Prefs::ephemeral` is a field because
-/// `Prefs` is built once, by the one function that knows a test's app is
-/// different; this index is built by `Library::open`, which **tests call
-/// directly after building the app** — `app.library = Library::open(root)` at
-/// two sites — so a field the constructor set would be silently discarded by the
-/// very fixture that needs it, and the second-cheapest answer (a process-wide
-/// flag stored by that constructor, `CLIPBOARD_OFF`'s spelling for §15 D798)
-/// would leave every `Library::open` in `library::state`'s own tests reading the
-/// machine's file until some *other* test in the binary happened to build an
-/// app first. A `cfg!` has no door to forget.
-///
-/// ⚠️ **What this does not cost is coverage, and that is the whole of why it is
-/// allowed to differ by profile.** [`LocalIndex::load`] and [`LocalIndex::save`]
-/// hold no behaviour beyond resolving [`path`]: every decision either one makes
-/// — the three-way read, the [`LocalIndex::unreadable`] write latch, the
-/// round trip — is in [`LocalIndex::load_from`] and [`LocalIndex::save_to`],
-/// which are `pub`, take a path and are asserted below. That is not true of the
-/// other two resources in this class, which is why neither took this answer:
-/// `prefs::Prefs`' latch test drives `save_to`, and `clipboard_gate_tests` has
-/// to open a *real* handle to prove the lock holds under eight threads.
+/// A `cfg!` rather than a flag set by a constructor, because tests call
+/// [`super::state::Library::open`] directly after building the app and would
+/// discard a flag the constructor set; a `cfg!` has no door to forget. It costs no
+/// coverage: [`LocalIndex::load`] and [`LocalIndex::save`] only resolve
+/// [`path`], and their decisions live in [`LocalIndex::load_from`] and
+/// [`LocalIndex::save_to`], which tests drive.
 fn index_is_reachable() -> bool {
     !cfg!(test)
 }
 
-/// The index's file name, in [`crate::machine_dir::root`] now and in its
-/// legacy root before §15 D969.
+/// The index's file name, in [`crate::machine_dir::root`] and in its legacy root
+/// before §15 D969.
 const FILE_NAME: &str = "library.json";
 
-/// Beside the font cache, which is the closest precedent for the path.
+/// Beside the font cache.
 fn path() -> Option<PathBuf> {
     Some(crate::machine_dir::root()?.join(FILE_NAME))
 }
@@ -297,34 +210,13 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    /// The machine's own `library.json` is out of reach from a test, and the two
-    /// functions that could resolve it both ask first (§15 D807).
+    /// The machine's own `library.json` is out of reach from a test (§15 D807).
+    /// It asserts the guard rather than performing the side effect; the second
+    /// assertion passes vacuously on a machine with no index, so the first holds.
     ///
-    /// ⚠️ **It asserts the guard and does not perform the side effect**, which is
-    /// `an_ephemeral_prefs_never_reaches_the_disk`'s rule and for the same
-    /// reason: a probe that called `save()` to prove the negative *is* the bug.
-    /// So the first assertion is where the decision is, and the second is the
-    /// only consequence that can be observed without writing.
-    ///
-    /// ⚠️ **The second assertion has teeth exactly where the defect was and is
-    /// vacuous on a clean box**, which is worth stating rather than hiding: on a
-    /// machine that has used the app — or has run this suite before the fix —
-    /// `load()` returns somebody's real Recent list, and here it must not. On a
-    /// fresh CI runner there is no file and an unguarded `load` answers `Default`
-    /// too. It can therefore false-*pass* and never false-fail, and the first
-    /// assertion is what holds when it does.
-    ///
-    /// **Flip-check, run** by deleting the `if !index_is_reachable()` from
-    /// `LocalIndex::load`: fails on the second assertion with
-    /// `["alp", "d", "alpha", "gamma", "beta"]` — this suite's own fixture
-    /// strings, read back out of the developer's cache directory, which is the
-    /// reported symptom itself rather than a stand-in for it. Deleting the guard
-    /// in `LocalIndex::save` instead leaves this green, by construction: the
-    /// only thing that would catch it is a write nobody may perform, so that
-    /// half rests on the first assertion and on the `cfg!`.
-    ///
-    /// (Plain backticks above, not `[links]` — §15 D319's convention inside a
-    /// `cfg(test)` module, which `cargo doc` cannot see at all.)
+    /// flip: delete the `if !index_is_reachable()` in `LocalIndex::load` → fails
+    /// at the second assertion on a machine with a real index. The same deletion
+    /// in `LocalIndex::save` leaves it green.
     #[test]
     fn the_machines_own_index_is_unreachable_from_a_test() {
         assert!(
@@ -342,34 +234,19 @@ mod tests {
     fn an_unopened_document_has_no_time_and_an_unfiled_one_asks_nothing() {
         let mut index = LocalIndex::default();
         assert_eq!(index.opened_at(Some("abc")), None);
-        // ⚠️ A document with no id at all — a pre-library file — must not panic
-        // or be confused with one that has never been opened under some empty
-        // key. `opened_at` takes an `Option` for exactly this.
+        // A pre-library document has no id; it must not panic or match an empty key.
         assert_eq!(index.opened_at(None), None);
         index.mark_opened("abc");
         assert!(index.opened_at(Some("abc")).is_some());
         assert_eq!(index.opened_at(None), None);
     }
 
-    /// An index that could not be read is **never written back over**.
+    /// An index that could not be read is never written back over. The bytes read
+    /// back are the assertion, not the flag; the control is a missing file, a
+    /// fresh install that must still write.
     ///
-    /// ⚠️ **The bytes are the assertion, not the flag.** What this is about is
-    /// that a half-synced or hand-broken `library.json` costs the user every
-    /// star on the machine at the first ordinary click after launch — every
-    /// `open_path`, star, duplicate and search calls `save` — so the test does
-    /// the whole round trip and then reads the file back, rather than asserting
-    /// that a boolean is set.
-    ///
-    /// Flip-check, run: removing the `if self.unreadable { return; }` from
-    /// `save_to` fails on the bytes assertion — the predicted site — with
-    /// `{"opened":{"doc-1":1788708912},"starred":["doc-1"],"recent_searches":[]}`
-    /// where `{not json` was. The `mark_opened`/`toggle_star` in between are what
-    /// make the flip bite *legibly*: without them the write would still happen
-    /// and the failure would read as an empty index rather than as a star that
-    /// replaced somebody's whole file.
-    ///
-    /// The control below is the other half: a **missing** file is a fresh
-    /// install, and writing an empty index over nothing is exactly right.
+    /// flip: remove the `if self.unreadable { return; }` in `save_to` → fails at
+    /// the bytes assertion.
     #[test]
     fn an_unreadable_index_is_not_overwritten_by_the_empty_one_it_produced() {
         let dir = std::env::temp_dir().join(format!("ondin-cache-{}", std::process::id()));
@@ -385,10 +262,7 @@ mod tests {
         index.mark_opened("doc-1");
         index.toggle_star("doc-1");
         index.save_to(&path);
-        // ⚠️ Compared as text, not as `Vec<u8>`. Under the flip a byte-slice
-        // comparison prints two rows of decimal numbers; this prints
-        // `{"opened":{"doc-1":…},"starred":["doc-1"],…}` against `{not json`,
-        // which is the loss itself.
+        // Compared as text so a failure prints the loss, not rows of decimals.
         assert_eq!(
             String::from_utf8_lossy(&std::fs::read(&path).unwrap()),
             String::from_utf8_lossy(corrupt),

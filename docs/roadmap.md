@@ -7,18 +7,22 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Next · Trim the code comments (the maintainer's call, 2026-10-20: the whole tree)
 
-**Where it stands (2026-10-22):** a first pass has covered every file that had more than ~60
-comment lines over 25%. Comments are **4.2 MB of the 13.2 MB of Rust (32% by bytes, 19% by
-lines)**, down from 49% by bytes; D-number citations appear about 2,700 times. Most of what is
-left is in the files trimmed first, which still hold 75–225 KB of comments each:
-`canvas.rs`, `panels/inspector.rs`, `app.rs`, `panels/typography.rs`, core `text.rs`,
-`dashboard.rs`, `ui.rs`, `tools/mod.rs`, core `build.rs` and `svg_in.rs`. Two files the first
-pass skipped carry the same weight: `panels/component.rs` and `panels/layout.rs`.
+**Where it stands (2026-10-22):** comments are **3.8 MB of the 12.8 MB of Rust (29.5% by
+bytes, 17.5% by lines)**, down from 49% by bytes; D-number citations appear about 2,100 times.
+By crate: `ondin-app` 26%, `ondin-core` 34%, `ondin-render` 35%, `ondin-export` 33%.
 
-A second pass is under way on those twelve. It cuts 20–30% of a file's comment bytes; past
-that, what is left is one-line reasons. Done: `canvas.rs`, `panels/inspector.rs`, `app.rs`,
-`panels/typography.rs`, `panels/dashboard.rs`, `ui.rs`, `tools/mod.rs`, core `build.rs`, core
-`text.rs` and `svg_in.rs`. Left: `panels/component.rs` and `panels/layout.rs`.
+The twelve heaviest `ondin-app` and core files have had two passes; a second pass cuts 20–30%
+of a file's comment bytes, and what is left is one-line reasons. The first pass chose files by
+comment *lines*, which missed files whose comments are few but long. What is left, heaviest
+first:
+- Integration tests never trimmed: core `tests/build.rs`, `tests/io.rs`, `tests/resolve.rs`,
+  `ondin-export/tests/svg.rs`, `ondin-render/tests/overrides.rs` (35–40% each).
+- Core sources never trimmed: `container.rs`, `kit.rs`, `variant.rs` (34–43%).
+- Core sources with one pass, still 34–41% by bytes: `document.rs`, `typography.rs`,
+  `image.rs`, `op.rs`.
+
+Select by comment bytes, not lines:
+`for f in $(git ls-files 'crates/*.rs'); do awk -v f=$f '/^[[:space:]]*\/\//{b+=length($0)+1} {t+=length($0)+1} END{printf "%d %d %s\n",b/1024,b*100/t,f}' $f; done | sort -rn`.
 
 **Why:** an agent reading code pays for every comment line. Much of that prose was the same
 history the docs had: amendment trails, "found in session N", flip-check write-ups, §15

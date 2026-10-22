@@ -25,12 +25,9 @@ pub fn nodes_in_view(res: &Resolved, view: Rect) -> Vec<NodeId> {
 /// divided by it, so a line is equally grabbable at 25% and at 400%, which no constant in
 /// world units can be. Pass `0.0` for an exact test.
 pub fn hit_test(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Vec<NodeId> {
-    // **The allowance widens the candidate query as well as the exact test**, and it has
-    // to: a horizontal line's cached bounds are a zero-height rectangle, so a point even
-    // slightly off it does not intersect them and the line never reaches the filter below
-    // that would have accepted it. Widening here only ever *adds* candidates — every one
-    // still has to pass its own geometry — so the cost is a few more point-in-shape tests
-    // and the exactness is unchanged.
+    // The allowance widens the candidate query too: a horizontal line's cached bounds
+    // are zero-height, so a point slightly off it would never reach the exact filter.
+    // Every added candidate still has to pass its own geometry.
     let point_area = Rect::new(p.x - slop, p.y - slop, p.x + slop, p.y + slop);
     let mut hits: Vec<NodeId> = res
         .candidates_intersecting(point_area)
@@ -45,23 +42,16 @@ pub fn hit_test(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Vec<Node
                 return false;
             };
             let local_p = world.inverse() * p;
-            // A boolean is hit-tested against its derived outline, which
-            // `contains_local` cannot build — it is a function of the subtree, not
-            // of the kind, so the cache is the only place it exists. Without this a
-            // boolean is unclickable on canvas and can only be selected from the
-            // layers tree.
-            // **Under the node's own rule** (§15 D239). An `Exclude` is even-odd and
-            // its outline is its operands concatenated, so a winding test would
-            // report every hole in it as a hit — the shape would be clickable
-            // precisely where it draws nothing.
+            // A boolean is tested against its derived outline, which only the
+            // `Resolved` cache holds (`contains_local` cannot build it), and under
+            // the node's own fill rule (§15 D239): an `Exclude` is even-odd, so a
+            // winding test would hit its holes.
             if let Some(path) = res.boolean_path(*id) {
                 return node.fill_rule().contains(path, local_p);
             }
-            // **And against its placeholder when there is no outline to test.** The
-            // grey cross is ink like any other, so it has to be clickable — a drawing
-            // you can see and cannot select is worse than the blank it replaced
-            // (§15 D298). `boolean_placeholder` is `None` for a boolean that is
-            // merely empty, so this adds a target exactly where one is drawn.
+            // With no outline, the failure placeholder is the target (§15 D298):
+            // `boolean_placeholder` is `None` for a merely empty boolean, so a
+            // target exists exactly where something is drawn.
             if let Some(b) = boolean_placeholder(doc, res, *id) {
                 return b.inflate(slop, slop).contains(local_p);
             }
@@ -96,99 +86,37 @@ pub fn bounds(res: &Resolved, id: NodeId) -> Option<Rect> {
 /// *through their own transforms*, so the result is a box that rotates with the
 /// group instead of the axis-aligned world union `Resolved` caches.
 ///
-/// That distinction is the whole reason this exists: a selection outline drawn
-/// from the world AABB of a rotated group is a rectangle the group does not
-/// have, and resize handles on it move axes the group does not own.
+/// A selection outline drawn from the world AABB of a rotated group would be a
+/// rectangle the group does not have. No stroke expansion: this is the geometry box
+/// the inspector's W/H reports and `resize_to_handle` edits.
 ///
-/// No stroke expansion. This is the *geometry* box — the one the inspector's
-/// W/H reports and the one `resize_to_handle` edits — so handles drawn from it
-/// land exactly where a drag will take them.
-///
-/// 🚨 **Uncached, and the chrome asks it fourteen times a frame — measured, not
-/// grepped** (§15 D741, `[S4.1-L4-08]`). Counting calls through one real
-/// `eframe::App::ui` frame on a headless app, with a 200-child group selected:
-/// **2,814 calls for 201 nodes, i.e. exactly 14.00 top-level asks**, each of which
-/// re-walks the whole subtree; **0 with nothing selected**. The asks are fourteen
-/// different functions across `canvas.rs`, `rulers.rs`, `inspector.rs` and
-/// `picker.rs`, so they are not a hoist away from being one.
-///
-/// ⚠️ **That multiplies the cost by fourteen and the finding's own ranking did not
-/// account for it.** `[S4.1-L4-08]` measured *one* call — 0.349 ms at 16,000
-/// children — and reasoned *"a fraction of a 16 ms frame, so this is ranked Low
-/// deliberately"*. Timed in `--release`, 20 reps, fourteen walks per frame:
-///
-/// ```text
-/// children   per frame
-///  1,000      0.169 ms
-///  4,000      0.789 ms
-/// 16,000      5.400 ms     <- a third of a 16 ms budget
-/// ```
-///
-/// **The finding predicted this correction and asked for it**: its confidence line
-/// reads *"medium on the per-frame total — the call sites were enumerated by grep,
-/// not driven through a headless frame… That is what would raise it."* It is
-/// raised. The fix it names is a new map on [`Resolved`], filled by the same
-/// children-before-parents pass as `world_bounds` — **not** derivable from that map,
-/// because a world AABB is not a local one for anything rotated, which is the
-/// distinction three paragraphs up.
-///
-/// 🚨 **Ruled on and declined** (§15 D778). The map is **not** built, and the two
-/// reasons are what a later reader needs before proposing it again. First, the
-/// number above is stale in the direction that matters: §15 D764 found
-/// `selection_handles` asking `preview_local_box` for its own box and then asking
-/// `preview_pivot`, which walks for the *same* box again — **eight of the fourteen
-/// asks were one repair**, so what is left is six, about 0.07 ms at 1,000
-/// children. Second, and this is the one that decides it, **the map answers the
-/// resting frame only**: `session::preview_local_box` re-walks the children itself
-/// whenever an override is live, so a cache buys nothing during a drag, which is
-/// the frame a user can feel. Against that it would add a seventh derived map that
-/// `update` has to keep equal to `rebuild` — §5.9 holds six and says the count is
-/// load-bearing — for a saving that is under the noise on any document this app
-/// has drawn.
-///
-/// ⚠️ **The trigger to revisit is written down rather than left to taste**: a real
-/// document with ~10k nodes under one selection, or a way to cache through the
-/// preview door. A number of milliseconds is not the trigger; the preview door is.
-///
-/// 🚨 **And the map would answer the *resting* frame only, which is not the frame
-/// that matters.** `session::preview_local_box` forwards here **only** when
-/// `overrides.is_empty()`; with a gesture live it re-walks the children itself, so
-/// every frame of a drag — exactly when the handles are moving and a budget is felt
-/// — would keep paying the walk. `arch-scribe` found that reading the brief against
-/// the code; the count above was taken **at rest** and the gesture figure is
-/// unmeasured. **So the fix is two doors, not one**, and a repair that does only the
-/// cached one would measure well on a still canvas and change nothing under the hand.
+/// Deliberately uncached (§15 D778): the chrome asks it a handful of times a frame,
+/// but `session::preview_local_box` re-walks the children itself whenever an
+/// override is live, so a cache would help only the resting frame, not a drag. A
+/// cache would also be a seventh derived map for `update` to keep equal to
+/// `rebuild` (§5.9 says the count of six is load-bearing). Revisit with a real
+/// document of ~10k nodes under one selection, or a way to cache through the
+/// preview door.
 pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     let node = doc.get(id)?;
-    // The **used** kind and, below, each child's **used** local (§15 D868): this
-    // is the box the handles and the W/H are drawn from, so it is the box that is
-    // drawn, not the one the user typed. It is also the box the resize tools edit
-    // *from*, and that is right (§15 D874): tools compute from where a layer is
-    // drawn, and `build::keep_insets` turns the result into insets for a pinned
-    // one. Step 1 read this as a split owed; step 2 decided there is none.
+    // The **used** kind and each child's **used** local (§15 D868): the box that is
+    // drawn, not the one the user typed. The resize tools edit from it too (§15
+    // D874), and `build::keep_insets` turns the result into insets for a pinned layer.
     if let Some(b) = geometry::local_bounds(res.used_kind(doc, id)?, res.text_layout(id)) {
         return Some(b);
     }
-    // **A group with a layout is the box its layout made** (§15 D869), not the
-    // union of what it holds — padding included, which the union cannot see.
+    // A group with a layout is the box its layout made (§15 D869), padding included.
     if let Some(s) = res.used_frame(id) {
         return Some(Rect::from_origin_size(kurbo::Point::ZERO, s));
     }
-    // **A boolean's box is its result's, not its operands'.** Falling through to the
-    // child union below would measure the shapes that were *consumed* — so a
-    // subtraction reported a box reaching out to wherever the subtracted circle
-    // happened to end, and the selection outline, the dimensions badge and every
-    // resize handle were placed against a rectangle the artwork does not have.
-    //
-    // Ahead of the child union rather than inside `local_bounds`, because this is
-    // the derived answer and `local_bounds` is a pure function of the kind.
+    // A boolean's box is its result's, not its consumed operands'. This sits ahead
+    // of the child union rather than in `local_bounds`, which is a pure function of
+    // the kind.
     if let Some(path) = res.boolean_path(id) {
         return (!path.is_empty()).then(|| path.bounding_box());
     }
-    // **Masked the same way `Resolved`'s world box is**, and it has to be: this
-    // is the box the selection outline and the resize handles are drawn from, so
-    // a container whose world box stopped at its mask and whose local box did not
-    // would draw handles in one place and snap to another.
+    // Masked the same way `Resolved`'s world box is, or handles and snap would
+    // disagree about where a masked container ends.
     let mut mask_box: Option<Rect> = None;
     node.children()
         .iter()
@@ -197,20 +125,14 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
             let local = res.used_local(doc, *c)?;
             let b = local_box(doc, res, *c).map(|b| geometry::transform_rect(local, b));
             if child.mask() {
-                // **Not `b`** — the same correction `Resolved`'s two bounds
-                // passes take (§15 D460): a mask *group* narrows its own box with
-                // its own inner mask, and clips with the un-narrowed union that
-                // `Resolved::mask_path` builds. Reading its own box here put the
-                // handles and the snap at a tenth of the artwork's size on the
-                // fixture `[S4.1-L2-01]` measured. Local rather than shared
-                // because this whole function is in the node's own space and
-                // `Resolved`'s helper is in world.
+                // Not `b` (§15 D460): a mask group narrows its own box with its
+                // inner mask but clips with the un-narrowed union that
+                // `Resolved::mask_path` builds. Local rather than shared because
+                // `Resolved`'s helper is in world space.
                 mask_box =
                     mask_extent_local(doc, res, *c).map(|m| geometry::transform_rect(local, m));
-                // **And nothing is contributed** (§15 D494), the third arm of the
-                // same correction: a mask is a clip, not an area. Returning `b`
-                // put a mask drawn larger than the artwork it passes into the
-                // container's own box, so the handles were drawn round emptiness.
+                // And nothing is contributed (§15 D494): a mask is a clip, not an
+                // area.
                 return None;
             }
             match mask_box {
@@ -223,10 +145,9 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
         .reduce(|a, b| a.union(b))
 }
 
-/// The box `id` **clips with** when it is a mask, in its own local space:
-/// `resolve::mask_parts` folded over [`local_box`]. Separate from the
-/// world-space fold because `local_box` works in the node's own space
-/// throughout, and composing the two would mean an inverse per child.
+/// The box `id` clips with when it is a mask, in its own local space:
+/// `resolve::mask_parts` folded over [`local_box`]. Separate from the world-space
+/// fold to avoid an inverse per child.
 fn mask_extent_local(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     match crate::resolve::mask_parts(doc, id)? {
         crate::resolve::MaskParts::Members(cs) => cs
@@ -240,24 +161,14 @@ fn mask_extent_local(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect>
     }
 }
 
-/// The box a boolean draws its **failure placeholder** in, in its own local
-/// space — or `None` for every boolean that is working, and every other kind.
+/// The box a boolean draws its failure placeholder in, in its own local space, or
+/// `None` for a working boolean and every other kind.
 ///
-/// `Some` exactly when [`Resolved::boolean_failed`] is, which is the distinction
-/// the whole placeholder rests on (§15 D298): a boolean whose operands genuinely
-/// cancel out draws nothing *correctly*, and putting a grey cross over that would
-/// mark a shape the user asked for as broken.
-///
-/// **The operands' union, because it is the only extent the node has left.** Its
-/// own outline is what failed, and unioning the operands to get a better one means
-/// running the arithmetic that just gave up. [`local_box`] already answers this —
-/// its boolean arm falls through to the child union when there is no cached
-/// outline — so this is that box with the failure test in front of it, and there
-/// is one construction of the box rather than one per renderer.
-///
-/// Asked by the scene walk, the hit test, `Resolved`'s own bounds and the SVG
-/// writer, so the drawing, the click target and the box the canvas culls against
-/// are the same rectangle by construction.
+/// `Some` exactly when [`Resolved::boolean_failed`] is (§15 D298): operands that
+/// genuinely cancel draw nothing correctly and get no cross. The box is the
+/// operands' union, [`local_box`]'s fallthrough when there is no cached outline.
+/// The scene walk, hit test, `Resolved`'s bounds and the SVG writer all ask it, so
+/// drawing, click target and cull box are one rectangle.
 pub fn boolean_placeholder(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     res.boolean_failed(id)
         .then(|| local_box(doc, res, id))
@@ -266,12 +177,10 @@ pub fn boolean_placeholder(doc: &Document, res: &Resolved, id: NodeId) -> Option
 
 /// Where `id`'s transforms pivot, in world space.
 ///
-/// The composition of [`local_box`], the node's own [`crate::Pivot`] and its
-/// world transform — spelled once so that core's own gestures ([`crate::build::flip`])
-/// and the app's ask the same question of the committed tree. The app's canvas
-/// answers it from the *preview* layer instead, so that dragging the marker and
-/// rotating about it both track a gesture in flight; that is the same three
-/// factors read from `EditorSession` rather than a second rule.
+/// The composition of [`local_box`], the node's own [`crate::Pivot`] and its world
+/// transform, so core's gestures ([`crate::build::flip`]) and the app ask the same
+/// question of the committed tree. The app's canvas reads the same three factors
+/// from the preview layer to track a gesture in flight.
 pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> {
     let node = doc.get(id)?;
     let local = local_box(doc, res, id)?;
@@ -283,40 +192,25 @@ pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> 
 /// given.
 ///
 /// This is what "clicking a grouped layer selects the group" needs: the hit test
-/// finds a leaf, and the picker has to decide how far back up to hand the
-/// selection. The run stops at the root, and at a frame with no group above it,
-/// because a group is the only container the user assembled by hand, and it is
-/// the only one they expect to move as a unit.
+/// finds a leaf and the picker decides how far up to hand the selection. The run
+/// stops at the root, and at a frame with no group above it, since a group is the
+/// only container the user assembled by hand.
 ///
-/// **A frame inside a group is a rung, not a stop** (§15 D876, the maintainer's
-/// ruling). A card that is a frame, in a row that is a group, is part of the row:
-/// a click on the card's text selects the row, the way it would if the card were a
-/// group. So a frame is walked *through* and kept on the chain as a level of its
-/// own — double-clicking the row steps in and lands on the card, the next steps
-/// into the card, and `Ctrl+Alt`'s "one level in" means the card. Only frames
-/// *outside* the outermost group are dropped, which is what keeps a top-level
-/// frame's contents as directly clickable as they always were: the chain that
-/// ends in frames ends before them.
+/// A frame inside a group is a rung, not a stop (§15 D876): a card frame in a row
+/// group is part of the row, so a click on its text selects the row and each
+/// double-click steps one level in. Only frames outside the outermost group are
+/// dropped, which keeps a top-level frame's contents directly clickable.
 ///
-/// **An instance root is a rung of its own, whatever its kind** (§15 D981 (b),
-/// the maintainer's ruling): a click on anything inside an instance selects the
-/// whole instance, as a click inside a group selects the group, and a
-/// double-click steps in. For an instance whose root is a frame that is an
-/// exception to §15 D22, not a change to it — every ordinary frame keeps its
-/// rule.
+/// An instance root is a rung of its own whatever its kind (§15 D981 (b)), an
+/// exception to §15 D22 only for instance roots.
 ///
-/// `inside` is the group the user has stepped into (Figma's double-click
-/// isolation): groups at or above it are not candidates, so a click inside picks
-/// something *within* it rather than re-selecting the whole thing. An `inside`
-/// that is not on the chain leaves the result unchanged, which is exactly the
-/// signal the caller needs to know the click landed outside and the isolation
-/// should end.
+/// `inside` is the group the user has stepped into: it and everything above are
+/// not candidates. An `inside` not on the chain leaves the result unchanged, which
+/// tells the caller the click landed outside and the isolation should end.
 pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<NodeId> {
-    // **Asked of the container the user stepped into, the answer is itself** —
-    // nothing above it is a candidate. Unreachable while `inside` was always a
-    // group, which a click never lands on; a frame stepped into is clicked on its
-    // background (§15 D876), and the walk from its parent would otherwise hand
-    // back the row it sits in.
+    // Asked of the container the user stepped into, nothing above it is a
+    // candidate; a stepped-into frame is clicked on its background (§15 D876), and
+    // the walk from its parent would otherwise hand back the row it sits in.
     if Some(id) == inside {
         return Vec::new();
     }
@@ -335,12 +229,10 @@ pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<No
         chain.push(c);
         cursor = node.parent();
     }
-    // Frames above the outermost group are not rungs: nothing above them was
-    // assembled by hand, so the chain ends where the last group does. Not when
-    // the walk stopped at `inside`, though — everything below the group the user
-    // stepped into is inside a group, frames included. **An instance is not a
-    // plain frame here** (§15 D981 (b)): it picks like a group whatever its kind,
-    // so a frame that is an instance root ends the trimming as a group does.
+    // Frames above the outermost group are not rungs, so the chain ends where the
+    // last group does, unless the walk stopped at `inside` (everything below it is
+    // inside a group). An instance root picks like a group (§15 D981 (b)) and ends
+    // the trimming.
     let nodes = doc.node_map();
     while !reached_inside
         && chain
@@ -358,19 +250,13 @@ fn is_frame(kind: &crate::node::NodeKind) -> bool {
     matches!(kind, crate::node::NodeKind::Artboard { .. })
 }
 
-/// The kinds [`group_chain`] walks *through* — the containers a click resolves
-/// upward past.
+/// The kinds [`group_chain`] walks through: the containers a click resolves upward
+/// past.
 ///
-/// A boolean behaves as a group here, and has to: its operands are not artwork on
-/// the page — nothing draws them (`scene::paint_node`) — so a click landing on one
-/// means the boolean, exactly as a click on a grouped layer means the group.
-/// Double-clicking still steps inside, which is how an operand gets edited.
-///
-/// A named function rather than the `matches!` that was inline in the loop (§15
-/// D668): it is one of six kind predicates in this crate that answer `false` for a
-/// variant nobody remembered to add, and an expression buried in a `while` was the
-/// one of the six no test could name. `node`'s matrix asserts the pair of sets it
-/// divides `NodeKind` into.
+/// A boolean behaves as a group: its operands are not drawn (`scene::paint_node`),
+/// so a click on one means the boolean; double-clicking still steps inside to edit
+/// an operand. A named function so `node`'s matrix can assert the sets it divides
+/// `NodeKind` into (§15 D668).
 pub(crate) fn steps_into(kind: &crate::node::NodeKind) -> bool {
     matches!(
         kind,
@@ -378,32 +264,22 @@ pub(crate) fn steps_into(kind: &crate::node::NodeKind) -> bool {
     )
 }
 
-/// Whether `id` is locked, **or sits anywhere inside something that is**.
+/// Whether `id` is locked, or sits anywhere inside something that is.
 ///
-/// **A locked group locks its contents.** That is what a lock on a container
-/// means rather than a convenience laid on top of it: a group is one thing to the
-/// hand that locked it, so nothing inside it is editable while it holds. Every
-/// refusal that protects a layer from being *changed* asks this, not
-/// [`crate::Node::locked`], which answers only about the node's own flag.
+/// A locked group locks its contents. Every refusal that protects a layer from
+/// being changed asks this, not [`crate::Node::locked`], which answers only about
+/// the node's own flag. Locked alone, deliberately: a hidden layer is still
+/// editable, since hiding says "do not draw" and locking says "do not change".
 ///
-/// **Locked alone, deliberately — a hidden layer is still editable.** The two
-/// flags travel together through [`is_effectively_interactable`] because a click
-/// needs both, and they are not the same question anywhere else: hiding a layer
-/// says "do not draw this", where locking it says "do not change this". A text
-/// layer switched off is still a text layer whose words can be fixed.
-///
-/// The two callers that must **not** use this are the lock control itself and its
-/// label: `ToggleLocked` writes the node's own flag, so a row reading this would
-/// offer *Unlock* on a layer whose own flag is already clear and then appear to do
-/// nothing. Those read [`crate::Node::locked`]; everything that refuses an *edit* reads
-/// this.
+/// The lock control and its label must read [`crate::Node::locked`] instead:
+/// `ToggleLocked` writes the node's own flag, so a row reading this would offer
+/// *Unlock* on a layer whose own flag is clear and appear to do nothing.
 pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool {
     let mut cursor = Some(id);
     while let Some(c) = cursor {
         let Some(node) = doc.get(c) else {
-            // A node that is not in the document cannot be edited either, and
-            // answering `false` here would hand a caller a licence rather than a
-            // refusal. The walk above stops at the root, whose parent is `None`.
+            // A node not in the document cannot be edited either; `false` would
+            // be a licence, not a refusal.
             return true;
         };
         if node.locked() {
@@ -428,20 +304,10 @@ pub fn is_within(doc: &Document, id: NodeId, ancestor: NodeId) -> bool {
 
 /// Whether a click at `p` (world) falls outside what masking leaves of `id`.
 ///
-/// Two things at once, and they are the same fact read from either end:
-///
-/// - **A mask is never hit.** It paints nothing, so there is nothing on the
-///   canvas to aim at; a click where a mask sits belongs to whatever the mask is
-///   letting through. It stays selectable from the layers panel, and a marquee
-///   still catches it — both of those go through bounds rather than through here.
-/// - **Masked content is hit only inside its mask.** Without this the clipped-away
-///   half of a photograph is still clickable, which is the exact complaint that
-///   makes an invisible layer feel like a bug: a click on empty canvas selects a
-///   picture that is not there.
-///
-/// Every ancestor is asked, not just the node's own parent, because a mask two
-/// levels up clips this layer just as surely — the run it governs is a run of
-/// *groups*, and what is inside them travels with them.
+/// Two readings of one fact: a mask is never hit (it paints nothing; the layers
+/// panel and a marquee still reach it through bounds), and masked content is hit
+/// only inside its mask. Every ancestor is asked, since a mask two levels up clips
+/// this layer just as surely.
 fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
     let mut cursor = id;
     loop {
@@ -454,14 +320,10 @@ fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
         let Some(parent) = node.parent() else {
             return false;
         };
-        // The mask's outline is in its parent's space, so the point has to be
-        // too — one inverse of the *parent's* world transform, never the mask's,
-        // which would apply the mask's own local a second time.
-        //
-        // A mask with no geometry, or a parent with no transform, falls through
-        // to the next ancestor rather than out of the walk: `mask_path`
-        // answering `None` means "masks nothing" everywhere else, and a run that
-        // clips nothing must not also stop the runs above it being asked.
+        // The mask's outline is in its parent's space: invert the parent's world
+        // transform, never the mask's, which would apply its local twice. A mask
+        // with no geometry falls through to the next ancestor, since `None` means
+        // "masks nothing" and must not stop the runs above being asked.
         if let Some(mask) = doc.governing_mask(cursor)
             && let Some(pw) = res.world_transform(parent)
             && let Some(path) = res.mask_path(doc, mask)
@@ -473,69 +335,33 @@ fn masked_away(doc: &Document, res: &Resolved, id: NodeId, p: Point) -> bool {
     }
 }
 
-/// The node whose **outline** passes within `slop` of `p`, nearest first — the
-/// query behind the Text tool's *type along this path* affordance (§15 D408).
+/// The node whose outline passes within `slop` of `p`, nearest first: the query
+/// behind the Text tool's *type along this path* affordance (§15 D408).
 ///
-/// **[`hit_test`]'s complement, not a variant of it.** That one asks what the
-/// pointer is *over*; this asks what it is *on the edge of*, which is the only
-/// question a rail can be picked by — a curve is its edge. The difference shows at
-/// a shape's **middle**: `hit_test` reports the shape and this reports nothing, so
-/// the Text tool plants an ordinary node in the middle of a circle and writes
-/// along it at the rim.
+/// [`hit_test`]'s complement: that asks what the pointer is over, this asks what it
+/// is on the edge of, the only way a rail can be picked. At a shape's middle
+/// `hit_test` reports the shape and this reports nothing. Nearest wins, not
+/// topmost, since two outlines can both be within tolerance and the one being
+/// traced is meant.
 ///
-/// ⚠️ **Not because an unfilled shape has no interior to hit** — that was the first
-/// reading of why this was needed and it is wrong here. This app's hit test does
-/// not consult the fill, so an unfilled ellipse is clickable anywhere inside it.
-/// The reason is the one above: an edge is a different place from an inside, and
-/// only one of them names a curve.
+/// Excluded: text (its outline must not shadow *edit that text*), frames (a page's
+/// edge is a boundary, not a curve), booleans (a limitation: their outline lives in
+/// `Resolved`, not [`geometry::local_path`], which `build::text_on_new_path` also
+/// reads; this is the only door onto a rail, §15 D409), and a boolean's operands
+/// (§15 D453; a `Subtract`'s subtrahend has an edge on the result's silhouette),
+/// enforced by ancestry in the loop below. What governs is a node's role, not its
+/// kind (§15 D456): a mask is never picked and masked content only inside its
+/// mask, [`masked_away`]'s question as in [`hit_test`]. The two doors deliberately
+/// differ on a boolean's operands, which `hit_test` resolves through `group_chain`.
 ///
-/// **Nearest wins, not topmost**, where `hit_test` is deliberately the other way:
-/// two outlines can both be inside the tolerance — concentric circles, one shape
-/// crossing another — and the one the pointer is actually tracing is the one meant,
-/// where paint order would answer with whichever happened to be drawn last.
-///
-/// ⚠️ **Text and frames are excluded, each for its own reason.** A text node's
-/// outline must not shadow *edit that text*, which is the same tool's other answer
-/// to the same click. A frame is a page: its edge is a boundary rather than a
-/// drawn curve, and consuming a page to make a rail of it is not something a click
-/// should be able to do. A **boolean** is excluded too and that one is a
-/// limitation rather than a decision — its outline is derived into `Resolved`
-/// rather than coming out of [`geometry::local_path`], which is also what
-/// `build::text_on_new_path` reads. **This is the only door onto a rail now**
-/// (§15 D409), so widening it is one change in one place rather than two that
-/// have to agree.
-///
-/// ⚠️ **And a boolean's *operands* are excluded, which is a fourth exclusion and
-/// not part of the third** (§15 D453). The boolean itself is out for the
-/// limitation just described; its children are out because they are operands
-/// rather than artwork, and a `Subtract`'s subtrahend has an edge lying exactly
-/// on the result's silhouette. The rule is enforced by ancestry inside the loop
-/// below, and the reasoning for where it sits is there — this list is the summary
-/// a reader trusts, so it is stated in both places rather than only the one.
-///
-/// ⚠️ **The list above is about *kinds*, and the property that actually governs
-/// is a node's ROLE** (§15 D456). An operand, a **mask**, and ink a mask has
-/// clipped away are all ordinary kinds that are not artwork on the page, and
-/// D408's exclusion list — written when only the kinds were known — could not say
-/// so. The last two are now [`masked_away`]'s question, asked here as it is in
-/// [`hit_test`]: **a mask is never picked, and masked content is picked only
-/// inside its mask.** `[S4.1-L1-02]` is what that omission cost.
-///
-/// ⚠️ **D408's *"both doors agree"* was never true and is still not.** The two
-/// doors agree about masks and about clipped-away ink from D456 on; they
-/// deliberately **disagree** about a boolean's operands, because `hit_test` is
-/// supposed to return one and resolve it through `group_chain` (D453). Read the
-/// two claims separately.
-///
-/// `slop` is in **world** units, the caller's number for [`hit_test`]'s reason.
+/// `slop` is in world units, the caller's number for [`hit_test`]'s reason.
 pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option<NodeId> {
     use crate::node::NodeKind;
     use kurbo::ParamCurveNearest;
 
     /// How exactly the nearest point on a segment is solved. Loose on purpose: the
-    /// answer is thresholded against a band several units wide, so a tenth of a
-    /// unit of slack cannot change which side of it a point falls on — and this
-    /// runs over every candidate outline on every frame the tool is in hand.
+    /// answer is thresholded against a band several units wide, and this runs every
+    /// frame the tool is in hand.
     const ACCURACY: f64 = 0.1;
 
     let area = Rect::new(p.x - slop, p.y - slop, p.x + slop, p.y + slop);
@@ -545,17 +371,14 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
             continue;
         }
         let Some(node) = doc.get(id) else { continue };
-        // A text has no outline to type along; the roles that may not become a
-        // rail are `text_on_new_path`'s own question. Neither is
-        // [`is_effectively_interactable`]'s, which `hit_test` shares and which
-        // must let a boolean's operand through to `group_chain`.
+        // Text has no outline to type along; the roles that may not become a rail
+        // are `text_on_new_path`'s question, not [`is_effectively_interactable`]'s,
+        // which must let a boolean's operand through to `group_chain`.
         if matches!(node.kind(), NodeKind::Text { .. }) || !crate::build::is_rail_artwork(doc, id) {
             continue;
         }
-        // **Nor is ink a mask has clipped away**, which the canvas does not show
-        // (§15 D456) — the same question `hit_test` asks. Behind the cheap
-        // rejections, on purpose: it asks `mask_path`, the most expensive
-        // question in a loop that runs every frame the Text or Pen tool is in hand.
+        // Nor is ink a mask has clipped away (§15 D456). Behind the cheap
+        // rejections on purpose: `mask_path` is the most expensive question here.
         if masked_away(doc, res, id, p) {
             continue;
         }
@@ -567,45 +390,23 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
         };
         let mut in_world = path;
         in_world.apply_affine(world);
-        // **A segment is rejected by its own box before it is solved**
-        // (§15 D507, `[S4.1-L4-05]`). `PathSeg::nearest` is a quintic root-find
-        // per cubic, and the candidate query above bounds this loop in **nodes**
-        // while the work is denominated in **segments** — one imported path is
-        // enough. Linear with no reject, and `rail_at` asks this for the hover
-        // affordance and again for the click, so a frame can pay it twice. On a
-        // 500-unit ring at `slop = 4`, **2 of 10,000** segments are within
-        // tolerance and the other 9,998 each paid a solve to be discarded.
-        //
-        // ⚠️ **The before-and-after table lives on
-        // `a_many_segment_outline_answers_the_same_with_the_segment_reject`**,
-        // in one place rather than two: `[S4.1-L4-05]`'s own figures and the
-        // re-run beside this fix differ in the fourth decimal, and three copies
-        // of a benchmark is three things to keep true. **0.160 → 0.041 ms/call
-        // at 2,000 segments** is the number to carry.
-        //
-        // The threshold starts at `slop²` and narrows to the nearest distance
-        // found so far, so the box test is against the band until something is
-        // in hand and against that afterwards.
-        //
-        // **Exact where it matters**: a segment whose box is within the threshold
-        // is still solved, so the answer is the same for every segment that could
-        // have produced it. The box is the segment's control hull, which contains
-        // the curve — so this can only reject segments that were going to lose.
+        // A segment is rejected by its own box before it is solved (§15 D507):
+        // `PathSeg::nearest` is a quintic root-find per cubic, and the work scales
+        // with segments, not the nodes the candidate query bounds. The box is the
+        // control hull, which contains the curve, so only segments that were going
+        // to lose are rejected. The benchmark is on
+        // `a_many_segment_outline_answers_the_same_with_the_segment_reject`.
         let mut d2 = f64::INFINITY;
         // The squared distance a segment has to beat: the band to begin with,
-        // then the nearest thing found so far.
+        // then the nearest found so far.
         let mut cap = slop * slop;
         for seg in in_world.segments() {
-            // ⚠️ **The control hull, not `PathSeg::bounding_box()`.** The tight
-            // box is a root-find of its own — `ParamCurveExtrema` per axis — and
-            // measured it gave back only half of what the reject was worth. The
-            // hull is four min/max pairs over points already in hand, and it
-            // *contains* the curve, so it is sound as a reject: a segment it
-            // admits is still solved exactly.
+            // The control hull, not `PathSeg::bounding_box()`, whose per-axis
+            // root-find gives back half of what the reject is worth.
             let b = seg_hull(&seg);
             // Squared distance from `p` to the box, zero inside it. Written out
-            // rather than `inflate(…).contains(p)`, which is half-open and would
-            // reject a segment lying exactly on the tolerance.
+            // because `inflate(…).contains(p)` is half-open and would reject a
+            // segment lying exactly on the tolerance.
             let dx = (b.x0 - p.x).max(p.x - b.x1).max(0.0);
             let dy = (b.y0 - p.y).max(p.y - b.y1).max(0.0);
             if dx * dx + dy * dy > cap {
@@ -624,18 +425,11 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
     best.map(|(id, _)| id)
 }
 
-/// The box of a segment's **control points** — a conservative bound on the curve
-/// (§15 D507).
+/// The box of a segment's control points, a conservative bound on the curve.
 ///
-/// A Bézier lies inside the convex hull of its control points, so this contains
-/// the segment and is never tighter than it. That is the property a reject needs:
-/// too generous costs a solve that was going to be discarded, and too tight would
-/// change the answer.
-///
-/// `PathSeg::bounding_box()` is the tight box and would be the obvious call. It
-/// is not free — it solves the derivative's roots per axis — and measured on the
-/// fixture `[S4.1-L4-05]` names it gave back about **half** of what the reject was
-/// worth. This is four min/max pairs over points the segment already holds.
+/// A Bézier lies inside its control points' hull, so a reject on this box never
+/// changes the answer; too generous only costs a wasted solve. It is four min/max
+/// pairs, where `PathSeg::bounding_box()` solves the derivative's roots per axis.
 fn seg_hull(seg: &kurbo::PathSeg) -> Rect {
     use kurbo::PathSeg;
     let pts: &[Point] = match seg {
@@ -657,20 +451,9 @@ fn seg_hull(seg: &kurbo::PathSeg) -> Rect {
 /// A node is interactable only if it and every ancestor are visible and none is
 /// locked (Figma: hidden/locked layers don't receive canvas clicks).
 ///
-/// **The lock half is [`is_effectively_locked`] rather than a second walk**, which
-/// is a deliberate correction: this function held the only ancestor-aware reading
-/// of the lock, privately, so every refusal outside the canvas asked
-/// [`crate::Node::locked`] instead and stopped at the node's own flag. Two
-/// spellings of one rule is how §15 D266 happened — three sites asking the same
-/// question and only one asking the shared answer — and a lock is the worst place
-/// to repeat it, because the weaker reading always looks like it works.
-///
-/// ⚠️ **This comment was sitting on [`outline_at`] until 2026-09-07**, two hundred
-/// lines away and above a function it says nothing about, while this one had no
-/// doc at all. Found by `CLAUDE.md`'s doc-run length ranking — not because the
-/// theft was new but because `outline_at`'s own doc grew past the head of the
-/// list (§15 D453, D456) and dragged the merged block into view. **The ranking
-/// finds accumulated damage, and what makes it visible is a later edit nearby.**
+/// The lock half is [`is_effectively_locked`] rather than a second walk: two
+/// spellings of one rule is how §15 D266 happened, and a weaker lock reading
+/// always looks like it works.
 fn is_effectively_interactable(doc: &Document, id: NodeId) -> bool {
     if is_effectively_locked(doc, id) {
         return false;
@@ -712,17 +495,8 @@ fn paint_path(doc: &Document, id: NodeId) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    //! **This module did not exist** (`[A5-L6-06]`, §15 D503).
-    //!
-    //! `group_chain` is the basis of every click-to-select decision in the
-    //! editor, and `grep -rn "group_chain" crates/ --include=*.rs` returned five
-    //! lines: the `pub use` in `lib.rs`, the definition, and three production
-    //! call sites in `canvas.rs`. No test in the workspace named it, and
-    //! `query.rs` carried no test module at all — its coverage figure comes from
-    //! `hit_test` and `local_box` being exercised through other suites.
-    //!
-    //! No gate could have helped: it is a `pub` item in `ondin-core`, and
-    //! `dead_code` never fires on one however many callers it has.
+    //! `group_chain` tests; `hit_test` and `local_box` are exercised through other
+    //! suites.
 
     use super::*;
     use crate::IdSource;
@@ -793,18 +567,10 @@ mod tests {
         }
     }
 
-    /// **Outermost first, and the run stops at the frame** — the two halves of
-    /// what *"clicking a grouped layer selects the group"* means.
-    ///
-    /// The order is not cosmetic: `canvas::pick_from_chain` reads the slice
-    /// positionally (`[_outermost, next, ..]`), so a chain built the other way
-    /// round would make a plain click select the innermost group and Ctrl+Alt the
-    /// outermost — both gestures still doing *something*, which is why nothing
-    /// downstream would have noticed.
-    ///
-    /// The frame stopping the run is asserted by the chain's **whole value**
-    /// rather than by the artboard's absence from it: an assertion that the frame
-    /// is not in the list would also pass a chain that stopped one group early.
+    /// The chain is outermost first and stops below the frame. The order matters
+    /// because `canvas::pick_from_chain` reads the slice positionally. The stop is
+    /// asserted by the chain's whole value, since "the frame is absent" would pass a
+    /// chain that stopped one group early.
     #[test]
     fn a_group_chain_is_outermost_first_and_stops_below_the_frame() {
         let n = nest();
@@ -828,25 +594,16 @@ mod tests {
         );
     }
 
-    /// **A frame inside a group is a rung of the chain, and a frame outside every
-    /// group is not** (§15 D876) — Root → frame → row `Group` → card frame → text.
+    /// A frame inside a group is a rung of the chain and a frame outside every
+    /// group is not (§15 D876): Root → frame → row `Group` → card frame → text.
     ///
-    /// Three readings, one per door that uses the chain: a plain click on the text
-    /// selects the row; `Ctrl+Alt`, one level in, is the card; and once stepped
-    /// into the row, the card is what is left — the next double-click enters it.
-    /// The top-level frame is on none of them, which is the half that keeps a
-    /// page's contents directly clickable.
+    /// The first assertion pins the plain click, the second stepping into the row
+    /// (trimming there would pop the card and skip a level).
     ///
-    /// **Flip run**, the frame arm dropped from the walk's continue condition (the
-    /// chain as it was before D876): fails on the first assertion at `[]` against
-    /// `[row, card]` — the predicted site. With the trailing-frame trim removed
-    /// instead, it fails there too, at `[board, row, card]` — and so do the two
-    /// older chain tests beside it, every fixture here sitting on a page. ⚠️ **The second
-    /// assertion is the one the first draft failed**: trimming even when the walk
-    /// stopped at `inside` pops the card off `[card]` and leaves `[]`, so stepping
-    /// into the row went straight to the text — a level skipped, and a boundary
-    /// the other three assertions do not see. The last assertion's guard, the
-    /// early return for `id == inside`, flipped: fails there at `[row]`.
+    /// flip: the frame arm dropped from the walk's continue condition → fails at
+    /// the first assertion (`[]` against `[row, card]`); the trailing-frame trim
+    /// removed → fails there too (`[board, row, card]`); the `id == inside` early
+    /// return flipped → fails at the last assertion (`[row]`).
     #[test]
     fn a_frame_inside_a_group_is_a_rung_and_a_page_is_not() {
         let mut ids = IdSource::new(0xCA4D);
@@ -886,18 +643,11 @@ mod tests {
         );
     }
 
-    /// **A boolean behaves as a group here, and has to** — the arm `CLAUDE.md`
-    /// names as a `NodeKind`-sweep hazard, and the one member of that list with
-    /// no test at all until now.
+    /// A boolean behaves as a group for a click: otherwise the click selects an
+    /// operand, which `scene::paint_node` never draws.
     ///
-    /// Deleting `| NodeKind::Boolean { .. }` makes a click select the **operand**,
-    /// which `scene::paint_node` never draws: the user selects something
-    /// invisible, and the boolean stops being draggable as a unit. The function's
-    /// own comment is the specification — *"its operands are not artwork on the
-    /// page … so a click landing on one means the boolean"*.
-    ///
-    /// **Flip run**, that alternative deleted: fails on *"a click on an operand
-    /// means the boolean"* at `[]` against the boolean's id — the predicted site.
+    /// flip: `| NodeKind::Boolean { .. }` deleted from `steps_into` → fails at "a
+    /// click on an operand means the boolean" (`[]` against the boolean's id).
     #[test]
     fn a_boolean_is_a_group_as_far_as_a_click_is_concerned() {
         let mut ids = IdSource::new(0xB001);
@@ -931,20 +681,13 @@ mod tests {
         );
     }
 
-    /// **Isolation excludes the group you stepped into, and says nothing when the
-    /// click landed elsewhere** — two boundaries, and the second is the signal
-    /// `canvas::pick_for_click` reads to *end* isolation.
+    /// Isolation excludes the group stepped into, and leaves the chain unchanged
+    /// when the click landed elsewhere, which `canvas::pick_for_click` reads to end
+    /// isolation. The two cases fall to different mutations.
     ///
-    /// ⚠️ **Both cases are needed and they fall to different mutations.** Moving
-    /// the `if Some(c) == inside { break; }` below the `chain.push(c)` re-selects
-    /// the group you stepped into on the very next click — Figma's isolation mode
-    /// stops working — and that is invisible to the third assertion, where
-    /// `inside` is never on the chain at all.
-    ///
-    /// **Flip run**, the break moved below the push: fails on *"the group you
-    /// stepped into is not a candidate"* at `[outer, inner]` against `[inner]`,
-    /// the predicted site. The unrelated-`inside` assertion stays green under it,
-    /// which is what says the two are independent rather than one written twice.
+    /// flip: the `inside` break moved below the push → fails at "the group you
+    /// stepped into is not a candidate" (`[outer, inner]` against `[inner]`); the
+    /// unrelated-`inside` assertion stays green.
     #[test]
     fn stepping_into_a_group_takes_it_and_everything_above_it_off_the_chain() {
         let n = nest();

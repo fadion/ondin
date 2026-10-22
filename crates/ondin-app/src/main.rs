@@ -5,10 +5,11 @@
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
-//! ondin export <file> [--svg|--png|--json] [-o out]
+//! ondin export <file> [--svg|--png|--json|--html] [-o out]
 //!            [--scale <n> | --width <px> | --height <px>]
 //!                                render a document with no GPU and no window
-//!                                the three sizes are --png only, and one at a time
+//!                                the three sizes are --png only, and one at a time;
+//!                                --html writes a zip of HTML and CSS
 //! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]
 //!                                run the document's own export settings (§7),
 //!                                optionally forcing every row to one size
@@ -106,6 +107,8 @@ enum ExportFormat {
     Svg,
     Png,
     Json,
+    /// Code export's plain HTML/CSS, zipped.
+    Html,
 }
 
 impl ExportFormat {
@@ -114,6 +117,7 @@ impl ExportFormat {
             ExportFormat::Svg => "svg",
             ExportFormat::Png => "png",
             ExportFormat::Json => "json",
+            ExportFormat::Html => "zip",
         }
     }
 }
@@ -163,7 +167,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json] \
+    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json|--html] \
          [--scale <n>|--width <px>|--height <px>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] [-o <dir>]";
     let mut file = None;
@@ -179,6 +183,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--svg" => format = Some(ExportFormat::Svg),
             "--png" => format = Some(ExportFormat::Png),
             "--json" => format = Some(ExportFormat::Json),
+            "--html" => format = Some(ExportFormat::Html),
             "--all" => all = true,
             "--folders" => folders = true,
             // One value each and mutually exclusive: three ways of answering one
@@ -388,7 +393,7 @@ fn clamp_note(
 }
 
 /// Headless export (§7). Loads the document, resolves it, and writes one of the
-/// three export formats — no window, no GPU, no font service (text uses the
+/// four export formats — no window, no GPU, no font service (text uses the
 /// bundled fallback, which keeps the output deterministic in CI).
 ///
 /// `scale` reaches only the PNG arm, and the output path is not decorated with it:
@@ -414,6 +419,24 @@ fn run_export(
 
     let data = match format {
         ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, None).into_bytes(),
+        ExportFormat::Html => {
+            // The page holds the top-level layers, laid out as on the canvas.
+            let origins = doc
+                .get(doc.root())
+                .map(|r| r.children().to_vec())
+                .unwrap_or_default();
+            let export = ondin_export::code::html::html_of(&doc, &res, &origins);
+            if !export.approximated.is_empty() || !export.positioned.is_empty() {
+                eprintln!(
+                    "{} drawn differently, {} with fixed positions or as pictures — see report.txt",
+                    export.approximated.len(),
+                    export.positioned.len()
+                );
+            }
+            export
+                .zip()
+                .map_err(|e| format!("cannot write the zip: {e}"))?
+        }
         ExportFormat::Json => {
             let snap = ondin_export::snapshot(&doc, &res);
             serde_json::to_vec_pretty(&snap)
@@ -744,6 +767,15 @@ mod tests {
                 scale: ExportScale::Times(1.0),
             }
         );
+        assert_eq!(
+            export(&["a.ondin", "--html"]).unwrap(),
+            Command::Export {
+                file: "a.ondin".into(),
+                format: ExportFormat::Html,
+                out: None,
+                scale: ExportScale::Times(1.0),
+            }
+        );
     }
 
     /// `--scale` is a PNG argument and is refused wherever it cannot apply rather
@@ -964,6 +996,7 @@ mod tests {
             (ExportFormat::Svg, "svg"),
             (ExportFormat::Png, "png"),
             (ExportFormat::Json, "json"),
+            (ExportFormat::Html, "zip"),
         ] {
             let out = dir.join(format!("out.{ext}"));
             run_export(
@@ -980,6 +1013,9 @@ mod tests {
         // PNG really is a PNG, not an empty stub.
         let png = std::fs::read(dir.join("out.png")).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
+        // And the zip a zip.
+        let zip = std::fs::read(dir.join("out.zip")).unwrap();
+        assert_eq!(&zip[..4], b"PK\x03\x04", "zip signature");
     }
 
     /// `--scale 2` doubles both sides of the raster, read out of the PNG header so

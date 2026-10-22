@@ -1,13 +1,8 @@
 //! The eframe application: egui chrome hosting the Vello canvas (§9.1–9.2).
 //!
-//! This module owns the shell — window layout, the top bar and tool rail, and
-//! the dispatch of resolved [`Action`]s. The pieces it coordinates live next to
-//! it: `session` (the document and everything derived from it), `canvas` (the
-//! Vello texture and canvas interaction), `panels` (layers and inspector),
-//! `input` (mode-aware key routing), `preview` (in-flight gesture state).
-//!
-//! egui types stay confined to `ondin-app`; nothing here leaks into
-//! core/render/export/mcp, which is what keeps a UI-toolkit swap survivable.
+//! Owns the shell — window layout, top bar, tool rail, dispatch of resolved [`Action`]s.
+//! Siblings: `session`, `canvas`, `panels`, `input`, `preview`. egui types stay confined
+//! to `ondin-app`, which keeps a UI-toolkit swap survivable.
 
 use crate::canvas::CanvasRenderer;
 use crate::cursor::Cursors;
@@ -27,16 +22,12 @@ use ondin_core::{
 };
 use std::collections::HashSet;
 
-/// Painted width of every inspector popover (stroke options, typography tabs), border
-/// included. One number for both, because [`OndinApp::picker_lane_right`] and
-/// [`OndinApp::popover_left`] reserve the lane from it; the controls inside lay out
-/// against `crate::ui::menu_inner_w`.
+/// Painted width of every inspector popover, border included; [`OndinApp::picker_lane_right`]
+/// and [`OndinApp::popover_left`] reserve the lane from it.
 pub(crate) const POPOVER_W: f32 = 272.0;
 
-/// The three faces of the typography popup. Tabs are scopes, labelled with the
-/// scope word spelled out, because the label tells the user what a change will hit
-/// when the selection is partial. Axes, OpenType features and language live under
-/// `Character`, since they are character-scoped.
+/// The three faces of the typography popup. Tabs are scopes, spelled out so the user
+/// sees what a change will hit when the selection is partial.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TypeTab {
     /// The tab the popup opens on.
@@ -60,18 +51,15 @@ impl TypeTab {
 }
 
 /// What a layer copy holds: the nodes plus everything they reference on the source
-/// document, so a paste into another document is complete. The clipboard survives
-/// opening a document on purpose (cross-document paste); a fill stores only an image
-/// key, so the bytes travel too. Everything is taken at copy time, the last moment
-/// the source document is certainly open.
+/// document, taken at copy time (the last moment it is certainly open), so a paste into
+/// another document is complete. The clipboard survives opening a document on purpose.
 #[derive(Clone)]
 pub(crate) struct Clip {
     /// One subtree per copied layer, ids still the originals' until
     /// `insert_subtrees` remaps them.
     pub(crate) subtrees: Vec<Vec<Node>>,
-    /// The vault mains those subtrees reach, with their origins
-    /// (`ondin_core::kit::carried`); a paste vendors them so a kit instance lands
-    /// linked.
+    /// The vault mains those subtrees reach (`ondin_core::kit::carried`); a paste
+    /// vendors them so a kit instance lands linked.
     pub(crate) kits: Vec<Vec<Node>>,
     /// The image-table entries those subtrees reference (`build::image_ids_in`),
     /// added to the target document if missing.
@@ -95,21 +83,18 @@ pub(crate) struct CutMove {
     links: Vec<TakenLink>,
     /// The clipboard's stamp at the cut; another copy since makes this stale.
     stamp: Option<ClipStamp>,
-    /// The history's undo depth once the cut landed: an undo below it takes the
-    /// cut back, and the move with it ([`OndinApp::document_rewound`]).
+    /// The undo depth once the cut landed: an undo below it takes the cut back, and the
+    /// move with it ([`OndinApp::document_rewound`]).
     depth: usize,
     /// While an undo has taken the cut back: the session's commit count then
-    /// ([`EditorSession::commits`]). A redo back to `depth` with the count
-    /// unchanged is the cut again, and the move with it; a commit in between
-    /// branched the history, and the move is dropped.
+    /// ([`EditorSession::commits`]). A redo to `depth` with the count unchanged restores
+    /// the move; a commit in between drops it.
     parked: Option<u64>,
 }
 
 /// One link a layer delete took ([`Deleted::links`]): a node outside the deleted
-/// subtrees that followed a node inside them, and what the delete left it at — cut
-/// for an instance of a deleted main, climbed (`component::relink_for_delete`) for a
-/// nested copy. A cut's paste gives the link back only where the node still holds
-/// what the delete left.
+/// subtrees that followed a node inside them, and what the delete left it at. A cut's
+/// paste gives the link back only where the node still holds what the delete left.
 #[derive(Clone, Debug)]
 pub(crate) struct TakenLink {
     id: NodeId,
@@ -168,53 +153,42 @@ impl ClipStamp {
     }
 }
 
-/// The values a gesture holds while it is running, in one place so that "is
-/// anything in flight?" is answered by the type: [`Self::any`] compares against
-/// `Default`, so a new field is covered by `cancel_gesture`'s gate automatically.
-/// A value in flight carries its subject, so it never lands on a selection that
-/// has moved since.
+/// The values a gesture holds while it is running: [`Self::any`] compares against
+/// `Default`, so a new field is covered by `cancel_gesture`'s gate automatically. A
+/// value in flight carries its subject, so it never lands on a moved selection.
 ///
-/// `drag` and `layer_drag` stay on `OndinApp` because `cancel_gesture` acts on them
-/// directly. Clearing is deliberately not blanket: `cancel_gesture` drops only
-/// `grid_scrub` and `grid_paint`, and the other owners read `gesture_cancelled` so
-/// they get the chance to restore something.
+/// Clearing is not blanket: `cancel_gesture` drops only `grid_scrub` and `grid_paint`;
+/// the other owners read `gesture_cancelled` so they can restore something.
 #[derive(Default, PartialEq)]
 pub(crate) struct InFlight {
     /// The typographic spans as they were when the field scrub began: what a
     /// right-click cancel puts back, and the only record of it.
     pub(crate) session_scrub: Option<(NodeId, CharSpans, ParaSpans)>,
-    /// The Settings modal's nudge pair as it was when the field scrub began: what a
-    /// right-click cancel puts back, since the modal writes its own draft rather
-    /// than through `RenderOverrides`. It also keeps the cancel gate from blinking:
-    /// egui clears `ctx.dragged_id()` on any button's release, and this stays armed.
+    /// The Settings modal's nudge pair as it was when the field scrub began (the modal
+    /// writes its own draft, not `RenderOverrides`). Also keeps the cancel gate armed
+    /// after egui clears `ctx.dragged_id()` on any button's release.
     pub(crate) settings_scrub: Option<crate::input::NudgeStep>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
-    /// The JPEG quality being scrubbed, and which spec it belongs to. Held here
-    /// because `RenderOverrides` cannot preview `SetExports`, and committing every
-    /// frame would make the drag uncancellable.
+    /// The JPEG quality being scrubbed, and which spec it belongs to; `RenderOverrides`
+    /// cannot preview `SetExports`, and committing every frame would make it uncancellable.
     pub(crate) export_quality_scrub: Option<(usize, f64)>,
-    /// The layout grid a scrub is holding: the frames it is written to, the index,
-    /// and the in-flight value. Read by the panel and by `canvas::draw_layout_grids`,
-    /// since `RenderOverrides` cannot preview it. A list of frames, because the edit
-    /// goes to every selected frame and the overlay must preview all of them.
+    /// The layout grid a scrub is holding: the frames, the index, the in-flight value.
+    /// Read by the panel and `canvas::draw_layout_grids`; a list of frames because the
+    /// edit goes to every selected frame.
     pub(crate) grid_scrub: Option<(Vec<NodeId>, usize, ondin_core::LayoutGrid)>,
-    /// The grid colour a picker is dragging: frames, index and in-flight `Color`,
-    /// filled by `OndinApp::preview_grid`. Kept apart from [`Self::grid_scrub`]
-    /// because `grid_step` commits whatever sits there; a colour dropped into it
-    /// would commit every frame.
+    /// The grid colour a picker is dragging (`OndinApp::preview_grid`). Apart from
+    /// [`Self::grid_scrub`] because `grid_step` commits whatever sits there.
     pub(crate) grid_paint: Option<(Vec<NodeId>, usize, ondin_core::peniko::Color)>,
-    /// The absolute target a guide position field is being dragged to, by axis.
-    /// The field must hold its own target: laid out from the committed document, a
-    /// per-frame step would commit only the last (zero) step on release. Keyed by
-    /// axis because a mixed-axis selection shows two fields.
+    /// The absolute target a guide position field is being dragged to, by axis. The
+    /// field holds its own target: a per-frame step from the committed document would
+    /// commit only the last (zero) step on release.
     pub(crate) guide_position_drag: Option<(ondin_core::GuideAxis, f64)>,
 }
 
 impl InFlight {
-    /// Is any gesture holding a value right now? `PartialEq` rather than `Eq` for
-    /// the float fields; sound, because every field is an `Option` defaulting to
-    /// `None`, so this only asks whether any is `Some`.
+    /// Is any gesture holding a value right now? Sound under `PartialEq` (floats)
+    /// because every field is an `Option` defaulting to `None`.
     pub(crate) fn any(&self) -> bool {
         *self != Self::default()
     }
@@ -222,13 +196,11 @@ impl InFlight {
 
 #[cfg(test)]
 mod in_flight_tests {
-    //! `InFlight::any` reads every field. The case list is hand-written, so it
-    //! checks today's fields; a new field needs a new case here.
+    //! The case list is hand-written: a new `InFlight` field needs a new case here.
 
     use super::*;
 
-    /// Each field alone arms the gate; each case starts from a fresh default so no
-    /// assertion passes on an earlier field's account.
+    /// Each field alone arms the gate.
     /// flip: `any` as an `||` chain omitting `export_quality_scrub` → fails at that case.
     #[test]
     fn every_field_on_its_own_arms_the_gate() {
@@ -304,8 +276,7 @@ mod in_flight_tests {
         }
     }
 
-    /// A `Some` with a zero, NaN or empty payload still arms the gate: `any` does
-    /// not compare payloads.
+    /// A `Some` with a zero, NaN or empty payload still arms the gate.
     #[test]
     fn a_zero_valued_gesture_is_still_a_gesture() {
         let at = |v: f64| InFlight {
@@ -335,31 +306,27 @@ mod in_flight_tests {
     }
 }
 
-/// The document's artboards and their world boxes, remembered against the
-/// revision they were read at. The walk is a full-document traversal that a move
-/// drag would otherwise run per node, per frame.
+/// The document's artboards and their world boxes, cached against the revision they
+/// were read at (the walk is a full traversal a move drag would run per node, per frame).
 ///
 /// Keyed on `EditorSession::revision`, bumped by every commit, undo, redo and
-/// `adopt_document` — exactly the events that can add, remove or move an artboard.
-/// A gesture in flight must not bump it: these are the committed world bounds the
-/// drop rule is defined against.
+/// `adopt_document`. A gesture in flight must not bump it: these are the committed
+/// bounds the drop rule is defined against.
 #[derive(Default)]
 pub(crate) struct FrameIndex {
     /// The revision `frames` was read at, or `None` for never.
     at: Option<u64>,
-    /// Every artboard, depth-first in child order, which is paint order and which
-    /// readers rely on ([`OndinApp::artboards`]).
+    /// Every artboard, depth-first in child order (paint order, which readers rely on;
+    /// [`OndinApp::artboards`]).
     frames: Vec<NodeId>,
-    /// Every layer that carries a canvas tag (frames and group mains), in the same
-    /// paint order ([`OndinApp::tagged`]).
+    /// Every layer that carries a canvas tag, in paint order ([`OndinApp::tagged`]).
     tagged: Vec<NodeId>,
     /// Those of them with world bounds, paired with the bounds.
     pub(crate) boxes: Vec<(NodeId, Rect)>,
     /// Whether the document has any main, linked layer or set, so a move's drop
     /// candidates ask `component::can_hold` only when a component rule could refuse.
     pub(crate) components: bool,
-    /// How many times the document walk has run; test-facing, so a test can pin
-    /// one walk per frame without a clock.
+    /// How many times the document walk has run; test-facing.
     walks: u64,
 }
 
@@ -373,12 +340,10 @@ pub(crate) struct Opening {
 
 pub struct OndinApp {
     pub(crate) session: EditorSession,
-    /// See [`FrameIndex`]. `RefCell` because every reader is `&self` and the whole
-    /// point is that reading may fill it.
+    /// See [`FrameIndex`]. `RefCell` because every reader is `&self` and reading may fill it.
     pub(crate) frame_index: std::cell::RefCell<FrameIndex>,
-    /// How many times `canvas::node_grab` has reached its segment walk (which
-    /// allocates a whole `BezPath`). Test-facing: a count pins "the pointer is
-    /// nowhere near the path, so do not walk it" where a clock could not.
+    /// How many times `canvas::node_grab` has reached its segment walk (it allocates a
+    /// `BezPath`). Test-facing.
     pub(crate) segment_walks: std::cell::Cell<u64>,
     pub(crate) canvas: CanvasRenderer,
     /// Explicit editing mode — every keystroke routes through it (§9.3).
@@ -389,150 +354,129 @@ pub struct OndinApp {
     pub(crate) alt_clone: Option<crate::canvas::AltClone>,
     /// What a layer copy is holding: the subtrees, and the pictures they need.
     pub(crate) clipboard: Option<Clip>,
-    /// The world box the copied layers occupied at the moment they were copied,
-    /// which *Paste here* measures its offset from. A snapshot like the payload,
-    /// because after a cut there is nothing left to look up.
+    /// The world box the copied layers occupied at copy time, which *Paste here*
+    /// measures its offset from (after a cut there is nothing left to look up).
     pub(crate) clipboard_from: Option<Rect>,
     /// What a cut that detached instances owes its first paste: a cut main moves.
-    /// Set by [`Self::cut_selection`], taken by [`Self::paste_cut_move`], and stale
-    /// once the clipboard is replaced (its `stamp` is the clipboard's at the cut).
+    /// Set by [`Self::cut_selection`], taken by [`Self::paste_cut_move`], stale once the
+    /// clipboard is replaced.
     pub(crate) cut_move: Option<CutMove>,
-    /// A digest of the stand-in text the last in-app copy put on the system
-    /// clipboard: the receipt [`Self::owns_the_clipboard`] reads to tell whether
-    /// [`Self::clipboard`] and [`Self::guide_clipboard`] still describe it. A digest
-    /// rather than the text, since the stand-in can be megabytes of payload.
+    /// A digest of the stand-in text the last in-app copy put on the system clipboard:
+    /// the receipt [`Self::owns_the_clipboard`] reads. A digest, since the stand-in can
+    /// be megabytes.
     pub(crate) clipboard_stamp: Option<ClipStamp>,
-    /// The guides Ctrl+C put on the clipboard. Kept mutually exclusive with
-    /// [`Self::clipboard`] by hand (every copy clears the other), so Ctrl+V is
-    /// unambiguous. Whole `Guide`s; the id is re-minted on paste.
+    /// The guides Ctrl+C put on the clipboard. Mutually exclusive with
+    /// [`Self::clipboard`] by hand (every copy clears the other). The id is re-minted on paste.
     pub(crate) guide_clipboard: Option<Vec<Guide>>,
-    /// The appearance *Copy properties* (`Ctrl+Alt+C`) lifted off a layer. Not
-    /// exclusive with the layer clipboard: a different chord and verb, so holding
-    /// both means `Ctrl+V` pastes and `Ctrl+Alt+V` paints. Never reaches the system
-    /// clipboard, so it needs no receipt.
+    /// The appearance *Copy properties* (`Ctrl+Alt+C`) lifted off a layer. Not exclusive
+    /// with the layer clipboard (`Ctrl+V` pastes, `Ctrl+Alt+V` paints); never reaches the
+    /// system clipboard.
     pub(crate) property_clipboard: Option<ondin_core::build::Properties>,
-    /// Which of the app's two screens is showing, the library or the editor. A
-    /// whole-window switch: `<OndinApp as eframe::App>::ui` returns early on it, so
-    /// nothing of the editor runs while the dashboard is up.
+    /// Which of the app's two screens is showing, the library or the editor:
+    /// `<OndinApp as eframe::App>::ui` returns early on it.
     pub(crate) view: View,
-    /// The library: the base folder, its projects and its documents. Scanned when
-    /// the dashboard is entered, not per frame; held while the editor is up for the
-    /// save root and the breadcrumb.
+    /// The library: base folder, projects, documents. Scanned when the dashboard is
+    /// entered, not per frame; held in the editor for the save root and breadcrumb.
     pub(crate) library: crate::library::state::Library,
-    /// When the open document was last written, for the autosave interval; compared
-    /// each frame the editor draws, as there is no clock thread.
+    /// When the open document was last written, for the autosave interval (no clock thread).
     pub(crate) last_autosave: std::time::Instant,
-    /// Crash recovery: this session's snapshot, and any left by a previous run
-    /// (`crate::library::recovery`). Covers what autosave will not, including a
-    /// never-saved document.
+    /// Crash recovery: this session's snapshot and any left by a previous run
+    /// (`crate::library::recovery`); covers what autosave will not.
     pub(crate) recovery: crate::library::recovery::RecoveryState,
-    /// The one background thread that writes whole documents, the crash snapshot
-    /// and the autosave both (`crate::library::writer`), so the two cannot race for
-    /// a path. `None` until the first job; no writer means nothing queued can be in
-    /// flight, so a snapshot removal may go straight to the filesystem.
+    /// The one background thread that writes whole documents (`crate::library::writer`),
+    /// so snapshot and autosave cannot race for a path. `None` until the first job; with
+    /// no writer nothing is queued, so a snapshot removal may go straight to the filesystem.
     pub(crate) writer: Option<crate::library::writer::Writer>,
-    /// The document being renamed inline on the library screen, its buffer, and
-    /// whether the field has already been handed the caret. The third element is a
-    /// latch: a field that requests focus every frame erases `lost_focus()` and never
-    /// commits (`OndinApp::rename_field`).
+    /// The document being renamed inline on the library screen, its buffer, and a latch
+    /// for whether the field has been handed the caret: a field that requests focus every
+    /// frame erases `lost_focus()` and never commits (`OndinApp::rename_field`).
     pub(crate) rename_entry: Option<(std::path::PathBuf, String, bool)>,
     /// The dashboard's own view state — which entry, which sort, which menu.
     pub(crate) dash: crate::panels::dashboard::DashboardState,
-    /// Rendered whole-document pictures for the grid's cards
-    /// (`crate::library::cover`), disk-cached; distinct from `thumbs`, which cuts
-    /// pictures a document already holds.
+    /// Rendered whole-document pictures for the grid's cards (`crate::library::cover`),
+    /// disk-cached; distinct from `thumbs`.
     pub(crate) covers: crate::library::cover::Covers,
-    /// The library's Settings modal draft while it is up, separate from the
-    /// editor's [`Self::settings`]; Save applies it
-    /// ([`crate::panels::dashboard::LibrarySettings`]).
+    /// The library's Settings modal draft while it is up, separate from [`Self::settings`];
+    /// Save applies it.
     pub(crate) library_settings: Option<crate::panels::dashboard::LibrarySettings>,
-    /// What the last library migration left behind, if anything, with both roots so
-    /// the modal can re-run it (the app already points at the new root). Session
-    /// state: cleared by a clean migration or a successful retry.
+    /// What the last library migration left behind, with both roots so the modal can
+    /// re-run it. Cleared by a clean migration or a successful retry.
     pub(crate) stranded: Option<crate::panels::dashboard::Stranded>,
-    /// Whether a chrome widget held the keyboard at the end of the last frame,
-    /// which [`Self::escape`] cannot ask egui for: egui clears focus in
-    /// `Memory::begin_pass`, before `input::resolve`. Without it, `Escape` out of a
-    /// rename field would also clear the selection. "Anything focused", matching
-    /// `egui_wants_keyboard_input`.
+    /// Whether a chrome widget held the keyboard at the end of the last frame: egui clears
+    /// focus in `Memory::begin_pass`, before `input::resolve`, so [`Self::escape`] cannot
+    /// ask it, and `Escape` out of a rename field would clear the selection.
     pub(crate) chrome_focus: bool,
-    /// Whether an open popover's own `Escape` handler ran this frame: written by
-    /// the handler, read and cleared by the key router at the top of the next. The
-    /// gate reads this rather than the popover's open flag, because a flag whose
-    /// panel was skipped (selection changed, present mode) would swallow `Escape`
-    /// with nothing on screen. One frame late, as the router runs before the panels.
+    /// Whether an open popover's own `Escape` handler ran this frame; written by the
+    /// handler, read and cleared by the key router next frame. Read instead of the open
+    /// flag, because a flag whose panel was skipped would swallow `Escape` with nothing
+    /// on screen.
     pub(crate) popover_heard: bool,
-    /// In-progress name edit (node id + buffer), so typing persists across
-    /// frames and commits once, on defocus.
+    /// In-progress name edit (node id + buffer); commits once, on defocus.
     pub(crate) name_edit: Option<(NodeId, String)>,
     /// System and web fonts, loaded into core on demand.
     pub(crate) fonts: FontService,
-    /// The background update check and the staged update it offers a restart
-    /// for. Inert unless [`Self::new`] started it; a headless app makes no request.
+    /// The background update check and the staged update it offers a restart for.
+    /// Inert unless [`Self::new`] started it.
     pub(crate) updater: crate::update::Updater,
     /// Family names rasterized in their own face, for the picker's rows.
     pub(crate) previews: crate::fonts::FontPreviews,
-    /// Pictures cut down to a layer row's square, for the layers tree and the
-    /// paint row's chip. Chrome-side, since `CanvasRenderer::images` is read-only.
+    /// Pictures cut down to a layer row's square, for the layers tree and the paint
+    /// row's chip. Chrome-side, since `CanvasRenderer::images` is read-only.
     pub(crate) thumbs: crate::thumbs::ImageThumbs,
-    /// Substring filter for the font picker (thousands of families otherwise).
+    /// Substring filter for the font picker.
     pub(crate) font_filter: String,
     /// In-progress pen path (world-space anchor points), or `None`.
     pub(crate) pen: Option<PenState>,
-    /// Whether the pen's verbs are armed inside the node tool's edit (what `P`
-    /// means while a path's points are the subject). A bias, not a tool switch or a
-    /// `Mode`: `tool` stays `Tool::Node` and only what a canvas press means changes
-    /// (`canvas::pen_verb`). Read only through [`Self::pen_scope`], which confines it
-    /// to the edited path.
+    /// Whether the pen's verbs are armed inside the node tool's edit (`P` while a
+    /// path's points are the subject). A bias, not a tool switch: `tool` stays
+    /// `Tool::Node` and only what a canvas press means changes (`canvas::pen_verb`).
+    /// Read only through [`Self::pen_scope`], which confines it to the edited path.
     pub(crate) pen_bias: bool,
     /// Images picked but not yet placed: what a loaded cursor holds (`Tool::Image`).
-    /// In pick order, placed front-first; the tool hands back to Select when it
-    /// empties. Already decoded, so nothing here can fail to place.
+    /// Placed front-first; the tool hands back to Select when it empties. Already
+    /// decoded, so nothing here can fail to place.
     pub(crate) pending_images: Vec<LoadedImage>,
-    /// The tool the rail's eyedropper hands back to after a pick, `Escape` or a
-    /// second `I` — the one it was armed from.
+    /// The tool the eyedropper hands back to after a pick, `Escape` or a second `I`.
     pub(crate) dropper_return: Tool,
     /// An eyedropper click waiting for the sample under it (`crate::eyedropper`).
     pub(crate) dropper_pick: Option<crate::eyedropper::PendingPick>,
     /// Numbers each eyedropper click, so its sample key is its own (`SampleKey::pick`).
     pub(crate) dropper_picks: u64,
     /// Where the pointer is while an armed eyedropper hides it from egui
-    /// (`OndinApp::gate_dropper_input`): off the canvas, egui is told it is gone.
+    /// (`OndinApp::gate_dropper_input`).
     pub(crate) dropper_pointer: Option<egui::Pos2>,
-    /// The window as it stood when the eyedropper armed: what every pick off
-    /// the canvas reads (`crate::eyedropper::Frozen`).
+    /// The window as it stood when the eyedropper armed: what every pick off the
+    /// canvas reads (`crate::eyedropper::Frozen`).
     pub(crate) dropper_frozen: crate::eyedropper::Frozen,
-    /// A press off the canvas while armed, which egui never saw; its release is
-    /// the pick (primary) or the way out (secondary).
+    /// A press off the canvas while armed, which egui never saw; its release is the
+    /// pick (primary) or the way out (secondary).
     pub(crate) dropper_press: Option<(egui::Pos2, egui::PointerButton)>,
     /// The text node currently being edited in-canvas.
     pub(crate) text: Option<TextSession>,
-    /// Points selected inside a path, for the node tool — a third kind of
-    /// subject, beside the layer selection and the guide selection.
+    /// Points selected inside a path, for the node tool — a third kind of subject,
+    /// beside the layer selection and the guide selection.
     pub(crate) points: PointSet,
     /// Layer-tree rows the user has collapsed (default: everything expanded).
     pub(crate) collapsed: HashSet<NodeId>,
     /// The first of a possible two opacity digits, and when it was typed; `None`
     /// outside the 600 ms window ([`OndinApp::opacity_digit`]).
     pub(crate) opacity_entry: Option<OpacityEntry>,
-    /// A layer row being renamed in place, and the text typed so far; buffered so
-    /// one rename is one undo step.
+    /// A layer row being renamed in place; buffered so one rename is one undo step.
     pub(crate) renaming_layer: Option<(NodeId, String)>,
     /// The selection the layers tree last reacted to, so it notices a change made
-    /// elsewhere and reveals and scrolls to it once.
+    /// elsewhere and reveals it once.
     pub(crate) layers_synced_selection: Vec<NodeId>,
     /// Whether the tree still owes the selection a scroll into view.
     pub(crate) scroll_layers_to_selection: bool,
-    /// A library file being read and loaded off the frame, its card pulsing
-    /// meanwhile ([`OndinApp::begin_open`]).
+    /// A library file being read and loaded off the frame, its card pulsing meanwhile
+    /// ([`OndinApp::begin_open`]).
     pub(crate) opening: Option<Opening>,
-    /// The row a Shift-click measures its range from: the last one clicked
-    /// *without* Shift. Deliberately not moved by a Shift-click itself, so a
-    /// range can be stretched and shrunk from one end.
+    /// The row a Shift-click measures its range from: the last one clicked *without*
+    /// Shift, so a range can be stretched and shrunk from one end.
     pub(crate) layers_range_anchor: Option<NodeId>,
-    /// Layer-name filter. `Some` while the search field is open, even when
-    /// empty — closing it is what clears the filter, so a search can be emptied
-    /// and retyped without the tree jumping back to its collapsed state.
+    /// Layer-name filter. `Some` while the search field is open, even when empty;
+    /// closing it clears the filter, so a search can be emptied and retyped without the
+    /// tree jumping back to its collapsed state.
     pub(crate) layer_filter: Option<String>,
     /// A layer row being dragged to reorder or reparent it.
     pub(crate) layer_drag: Option<LayerDrag>,
@@ -543,182 +487,153 @@ pub struct OndinApp {
     /// A set's value the user asked to delete while variants use it, until the
     /// confirmation modal is answered.
     pub(crate) deleting_value: Option<crate::panels::ValueDelete>,
-    /// The selection the inspector last drew while one of its fields held the
-    /// keyboard, kept until that field lets go so a click elsewhere commits what
-    /// was typed rather than dropping it ([`Self::inspector_panel`]).
+    /// The selection the inspector last drew while one of its fields held the keyboard,
+    /// kept until that field lets go so a click elsewhere commits what was typed
+    /// ([`Self::inspector_panel`]).
     pub(crate) inspector_hold: Option<crate::session::Selection>,
     /// Canvas size in device pixels as of the last frame — zoom-to-fit needs it.
     pub(crate) canvas_px: (u32, u32),
-    /// The display scale the canvas was last laid out at, `pixels_per_point`. It
-    /// turns a `*_PX` pointer allowance (logical points) into world units, since
-    /// `camera.zoom` is device pixels per world unit (`OndinApp::points_per_world`).
+    /// The display scale the canvas was last laid out at (`pixels_per_point`); it turns
+    /// a `*_PX` allowance in points into world units (`OndinApp::points_per_world`).
     pub(crate) canvas_ppp: f32,
-    /// The canvas widget's rect as of the last frame, in screen points. Last
-    /// frame's because [`ChromeHold`] asks before the canvas is laid out; it moves
-    /// only on a panel toggle or resize.
+    /// The canvas widget's rect as of the last frame, in screen points; last frame's
+    /// because [`ChromeHold`] asks before the canvas is laid out.
     pub(crate) canvas_rect: egui::Rect,
     /// Why the selection chrome is being held back while the inspector is edited.
     pub(crate) chrome_hold: ChromeHold,
-    /// An inspector edit noticed since the last [`ChromeHold`] fold, and whether
-    /// its gesture is a drag still in flight. Written by [`Self::edit_valve`] and
+    /// An inspector edit noticed since the last [`ChromeHold`] fold, and whether its
+    /// gesture is a drag still in flight. Written by [`Self::edit_valve`] and
     /// [`Self::commit_edit`], taken once a frame by `fold_chrome_hold`.
     pub(crate) pending_edit: Option<bool>,
-    /// How far `canvas::autopan` has scrolled the view during the gesture in
-    /// flight, in world units, so a cancel can put the view back. A running total
-    /// rather than a camera snapshot, so a deliberate zoom or pan mid-drag survives.
+    /// How far `canvas::autopan` has scrolled the view during the gesture in flight,
+    /// in world units, so a cancel can put the view back. A running total rather than a
+    /// camera snapshot, so a deliberate zoom or pan mid-drag survives.
     pub(crate) autopan_total: Vec2,
-    /// Inspector panels the user has collapsed, keyed by title so the state
-    /// survives a selection change.
+    /// Inspector panels the user has collapsed, keyed by title.
     pub(crate) collapsed_panels: HashSet<&'static str>,
-    /// How far each instance asked about has drifted from its main
-    /// (`reset::drift`), cached against the session revision beside it for the
-    /// Component card's per-frame counts.
+    /// How far each instance asked about has drifted from its main (`reset::drift`),
+    /// cached against the session revision for the Component card's per-frame counts.
     pub(crate) drift_cache: (
         u64,
         std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
     ),
-    /// What differs among each layers-panel row's children
-    /// (`OndinApp::child_drift_of`), on `drift_cache`'s revision key. Keyed by row
-    /// and whether it is folded: a collapsed row counts its whole subtree, and
-    /// folding changes no revision.
+    /// What differs among each layers-panel row's children (`OndinApp::child_drift_of`),
+    /// on `drift_cache`'s revision key. Keyed by row and whether it is folded: a
+    /// collapsed row counts its whole subtree, and folding changes no revision.
     pub(crate) child_drift_cache: (
         u64,
         std::collections::HashMap<(NodeId, bool), ondin_core::reset::ChildDrift>,
     ),
-    /// The Component card's property readings, kept beside `drift_cache` on the
-    /// same key (`panels::PropCache`).
+    /// The Component card's property readings, on `drift_cache`'s key (`panels::PropCache`).
     pub(crate) prop_cache: crate::panels::PropCache,
     /// This frame's overrides of the selected instance layers, by inspector card:
-    /// title, unit count and the resetting operations, for a card header's dot,
-    /// count and *Reset*. Gathered at the top of `inspector_ui`.
+    /// title, unit count and the resetting operations. Gathered at the top of
+    /// `inspector_ui`.
     pub(crate) card_overrides: Vec<(&'static str, usize, Vec<Operation>)>,
-    /// This frame's field resets of each selected linked layer, by layer, which a
-    /// field's own mark reads its source's value from (`OndinApp::sub_mark`).
+    /// This frame's field resets of each selected linked layer, which a field's own
+    /// mark reads its source's value from (`OndinApp::sub_mark`).
     pub(crate) field_overrides: Vec<(NodeId, Vec<Operation>)>,
-    /// Rects whose Appearance panel is showing the four per-corner radius fields.
-    /// A disclosure only (the model always holds four radii), so view state.
+    /// Rects whose Appearance panel shows the four per-corner radius fields; view state.
     pub(crate) per_corner_radius: HashSet<NodeId>,
     /// The run of Ctrl+D duplicates in progress, if any.
     pub(crate) clones: Option<CloneChain>,
-    /// The group the user has stepped into by double-clicking it, if any. A
-    /// selection scope only: a click picks inside it, a click outside clears it.
+    /// The group the user has stepped into by double-clicking it. A selection scope
+    /// only: a click picks inside it, a click outside clears it.
     pub(crate) entered_group: Option<NodeId>,
-    /// A gesture the user cancelled while still holding the button, so no release
-    /// path turns it into an edit. Cleared at the end of the frame once nothing is
-    /// held, since the release and its suppression happen in the same frame.
+    /// A gesture cancelled while the button is still held, so no release path turns it
+    /// into an edit. Cleared at the end of the frame once nothing is held.
     pub(crate) gesture_cancelled: bool,
     /// Every value a gesture is holding while it runs ([`InFlight`]).
     pub(crate) in_flight: InFlight,
     /// The detached colour picker, when one is open.
     pub(crate) picker: Option<Picker>,
-    /// A picker the `+` on a Fill or Stroke header asked for, parked until the
-    /// new row is laid out; [`Self::paint_row`] claims it next frame with the
-    /// row's own anchor.
+    /// A picker the `+` on a Fill or Stroke header asked for, parked until the new row
+    /// is laid out; [`Self::paint_row`] claims it next frame with the row's anchor.
     pub(crate) pending_picker: Option<(NodeId, PaintSlot)>,
-    /// A paint row's hex field mid-edit (which row, and the half-typed text), so
-    /// a colour can be typed or pasted without the value being reparsed — and
-    /// recommitted — on every keystroke.
+    /// A paint row's hex field mid-edit, so a colour can be typed or pasted without
+    /// being reparsed and recommitted on every keystroke.
     pub(crate) paint_hex: Option<(NodeId, crate::panels::PaintSlot, String)>,
-    /// What the Transform card's Scale field shows, as a percentage. A verb with a
-    /// live readout rather than a property: scale is not stored (`Resize` writes
-    /// geometry), so the field applies against the committed box while in flight
-    /// and returns to 100 when the valve closes.
+    /// What the Transform card's Scale field shows, as a percentage. A verb with a live
+    /// readout, not a property: scale is not stored (`Resize` writes geometry), so the
+    /// field applies against the committed box and returns to 100 when the valve closes.
     pub(crate) scale_pct: f64,
     /// Paint panels already auto-collapsed for being empty. Acting only on the
     /// transition into empty leaves the user's own toggle the last word.
     pub(crate) paint_auto_collapsed: HashSet<&'static str>,
-    /// The selection each self-collapsing panel last set its open state from,
-    /// keyed by title (Fill and Stroke share `"Fill"`); see
-    /// `OndinApp::subject_changed`. One entry per caller, because asking consumes
-    /// the edge: a second caller on one entry would never see the change.
+    /// The selection each self-collapsing panel last set its open state from, keyed by
+    /// title (Fill and Stroke share `"Fill"`); see `OndinApp::subject_changed`. One entry
+    /// per caller, because asking consumes the edge.
     pub(crate) synced_selection: std::collections::HashMap<&'static str, Vec<NodeId>>,
-    /// The stroke whose options menu (dash, cap, join) is open, by index into the
-    /// Stroke panel's list. At most one: overlapping menus hide the one behind.
+    /// The stroke whose options menu (dash, cap, join) is open, by index. At most one.
     pub(crate) stroke_menu: Option<usize>,
-    /// The effect row whose popover is open: its layer and its index in that
-    /// layer's stack. Keyed by node too, so a selection change cannot leave the
-    /// popover editing another layer's effect. At most one, like `stroke_menu`.
+    /// The effect row whose popover is open: its layer and its index in that stack.
+    /// Keyed by node too, so a selection change cannot leave it editing another layer's
+    /// effect. At most one.
     pub(crate) effect_menu: Option<(NodeId, usize)>,
-    /// Which tab of image editing's card is showing. Just a preference, kept across
-    /// entries: the card is open exactly while `Tool::ImageEdit` is, and
-    /// `canvas::edited_image` names the layer and paint.
+    /// Which tab of image editing's card is showing; a preference kept across entries.
+    /// The card is open exactly while `Tool::ImageEdit` is.
     pub(crate) image_tab: ImageCard,
-    /// The strokes whose sides selector row is showing. A `Vec`, since rows stack
-    /// rather than overlap. The only thing deciding whether the row shows; a
-    /// collapsed row still declares its setting through
+    /// The strokes whose sides selector row is showing. The only thing deciding whether
+    /// the row shows; a collapsed row still declares its setting through
     /// [`crate::ui::FieldButton::Set`], so losing this never loses a setting.
     pub(crate) stroke_sides_open: Vec<usize>,
-    /// Settings that outlive the session (export presets and destination, export
-    /// switches, nudge step, tree fold-on-open, web fonts). Held rather than re-read,
-    /// because the export panel asks every frame.
+    /// Settings that outlive the session. Held rather than re-read, because the export
+    /// panel asks every frame.
     pub(crate) prefs: crate::prefs::Prefs,
-    /// The Settings modal's staged edits while it is open (`crate::settings`);
-    /// `Some` is the modal being open.
+    /// The Settings modal's staged edits (`crate::settings`); `Some` is the modal open.
     pub(crate) settings: Option<crate::settings::Settings>,
-    /// The export spec whose settings block is showing, if any. One at a time: two
-    /// open blocks would push the export button off the panel.
+    /// The export spec whose settings block is showing. One at a time: two open blocks
+    /// would push the export button off the panel.
     pub(crate) export_row_open: Option<usize>,
-    /// Whether the Export panel's own menu — presets, copy/paste, the folder rule
-    /// — is showing.
+    /// Whether the Export panel's own menu — presets, copy/paste, the folder rule — is showing.
     pub(crate) export_menu: bool,
-    /// The export settings *Copy export settings* is holding; its own slot, apart
-    /// from [`Self::property_clipboard`], so neither paste is lost to the other.
+    /// The export settings *Copy export settings* is holding; apart from
+    /// [`Self::property_clipboard`], so neither paste is lost to the other.
     pub(crate) export_clipboard: Option<Vec<ondin_core::ExportSpec>>,
-    /// The Export panel's rendered preview, and what it was built from. One slot:
-    /// a new key simply replaces the old.
+    /// The Export panel's rendered preview and what it was built from; one slot.
     pub(crate) export_preview: Option<crate::panels::ExportPreview>,
-    /// The export prefix being typed, and which spec it belongs to; buffered so
-    /// typing one name is one undo step.
+    /// The export prefix being typed, and which spec it belongs to; buffered so typing
+    /// one name is one undo step.
     pub(crate) export_prefix_text: Option<(usize, String)>,
-    /// The export suffix being typed, and which spec it belongs to. Its own
-    /// buffer, not a shared one keyed by part: both fields are on screen at once.
+    /// The export suffix being typed; its own buffer, since both fields are on screen.
     pub(crate) export_suffix_text: Option<(usize, String)>,
-    /// The custom dash list being typed, and which stroke it belongs to. Buffered
-    /// verbatim: typing "5, 10" passes through `5`, a different real pattern, and
-    /// each keystroke would otherwise be an undo step.
+    /// The custom dash list being typed, buffered verbatim: typing "5, 10" passes
+    /// through `5`, a different real pattern, and each keystroke would be an undo step.
     pub(crate) stroke_dash_text: Option<(usize, String)>,
-    /// Which tab of the typography popup is showing, or `None` when it is closed;
-    /// one field, so reopening lands where the user left off.
+    /// Which tab of the typography popup is showing, or `None` when closed; one field,
+    /// so reopening lands where the user left off.
     pub(crate) type_menu: Option<TypeTab>,
     /// The OpenType feature filter being typed in the Character tab, if any.
     pub(crate) feature_filter: String,
-    /// Whether the Character tab's OpenType list also shows the features the
-    /// registry says a user should not be choosing (required, per-script,
-    /// vertical). Per session: a way of looking at the list, not document state.
+    /// Whether the Character tab's OpenType list also shows the features a user should
+    /// not be choosing (required, per-script, vertical). Per session, not document state.
     pub(crate) show_all_features: bool,
-    /// A character colour's hex field mid-edit: which row, and the text in it.
-    /// Buffered so a half-typed hex is not committed on the way; keyed by slot
-    /// because the text colour and a decoration's show at once.
+    /// A character colour's hex field mid-edit; keyed by slot because the text colour
+    /// and a decoration's show at once.
     pub(crate) char_hex: Option<(crate::panels::CharSlot, String)>,
-    /// A multi-selection Transform field being dragged: which one, and the
-    /// absolute value it has been dragged to. `multi_transform_tx` builds from the
-    /// committed document every frame, so a per-frame step would commit only the
-    /// last (zero) step on release; holding the target makes preview and commit the
-    /// same edit.
+    /// A multi-selection Transform field being dragged: which one, and the absolute
+    /// value it has been dragged to. `multi_transform_tx` builds from the committed
+    /// document every frame, so a per-frame step would commit only the last (zero) step
+    /// on release.
     pub(crate) multi_transform_drag: Option<(crate::panels::MultiField, f64)>,
-    /// The drawn canvas cursors, rasterized once (see `cursor.rs` for which ones
-    /// the OS does not provide).
+    /// The drawn canvas cursors, rasterized once (`cursor.rs`).
     pub(crate) cursors: Cursors,
     /// Whether the rulers are showing (Shift+R). View state; on by default.
     pub(crate) show_rulers: bool,
-    /// Whether the guides are showing — *View ▸ Show guides*, `Ctrl+;`. View
-    /// state; every reader goes through [`OndinApp::guides_on`] so hit test and
-    /// paint agree. Present mode leaves guides on screen.
+    /// Whether the guides are showing — *View ▸ Show guides*, `Ctrl+;`. Every reader goes
+    /// through [`OndinApp::guides_on`] so hit test and paint agree.
     pub(crate) show_guides: bool,
-    /// Whether the guides are locked — *View ▸ Lock guides*, `Ctrl+Alt+;`. A
-    /// workspace switch rather than per guide, so the toggle that locked them
-    /// unlocks them and locked can mean not selectable at all
+    /// Whether the guides are locked — *View ▸ Lock guides*, `Ctrl+Alt+;`. A workspace
+    /// switch rather than per guide; locked means not selectable at all
     /// ([`OndinApp::guide_at`]). Off by default.
     pub(crate) lock_guides: bool,
-    /// The guides being edited from the inspector, as whole guides: the preview
-    /// half of the valve for state the renderer never sees
-    /// ([`OndinApp::shown_guide`]). A list, because an edit reaches every selected
-    /// guide and all must preview.
+    /// The guides being edited from the inspector, as whole guides: the preview half of
+    /// the valve for state the renderer never sees ([`OndinApp::shown_guide`]). A list,
+    /// because an edit reaches every selected guide.
     pub(crate) guide_previews: Vec<Guide>,
-    /// The colour a picker drag is previewing for a variable's cell, and which
-    /// cell: [`Self::guide_previews`]' twin for the table, which the picker and
-    /// the browser read instead of the canvas overrides. Dropped by the picker
-    /// whenever no button is held, so it cannot outlive its gesture.
+    /// The colour a picker drag is previewing for a variable's cell, and which cell:
+    /// [`Self::guide_previews`]' twin for the table. Dropped by the picker whenever no
+    /// button is held, so it cannot outlive its gesture.
     pub(crate) var_cell_preview: Option<(
         ondin_core::VarId,
         ondin_core::ModeId,
@@ -729,47 +644,42 @@ pub struct OndinApp {
     pub(crate) open_menu: TopMenu,
     /// The floating insert picker, while it is open.
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
-    /// The revision the bound families were last loaded at: a bind, a string
-    /// cell, a new variable or a paste can name a family not yet requested.
+    /// The revision the bound families were last loaded at: a bind, a string cell, a new
+    /// variable or a paste can name a family not yet requested.
     bound_fonts_at: Option<u64>,
-    /// A picker placement waiting one painted frame, kept here rather than on the
-    /// picker so closing it in the wait keeps the click.
+    /// A picker placement waiting one painted frame; here, not on the picker, so closing
+    /// it in the wait keeps the click.
     pub(crate) kit_placing: Option<crate::kits::picker::Placing>,
-    /// The library's kits' published states and tile pictures, loaded off the
-    /// frame for the picker (`kits::index`).
+    /// The library's kits' published states and tile pictures, loaded off the frame
+    /// (`kits::index`).
     pub(crate) kit_shelf: crate::kits::index::KitShelf,
-    /// The update popover's summary, kept against the document revision and the
-    /// waiting kits' versions it was read at — a dry run too dear for every frame.
-    /// `None` inside when the dry run failed.
+    /// The update popover's summary, kept against the document revision and waiting kits'
+    /// versions it was read at (a dry run, too dear for every frame). `None` inside when
+    /// the dry run failed.
     pub(crate) kit_summary: Option<(
         crate::kits::summary::Key,
         Option<crate::kits::summary::Summary>,
     )>,
-    /// When the kits this document uses were last looked at on disk, for the
-    /// update pill (`kits::updates`).
+    /// When the kits this document uses were last looked at on disk (`kits::updates`).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
-    /// The *Stop sharing* dialog's count of the documents using the kit, while
-    /// the dialog is open (`kits::users`).
+    /// The *Stop sharing* dialog's count of the documents using the kit (`kits::users`).
     pub(crate) kit_users: Option<crate::kits::users::KitUsers>,
-    /// Where the rail's insert button was drawn last frame; the picker hangs
-    /// beside it, bottom-aligned. `NOTHING` until the rail has drawn.
+    /// Where the rail's insert button was drawn last frame; the picker hangs beside it.
+    /// `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
-    /// The styles and variables browser, while it is open; it shares a place with
-    /// the insert picker, one open at a time.
+    /// The styles and variables browser; it shares a place with the insert picker.
     pub(crate) var_browser: Option<crate::panels::variables::Browser>,
-    /// The browser's collapsed groups per document, keyed by the document's root;
-    /// view state for the life of the process, not saved.
+    /// The browser's collapsed groups per document root; view state, not saved.
     pub(crate) var_collapsed: std::collections::HashMap<NodeId, HashSet<String>>,
-    /// Where the rail's swatches button was drawn last frame, directly above the
-    /// hexagon. `NOTHING` until the rail has drawn.
+    /// Where the rail's swatches button was drawn last frame. `NOTHING` until the rail
+    /// has drawn.
     pub(crate) var_button: egui::Rect,
-    /// The `--` list, while a bindable field is typing one or the field menu
-    /// opened it.
+    /// The `--` list, while a bindable field is typing one or the field menu opened it.
     pub(crate) var_complete: Option<crate::panels::binding::Complete>,
     /// A bound field's chip being typed over.
     pub(crate) var_retype: Option<crate::panels::binding::Retype>,
-    /// A bindable field's right-click menu: the field, the point, the field's
-    /// rect the `--` list would hang under (`context-menus.md` §6.7).
+    /// A bindable field's right-click menu: the field, the point, and the field's rect
+    /// the `--` list would hang under (`context-menus.md` §6.7).
     pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
     /// A frame's *Mode* menu, open under its row.
     pub(crate) mode_menu: Option<(NodeId, egui::Rect)>,
@@ -779,70 +689,59 @@ pub struct OndinApp {
     pub(crate) style_picker: Option<crate::panels::styles::StylePicker>,
     /// A style just created, its name being typed in the capsule.
     pub(crate) style_naming: Option<crate::panels::styles::StyleNaming>,
-    /// The style slots whose capsule is opened over its greyed rows — per slot,
-    /// not per layer.
+    /// The style slots whose capsule is opened over its greyed rows — per slot, not per layer.
     pub(crate) style_open: HashSet<ondin_core::style::StyleSlot>,
     /// The publish dialog, while it is open.
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
-    /// This kit's changes since its last publish, with the session revision and
-    /// mark version they were counted at (`OndinApp::kit_changes`).
+    /// This kit's changes since its last publish, with the session revision and mark
+    /// version they were counted at (`OndinApp::kit_changes`).
     pub(crate) kit_changes: Option<(u64, u32, ondin_core::kit::Changes)>,
-    /// The vendored main *Make local*'s confirmation is asking about, while it is
-    /// up.
+    /// The vendored main *Make local*'s confirmation is asking about.
     pub(crate) making_local: Option<NodeId>,
-    /// The document *Go to main in the kit* came from, and its name — the kit's
-    /// top bar links back to it until the user leaves the kit.
+    /// The document *Go to main in the kit* came from, and its name — the kit's top bar
+    /// links back to it until the user leaves the kit.
     pub(crate) kit_return: Option<(std::path::PathBuf, String)>,
     /// *Kits used…*, while it is open.
     pub(crate) kits_used_open: bool,
     /// The kit *Make all local*'s confirmation is asking about.
     pub(crate) making_all_local: Option<String>,
-    /// *Stop sharing as kit*'s confirmation, while it is up: `Some(None)` asks
-    /// about the open document, `Some(Some(path))` about a library file from its
-    /// card.
+    /// *Stop sharing as kit*'s confirmation: `Some(None)` asks about the open document,
+    /// `Some(Some(path))` about a library file from its card.
     pub(crate) unsharing_kit: Option<Option<std::path::PathBuf>>,
-    /// The one open context menu (`docs/context-menus.md` §0 R4). One slot, so
-    /// opening the next one closes the last by construction.
+    /// The one open context menu (`docs/context-menus.md` §0 R4); one slot, so opening
+    /// the next closes the last.
     pub(crate) context_menu: Option<ContextMenu>,
-    /// Where the secondary press that may open a menu landed
-    /// (`docs/context-menus.md` §0 R1). The menu opens at the press, and egui has
-    /// forgotten the press by the time `secondary_clicked` fires on release.
+    /// Where the secondary press that may open a menu landed (§0 R1): egui has forgotten
+    /// the press by the time `secondary_clicked` fires on release.
     pub(crate) secondary_press: Option<egui::Pos2>,
-    /// The pixel grid's own switch — *View ▸ Show grid*. The grid also needs
-    /// enough magnification to be worth drawing, so this is necessary and not
-    /// sufficient; see `grid::VISIBLE_AT_ZOOM`.
+    /// The pixel grid's own switch — *View ▸ Show grid*. Necessary, not sufficient: the
+    /// grid also needs enough magnification (`grid::VISIBLE_AT_ZOOM`).
     pub(crate) show_grid: bool,
-    /// The layout grids' workspace switch — *View ▸ Show layout grid*: every
-    /// frame's bands at once. The outermost of three gates (with each grid's eye
-    /// and `shown_visible`). Nothing snaps to a layout grid, so hiding the bands
-    /// cannot change where anything lands. Per session.
+    /// The layout grids' workspace switch — *View ▸ Show layout grid*: the outermost of
+    /// three gates (with each grid's eye and `shown_visible`). Nothing snaps to a layout
+    /// grid, so hiding the bands cannot change where anything lands. Per session.
     pub(crate) show_layout_grids: bool,
-    /// *View ▸ Show layers* and *Show toolbar*: whether the left pane and the
-    /// tool rail are on screen.
+    /// *View ▸ Show layers* and *Show toolbar*: whether the left pane and the tool rail
+    /// are on screen.
     pub(crate) show_layers: bool,
     pub(crate) show_toolbar: bool,
-    /// *View ▸ Show status messages*: whether the floating status bar at the
-    /// canvas's bottom left reports what just happened. On by default; with it
-    /// off, a message is still written and read by nothing.
+    /// *View ▸ Show status messages*: whether the floating status bar reports what just
+    /// happened. With it off, a message is still written and read by nothing.
     pub(crate) show_status: bool,
-    /// *View ▸ Present mode*: the panels hidden — top bar, layers pane, tool rail,
-    /// inspector, picker and the ruler bars — while the canvas and its overlays
-    /// (guides, grids, selection chrome) keep working. Escape comes back. It
-    /// overrides `Rulers`, `Layers` and `Toolbar` while on without changing them, so
-    /// leaving restores the user's workspace.
+    /// *View ▸ Present mode*: the panels hidden while the canvas and its overlays keep
+    /// working. Escape comes back. Overrides `Rulers`, `Layers` and `Toolbar` without
+    /// changing them, so leaving restores the user's workspace.
     pub(crate) present: bool,
-    /// Whether the transform-origin marker is editable — the Transform panel's
-    /// crosshair. Sticky and app-wide, since moving pivots is a way of working;
-    /// the pivots themselves are per node and saved. Escape turns it off after
-    /// cancelling any gesture ([`Self::escape`]).
+    /// Whether the transform-origin marker is editable — the Transform panel's crosshair.
+    /// Sticky and app-wide; the pivots themselves are per node and saved. Escape turns it
+    /// off after cancelling any gesture ([`Self::escape`]).
     pub(crate) show_pivot: bool,
-    /// The four *Snap* menu toggles. Resolved into snap sources by
-    /// [`OndinApp::snapping`], which is the only place that reads them.
+    /// The four *Snap* menu toggles, read only by [`OndinApp::snapping`].
     pub(crate) snap_shapes: bool,
     pub(crate) snap_guides: bool,
     pub(crate) snap_grid: bool,
-    /// Text baselines: its own switch, since every line of copy in view is a
-    /// candidate and that is far more magnetism than the other three. On by default.
+    /// Text baselines: its own switch, since every line of copy in view is a candidate
+    /// and that is far more magnetism than the other three. On by default.
     pub(crate) snap_baselines: bool,
 }
 
@@ -862,9 +761,8 @@ pub enum TopMenu {
 
 /// The system clipboard's text, if it holds any; `None` for an empty one.
 ///
-/// Read directly, because `Event::Paste` only arrives on `Ctrl+V`, and a
-/// context-menu row both runs and is offered from app code
-/// ([`ContextMenu::system_text`]).
+/// Read directly, because `Event::Paste` only arrives on `Ctrl+V` and a context-menu
+/// row is offered from app code ([`ContextMenu::system_text`]).
 pub(crate) fn system_clipboard_text() -> Option<String> {
     if !clipboard_is_reachable() {
         return None;
@@ -874,13 +772,10 @@ pub(crate) fn system_clipboard_text() -> Option<String> {
 }
 
 /// Every `arboard` handle this crate opens is opened under this lock: two threads
-/// opening the Windows clipboard at once corrupt the heap, which parallel tests
-/// (every `ContextMenu` open snapshots the clipboard) would otherwise hit.
+/// opening the Windows clipboard at once corrupt the heap.
 ///
-/// `egui-winit` keeps its own handle (`ctx.copy_text`) outside the lock; that is
-/// safe only because both are driven from the one UI thread, so a clipboard read
-/// moved onto a worker is not covered. Poisoning is ignored: a panic under the
-/// lock says nothing about the OS clipboard.
+/// `egui-winit` keeps its own handle outside the lock, safe only because both run on
+/// the one UI thread; a read moved onto a worker is not covered. Poisoning is ignored.
 fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> {
     static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _held = GATE.lock().unwrap_or_else(|e| e.into_inner());
@@ -888,22 +783,18 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> 
     Some(f(&mut clipboard))
 }
 
-/// Whether the OS clipboard is off limits — set once by `OndinApp::headless` and
-/// never cleared, so a headless test cannot read or overwrite the developer's real
-/// clipboard. Process-wide because the clipboard is; one-way so no test can turn
-/// it back on for the others.
+/// Whether the OS clipboard is off limits — set once by `OndinApp::headless`, never
+/// cleared, so no headless test can touch the developer's real clipboard.
 static CLIPBOARD_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Whether this process may open the OS clipboard at all. Checked by the callers,
-/// not inside [`with_clipboard`], because `clipboard_gate_tests` calls that
-/// directly and would otherwise return early and assert nothing.
+/// Whether this process may open the OS clipboard at all. Checked by the callers, not
+/// inside [`with_clipboard`], which `clipboard_gate_tests` calls directly.
 fn clipboard_is_reachable() -> bool {
     !CLIPBOARD_OFF.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Whether the system clipboard holds a picture, so a *Paste* row is offered over
-/// a screenshot. A `bool` rather than the image, since asking decodes it;
-/// [`OndinApp::paste_image`] reads it again if the row is taken.
+/// Whether the system clipboard holds a picture. A `bool` rather than the image, since
+/// asking decodes it; [`OndinApp::paste_image`] reads it again if the row is taken.
 pub(crate) fn system_clipboard_has_image() -> bool {
     clipboard_is_reachable() && with_clipboard(|c| c.get_image().is_ok()).unwrap_or(false)
 }
@@ -913,71 +804,58 @@ pub(crate) struct ContextMenu {
     /// The **press** position (R1), in screen points.
     pub at: egui::Pos2,
     pub target: crate::menu::Target,
-    /// The world point the menu was opened over, where there is one: where *Paste
-    /// here* pastes and *Edit text* puts the caret.
+    /// The world point the menu was opened over, where there is one: where *Paste here*
+    /// pastes and *Edit text* puts the caret.
     pub world: Option<Point>,
-    /// True on the frame this menu was opened, and false on every frame after.
-    /// That frame is exempt from the click-away test: a context menu has no head,
-    /// so the release that opens it would otherwise read as the click that
-    /// dismisses it.
+    /// True on the frame this menu was opened. That frame is exempt from the click-away
+    /// test, or the release that opens the menu would dismiss it.
     pub just_opened: bool,
-    /// Whether the system clipboard held text when this menu opened, for the
-    /// *Paste* rows ([`OndinApp::paste`]). A snapshot, so an open menu does not
-    /// open an OS clipboard handle every frame.
+    /// Whether the system clipboard held text when this menu opened, for the *Paste*
+    /// rows ([`OndinApp::paste`]). A snapshot, so an open menu does not open an OS
+    /// clipboard handle every frame.
     pub system_text: bool,
     /// Whether the system clipboard held a picture when this menu opened
     /// ([`system_clipboard_has_image`]); a snapshot, since asking decodes a bitmap.
-    /// Read by every *Paste* row but the text session's.
     pub system_image: bool,
-    /// Whether [`OndinApp::clipboard`] / [`OndinApp::guide_clipboard`] still describe
-    /// the system clipboard ([`OndinApp::owns_the_clipboard`]), snapshotted with
-    /// [`Self::system_text`], so a *Paste* row never offers what its chord would
-    /// decline.
+    /// Whether [`OndinApp::clipboard`] / [`OndinApp::guide_clipboard`] still describe the
+    /// system clipboard ([`OndinApp::owns_the_clipboard`]), so a *Paste* row never offers
+    /// what its chord would decline.
     pub payload_current: bool,
-    /// Whether the layer this menu opened on is text with contours to convert —
-    /// what dims *Convert to path* (`build::can_outline_text`). A snapshot, because
-    /// asking builds the outlines; "has glyphs" is not enough, since spaces have
-    /// glyphs and no contours.
+    /// Whether the layer this menu opened on is text with contours to convert
+    /// (`build::can_outline_text`). A snapshot, because asking builds the outlines.
     pub text_outlineable: bool,
     /// The row `↑`/`↓` have walked to, if the keyboard is driving this menu
     /// (`docs/context-menus.md` §8). An item rather than an index, as the menu is
-    /// rebuilt each frame ([`crate::menu::navigate`]). `None` means the pointer owns
-    /// the highlight.
+    /// rebuilt each frame ([`crate::menu::navigate`]).
     pub highlight: Option<crate::menu::Item>,
 }
 
 /// How long the selection chrome stays away after the last keystroke, or after a
-/// scrub lets go. Moving the pointer over the canvas brings it back sooner
-/// ([`ChromeHold`]).
+/// scrub lets go ([`ChromeHold`]).
 const CHROME_HOLD_SECS: f64 = 1.5;
 
-/// Whether the selection chrome is being held back because a value in the
-/// inspector is being edited, and until when, so the user sees what they change.
-/// A term in `canvas::chrome_hidden`.
+/// Whether the selection chrome is held back because an inspector value is being
+/// edited, and until when. A term in `canvas::chrome_hidden`.
 ///
-/// Two clocks: a scrub holds for its whole duration and starts the count on
-/// release; a keystroke restarts the count each time.
+/// Two clocks: a scrub holds for its whole duration and starts the count on release;
+/// a keystroke restarts the count each time.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum ChromeHold {
     /// Nothing is being edited; the chrome is the selection's own business.
     #[default]
     Free,
-    /// A scrub is in flight. Held until the button comes up, whereupon the count
-    /// starts — so this state has no deadline of its own.
+    /// A scrub is in flight; held until the button comes up, so no deadline of its own.
     Scrubbing,
-    /// Held until this moment on egui's own clock (`InputState::time`), the clock
-    /// `request_repaint_after` uses and a headless probe can drive.
+    /// Held until this moment on egui's own clock (`InputState::time`).
     Until(f64),
 }
 
-/// How long the pointer rests on the layers panel's drag edge before the edge
-/// lights up: long enough that a pointer crossing the 7pt band on its way
-/// somewhere does not light it.
+/// How long the pointer rests on the layers panel's drag edge before it lights, so a
+/// pointer merely crossing the 7pt band does not light it.
 const EDGE_DWELL: f64 = 0.2;
 
 /// Whether the layers panel's drag edge is lit, and since when (seconds on
-/// `InputState::time`, as for [`ChromeHold::Until`]). The delay is on the
-/// highlight only; egui's resize cursor is untouched.
+/// `InputState::time`). The delay is on the highlight only, not egui's resize cursor.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub(crate) enum EdgeDwell {
     /// The pointer is not on the edge.
@@ -990,15 +868,10 @@ pub(crate) enum EdgeDwell {
 }
 
 impl EdgeDwell {
-    /// One frame of the machine, as a pure function of its inputs.
-    ///
-    /// - `in_band` is the pointer inside the edge's grab band.
-    /// - `pressed` is the primary press this frame, which lights the edge at once;
-    ///   the press edge rather than `down`, which an unrelated drag crossing the
-    ///   band also has.
-    /// - `down` holds a lit edge after a drag leaves the band (at `MIN_W`/`MAX_W`),
-    ///   and blocks the dwell, so a gesture already in flight that pauses on the
-    ///   band never lights it.
+    /// One frame of the machine. `in_band`: the pointer is in the edge's grab band.
+    /// `pressed`: the primary press this frame (the edge, not `down`, which an unrelated
+    /// drag also has). `down` holds a lit edge after a drag leaves the band and blocks
+    /// the dwell, so a gesture already in flight never lights it.
     pub fn advance(self, now: f64, in_band: bool, pressed: bool, down: bool) -> Self {
         match self {
             Self::Off if in_band && pressed => Self::Lit,
@@ -1017,8 +890,8 @@ impl EdgeDwell {
         self == Self::Lit
     }
 
-    /// When the highlight falls due, so the frame can be woken for it: a resting
-    /// pointer produces no events.
+    /// When the highlight falls due, so the frame can be woken (a resting pointer
+    /// produces no events).
     pub fn due(self) -> Option<f64> {
         match self {
             Self::Waiting(t) => Some(t + EDGE_DWELL),
@@ -1030,12 +903,11 @@ impl EdgeDwell {
 /// How long a first opacity digit waits for a second one (`docs/shortcuts.md` §2).
 const OPACITY_DIGIT_WINDOW: f64 = 0.6;
 
-/// A first opacity digit waiting to find out whether it is the whole value
-/// (seconds on `InputState::time`, as for [`ChromeHold::Until`]).
+/// A first opacity digit waiting to find out whether it is the whole value (seconds on
+/// `InputState::time`).
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct OpacityEntry {
-    /// `0`–`9` as typed. `0` alone means 100%, so this is the digit and not the
-    /// value it resolves to.
+    /// `0`–`9` as typed: the digit, not the value it resolves to.
     first: u8,
     at: f64,
     /// The layers the digit was typed against, which the deadline commit lands on.
@@ -1045,8 +917,7 @@ pub(crate) struct OpacityEntry {
 /// What a typed digit resolves to, and whether the window is still open.
 #[derive(Clone, PartialEq, Debug)]
 enum OpacityStep {
-    /// Preview this percentage and hold the entry: a second digit may still
-    /// arrive and make it exact.
+    /// Preview this percentage and hold the entry for a possible second digit.
     Wait(f64, OpacityEntry),
     /// Commit this percentage — a second digit shut the window.
     Land(f64),
@@ -1062,15 +933,13 @@ fn opacity_of_digit(digit: u8) -> f64 {
     }
 }
 
-/// Whether `entry` is still waiting for a second digit. The single reading of the
-/// boundary for [`opacity_step`] and [`OndinApp::fold_opacity_entry`]; if they
-/// disagreed, one digit could be both paired and committed alone.
+/// Whether `entry` is still waiting for a second digit: the one reading of the boundary
+/// for [`opacity_step`] and [`OndinApp::fold_opacity_entry`], which must agree.
 fn opacity_window_open(entry: &OpacityEntry, now: f64) -> bool {
     now - entry.at < OPACITY_DIGIT_WINDOW
 }
 
-/// Resolve a digit against whatever digit is already pending. Pure, with the
-/// clock passed in, so it is testable as a state machine.
+/// Resolve a digit against whatever digit is already pending. Pure; the clock is passed in.
 fn opacity_step(
     pending: Option<OpacityEntry>,
     digit: u8,
@@ -1093,15 +962,12 @@ fn opacity_step(
     }
 }
 
-/// Whether `tx`, offered by a control with response `resp`, is an inspector edit
-/// worth hiding the selection chrome for — and if so, whether the gesture making it
-/// is a drag still in flight.
+/// Whether `tx`, offered by a control with response `resp`, is an inspector edit worth
+/// hiding the selection chrome for — and if so, whether it is a drag still in flight.
 ///
-/// Both halves are needed: `Transaction::changes_ink` says the edit is visible,
-/// and the response says an edit happened this frame at all — a live control's
-/// transaction is built every frame, so without it a resting field held the chrome
-/// away forever. A `None` response comes from [`OndinApp::commit_edit`], which is
-/// reached only when something changed.
+/// Both halves are needed: `changes_ink` says the edit is visible, the response says an
+/// edit happened this frame (a live control's transaction is built every frame). A
+/// `None` response comes from [`OndinApp::commit_edit`], reached only on a change.
 fn edit_note(resp: Option<&egui::Response>, tx: &Transaction) -> Option<bool> {
     if !tx.changes_ink() {
         return None;
@@ -1122,15 +988,11 @@ impl ChromeHold {
         self != Self::Free
     }
 
-    /// One frame of the machine, as a pure function of its inputs;
-    /// `OndinApp::fold_chrome_hold` gathers them from the `Context`.
-    ///
-    /// - `edit` is the note a value field left: `Some(true)` a drag in flight,
-    ///   `Some(false)` a keystroke that moved the number, `None` nothing.
-    /// - `pointer_down` ends a scrub, because the field cannot report the release.
-    /// - `moved_on_canvas` is the pointer travelling over the artwork, which brings
-    ///   the chrome back early — but never out of a scrub, since a long drag
-    ///   crosses the canvas.
+    /// One frame of the machine; `OndinApp::fold_chrome_hold` gathers the inputs.
+    /// `edit` is the note a value field left (`Some(true)` a drag in flight,
+    /// `Some(false)` a keystroke). `pointer_down` ends a scrub, since the field cannot
+    /// report the release. `moved_on_canvas` brings the chrome back early, never out of
+    /// a scrub, since a long drag crosses the canvas.
     pub fn advance(
         self,
         now: f64,
@@ -1181,11 +1043,10 @@ impl OndinApp {
     }
 
     /// Say, once, in the status line, that a record on disk could not be read.
-    /// [`crate::prefs::Prefs::unreadable`],
-    /// [`crate::library::cache::LocalIndex::unreadable`] and
-    /// [`crate::library::state::Library::projects_unreadable`] each refuse to be
-    /// overwritten with defaults, and each looks like an ordinary empty state; without
-    /// a message the user would make a new library beside the real one.
+    /// [`crate::prefs::Prefs::unreadable`], [`crate::library::cache::LocalIndex::unreadable`]
+    /// and [`crate::library::state::Library::projects_unreadable`] each refuse to be
+    /// overwritten and look like an empty state; without a message the user would make a
+    /// new library beside the real one.
     pub(crate) fn report_unreadable_records(&mut self) {
         let unreadable: Vec<&str> = [
             (
@@ -1219,20 +1080,17 @@ impl OndinApp {
     /// Decide what the window shows on the first frame: the library, unless
     /// `reopen_last` names a document that still loads.
     ///
-    /// `open_path` is deliberately not used: it autosaves the outgoing document,
-    /// asks about unsaved work, rewrites `last_document` and drops the recovery
-    /// snapshot this collects.
+    /// `open_path` is deliberately not used: it autosaves the outgoing document, asks
+    /// about unsaved work, rewrites `last_document` and drops the recovery snapshot this
+    /// collects.
     fn open_at_launch(&mut self) {
         self.view = View::Dashboard;
         self.report_unreadable_records();
-        // The trash's retention window is enforced at launch, which reaches users
-        // who reopen straight into a document and never see the dashboard. The
-        // settings save keeps its own sweep so a shrunk window applies at once.
+        // Enforced at launch to reach users who reopen straight into a document.
         crate::library::store::purge_trash(&self.library.root, self.prefs.trash_keep_days);
         // `Library::open` counted the trash before the sweep.
         self.library.refresh_trash();
-        // Collected before the reopen and answered by a later frame's modal, which
-        // asks over whatever document this opens.
+        // Collected before the reopen; a later frame's modal asks over whatever opens.
         self.recovery.pending =
             crate::library::recovery::pending(&self.library.root, &self.library.entries);
         if !self.prefs.reopen_last {
@@ -1258,32 +1116,24 @@ impl OndinApp {
         self.view = View::Editor;
     }
 
-    /// An `OndinApp` with no GPU, no font threads, no preferences file and no OS
-    /// clipboard, so everything the app decides is reachable from a test.
-    /// `theme::install` is called because the chrome reads fonts and spacing from
-    /// the style. The caller supplies the `Context` so a probe drives input and
-    /// reads output through the same one.
+    /// An `OndinApp` with no GPU, font threads, preferences file or OS clipboard. The
+    /// caller supplies the `Context` so a probe drives input and reads output through it.
     #[cfg(test)]
     pub(crate) fn headless(ctx: &egui::Context) -> Self {
         crate::theme::install(ctx);
-        // A base folder that does not exist, because `with` scans it; the default
-        // would read the developer's real library.
+        // A base folder that does not exist: the default would read the real library.
         let prefs = crate::prefs::Prefs {
             base_folder: Some(std::env::temp_dir().join("ondin-headless-no-library")),
-            // Never written out, or the temp root above would become the
-            // developer's real base folder on the first `prefs.save()`.
+            // Never written out, or the temp root would become the real base folder.
             ephemeral: true,
             ..Default::default()
         };
-        // Process-wide and never cleared (`CLIPBOARD_OFF`).
         CLIPBOARD_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
         Self::with(CanvasRenderer::headless(), FontService::inert(), prefs)
     }
 
-    /// The one field list, so the two constructors above cannot drift; the three
-    /// parameters are the whole difference between an app and a headless one.
+    /// The one field list, so the two constructors cannot drift.
     fn with(canvas: CanvasRenderer, fonts: FontService, prefs: crate::prefs::Prefs) -> Self {
-        // Before the struct literal, which moves `prefs`.
         let root = crate::library::root(prefs.base_folder.as_deref())
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         let library = crate::library::state::Library::open(root);
@@ -1339,9 +1189,7 @@ impl OndinApp {
             chrome_hold: ChromeHold::default(),
             pending_edit: None,
             autopan_total: Vec2::ZERO,
-            // Preview starts closed because opening it starts rendering and
-            // encoding the artwork. Effects is only seeded closed; the panel then
-            // follows `inspector::sync_paint_collapse`.
+            // Preview starts closed because opening it renders and encodes the artwork.
             collapsed_panels: HashSet::from(["Effects", "Preview", "Frame templates"]),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
@@ -1385,8 +1233,7 @@ impl OndinApp {
             show_toolbar: true,
             show_status: true,
             present: false,
-            // Off: a marker on every selection would be permanent chrome for a
-            // property most layers never move.
+            // Off: a marker on every selection would be permanent chrome.
             show_pivot: false,
             snap_shapes: true,
             snap_guides: true,
@@ -1460,12 +1307,10 @@ pub(crate) enum View {
 }
 
 impl eframe::App for OndinApp {
-    /// Wait for the snapshot writer before the process goes, on every exit path
-    /// that skips [`Self::handle_close_request`]'s own settle.
-    ///
-    /// This is the primary flush and `library::writer::Writer`'s `Drop` the
-    /// backstop: eframe may exit without dropping the app (`process::exit`, or
-    /// macOS `Cmd-Q`), but reaches `on_exit` on all paths.
+    /// Wait for the snapshot writer before the process goes, on every exit path that
+    /// skips [`Self::handle_close_request`]'s own settle. This is the primary flush and
+    /// `library::writer::Writer`'s `Drop` the backstop: eframe may exit without dropping
+    /// the app (`process::exit`, macOS `Cmd-Q`) but reaches `on_exit` on all paths.
     ///
     /// [`Self::handle_close_request`]: OndinApp::handle_close_request
     fn on_exit(&mut self) {
@@ -1480,49 +1325,39 @@ impl eframe::App for OndinApp {
         self.gate_dropper_input(ctx, raw_input);
     }
 
-    /// The frame body: everything the app draws and decides, once per pass. (It is
-    /// `ui`, not `update`; this impl has only `on_exit`, `raw_input_hook` and this.)
+    /// The frame body: everything the app draws and decides, once per pass.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // Above the view branch, because a launch can land on either screen
-        // ([`OndinApp::recovery_modal`]).
+        // Above the view branch: a launch can land on either screen.
         self.recovery_modal(&ctx);
 
-        // Above the view branch too: the close interception is about the window,
-        // and the library screen can hold a dirty session (a failed save, an
-        // unsaved document left for the dashboard).
+        // Above the view branch too: the library screen can hold a dirty session.
         self.handle_close_request(&ctx);
         self.close_confirmation(&ctx);
         self.value_delete_confirmation(&ctx);
 
-        // The window's resize edges, on a host whose window has none of its own —
-        // above the view branch, because both screens are the same window.
+        // Both screens are the same window, and the updater reports to both bars.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
-        // And the updater, for the same reason: it reports to both screens' bars.
         self.updater.poll();
 
-        // The dashboard returns, and everything below it is the editor: no
-        // keyboard routing, no panels. It deliberately skips the font poll,
-        // `disk_results` and the two ticks (`go_to_dashboard` compensates one).
-        // A library file read off the frame lands here, before the screen it
-        // switches to is drawn.
+        // The dashboard returns early: no keyboard routing, no panels, no font poll,
+        // `disk_results` or ticks (`go_to_dashboard` compensates one). A library file
+        // read off the frame lands here, before the screen it switches to is drawn.
         self.poll_open(ui.ctx());
         if self.view == View::Dashboard {
             self.dashboard_ui(ui);
-            // Last of the library's frame, after every card: see the editor's
-            // twin at the end of this function.
+            // Last of the library's frame, after every card (the editor's twin is at
+            // the end of this function).
             crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
-            // Written here too, or the first editor frame after the library would
-            // read the last editor frame's value.
+            // Written here too, or the first editor frame would read a stale value.
             self.chrome_focus = ui.ctx().memory(|m| m.focused()).is_some();
             return;
         }
 
-        // Merge background font results; only font data invalidates the
-        // shaped-text cache. A bound family is requested when the document
-        // changes, since a variable can name a family the open-time walk missed;
-        // gated on the table holding a string at all.
+        // Merge background font results; only font data invalidates the shaped-text
+        // cache. A bound family is requested when the document changes, since a
+        // variable can name a family the open-time walk missed.
         if self.bound_fonts_at != Some(self.session.revision()) {
             self.bound_fonts_at = Some(self.session.revision());
             let strings = self
@@ -1541,21 +1376,18 @@ impl eframe::App for OndinApp {
             // fetches preview faces continuously while scrolled.
             if fonts.touches(&self.document_families()) {
                 self.session.fonts_changed();
-                // The picker's pictures of this document's mains were laid out
-                // in the fallback too, and no revision says so.
+                // The picker's pictures were laid out in the fallback too.
                 if let Some(p) = self.kit_picker.as_mut() {
                     p.fonts_changed();
                 }
             }
-            // And the kits' pictures, asked of their own text.
             self.kit_shelf
                 .fonts_changed(|families| fonts.touches(families));
             // Not narrowed: a preview miss waits for exactly this face.
             self.previews.retry_misses();
         }
         if fonts.families_changed {
-            // A document opened before the system scan or web catalog landed could
-            // not resolve its families; ask again now. Idempotent.
+            // A document opened before the font scan landed could not resolve its families.
             self.ensure_document_fonts();
         }
         for family in self.fonts.take_evicted() {
@@ -1565,28 +1397,23 @@ impl eframe::App for OndinApp {
             ctx.request_repaint();
         }
 
-        // A pointer press ends any run of coalescing edits: a click is a new
-        // intent, even on the same node (`EditorSession::end_edit_run`).
+        // A pointer press ends any run of coalescing edits: a click is a new intent.
         if ctx.input(|i| i.pointer.any_pressed()) {
             self.session.end_edit_run();
         }
         self.leave_a_scope_the_selection_left();
 
-        // Whether this frame's `Tab` was ours (point editing with a path, or any
-        // live text session), read before the panels change focus and acted on at
-        // the end of the frame.
+        // Whether this frame's `Tab` was ours (point editing or a live text session),
+        // read before the panels change focus and acted on at the end of the frame.
         let took_tab = (self.edited_path().is_some() || self.text.is_some())
             && !ctx.egui_wants_keyboard_input()
             && ctx.input(|i| i.key_pressed(egui::Key::Tab));
 
-        // Keyboard first, but only what the current mode admits and only when
-        // no chrome widget owns the keyboard (see `input::resolve`).
-        //
-        // An open context menu holds the keyboard (`docs/context-menus.md` §0 R3):
-        // Escape closes only the menu, never reaching the `escape` ladder, and the
-        // menu's own navigation keys are consumed here and travel to it as a value.
+        // Keyboard first, only what the mode admits and no chrome widget owns (see
+        // `input::resolve`). An open context menu holds the keyboard
+        // (`docs/context-menus.md` §0 R3): Escape closes only the menu, and its
+        // navigation keys travel to it as a value.
         let mut nav = None;
-        // Last frame's answer, taken so this frame's handlers write a fresh one.
         let popover_heard = std::mem::take(&mut self.popover_heard);
         if self.context_menu.is_some() {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1595,18 +1422,15 @@ impl eframe::App for OndinApp {
                 nav = crate::menu::read_nav(&ctx);
             }
         } else if self.modal_is_up() {
-            // A modal owns every key, or they would edit the document behind the
-            // backdrop; `input::resolve` is no second guard, since a modal of
-            // buttons does not make egui want the keyboard.
+            // A modal owns every key; `input::resolve` is no second guard, since a modal
+            // of buttons does not make egui want the keyboard.
         } else if popover_heard
             && self.a_popover_owns_escape()
             && ctx.input(|i| i.key_pressed(egui::Key::Escape))
         {
-            // Escape is spent on a popover heard last frame (it closes itself
-            // further down), so it pays out no rung of the ladder. Other keys pass.
+            // Escape is spent on a popover heard last frame; other keys pass.
         } else {
-            // A popover flag nobody heard is dead: clear it, and let the press pay
-            // out its rung.
+            // A popover flag nobody heard is dead: clear it, and let the press pay out.
             if self.a_popover_owns_escape() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.type_menu = None;
                 self.stroke_menu = None;
@@ -1620,38 +1444,31 @@ impl eframe::App for OndinApp {
             }
         }
 
-        // Files dropped on the window, whatever the tool. A modal blocks them too:
-        // `raw.dropped_files` bypasses the `egui::Modal` backdrop.
+        // Dropped files bypass the `egui::Modal` backdrop, so a modal blocks them here.
         if !self.modal_is_up() {
             self.take_dropped_images(&ctx);
         }
 
-        // Right-click abandons whatever is in flight. Before the UI runs, so this
-        // frame's widgets already know; a strict no-op when nothing is in flight,
-        // which leaves the right-click that removes a gradient stop alone. The
-        // press position is kept for the menu the release may open.
+        // Right-click abandons whatever is in flight, before the UI runs so this
+        // frame's widgets know; a strict no-op when nothing is, which leaves the
+        // right-click that removes a gradient stop alone.
         if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
             self.secondary_press = ctx.pointer_interact_pos();
-            // An armed eyedropper is a gesture a right-click calls off, and the
-            // click is spent on it: no menu, no selection. Anything else in
-            // flight is cancelled by the same press.
+            // A right-click calls off an armed eyedropper and is spent on it.
             if self.disarm_dropper() {
                 self.gesture_cancelled = true;
             }
             self.cancel_gesture(&ctx);
         }
 
-        // Whatever the background writer finished, before anything reads the
-        // state it changes ([`OndinApp::disk_results`]).
+        // Before anything reads the state the background writer changes.
         self.disk_results();
         // After this frame's edits, before the panels draw the save dot.
         self.autosave_tick(&ctx);
-        // After `disk_results`, so a landed save drops the snapshot before the
-        // tick could take a new one.
+        // After `disk_results`, so a landed save drops the snapshot before a new one.
         self.recovery_tick(&ctx);
 
         // Present mode overrides the chrome switches without changing them.
-        // Escape leaves it, handled first in `escape`.
         if !self.present {
             self.top_bar(ui);
             if self.show_layers {
@@ -1669,11 +1486,9 @@ impl eframe::App for OndinApp {
         // Before the canvas, which reads the answer; the note was left by the
         // previous frame's inspector.
         self.fold_chrome_hold(&ctx);
-        // Another deadline nothing else would wake the loop for.
         self.fold_opacity_entry(&ctx);
 
-        // The canvas takes the whole remaining area; the inspector and the
-        // colour picker float over it, so both are shown after it.
+        // The canvas takes the remaining area; the inspector and picker float over it.
         let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(color::BG))
             .show(ui, |ui| {
@@ -1681,11 +1496,8 @@ impl eframe::App for OndinApp {
             })
             .response
             .rect;
-        // Over the canvas's bottom left, beside the tool rail.
         self.status_bar(&ctx, canvas);
 
-        // A kit this document uses that published since the library was last
-        // read brings the update pill on its own.
         self.watch_kits(&ctx);
         if !self.present {
             self.inspector_panel(&ctx);
@@ -1697,51 +1509,44 @@ impl eframe::App for OndinApp {
             self.mode_menu_ui(&ctx);
             self.style_popups_ui(&ctx);
         }
-        // The kit dialogs are outside the `!present` guard because shortcuts and
-        // the canvas menu open them in present mode; every flag `modal_is_up`
-        // reads must be a card that is drawn whenever it is set.
+        // Outside the `!present` guard: shortcuts and the canvas menu open the kit
+        // dialogs in present mode, and every flag `modal_is_up` reads must be drawn.
         self.publish_dialog(&ctx);
         self.make_local_dialog(&ctx);
         self.kits_used_dialog(&ctx);
         self.stop_sharing_dialog(&ctx);
-        // After every door has had its say, so a right-click that replaced the
-        // open menu has already written the slot (R4). Outside the `!present`
-        // guard, because a context menu opens in present mode.
+        // After every door, so a right-click that replaced the open menu has already
+        // written the slot (R4); unguarded, a context menu opens in present mode.
         self.context_menu_ui(&ctx, nav);
-        // Last; unguarded because its only door is a top-bar button present mode
-        // already hides.
+        // Last; unguarded because its only door is a top-bar button present mode hides.
         self.settings_ui(&ctx);
 
-        // The next frame acts on the inspector's edit note, so ask for it: a
-        // button click's commit requests no repaint of its own.
+        // A button click's commit requests no repaint of its own.
         if self.pending_edit.is_some() {
             ctx.request_repaint();
         }
 
-        // Once the button the cancelled gesture rode on is up, the next press is a
-        // fresh gesture. End of frame, because the release is the event the
-        // suppression swallows.
+        // End of frame, because the release is the event the suppression swallows.
         if ctx.input(|i| !i.pointer.any_down()) {
             self.gesture_cancelled = false;
-            // No scrub is left to cancel. Here rather than on `drag_stopped`, which
-            // the session-scoped valves see only on a frame the field changed.
+            // Here rather than on `drag_stopped`, which the session-scoped valves see
+            // only on a frame the field changed.
             self.in_flight.session_scrub = None;
             self.in_flight.settings_scrub = None;
         }
 
-        // Hand focus back from egui's focus ring after a `Tab` that was ours, or
-        // the next `Tab` would be dropped as chrome-focused. It cannot be consumed
-        // earlier: egui moves focus while the panels are built.
+        // Hand focus back from egui's focus ring after a `Tab` that was ours, or the
+        // next `Tab` would be dropped as chrome-focused. Not consumable earlier: egui
+        // moves focus while the panels are built.
         if took_tab && let Some(focused) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(focused));
         }
 
-        // The window's controls over a card, last, once every card and the bar
-        // are laid: a modal otherwise leaves no way to move, resize or close it.
+        // Last, once every card and the bar are laid: a modal otherwise leaves no way
+        // to move, resize or close the window.
         crate::chrome::above_modal(&ctx, crate::chrome::Chrome::current());
 
-        // After the `Tab` surrender above, or the next frame's `Escape` would think
-        // a field still had the keyboard ([`Self::chrome_focus`]).
+        // After the `Tab` surrender, or the next `Escape` would think a field had the keyboard.
         self.chrome_focus = ctx.memory(|m| m.focused()).is_some();
     }
 }
@@ -1757,29 +1562,27 @@ impl OndinApp {
         }
     }
 
-    /// `Ctrl+Shift+Z`. Redo is a structural edit by the same argument: it moves
-    /// the document under state that indexes into it.
+    /// `Ctrl+Shift+Z`; moves the document under state that indexes into it, like undo.
     pub(crate) fn redo(&mut self) {
         if self.session.redo() {
             self.document_rewound();
         }
     }
 
-    /// The document just moved under us (undo or redo). Drop the app-side state
-    /// that names parts of it by index rather than by id, and park or drop a cut's
-    /// move, which is a claim about one point in the history.
+    /// The document just moved under us (undo or redo). Drop the app-side state that
+    /// names parts of it by index, and park or drop a cut's move (a claim about one point
+    /// in the history).
     ///
-    /// - [`PointSet`] holds `(subpath, anchor)` indices; they can stay in range and
-    ///   name a different anchor, so `retain_valid` is not enough — only clearing.
-    /// - [`PenState`] snapshots the node's subpaths, so finishing after an undo
-    ///   would resurrect the undone geometry.
-    /// - [`OndinApp::cut_move`] is parked when undone below its `depth`, restored by
-    ///   a redo with no commit between, and dropped once a commit branches.
+    /// - [`PointSet`] holds `(subpath, anchor)` indices that can stay in range and name
+    ///   a different anchor, so only clearing is safe.
+    /// - [`PenState`] snapshots the subpaths; finishing would resurrect undone geometry.
+    /// - [`OndinApp::cut_move`] is parked when undone below its `depth`, restored by a
+    ///   redo with no commit between, dropped once a commit branches.
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
-        // A picker on a slot a style has just landed on closes, or its next write
-        // would cut the style again (unless the style itself is being edited).
+        // A picker on a slot a style has just landed on closes, or its next write would
+        // cut the style again (unless the style itself is being edited).
         if self.session.style_edit.is_none()
             && let Some(p) = &self.picker
         {
@@ -1800,8 +1603,7 @@ impl OndinApp {
                 self.picker = None;
             }
         }
-        // Parked at the commit count: a commit while parked branched the history,
-        // and the cut a redo would replay is gone.
+        // A commit while parked branched the history; the cut a redo would replay is gone.
         let (depth, commits) = (self.session.history.undo_depth(), self.session.commits());
         let mut branched = false;
         if let Some(c) = self.cut_move.as_mut() {
@@ -1819,10 +1621,9 @@ impl OndinApp {
 
     pub(crate) fn dispatch(&mut self, ctx: &egui::Context, action: Action) {
         match action {
-            // The arms that act on the whole document finish a live text session
-            // first, or the session's buffer and `session.doc` disagree (and Save
-            // would pin a version without the typed text). At the dispatch seam,
-            // because it is a fact about the action, not the key.
+            // The arms that act on the whole document finish a live text session first,
+            // or its buffer and `session.doc` disagree (Save would pin a version without
+            // the typed text).
             Action::Undo => {
                 self.finish_text_first();
                 self.undo();
@@ -1831,16 +1632,14 @@ impl OndinApp {
                 self.finish_text_first();
                 self.redo();
             }
-            // Pins, which is what `Ctrl+S` means now that autosave writes the
-            // file anyway (`input::Action::Save`).
+            // Pins: autosave already writes the file (`input::Action::Save`).
             Action::Save => {
                 self.finish_text_first();
                 self.save_file(true);
             }
             // `go_to_dashboard` finishes the text session itself.
             Action::Open => self.go_to_dashboard(),
-            // The same functions the dashboard's buttons call, which carry their
-            // own guards.
+            // The dashboard's own functions, which carry their guards.
             Action::NewDocument => {
                 let project = self.open_document_project();
                 self.new_library_document(project);
@@ -1870,9 +1669,8 @@ impl OndinApp {
             Action::CopyProperties => self.copy_properties(),
             Action::PasteProperties => self.paste_properties(),
             Action::Duplicate => self.duplicate_selection(),
-            // While the pen is drawing, Backspace takes back the last anchor.
-            // Intercepted here because keyboard actions dispatch before the canvas
-            // runs, and `input::resolve` knows nothing of a gesture in flight.
+            // While the pen is drawing, Backspace takes back the last anchor; intercepted
+            // here because `input::resolve` knows nothing of a gesture in flight.
             Action::Delete if self.pen.is_some() => self.pen_backspace(),
             // With points selected, Delete removes the points, healing the path.
             Action::Delete if !self.points.is_empty() && self.edited_path().is_some() => {
@@ -1880,12 +1678,11 @@ impl OndinApp {
             }
             Action::Delete => self.delete_selection(),
             Action::SelectAll => self.select_all(),
-            // The pen reads Enter itself in `pen_input`; acting here too would
-            // act twice.
+            // The pen reads Enter itself in `pen_input`.
             Action::Enter if self.pen.is_some() => {}
             Action::Enter => self.enter_action(),
-            // The Escape that closes a top-bar dropdown closes only it. egui's
-            // keyboard guard cannot stand in: an open dropdown focuses nothing.
+            // The Escape that closes a top-bar dropdown closes only it (an open dropdown
+            // focuses nothing, so egui's keyboard guard cannot stand in).
             Action::Escape if self.open_menu != TopMenu::None => {
                 self.open_menu = TopMenu::None;
             }
@@ -1898,16 +1695,14 @@ impl OndinApp {
             Action::Boolean(op) => self.apply_boolean(op),
             Action::Flatten => self.flatten_selection(),
             Action::Ungroup => self.ungroup_selection(),
-            // While a shape is being drawn the arrows belong to it (they change its
-            // sides, `canvas::reshape_create`); with points selected they move the
-            // points rather than the layer.
+            // While a shape is drawn the arrows belong to it (`canvas::reshape_create`);
+            // with points selected they move the points.
             Action::Nudge(_) if matches!(self.drag, Drag::Create { .. }) => {}
             Action::Nudge(delta) if !self.points.is_empty() && self.edited_path().is_some() => {
                 self.nudge_points(delta)
             }
             Action::Nudge(delta) => self.nudge(delta),
-            // Dropped mid-create, where the pointer owns the size. No point arm: a
-            // width belongs to the whole layer.
+            // Dropped mid-create, where the pointer owns the size.
             Action::SizeStep(_) if matches!(self.drag, Drag::Create { .. }) => {}
             Action::SizeStep(d) => self.size_step(d),
             Action::StepPoint(forward) => self.step_point(forward),
@@ -1941,32 +1736,28 @@ impl OndinApp {
         ctx.request_repaint();
     }
 
-    /// Where a whole-selection switch moves, given each member's state in the
-    /// sense of the verb (*hidden*, *locked*). Everything moves to applied unless
-    /// everything already is, so a mixed selection hides, and locks: the verb is
-    /// honoured, and `Ctrl+Z` answers a mis-press.
+    /// Where a whole-selection switch moves, given each member's state in the sense of
+    /// the verb (*hidden*, *locked*): everything moves to applied unless everything
+    /// already is, so a mixed selection hides, and locks.
     fn set_switch(applied: impl IntoIterator<Item = bool>) -> bool {
         !applied.into_iter().all(|a| a)
     }
 
-    /// [`Self::set_switch`] for hiding: takes the members' current `visible` and
-    /// returns the `visible` they all move to. The negation lives here so callers
-    /// pass `doc.shown(id)` unchanged and a test can hold the polarity.
+    /// [`Self::set_switch`] for hiding: takes the members' `visible` and returns the
+    /// `visible` they all move to. The negation lives here so callers pass
+    /// `doc.shown(id)` unchanged.
     fn hide_switch(visible: impl IntoIterator<Item = bool>) -> bool {
         !Self::set_switch(visible.into_iter().map(|v| !v))
     }
 
-    /// [`Self::set_switch`] for locking: takes the members' current `locked` and
-    /// returns the `locked` they all move to. No inversion — this switch's verb
-    /// and its field are the same word — and it exists anyway so the two chords
-    /// are spelled alike at their call sites.
+    /// [`Self::set_switch`] for locking: takes the members' `locked` and returns the
+    /// `locked` they all move to. No inversion; it exists so the two chords are spelled alike.
     fn lock_switch(locked: impl IntoIterator<Item = bool>) -> bool {
         Self::set_switch(locked)
     }
 
-    /// The `visible` [`Self::toggle_hidden`] moves the selection's outermost
-    /// layers to — on what they show, a bound visibility resolved — and so
-    /// whether the menu's row reads *Show*.
+    /// The `visible` [`Self::toggle_hidden`] moves the selection's outermost layers to
+    /// (a bound visibility resolved), and so whether the menu's row reads *Show*.
     pub(crate) fn hide_switch_shows(&self) -> bool {
         let doc = &self.session.doc;
         Self::hide_switch(
@@ -1990,9 +1781,8 @@ impl OndinApp {
     }
 
     /// Hide or show the whole selection — `Ctrl+Shift+H` (`docs/shortcuts.md` §4).
-    /// One switch for the set ([`Self::set_switch`]), not a per-layer flip.
-    /// `session.commit` rather than [`Self::commit_edit`], whose only addition is
-    /// the inspector's chrome hide; the layers panel's eye commits the same way.
+    /// One switch for the set ([`Self::set_switch`]). `session.commit` rather than
+    /// [`Self::commit_edit`], whose only addition is the inspector's chrome hide.
     fn toggle_hidden(&mut self) {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let visible = self.hide_switch_shows();
@@ -2027,13 +1817,11 @@ impl OndinApp {
     /// Open the rename field on the selected layer — `Ctrl+R` / `F2`
     /// (`docs/shortcuts.md` §4).
     ///
-    /// The same field a double-click in the layers panel opens: `renaming_layer`
-    /// is the whole state and `layers::layer_rename_field` draws and commits it. So
-    /// the panel is shown if hidden, and with several layers selected it renames
-    /// nothing and says so.
+    /// The same field a double-click in the layers panel opens (`renaming_layer`, drawn
+    /// by `layers::layer_rename_field`). The panel is shown if hidden; with several
+    /// layers selected it renames nothing and says so.
     fn rename_selection(&mut self) {
-        // Refused in present mode, which draws no layers panel: the rename would
-        // arm a field that never renders.
+        // Present mode draws no layers panel: the field would never render.
         if self.present {
             self.session.info("Leave present mode to rename");
             return;
@@ -2050,17 +1838,15 @@ impl OndinApp {
         };
         self.show_layers = true;
         self.renaming_layer = Some((*id, name));
-        // Focus is requested by `layer_rename_field` on the frame it first draws,
-        // not here: focusing an id with no AccessKit node yet panics
-        // `accesskit_consumer`.
+        // Focus is requested by `layer_rename_field` on its first draw: focusing an id
+        // with no AccessKit node yet panics `accesskit_consumer`.
     }
 
     /// Apply a digit to the selection's opacity — `docs/shortcuts.md` §2.
     ///
-    /// One digit is a coarse value, two within 600 ms an exact one: `4` is 40%,
-    /// `4`,`5` is 45%, `0` is 100%, `0`,`0` is 0%. The first digit only previews, so
-    /// `4`,`5` leaves one undo step; the window commits when it shuts, by a second
-    /// digit or by the deadline ([`Self::fold_opacity_entry`]).
+    /// One digit is a coarse value, two within 600 ms an exact one (`4` is 40%, `4`,`5`
+    /// is 45%, `0`,`0` is 0%). The first digit only previews, so `4`,`5` leaves one undo
+    /// step; the window commits when it shuts ([`Self::fold_opacity_entry`]).
     fn opacity_digit(&mut self, ctx: &egui::Context, digit: u8) {
         if self.session.selection.is_empty() {
             return;
@@ -2076,9 +1862,8 @@ impl OndinApp {
         }
     }
 
-    /// Close the two-digit window once it has run out, committing the coarse
-    /// value the first digit previewed. Asks for a repaint at the deadline on every
-    /// pending frame, since nothing else wakes the loop after the last keypress.
+    /// Close the two-digit window once it has run out, committing the coarse value. Asks
+    /// for a repaint at the deadline, since nothing else wakes the loop.
     fn fold_opacity_entry(&mut self, ctx: &egui::Context) {
         let Some(entry) = self.opacity_entry.clone() else {
             return;
@@ -2121,34 +1906,28 @@ impl OndinApp {
         Vec2::new(self.canvas_px.0 as f64 / 2.0, self.canvas_px.1 as f64 / 2.0)
     }
 
-    /// Abandon whatever gesture is in flight and leave no trace of it: the
-    /// preview is dropped, so the layer snaps back to what the document
-    /// already says, and nothing is committed, so history never learns it
-    /// happened. Returns whether there was anything to abandon.
+    /// Abandon whatever gesture is in flight and leave no trace: the preview is dropped
+    /// and nothing is committed. Returns whether there was anything to abandon.
     ///
-    /// Covers a canvas drag (`Drag`) and an inspector field scrub (egui's) alike.
-    /// It sets `gesture_cancelled` because the press is still down, and its
-    /// eventual release would otherwise commit the edit after all.
+    /// Covers a canvas drag and an inspector field scrub alike. It sets
+    /// `gesture_cancelled` because the press is still down and its release would
+    /// otherwise commit the edit after all.
     pub(crate) fn cancel_gesture(&mut self, ctx: &egui::Context) -> bool {
-        // `dragged_id` blinks: egui clears it on any button's release, so a
-        // right-click within one frame reads it empty. The gesture preview and
-        // `InFlight` do not blink, and are absent when nothing is in flight, which
-        // keeps this a no-op for the right-click that removes a gradient stop.
+        // `dragged_id` blinks (egui clears it on any button's release), so the gesture
+        // preview and `InFlight` are read too; both are absent when nothing is in
+        // flight, which keeps this a no-op for the right-click that removes a gradient stop.
         let field = ctx.dragged_id().is_some()
             || self.session.has_gesture_preview()
             || self.in_flight.any()
-            // A component carried out of the insert picker: its drag is egui's,
-            // so `dragged_id` blinks for it as for a field.
+            // A component carried out of the insert picker: its drag is egui's too.
             || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
         if self.drag.is_none() && self.layer_drag.is_none() && !field {
             return false;
         }
         self.drag = Drag::None;
-        // Guide and variable-cell previews live outside `RenderOverrides`, so they
-        // are dropped by name.
+        // Guide and variable-cell previews live outside `RenderOverrides`.
         self.guide_previews.clear();
         self.var_cell_preview = None;
-        // Dropped here rather than on the release, which is still coming.
         self.layer_drag = None;
         self.in_flight.paint_drag = None;
         // `gesture_cancelled` stops the release placing it.
@@ -2157,10 +1936,9 @@ impl OndinApp {
         }
         // A stale one would be what the next Alt-drag silently inserts.
         self.alt_clone = None;
-        // The view goes back with the layer; only autopan's own scrolling is undone.
+        // Only autopan's own scrolling is undone.
         self.session.camera.center -= std::mem::take(&mut self.autopan_total);
-        // Not `clear_preview`, which would also hide a live text session's
-        // uncommitted content (`EditorSession::clear_gesture_preview`).
+        // Not `clear_preview`, which would also hide a live text session's uncommitted content.
         self.session.clear_gesture_preview();
         // A scrub that wrote into the session is wound back by hand.
         if let Some((id, spans, para_spans)) = self.in_flight.session_scrub.take()
@@ -2168,42 +1946,31 @@ impl OndinApp {
         {
             self.restyle_session_with(spans, para_spans);
         }
-        // And the Settings modal's nudge pair; `settings_ui` runs later this frame
-        // and sees the restored pair.
+        // And the Settings modal's nudge pair.
         if let Some(nudge) = self.in_flight.settings_scrub.take()
             && let Some(settings) = &mut self.settings
         {
             settings.set_nudge(nudge);
         }
-        // The layout grid buffers are dropped here, not by the panel, because the
-        // canvas draws them before the panels run.
+        // Dropped here, not by the panel: the canvas draws them before the panels run.
         self.in_flight.grid_scrub = None;
         self.in_flight.grid_paint = None;
-        // A pending opacity digit is a gesture too: shut its window without
-        // committing, or the deadline would land it after the cancel.
+        // A pending opacity digit is a gesture too, or its deadline would land it.
         self.opacity_entry = None;
-        // The chrome comes straight back: a cancelled scrub has no result to show.
         self.chrome_hold = ChromeHold::Free;
         self.gesture_cancelled = true;
         ctx.stop_dragging();
         true
     }
 
-    /// Leaving a tool or pressing Escape abandons whatever is half-done, in
-    /// order of specificity: open picker, text session, pen path, gesture, pen
-    /// bias, points, then selection. Escape unwinds whatever is in flight, one
-    /// level per press.
+    /// Escape unwinds whatever is in flight, one level per press, most transient first:
+    /// floating panels, an editing session, a gesture, the pen bias, points, the entered
+    /// group, the tool (back to Select), then the selection.
     ///
-    /// Most transient first: floating panels, an editing session, a gesture, the
-    /// pen bias, points, the entered group, the tool (back to Select), then the
-    /// selection.
-    ///
-    /// An in-flight pen path is committed, not discarded (Ctrl+Z is there). It
-    /// happens here rather than in `pen_input`, because keyboard actions dispatch
-    /// before the canvas runs.
+    /// An in-flight pen path is committed, not discarded. It happens here rather than in
+    /// `pen_input`, because keyboard actions dispatch before the canvas runs.
     pub(crate) fn escape(&mut self, ctx: &egui::Context) {
-        // Present mode first: its own way out is hidden by the state itself. An
-        // open context menu still takes the first Escape, before this is called.
+        // Present mode first: its own way out is hidden by the state itself.
         if self.present {
             self.present = false;
             self.session.info("Left present mode");
@@ -2211,22 +1978,18 @@ impl OndinApp {
             || self.var_complete.take().is_some()
             || self.mode_menu.take().is_some()
         {
-            // A bindable field's menu and its `--` list float over everything,
-            // and the list's `Escape` restores what it previewed.
+            // They float over everything, and the list's `Escape` restores its preview.
             self.var_retype = None;
             self.session.clear_gesture_preview();
         } else if self.escape_styles() {
-            // A style card's menu, its picker, a new style's name, a style edit —
-            // one a press.
+            // A style card's menu, its picker, a new style's name, a style edit — one a press.
         } else if self.disarm_dropper() {
-            // An armed eyedropper, above the picker it may be picking for.
+            // Above the picker it may be picking for.
         } else if self.picker.take().is_some() {
-            // The picker floats over the canvas and owns no gesture.
         } else if self.kit_picker.take().is_some() {
-            // The insert picker, a rung of its own so one press closes one thing.
+            // A rung of its own so one press closes one thing.
         } else if let Some(b) = self.var_browser.as_mut() {
-            // The variables browser: a cell being typed into or an open menu goes
-            // first, the browser on the next press.
+            // A cell being typed into or an open menu goes first, the browser next press.
             if !b.escape() {
                 self.var_browser = None;
             }
@@ -2235,18 +1998,14 @@ impl OndinApp {
         } else if self.pen.is_some() {
             self.finish_pen(false);
         } else if self.cancel_gesture(ctx) {
-            // Whatever was being dragged goes back to where the document says
-            // it is, and history never hears about it.
         } else if self.chrome_focus {
-            // A chrome field surrendered focus to this `Escape`, so the key stops
-            // here. Below `cancel_gesture`, which a valved field's cancel must
-            // still reach to set `gesture_cancelled`.
+            // A chrome field surrendered focus to this `Escape`. Below `cancel_gesture`,
+            // which a valved field's cancel must still reach to set `gesture_cancelled`.
         } else if self.pen_bias {
             // The bias, above the points it was armed over.
             self.pen_bias = false;
             self.session.info("Pen off; still editing points");
         } else if !self.points.is_empty() {
-            // Points before the tool.
             self.points.clear();
         } else if self.show_pivot {
             // Puts the pivot handle away; placed pivots stay.
@@ -2255,8 +2014,7 @@ impl OndinApp {
             self.leave_a_scope_the_selection_left();
             self.entered_group.take()
         } {
-            // Step back out of the group and select it, which is where the
-            // double-click that entered it came from.
+            // Step back out of the group and select it.
             self.session.selection.set_one(group);
         } else if self.tool != Tool::Select {
             self.choose_tool(Tool::Select);
@@ -2265,10 +2023,9 @@ impl OndinApp {
         }
     }
 
-    /// Clear [`Self::entered_group`] when the selection has left it — something is
-    /// selected and none of it is within the group. Run at the top of every
-    /// editor frame and by `Escape` before its rung, so one check covers every
-    /// door that moves the selection. An empty selection keeps the scope.
+    /// Clear [`Self::entered_group`] when something is selected and none of it is within
+    /// the group. Run at the top of every editor frame and by `Escape`, so one check
+    /// covers every door that moves the selection. An empty selection keeps the scope.
     pub(crate) fn leave_a_scope_the_selection_left(&mut self) {
         let Some(g) = self.entered_group else { return };
         let doc = &self.session.doc;
@@ -2280,11 +2037,8 @@ impl OndinApp {
         }
     }
 
-    /// Step one level into a group or a boolean, selecting something inside it —
-    /// for the context menu's *Enter group* rows and the `Enter` key alike.
-    ///
-    /// `at` is the menu's pointer, which picks what to land on; without one, the
-    /// last (topmost) child.
+    /// Step one level into a group or a boolean, selecting something inside it. `at` is
+    /// the menu's pointer, which picks what to land on; without one, the topmost child.
     pub(crate) fn enter_container(&mut self, id: NodeId, at: Option<Point>) {
         self.entered_group = Some(id);
         let inside = at
@@ -2299,9 +2053,8 @@ impl OndinApp {
         self.session.selection.set_one(inside.unwrap_or(id));
     }
 
-    /// Enter: step into the selection, or step back out. A toggle where Escape is
-    /// a ladder: one press out of the node tool or image editing, one press into an
-    /// instance, text, picture, path or group — the double-click's order.
+    /// Enter: step into the selection, or step back out. A toggle where Escape is a
+    /// ladder; into an instance, text, picture, path or group in the double-click's order.
     fn enter_action(&mut self) {
         if self.tool == Tool::Node {
             self.choose_tool(Tool::Select); // clears the points itself
@@ -2326,18 +2079,15 @@ impl OndinApp {
             self.enter_container(id, None);
             return;
         }
-        // `double_click_pick`'s order, so the two gestures agree: text, picture,
-        // points, one group deeper.
+        // `double_click_pick`'s order, so the two gestures agree.
         if matches!(
             self.session.doc.get(id).map(|n| n.kind()),
             Some(ondin_core::NodeKind::Text { .. })
         ) {
-            // No pointer, so the whole string is selected rather than a caret being
-            // placed somewhere arbitrary — see `begin_edit_text`.
+            // No pointer, so the whole string is selected (`begin_edit_text`).
             self.begin_edit_text(Some(id), None);
             return;
         }
-        // `croppable_fill`, not a copy of its rule, so entry and tool agree.
         if self
             .session
             .doc
@@ -2373,9 +2123,8 @@ impl OndinApp {
         }
     }
 
-    /// Switch tool, abandoning whatever the old one held. Asking for the pen from
-    /// inside a path edit arms the bias instead (here, so the key and the rail's
-    /// button agree); the standalone pen is Escape then `P`.
+    /// Switch tool, abandoning whatever the old one held. Asking for the pen from inside
+    /// a path edit arms the bias instead; the standalone pen is Escape then `P`.
     pub(crate) fn choose_tool(&mut self, tool: Tool) {
         // `I` toggles the eyedropper, back to the tool it was armed from.
         let tool = match tool {
@@ -2392,9 +2141,8 @@ impl OndinApp {
         };
         self.dropper_pick = None;
         self.finish_text_first();
-        // A tool switch abandons the canvas drag in flight: the drag, its Alt copy
-        // (which the release would no longer clear) and its preview — not
-        // `clear_preview`, which would take a live text session's content too.
+        // Abandons the drag in flight, its Alt copy and its preview — not `clear_preview`,
+        // which would take a live text session's content too.
         self.drag = Drag::None;
         self.alt_clone = None;
         self.session.clear_gesture_preview();
@@ -2411,20 +2159,16 @@ impl OndinApp {
         if tool != Tool::Pen {
             self.pen = None;
         }
-        // The bias belongs to one edit, so it cannot outlive the tool that holds
-        // it — including when Escape's last rung is what switched away.
+        // The bias belongs to one edit, so it cannot outlive the tool that holds it.
         self.pen_bias = false;
         if tool != Tool::Node {
-            // Points are the node tool's subject and mean nothing without it.
             self.points.clear();
         }
         if tool != Tool::Image {
-            // The loaded cursor belongs to the tool that holds it.
             self.pending_images.clear();
         }
-        // Arming a tool that creates a layer (`drags_a_box`) drops the selection,
-        // whose chrome would sit over the new drawing. Not Select, Scale, Node,
-        // ImageEdit, Pen or Hand, which act on or are entered from the selection.
+        // A tool that creates a layer (`drags_a_box`) drops the selection, whose chrome
+        // would sit over the new drawing.
         if tool.drags_a_box() {
             self.session.selection.clear();
         }
@@ -2432,13 +2176,9 @@ impl OndinApp {
     }
 
     pub(crate) fn select_all(&mut self) {
-        // Everything inside artboards plus loose layers, not the artboards
-        // themselves; always layers, replacing a guide selection. Locked layers are
-        // filtered by `may_select_in_bulk`, as the marquee does.
-        //
-        // The frames fallback is asked of the unfiltered range: frames whose
-        // contents are all locked must select nothing, or `Delete` would take the
-        // frames and the locked layers with them.
+        // Everything inside artboards plus loose layers, replacing a guide selection.
+        // The frames fallback asks the unfiltered range: frames whose contents are all
+        // locked must select nothing, or `Delete` would take the frames with them.
         let range = self.marquee_range();
         let ids = if range.is_empty() {
             self.root_artboards()
@@ -2452,13 +2192,11 @@ impl OndinApp {
         );
     }
 
-    /// The layers a marquee or Ctrl+A can pick: the direct children of every frame
-    /// on the canvas (one level in), and the root's own non-frame children, which
-    /// is where a shape dragged out of a frame lives.
+    /// The layers a marquee or Ctrl+A can pick: the direct children of every frame and
+    /// the root's own non-frame children.
     ///
-    /// Locked layers are filtered here, once for every caller: the lock is enforced
-    /// only at selection time, so a locked id in the selection arms `Delete` and the
-    /// rest. A row click in the layers panel or a frame's tag can still select one.
+    /// Locked layers are filtered here, once for every caller: the lock is enforced only
+    /// at selection time. A row click or a frame's tag can still select one.
     pub(crate) fn marquee_candidates(&self) -> Vec<NodeId> {
         let mut ids = self.marquee_range();
         ids.retain(|id| self.may_select_in_bulk(*id));
@@ -2466,19 +2204,16 @@ impl OndinApp {
     }
 
     /// Whether a door that selects a set may put `id` in it: the one statement for
-    /// [`Self::marquee_candidates`], [`Self::select_all`] (and its frames fallback)
-    /// and `inspector::select_by_color`. A layers-panel row click points at one
-    /// layer and is not such a door.
+    /// [`Self::marquee_candidates`], [`Self::select_all`] and `inspector::select_by_color`.
     ///
-    /// The effective lock, so a layer inside a locked group is refused too.
-    /// Visibility is deliberately not part of it: a hidden layer is editable.
+    /// The effective lock, so a layer inside a locked group is refused too. Visibility is
+    /// deliberately not part of it: a hidden layer is editable.
     pub(crate) fn may_select_in_bulk(&self, id: NodeId) -> bool {
         !ondin_core::is_effectively_locked(&self.session.doc, id)
     }
 
-    /// [`Self::marquee_candidates`] before the lock filter. Never select from it:
-    /// it only tells `select_all`'s fallback whether the range was empty, which
-    /// differs from "everything in it is locked".
+    /// [`Self::marquee_candidates`] before the lock filter. Never select from it: it only
+    /// tells `select_all`'s fallback whether the range was empty, not all locked.
     fn marquee_range(&self) -> Vec<NodeId> {
         let mut ids = Vec::new();
         for artboard in self.root_artboards() {
@@ -2498,8 +2233,7 @@ impl OndinApp {
     }
 
     fn nudge(&mut self, delta: Vec2) {
-        // A guide nudges along its one axis; the cross-axis arrow is silently
-        // inert, so a mixed-axis selection moves only the guides it speaks to.
+        // A guide nudges along its one axis; the cross-axis arrow is silently inert.
         if !self.session.selection.guides().is_empty() {
             self.nudge_guides(delta);
             return;
@@ -2511,10 +2245,9 @@ impl OndinApp {
         let tx = build::move_by_world(&self.session.doc, &self.session.resolved, &ids, delta);
         match tx {
             Ok(tx) => {
-                // A burst of taps is one undo step (`EditorSession::commit_run`),
-                // under its own verb so it never merges with a point nudge.
+                // A burst of taps is one undo step, under its own verb so it never
+                // merges with a point nudge.
                 if self.session.commit_run(tx, "nudge-layers") {
-                    // A held arrow key walks the layer off the screen otherwise.
                     self.reveal_selection();
                 }
             }
@@ -2525,16 +2258,14 @@ impl OndinApp {
     /// Grow or shrink the selection's box by `delta` points per axis —
     /// `Ctrl`+arrows. Positive is wider and taller.
     ///
-    /// Held by its top-left corner, so a held key grows the shape from a fixed point.
-    /// The arithmetic is the inspector's W/H fields': one layer through
-    /// [`crate::tools::resize_box_to`] (its own axes), several through
-    /// [`crate::tools::resize_selection`] over the world union, so a typed number and
-    /// the key never disagree.
+    /// Held by its top-left corner. The arithmetic is the inspector's W/H fields': one
+    /// layer through [`crate::tools::resize_box_to`], several through
+    /// [`crate::tools::resize_selection`] over the world union.
     ///
-    /// A 1pt floor per axis stops the ask going negative, which would reflect the
-    /// layer across its anchored edge; an axis with no extent stays zero. A
-    /// proportion-locked selection ([`crate::tools::proportions_locked`]) scales both
-    /// axes, the arrow naming the driver. Guides are inert.
+    /// A 1pt floor per axis stops the ask going negative (which would reflect the layer
+    /// across its anchored edge). A proportion-locked selection
+    /// ([`crate::tools::proportions_locked`]) scales both axes, the arrow naming the
+    /// driver. Guides are inert.
     fn size_step(&mut self, delta: Vec2) {
         if self.session.selection.is_empty() {
             return;
@@ -2542,10 +2273,8 @@ impl OndinApp {
         let Some((roots, union)) = self.selection_union() else {
             return;
         };
-        // One expression for both axes and both arms, so the floor is everywhere.
         let want = |extent: f64, d: f64| (extent + d).max(1.0);
-        // Read across the whole selection, not the `outermost` reduction, as
-        // `canvas::keep_ratio` does, so a handle drag and an arrow key agree.
+        // Read across the whole selection, as `canvas::keep_ratio` does.
         let locked =
             crate::tools::proportions_locked(&self.session.doc, self.session.selection.ids());
         // Which arrow was pressed; the keymap never sets both.
@@ -2587,14 +2316,12 @@ impl OndinApp {
                     &self.session.doc,
                     &self.session.resolved,
                     &roots,
-                    // The upright union, the box `union.width()` measures.
                     crate::tools::SelectionBox::upright(union),
                     crate::preview::Handle::BottomRight,
-                    // Both coordinates from `min`: the far edge stops being "unchanged"
-                    // once the height is paired.
+                    // Both from `min`: the far edge stops being "unchanged" once paired.
                     Point::new(union.min_x() + size.width, union.min_y() + size.height),
-                    // Never `keep_ratio`: it takes the larger factor, so a one-axis
-                    // shrink would compare against 1.0 and refuse to shrink.
+                    // Never `keep_ratio`: it takes the larger factor, so a one-axis shrink
+                    // would compare against 1.0 and refuse to shrink.
                     crate::tools::Resize::geometry(false, false),
                 )
             }
@@ -2602,13 +2329,12 @@ impl OndinApp {
         if tx.0.is_empty() {
             return;
         }
-        // A burst of taps is one undo step, under its own verb so a nudge and a
-        // resize never coalesce.
+        // Its own verb, so a nudge and a resize never coalesce.
         self.session.commit_run(tx, "resize-layers");
     }
 
-    /// Restack the selection. Reported when nothing moved, because a layer
-    /// already at the front looks identical to a shortcut that failed to fire.
+    /// Restack the selection. Reported when nothing moved, or a layer already at the
+    /// front would look like a shortcut that failed to fire.
     pub(crate) fn restack(&mut self, mv: build::ZMove) {
         if self.session.selection.is_empty() {
             return;
@@ -2632,8 +2358,7 @@ impl OndinApp {
         }
     }
 
-    /// *Group selection* (`Ctrl+G`), and the identity row's group button — one
-    /// implementation for both doors.
+    /// *Group selection* (`Ctrl+G`) and the identity row's group button.
     pub(crate) fn group_selection(&mut self) {
         let ids = self.session.selection.ids().to_vec();
         if ids.len() < 2 {
@@ -2656,9 +2381,8 @@ impl OndinApp {
     }
 
     /// *Frame selection*: wrap the selection in a new frame sized to its union.
-    /// One layer is enough, unlike grouping. Failures other than
-    /// `build::can_frame`'s are reported through the status line. The frame is left
-    /// open in the layers tree, where grouping leaves its group shut.
+    /// One layer is enough, unlike grouping. The frame is left open in the layers tree,
+    /// where grouping leaves its group shut.
     pub(crate) fn frame_selection(&mut self) {
         let ids = self.session.selection.ids().to_vec();
         if ids.is_empty() {
@@ -2730,10 +2454,9 @@ impl OndinApp {
         }
     }
 
-    /// Why *Create component* would refuse the selection, or `None` when it would
-    /// commit — the one question [`Self::create_component`] and the menu row's
-    /// dimming both ask. In place for one frame or group
-    /// (`component::why_not_main`), else for the wrap (`why_not_wrap`).
+    /// Why *Create component* would refuse the selection, or `None` when it would commit
+    /// — asked by [`Self::create_component`] and the menu row's dimming alike. In place
+    /// for one frame or group (`component::why_not_main`), else for the wrap.
     pub(crate) fn create_component_refusal(&self) -> Option<ondin_core::component::NotMain> {
         let doc = &self.session.doc;
         let ids = build::outermost(doc, self.session.selection.ids());
@@ -2744,9 +2467,8 @@ impl OndinApp {
         }
     }
 
-    /// *Detach instance* (`Ctrl+Alt+B`): every instance the selection sits in
-    /// becomes ordinary layers that keep their look (`component::detach`). No
-    /// toast — the glyph changing is enough.
+    /// *Detach instance* (`Ctrl+Alt+B`): every instance the selection sits in becomes
+    /// ordinary layers that keep their look (`component::detach`). No toast.
     pub(crate) fn detach_instances(&mut self) {
         let doc = &self.session.doc;
         let mut roots: Vec<NodeId> = self
@@ -2758,8 +2480,7 @@ impl OndinApp {
             .collect();
         roots.sort();
         roots.dedup();
-        // An instance inside another selected one is detached by the outer's own
-        // climb or stays nested by design; only the outermost are acted on.
+        // Only the outermost are acted on.
         let roots = build::outermost(doc, &roots);
         if roots.is_empty() {
             self.session.info("Select an instance to detach");
@@ -2773,9 +2494,8 @@ impl OndinApp {
         self.session.commit(Transaction(ops));
     }
 
-    /// *Go to main component*: select what the selected layer was
-    /// copied from — the main itself for an instance, the counterpart inside it for
-    /// a child — and bring it into view.
+    /// *Go to main component*: select what the selected layer was copied from (the main
+    /// for an instance, the counterpart inside it for a child) and bring it into view.
     pub(crate) fn go_to_main(&mut self) {
         let Some(id) = self.session.selection.single() else {
             return;
@@ -2791,10 +2511,9 @@ impl OndinApp {
         self.select_main(target);
     }
 
-    /// Select `main` — a main or a node inside one — and bring it into view, unless
-    /// it is a vendored kit main, which lives in the vault and is never selected:
-    /// the user cannot see it and must not edit it. *Go to main in the kit* is the
-    /// kit's own verb.
+    /// Select `main` (a main or a node inside one) and bring it into view, unless it is
+    /// a vendored kit main: that lives in the vault and is never selected. *Go to main
+    /// in the kit* is the kit's own verb.
     pub(crate) fn select_main(&mut self, main: NodeId) {
         if self.session.doc.in_vault(main) {
             self.session
@@ -2830,8 +2549,8 @@ impl OndinApp {
         }
     }
 
-    /// *Duplicate as component*: a copy of the selected main that is a
-    /// new, independent main rather than an instance of it.
+    /// *Duplicate as component*: a copy of the selected main that is a new, independent
+    /// main rather than an instance.
     pub(crate) fn duplicate_as_component(&mut self) {
         let Some(id) = self.session.selection.single() else {
             return;
@@ -2906,8 +2625,8 @@ impl OndinApp {
     }
 
     /// Why *Combine as variants* would refuse the mains [`Self::combinable_mains`]
-    /// offers it: a frame main and a group main cannot be one set — the menu row's
-    /// dimmed reason, and the verb's message.
+    /// offers it (a frame main and a group main cannot be one set): the menu row's
+    /// dimmed reason and the verb's message.
     pub(crate) fn combine_refusal(&self) -> Option<&'static str> {
         let mains = self.combinable_mains()?;
         (!ondin_core::variant::one_kind(&self.session.doc, &mains))
@@ -2929,8 +2648,7 @@ impl OndinApp {
             self.session.info("Select main components to combine");
             return;
         };
-        // One kind per set, said before `variant::combine` refuses it as a bare
-        // `WrongKindForOp`.
+        // Said before `variant::combine` refuses it as a bare `WrongKindForOp`.
         if !ondin_core::variant::one_kind(&self.session.doc, &mains) {
             self.session.fail(crate::menu::COMBINE_MIXED);
             return;
@@ -2961,8 +2679,8 @@ impl OndinApp {
         }
     }
 
-    /// *Add variant*, on a set or a variant: a copy of the selected
-    /// variant (or the set's last) taking the first free combination, selected.
+    /// *Add variant*, on a set or a variant: a copy of the selected variant (or the set's
+    /// last) taking the first free combination, selected.
     pub(crate) fn add_variant(&mut self) {
         let Some(id) = self.session.selection.single() else {
             return;
@@ -2991,16 +2709,15 @@ impl OndinApp {
         }
     }
 
-    /// The component property the one selected linked layer drives whose field
-    /// differs from the main's — what *Reset Label text* resets.
+    /// The component property the one selected linked layer drives whose field differs
+    /// from the main's — what *Reset Label text* resets.
     pub(crate) fn overridden_property_of_selection(&self) -> Option<ondin_core::variant::Property> {
         self.overridden_property_and_root().map(|(p, _)| p)
     }
 
-    /// [`Self::overridden_property_of_selection`] with the instance whose property
-    /// it is. Climbing out: the selected layer's own instance first, then each
-    /// instance around it — a swap property's counterpart is a nested copy, itself
-    /// an instance root, so its property is its outer instance's.
+    /// [`Self::overridden_property_of_selection`] with the instance whose property it is,
+    /// climbing outward: a swap property's counterpart is a nested copy, itself an
+    /// instance root, so its property is its outer instance's.
     fn overridden_property_and_root(&self) -> Option<(ondin_core::variant::Property, NodeId)> {
         let doc = &self.session.doc;
         let id = self.session.selection.single()?;
@@ -3024,8 +2741,8 @@ impl OndinApp {
         None
     }
 
-    /// *Reset Label text* — named for the property — from the context menu: that
-    /// property back to the main's value on the instance the selected layer sits in.
+    /// *Reset Label text* (named for the property) from the context menu: that property
+    /// back to the main's value on the instance the selected layer sits in.
     pub(crate) fn reset_selected_property(&mut self) {
         let Some((p, root)) = self.overridden_property_and_root() else {
             return;
@@ -3034,9 +2751,8 @@ impl OndinApp {
         self.session.commit(Transaction(ops));
     }
 
-    /// *Restore children* from the context menu: what the one selected layer's
-    /// layers-panel row's dot and tooltip name, never a field. Scoped by the row's
-    /// fold (`row_folded`): expanded, its own removed children and their order
+    /// *Restore children* from the context menu. Scoped by the row's fold (`row_folded`):
+    /// expanded, its own removed children and their order
     /// (`reset::restore_own_children`); collapsed, everything inside it
     /// (`reset::restore_structure`). One transaction; no toast.
     pub(crate) fn restore_selected_children(&mut self) {
@@ -3053,8 +2769,7 @@ impl OndinApp {
                 .info("Nothing here differs from the main component");
             return;
         }
-        // `reset_tx`'s two statements, so a restore is never read as the hand's
-        // placement or resize at the commit door.
+        // As in `reset_tx`, so a restore is never read as the hand's placement or resize.
         let tx = self.placement_stated(Transaction(ops));
         let tx = self.items_stated(tx);
         if let Err(e) = self.session.try_commit(tx) {
@@ -3062,9 +2777,8 @@ impl OndinApp {
         }
     }
 
-    /// A reset of everything selected that sits in an instance — each selected
-    /// layer is the scope of its own reset, so an instance resets whole and a child
-    /// resets itself. One transaction, so one `Ctrl+Z`. No toast.
+    /// A reset of everything selected that sits in an instance: each selected layer is
+    /// the scope of its own reset. One transaction. No toast.
     pub(crate) fn reset_selection(&mut self, kind: ondin_core::reset::Kind) {
         if let Some(tx) = self.reset_tx(kind)
             && let Err(e) = self.session.try_commit(tx)
@@ -3073,12 +2787,9 @@ impl OndinApp {
         }
     }
 
-    /// The transaction [`Self::reset_selection`] commits, or `None` — having said
-    /// why — when there is nothing to reset. Split out so the inspector's
-    /// Component card can commit it through [`Self::commit_edit`]: a reset changes
-    /// what is drawn, so from the panel it arms the chrome hide as every other
-    /// inspector edit does, where the context menu's row commits as the menu's
-    /// other verbs do.
+    /// The transaction [`Self::reset_selection`] commits, or `None` (having said why)
+    /// when there is nothing to reset. Split out so the inspector's Component card can
+    /// commit it through [`Self::commit_edit`] and arm the chrome hide.
     pub(crate) fn reset_tx(&mut self, kind: ondin_core::reset::Kind) -> Option<Transaction> {
         let doc = &self.session.doc;
         let scopes: Vec<NodeId> = build::outermost(doc, self.session.selection.ids())
@@ -3091,20 +2802,18 @@ impl OndinApp {
         }
         let ops = ondin_core::reset::reset(doc, kind, &scopes, &mut self.session.ids);
         if ops.is_empty() {
-            // The card's *Reset all* tooltip's words, so the two say one thing.
+            // The card's *Reset all* tooltip's words.
             self.session
                 .info("Nothing here differs from the main component");
             return None;
         }
-        // A reset is neither a resize nor the hand placing a pinned or laid-out
-        // layer; its insets are stated beside it so the commit door does not
-        // re-pin or drop it.
+        // A reset is neither a resize nor the hand placing a pinned or laid-out layer;
+        // its insets are stated so the commit door does not re-pin or drop it.
         let ops = self.placement_stated(Transaction(ops));
         Some(self.items_stated(ops))
     }
 
-    /// Select a freshly made group, and leave it shut in the layers tree:
-    /// grouping is tidying several rows into one.
+    /// Select a freshly made group, and leave it shut in the layers tree.
     pub(crate) fn finish_grouping(&mut self, group: NodeId) {
         self.collapsed.insert(group);
         self.session.selection.set_one(group);
@@ -3113,10 +2822,8 @@ impl OndinApp {
 
     /// Dissolve every group **or boolean** in the selection (`Ctrl+Shift+G`).
     ///
-    /// A boolean's operands are kept intact inside it, so releasing one is the
-    /// same splice. One press is one transaction however many containers it
-    /// dissolves ([`build::ungroup_all`]). Also the inspector identity row's door,
-    /// so both share one aftermath.
+    /// A boolean's operands are kept intact, so releasing one is the same splice. One
+    /// press is one transaction ([`build::ungroup_all`]). Also the identity row's door.
     pub(crate) fn ungroup_selection(&mut self) {
         let groups: Vec<NodeId> = self
             .session
@@ -3135,8 +2842,7 @@ impl OndinApp {
             self.session.info("Select a group or a boolean to ungroup");
             return;
         }
-        // Read before the commit, which removes the containers; children that were
-        // dissolved too are filtered out below.
+        // Read before the commit removes the containers; dissolved children are filtered below.
         let children: Vec<NodeId> = groups
             .iter()
             .filter_map(|g| self.session.doc.get(*g))
@@ -3170,33 +2876,27 @@ impl OndinApp {
             return;
         }
         let (pw, ph) = (self.canvas_px.0 as f64, self.canvas_px.1 as f64);
-        // A margin so the fitted content is not flush against the edges.
         let zoom = (pw / bounds.width()).min(ph / bounds.height()) * 0.9;
-        // Through `set_zoom`, which clamps: a computed fit can leave the range.
+        // `set_zoom` clamps; a computed fit can leave the range.
         self.session.camera.set_zoom(zoom);
         self.session.camera.center = bounds.center();
     }
 
-    /// Scroll the selection back into view, by the least that will do it.
-    ///
-    /// For edits that move a layer without the pointer (keyboard nudges, the
-    /// inspector's X and Y), which autopan does not follow. Nothing while it fits,
-    /// then just enough to bring the offending edge inside a margin. Size-only edits
-    /// deliberately do not call this; scrolling would fight the hand.
+    /// Scroll the selection back into view, by the least that will do it, for edits that
+    /// move a layer without the pointer (keyboard nudges, the inspector's X and Y).
+    /// Size-only edits deliberately do not call this; scrolling would fight the hand.
     pub(crate) fn reveal_selection(&mut self) {
         let Some(bounds) = self.selection_bounds() else {
             return;
         };
         let view = self.session.camera.viewport(self.canvas_px).view;
-        // A margin in world units, so the layer lands *inside* the frame rather
-        // than flush against the edge where half its selection box is cut off.
+        // A margin in world units, so the layer lands inside the frame.
         let margin = (REVEAL_MARGIN_PX / self.session.camera.zoom)
             .min(view.width() / 4.0)
             .min(view.height() / 4.0);
         let view = view.inset(-margin);
 
-        // Per axis and independently: a layer that has run off the right stays put
-        // vertically.
+        // Per axis and independently.
         let dx = reveal_axis(bounds.min_x(), bounds.max_x(), view.min_x(), view.max_x());
         let dy = reveal_axis(bounds.min_y(), bounds.max_y(), view.min_y(), view.max_y());
         if dx != 0.0 || dy != 0.0 {
@@ -3204,8 +2904,7 @@ impl OndinApp {
         }
     }
 
-    /// Everything in the document — what `Action::ZoomFit` fits, whatever is
-    /// selected.
+    /// Everything in the document — what `Action::ZoomFit` fits.
     fn document_bounds(&self) -> Option<Rect> {
         self.session.preview_world_bounds(self.session.doc.root())
     }
@@ -3221,14 +2920,13 @@ impl OndinApp {
             .reduce(|a, b| a.union(b))
     }
 
-    /// Fill [`FrameIndex`] if this revision has not been walked yet, then hand the
-    /// caller what it wants out of it. A closure rather than a returned `Ref`, so
-    /// no caller can hold the borrow across a nested lookup and panic the `RefCell`.
+    /// Fill [`FrameIndex`] if this revision has not been walked yet, then hand the caller
+    /// what it wants. A closure rather than a `Ref`, so no caller can hold the borrow
+    /// across a nested lookup and panic the `RefCell`.
     pub(crate) fn with_frames<R>(&self, f: impl FnOnce(&FrameIndex) -> R) -> R {
         let mut index = self.frame_index.borrow_mut();
         if index.at != Some(self.session.revision()) {
-            // Paint order, so readers taking the last match get the innermost of
-            // nested frames.
+            // Paint order: the last match is the innermost of nested frames.
             let doc = &self.session.doc;
             let all = ondin_core::subtree_nodes(doc, &[doc.root()]);
             index.components = all
@@ -3267,9 +2965,7 @@ impl OndinApp {
         f(&index)
     }
 
-    /// How many document walks `Self::artboards` has actually paid for
-    /// (`FrameIndex::walks`). Only the accessor is `cfg(test)`, so the production
-    /// and tested memo are the same code.
+    /// How many document walks `Self::artboards` has paid for (`FrameIndex::walks`).
     #[cfg(test)]
     pub(crate) fn frame_walks(&self) -> u64 {
         self.frame_index.borrow().walks
@@ -3280,9 +2976,8 @@ impl OndinApp {
         self.with_frames(|i| i.frames.clone())
     }
 
-    /// Every layer that carries a tag on the canvas — every artboard, and each
-    /// group that is a main — in paint order, from the same memo
-    /// as [`Self::artboards`].
+    /// Every layer that carries a tag on the canvas (every artboard, each group that is
+    /// a main) in paint order, from the same memo as [`Self::artboards`].
     pub(crate) fn tagged(&self) -> Vec<NodeId> {
         self.with_frames(|i| i.tagged.clone())
     }
@@ -3321,19 +3016,16 @@ fn create_in_place(doc: &ondin_core::Document, id: NodeId) -> bool {
 /// How far a pasted copy sits from its original, in its parent's space.
 const PASTE_OFFSET: Vec2 = Vec2::new(20.0, 20.0);
 
-/// How far a pasted or duplicated **guide** sits from its original, along the one
-/// axis it has.
-///
-/// [`PASTE_OFFSET`]'s single component, so a guide and a layer step alike, and
-/// repeated Ctrl+D lays out a row of evenly spaced guides.
+/// How far a pasted or duplicated **guide** sits from its original, along its one axis:
+/// [`PASTE_OFFSET`]'s single component, so repeated Ctrl+D lays out evenly spaced guides.
 const GUIDE_PASTE_OFFSET: f64 = PASTE_OFFSET.x;
 
 // A copy landing on its original would be invisible; checked at compile time.
 const _: () = assert!(GUIDE_PASTE_OFFSET > 0.0);
 
 /// How far *Paste here* moves the payload: enough to put `from`'s centre on the
-/// pointer, or [`PASTE_OFFSET`] when there is no recorded box to aim. It takes the
-/// box rather than the source ids, which are gone after a cut.
+/// pointer, or [`PASTE_OFFSET`] when there is no recorded box. Takes the box, not the
+/// source ids, which are gone after a cut.
 fn paste_aim(from: Option<Rect>, world: Point) -> Vec2 {
     match from {
         Some(b) => world - b.center(),
@@ -3344,9 +3036,9 @@ fn paste_aim(from: Option<Rect>, world: Point) -> Vec2 {
 /// The guide a paste or a duplicate of `from` produces: a fresh id, the resolved
 /// `owner`, and the original's position stepped along its own axis.
 ///
-/// One rule for Ctrl+V and Ctrl+D. Axis and colour carry over; the scope is the
-/// caller's to resolve, since paste must survive the original's frame being
-/// deleted. `step` is [`GUIDE_PASTE_OFFSET`], or zero for paste in place.
+/// One rule for Ctrl+V and Ctrl+D. The scope is the caller's to resolve, since paste
+/// must survive the original's frame being deleted. `step` is [`GUIDE_PASTE_OFFSET`],
+/// or zero for paste in place.
 fn pasted_guide(from: &Guide, id: GuideId, owner: Option<NodeId>, step: f64) -> Guide {
     Guide {
         id,
@@ -3356,15 +3048,12 @@ fn pasted_guide(from: &Guide, id: GuideId, owner: Option<NodeId>, step: f64) -> 
     }
 }
 
-/// Clearance `reveal_selection` leaves between the layer it scrolled to and the
-/// edge of the canvas, in device px. Enough for the selection box and its handles,
-/// which are the part the user is about to reach for.
+/// Clearance `reveal_selection` leaves between the layer and the canvas edge, in device
+/// px: enough for the selection box and its handles.
 const REVEAL_MARGIN_PX: f64 = 24.0;
 
 /// How far one axis must scroll for `b0..b1` to lie inside `v0..v1`: `0.0` when it
-/// already does, otherwise the smaller of the two corrections. The clamp in each
-/// branch leaves a layer bigger than the viewport alone, rather than pulling one
-/// edge in and pushing the other out.
+/// already does. The clamp in each branch leaves a layer bigger than the viewport alone.
 fn reveal_axis(b0: f64, b1: f64, v0: f64, v1: f64) -> f64 {
     if b0 < v0 {
         (b0 - v0).max((b1 - v1).min(0.0))
@@ -3375,36 +3064,30 @@ fn reveal_axis(b0: f64, b1: f64, v0: f64, v1: f64) -> f64 {
     }
 }
 
-/// Band at the top and bottom of the layers tree inside which a dragged row
-/// scrolls it, in points. Narrower than the canvas's, because the tree is a narrow
-/// column and a 32pt band at each end of it would leave little dead space between.
+/// Band at the top and bottom of the layers tree inside which a dragged row scrolls it,
+/// in points. Narrower than the canvas's: a 32pt band would leave little dead space.
 const LAYER_SCROLL_BAND: f32 = 22.0;
-/// Fastest the layers tree auto-scrolls, in points per second. Slower than the
-/// canvas: the target is one 20px row, not a region, so the last stretch has to be
-/// steerable rather than quick.
+/// Fastest the layers tree auto-scrolls, in points per second. Slower than the canvas:
+/// the target is one 20px row, so the last stretch has to be steerable.
 const LAYER_SCROLL_MAX: f32 = 420.0;
 
-/// The run of duplicates Ctrl+D is currently building. Only the most recent
-/// clone is remembered, so duplicating anything else starts a new run at zero.
+/// The run of duplicates Ctrl+D is currently building. Only the most recent clone is
+/// remembered, so duplicating anything else starts a new run at zero.
 pub(crate) struct CloneChain {
     /// The clone the last Ctrl+D produced.
     last: NodeId,
-    /// Its world origin at the moment it was created. The difference between
-    /// this and where it sits now is the movement to repeat.
+    /// Its world origin when created; the difference from where it sits now is the
+    /// movement to repeat.
     placed_at: Point,
-    /// The step being repeated, carried forward so a run of presses keeps its
-    /// spacing instead of collapsing once the user stops nudging.
+    /// The step being repeated, carried forward so a run of presses keeps its spacing.
     step: Vec2,
 }
 
 impl OndinApp {
-    /// `Ctrl+V`'s whole decision, in one place: a picture, then the app's own
-    /// payload, then text as a new layer.
-    ///
-    /// The picture wins over the layers: a layer copy's text stand-in never arrives
-    /// with one. The layers win over text only while they are still what the OS
-    /// clipboard describes ([`Self::owns_the_clipboard`]). [`Self::paste_at`] asks
-    /// in the same order.
+    /// `Ctrl+V`'s whole decision: a picture, then the app's own payload, then text as a
+    /// new layer. The layers win over text only while they are still what the OS
+    /// clipboard describes ([`Self::owns_the_clipboard`]). [`Self::paste_at`] asks in
+    /// the same order.
     fn paste(&mut self) {
         if self.paste_image(None) {
             return;
@@ -3414,8 +3097,7 @@ impl OndinApp {
             Clipboard::Unreadable => return,
             _ => {}
         }
-        // After the app's own payload and before the text layer: anything that is
-        // not markup is text.
+        // Anything that is not markup is text.
         if self.paste_svg(None) {
             return;
         }
@@ -3423,10 +3105,9 @@ impl OndinApp {
     }
 
     /// `Ctrl+Shift+V`: the clipboard back at the **coordinates it was copied from**
-    /// (`docs/shortcuts.md` §7, `docs/context-menus.md` §4): a zero offset through
-    /// [`Self::paste_clipboard_at`], with the same payload order as [`Self::paste`].
-    /// A picture or markup has no position to restore and lands as usual. Guides
-    /// are taken here with a zero step, since `paste_clipboard_at` would step them.
+    /// (`docs/shortcuts.md` §7): a zero offset through [`Self::paste_clipboard_at`], in
+    /// [`Self::paste`]'s payload order. A picture or markup has no position to restore.
+    /// Guides are taken here with a zero step, since `paste_clipboard_at` would step them.
     fn paste_in_place(&mut self) {
         if self.paste_image(None) {
             return;
@@ -3450,15 +3131,12 @@ impl OndinApp {
         self.paste_text_as_layer(None);
     }
 
-    /// Whether the in-app clipboard still holds what the **system** clipboard
-    /// describes.
+    /// Whether the in-app clipboard still holds what the **system** clipboard describes.
     ///
-    /// Every in-app copy puts a text stand-in on the system clipboard (so
-    /// `Event::Paste` fires), and the stand-in doubles as a receipt: if the
-    /// clipboard no longer reads back as it, something else has copied since. The
-    /// stamp is written with the payload ([`Self::stamp_clipboard`]), so "no stamp"
-    /// means nothing of ours is on it. Takes the text, so callers read the OS
-    /// clipboard once.
+    /// Every in-app copy puts a text stand-in on the system clipboard, doubling as a
+    /// receipt: if the clipboard no longer reads back as it, something else has copied
+    /// since. "No stamp" means nothing of ours is on it ([`Self::stamp_clipboard`]).
+    /// Takes the text, so callers read the OS clipboard once.
     pub(crate) fn owns_the_clipboard(&self, text: Option<&str>) -> bool {
         let Some(stamp) = self.clipboard_stamp else {
             debug_assert!(
@@ -3470,14 +3148,11 @@ impl OndinApp {
         text.is_some_and(|t| ClipStamp::of(t) == stamp)
     }
 
-    /// What the clipboard is holding for the layer arm — and, when the answer is
-    /// a copy made in another `ondin` window, adopt it on the way past. Every paste
-    /// door calls this, so what the clipboard is found to hold is the same for all.
-    ///
-    /// The receipt is a fast path: a copy from this window is already in
-    /// [`Self::clipboard`]. Adopting rather than pasting keeps placement in
-    /// [`Self::paste_clipboard_at`], whose fallback to the canvas root already
-    /// handles a foreign copy's unknown parent. One OS read per call.
+    /// What the clipboard is holding for the layer arm, adopting a copy made in another
+    /// `ondin` window on the way past. Every paste door calls this. The receipt is a
+    /// fast path; adopting rather than pasting keeps placement in
+    /// [`Self::paste_clipboard_at`], whose fallback to the canvas root handles a foreign
+    /// copy's unknown parent. One OS read per call.
     fn take_clipboard(&mut self) -> Clipboard {
         let Some(text) = system_clipboard_text() else {
             return Clipboard::Foreign;
@@ -3488,9 +3163,8 @@ impl OndinApp {
         self.adopt_clip_text(text)
     }
 
-    /// [`Self::take_clipboard`]'s decision, with the OS read lifted off it so a
-    /// test (whose headless app has no clipboard) can hand it the text a real
-    /// [`Self::copy_selection`] produced.
+    /// [`Self::take_clipboard`]'s decision with the OS read lifted off, so a test can
+    /// hand it the text a real [`Self::copy_selection`] produced.
     fn adopt_clip_text(&mut self, text: String) -> Clipboard {
         let Some(read) = ondin_core::io::clip::read(&text) else {
             return Clipboard::Foreign;
@@ -3498,8 +3172,6 @@ impl OndinApp {
         let payload = match read {
             Ok(payload) => payload,
             Err(e) => {
-                // One message per failure kind, so a damaged copy is not blamed on
-                // a version mismatch.
                 self.session.fail(match &e {
                     ondin_core::io::IoError::UnsupportedVersion(v) => {
                         format!("That copy came from a build this one cannot read (schema {v})")
@@ -3529,30 +3201,25 @@ impl OndinApp {
     }
 
     /// Put `text` on the system clipboard **and** keep it as the receipt
-    /// [`Self::owns_the_clipboard`] reads back; one function, so no copy site can
-    /// forget the stamp.
+    /// [`Self::owns_the_clipboard`] reads back, so no copy site can forget the stamp.
     fn stamp_clipboard(&mut self, ctx: &egui::Context, text: String) {
         self.clipboard_stamp = Some(ClipStamp::of(&text));
         ctx.copy_text(text);
     }
 
-    /// Copy the selection into the in-app clipboard, and put a text stand-in on
-    /// the **system** clipboard.
+    /// Copy the selection into the in-app clipboard, and put a text stand-in on the
+    /// **system** clipboard: `egui_winit` emits `Event::Paste`, Ctrl+V's only form, only
+    /// for a non-empty clipboard. The layer names on the first line, then the payload past
+    /// `ondin_core::io::clip::FENCE`, so another `ondin` window pastes layers.
     ///
-    /// The stand-in is needed because `egui_winit` emits `Event::Paste`, Ctrl+V's
-    /// only form, only for a non-empty clipboard. It is the layer names on the
-    /// first line, then the captured payload past `ondin_core::io::clip::FENCE`, so
-    /// another `ondin` window pastes layers.
-    ///
-    /// Returns the text a layer copy put on the system clipboard, or `None` for a
-    /// guide copy or nothing copied; only tests modelling a second window read it.
+    /// Returns that text, or `None` for a guide copy or nothing copied; only tests
+    /// modelling a second window read it.
     fn copy_selection(&mut self, ctx: &egui::Context) -> Option<String> {
         // Guides are never selected alongside layers.
         if self.copy_guides(ctx) {
             return None;
         }
-        // The outermost members only: copying a group and its child would
-        // paste the child twice.
+        // Outermost only: copying a group and its child would paste the child twice.
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let names: Vec<String> = ids
             .iter()
@@ -3571,19 +3238,16 @@ impl OndinApp {
             .iter()
             .filter_map(|id| self.session.preview_world_bounds(*id))
             .reduce(|a, b| a.union(b));
-        // The kit mains a kit instance links to, and the image entries everything
-        // keys into (`Clip`), taken while their document is certainly on screen.
+        // Kit mains and image entries (`Clip`), taken while their document is on screen.
         let kits = ondin_core::kit::carried(&self.session.doc, &templates);
         let flat: Vec<Node> = templates.iter().chain(&kits).flatten().cloned().collect();
         let images: Vec<_> = build::image_ids_in(&flat)
             .into_iter()
             .filter_map(|id| Some((id.clone(), self.session.doc.image(&id)?.clone())))
             .collect();
-        // And the copied layers' variables: only this document can say what a
-        // binding draws.
+        // Only this document can say what a binding draws.
         let vars = ondin_core::variable::carried(&self.session.doc, &templates);
-        // The names alone if `write` fails, which keeps the in-app clipboard
-        // working and loses only the cross-window paste.
+        // The names alone if `write` fails: only the cross-window paste is lost.
         let heading = names.join(", ");
         let text = ondin_core::io::clip::write_carrying(
             &templates,
@@ -3608,11 +3272,8 @@ impl OndinApp {
         Some(text)
     }
 
-    /// Copy the selected guides. Returns whether there were any, so
-    /// [`Self::copy_selection`] can treat this as its guide half.
-    ///
-    /// The system clipboard gets a text stand-in, as for a layer copy: each guide's
-    /// axis and number.
+    /// Copy the selected guides; returns whether there were any. The system clipboard
+    /// gets a stand-in of each guide's axis and number.
     fn copy_guides(&mut self, ctx: &egui::Context) -> bool {
         let guides: Vec<Guide> = self
             .session
@@ -3634,21 +3295,14 @@ impl OndinApp {
             .info(format!("Copied {} guide(s)", guides.len()));
         self.guide_clipboard = Some(guides);
         self.clipboard = None;
-        // Cleared with the payload it belongs to, so a stale box can never be
-        // measured against a payload it did not come from.
+        // Cleared with the payload it belongs to.
         self.clipboard_from = None;
         true
     }
 
-    /// Paste the copied guides, each one **into the scope its original had** and
-    /// offset along its own axis so the copy is visibly a copy.
-    ///
-    /// Returns whether there was anything to paste, so [`Self::paste_clipboard`]
-    /// can treat this as its guide half.
-    ///
-    /// The owner is carried across unchanged, not re-derived from the pointer; a
-    /// guide whose frame has since been deleted falls back to the canvas rather
-    /// than being dropped.
+    /// Paste the copied guides, each **into the scope its original had**, offset along
+    /// its own axis. Returns whether there was anything to paste. A guide whose frame
+    /// has since been deleted falls back to the canvas rather than being dropped.
     fn paste_guides(&mut self, step: f64) -> bool {
         let Some(guides) = self.guide_clipboard.clone() else {
             return false;
@@ -3682,11 +3336,9 @@ impl OndinApp {
         true
     }
 
-    /// Ctrl+D on guides: a copy of each selected guide, in its own scope, offset
-    /// along its axis. Returns whether there were any.
-    ///
-    /// Not routed through the clipboard, which Ctrl+D must not overwrite; it shares
-    /// only the placement rule with paste.
+    /// Ctrl+D on guides: a copy of each selected guide, in its own scope, offset along its
+    /// axis. Returns whether there were any. Not routed through the clipboard, which
+    /// Ctrl+D must not overwrite.
     fn duplicate_guides(&mut self) -> bool {
         let guides: Vec<Guide> = self
             .session
@@ -3704,7 +3356,6 @@ impl OndinApp {
         for guide in guides {
             let id = GuideId(self.session.ids.mint());
             ids.push(id);
-            // The original's own scope, which exists by construction.
             ops.push(Operation::AddGuide {
                 guide: pasted_guide(&guide, id, guide.owner, GUIDE_PASTE_OFFSET),
             });
@@ -3729,16 +3380,12 @@ impl OndinApp {
         }
     }
 
-    /// Cut is copy then delete, and one undo step: the copy touches no document
-    /// state, and `delete_selection` already commits the whole selection at once.
+    /// Cut is copy then delete, and one undo step. Nothing selected leaves the clipboard
+    /// alone.
     ///
-    /// Nothing selected (layers or guides) means nothing to cut, and the clipboard
-    /// is left alone.
-    ///
-    /// A cut main moves: its delete detaches the instances, the cut remembers each
-    /// link it took ([`Self::cut_move`]), and the first paste in this document
-    /// restores the main under its own ids and relinks them
-    /// ([`Self::paste_cut_move`]). The message says so.
+    /// A cut main moves: its delete detaches the instances, the cut remembers each link
+    /// it took ([`Self::cut_move`]), and the first paste in this document restores the
+    /// main under its own ids and relinks them ([`Self::paste_cut_move`]).
     fn cut_selection(&mut self, ctx: &egui::Context) {
         let layers = !build::outermost(&self.session.doc, self.session.selection.ids()).is_empty();
         let guides = !self.session.selection.guides().is_empty();
@@ -3783,20 +3430,19 @@ impl OndinApp {
         });
     }
 
-    /// Put the selection on the system clipboard as an SVG document, from the
-    /// committed document so a gesture in flight cannot leak into it.
+    /// Put the selection on the system clipboard as an SVG document, from the committed
+    /// document so a gesture in flight cannot leak into it.
     ///
     /// `build::in_document_order` drops children of selected groups and restores z-order
-    /// (`Selection::ids` is pick order, and SVG has no z-index). No
-    /// [`Self::clipboard_stamp`]: the text stands on its own, so `owns_the_clipboard`
+    /// (`Selection::ids` is pick order). No [`Self::clipboard_stamp`]: `owns_the_clipboard`
     /// must answer no afterwards.
     pub(crate) fn copy_as_svg(&mut self, ctx: &egui::Context) {
         let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {
             return;
         }
-        // The reported form: a clipboard payload has no file to inspect, so the status
-        // line is the only place to say the markup is not quite the document.
+        // The reported form: the status line is the only place to say the markup is not
+        // quite the document.
         let out =
             ondin_export::svg::svg_of_reported(&self.session.doc, &self.session.resolved, &ids);
         let note = crate::panels::fidelity_clauses(&out);
@@ -3811,9 +3457,8 @@ impl OndinApp {
     /// *Copy as PNG* — the selection as a picture on the clipboard, 1:1 and transparent.
     ///
     /// `raster_of`, not `png_of`: `arboard::ImageData` takes raw RGBA, and encoded PNG
-    /// bytes would paste as noise rather than fail. Ordered by `build::in_document_order`
-    /// as in [`Self::copy_as_svg`]. No `clipboard_stamp`: a stamp would make
-    /// `owns_the_clipboard` answer yes while the clipboard holds a flattened picture.
+    /// bytes would paste as noise. Ordered as in [`Self::copy_as_svg`]. No
+    /// `clipboard_stamp`: it would make `owns_the_clipboard` answer yes for a flat picture.
     pub(crate) fn copy_as_png(&mut self) {
         let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {
@@ -3830,8 +3475,7 @@ impl OndinApp {
             height: raster.height as usize,
             bytes: raster.rgba.into(),
         };
-        // `arboard` directly, since egui's clipboard is text-only; refused on a headless
-        // app, where this would overwrite what the developer had copied.
+        // `arboard` directly, since egui's clipboard is text-only; refused on a headless app.
         if !clipboard_is_reachable() {
             self.session
                 .info("Copying to the clipboard is off in this build".to_string());
@@ -3849,8 +3493,8 @@ impl OndinApp {
         }
     }
 
-    /// The picture *Copy as PNG* hands the clipboard: raw RGBA at 1:1. Takes no `self`
-    /// so it is testable without writing to the user's OS clipboard.
+    /// The picture *Copy as PNG* hands the clipboard: raw RGBA at 1:1. Takes no `self`,
+    /// so it is testable without the OS clipboard.
     fn png_for_the_clipboard(
         doc: &ondin_core::Document,
         res: &ondin_core::Resolved,
@@ -3859,9 +3503,9 @@ impl OndinApp {
         ondin_export::png::raster_of(doc, res, ids, &ondin_export::png::RasterOpts::default())
     }
 
-    /// The layer *Copy properties* would lift an appearance off — the key layer when
-    /// the selection has one, else a lone selected layer. `None` for an unkeyed
-    /// multi-selection (ambiguous) and for a layer with no appearance, such as a group.
+    /// The layer *Copy properties* would lift an appearance off: the key layer, else a
+    /// lone selected layer. `None` for an unkeyed multi-selection and for a layer with no
+    /// appearance, such as a group.
     pub(crate) fn properties_source(&self) -> Option<(NodeId, build::Properties)> {
         let sel = &self.session.selection;
         let id = sel.key().or_else(|| sel.single())?;
@@ -3870,8 +3514,8 @@ impl OndinApp {
     }
 
     /// Lift the source layer's fills, strokes and opacity into
-    /// [`Self::property_clipboard`] — `Ctrl`+`Alt`+`C`. Reads the committed node, not
-    /// a gesture's preview, so the clipboard never holds a value no undo step contained.
+    /// [`Self::property_clipboard`] (`Ctrl`+`Alt`+`C`). Reads the committed node, not a
+    /// gesture's preview.
     fn copy_properties(&mut self) {
         let Some((_, props)) = self.properties_source() else {
             return;
@@ -3886,10 +3530,8 @@ impl OndinApp {
         self.session.info(format!("Copied {what}"));
     }
 
-    /// Give the selection the appearance the clipboard is holding —
-    /// `Ctrl`+`Alt`+`V`, `build::paste_properties`.
-    ///
-    /// One undo step; an empty transaction commits nothing and says so.
+    /// Give the selection the appearance the clipboard is holding (`Ctrl`+`Alt`+`V`,
+    /// `build::paste_properties`). One undo step; an empty transaction says so.
     fn paste_properties(&mut self) {
         let Some(props) = self.property_clipboard.clone() else {
             return;
@@ -3900,14 +3542,12 @@ impl OndinApp {
             self.session.info("Already has these properties");
             return;
         }
-        // Layers actually changed, not the selection's size; one layer can take
-        // several ops, hence the dedup.
+        // Layers actually changed (one layer can take several ops, hence the dedup).
         let mut touched: Vec<_> = tx.0.iter().filter_map(|op| op.overwrites()).collect();
         touched.sort_unstable();
         touched.dedup();
         let layers = touched.len();
-        // Read before the commit, which cannot report either: what the paste's
-        // bindings land as, and the paint bindings it overwrites.
+        // Read before the commit, which cannot report either.
         let (rebound, mut cut) = properties_landing(&self.session.doc, &props);
         for name in paints_overwritten(&self.session.doc, &tx) {
             if !cut.contains(&name) {
@@ -3938,16 +3578,15 @@ impl OndinApp {
         }
     }
 
-    /// Returns whether it took the paste, so [`Self::paste`] can fall through to
-    /// text when the app is holding nothing.
+    /// Returns whether it took the paste, so [`Self::paste`] can fall through to text.
     fn paste_clipboard(&mut self) -> bool {
         self.paste_clipboard_at(PASTE_OFFSET)
     }
 
     /// [`Self::paste_clipboard`] with the placement offset spelled out (*Paste here*).
     fn paste_clipboard_at(&mut self, offset: Vec2) -> bool {
-        // Guides and layers are mutually exclusive on the clipboard. The guide step is
-        // the constant, not `offset`; *Paste in place* takes the guide arm itself.
+        // The guide step is the constant, not `offset`; *Paste in place* takes the guide
+        // arm itself.
         if self.paste_guides(GUIDE_PASTE_OFFSET) {
             return true;
         }
@@ -3964,8 +3603,8 @@ impl OndinApp {
                 .and_then(|n| n.parent())
                 .filter(|p| self.session.doc.contains(*p))
                 .unwrap_or(fallback);
-            // Just above the original, whose id the template still carries until
-            // `insert_subtrees` remaps it; appended when the original is gone.
+            // Just above the original (the template still carries its id); appended
+            // when the original is gone.
             let from = template.first().map(|n| n.id());
             let index = from
                 .filter(|id| self.session.doc.get(*id).and_then(|n| n.parent()) == Some(parent))
@@ -3985,7 +3624,6 @@ impl OndinApp {
                 index,
             });
         }
-        // Offset so the copy does not sit invisibly on its original.
         self.insert_all(
             placements,
             "Pasted",
@@ -3998,11 +3636,8 @@ impl OndinApp {
     }
 
     /// *Paste*, through the **layers panel's** door: the clipboard as a sibling
-    /// immediately above the row that was right-clicked, since a panel paste says
-    /// where in the tree.
-    ///
-    /// Same payload order as everywhere else — picture, layers, text — so the row and
-    /// the chord mean the same thing; only layers take the row's slot.
+    /// immediately above the right-clicked row. Same payload order as [`Self::paste`];
+    /// only layers take the row's slot.
     pub(crate) fn paste_beside(&mut self, id: NodeId) {
         if self.paste_image(None) {
             return;
@@ -4015,12 +3650,11 @@ impl OndinApp {
         self.paste_text_as_layer(None);
     }
 
-    /// The layer half of [`Self::paste_beside`]. Returns whether it took the paste.
-    ///
-    /// Falls back to the ordinary paste rather than refusing where "beside this row"
-    /// has no answer (the root, or a row whose parent is gone).
+    /// The layer half of [`Self::paste_beside`]; returns whether it took the paste. Falls
+    /// back to the ordinary paste where "beside this row" has no answer (the root, or a
+    /// row whose parent is gone).
     fn paste_clipboard_beside(&mut self, id: NodeId) -> bool {
-        // Guides have no place in the tree, so this door means nothing to them.
+        // Guides have no place in the tree.
         if self.paste_guides(GUIDE_PASTE_OFFSET) {
             return true;
         }
@@ -4031,8 +3665,8 @@ impl OndinApp {
         let Some((parent, above)) = crate::canvas::sibling_slot_above(&self.session.doc, id) else {
             return self.paste_clipboard_at(PASTE_OFFSET);
         };
-        // Every template targets the one slot; `insert_subtrees` advances each past
-        // those already inserted, so they keep their listed order.
+        // Every template targets the one slot; `insert_subtrees` advances each past those
+        // already inserted, so they keep their order.
         let placements: Vec<build::Placement> = templates
             .iter()
             .map(|template| build::Placement {
@@ -4046,8 +3680,7 @@ impl OndinApp {
         if !self.paste_is_held(&placements, &clip.images, &clip.kits, &clip.vars.tokens) {
             return self.paste_clipboard_at(PASTE_OFFSET);
         }
-        // Offset like every other paste: a copy landing exactly on top of something
-        // is invisible, and this door decided the *slot*, not the position.
+        // Offset like every other paste: this door decided the *slot*, not the position.
         self.insert_all(
             placements,
             "Pasted",
@@ -4059,12 +3692,10 @@ impl OndinApp {
         true
     }
 
-    /// Whether the document would take `placements` as an ordinary paste —
-    /// asked by [`Self::paste_clipboard_beside`], whose slot is the user's.
-    ///
-    /// Only the component rules can refuse, and only under a main or an instance;
-    /// there the paste is built, settled as the commit would (`propagate::owed`) and
-    /// applied to a clone. Every other slot answers `true` without building anything.
+    /// Whether the document would take `placements` as an ordinary paste, asked by
+    /// [`Self::paste_clipboard_beside`], whose slot is the user's. Only the component
+    /// rules can refuse, and only under a main or an instance; there the paste is built,
+    /// settled as the commit would (`propagate::owed`) and applied to a clone.
     fn paste_is_held(
         &mut self,
         placements: &[build::Placement],
@@ -4080,8 +3711,8 @@ impl OndinApp {
         if !under_a_component {
             return true;
         }
-        // The transaction `insert_all` will commit, kit mains included, or a carried
-        // instance would be judged detached. A refused carry is `insert_all`'s to report.
+        // The transaction `insert_all` will commit, kit mains included, or a carried instance
+        // would be judged detached. A refused carry is `insert_all`'s to report.
         let Ok((tx, _)) = ondin_core::kit::insert_carrying(
             doc,
             &mut self.session.ids,
@@ -4099,20 +3730,15 @@ impl OndinApp {
         doc.clone().apply(&tx).is_ok()
     }
 
-    /// *Paste here*: the clipboard, centred on `world`. The chord stays
-    /// position-free by choice, so it lands predictably wherever the mouse rests.
-    ///
-    /// The offset is measured from the source layers' bounds, which the copy recorded
-    /// in [`Self::clipboard_from`] — so a cut, whose originals are gone, aims too.
-    /// Payloads go in [`Self::paste`]'s order (picture, layers, markup, text), each
-    /// placed at the pointer, so the row and the chord never disagree on what pastes.
+    /// *Paste here*: the clipboard, centred on `world`. The offset is measured from the
+    /// bounds recorded in [`Self::clipboard_from`], so a cut aims too. Payloads go in
+    /// [`Self::paste`]'s order, each placed at the pointer.
     pub(crate) fn paste_at(&mut self, world: Point) {
         if self.paste_image(Some(world)) {
             return;
         }
         match self.take_clipboard() {
-            // `clipboard_from` is read after the adoption, so a foreign copy aims by
-            // its own source box.
+            // `clipboard_from` is read after the adoption: a foreign copy aims by its own box.
             Clipboard::Layers if self.paste_clipboard_at(paste_aim(self.clipboard_from, world)) => {
                 return;
             }
@@ -4128,7 +3754,6 @@ impl OndinApp {
     /// Ctrl+D: a copy in place, then — for a copy of a copy ([`CloneChain`]) — a copy
     /// that repeats however far the last one was moved, so repeated presses lay out a row.
     pub(crate) fn duplicate_selection(&mut self) {
-        // Guides take the paste path's fixed step rather than a `CloneChain`.
         if self.duplicate_guides() {
             return;
         }
@@ -4155,7 +3780,7 @@ impl OndinApp {
                 index: after,
             });
         }
-        // No pictures or kits to carry: a duplicate lands in its own document.
+        // A duplicate lands in its own document: no pictures or kits to carry.
         self.insert_all(
             placements,
             "Duplicated",
@@ -4175,9 +3800,9 @@ impl OndinApp {
         };
     }
 
-    /// How far the next duplicate of `ids` should be offset: zero unless the single
-    /// selected node is the chain's last clone, then how far it has moved since — or,
-    /// if unmoved, the step already being repeated.
+    /// How far the next duplicate of `ids` is offset: zero unless the single selected
+    /// node is the chain's last clone, then how far it has moved since (or, if unmoved,
+    /// the step already being repeated).
     fn clone_step(&self, ids: &[NodeId]) -> Vec2 {
         let [id] = ids else { return Vec2::ZERO };
         let Some(chain) = self.clones.as_ref().filter(|c| c.last == *id) else {
@@ -4194,18 +3819,15 @@ impl OndinApp {
         }
     }
 
-    /// A node's origin in world space — the reference point the clone chain
-    /// measures movement against.
+    /// A node's origin in world space, which the clone chain measures movement against.
     fn origin_of(&self, id: NodeId) -> Option<Point> {
         Some(self.session.resolved.world_transform(id)? * Point::ZERO)
     }
 
     /// Insert captured subtrees as one undo step, offset by `offset` in their parent's
-    /// space, and select the results.
-    ///
-    /// `images` and `kits` are what nodes cannot carry themselves: the image-table
-    /// entries their fills key into and the vendored kit mains their instances link
-    /// to. Only what this document is missing is added.
+    /// space, and select the results. `images` and `kits` are what nodes cannot carry
+    /// themselves (image-table entries, vendored kit mains); only what this document is
+    /// missing is added.
     fn insert_all(
         &mut self,
         placements: Vec<build::Placement>,
@@ -4259,9 +3881,8 @@ impl OndinApp {
     }
 
     /// The paste that makes a cut a move: when `placements` are the clipboard a
-    /// [`CutMove`] was taken for, in the document it was cut from, they go in under
-    /// their own ids and every link the cut's delete took is given back, so a cut
-    /// main's instances follow it again. Taken once (§15 D1003).
+    /// [`CutMove`] was taken for, in the document it was cut from, they go in under their
+    /// own ids and every link the cut's delete took is given back. Taken once.
     ///
     /// `false` leaves the ordinary paste to run, including for a move the commit refuses.
     fn paste_cut_move(
@@ -4272,8 +3893,7 @@ impl OndinApp {
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
     ) -> bool {
         let doc = &self.session.doc;
-        // A parked move is a cut the history has taken back (`document_rewound`):
-        // nothing is owed while it is, and a commit since means it never will be.
+        // A parked move is a cut the history has taken back (`document_rewound`).
         let Some(cut) = self.cut_move.as_ref().filter(|c| c.parked.is_none()) else {
             return false;
         };
@@ -4311,9 +3931,9 @@ impl OndinApp {
                 transform: ondin_core::kurbo::Affine::translate(offset) * p.nodes[0].transform(),
             });
         }
-        // Every link the delete took where the node still holds what the delete left
-        // — not only unlinked ones, since a nested copy was climbed to its own main.
-        // A node relinked since, or whose swap's main has gone, is left as it is.
+        // Every link the delete took where the node still holds what it left (a nested
+        // copy was climbed to its own main, not just unlinked). A node relinked since, or
+        // whose swap's main has gone, is left as it is.
         for t in &cut.links {
             let Some(n) = doc.get(t.id) else { continue };
             if (n.link(), n.swap()) != t.left
@@ -4344,7 +3964,6 @@ impl OndinApp {
     }
 
     pub(crate) fn delete_selection(&mut self) {
-        // Guides are never selected alongside layers, so this is an early return.
         if !self.session.selection.guides().is_empty() {
             self.remove_selected_guides();
             return;
@@ -4366,21 +3985,20 @@ impl OndinApp {
         });
     }
 
-    /// Delete the selected layers in one commit, and say what that did — `None`
-    /// when nothing was selected or the commit refused. Shared by
-    /// [`Self::delete_selection`] and [`Self::cut_selection`].
+    /// Delete the selected layers in one commit and say what that did; `None` when
+    /// nothing was selected or the commit refused. Shared by [`Self::delete_selection`]
+    /// and [`Self::cut_selection`].
     fn delete_layers(&mut self) -> Option<Deleted> {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {
             return None;
         }
-        // A frame's guides go with it, and first: the inverse runs reversed, so this
-        // order restores the frame before its guides (the other order cannot be undone).
+        // A frame's guides go with it, and first: the inverse runs reversed, so this order
+        // restores the frame before its guides (the other order cannot be undone).
         let mut ops = build::guides_of(&self.session.doc, &ids);
         let guides = ops.len();
         ops.extend(ids.iter().map(|id| Operation::DeleteNode { id: *id }));
-        // Links into what is deleted climb past it; without these `component::check`
-        // refuses the commit for keeping a link to nothing.
+        // Links into what is deleted climb past it, or `component::check` refuses the commit.
         let relinks = ondin_core::component::relink_for_delete(&self.session.doc, &ids);
         let detached = relinks
             .iter()
@@ -4394,8 +4012,7 @@ impl OndinApp {
             [one] => self.session.doc.get(*one).map(|n| n.name().to_string()),
             _ => None,
         };
-        // Every link into what goes, read before the commit and kept where the commit
-        // changed it, so a cut can give them back.
+        // Every link into what goes, read before the commit, so a cut can give them back.
         let doc = &self.session.doc;
         let going: HashSet<NodeId> = build::subtree_nodes(doc, &ids).into_iter().collect();
         let held: Vec<(NodeId, NodeId, Option<NodeId>)> = build::subtree_nodes(doc, &[doc.root()])
@@ -4444,12 +4061,11 @@ impl OndinApp {
 
 impl OndinApp {
     /// Write the open document to its place in the library (filing it first if new),
-    /// pinning a version when `pin` — `Ctrl+S` pins, autosave does not.
+    /// pinning a version when `pin`. Answers whether the document was written.
     ///
     /// Synchronous on purpose: a pin reads the bytes back off disk, and the close,
     /// dashboard and open transitions need them down. The `disk_settle` first is
-    /// load-bearing — an older in-flight autosave could otherwise land after this.
-    /// Answers whether the document was written.
+    /// load-bearing: an older in-flight autosave could otherwise land after this.
     pub(crate) fn save_file(&mut self, pin: bool) -> bool {
         self.disk_settle();
         let path = match self.session.path.clone() {
@@ -4467,8 +4083,7 @@ impl OndinApp {
         self.last_autosave = std::time::Instant::now();
 
         if pin && self.prefs.version_history {
-            // Refreshed first: the document may have just been filed above, and the
-            // entry carries the id a version is filed under.
+            // The document may have just been filed; the entry carries the version's id.
             self.library.refresh();
             if let Some(entry) = self.library.entry_at(&path).cloned() {
                 match crate::library::store::pin_version(&self.library.root, &entry) {
@@ -4525,10 +4140,9 @@ impl OndinApp {
     /// Queue an autosave (never a pin) if the interval has elapsed and the session is
     /// dirty — an idle session writes nothing, which sync clients would upload.
     ///
-    /// The write, `mark_saved` and export happen on the result ([`Self::apply_disk`]),
-    /// so the session stays dirty until the bytes land. `is_saving` is not redundant
-    /// with the clock: a short user interval could otherwise put two writes of one
-    /// path in flight, and the older could land last.
+    /// `mark_saved` and the export happen on the result ([`Self::apply_disk`]), so the
+    /// session stays dirty until the bytes land. `is_saving` is not redundant with the
+    /// clock: a short interval could put two writes of one path in flight.
     fn autosave_tick(&mut self, ctx: &egui::Context) {
         let interval = self.prefs.autosave_secs;
         if interval == 0 || !self.session.is_dirty() || self.session.is_saving() {
@@ -4537,13 +4151,11 @@ impl OndinApp {
         if self.last_autosave.elapsed().as_secs() < interval {
             return;
         }
-        // A never-filed document is not autosaved into existence; its first save is
-        // the user's.
+        // A never-filed document is not autosaved into existence.
         let Some(path) = self.session.path.clone() else {
             return;
         };
-        // Stamped at queue time: a back-off on failure, and a slow disk does not
-        // stretch the interval.
+        // Stamped at queue time: a back-off on failure.
         self.last_autosave = std::time::Instant::now();
         let at = self.session.revision();
         let doc = self.session.doc.clone();
@@ -4554,17 +4166,16 @@ impl OndinApp {
     /// Take a crash snapshot if the interval has elapsed and something has been
     /// committed since the last one, queued onto [`writer::Writer`].
     ///
-    /// Three gates: dirty, at most once every [`SNAPSHOT_SECS`], and a new revision
-    /// (or an untouched document rewrites identical bytes forever). Unlike autosave
-    /// there is no path gate: a snapshot goes to `.recovery/`, so a never-saved
+    /// Three gates: dirty, at most once every [`SNAPSHOT_SECS`], and a new revision. Unlike
+    /// autosave there is no path gate: a snapshot goes to `.recovery/`, so a never-saved
     /// document is covered too.
     ///
     /// [`SNAPSHOT_SECS`]: crate::library::recovery::SNAPSHOT_SECS
     /// [`writer::Writer`]: crate::library::writer::Writer
     fn recovery_tick(&mut self, ctx: &egui::Context) {
         use crate::library::recovery;
-        // Results are drained by the frame ([`OndinApp::disk_results`]) before this
-        // runs; a test driving this directly has to drain them itself.
+        // The frame drains results ([`OndinApp::disk_results`]) first; a test driving this
+        // directly has to drain them itself.
         if !self.session.is_dirty() {
             // Clean: the file on disk is the document, so the snapshot is stale.
             self.drop_recovery();
@@ -4580,8 +4191,8 @@ impl OndinApp {
         let key = match self.recovery.key.clone() {
             Some(key) => key,
             None => {
-                // The document's id, so the snapshot matches back to its file; minted
-                // for a never-filed document.
+                // The document's id (minted for a never-filed one), so the snapshot
+                // matches back to its file.
                 let key = self
                     .session
                     .doc
@@ -4594,25 +4205,23 @@ impl OndinApp {
             }
         };
         let root = self.library.root.clone();
-        // Stamped whichever way it goes, so a failing folder backs off rather than
-        // retrying every frame.
+        // Stamped whichever way it goes, so a failing folder backs off.
         self.recovery.last = Some(std::time::Instant::now());
-        // `recovery.at` means "this revision is on disk", so only the worker's answer
-        // sets it; the clock above keeps the same revision from re-queueing.
+        // `recovery.at` means "this revision is on disk", so only the worker's answer sets it.
         let at = self.session.revision();
         let doc = self.session.doc.clone();
         self.writer(ctx).snapshot(&root, &key, doc, at);
     }
 
-    /// The background writer, started on the first job. The `Context` is cloned into
-    /// the worker so an arriving result can `request_repaint`.
+    /// The background writer, started on the first job; the `Context` is cloned into the
+    /// worker so a result can `request_repaint`.
     fn writer(&mut self, ctx: &egui::Context) -> &mut crate::library::writer::Writer {
         self.writer
             .get_or_insert_with(|| crate::library::writer::Writer::spawn(ctx))
     }
 
-    /// Apply whatever the writer has finished, without waiting. Called once at the
-    /// top of the frame, ahead of both ticks, since both gate on state a result changes.
+    /// Apply whatever the writer has finished, without waiting. Called at the top of the
+    /// frame, ahead of both ticks, which gate on state a result changes.
     fn disk_results(&mut self) {
         let Some(writer) = self.writer.as_mut() else {
             return;
@@ -4621,11 +4230,9 @@ impl OndinApp {
         self.apply_disk(done);
     }
 
-    /// Block until the writer's queue is empty, then apply it.
-    ///
-    /// Only where there is no next frame (a close), where this frame writes the same
-    /// file itself ([`Self::save_file`]), or where the library folder is about to move.
-    /// Everywhere else, waiting is the cost the writer exists to avoid.
+    /// Block until the writer's queue is empty, then apply it. Only where there is no
+    /// next frame (a close), where this frame writes the same file itself
+    /// ([`Self::save_file`]), or where the library folder is about to move.
     pub(crate) fn disk_settle(&mut self) {
         let Some(writer) = self.writer.as_mut() else {
             return;
@@ -4634,8 +4241,7 @@ impl OndinApp {
         self.apply_disk(done);
     }
 
-    /// The one reader of [`writer::Done`], so no caller above can come to mean
-    /// something different by a result.
+    /// The one reader of [`writer::Done`].
     ///
     /// [`writer::Done`]: crate::library::writer::Done
     fn apply_disk(&mut self, done: Vec<crate::library::writer::Done>) {
@@ -4676,11 +4282,9 @@ impl OndinApp {
     /// [`eframe::App::ui`] so it appears over either screen.
     ///
     /// Recovering never writes the user's file: the snapshot loads with the original's
-    /// path and is marked unsaved ([`EditorSession::mark_unsaved`]), and the snapshot
-    /// itself is kept, adopted by [`Self::recovery_tick`]. [`Self::recover`] drops the
-    /// outgoing session's snapshot, safe only behind
-    /// [`Self::may_replace_current_document`], which the *Recover* arm asks before it
-    /// pops `pending`.
+    /// path, marked unsaved ([`EditorSession::mark_unsaved`]), and is kept, adopted by
+    /// [`Self::recovery_tick`]. [`Self::recover`] drops the outgoing session's snapshot,
+    /// safe only behind [`Self::may_replace_current_document`], asked before `pending` pops.
     fn recovery_modal(&mut self, ctx: &egui::Context) {
         let Some(pending) = self.recovery.pending.last().cloned() else {
             return;
@@ -4692,8 +4296,7 @@ impl OndinApp {
                 crate::settings::CARD_W,
                 crate::settings::PAD,
             ));
-            // A ✕ like every modal; it dismisses this launch's asking, never the
-            // snapshot ([`RecoverChoice::Later`]).
+            // The ✕ dismisses this launch's asking, never the snapshot ([`RecoverChoice::Later`]).
             if crate::settings::modal_title(ui, "Recover unsaved work") {
                 decision = Some(RecoverChoice::Later);
             }
@@ -4752,8 +4355,7 @@ impl OndinApp {
                 }
             });
         });
-        // Escape and the backdrop are *Later*, never *Discard*: a reflex must not
-        // destroy work.
+        // Escape and the backdrop are *Later*, never *Discard*.
         if modal.should_close() {
             decision = Some(RecoverChoice::Later);
         }
@@ -4768,7 +4370,6 @@ impl OndinApp {
             }
             Some(RecoverChoice::Discard) => {
                 self.recovery.pending.pop();
-                // Through the same door as every other removal.
                 self.forget_snapshot(&pending.key);
             }
             // Popped without deleting: the next launch offers it again.
@@ -4790,12 +4391,11 @@ impl OndinApp {
             Ok(d) => d,
             Err(e) => return self.session.fail(format!("Recovery failed: {e}")),
         };
-        // The outgoing snapshot, dropped before the adopt overwrites `recovery.key`,
-        // or it is offered at every launch forever. Safe only because the caller ran
-        // `may_replace_current_document`; without it a second queued *Recover* would
-        // delete the unsaved first one (§15 D768).
+        // The outgoing snapshot, dropped before the adopt overwrites `recovery.key`, or it
+        // is offered at every launch forever. Safe only because the caller ran
+        // `may_replace_current_document`; otherwise a second queued *Recover* would delete
+        // the unsaved first one.
         self.drop_recovery();
-        // A library file still loading loses to the recovered one.
         self.opening = None;
         self.session.adopt_document(doc, pending.target.clone());
         // After `adopt_document`, which sets it clean.
@@ -4810,16 +4410,13 @@ impl OndinApp {
         self.session.info("Unsaved changes recovered");
     }
 
-    /// Forget this session's crash snapshot: the work it held is on disk, or the
-    /// user has said to throw it away.
-    ///
-    /// The tick only runs on an editor frame, so whatever ends the session or replaces
-    /// its document calls this itself: [`Self::close_confirmation`],
-    /// [`Self::go_to_dashboard`], [`Self::adopt_opened`] and [`Self::recover`] — the
-    /// last only behind [`Self::may_replace_current_document`].
+    /// Forget this session's crash snapshot: the work it held is on disk, or the user has
+    /// said to throw it away. The tick only runs on an editor frame, so whatever ends the
+    /// session or replaces its document calls this itself ([`Self::close_confirmation`],
+    /// [`Self::go_to_dashboard`], [`Self::adopt_opened`], [`Self::recover`]).
     pub(crate) fn drop_recovery(&mut self) {
-        // `library.root` is read now, not remembered with the key: a moved library
-        // carried the snapshot along, and an abandoned one keeps it to offer later.
+        // `library.root` is read now, not remembered with the key: a moved library carried
+        // the snapshot along.
         if let Some(key) = self.recovery.key.take() {
             self.forget_snapshot(&key);
         }
@@ -4828,8 +4425,7 @@ impl OndinApp {
     }
 
     /// Delete the snapshot filed under `key` down the writer's queue, so an in-flight
-    /// write cannot land afterwards and put it back. With no writer, nothing has been
-    /// queued and the removal goes straight to disk.
+    /// write cannot put it back. With no writer, the removal goes straight to disk.
     fn forget_snapshot(&mut self, key: &str) {
         let root = self.library.root.clone();
         match self.writer.as_mut() {
@@ -4842,15 +4438,14 @@ impl OndinApp {
     /// a never-filed document keeps its unsaved state in memory.
     ///
     /// The text session is committed first ([`Self::finish_text_first`], as every exit
-    /// does): the live editor alone holds what was typed, so a save before it would
-    /// miss it and the `drop_recovery` below would take the last copy.
+    /// does): a save before it would miss what was typed and `drop_recovery` would take
+    /// the last copy.
     pub(crate) fn go_to_dashboard(&mut self) {
         self.finish_text_first();
         if self.session.is_dirty() && self.session.path.is_some() {
             self.save_file(false);
         }
-        // Here rather than the tick, which only runs on editor frames — and gated on
-        // clean, since a never-filed document was not saved above and its snapshot
+        // Gated on clean: a never-filed document was not saved above and its snapshot
         // is all it has.
         if !self.session.is_dirty() {
             self.drop_recovery();
@@ -4865,19 +4460,17 @@ impl OndinApp {
         self.context_menu = None;
         self.open_menu = TopMenu::None;
         self.rename_entry = None;
-        // The close card too (reachable via `Ctrl+O` under it), or it returns over a
-        // clean document; cleared, not answered, since the user stopped closing.
+        // The close card too (reachable via `Ctrl+O`), or it returns over a clean document.
         self.confirming_close = false;
     }
 
-    /// Open a document from the library into the editor.
-    ///
-    /// Reports failure and stays where it is, so the dashboard row can be tried again.
+    /// Open a document from the library into the editor. Reports failure and stays where
+    /// it is, so the dashboard row can be tried again.
     pub(crate) fn open_path(&mut self, path: &std::path::Path) {
         if !self.may_replace_current_document("opening another document") {
             return;
         }
-        // A card still loading loses to this one, or its late answer would replace it.
+        // A card still loading loses to this one.
         self.opening = None;
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -4891,8 +4484,7 @@ impl OndinApp {
     }
 
     /// Open `path` with the read and the load on a worker, the library's card pulsing
-    /// until [`Self::poll_open`] adopts it; a second click replaces the first. The
-    /// *may I replace* question is asked here, before the work starts.
+    /// until [`Self::poll_open`] adopts it; a second click replaces the first.
     pub(crate) fn begin_open(&mut self, path: &std::path::Path) {
         if self.opening.as_ref().is_some_and(|o| o.path == path) {
             return;
@@ -4918,13 +4510,13 @@ impl OndinApp {
                     at: std::time::Instant::now(),
                 });
             }
-            // No thread to be had: open on this one, as before.
+            // No thread to be had: open on this one.
             Err(_) => self.open_path(path),
         }
     }
 
-    /// Adopt a document [`Self::begin_open`] finished loading, or report why it
-    /// could not — and keep frames coming while it works, for the pulse.
+    /// Adopt a document [`Self::begin_open`] finished loading, or report why it could not;
+    /// keeps frames coming meanwhile, for the pulse.
     pub(crate) fn poll_open(&mut self, ctx: &egui::Context) {
         let Some(o) = &self.opening else {
             return;
@@ -4959,16 +4551,15 @@ impl OndinApp {
         }
     }
 
-    /// The half of an open after the bytes are a document: the library's
-    /// bookkeeping, the session, and the editor.
+    /// The half of an open after the bytes are a document: the library's bookkeeping, the
+    /// session, and the editor.
     fn adopt_opened(&mut self, path: &std::path::Path, doc: ondin_core::Document) {
         if let Some(id) = doc.meta().id.clone() {
-            // Before `adopt_document`, which moves the document.
             self.library.local.mark_opened(&id);
             self.library.local.save();
         }
-        // Before the adopt: past it the old snapshot's key cannot be named. Both
-        // callers asked `may_replace_current_document` first, so the work is safe.
+        // Before the adopt: past it the old snapshot's key cannot be named. Both callers
+        // asked `may_replace_current_document` first.
         self.drop_recovery();
         self.session.adopt_document(doc, Some(path.to_path_buf()));
         self.reset_transient_state();
@@ -4985,9 +4576,8 @@ impl OndinApp {
 
     fn reset_transient_state(&mut self) {
         self.drag = Drag::None;
-        // Fields holding the old document's ids are cleared here by hand; one this
-        // list misses dangles rather than collides, since `NodeId` carries a random
-        // per-session actor.
+        // Fields holding the old document's ids are cleared by hand; one this list misses
+        // dangles rather than collides (`NodeId` carries a random per-session actor).
         self.alt_clone = None;
         self.pen = None;
         self.text = None;
@@ -5007,8 +4597,7 @@ impl OndinApp {
         self.style_menu = None;
         self.style_picker = None;
         self.style_naming = None;
-        // Leaving a kit ends its link back; *Go to main in the kit* sets it again
-        // after the open that cleared it.
+        // *Go to main in the kit* sets it again after the open that cleared it.
         self.kit_return = None;
         self.making_local = None;
         self.kits_used_open = false;
@@ -5017,17 +4606,15 @@ impl OndinApp {
         self.paint_hex = None;
         self.guide_previews.clear();
         self.var_cell_preview = None;
-        // Cleared nowhere else, so without this it grows across every document opened.
         self.per_corner_radius.clear();
     }
 
-    /// Whether the app may put a different document in front of the user: **save
-    /// what can be saved, then ask about what cannot**. `false` means the user
-    /// declined and the caller must change nothing.
+    /// Whether the app may put a different document in front of the user: **save what
+    /// can be saved, then ask about what cannot**. `false` means the user declined and
+    /// the caller must change nothing.
     ///
-    /// A live text session is finished first so its typing is saved. `is_dirty()` is
-    /// read twice on purpose: `save_file` clears it, so the second asks what is left
-    /// — only an unfiled document reaches the (blocking, `rfd`) dialog.
+    /// `is_dirty()` is read twice on purpose: `save_file` clears it, so only an unfiled
+    /// document reaches the (blocking, `rfd`) dialog.
     fn may_replace_current_document(&mut self, what: &str) -> bool {
         self.finish_text_first();
         if self.session.is_dirty() && self.session.path.is_some() {
@@ -5036,9 +4623,9 @@ impl OndinApp {
         !self.session.is_dirty() || self.confirm_discard(what)
     }
 
-    /// A blocking yes/no dialog: discard unsaved work to put a different document in
-    /// front of the user. Only [`Self::may_replace_current_document`] calls it; the
-    /// window close uses the in-app [`Self::close_confirmation`] card instead.
+    /// A blocking yes/no dialog to discard unsaved work. Only
+    /// [`Self::may_replace_current_document`] calls it; the window close uses the in-app
+    /// [`Self::close_confirmation`] card.
     fn confirm_discard(&self, what: &str) -> bool {
         rfd::MessageDialog::new()
             .set_title("Unsaved changes")
@@ -5051,8 +4638,8 @@ impl OndinApp {
             == rfd::MessageDialogResult::Yes
     }
 
-    /// The update chip's click, from either screen's bar: ask the window to
-    /// close and apply the update once it has, or say why not.
+    /// The update chip's click, from either screen's bar: ask the window to close and
+    /// apply the update once it has, or say why not.
     pub(crate) fn restart_to_update(&mut self) {
         // The count is of processes, headless `ondin export` included.
         if let crate::update::Restart::OthersOpen(n) = self.updater.restart() {
@@ -5069,8 +4656,8 @@ impl OndinApp {
 
     /// Intercept the window close so unsaved work is never lost silently.
     ///
-    /// Re-armed on every close request, not only the first: the title bar's ✕ is not
-    /// covered by the card, and an uncancelled second click would close the window.
+    /// Re-armed on every close request: the title bar's ✕ is not covered by the card, and
+    /// an uncancelled second click would close the window.
     fn handle_close_request(&mut self, ctx: &egui::Context) {
         let requested = ctx.input(|i| i.viewport().close_requested());
         if !requested {
@@ -5088,7 +4675,6 @@ impl OndinApp {
             return;
         }
         let mut decision: Option<CloseChoice> = None;
-        // Through `settings::card` like every modal (focus ring, frame, backdrop).
         // The title's ✕ is *Cancel*: a reflex must not land in the destructive arm.
         let modal = crate::settings::card("confirm-close", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(320.0, crate::settings::PAD));
@@ -5123,8 +4709,8 @@ impl OndinApp {
                 }
             });
         });
-        // Escape and the backdrop mean *Cancel*; unread, Escape would fall through to
-        // the editor's escape ladder beneath the card.
+        // Escape and the backdrop mean *Cancel*; unread, Escape would fall through to the
+        // editor's ladder beneath the card.
         if modal.should_close() {
             decision = Some(CloseChoice::Cancel);
         }
@@ -5133,14 +4719,13 @@ impl OndinApp {
             Some(CloseChoice::Save) => {
                 self.save_file(false);
                 self.confirming_close = false;
-                // Close only if the save went through; otherwise a chip-asked
-                // restart is called off as *Cancel* does.
+                // Close only if the save went through; otherwise a chip-asked restart is
+                // called off as *Cancel* does.
                 if self.session.is_dirty() {
                     self.updater.restart_called_off();
                 }
                 if !self.session.is_dirty() {
-                    // Here, not in `recovery_tick`: there is no next frame. Settled
-                    // because the removal is queued.
+                    // Not in `recovery_tick`: there is no next frame.
                     self.drop_recovery();
                     self.disk_settle();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -5148,7 +4733,6 @@ impl OndinApp {
             }
             Some(CloseChoice::Discard) => {
                 self.confirming_close = false;
-                // Discarding reaches the snapshot too, as in the arm above.
                 self.drop_recovery();
                 self.disk_settle();
                 self.session.mark_saved(
@@ -5168,11 +4752,8 @@ impl OndinApp {
         }
     }
 
-    /// Pick image files and load the cursor with them (`Tool::Image`,
-    /// `Ctrl+Shift+K`, and the rail's image button — all one action).
-    ///
-    /// The tool is only armed if something loaded; a placement tool with nothing to
-    /// place would look hung.
+    /// Pick image files and load the cursor with them (`Tool::Image`). The tool is only
+    /// armed if something loaded; a placement tool with nothing to place would look hung.
     pub(crate) fn place_image_action(&mut self) {
         let Some(paths) = rfd::FileDialog::new()
             .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"])
@@ -5209,13 +4790,12 @@ impl OndinApp {
         });
     }
 
-    /// Pick one file and give it to the picture in `slot`, `keep_framing`
-    /// deciding whether the crop travels with it. Also the repair for a picture that
-    /// cannot be drawn (dangling id, undecodable bytes, moved link).
+    /// Pick one file and give it to the picture in `slot`; also the repair for a picture
+    /// that cannot be drawn (dangling id, undecodable bytes, moved link).
     ///
     /// `keep_framing: false` is *Replace and reset*: only the framing resets; the
-    /// adjustments and sampler survive, being another card's. Written through the slot
-    /// with the table entry in the same transaction, so one undo restores both.
+    /// adjustments and sampler survive, being another card's. The table entry goes in the
+    /// same transaction, so one undo restores both.
     pub(crate) fn replace_image_action(
         &mut self,
         id: NodeId,
@@ -5244,15 +4824,13 @@ impl OndinApp {
             ondin_core::Brush::Image(_) if keep_framing => crate::panels::map_image(&brush, |r| {
                 r.id = image.id.clone();
             }),
-            // *Replace and reset*: rebuilt from `ImageRef::new` so a future framing
-            // field resets too; the adjustments come across.
+            // Rebuilt from `ImageRef::new` so a future framing field resets too.
             ondin_core::Brush::Image(_) => crate::panels::map_image(&brush, |r| {
                 *r = ondin_core::ImageRef {
                     adjust: r.adjust,
                     ..ondin_core::ImageRef::new(image.id.clone())
                 };
             }),
-            // The slot was not showing a picture: nothing to keep.
             _ => ondin_core::image_brush(image.id.clone()),
         };
         let mut ops = Vec::new();
@@ -5264,15 +4842,14 @@ impl OndinApp {
         }
         ops.extend(self.slot_transaction(id, slot, next).0);
         if self.commit_edit(Transaction(ops)) {
-            // Through the drop's wording, so a detach the commit reported is kept.
             let said = self.replaced_status(image.label(), None);
             self.session.info(said);
         }
     }
 
-    /// *Replaced with ‹label›*, and what the commit just made detached after it —
-    /// [`EditorSession::last_detached`], with `cut_var` (a variable the door read
-    /// off the paint before writing over it) among the variables.
+    /// *Replaced with ‹label›*, and what the commit just made detached
+    /// ([`EditorSession::last_detached`]), with `cut_var` (a variable the door read off
+    /// the paint before writing over it) among the variables.
     fn replaced_status(&self, label: &str, cut_var: Option<String>) -> String {
         let (styles, mut vars) = self.session.last_detached().clone();
         if let Some(name) = cut_var
@@ -5287,12 +4864,9 @@ impl OndinApp {
         }
     }
 
-    /// Step into image editing on `id` — select it, take the tool, say what the
-    /// mode expects. The one funnel for every door (`Enter`, double-click, the menu
-    /// row, the inspector's fill row), so they cannot disagree.
-    ///
-    /// A lock refuses here, in the mode rather than at a door, since a crop is a
-    /// resize; `is_effectively_locked`, so a locked group locks the picture inside it.
+    /// Step into image editing on `id`: select it, take the tool, say what the mode
+    /// expects. The one funnel for every door. A lock refuses here, in the mode rather
+    /// than at a door, since a crop is a resize; a locked group locks its picture.
     pub(crate) fn begin_image_edit(&mut self, id: NodeId) {
         if ondin_core::is_effectively_locked(&self.session.doc, id) {
             self.session
@@ -5311,17 +4885,16 @@ impl OndinApp {
 
     /// Read, hash and decode one file, or say why not ([`ImageRefusal`]).
     fn load_image_file(&mut self, path: &std::path::Path) -> Result<LoadedImage, ImageRefusal> {
-        // An unreadable file and a non-picture share one message; only refusals of
-        // good bytes are worth distinguishing.
+        // An unreadable file and a non-picture share one message.
         let Ok(bytes) = std::fs::read(path) else {
             return Err(ImageRefusal::NotAnImage);
         };
         self.load_image_bytes(bytes, file_extension(path), Some(image_name(path)))
     }
 
-    /// [`Self::load_image_file`] without the file: hash, sniff, decode and name
-    /// bytes already in hand — the one path for pick, drop and paste, so they agree.
-    /// `ext` is a second opinion when the magic number says nothing; `None` for a paste.
+    /// [`Self::load_image_file`] without the file: hash, sniff, decode and name bytes in
+    /// hand — the one path for pick, drop and paste. `ext` is a second opinion when the
+    /// magic number says nothing; `None` for a paste.
     fn load_image_bytes(
         &mut self,
         bytes: Vec<u8>,
@@ -5332,8 +4905,7 @@ impl OndinApp {
             return Err(ImageRefusal::NotAnImage);
         };
         let id = content_hash(&bytes);
-        // Decoded here, not at placement: it gives the intrinsic size and proves the
-        // file drawable before the tool is armed.
+        // Decoded here: gives the intrinsic size and proves the file drawable.
         let (w, h) = self
             .canvas
             .images_mut()
@@ -5341,7 +4913,6 @@ impl OndinApp {
             .map_err(ImageRefusal::Decode)?;
         Ok(LoadedImage {
             entry: ImageEntry {
-                // The last copy these bytes make; commits share them from here on.
                 source: ImageSource::Embedded(bytes.into()),
                 format,
                 width: w,
@@ -5354,10 +4925,9 @@ impl OndinApp {
     }
 
     /// Take whatever was dropped on the window this frame and place it. Each
-    /// `DroppedFile` carries bytes (a browser drag) or a path (a file manager).
-    ///
-    /// The point comes from [`Self::drop_point`] — on Windows no drop event carries
-    /// one — shared with [`Self::draw_drop_indicator`] so aim and announcement agree.
+    /// `DroppedFile` carries bytes (a browser drag) or a path (a file manager). The
+    /// point comes from [`Self::drop_point`] (no Windows drop event carries one), shared
+    /// with [`Self::draw_drop_indicator`].
     pub(crate) fn take_dropped_images(&mut self, ctx: &egui::Context) {
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if dropped.is_empty() {
@@ -5383,7 +4953,6 @@ impl OndinApp {
                 Some(b) if looks_like_svg(&b) => vector += 1,
                 Some(b) => match self.load_image_bytes(b, ext, Some(name.clone())) {
                     Ok(image) => loaded.push(image),
-                    // The refusal's own reason, not a flat "could not read".
                     Err(why) => failed.push(why.message(&name)),
                 },
                 None => failed.push(ImageRefusal::NotAnImage.message(&name)),
@@ -5405,17 +4974,15 @@ impl OndinApp {
         self.drop_images_at(loaded, at);
     }
 
-    /// Place dropped images, or hand one to the shape under the pointer.
-    ///
-    /// Onto a shape it replaces that shape's picture, keeping the framing; onto bare
-    /// canvas it makes layers, cascaded since N files arrive at one point.
+    /// Place dropped images, or hand one to the shape under the pointer: onto a shape it
+    /// replaces that shape's picture, keeping the framing; onto bare canvas it makes
+    /// layers, cascaded since N files arrive at one point.
     fn drop_images_at(&mut self, loaded: Vec<LoadedImage>, at: Option<Point>) {
         /// World units between one dropped layer and the next, not scaled by zoom.
         const CASCADE: f64 = 24.0;
         let n = loaded.len();
-        // A single picture replaces the fill under it — only with a real drop
-        // point, never the paste's selection-only `None` arm, or every drop would
-        // replace whatever was selected.
+        // A single picture replaces the fill under it, only with a real drop point:
+        // the paste's selection-only `None` arm would replace whatever was selected.
         if n == 1
             && let Some(p) = at
             && let Some(target) = self.image_drop_target(Some(p))
@@ -5428,9 +4995,9 @@ impl OndinApp {
         }
         // No point (over a panel, or an unreadable cursor): the view's centre.
         let p = at.unwrap_or_else(|| self.viewport_centre());
-        // Placed now from the local list, never through `pending_images` (the Image
-        // tool's cursor). One drop is one transaction; the document is advanced per
-        // file because index, free name and embedded-blob checks read the tree.
+        // Never through `pending_images` (the Image tool's cursor). One drop is one
+        // transaction; the document is advanced per file because index, free name and
+        // embedded-blob checks read the tree.
         let mut advanced = self.session.doc.clone();
         let mut ops = Vec::new();
         let mut made = Vec::new();
@@ -5454,13 +5021,10 @@ impl OndinApp {
         });
     }
 
-    /// Put `image` into the fill `target` names, keeping how it was framed.
-    ///
-    /// Returns the status — *Replaced with ‹file›* plus what it detached — or `None`
-    /// when there was nothing to replace.
-    ///
-    /// A fill bound to a colour variable is replaced whole, which the commit cannot
-    /// report, so the variable is read here before the write.
+    /// Put `image` into the fill `target` names, keeping how it was framed. Returns the
+    /// status (*Replaced with ‹file›* plus what it detached), or `None` when there was
+    /// nothing to replace. A fill bound to a colour variable is replaced whole, which the
+    /// commit cannot report, so the variable is read here before the write.
     fn replace_image_fill(
         &mut self,
         target: (NodeId, usize),
@@ -5477,7 +5041,6 @@ impl OndinApp {
             .and_then(|v| self.session.doc.variables().get(v))
             .map(|v| v.name.clone());
         fill.brush = match fill.brush.literal() {
-            // Everything but which picture it is.
             Some(b @ ondin_core::Brush::Image(_)) => crate::panels::map_image(b, |r| {
                 r.id = image.id.clone();
             }),
@@ -5499,20 +5062,16 @@ impl OndinApp {
         Some(self.replaced_status(image.label(), cut_var))
     }
 
-    /// Paste an image off the OS clipboard, if there is one.
+    /// Paste an image off the OS clipboard, if there is one; returns whether it took the
+    /// paste, so the caller can fall through to the in-app layer paste.
     ///
-    /// Returns whether it took the paste, so the caller can fall through to the
-    /// in-app layer paste when the clipboard holds no picture.
+    /// `at` is *Paste here*'s pointer: `None` (the chord) aims by the selection and lands
+    /// mid-view; `Some(p)` aims like a drop ([`Self::image_drop_target`]).
     ///
-    /// `at` is *Paste here*'s pointer: `None` (the chord) aims by the selection and
-    /// lands mid-view; `Some(p)` aims like a drop — a selected shape under the point,
-    /// or a new layer at it ([`Self::image_drop_target`]).
-    ///
-    /// Read through `arboard`, since `egui::Event::Paste` is text-only. The decoded
-    /// RGBA is re-encoded to lossless PNG, as a document stores encoded originals, so
-    /// a pasted image's id hashes our encoding.
+    /// Read through `arboard`, since `egui::Event::Paste` is text-only. The decoded RGBA
+    /// is re-encoded to lossless PNG, as a document stores encoded originals, so a pasted
+    /// image's id hashes our encoding.
     pub(crate) fn paste_image(&mut self, at: Option<Point>) -> bool {
-        // The whole read happens inside the clipboard gate, not just the open.
         if !clipboard_is_reachable() {
             return false;
         }
@@ -5562,12 +5121,10 @@ impl OndinApp {
         }
     }
 
-    /// Every family the document's text nodes name, lowercased (family case is not
-    /// identity anywhere in the font path), for [`Self::ensure_document_fonts`] and
-    /// the font-poll gate in `OndinApp::ui`.
-    ///
-    /// Reads the character spans and bound families too, not only the node's
-    /// default: a partial-range family lives only in a `CharAttr::Family` span.
+    /// Every family the document's text nodes name, lowercased, for
+    /// [`Self::ensure_document_fonts`] and the font-poll gate in `OndinApp::ui`. Reads
+    /// the character spans and bound families too: a partial-range family lives only in
+    /// a `CharAttr::Family` span.
     fn document_families(&self) -> std::collections::HashSet<String> {
         let mut families = std::collections::HashSet::new();
         let mut stack = vec![self.session.doc.root()];
@@ -5611,8 +5168,7 @@ fn file_extension(path: &std::path::Path) -> Option<String> {
     path.extension().and_then(|e| e.to_str()).map(str::to_owned)
 }
 
-/// What a layer made from this file is called — its own name, because an auto
-/// "Rectangle 4" throws away the one piece of identity an image arrives with.
+/// What a layer made from this file is called: its own name.
 fn image_name(path: &std::path::Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -5620,18 +5176,15 @@ fn image_name(path: &std::path::Path) -> String {
 }
 
 /// Whether a byte run is SVG, sniffed from the bytes (a browser drop's name is not
-/// trustworthy), so a drop of vector art can be refused rather than rasterized.
-///
-/// A byte adapter over `svg_in::looks_like_svg`, so drop and paste agree. Capped at
-/// 512 bytes, decoded lossily because the cap can split a multi-byte character.
+/// trustworthy). A byte adapter over `svg_in::looks_like_svg`, capped at 512 bytes and
+/// decoded lossily because the cap can split a multi-byte character.
 fn looks_like_svg(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(512)];
     ondin_core::svg_in::looks_like_svg(&String::from_utf8_lossy(head))
 }
 
-/// Why a byte run did not become a placeable picture: not a picture at all, or a
-/// picture Ondin will not draw (with `DecodeError`'s reason), so a renderer limit
-/// is never reported as "Could not read".
+/// Why a byte run did not become a placeable picture: not a picture at all, or one
+/// Ondin will not draw (with `DecodeError`'s reason).
 #[derive(Debug)]
 pub(crate) enum ImageRefusal {
     /// Neither the magic bytes nor the extension name a format this app reads.
@@ -5641,8 +5194,7 @@ pub(crate) enum ImageRefusal {
 }
 
 impl ImageRefusal {
-    /// What to tell the user about `name`, as one sentence — with the numbers, so
-    /// they know what to change and by how much.
+    /// What to tell the user about `name`, as one sentence with the numbers.
     fn message(&self, name: &str) -> String {
         use ondin_render::images::{DecodeError, MAX_DECODED_BYTES, MAX_EDGE};
         match self {
@@ -5666,8 +5218,7 @@ impl ImageRefusal {
 }
 
 /// One image picked and decoded, waiting to be placed (`OndinApp::pending_images`).
-/// `Clone` so the tool can hand one on without borrowing the queue; once per
-/// placement, never per frame.
+/// `Clone` so the tool can hand one on without borrowing the queue.
 #[derive(Clone)]
 pub(crate) struct LoadedImage {
     pub(crate) id: ImageId,
@@ -5680,8 +5231,8 @@ pub(crate) struct LoadedImage {
 }
 
 impl LoadedImage {
-    /// What a status message calls this picture — not the layer name, which is
-    /// numbered against siblings the message cannot see.
+    /// What a status message calls this picture (not the layer name, which is numbered
+    /// against siblings).
     pub(crate) fn label(&self) -> &str {
         self.name.as_deref().unwrap_or("the pasted image")
     }
@@ -5722,9 +5273,8 @@ fn properties_landing(
     (rebound, detached)
 }
 
-/// The variables `tx`'s fill, stroke and opacity writes take off the layers
-/// they write — a target's own bound paint, stroke width or opacity replaced by
-/// the pasted one, which the commit's passes cannot name.
+/// The variables `tx`'s fill, stroke and opacity writes take off the layers they write
+/// (a target's own bound paint, stroke width or opacity), which the commit cannot name.
 fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<String> {
     use ondin_core::BrushSource;
     let t = doc.variables();
@@ -5777,11 +5327,9 @@ fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<Strin
     names
 }
 
-/// The document-wide id for these bytes: `sha256:<hex>` of the encoded original —
-/// never the decode, which is not bit-exact across decoder versions.
-///
-/// SHA-256 (via `ring`, already in the tree) so `sha256sum` on an exported original
-/// reproduces the id stored in the file.
+/// The document-wide id for these bytes: `sha256:<hex>` of the encoded original, never
+/// the decode (not bit-exact across decoder versions), so `sha256sum` on an exported
+/// original reproduces the stored id.
 pub(crate) fn content_hash(bytes: &[u8]) -> ImageId {
     let digest = ring::digest::digest(&ring::digest::SHA256, bytes);
     let mut hex = String::with_capacity(7 + 64);
@@ -5821,22 +5369,19 @@ enum CloseChoice {
     Cancel,
 }
 
-/// What the user did with a crash snapshot (`OndinApp::recovery_modal`). `Later`
-/// is what the ✕, `Escape` and the backdrop mean, and must never collapse into
-/// `Discard`.
+/// What the user did with a crash snapshot (`OndinApp::recovery_modal`). `Later` is what
+/// the ✕, `Escape` and the backdrop mean, and must never collapse into `Discard`.
 enum RecoverChoice {
     /// Load the snapshot into the session. The file on disk is not written.
     Recover,
     /// Delete the snapshot. The only thing that does.
     Discard,
-    /// Stop asking this launch. The snapshot stays and is offered again next
-    /// time.
+    /// Stop asking this launch; the snapshot is offered again next time.
     Later,
 }
 
-/// The save dot's tooltip. `ago` is `None` when nothing on disk matches the
-/// current state. `saving` is a third label, not a third dot state: the file still
-/// does not match while a write is in flight.
+/// The save dot's tooltip. `ago` is `None` when nothing on disk matches the current
+/// state. `saving` is a third label, not a third dot state.
 fn save_label(saving: bool, ago: Option<std::time::Duration>) -> String {
     if saving {
         return "Saving…".into();
@@ -5847,8 +5392,8 @@ fn save_label(saving: bool, ago: Option<std::time::Duration>) -> String {
     let secs = ago.as_secs();
     match secs {
         0..=44 => "Saved · just now".into(),
-        // Each band rounds half-up, so it must open inside `[unit/2, 3·unit/2)` to
-        // be able to print `1`; at 5400 the hours band could never say "1h ago".
+        // Each band rounds half-up, so it must open inside `[unit/2, 3·unit/2)` to be
+        // able to print `1`.
         45..=2699 => format!("Saved · {}m ago", (secs + 30) / 60),
         2700..=79199 => format!("Saved · {}h ago", (secs + 1800) / 3600),
         _ => format!("Saved · {}d ago", (secs + 43200) / 86400),
@@ -5857,34 +5402,30 @@ fn save_label(saving: bool, ago: Option<std::time::Duration>) -> String {
 
 // --- chrome ---------------------------------------------------------------
 
-/// Height of the top bar. The floating inspector is positioned in screen
-/// coordinates, so it needs to know where the chrome ends.
+/// Height of the top bar; the floating inspector positions itself below it.
 const TOP_BAR_H: f32 = 46.0;
 
 /// Inner padding of every top-bar dropdown.
 const MENU_PAD: f32 = 5.0;
 
-/// The gap between every control in the top bar's right-hand cluster — undo,
-/// redo, the two rules, the View and Snap heads, the zoom readout and Settings —
-/// including a mark and its own caret, so the gaps read equal. The rules get
-/// [`TOP_RULE_GAP`] on top. The library's bar uses it between Settings and the
-/// update pill.
+/// The gap between every control in the top bar's right-hand cluster, including a mark
+/// and its own caret, so the gaps read equal. The rules get [`TOP_RULE_GAP`] on top. The
+/// library's bar uses it between Settings and the update pill.
 pub(crate) const TOP_GAP: f32 = 5.0;
 
 /// Extra space on each side of a rule, over and above [`TOP_GAP`]: a 1px rule
 /// between 26px boxes otherwise reads as stuck to the nearer icon.
 const TOP_RULE_GAP: f32 = 3.0;
 
-/// One of the top bar's dividers, with [`TOP_RULE_GAP`] on each side — here, since
-/// the `right_to_left` cluster mirrors "before" and "after".
+/// One of the top bar's dividers, with [`TOP_RULE_GAP`] on each side.
 fn top_rule(ui: &mut egui::Ui) {
     ui.add_space(TOP_RULE_GAP);
     crate::ui::rule(ui, 16.0);
     ui.add_space(TOP_RULE_GAP);
 }
 
-/// How long the floating status bar holds `status`: a base plus a reading
-/// allowance per character, and longer for a failure, which the user must act on.
+/// How long the floating status bar holds `status`: a base plus a reading allowance per
+/// character, and longer for a failure.
 pub(crate) fn status_hold(status: &crate::session::Status) -> std::time::Duration {
     let chars = status.text.chars().count() as f32;
     let secs = (2.0 + chars * 0.05).clamp(3.0, 8.0);
@@ -5896,12 +5437,11 @@ pub(crate) fn status_hold(status: &crate::session::Status) -> std::time::Duratio
     std::time::Duration::from_secs_f32(secs)
 }
 
-/// The fade at the end of [`status_hold`], so a message leaves rather than
-/// blinks out.
+/// The fade at the end of [`status_hold`].
 const STATUS_FADE: f32 = 0.3;
 
 /// The colour a status is drawn in, shared by the library's dot and the editor's
-/// [`OndinApp::status_bar`] so a failure looks the same on both.
+/// [`OndinApp::status_bar`].
 fn status_color(status: &crate::session::Status) -> egui::Color32 {
     if status.kind == StatusKind::Error {
         egui::Color32::from_rgb(226, 138, 138)
@@ -5910,12 +5450,10 @@ fn status_color(status: &crate::session::Status) -> egui::Color32 {
     }
 }
 
-/// The library's half of the status line: a dot the width of nothing, with the
-/// whole message on hover — a fixed box, so it shows at every window width.
-///
-/// A painted circle, not an icon glyph: `Phosphor.ttf` has no glyph names, and a
-/// wrong codepoint renders blank. The hit box ([`STATUS_DOT_HIT`]) is far larger
-/// than the ink ([`STATUS_DOT_R`]) so the tooltip is discoverable.
+/// The library's half of the status line: a dot with the whole message on hover, in a
+/// fixed box so it shows at every window width. A painted circle, not an icon glyph
+/// (`Phosphor.ttf` has no glyph names). The hit box ([`STATUS_DOT_HIT`]) is far larger
+/// than the ink ([`STATUS_DOT_R`]).
 pub(crate) fn status_dot(ui: &mut egui::Ui, status: &crate::session::Status) {
     if status.text.is_empty() {
         return;
@@ -5929,31 +5467,26 @@ pub(crate) fn status_dot(ui: &mut egui::Ui, status: &crate::session::Status) {
     resp.on_hover_text(&status.text);
 }
 
-/// The library status dot's radius: an 8pt mark, the cap height of the 11.5pt
-/// status text it stands in for.
+/// The library status dot's radius: an 8pt mark, the cap height of the status text.
 pub(crate) const STATUS_DOT_R: f32 = 4.0;
 
 /// The box [`status_dot`] allocates, matched to the header's other controls
-/// (`HEADER_CONTROL_H`) so the dot sits beside the gear with a findable target.
+/// (`HEADER_CONTROL_H`).
 const STATUS_DOT_HIT: f32 = 28.0;
 
-/// Should a panel `width` points wide, in a parent with `room` to spare, replace
-/// the `stored` one? Only once the drag is released (`down`), only when the window
-/// is not what clamped it (`room`), and only when it changed (`stored`).
-///
-/// Built from numbers rather than egui's resize `Response`, whose id is a private
-/// salt. The 0.5 tolerances absorb egui's whole-pixel rounding of panel rects.
+/// Should a panel `width` points wide, in a parent with `room` to spare, replace the
+/// `stored` one? Only once the drag is released (`down`), when the window is not what
+/// clamped it (`room`), and when it changed (`stored`). Built from numbers because
+/// egui's resize `Response` id is a private salt; the 0.5 tolerances absorb whole-pixel
+/// rounding of panel rects.
 fn width_to_store(width: f32, room: f32, stored: f32, down: bool) -> Option<f32> {
     let user_did_it = !down && width < room - 0.5;
     (user_did_it && (width - stored).abs() >= 0.5).then_some(width)
 }
 
-/// How many instances a paste landed detached: linked in what was copied, with no
-/// link where they landed, for the paste's status line.
-///
-/// Read off the result, not predicted from the copy: each created subtree is
-/// matched to its template node for node (one preorder), and an instance counts
-/// once, not per member.
+/// How many instances a paste landed detached (linked in what was copied, no link where
+/// they landed). Read off the result: each created subtree is matched to its template
+/// node for node, and an instance counts once, not per member.
 fn landed_detached(
     doc: &ondin_core::Document,
     placements: &[build::Placement],
@@ -5984,23 +5517,18 @@ fn landed_detached(
 }
 
 impl OndinApp {
-    /// End a live text session before acting on the document: the session's buffer
-    /// is not yet in the `Document`, so an edit, save or undo under it would act on
-    /// stale content and lose the typing.
-    ///
-    /// Finishing rather than dimming, since a control that visibly does nothing reads
-    /// as broken. Called by the chrome controls live in `Mode::TextInsert`, by
-    /// [`Self::may_replace_current_document`], and at the head of each kit verb that
-    /// commits, saves or publishes.
+    /// End a live text session before acting on the document: its buffer is not yet in
+    /// the `Document`, so an edit, save or undo under it would lose the typing. Finishing
+    /// rather than dimming, since a control that visibly does nothing reads as broken.
     pub(crate) fn finish_text_first(&mut self) {
         if self.text.is_some() {
             self.finish_text_edit();
         }
     }
 
-    /// The top bar: brand mark, breadcrumb, save dot, edit actions, zoom readout and
-    /// the Settings button — and the window's own title bar: the drag strip, the
-    /// caption buttons and the update chip. No *Share*: this is a local file editor.
+    /// The top bar: brand mark, breadcrumb, save dot, edit actions, zoom readout and the
+    /// Settings button — and the window's own title bar: drag strip, caption buttons and
+    /// the update chip.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("topbar")
@@ -6008,16 +5536,13 @@ impl OndinApp {
             .resizable(false)
             .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
             .show(ui, |ui| {
-                // The empty parts drag the window; laid first so every control
-                // added below keeps its own clicks.
+                // Laid first so every control added below keeps its own clicks.
                 crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome), true);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
-                    // Brand mark: the app's icon and the way back to the library.
-                    // The hover lift and tooltip are what mark it as a control.
-                    // The 12pt gap to the crumb is set before the mark is placed,
-                    // since egui applies spacing at placement.
+                    // Brand mark: the way back to the library. The 12pt gap to the crumb is
+                    // set before the mark is placed, since egui applies spacing at placement.
                     ui.spacing_mut().item_spacing.x = 12.0;
                     let (mark, mark_resp) =
                         ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
@@ -6027,11 +5552,9 @@ impl OndinApp {
                         self.go_to_dashboard();
                     }
 
-                    // `Project / Document`, the project half a link; a document in
-                    // no project shows its name alone.
+                    // `Project / Document`, the project half a link.
                     self.document_crumb(ui);
 
-                    // Straight after the name, so it reads as the name's state.
                     self.save_dot(ui);
                     // On a kit, its tag and *Publish N* follow the dot as one group.
                     if self.shared_kit().is_some() {
@@ -6043,28 +5566,22 @@ impl OndinApp {
                     // In a kit opened by *Go to main*, the way back.
                     self.kit_back_link(ui);
 
-                    // Status text is the floating `status_bar`; open and save are the
-                    // library and the chords.
-
-                    // Right cluster, reading undo/redo · View · Snap · zoom ·
-                    // Settings; laid out `right_to_left`, so added in mirror order.
+                    // Right cluster, reading undo/redo · View · Snap · zoom · Settings;
+                    // laid out `right_to_left`, so added in mirror order.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // One gap for the whole cluster.
                         ui.spacing_mut().item_spacing.x = TOP_GAP;
 
-                        // The window's own buttons hard against the right edge,
-                        // then the bar's 14pt margin.
+                        // The window's own buttons hard against the right edge, then
+                        // the bar's 14pt margin.
                         crate::chrome::caption_buttons(ui, chrome, true);
                         crate::chrome::after_buttons(ui, 14.0, TOP_GAP);
 
                         self.settings_button(ui);
-                        // The update offer, beside the app's own button.
                         if crate::update::chip(ui, self.updater.state()) {
                             self.finish_text_first();
                             self.restart_to_update();
                         }
-                        // Extra air (15pt with `TOP_GAP`) separates the app's
-                        // controls from the document's.
+                        // Extra air separates the app's controls from the document's.
                         ui.add_space(10.0);
 
                         self.zoom_control(ui);
@@ -6098,8 +5615,8 @@ impl OndinApp {
             });
     }
 
-    /// The zoom readout (`62% ⌄`), and the menu it opens — the zoom actions are all
-    /// on the keyboard, so the bar only makes them discoverable.
+    /// The zoom readout (`62% ⌄`) and the menu it opens; the actions are all on the
+    /// keyboard, so the bar only makes them discoverable.
     fn zoom_control(&mut self, ui: &mut egui::Ui) {
         const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
         const MENU_W: f32 = 150.0;
@@ -6150,8 +5667,7 @@ impl OndinApp {
                     "Fit to page",
                     crate::input::Action::ZoomFit,
                 ),
-                // `SELECTION`, not a guessed `corners-in`: Phosphor has no glyph
-                // names, and a wrong codepoint renders blank.
+                // `SELECTION`, not a guessed `corners-in`: a wrong Phosphor codepoint renders blank.
                 (
                     icon::SELECTION,
                     "Fit selection",
@@ -6176,11 +5692,9 @@ impl OndinApp {
         };
     }
 
-    /// A top-bar dropdown: the floating panel, plus the two ways every one of
-    /// them closes — a click outside it, and Escape.
-    ///
-    /// `width` is the painted width, border included — the number the anchor
-    /// right-aligns against ([`crate::ui::menu_inner_w`] derives the inner one).
+    /// A top-bar dropdown: the floating panel, closed by a click outside it or Escape.
+    /// `width` is the painted width, border included ([`crate::ui::menu_inner_w`]
+    /// derives the inner one).
     pub(crate) fn dropdown(
         &mut self,
         ctx: &egui::Context,
@@ -6214,12 +5728,9 @@ impl OndinApp {
         }
     }
 
-    /// The **View** and **Snap** dropdowns, each an icon and a caret over a
-    /// column of checkable rows.
-    ///
-    /// Present mode is not a peer of the other switches: it hides all chrome and
-    /// leaves the others untouched, so leaving it restores the user's workspace.
-    /// Escape leaves it too, since turning it on hides this menu.
+    /// The **View** and **Snap** dropdowns, each an icon and a caret over a column of
+    /// checkable rows. Present mode is not a peer of the other switches: it hides all
+    /// chrome and leaves them untouched, so Escape (this menu being hidden) restores them.
     fn view_and_snap_menus(&mut self, ui: &mut egui::Ui) {
         const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
         const MENU_W: f32 = 160.0;
@@ -6267,8 +5778,7 @@ impl OndinApp {
                 width,
                 &head,
                 |app, ui| {
-                    // Rendered from [`ViewSwitch`], the enum the chords resolve
-                    // to, so a row and its chord cannot disagree.
+                    // From [`ViewSwitch`], which the chords resolve to.
                     let rows: &[ViewSwitch] = match which {
                         TopMenu::View => &ViewSwitch::VIEW_MENU,
                         _ => &ViewSwitch::SNAP_MENU,
@@ -6284,13 +5794,9 @@ impl OndinApp {
         }
     }
 
-    /// Whether a modal card is up: the Settings form, the *Unsaved changes*
-    /// confirmation, the recovery prompt, the *Delete value* confirmation, or a kit
-    /// card — the things that paint an `egui::Modal` with a backdrop.
-    ///
-    /// Not `edited_image`, which is a canvas mode rather than a card. Not
-    /// `ctx.egui_wants_keyboard_input()` either, which is false for a modal with
-    /// buttons and no text field.
+    /// Whether a modal card is up: anything that paints an `egui::Modal` with a backdrop.
+    /// Not `edited_image` (a canvas mode), and not `ctx.egui_wants_keyboard_input()`,
+    /// which is false for a modal with buttons and no text field.
     pub(crate) fn modal_is_up(&self) -> bool {
         self.settings.is_some()
             || self.confirming_close
@@ -6303,8 +5809,7 @@ impl OndinApp {
             || self.unsharing_kit.is_some()
     }
 
-    /// Read a workspace switch. The menus tick their rows from here and the keymap
-    /// flips them through [`Self::set_view_switch`].
+    /// Read a workspace switch; the menus tick their rows from here.
     pub(crate) fn view_switch(&self, sw: ViewSwitch) -> bool {
         match sw {
             ViewSwitch::Rulers => self.show_rulers,
@@ -6364,13 +5869,9 @@ impl OndinApp {
             .info(format!("{} {}", sw.label(), if on { "on" } else { "off" }));
     }
 
-    /// Lock or unlock the guides — *View ▸ Lock guides* and `Ctrl+Alt+;`, both
-    /// through here.
-    ///
-    /// Locking drops the guide selection — a locked guide is unselectable, so one
-    /// left selected could never be picked up again — but only the guides, never
-    /// the user's layers. A workspace switch, not a per-guide property
-    /// ([`Self::lock_guides`]).
+    /// Lock or unlock the guides — *View ▸ Lock guides* and `Ctrl+Alt+;`. Locking drops
+    /// the guide selection (a locked guide is unselectable, so one left selected could
+    /// never be picked up again) but never the user's layers.
     fn set_guides_locked(&mut self, on: bool) {
         self.lock_guides = on;
         if on {
@@ -6383,15 +5884,13 @@ impl OndinApp {
         });
     }
 
-    /// The breadcrumb: `Project / Document`, or just the document. The project
-    /// segment opens the library on that project.
-    ///
-    /// The project half is allocated at its measured width and interacted on,
-    /// since a `ui.label` reports no hover or click.
+    /// The breadcrumb: `Project / Document`, or just the document. The project segment
+    /// opens the library on that project; it is allocated at its measured width, since a
+    /// `ui.label` reports no hover or click.
     fn document_crumb(&mut self, ui: &mut egui::Ui) {
         let title = self.session.document_title();
-        // From the open document's own meta, not the library entry, which an
-        // unsaved or just-moved document lacks or has stale.
+        // From the document's own meta, not the library entry, which an unsaved or
+        // just-moved document lacks or has stale.
         let project = self
             .session
             .doc
@@ -6429,7 +5928,6 @@ impl OndinApp {
                 self.dash.nav = crate::panels::dashboard::Nav::Project(project.id.clone());
                 self.go_to_dashboard();
             }
-            // Its own label, so it keeps the row's spacing on both sides.
             ui.label(
                 egui::RichText::new("/")
                     .size(13.0)
@@ -6440,12 +5938,10 @@ impl OndinApp {
         self.document_menu(ui, title);
     }
 
-    /// The save dot beside the document name: red while the document differs from
-    /// its file (including while a save is in flight), green once it matches. The
-    /// sentence is its tooltip ([`save_label`]).
-    ///
-    /// The dot sits at the left edge of a larger hover target, so the gap to the
-    /// name stays the row's 8pt.
+    /// The save dot beside the document name: red while the document differs from its
+    /// file (including during a save), green once it matches; the tooltip is
+    /// [`save_label`]. The dot sits at the left edge of a larger hover target, so the gap
+    /// to the name stays the row's 8pt.
     fn save_dot(&self, ui: &mut egui::Ui) {
         const DOT: f32 = 7.0;
         const HIT: f32 = 14.0;
@@ -6468,11 +5964,9 @@ impl OndinApp {
 
     /// The floating status bar at the canvas's bottom left: the mode when not the
     /// default, and the last status message for [`status_hold`], then a fade.
-    /// *View ▸ Show status messages* hides the message, never the mode.
-    ///
-    /// Drawn in present mode too, which is how its Escape hint reaches the user.
-    /// Not interactable; truncated to the canvas's width so it never runs under
-    /// the inspector.
+    /// *View ▸ Show status messages* hides the message, never the mode. Drawn in present
+    /// mode too (its Escape hint). Not interactable; truncated so it never runs under the
+    /// inspector.
     fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) {
         const MARGIN: f32 = 12.0;
         let status = self.session.status();
@@ -6505,8 +5999,7 @@ impl OndinApp {
             .pivot(egui::Align2::LEFT_BOTTOM)
             .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN, -MARGIN))
             .show(ctx, |ui| {
-                // The card fades only when the message is all it holds; with the
-                // mode in it, the message fades alone.
+                // The card fades only when the message is all it holds.
                 let message_fade = if moded {
                     fade
                 } else {
@@ -6580,8 +6073,7 @@ impl OndinApp {
                 Some(Tool::Image),
                 "Place image — pick files, then click to place each (Ctrl+Shift+K)",
             ),
-            // No crop button: `Tool::ImageEdit` needs a subject, so it is entered
-            // from a picture (double-click or `Enter`).
+            // No crop button: `Tool::ImageEdit` needs a subject (double-click or `Enter`).
             E::Sep,
             E::Btn(
                 icon::EYEDROPPER,
@@ -6613,8 +6105,7 @@ impl OndinApp {
                                 ui.add_space(4.0);
                             }
                             E::Btn(glyph, tool, tip) => {
-                                // With the pen armed inside a node edit both are lit:
-                                // the node tool is in hand and a press does the pen's verbs.
+                                // With the pen armed inside a node edit both are lit.
                                 let active = tool.is_some_and(|t| {
                                     t == self.tool || (self.pen_bias && t == Tool::Pen)
                                 });
@@ -6633,8 +6124,7 @@ impl OndinApp {
                         }
                     }
                 });
-                // The insert picker's toggle at the rail's foot; the picker hangs
-                // from its corner.
+                // The insert picker's toggle at the rail's foot.
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
                     let open = self.kit_picker.is_some();
                     let resp = icon_button(ui, icon::HEXAGON, 30.0, 20.0, open, true)
@@ -6656,19 +6146,16 @@ impl OndinApp {
     }
 
     /// The layers panel: header + the node tree, resizable within
-    /// `layers::MIN_W ..= MAX_W` and remembered in `prefs.json`.
-    ///
-    /// `set_min_width` is what makes the drag hold: `Panel` takes its rect from what
-    /// the content occupied, so narrower content snaps it back.
+    /// `layers::MIN_W ..= MAX_W` and remembered in `prefs.json`. `set_min_width` is what
+    /// makes the drag hold: `Panel` takes its rect from the content, so narrower content
+    /// snaps it back.
     fn layers_panel(&mut self, ui: &mut egui::Ui) {
         // Before the panel is shown: egui measures its clamp against this.
         let room = ui.available_rect_before_wrap().width();
 
-        // The drag edge's lit states, retuned from egui's near-white text strokes
-        // to the accent border colours, on the parent ui (restored after, since the
-        // rail, canvas and inspector still draw into it). Hover lights only after
-        // `EDGE_DWELL`, by handing egui `color::DIVIDER` — the resting edge's exact
-        // colour — until then.
+        // The drag edge's lit states, retuned to the accent border colours on the parent
+        // ui (restored after: the rail, canvas and inspector still draw into it). Hover
+        // lights only after `EDGE_DWELL`, by handing egui the resting edge's colour until then.
         self.fold_layers_edge(ui);
         let style = ui.style().clone();
         let inner_style = style.clone();
@@ -6682,15 +6169,13 @@ impl OndinApp {
             w.active.fg_stroke = egui::Stroke::new(1.0, color::ACCENT);
         }
         let shown = egui::Panel::left("layers")
-            // `default_size` before `size_range`, which then clamps a hand-edited
-            // `prefs.json` value; the other order lets it through.
+            // `default_size` before `size_range`, which then clamps a hand-edited value.
             .default_size(self.prefs.layers_width)
             .size_range(crate::panels::layers::MIN_W..=crate::panels::layers::MAX_W)
             .resizable(true)
             .frame(panel_frame(color::PANEL, 0, 0))
             .show(ui, |ui| {
-                // The retune is for the edge only; without this the content's
-                // text (`fg_stroke.color`) would go accent-blue on hover.
+                // The retune is for the edge only, or the content's text would go accent-blue.
                 ui.set_style(inner_style);
                 ui.set_min_width(ui.available_width());
                 egui::Frame::NONE
@@ -6701,8 +6186,7 @@ impl OndinApp {
                         bottom: 9,
                     })
                     .show(ui, |ui| {
-                        // A stable id, so opening the search can hand it focus
-                        // before the field itself has been built this frame.
+                        // A stable id, so opening the search can focus it before it is built.
                         let field = egui::Id::new("layer-search");
                         let searching = self.layer_filter.is_some();
                         ui.horizontal(|ui| {
@@ -6759,8 +6243,6 @@ impl OndinApp {
 
                         if let Some(filter) = &mut self.layer_filter {
                             ui.add_space(4.0);
-                            // A [`crate::ui::field_row`] like every inspector input,
-                            // for its height, gutter and radius.
                             field_row(ui, egui::vec2(ui.available_width(), 28.0), |ui| {
                                 ui.add(
                                     egui::TextEdit::singleline(filter)
@@ -6783,9 +6265,9 @@ impl OndinApp {
                     // No bar, though it still scrolls.
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .show(ui, |ui| {
-                        // A row dragged to the tree's edge scrolls it, on the canvas
-                        // autopan's curve. Inside the area, since `scroll_with_delta`
-                        // targets the enclosing one; instant, so it stops with the hand.
+                        // A row dragged to the tree's edge scrolls it, on the canvas autopan's
+                        // curve. Inside the area, since `scroll_with_delta` targets the
+                        // enclosing one; instant, so it stops with the hand.
                         if self.layer_drag.is_some()
                             && let Some(p) = ui.ctx().pointer_interact_pos()
                         {
@@ -6815,9 +6297,8 @@ impl OndinApp {
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = 1.0;
                                 self.layers_tree(ui);
-                                // The empty space below the last row is a context-
-                                // menu target; allocated, so it cannot steal a row's
-                                // right-click.
+                                // The empty space below the last row is a context-menu
+                                // target; allocated, so it cannot steal a row's right-click.
                                 let rest = ui.available_size_before_wrap();
                                 if rest.y > 0.0 {
                                     let (_, back) =
@@ -6837,13 +6318,10 @@ impl OndinApp {
         self.remember_layers_width(ui.ctx(), shown.response.rect.width(), room);
     }
 
-    /// Gather [`EdgeDwell::advance`]'s inputs from the `Context` and do nothing
-    /// else, so the state machine is testable on its own.
-    ///
-    /// The band comes from public numbers — `PanelState`'s rect (last frame's) and
-    /// egui's grab radius plus half a point — not the private `__resize` response.
-    /// Runs only while the panel is drawn, so a hidden panel freezes `layers_edge`;
-    /// harmless while nothing outside `layers_panel` reads it.
+    /// Gather [`EdgeDwell::advance`]'s inputs from the `Context` and do nothing else.
+    /// The band comes from public numbers (`PanelState`'s rect from last frame, egui's
+    /// grab radius plus half a point), not the private `__resize` response. Runs only
+    /// while the panel is drawn, so a hidden panel freezes `layers_edge`.
     fn fold_layers_edge(&mut self, ui: &egui::Ui) {
         let ctx = ui.ctx();
         let reach = ui.style().interaction.resize_grab_radius_side + 0.5;
@@ -6855,13 +6333,11 @@ impl OndinApp {
                 i.time,
                 i.pointer.hover_pos(),
                 i.pointer.button_pressed(egui::PointerButton::Primary),
-                // Primary, matching `pressed`, not `any_down` (a middle-button pan
-                // would hold the edge lit).
+                // Primary, not `any_down` (a middle-button pan would hold the edge lit).
                 i.pointer.button_down(egui::PointerButton::Primary),
             )
         });
-        // `NAN` before the panel stored a rect: every comparison is false, so the
-        // band is empty.
+        // `NAN` before the panel stored a rect: the band is empty.
         let in_band = pos.is_some_and(|p| (p.x - edge).abs() <= reach);
         self.layers_edge = self.layers_edge.advance(now, in_band, pressed, down);
         if let Some(due) = self.layers_edge.due() {
@@ -6869,9 +6345,9 @@ impl OndinApp {
         }
     }
 
-    /// Persist a dragged panel width, once per gesture and only when the *user*
-    /// is what changed it. The wiring; [`width_to_store`] is the decision, kept pure
-    /// because `Prefs::save` writes the real `prefs.json`.
+    /// Persist a dragged panel width, once per gesture and only when the *user* changed
+    /// it. The wiring; [`width_to_store`] is the decision, kept pure because
+    /// `Prefs::save` writes the real `prefs.json`.
     fn remember_layers_width(&mut self, ctx: &egui::Context, width: f32, room: f32) {
         let down = ctx.input(|i| i.pointer.any_down());
         if let Some(w) = width_to_store(width, room, self.prefs.layers_width, down) {
@@ -6904,18 +6380,15 @@ impl OndinApp {
         (Self::inspector_column(screen).left() - width - GAP).max(screen.min.x + MARGIN)
     }
 
-    /// Where a panel's popover goes: clear of the inspector, to its left — over the
-    /// same-coloured cards it would blend in.
-    ///
-    /// Only `head`'s top is used, lining the popover up with its row; the `Area`'s
-    /// `constrain_to` pulls a tall one back on screen.
+    /// Where a panel's popover goes: clear of the inspector, to its left. Only `head`'s
+    /// top is used, lining the popover up with its row; the `Area`'s `constrain_to` pulls
+    /// a tall one back on screen.
     pub(crate) fn popover_anchor(ctx: &egui::Context, head: egui::Rect, width: f32) -> egui::Pos2 {
         egui::pos2(Self::popover_left(ctx, width), head.top())
     }
 
-    /// The rightmost x the detached picker may start at: left of any open popover,
-    /// which shares its side of the screen and would cover it (`Foreground` over
-    /// `Middle`).
+    /// The rightmost x the detached picker may start at: left of any open popover, which
+    /// would cover it (`Foreground` over `Middle`).
     pub(crate) fn picker_lane_right(&self, ctx: &egui::Context, anchor_x: f32) -> f32 {
         if self.a_popover_is_open() {
             return anchor_x.min(Self::popover_left(ctx, POPOVER_W));
@@ -6923,9 +6396,8 @@ impl OndinApp {
         anchor_x
     }
 
-    /// Whether anything is occupying the popover lane — every popover, asked in
-    /// one place; a new popover must join this list. The image-editing card is
-    /// asked for by its mode being on.
+    /// Whether anything is occupying the popover lane; a new popover must join this list.
+    /// The image-editing card is asked for by its mode being on.
     fn a_popover_is_open(&self) -> bool {
         self.type_menu.is_some()
             || self.stroke_menu.is_some()
@@ -6936,12 +6408,9 @@ impl OndinApp {
     }
 
     /// Whether a popover flag is set that would claim an `Escape` press, so one press
-    /// dismisses it and pays out no rung of the escape ladder. Half of the claim: the
-    /// router also asks [`Self::popover_heard`].
-    ///
-    /// [`Self::a_popover_is_open`] minus the image-edit card on purpose: leaving that
-    /// mode is the ladder's own rung, and gating on it would swallow the exit key.
-    /// `Escape` only — unlike a modal, a popover does not own the keyboard.
+    /// dismisses it and pays out no rung of the ladder. Half of the claim: the router
+    /// also asks [`Self::popover_heard`]. [`Self::a_popover_is_open`] minus the
+    /// image-edit card on purpose: leaving that mode is the ladder's own rung.
     fn a_popover_owns_escape(&self) -> bool {
         self.type_menu.is_some()
             || self.stroke_menu.is_some()
@@ -6950,19 +6419,17 @@ impl OndinApp {
             || self.export_row_open.is_some()
     }
 
-    /// The inspector: a column of individually floating panels over the right of
-    /// the canvas.
-    ///
-    /// An `Area` drawn after the canvas, not an `egui::Panel`: the artwork runs to
-    /// the window edge, the canvas below the last card stays clickable, and the gaps
+    /// The inspector: a column of individually floating panels over the right of the
+    /// canvas. An `Area` drawn after the canvas, not an `egui::Panel`: the artwork runs
+    /// to the window edge, the canvas below the last card stays clickable, and the gaps
     /// between cards are not, so aiming at a card can never deselect.
     pub(crate) fn inspector_panel(&mut self, ctx: &egui::Context) {
         let screen = ctx.input(|i| i.content_rect());
         let column = Self::inspector_column(screen);
 
-        // A focused field keeps the selection it was showing until it lets go of
-        // focus, so a canvas click that changes the selection does not lose its
-        // typed text: it blurs and commits to its own layer first.
+        // A focused field keeps the selection it was showing until it lets go of focus,
+        // so a canvas click that changes the selection commits its typed text to its own
+        // layer first.
         let held = self.inspector_hold.take().filter(|old| {
             old.ids() != self.session.selection.ids()
                 && old
@@ -6978,14 +6445,12 @@ impl OndinApp {
             .fixed_pos(column.min)
             .default_size(column.size())
             .show(ctx, |ui| {
-                // An `Area` shrink-wraps to last frame's size and a `ScrollArea`
-                // fills what it is offered; nested naively they converge on a tiny
-                // box, so the column geometry is set explicitly.
+                // An `Area` shrink-wraps to last frame's size and a `ScrollArea` fills what
+                // it is offered; nested naively they converge on a tiny box.
                 ui.scope_builder(egui::UiBuilder::new().max_rect(column), |ui| {
                     egui::ScrollArea::vertical()
                         .max_width(column.width())
-                        // Bar hidden, not scrolling disabled: the cards float with
-                        // no pane for a bar to edge.
+                        // Bar hidden, not scrolling disabled.
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
                             ui.set_width(column.width());
@@ -7015,13 +6480,10 @@ impl OndinApp {
         }
     }
 
-    /// Advance [`ChromeHold`] one frame: pick up whatever the last pass's value
-    /// fields left behind, then decide whether the chrome comes back.
-    ///
-    /// One frame behind, since the canvas draws before the inspector; the end of
-    /// [`eframe::App::ui`] requests that frame when a note is pending. The chrome
-    /// returns on the timeout or on pointer motion over the canvas — not any motion,
-    /// and not during a scrub, which wraps the pointer across the canvas.
+    /// Advance [`ChromeHold`] one frame: pick up whatever the last pass's value fields
+    /// left behind, then decide whether the chrome comes back. One frame behind, since
+    /// the canvas draws before the inspector. The chrome returns on the timeout or on
+    /// pointer motion over the canvas, not during a scrub (which wraps the pointer).
     fn fold_chrome_hold(&mut self, ctx: &egui::Context) {
         let edit = self.pending_edit.take();
         let canvas = self.canvas_rect;
@@ -7036,22 +6498,16 @@ impl OndinApp {
         self.chrome_hold = self
             .chrome_hold
             .advance(now, edit, pointer_down, moved_on_canvas);
-        // A reactive app has nothing to wake a timer; asked every held frame, since
-        // egui keeps the earliest request.
+        // Asked every held frame; egui keeps the earliest request.
         if let ChromeHold::Until(deadline) = self.chrome_hold {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(deadline - now));
         }
     }
 
-    /// Note that an inspector edit is happening, so the selection chrome gets out of
-    /// the way while it is looked at.
-    ///
-    /// The transaction decides, not the widget: only an edit that changes what is
-    /// drawn (`Transaction::changes_ink`) hides the chrome. The one exception is
-    /// [`Self::commit_chrome_edit`].
-    ///
-    /// `resp` is the control's response; `None` is a discrete edit whose count
-    /// starts at once.
+    /// Note that an inspector edit is happening, so the selection chrome gets out of the
+    /// way. The transaction decides, not the widget: only an edit that changes what is
+    /// drawn (`Transaction::changes_ink`) hides the chrome. `resp` is the control's
+    /// response; `None` is a discrete edit whose count starts at once.
     pub(crate) fn note_edit(&mut self, resp: Option<&egui::Response>, tx: &Transaction) {
         let Some(dragging) = edit_note(resp, tx) else {
             return;
@@ -7060,14 +6516,10 @@ impl OndinApp {
         self.pending_edit = Some(self.pending_edit.unwrap_or(false) || dragging);
     }
 
-    /// [`Self::note_edit`] where the caller already knows the edit is visible and has
-    /// no `Transaction` to hand it. `live` is whether a gesture still holds the
-    /// pointer, which is a hold with no deadline until the button comes up.
-    ///
-    /// Unconditional only because both callers guard it themselves —
-    /// `char_valve`'s partial branch (behind `resp.changed()`, previewing through a
-    /// text session that commits nothing yet) and `picker::pointer_slot`'s press
-    /// branch (behind `is_pointer_button_down_on`).
+    /// [`Self::note_edit`] where the caller already knows the edit is visible and has no
+    /// `Transaction`. `live` is whether a gesture still holds the pointer (a hold with
+    /// no deadline until the button comes up). Unconditional only because both callers
+    /// guard it: `char_valve`'s partial branch and `picker::pointer_slot`'s press branch.
     pub(crate) fn note_live_edit(&mut self, live: bool) {
         self.pending_edit = Some(self.pending_edit.unwrap_or(false) || live);
     }
@@ -7078,39 +6530,34 @@ impl OndinApp {
     /// frame, or the box would stay up for the whole drag.
     ///
     /// The panels commit through this or [`Self::edit_valve`], never `session.commit`
-    /// directly, so new controls get the hide for free. Exceptions:
-    /// [`Self::commit_chrome_edit`], the layers panel, and the *Group*/*Ungroup*
-    /// buttons, which call [`Self::group_selection`] — grouping changes no pixel,
-    /// though `changes_ink` says `true` by op. Returns whether the commit took.
+    /// directly. Exceptions: [`Self::commit_chrome_edit`], the layers panel, and the
+    /// *Group*/*Ungroup* buttons (grouping changes no pixel, though `changes_ink` says
+    /// `true` by op). Returns whether the commit took.
     pub(crate) fn commit_edit(&mut self, tx: Transaction) -> bool {
         self.note_edit(None, &tx);
         self.session.commit(tx)
     }
 
-    /// [`Self::commit_edit`] for an edit whose **only** visible result is the
-    /// selection chrome itself: it commits without arming the hide.
-    ///
-    /// Box trim: it never moves the ink, so hiding the box would hide the only
-    /// visible change.
+    /// [`Self::commit_edit`] for an edit whose **only** visible result is the selection
+    /// chrome itself (box trim): it commits without arming the hide.
     pub(crate) fn commit_chrome_edit(&mut self, tx: Transaction) -> bool {
         self.session.commit(tx)
     }
 
-    /// Route an inspector edit through the preview→commit valve: live preview for
-    /// as long as the control is held, **one** commit when the edit ends.
+    /// Route an inspector edit through the preview→commit valve: live preview while the
+    /// control is held, **one** commit when the edit ends.
     ///
-    /// "Ends" is a transition: the valve commits on the frame the control stops
-    /// being engaged (dragged or focused), since a typed `DragValue` reports
-    /// `changed()` per keystroke and `lost_focus()` twice. `multi_valve` and
-    /// `char_valve` share this condition; `valve_condition_gate` enforces it.
+    /// "Ends" is a transition: the valve commits on the frame the control stops being
+    /// engaged (dragged or focused), since a typed `DragValue` reports `changed()` per
+    /// keystroke and `lost_focus()` twice. `multi_valve` and `char_valve` share this
+    /// condition; `valve_condition_gate` enforces it.
     ///
-    /// Previews while engaged, so typing stays live and `Escape` cancels through
-    /// [`Self::cancel_gesture`]. The latch lives in `Context::data` under the
-    /// widget's id, read and written in one accessor (nesting deadlocks). Returns
-    /// whether this frame committed, so callers need not predict it.
+    /// `Escape` cancels through [`Self::cancel_gesture`]. The latch lives in
+    /// `Context::data` under the widget's id, read and written in one accessor (nesting
+    /// deadlocks). Returns whether this frame committed.
     pub(crate) fn edit_valve(&mut self, resp: &egui::Response, tx: Transaction) -> bool {
-        // The latch is updated before anything can bail, so a cancelled frame
-        // spends the transition instead of committing on the next one (§15 D317).
+        // The latch is updated before anything can bail, so a cancelled frame spends the
+        // transition instead of committing on the next one.
         let engaged = resp.dragged() || resp.has_focus();
         let was_engaged = resp.ctx.data_mut(|d| {
             let id = resp.id.with("valve-engaged");
@@ -7134,23 +6581,19 @@ impl OndinApp {
             self.guide_previews.clear();
             self.var_cell_preview = None;
             self.in_flight.grid_paint = None;
-            // `Escape` abandons the edit (egui does not revert a `DragValue` on it);
-            // every other way out confirms.
+            // `Escape` abandons the edit (egui does not revert a `DragValue` on it).
             if !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 committed = self.session.commit(tx);
             }
-            // `clear_gesture_preview`, not `clear_preview`, which would also drop a
-            // live text session's preview of content the document lacks.
+            // Not `clear_preview`, which would also drop a live text session's preview.
             self.session.clear_gesture_preview();
         }
         committed
     }
 
-    /// The guide half of [`EditorSession::set_preview`].
-    ///
-    /// `RenderOverrides` cannot carry a guide edit — a guide is chrome — so the
-    /// valve forks here. Every guide the transaction names is previewed; ops naming
-    /// a guide the document lacks are skipped, as the commit will refuse them.
+    /// The guide half of [`EditorSession::set_preview`]: `RenderOverrides` cannot carry a
+    /// guide edit (a guide is chrome), so the valve forks here. Ops naming a guide the
+    /// document lacks are skipped, as the commit will refuse them.
     ///
     /// [`EditorSession::set_preview`]: crate::session::EditorSession::set_preview
     pub(crate) fn preview_guide(&mut self, tx: &Transaction) {
@@ -7161,8 +6604,7 @@ impl OndinApp {
                 | Operation::SetGuideScope { id, .. } => *id,
                 _ => continue,
             };
-            // Build on the pending guide, not the committed one, so several ops
-            // in one transaction compose as they will when applied.
+            // Build on the pending guide so several ops in one transaction compose.
             let pending = self
                 .guide_previews
                 .iter()
@@ -7188,9 +6630,9 @@ impl OndinApp {
         }
     }
 
-    /// The variables-table half of [`EditorSession::set_preview`]: a picker drag's
-    /// colour for a variable's cell, held in [`Self::var_cell_preview`] for the
-    /// picker; the canvas keeps the committed colour until release.
+    /// The variables-table half of [`EditorSession::set_preview`]: a picker drag's colour
+    /// for a variable's cell, held in [`Self::var_cell_preview`]; the canvas keeps the
+    /// committed colour until release.
     ///
     /// [`EditorSession::set_preview`]: crate::session::EditorSession::set_preview
     pub(crate) fn preview_var_cell(&mut self, tx: &Transaction) {
@@ -7206,13 +6648,10 @@ impl OndinApp {
         }
     }
 
-    /// The layout-grid half of [`EditorSession::set_preview`] — a grid is chrome,
-    /// so `RenderOverrides` cannot show it; [`Self::preview_guide`]'s twin.
-    ///
-    /// Only a colour change is taken, found by comparing the whole list against the
-    /// committed one (a length change is skipped), so a field edit never writes the
-    /// picker's buffer. One op per selected frame is gathered; ops disagreeing with
-    /// the first about index or colour are dropped.
+    /// The layout-grid half of [`EditorSession::set_preview`] ([`Self::preview_guide`]'s
+    /// twin: a grid is chrome). Only a colour change is taken, so a field edit never
+    /// writes the picker's buffer. One op per selected frame is gathered; ops disagreeing
+    /// with the first about index or colour are dropped.
     ///
     /// [`EditorSession::set_preview`]: crate::session::EditorSession::set_preview
     pub(crate) fn preview_grid(&mut self, tx: &Transaction) {
@@ -7286,7 +6725,7 @@ mod tests {
             save_label(false, Some(Duration::from_secs(120))),
             "Saved · 2m ago"
         );
-        // Rounds to the nearest unit rather than truncating, so 119s is "2m".
+        // Rounds rather than truncates: 119s is "2m".
         assert_eq!(
             save_label(false, Some(Duration::from_secs(119))),
             "Saved · 2m ago"
@@ -7312,8 +6751,8 @@ mod tests {
         assert_eq!(save_label(true, Some(Duration::from_secs(0))), "Saving…");
     }
 
-    /// Every band opens where it can say `1` of its unit; the `1d` row keeps all three
-    /// boundaries on one rule. flip: hours band opens at 5400 → fails at the 2700 row
+    /// Every band opens where it can say `1` of its unit.
+    /// flip: hours band opens at 5400 → fails at the 2700 row
     #[test]
     fn every_band_of_the_save_pill_can_say_one_of_its_unit() {
         let at = |secs| save_label(false, Some(Duration::from_secs(secs)));
@@ -7343,9 +6782,9 @@ mod tests {
         );
     }
 
-    /// `layers.rs` is the only panel that commits for itself. The `self.session.`
-    /// receiver separates production code from fixtures, which commit through a named
-    /// app; this file is outside `panels/`, so widening the scan would self-match.
+    /// `layers.rs` is the only panel that commits for itself. The `self.session.` receiver
+    /// separates production code from fixtures; this file is outside `panels/`, so
+    /// widening the scan would self-match.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
         let panels: [(&str, &str); 14] = [
@@ -7378,8 +6817,8 @@ mod tests {
              in `architecture.md` and in §15 D128, or route it through"
         );
 
-        // The array is hand-written (`include_str!` takes no glob), so this checks it
-        // against the directory, recursively; `mod.rs` is the one name subtracted.
+        // The array is hand-written (`include_str!` takes no glob): check it against the
+        // directory; `mod.rs` is the one name subtracted.
         fn listed_under(dir: &std::path::Path, prefix: &str, out: &mut Vec<String>) {
             for e in std::fs::read_dir(dir)
                 .expect("a panels directory")
@@ -7412,8 +6851,7 @@ mod tests {
 mod reveal_tests {
     use super::reveal_axis;
 
-    /// A layer comfortably in frame must not move the world: a 1px arrow-key tap
-    /// that jumped the view would make nudging unusable.
+    /// A layer comfortably in frame does not scroll.
     #[test]
     fn something_already_in_view_does_not_scroll() {
         assert_eq!(reveal_axis(10.0, 20.0, 0.0, 100.0), 0.0);
@@ -7421,24 +6859,21 @@ mod reveal_tests {
         assert_eq!(reveal_axis(0.0, 100.0, 0.0, 100.0), 0.0);
     }
 
-    /// And when it has left, the *minimum* that brings it back — not a centring,
-    /// which would throw the view about on every nudge.
+    /// A layer that has left scrolls by the *minimum* that brings it back, not a centring.
     #[test]
     fn a_layer_off_the_edge_scrolls_by_the_least_that_shows_it() {
         assert_eq!(reveal_axis(105.0, 115.0, 0.0, 100.0), 15.0);
         assert_eq!(reveal_axis(-15.0, -5.0, 0.0, 100.0), -15.0);
     }
 
-    /// A layer overhanging both edges already fills the view, so nothing scrolls
-    /// (pulling one edge in would push the other out and oscillate).
+    /// A layer overhanging both edges does not scroll (it would oscillate).
     #[test]
     fn a_selection_that_straddles_the_whole_view_does_not_scroll() {
         assert_eq!(reveal_axis(-20.0, 150.0, 0.0, 100.0), 0.0);
         assert_eq!(reveal_axis(-500.0, 500.0, 0.0, 100.0), 0.0);
     }
 
-    /// A layer larger than the view but entirely outside it *does* scroll — as far
-    /// as its near edge and no further, which is the most that can be shown.
+    /// A layer larger than the view but entirely outside it scrolls to its near edge only.
     #[test]
     fn an_oversized_layer_off_to_one_side_scrolls_to_its_near_edge() {
         let d = reveal_axis(150.0, 400.0, 0.0, 100.0);
@@ -7465,17 +6900,15 @@ mod chrome_hold_tests {
     #[test]
     fn a_scrub_holds_for_its_whole_length_however_long_that_is() {
         let mut hold = ChromeHold::Free;
-        // Frame 1: the drag begins.
         hold = hold.advance(0.0, Some(true), true, false);
         assert_eq!(hold, ChromeHold::Scrubbing);
-        // Ten seconds of dragging, well past the timeout, reporting on some frames
-        // and not others — a slow speed spends whole frames below one unit.
+        // Past the timeout, reporting on some frames only (a slow drag spends whole
+        // frames below one unit).
         for t in [1.0, 2.5, 5.0, 9.9] {
             hold = hold.advance(t, if t > 2.0 { None } else { Some(true) }, true, false);
             assert_eq!(hold, ChromeHold::Scrubbing, "let go at {t}s");
             assert!(hold.holding());
         }
-        // The button lifts, and only now does the clock start.
         hold = idle(hold, 10.0);
         assert_eq!(hold, ChromeHold::Until(10.0 + CHROME_HOLD_SECS));
         assert!(hold.holding());
@@ -7488,11 +6921,8 @@ mod chrome_hold_tests {
     fn each_typed_keystroke_restarts_the_count() {
         let mut hold = ChromeHold::Free.advance(0.0, Some(false), false, false);
         assert_eq!(hold, ChromeHold::Until(CHROME_HOLD_SECS));
-        // A second digit a second later pushes the deadline out rather than being
-        // ignored because a hold is already running.
         hold = hold.advance(1.0, Some(false), false, false);
         assert_eq!(hold, ChromeHold::Until(1.0 + CHROME_HOLD_SECS));
-        // Which is past where the first one would have expired.
         assert!(idle(hold, CHROME_HOLD_SECS + 0.01).holding());
         assert_eq!(idle(hold, 1.0 + CHROME_HOLD_SECS), ChromeHold::Free);
     }
@@ -7507,13 +6937,12 @@ mod chrome_hold_tests {
             ChromeHold::Free,
             "a tenth of a second in, the pointer reaching the canvas is enough"
         );
-        // And motion *not* on the canvas is not enough — travelling from one field
-        // to the next must not bring the box back.
+        // Motion off the canvas is not enough: travelling between fields keeps it hidden.
         assert_eq!(hold.advance(0.1, None, false, false), hold);
     }
 
-    /// Canvas motion does not cancel a scrub in flight: a long drag wraps the pointer
-    /// (`ui::wrap_scrub`) and crosses the canvas on the way.
+    /// Canvas motion does not cancel a scrub in flight (a long drag wraps the pointer,
+    /// `ui::wrap_scrub`).
     #[test]
     fn a_scrub_that_crosses_the_canvas_keeps_the_chrome_away() {
         let mut hold = ChromeHold::Free.advance(0.0, Some(true), true, false);
@@ -7524,7 +6953,6 @@ mod chrome_hold_tests {
             ChromeHold::Scrubbing,
             "the drag was cancelled by its own travel across the canvas"
         );
-        // Once it lets go, the same motion counts again.
         hold = idle(hold, 0.3);
         assert_eq!(hold.advance(0.4, None, false, true), ChromeHold::Free);
     }
@@ -7535,8 +6963,7 @@ mod chrome_hold_tests {
         assert_eq!(idle(ChromeHold::Free, 0.0), ChromeHold::Free);
         assert_eq!(idle(ChromeHold::Free, 99.0), ChromeHold::Free);
         assert!(!ChromeHold::Free.holding());
-        // Including with a button down somewhere else in the app: a canvas drag must
-        // not be mistaken for a scrub that has yet to end.
+        // A button down elsewhere (a canvas drag) is not a scrub.
         assert_eq!(
             ChromeHold::Free.advance(1.0, None, true, false),
             ChromeHold::Free
@@ -7544,8 +6971,7 @@ mod chrome_hold_tests {
     }
 }
 
-/// `edit_note` against real value fields; it is a free function over a `Response` and
-/// a `Transaction`, so a headless pass can assert it.
+/// `edit_note` against real value fields, in a headless pass.
 #[cfg(test)]
 mod edit_note_tests {
     use super::{Transaction, edit_note};
@@ -7554,8 +6980,7 @@ mod edit_note_tests {
     use ondin_core::Operation;
     use ondin_core::kurbo::Affine;
 
-    /// The transaction a Transform field offers, built by `inspector::place_at`
-    /// whether or not the number moved.
+    /// The transaction a Transform field offers whether or not the number moved.
     fn moves_a_layer() -> Transaction {
         Transaction(vec![Operation::SetTransform {
             id: ondin_core::IdSource::new(1).mint(),
@@ -7570,8 +6995,8 @@ mod edit_note_tests {
         }])
     }
 
-    /// One pass over a `value_field`, returning what `edit_note` makes of it and the
-    /// field's painted ground for the next pass to aim at.
+    /// One pass over a `value_field`: what `edit_note` makes of it, and the field's
+    /// painted ground to aim at.
     fn pass(
         ctx: &egui::Context,
         v: &mut f64,
@@ -7596,8 +7021,7 @@ mod edit_note_tests {
                 note = edit_note(Some(&resp), &moves_a_layer());
             },
         );
-        // The painted ground: the response is a union that shrinks if the prefix strip
-        // stops sensing.
+        // The response is a union that shrinks if the prefix strip stops sensing.
         for c in &out.shapes {
             if let egui::Shape::Rect(r) = &c.shape
                 && (r.rect.height() - 28.0).abs() < 0.51
@@ -7617,8 +7041,8 @@ mod edit_note_tests {
         }
     }
 
-    /// A field nobody is touching is not an edit: `edit_valve` builds a transaction
-    /// every frame, so without the response half the hold would renew for ever.
+    /// A field nobody is touching is not an edit (`edit_valve` builds a transaction every
+    /// frame, so the hold would renew for ever).
     #[test]
     fn a_resting_field_notes_nothing_however_many_frames_pass() {
         let ctx = egui::Context::default();
@@ -7716,8 +7140,7 @@ mod guide_copy_tests {
     use super::*;
     use ondin_core::{GuideAxis, IdSource};
 
-    /// A copy of a guide keeps its axis, colour and owning frame, and steps along its
-    /// own axis so the copy is visibly a second line.
+    /// A copy of a guide keeps its axis, colour and owning frame, and steps along its axis.
     #[test]
     fn a_pasted_guide_keeps_its_axis_colour_and_scope() {
         let mut ids = IdSource::new(0x9A57E);
@@ -7760,8 +7183,8 @@ mod guide_copy_tests {
         assert_eq!(copy.position, -40.5 + GUIDE_PASTE_OFFSET);
     }
 
-    /// A guide whose frame was deleted between copy and paste falls back to the
-    /// canvas rather than being dropped; `pasted_guide` honours the owner it is handed.
+    /// A guide whose frame was deleted falls back to the canvas; `pasted_guide` honours
+    /// the owner it is handed.
     #[test]
     fn a_pasted_guide_whose_frame_is_gone_lands_on_the_canvas() {
         let mut ids = IdSource::new(0x9A57E);
@@ -7776,31 +7199,27 @@ mod guide_copy_tests {
         // What `paste_guides` computes when `doc.contains(gone)` is false.
         let copy = pasted_guide(&orphan, GuideId(ids.mint()), None, GUIDE_PASTE_OFFSET);
         assert_eq!(copy.owner, None);
-        // The number is carried across unchanged: with the frame gone there is nothing
-        // to reproject against.
+        // The number is carried across unchanged (nothing to reproject against).
         assert_eq!(copy.position, 60.0 + GUIDE_PASTE_OFFSET);
     }
 
-    /// The guide step is `PASTE_OFFSET`'s own component, so a guide and a layer move
-    /// by the same amount.
+    /// The guide step is `PASTE_OFFSET`'s own component.
     #[test]
     fn a_guide_and_a_layer_step_by_the_same_amount() {
         assert_eq!(GUIDE_PASTE_OFFSET, PASTE_OFFSET.x);
     }
 
-    /// *Paste here* aims from the recorded source box, so it still works after a cut
-    /// deleted the source layers; with no box it falls back to the fixed step.
+    /// *Paste here* aims from the recorded source box, so it works after a cut; with no
+    /// box it falls back to the fixed step.
     #[test]
     fn paste_here_aims_from_the_recorded_box_and_not_from_the_layers() {
-        // Offset from the origin on both axes, so a centre confused with a corner
-        // or the origin cannot pass.
+        // Off the origin on both axes, so a centre confused with a corner cannot pass.
         let from = Rect::new(100.0, 40.0, 140.0, 60.0);
         assert_eq!(from.center(), Point::new(120.0, 50.0));
 
         let pointer = Point::new(300.0, 200.0);
         let aim = paste_aim(Some(from), pointer);
         assert_eq!(aim, Vec2::new(180.0, 150.0));
-        // The copy's centre ends up under the pointer.
         assert_eq!(from.center() + aim, pointer);
 
         // A pointer inside the source box aims backwards.
@@ -7809,13 +7228,12 @@ mod guide_copy_tests {
             Vec2::new(-10.0, -5.0)
         );
 
-        // No box: the chord's own step, so the row still puts a visible copy down.
+        // No box: the chord's own step.
         assert_eq!(paste_aim(None, pointer), PASTE_OFFSET);
     }
 
-    /// A guide pasted in place keeps its own number: a step of zero is exact. Which
-    /// caller passes zero is not tested; `owns_the_clipboard` is permanently `false`
-    /// under `CLIPBOARD_OFF`, so that wiring is unreachable headless.
+    /// A guide pasted in place keeps its own number. Which caller passes zero is not
+    /// tested: `owns_the_clipboard` is permanently `false` under `CLIPBOARD_OFF`.
     #[test]
     fn a_guide_pasted_in_place_keeps_its_own_number() {
         let mut ids = IdSource::new(0x9A57E);
@@ -7834,9 +7252,8 @@ mod guide_copy_tests {
         assert_ne!(copy.id, guide.id, "and it is still its own guide");
     }
 
-    /// A locked paste still reports the guides it made, though they are not selected;
-    /// the unlocked case is the control. flip: count `selection.guides()` → fails at
-    /// the locked "Pasted 3 guide(s)" assertion
+    /// A locked paste still reports the guides it made, though they are not selected.
+    /// flip: count `selection.guides()` → fails at the locked "Pasted 3 guide(s)" assertion
     #[test]
     fn a_paste_counts_the_guides_it_made_even_when_they_cannot_be_selected() {
         let ctx = egui::Context::default();
@@ -7873,8 +7290,7 @@ mod guide_copy_tests {
     }
 }
 
-/// The two-digit opacity window (`docs/shortcuts.md` §2); `opacity_step` is pure so
-/// the clock can be driven directly.
+/// The two-digit opacity window (`docs/shortcuts.md` §2); `opacity_step` is pure.
 #[cfg(test)]
 mod opacity_digit_tests {
     use super::{
@@ -7882,7 +7298,7 @@ mod opacity_digit_tests {
         opacity_window_open,
     };
 
-    /// A lone digit is tens; `0` is 100%, since no digit is left over for 0%.
+    /// A lone digit is tens; `0` is 100%.
     #[test]
     fn a_lone_digit_is_tens_except_zero_which_is_full() {
         assert_eq!(opacity_of_digit(1), 10.0);
@@ -7891,8 +7307,7 @@ mod opacity_digit_tests {
         assert_eq!(opacity_of_digit(0), 100.0);
     }
 
-    /// The first digit waits (a preview) and the second lands the exact value, so
-    /// `4`,`5` leaves one history step reading 45%.
+    /// The first digit waits (a preview) and the second lands the exact value.
     #[test]
     fn two_digits_inside_the_window_are_one_exact_value() {
         let one = [ondin_core::IdSource::new(1).mint()];
@@ -7915,7 +7330,7 @@ mod opacity_digit_tests {
         let OpacityStep::Wait(_, entry) = opacity_step(None, 4, 10.0, &a) else {
             panic!("the first digit waits");
         };
-        // Same instant, well inside the window; only the subject moved.
+        // Well inside the window; only the subject moved.
         let now = 10.0 + OPACITY_DIGIT_WINDOW / 2.0;
         assert!(
             matches!(
@@ -7947,7 +7362,7 @@ mod opacity_digit_tests {
             opacity_step(Some(entry), 0, 0.1, &one),
             OpacityStep::Land(0.0)
         );
-        // And `0`,`5` is 5%, not 50% — the pair is read as written.
+        // `0`,`5` is 5%, not 50%.
         let OpacityStep::Wait(_, entry) = opacity_step(None, 0, 0.0, &one) else {
             unreachable!()
         };
@@ -7958,7 +7373,7 @@ mod opacity_digit_tests {
     }
 
     /// Once the window has run out, the next digit starts a new value. Sampled a hair
-    /// either side of the boundary, which is a float artefact (`10.6 - 10.0`).
+    /// either side of the boundary (a float artefact, `10.6 - 10.0`).
     #[test]
     fn a_digit_after_the_window_begins_a_new_value() {
         let one = vec![ondin_core::IdSource::new(1).mint()];
@@ -7988,8 +7403,7 @@ mod opacity_digit_tests {
     }
 
     /// The pairing rule and the commit deadline read the boundary the same way
-    /// (`opacity_window_open`), swept finely across it; drift would pair a digit that
-    /// `fold_opacity_entry` already committed.
+    /// (`opacity_window_open`), swept finely across it.
     #[test]
     fn the_pairing_rule_and_the_commit_deadline_agree_everywhere() {
         let one = vec![ondin_core::IdSource::new(1).mint()];
@@ -8015,9 +7429,8 @@ mod opacity_digit_tests {
 
 #[cfg(test)]
 mod cancelled_opacity_digit_tests {
-    //! A cancelled opacity digit does not commit itself when the window runs out.
-    //! Only the clock past the deadline reveals a leftover `opacity_entry`, so these
-    //! drive `escape` (the rung the ladder stops on) and then advance time.
+    //! A cancelled opacity digit does not commit itself when the window runs out: drive
+    //! `escape`, then advance time past the deadline.
     use super::{OPACITY_DIGIT_WINDOW, OndinApp};
     use ondin_core::kurbo::Size;
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
@@ -8046,8 +7459,7 @@ mod cancelled_opacity_digit_tests {
         (app, rect)
     }
 
-    /// Delivers the clock by a frame: `opacity_digit` and `fold_opacity_entry` read
-    /// `now` from `ctx.input(|i| i.time)`.
+    /// Delivers the clock by a frame (`now` is read from `ctx.input(|i| i.time)`).
     fn at(ctx: &egui::Context, time: f64) {
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -8092,7 +7504,6 @@ mod cancelled_opacity_digit_tests {
         );
         assert_eq!(opacity(&app, rect), 1.0, "and the document never had it");
 
-        // Past the deadline, which is the only instant the two versions differ at.
         at(&ctx, 10.0 + OPACITY_DIGIT_WINDOW + 0.1);
         app.fold_opacity_entry(&ctx);
         assert_eq!(
@@ -8112,8 +7523,7 @@ mod cancelled_opacity_digit_tests {
         );
     }
 
-    /// Control: an uncancelled digit still lands on the deadline, so the test above
-    /// cannot pass by deleting the feature.
+    /// Control: an uncancelled digit still lands on the deadline.
     #[test]
     fn an_uncancelled_digit_still_lands_on_the_deadline() {
         let ctx = egui::Context::default();
@@ -8134,8 +7544,7 @@ mod cancelled_opacity_digit_tests {
     }
 }
 
-/// Which way `Ctrl+Shift+H` and `Ctrl+Shift+L` take a whole selection
-/// (`docs/shortcuts.md` §4).
+/// Which way `Ctrl+Shift+H` and `Ctrl+Shift+L` take a whole selection.
 #[cfg(test)]
 mod set_switch_tests {
     use super::OndinApp;
@@ -8156,13 +7565,13 @@ mod set_switch_tests {
             !OndinApp::set_switch([true, true, true]),
             "everything already applied is the only case that releases"
         );
-        // Two members, which is the smallest mixed selection there is.
+        // The smallest mixed selection.
         assert!(OndinApp::set_switch([true, false]));
         assert!(OndinApp::set_switch([false, true]));
     }
 
-    /// The same three states through `hide_switch` and `lock_switch`, so the polarity
-    /// inversion is under test rather than re-implemented by the test.
+    /// The same three states through `hide_switch` and `lock_switch` (the polarity
+    /// inversion is under test, not re-implemented).
     #[test]
     fn the_two_switches_read_their_own_fields() {
         for (visible, want) in [
@@ -8192,11 +7601,10 @@ mod set_switch_tests {
 
 #[cfg(test)]
 mod image_edit_lock_tests {
-    //! A lock refuses every editing mode, and a locked group refuses for what is
-    //! inside it (the refusals ask `query::is_effectively_locked`, not a node's own
-    //! flag). A crop is a resize, so the lock reaches it. `Enter` is the door driven
-    //! here: `query::hit_test` already refuses a double-click on a locked node and
-    //! the menu rows dim.
+    //! A lock refuses every editing mode, and a locked group refuses for what is inside
+    //! it (the refusals ask `query::is_effectively_locked`, not a node's own flag).
+    //! `Enter` is the door driven here: `query::hit_test` already refuses a double-click
+    //! on a locked node and the menu rows dim.
     use super::OndinApp;
     use crate::tools::Tool;
     use ondin_core::kurbo::Size;
@@ -8204,8 +7612,7 @@ mod image_edit_lock_tests {
         Document, Fill, IdSource, NodeId, NodeKind, Operation, Transaction, image_brush,
     };
 
-    /// A headless app holding one 80×60 rect painted with a picture, selected, with
-    /// the Select tool armed — and locked if asked.
+    /// A headless app holding one 80×60 picture rect, selected, `Select` armed, locked if asked.
     fn app_with_a_picture(ctx: &egui::Context, locked: bool) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0xC1);
@@ -8245,15 +7652,12 @@ mod image_edit_lock_tests {
         (app, rect)
     }
 
-    /// The `begin_image_edit` funnel refuses a locked picture, directly and through
-    /// `Enter`; the unlocked control keeps the refusal from being vacuous.
-    /// flip: delete the guard in `begin_image_edit` → fails at the locked-picture
-    /// assertions
+    /// `begin_image_edit` refuses a locked picture, directly and through `Enter`.
+    /// flip: delete the guard in `begin_image_edit` → fails at the locked-picture assertions
     #[test]
     fn a_locked_picture_refuses_every_door() {
         let ctx = egui::Context::default();
 
-        // The control first: unlocked, the mode opens.
         let (mut open, id) = app_with_a_picture(&ctx, false);
         assert!(
             crate::tools::croppable_fill(
@@ -8270,7 +7674,6 @@ mod image_edit_lock_tests {
             "an unlocked picture enters the mode"
         );
 
-        // Locked, by the same door.
         let (mut shut, id) = app_with_a_picture(&ctx, true);
         shut.begin_image_edit(id);
         assert_eq!(
@@ -8280,7 +7683,7 @@ mod image_edit_lock_tests {
              lock reaches a resize"
         );
 
-        // And by `Enter`, whose arm asks only `croppable_fill`.
+        // `Enter`'s arm asks only `croppable_fill`.
         let (mut chord, _) = app_with_a_picture(&ctx, true);
         chord.enter_action();
         assert_eq!(
@@ -8291,9 +7694,8 @@ mod image_edit_lock_tests {
         );
     }
 
-    /// A headless app holding a group with one child of `kind`, the child selected,
-    /// `Select` armed; the group is locked if asked, never the child, so refusals are
-    /// the ancestor walk.
+    /// A headless app holding a group with one child of `kind`, the child selected; the
+    /// group is locked if asked, never the child, so refusals are the ancestor walk.
     fn app_with_a_child_in_a_group(
         ctx: &egui::Context,
         kind: NodeKind,
@@ -8337,8 +7739,7 @@ mod image_edit_lock_tests {
         (app, child)
     }
 
-    /// Text and points refuse on a locked layer too. Text asserts on the session
-    /// (`begin_edit_text` opens one; there is no `Tool::Text`).
+    /// Text and points refuse on a locked layer too (text asserts on the session).
     /// flip: delete the guard in `begin_edit_text` or in `enter_action`'s `Path` arm →
     /// fails at the matching shut_* assertion
     #[test]
@@ -8361,7 +7762,7 @@ mod image_edit_lock_tests {
             on_path_offset: 0.0,
         };
 
-        // The controls: unlocked, both modes open.
+        // Controls: unlocked, both modes open.
         let (mut live_text, id) = app_with_a_child_in_a_group(&ctx, text(), false);
         live_text.enter_action();
         assert!(
@@ -8377,7 +7778,7 @@ mod image_edit_lock_tests {
         );
         let _ = id;
 
-        // Locked on the group, so this is the ancestor rule as well.
+        // Locked on the group: the ancestor rule as well.
         let (mut shut_text, _) = app_with_a_child_in_a_group(&ctx, text(), true);
         shut_text.enter_action();
         assert!(
@@ -8395,15 +7796,13 @@ mod image_edit_lock_tests {
         );
     }
 
-    /// `A` and the rail button arm `Tool::Node` without `Enter`'s guard, so the lock
-    /// is asserted on `edited_path` (the one query every reader goes through), not on
-    /// the tool. flip: remove the guard from `edited_path` → fails at the locked
-    /// `None` assertion
+    /// `A` and the rail button arm `Tool::Node` without `Enter`'s guard, so the lock is
+    /// asserted on `edited_path` (the one query every reader uses).
+    /// flip: remove the guard from `edited_path` → fails at the locked `None` assertion
     #[test]
     fn arming_the_node_tool_finds_no_subject_on_a_locked_path() {
         let ctx = egui::Context::default();
 
-        // The control: unlocked, arming the tool finds the path.
         let (mut live, id) = app_with_a_child_in_a_group(&ctx, path_kind(), false);
         live.choose_tool(Tool::Node);
         assert_eq!(
@@ -8412,7 +7811,6 @@ mod image_edit_lock_tests {
             "the control: an unlocked path is the subject once the tool is armed"
         );
 
-        // Locked group, child's own flag clear.
         let (mut shut, child) = app_with_a_child_in_a_group(&ctx, path_kind(), true);
         shut.choose_tool(Tool::Node);
         assert!(
@@ -8488,7 +7886,7 @@ mod image_edit_lock_tests {
         app.session.selection.set_one(child);
         app.tool = Tool::Select;
 
-        // The child's own flag is clear, so a guard reading `n.locked()` would pass it.
+        // A guard reading `n.locked()` would pass the child.
         assert!(
             !app.session.doc.get(child).expect("the child").locked(),
             "the fixture locks the group and never the child, or this asserts nothing \

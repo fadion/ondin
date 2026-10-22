@@ -1,8 +1,7 @@
 //! ondin — the `ondin` binary (§9).
 //!
-//! Subcommands — **fenced, because rustdoc reads a bare usage line as markup**:
-//! `[gui]` is an intra-doc link and `<file>` an unclosed HTML tag, which is three
-//! of this crate's doc warnings for a block that is not prose at all (§15 D296).
+//! Subcommands — fenced, because rustdoc reads a bare usage line as markup
+//! (`[gui]` as an intra-doc link, `<file>` as an unclosed HTML tag):
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
@@ -17,31 +16,21 @@
 //! ondin mcp-proxy                stdio↔socket bridge for agents (§8.1)
 //! ```
 //!
-//! `export` runs entirely on `ondin-core` + the CPU renderer, so it works on a
-//! CI box with no display and no graphics driver — the property the headless
-//! core invariant exists to buy. `serve`/`mcp-proxy` land at M6.
+//! `export` runs on `ondin-core` and the CPU renderer alone, so it works with no
+//! display or graphics driver. `serve`/`mcp-proxy` land at M6.
 //!
-//! The rustdoc gate, and why one of the three lints is allowed: see `ondin_core`'s
-//! crate doc (§15 D296). **This crate is where it pays** — it holds the largest
-//! modules and the densest doc comments, and it is where the gate found a
-//! paragraph asserting a contrast between two functions that had stopped being
-//! true (`panels::export::export_menu_popup`).
+//! The rustdoc gate and the lint it allows are explained in `ondin_core`'s crate doc.
 //!
-//! **A GUI-subsystem binary on Windows in a release build** (§15 D953), so a
-//! launch from the Start menu, a shortcut or Explorer opens the window and no
-//! console beside it. Such a process has no console of its own to print to, so
-//! `ondin export …` typed at a prompt is reached through the console twin,
-//! `ondin-cli` (shipped as `ondin.com`, which `PATHEXT` prefers over the `.exe`),
-//! which runs this binary with its own standard handles. A debug build keeps the
-//! console, where `eprintln!` is read.
+//! A GUI-subsystem binary on Windows in a release build, so a launch from the
+//! Start menu or Explorer opens no console. `ondin export …` typed at a prompt is
+//! reached through the console twin `ondin-cli` (shipped as `ondin.com`, which
+//! `PATHEXT` prefers over the `.exe`), which runs this binary with its own
+//! standard handles. A debug build keeps the console, where `eprintln!` is read.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 #![allow(rustdoc::private_intra_doc_links)]
-// `Duration - Duration` panics on underflow in release too, and one in the kit
-// picker's settle wait crashed the UI thread on a frame near its deadline
-// (`[X4.1-L1-01]` of the v0.5.0 release review). Production only: the tests
-// back-date an `Instant` by subtraction on purpose, and a test box has been up
-// longer than any of those offsets.
+// `Duration - Duration` panics on underflow in release too. Production only: the
+// tests back-date an `Instant` by subtraction on purpose.
 #![cfg_attr(not(test), deny(clippy::unchecked_time_subtraction))]
 
 mod app;
@@ -56,19 +45,8 @@ mod grid;
 mod input;
 mod instances;
 mod kits;
-// **The receipt is spent** (§15 D699, `[S16.5-L3-04]`). It read *"unwired on
-// purpose … delete this attribute the moment the first real caller lands —
-// leaving it is how an abandoned module comes to look finished"*, and the
-// dashboard that calls this module landed on 2026-08-26 (§15 D362–D366). The
-// condition ended; the instruction had not been followed, and the blanket
-// `allow` was shielding every item in a module that is now thoroughly wired.
-//
-// ⚠️ **It was masking exactly one thing** — measured with the attribute off,
-// under both `cargo check -p ondin-app` and `--all-targets`: `store::versions`,
-// which has no production caller anywhere and is read only from tests. It
-// carries its own `#[allow(dead_code)]` now, with the argument on it, so the
-// plain build is the gate that catches the *next* one — checked with a
-// throwaway `fn`, which the plain build duly reported.
+// No blanket `dead_code` allow here: the plain build is the gate that catches an
+// unwired item. `store::versions` (test-only callers) carries its own allow.
 mod library;
 mod logging;
 mod machine_dir;
@@ -101,31 +79,23 @@ enum Command {
         file: String,
         format: ExportFormat,
         out: Option<String>,
-        /// How big the raster comes out — `--scale 2`, `--width 512`, `--height
-        /// 512` (§15 D360, D361). The panel's three questions reaching the one
-        /// export route that could ask none of them.
+        /// How big the raster comes out — `--scale 2`, `--width 512`, `--height 512`.
         ///
-        /// Not an `Option`, because the PNG arm needs an answer either way and the
-        /// parser has already refused all three for the two formats that cannot use
-        /// one — so `Times(1.0)` here means "unscaled", never "unasked".
+        /// Not an `Option`: the parser refuses all three for the formats that cannot
+        /// use one, so `Times(1.0)` here means "unscaled", never "unasked".
         scale: ExportScale,
     },
-    /// Run the document's **own** export settings (§7) — every layer that carries
-    /// any, at the formats and sizes the file says, into a folder.
+    /// Run the document's own export settings (§7) — every layer that carries any,
+    /// at the formats and sizes the file says, into a folder.
     ///
-    /// **The reason export settings are document state.** With them in the file
-    /// rather than in a dialog, regenerating a project's assets is a command a
-    /// build script can run: no window, no GPU, nobody steering a folder picker.
-    /// It is the same `ondin_export::plan` the panel's button goes through, so the
-    /// bytes are the bytes a designer would have got by clicking.
+    /// Goes through the same `ondin_export::plan` as the panel's button, so a build
+    /// script gets the bytes a designer would get by clicking.
     ExportAll {
         file: String,
         out: Option<String>,
         folders: bool,
-        /// `--scale-override`: force every spec in the file to this size (§15
-        /// D361). The document still decides *which* layers export and at what
-        /// formats; this decides only how big, which is the one setting a build
-        /// step plausibly wants to say from outside the file.
+        /// `--scale-override`: force every spec in the file to this size. The
+        /// document still decides which layers export and at what formats.
         scale_override: Option<ExportScale>,
     },
     McpProxy,
@@ -150,16 +120,11 @@ impl ExportFormat {
 
 /// Whether `args` are a launch Velopack's startup hook must see: the GUI's
 /// (nothing, or `gui`) and Velopack's own `--veloapp-*` re-invocations — an
-/// **allowlist on the first argument**, never "are there any arguments", since
-/// the re-invocations carry arguments too (§15 D954).
+/// allowlist on the first argument, since the re-invocations carry arguments too.
 ///
-/// ⚠️ **An allowlist of what reaches the hook, not of what avoids it**
-/// (`[X1-L1-02]`). It was the second: the three subcommands skipped the hook
-/// and everything else went through it, so a mistyped `ondin exprot …`, an
-/// `ondin --version` or an `ondin help` reached a hook that, with an update
-/// staged, applied it and exited 0 where `parse` would have refused with 2.
-/// The hook no longer applies anything at startup (§15 D970), and this is the
-/// half that keeps a command line nobody meant for it away from it anyway.
+/// It lists what reaches the hook, not what avoids it, so a mistyped
+/// `ondin exprot …` or `ondin --version` never reaches it and `parse` refuses it
+/// with exit 2.
 fn hook_runs(args: &[String]) -> bool {
     match args.first() {
         None => true,
@@ -169,12 +134,9 @@ fn hook_runs(args: &[String]) -> bool {
 
 /// The command line as strings, or the refusal for one that is not Unicode.
 ///
-/// ⚠️ **Not `std::env::args`, which panics** on such an argument
-/// (`[X1-L1-04]`): an `ondin export` of a Latin-1-named file on Linux — legal
-/// there, and first shipped there by §15 D956 — crashed with exit 101 and a
-/// panic message. It is refused with `parse`'s exit 2 and a sentence instead.
-/// Taking such a path *through* would mean `OsString` all the way down the
-/// export path; nothing has asked for it yet.
+/// Not `std::env::args`, which panics on such an argument (a Latin-1-named file
+/// on Linux): it is refused with `parse`'s exit 2 and a sentence instead. Taking
+/// the path through would mean `OsString` all the way down the export path.
 fn unicode_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
     args.map(|a| {
         a.into_string().map_err(|bad| {
@@ -219,16 +181,13 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--json" => format = Some(ExportFormat::Json),
             "--all" => all = true,
             "--folders" => folders = true,
-            // **One value each, and mutually exclusive**, because they are three
-            // ways of answering one question and a command that took two would have
-            // to pick. The flag that was typed is carried with the value so the
-            // refusals below can name it back.
+            // One value each and mutually exclusive: three ways of answering one
+            // question. The typed flag is carried so the refusals can name it.
             flag @ ("--scale" | "--width" | "--height") => {
                 i += 1;
                 let text = args.get(i).ok_or_else(|| USAGE.to_string())?;
-                // Zero and negative are rejected here rather than left to
-                // `factor`'s floor, which exists to keep the renderer safe and
-                // would turn `--scale 0` into a one-pixel file nobody asked for.
+                // Zero and negative are rejected here, not left to `factor`'s floor,
+                // which would turn `--scale 0` into a one-pixel file.
                 let asked = match flag {
                     "--width" => text
                         .parse()
@@ -257,8 +216,7 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--scale-override" => {
                 i += 1;
                 let text = args.get(i).ok_or_else(|| USAGE.to_string())?;
-                // The export row's own vocabulary read backwards, so what a
-                // designer sees on the row is what a build script types.
+                // The export row's own vocabulary, so a script types what the row shows.
                 over = Some(ExportScale::from_label(text).ok_or_else(|| {
                     format!("--scale-override wants 2x, 512w or 512h, not {text:?}\n{USAGE}")
                 })?);
@@ -266,14 +224,9 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "-o" | "--out" => {
                 i += 1;
                 let name = args.get(i).ok_or_else(|| USAGE.to_string())?;
-                // ⚠️ **A flag is not a filename** (§15 D670, `[S16.5-L1-03]`).
-                // Taking the next token unconditionally means `-o --png` sets the
-                // output *to* `--png`, and the token is then never seen at the top
-                // of this loop — so the `other if other.starts_with('-')` arm below
-                // cannot object, the format falls back to the SVG default, and the
-                // command writes SVG bytes into a file literally called `--png` and
-                // prints `wrote --png`. This is the same refusal the size flags
-                // already make with their `ok_or_else`, one argument earlier.
+                // A flag is not a filename: taking the next token unconditionally
+                // would make `-o --png` write SVG bytes into a file called `--png`,
+                // since the `other if other.starts_with('-')` arm never sees it.
                 if name.starts_with('-') {
                     return Err(format!(
                         "-o wants a filename, not the option {name}\n{USAGE}"
@@ -284,12 +237,8 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             other if other.starts_with('-') => {
                 return Err(format!("unknown option {other}\n{USAGE}"));
             }
-            // **A second document is refused rather than taken** (§15 D670). The
-            // arm used to overwrite, so `ondin export a.ondin b.ondin --png`
-            // rendered `b.ondin` and never mentioned `a.ondin` — a build step whose
-            // glob matched twice exports the wrong document into the right name and
-            // has no way to notice. Both names are in the message, because the
-            // interesting half is *which* two.
+            // A second document is refused, not overwritten: a build step whose glob
+            // matched twice would otherwise export the wrong document unnoticed.
             other if file.is_some() => {
                 return Err(format!(
                     "export takes one document; got {} and {other}\n{USAGE}",
@@ -301,20 +250,15 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
         i += 1;
     }
     if all {
-        // **A different command, not a fourth format**, and refusing the
-        // combination is what says so: `--all` writes *many* files at whatever
-        // formats the document names, so `-o` is a folder rather than a filename
-        // and `--png` would be an instruction it has nowhere to apply.
+        // A different command, not a fourth format: `--all` writes many files at
+        // the document's formats, so `-o` is a folder and `--png` has nowhere to apply.
         if format.is_some() {
             return Err(format!(
                 "--all runs the document's own export settings, so it takes no format\n{USAGE}"
             ));
         }
-        // The size flags are refused for the same reason and then **point at the
-        // one that is not refused**: overriding every row is a coherent thing to
-        // want, and it has its own flag precisely because it is not what
-        // `--scale` means anywhere else — there it *is* the size, here it
-        // overrules a size the file already carries.
+        // The size flags are refused too, and the message points at
+        // `--scale-override`, which overrules a size the file already carries.
         if let Some((had, _)) = scale {
             return Err(format!(
                 "--all takes its sizes from the document; use --scale-override to force them all\n\
@@ -336,14 +280,10 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--scale-override applies only to --all; a one-off export takes --scale\n{USAGE}"
         ));
     }
-    // SVG is the default: it is the semantic format and the one that needs
-    // no viewport arguments.
+    // SVG is the default: the semantic format, needing no viewport arguments.
     let format = format.unwrap_or(ExportFormat::Svg);
-    // **Refused rather than ignored**, which is this parser's rule everywhere else
-    // (`--all --png`, `--folders` alone) and matters most here: a build script that
-    // believes it asked for 2× and got 1× has no way to notice. The message names
-    // the rule rather than only the flag, because the commonest way to hit it is to
-    // type no format at all and inherit the SVG default.
+    // Refused rather than ignored, as everywhere in this parser. The message names
+    // the rule, since the commonest way to hit it is typing no format at all.
     if let Some((had, _)) = scale
         && format != ExportFormat::Png
     {
@@ -367,31 +307,24 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // **Velopack's hook, before anything else in a GUI launch** (§15 D954). The
-    // installer and the updater re-run this binary with `--veloapp-install`,
-    // `--veloapp-updated`, `--veloapp-uninstall` and the like; `run` services
-    // the flag and **ends the process**, so it has to come before `parse` —
-    // which would refuse the flag as an unknown subcommand and break every
-    // install. With no such flag it returns at once.
+    // Velopack's hook, before anything else in a GUI launch. The installer and
+    // updater re-run this binary with `--veloapp-*`; `run` services the flag and
+    // ends the process, so it must precede `parse`, which would refuse the flag.
+    // With no such flag it returns at once.
     //
-    // 🚨 **And it applies nothing at startup** (§15 D970). Velopack's default
-    // applies an update a previous session staged, before anything is drawn —
-    // and its updater stops every Ondin process running from the install, so a
-    // second window opened beside a dirty first one killed the first with no
-    // question. An update now applies only through the chip, when the window
-    // that clicked it has closed and nothing else is running
-    // (`update::Updater::on_exit`); a staged one is found again by the next
-    // check and offered.
-    //
-    // **Not for anything else** — see `hook_runs`.
+    // It applies nothing at startup: Velopack's default would apply a staged
+    // update and stop every running Ondin, killing a dirty window with no
+    // question. An update applies only through the chip, once nothing else is
+    // running (`update::Updater::on_exit`). Other command lines skip it, see
+    // `hook_runs`.
     if hook_runs(&args) {
         logging::init();
         velopack::VelopackApp::build()
             .set_auto_apply_on_startup(false)
             .run();
     }
-    // Counted by any other Ondin's updater before it applies (§15 D970) — the
-    // GUI and a headless export alike, since the updater stops both.
+    // Counted by any other Ondin's updater before it applies — the GUI and a
+    // headless export alike, since the updater stops both.
     instances::register();
     let result = match parse(&args) {
         Ok(Command::Gui) => run_gui().map_err(|e| format!("ondin gui failed: {e}")),
@@ -422,29 +355,16 @@ fn main() {
 
 /// What to say when the raster limit took a scale down, or `None` when it did not.
 ///
-/// **`viewport_at` clamps correctly and silently.** It caps the *multiplier*
-/// rather than each side, so an impossible ask comes back as the same picture
-/// smaller rather than the same picture squashed — but silence is the wrong half
-/// of that for a command a build script runs: asking for 8× on a poster and
-/// getting 3.4× is otherwise unnoticeable. `plan` already reports what it clamped;
-/// this is the ad-hoc path catching up with it.
+/// `viewport_at` caps the multiplier silently, which a build script would not
+/// notice (8× on a poster coming back 3.4×); like `plan`, this reports it.
 ///
-/// A free function returning the sentence rather than a `fn` that prints it, so
-/// the decision — *was this a clamp* — is assertable without capturing stderr.
+/// Returns the sentence rather than printing it, so the decision is assertable
+/// without capturing stderr. The size is named in the spec's own vocabulary
+/// (`2x`, `512w`), not the multiplier it became.
 ///
-/// It names the size in the **spec's own vocabulary** (`2x`, `512w`) rather than
-/// the multiplier it became, because a `--width 20000` reduced to 3.4× is a
-/// sentence about a number the person never typed.
-///
-/// ⚠️ **`>=` rather than `==` is deliberate and currently unreachable**, which was
-/// found by flipping it and watching nothing fail. The intent it states is that a
-/// result *bigger* than the arithmetic is not a clamp — `px` floors every side at
-/// one pixel, so a sub-pixel ask is served rather than reduced. But `px` takes
-/// `ceil` of the same positive product this does, and the ceiling of a positive is
-/// never below 1, so `got` can never actually exceed `asked`: the two spellings
-/// agree on every input the guards above can produce. Kept in the honest form
-/// because it is the shape that survives a change to `px`'s clamp, and recorded
-/// here so the next reader does not mistake an unreachable branch for a tested one.
+/// `>=` rather than `==` is deliberate and currently indistinguishable: `px`
+/// takes `ceil` of the same positive product, so `got` never exceeds `asked`.
+/// The `>=` form survives a change to `px`'s clamp, and no test can tell the two apart.
 fn clamp_note(
     view: ondin_core::kurbo::Rect,
     scale: ExportScale,
@@ -469,18 +389,13 @@ fn clamp_note(
 
 /// Headless export (§7). Loads the document, resolves it, and writes one of the
 /// three export formats — no window, no GPU, no font service (text uses the
-/// bundled fallback, which is what makes the output deterministic in CI).
+/// bundled fallback, which keeps the output deterministic in CI).
 ///
-/// `scale` reaches only the PNG arm; the parser has already refused it for the
-/// other two, so there is nothing to ignore here. The **output path is not
-/// decorated with it** — `plan`'s `@2x` marker disambiguates a *set* of files
-/// written in one go, and letting a flag rename this command's one output would
-/// make `-o` the only way to know where the bytes went.
+/// `scale` reaches only the PNG arm, and the output path is not decorated with it:
+/// `plan`'s `@2x` marker disambiguates a set of files, not this command's one output.
 ///
-/// **`Width`/`Height` are resolved against the same box the render frames**, which
-/// is why the multiplier is taken here and not in the parser: `--width 512` is a
-/// different number on every document, and taking it anywhere else would mean
-/// measuring the drawing twice and hoping the two agreed.
+/// `Width`/`Height` are resolved here, against the same box the render frames,
+/// since `--width 512` is a different multiplier on every document.
 fn run_export(
     file: &str,
     format: ExportFormat,
@@ -505,11 +420,9 @@ fn run_export(
                 .map_err(|e| format!("cannot serialize snapshot: {e}"))?
         }
         ExportFormat::Png => {
-            // Frame the whole document, at `scale` device pixels per world unit.
-            // The 512-square is this command's own answer to an empty document —
-            // `extent` returns `None` rather than picking one, because the SVG
-            // writer wants a different fallback — and the *floor* on a degenerate
-            // box lives in `viewport_at`, where the division that needs it is.
+            // Frame the whole document at `scale` device pixels per world unit. The
+            // 512-square is this command's answer to an empty document (`extent`
+            // returns `None`; the SVG writer wants a different fallback).
             let view = ondin_export::extent(&res, &[doc.root()])
                 .unwrap_or_else(|| ondin_core::kurbo::Rect::new(0.0, 0.0, 512.0, 512.0));
             let vp = ondin_export::png::viewport_at(
@@ -529,16 +442,13 @@ fn run_export(
     Ok(())
 }
 
-/// Headless run of the document's **own** export settings (§7).
+/// Headless run of the document's own export settings (§7).
 ///
-/// **Exit code 1 when a document has no export settings at all**, rather than a
-/// cheerful zero over nothing written. A build step that silently succeeds
-/// without producing its output is the failure that gets noticed three commits
-/// later; a designer who has not set anything up yet gets the message in the same
-/// breath.
+/// Exits 1 when no layer has export settings, or when every file was skipped:
+/// a build step that succeeds without producing its output goes unnoticed.
 ///
 /// The whole plan is rendered before anything is written, so a failure part way
-/// through leaves a folder of files that all came from one state of the document.
+/// through leaves files that all came from one state of the document.
 fn run_export_all(
     file: &str,
     out: Option<&str>,
@@ -562,10 +472,7 @@ fn run_export_all(
         }
         stack.extend(node.children().iter().copied());
     }
-    // `all_in_document_order`, matching the panel exactly — see
-    // `exportable_layers` and §15 D516. The CLI had the same defect by an
-    // independent copy of this walk, which is why nothing had noticed: the two
-    // front ends agreed about the wrong answer.
+    // `all_in_document_order`, matching the panel exactly — see `exportable_layers`.
     let subjects = ondin_core::build::all_in_document_order(&doc, &subjects);
     if subjects.is_empty() {
         return Err(format!("{file}: no layer has export settings"));
@@ -596,41 +503,21 @@ fn run_export_all(
             }
         }
     }
-    // ⚠️ **Every file skipped is a failure, and it was exit 0** (§15 D531).
-    // `subjects.is_empty()` above fires on the set of *layers*, not on the set of
-    // *files produced* — so a document whose only exporting layer has no ink (an
-    // empty group, a fully hidden layer, a zero-size shape) carrying a **raster**
-    // spec wrote nothing, did not even create the output directory, said so on
-    // **stderr** where a build step does not read it, and returned `Ok(())`.
-    // Which is the failure this function's own doc says the exit-1 path exists to
-    // prevent, three paragraphs up: *"a cheerful zero over nothing written. A
-    // build step that silently succeeds without producing its output is the
-    // failure that gets noticed three commits later."*
-    //
-    // The raster arm is the reachable one: `png::raster_of` opens with
-    // `extent(res, origins)?`, so an extent-less layer skips every raster spec,
-    // while the SVG arm always returns `Some`.
+    // Every file skipped is a failure: `subjects.is_empty()` above counts layers,
+    // not files produced. The raster arm is the reachable one — `png::raster_of`
+    // opens with `extent(res, origins)?`, so an ink-less layer skips every raster
+    // spec, while the SVG arm always returns `Some`.
     if written.is_empty() {
         return Err(format!(
             "{file}: every export was skipped — no layer with export settings has a size \
              ({skipped} skipped)"
         ));
     }
-    // ⚠️ **The other no-dialog door, and §15 D636 did not reach it** (§15 D652,
-    // `[S8.2-L5-07]`). D636's ruling is that the disclosure belongs to the door:
-    // a *File* or an *Archive* was named in a save dialog and the OS has already
-    // warned, and a door that writes with **no dialog at all** owes a count
-    // instead. It gave the count to the panel's folder arm; this is the other
-    // such door, and the worse of the two, because `dir` above falls back to
-    // **the folder holding the `.ondin`** when `-o` is absent — in the library a
-    // project folder the user keeps other things in. So `--all` on a document
-    // with a layer named `logo` replaced a hand-authored `logo.svg` beside it and
-    // said `wrote 1 file`.
-    //
-    // **Asked before the write**, which is the whole of it: afterwards every one
-    // of these exists. Same sentence as `write_export`'s, deliberately — the two
-    // walks are separate implementations (D626) and this is the second time that
-    // has cost a fix.
+    // A door that writes with no dialog owes a count of what it replaced (§15 D636),
+    // and this one is the worse case: with no `-o`, `dir` is the folder holding the
+    // `.ondin`, where a hand-authored `logo.svg` may sit. The count is taken before
+    // the write, since afterwards every path exists. Same sentence as
+    // `write_export`'s, a separate implementation of the same walk.
     let replaced = write_planned(&written)?;
     println!(
         "{}",
@@ -639,18 +526,12 @@ fn run_export_all(
     Ok(())
 }
 
-/// Write a rendered plan to disk, answering **how many of those paths already
-/// held a file** (§15 D652, `[S8.2-L5-07]`).
+/// Write a rendered plan to disk, answering how many of those paths already held
+/// a file.
 ///
-/// **Asked before the write, which is the whole of it**: afterwards every one of
-/// them exists. The same sentence `panels::export::write_export`'s folder arm
-/// carries, and deliberately the same shape — the two walks are separate
-/// implementations (§15 D626), and this is the second time that has cost a fix
-/// twice over.
-///
-/// **Lifted out of `run_export_all` so the count can be asserted** (§15 D269's
-/// shape): the caller's only report of it is a `println!`, which a test cannot
-/// read.
+/// The count is taken before the write, since afterwards every path exists; it has
+/// the same shape as `panels::export::write_export`'s folder arm. Separate from
+/// `run_export_all` so the count is assertable rather than only printed.
 fn write_planned(files: &[(std::path::PathBuf, Vec<u8>)]) -> Result<usize, String> {
     let mut replaced = 0usize;
     for (path, data) in files {
@@ -668,11 +549,9 @@ fn write_planned(files: &[(std::path::PathBuf, Vec<u8>)]) -> Result<usize, Strin
 
 /// What `--all` says when it is done.
 ///
-/// **The count first, the loss next, the path last** is the panel's rule and not
-/// this one's: a terminal line is not truncated, so the folder stays where a
-/// reader looks for it and the two parenthetical counts follow it. What the two
-/// doors do share is *which* counts are owed — `(n replaced)` is D636's, and it
-/// belongs to any door that writes without a dialog.
+/// The folder comes first and the parenthetical counts follow, since a terminal
+/// line is not truncated. `(n replaced)` is owed by any door that writes without
+/// a dialog.
 fn export_all_report(
     written: usize,
     replaced: usize,
@@ -695,35 +574,28 @@ fn export_all_report(
 }
 
 /// The running window's icon — taskbar button, Alt-Tab, and on macOS the Dock.
-/// (There is no system title bar to draw it in on Windows or Linux since the app
-/// draws its own, §15 D952.)
 ///
-/// Distinct from the icon on `ondin.exe` itself, which `build.rs` compiles into
-/// the binary's resource table as a multi-size `.ico`; winit has no way to read
-/// that container, and Windows has no window to read this one from. Both are
-/// needed, and neither covers the other's surfaces: with only the resource icon
-/// the taskbar shows the generic application glyph, because winit registers its
-/// window class with `hIcon: 0` rather than falling back to the executable's.
+/// Distinct from the icon on `ondin.exe`, which `build.rs` compiles into the
+/// resource table as a multi-size `.ico`: winit registers its window class with
+/// `hIcon: 0` rather than falling back to the executable's, so each covers
+/// surfaces the other does not.
 ///
-/// One size has to be chosen here, since `WM_SETICON` gets the same pixels for
-/// `ICON_BIG` and `ICON_SMALL` and Windows scales for everything below it.
-/// `icons/icon.png` is 512, the size Schemaic hands winit from the same icon
-/// set, so it has something left to give at any display scaling; the cost is
-/// that the 16px copies are a downscale done by the OS rather than the artwork
-/// drawn at that size. (The 1024 is for the macOS `.icns` alone, and the 64 is
-/// the top bar's mark.)
+/// One size is chosen, since `WM_SETICON` gets the same pixels for `ICON_BIG` and
+/// `ICON_SMALL`. `icons/icon.png` is 512 so it has something left to give at any
+/// display scaling; the 16px copies are a downscale done by the OS. (The 1024 is
+/// for the macOS `.icns` alone, and the 64 is the top bar's mark.)
 fn window_icon() -> eframe::egui::IconData {
     static PNG: &[u8] = include_bytes!("../../../icons/icon.png");
-    // Compiled in, so this either works on every run or on none. The test below
-    // holds the "every" end, which is what makes the panic honest.
+    // Compiled in, so this works on every run or on none; the test below holds
+    // the "every" end.
     eframe::icon_data::from_png_bytes(PNG).expect("the bundled window icon is not a valid PNG")
 }
 
 fn run_gui() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
-        // The system's title bar off, or made transparent on macOS, with the
-        // app drawing what that host leaves to it (`chrome`, §15 D952).
+        // The system's title bar off, or transparent on macOS, with the app
+        // drawing what the host leaves to it (`chrome`).
         viewport: chrome::Chrome::current().viewport(
             eframe::egui::ViewportBuilder::default()
                 .with_inner_size([1200.0, 800.0])
@@ -743,14 +615,11 @@ fn run_gui() -> eframe::Result<()> {
 mod tests {
     use super::*;
 
-    /// **Only a GUI launch and Velopack's own re-invocations reach the install
-    /// hook** (§15 D954, `[X1-L1-02]`): the installer runs the binary with
-    /// `--veloapp-install` and the like, and those must reach it; a CLI command
-    /// must not, and neither must a command line that is not one — a typo, a
-    /// `--version` — which `parse` refuses with exit 2.
+    /// Only a GUI launch and Velopack's own re-invocations reach the install hook;
+    /// a CLI command or a malformed command line (a typo, `--version`) does not.
     ///
-    /// **Flip-check, run**: the old shape (`!` of a three-subcommand
-    /// allowlist) fails on `["exprot", "a.ondin"]`.
+    /// flip: `hook_runs` as the negation of a three-subcommand allowlist → fails at
+    /// `["exprot", "a.ondin"]`.
     #[test]
     fn only_a_gui_launch_or_velopack_reaches_the_install_hook() {
         let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
@@ -776,16 +645,14 @@ mod tests {
         }
     }
 
-    /// An argument that is not Unicode is refused, not panicked on
-    /// (`[X1-L1-04]`) — a lone surrogate on Windows, an invalid byte on Unix,
-    /// each the host's own way of spelling one.
+    /// An argument that is not Unicode is refused, not panicked on — a lone
+    /// surrogate on Windows, an invalid byte on Unix.
     #[test]
     fn an_argument_that_is_not_unicode_is_refused() {
         #[cfg(windows)]
         let bad = {
             use std::os::windows::ffi::OsStringExt;
-            // A lone trailing surrogate — `0xDC..`, whose letter after the D
-            // keeps it out of the D-number census's sieve.
+            // A lone trailing surrogate.
             std::ffi::OsString::from_wide(&[0x61, 0xDC00, 0x62])
         };
         #[cfg(unix)]
@@ -802,16 +669,9 @@ mod tests {
         assert!(refused.contains("not valid Unicode"), "{refused}");
     }
 
-    /// `window_icon` panics on a bad PNG, and the bytes are compiled in, so the
-    /// panic is reachable only through a build — a wrong path, a re-exported
-    /// file, an `icons/` folder regenerated into a different format. This is the
-    /// gate that catches it before a user does.
-    ///
-    /// It asserts the *artwork*, not just that something decoded: a transparent
-    /// corner and middle, and opaque points on the coil. A blank buffer passes
-    /// none of the opaque ones, and an opaque square fails the transparent ones.
-    /// The size pins the file: `icon-64.png` and `icon-1024.png` sit beside it
-    /// and are the same artwork, so only the 512 tells them apart.
+    /// `window_icon` decodes as the 512px Ondin mark: a transparent corner and
+    /// middle, opaque points on the coil. The size pins the file, since
+    /// `icon-64.png` and `icon-1024.png` are the same artwork.
     #[test]
     fn window_icon_is_the_ondin_mark_at_the_size_windows_scales_from() {
         let icon = window_icon();
@@ -886,15 +746,8 @@ mod tests {
         );
     }
 
-    /// `--scale` is the density the panel's per-row combo already offers
-    /// (`ExportScale::Times`), reaching the one export path that had no way to ask
-    /// for it. The default is 1.0 and not an `Option`, because every arm below
-    /// needs a number and only one of them can use it.
-    ///
-    /// **It is refused wherever it cannot apply rather than ignored**, which is
-    /// this parser's rule everywhere else and the reason the flag is worth having
-    /// at all: the failure it guards against is a build script that thinks it
-    /// asked for 2×.
+    /// `--scale` is a PNG argument and is refused wherever it cannot apply rather
+    /// than ignored, so a build script cannot think it asked for 2× and get 1×.
     #[test]
     fn scale_is_a_png_argument_and_is_refused_everywhere_else() {
         assert_eq!(
@@ -917,9 +770,7 @@ mod tests {
             }
         );
 
-        // The three ways it cannot apply. The last is the one a person actually
-        // hits: no format at all inherits the SVG default, so the message names
-        // the rule rather than only the flag they typed.
+        // The ways it cannot apply; with no format typed the SVG default is inherited.
         for args in [
             vec!["a.ondin", "--svg", "--scale", "2"],
             vec!["a.ondin", "--json", "--scale", "2"],
@@ -930,14 +781,11 @@ mod tests {
             let err = export(&args).unwrap_err();
             assert!(err.contains("applies only to --png"), "{args:?}: {err}");
         }
-        // And on `--all`, where every layer already carries its own — where the
-        // message **names the flag that would have worked**, since forcing every
-        // row is a coherent thing to have wanted.
+        // On `--all` the message names the flag that would have worked.
         let err = export(&["a.ondin", "--all", "--scale", "2"]).unwrap_err();
         assert!(err.contains("--scale-override"), "{err}");
 
-        // A number that cannot be a size is a parse error, not a silent 1× and not
-        // a one-pixel file out of `factor`'s floor.
+        // A number that cannot be a size is a parse error, not a silent 1×.
         for bad in ["0", "-2", "abc", "", "nan"] {
             assert!(
                 export(&["a.ondin", "--png", "--scale", bad]).is_err(),
@@ -956,10 +804,8 @@ mod tests {
         }
     }
 
-    /// `--width` and `--height` are the panel's other two questions: *whatever it
-    /// takes to be this big*, where `--scale` is *the same drawing, denser*. They
-    /// are three answers to one question, so two of them together is a refusal
-    /// rather than a precedence rule nobody would remember.
+    /// `--width` and `--height` pin an axis; any two of the three size flags
+    /// together are refused rather than resolved by a precedence rule.
     #[test]
     fn width_and_height_are_the_other_two_ways_to_ask_and_only_one_may_be_asked() {
         let png = |args: &[&str], want: ExportScale| {
@@ -983,8 +829,7 @@ mod tests {
             ExportScale::Height(1024),
         );
 
-        // Every unordered pair, because a rule that only fired one way round would
-        // pass a test written in the order the author happened to think of.
+        // Every pair in both orders, so a rule firing one way round fails.
         for pair in [
             ["--scale", "--width"],
             ["--width", "--scale"],
@@ -998,27 +843,19 @@ mod tests {
                 err.contains("two answers to one question"),
                 "{pair:?}: {err}"
             );
-            // The message names **both** flags, which is the whole of its use.
+            // The message names both flags.
             assert!(err.contains(pair[0]) && err.contains(pair[1]), "{err}");
         }
 
-        // The same flag twice is the same mistake, and is caught by the same guard
-        // rather than silently taking the last one — the shape `--png --svg` does
-        // take, and the one worth being different from here, since two sizes have
-        // no ordering anyone would guess.
+        // The same flag twice is refused too, not last-one-wins like `--png --svg`.
         assert!(
             export(&["a.ondin", "--png", "--scale", "2", "--scale", "3"]).is_err(),
             "--scale twice"
         );
     }
 
-    /// `--scale-override` is the flag `--all` gets instead: the document still says
-    /// which layers export and at what formats, and this says how big — the one
-    /// setting a build step plausibly wants to say from outside the file.
-    ///
-    /// It takes the **export row's own vocabulary** (`ExportScale::from_label`), so
-    /// what a designer reads off a row is what a script types, and one flag covers
-    /// all three questions where the one-off export spends three.
+    /// `--scale-override` belongs to `--all` and takes the export row's own
+    /// vocabulary (`ExportScale::from_label`), so one flag covers all three sizes.
     #[test]
     fn scale_override_belongs_to_all_and_speaks_the_rows_vocabulary() {
         let all = |args: &[&str], want: Option<ExportScale>| {
@@ -1047,8 +884,7 @@ mod tests {
             Some(ExportScale::Width(512)),
         );
 
-        // Not on a one-off, where `--scale` is the flag and overriding nothing is
-        // what it would mean.
+        // Not on a one-off, where `--scale` is the flag.
         let err = export(&["a.ondin", "--png", "--scale-override", "2x"]).unwrap_err();
         assert!(err.contains("applies only to --all"), "{err}");
 
@@ -1066,18 +902,9 @@ mod tests {
         assert!(export(&["a.ondin", "--jpeg"]).is_err(), "unknown format");
         assert!(export(&["a.ondin", "-o"]).is_err(), "-o without a value");
 
-        // §15 D670, `[S16.5-L1-03]` — the two this parser used to accept in
-        // silence, which is the one failure its own comment says it does not
-        // make: *"a build script that believes it asked for 2× and got 1× has no
-        // way to notice."*
-        //
-        // **Flip:** put back the unconditional `args.get(i)` in the `-o` arm and
-        // the first fails; put back `other => file = Some(…)` without the
-        // `file.is_some()` guard and the second fails. Both predicted correctly.
-        // ⚠️ The `-o --png` case is worth reading rather than counting: without
-        // the guard it does not merely mis-set the output, it **loses the format
-        // flag entirely**, so the assertion is about a silent SVG, not about a
-        // silly filename.
+        // flip: the unconditional `args.get(i)` in the `-o` arm → the first fails;
+        // `other => file = Some(…)` without the `file.is_some()` guard → the second
+        // fails. The `-o --png` case is about a silent SVG: the format flag is lost.
         assert!(
             export(&["a.ondin", "-o", "--png"]).is_err(),
             "-o swallowed the format flag"
@@ -1086,7 +913,7 @@ mod tests {
             export(&["a.ondin", "b.ondin"]).is_err(),
             "a second document overwrote the first"
         );
-        // The order does not matter: the second name is refused wherever it sits.
+        // The second name is refused wherever it sits.
         assert!(
             export(&["a.ondin", "--png", "b.ondin", "-o", "out.png"]).is_err(),
             "a second document after the flags"
@@ -1155,22 +982,14 @@ mod tests {
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG signature");
     }
 
-    /// `--scale 2` doubles both sides of the raster, read out of the PNG header
-    /// rather than out of the `Viewport` the code just built — the assertion has to
-    /// survive the whole write, since the flag's only job is to change the bytes on
-    /// disk.
+    /// `--scale 2` doubles both sides of the raster, read out of the PNG header so
+    /// the assertion survives the whole write.
     ///
-    /// ⚠️ **The predicted flip was wrong about which half fails.** Pinning
-    /// `run_export` back to `viewport_over` was expected to fail on the 2× file
-    /// being too small; it fails on `2 * 1× == 2×` with *both* files identical,
-    /// which is the better failure: it says the flag did nothing rather than that
-    /// one number was off, and it would still bite if the 1× path broke too.
+    /// flip: `run_export` pinned back to `viewport_over` → fails at `2× is not
+    /// twice 1×`, with both files identical.
     ///
-    /// ⚠️ **The pinned-axis pair is flip-checked against the axes being swapped**
-    /// — `factor`'s `Width`/`Height` arms exchanged — and bites at `(128, 96)`
-    /// against `(96, 72)`, on the `Width` line. It only bites because the fixture
-    /// is 32×24: on a square one both spellings agree, and the test would have
-    /// been about nothing.
+    /// flip: `factor`'s `Width`/`Height` arms exchanged → fails on the `Width` line,
+    /// `(128, 96)` against `(96, 72)`. It bites only because the fixture is 32×24.
     #[test]
     fn scale_multiplies_the_pixels_the_png_actually_carries() {
         use ondin_core::kurbo::Size;
@@ -1204,16 +1023,8 @@ mod tests {
         ]))
         .unwrap();
 
-        // ⚠️ **Process-unique, which this was not.** A fixed shared path makes the
-        // test unrunnable beside a second `cargo test` on the same machine: both
-        // runs write `doc.ondin` and `one.png` into one directory, and a read that
-        // lands between another process's `create` and its `write` panics at
-        // `png[16..20]` with *"range start index 16 out of range for slice of length
-        // 0"*. Seen for real on 2026-09-10, twice, while an agent ran the workspace
-        // suite beside an interactive one — and it reads exactly like a defect in
-        // the export path, which is the expensive part. The house pattern is
-        // `ondin-<what>-<pid>` and almost every other fixture in this workspace
-        // already uses it.
+        // Process-unique, so a second `cargo test` on the same machine cannot read
+        // a half-written file and fail like an export defect.
         let dir = std::env::temp_dir().join(format!("ondin-export-scale-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let src = dir.join("doc.ondin");
@@ -1238,29 +1049,20 @@ mod tests {
         );
         assert_eq!((w2, h2), (w1 * 2, h1 * 2), "2× is not twice 1×");
 
-        // **The pinned axis answers the question and the other one follows**, which
-        // is the whole difference between `--width` and `--scale`: the fixture is
-        // 32×24, so 96 wide is 3× and 72 tall, and 96 *tall* is 4× and 128 wide.
-        // Asserting both sides of both is what catches the axes being swapped —
-        // a square fixture would have passed under either.
+        // The pinned axis answers and the other follows: the fixture is 32×24, so 96
+        // wide is 3× and 72 tall, and 96 tall is 4× and 128 wide. Asserting both
+        // sides of both catches swapped axes.
         assert_eq!(sides(ExportScale::Width(96), "w.png"), (96, 72));
         assert_eq!(sides(ExportScale::Height(96), "h.png"), (128, 96));
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// The clamp is `viewport_at`'s and correct; what this pins is that the ad-hoc
-    /// path *says so*, which `plan` already does and this command did not.
+    /// The ad-hoc path reports a clamp (`viewport_at`'s), and stays silent on a floor.
     ///
-    /// ⚠️ **The third case is a floor rather than a clamp, and the flip on it did
-    /// not bite** — which is the finding, not a failed experiment. It was written to
-    /// show that `>=` beats `==` in `clamp_note`, on the theory that `px`'s
-    /// one-pixel floor can serve *more* than the arithmetic asked for. Flipping to
-    /// `==` changed nothing, because `px` takes `ceil` of the same positive product
-    /// and the ceiling of a positive is never below 1: 0.01× of 100×50 asks for
-    /// `ceil(1.0) × ceil(0.5)` = 1×1 and gets 1×1 exactly. So the case is real, the
-    /// silence is right, and **no input can tell the two spellings apart**. What the
-    /// third case does still pin is that a sub-pixel scale is silent at all.
+    /// The third case's flip does not bite: `>=` to `==` in `clamp_note` changes
+    /// nothing, because `px` takes `ceil` of the same positive product (0.01× of
+    /// 100×50 asks for 1×1 and gets 1×1). It pins only that a sub-pixel scale is silent.
     #[test]
     fn a_clamped_scale_is_reported_and_a_floored_one_is_not() {
         use ondin_core::kurbo::Rect;
@@ -1269,9 +1071,8 @@ mod tests {
         // Served exactly: nothing to say.
         assert_eq!(clamp_note(view, ExportScale::Times(2.0), (200, 100)), None);
 
-        // Past `MAX_RASTER_SIDE` on the long side. `viewport_at` is the authority
-        // on what comes back, so the note is checked against what it actually did
-        // rather than against a number written here.
+        // Past `MAX_RASTER_SIDE` on the long side; checked against what
+        // `viewport_at` actually returned.
         let big = ExportScale::Times(2000.0);
         let vp = ondin_export::png::viewport_at(view, big.factor(100.0, 50.0));
         let note = clamp_note(view, big, vp.pixel_size).expect("2000× is past the limit");
@@ -1282,13 +1083,10 @@ mod tests {
             )),
             "{note}"
         );
-        // **Named in the vocabulary that was typed**, not in the multiplier it
-        // became — the point of which shows on the `--width` line below.
+        // Named in the vocabulary that was typed, not the multiplier it became.
         assert!(note.starts_with("2000x "), "{note}");
-        // The effective multiplier, which is what a script needs and the raw pixel
-        // counts do not give at a glance. Derived from the cap rather than typed,
-        // so a change to `MAX_RASTER_SIDE` moves this with it — it has moved once
-        // already (§15, `[S8.2-L1-01]`).
+        // The effective multiplier, derived from the cap so a change to
+        // `MAX_RASTER_SIDE` moves it too.
         assert!(
             note.contains(&format!(
                 "{:.3}×",
@@ -1296,31 +1094,23 @@ mod tests {
             )),
             "{note}"
         );
-        // Proportions kept — the reason the cap is on the scale and not per axis.
-        // ⚠️ **Kept to within a pixel *per side*, not exactly**, and asserting
-        // `h * 2 == w` is the form somebody would reach for and is wrong: both
-        // sides are `ceil`ed independently after the one multiplier is applied,
-        // and the multiplier is a float, so each side can round up on its own. At
-        // the old cap that showed as 65536 against 65535; at this one both sides
-        // land a hair over an exact integer and the doubled short side is 2 past
-        // the long one.
+        // Proportions kept, within a pixel per side rather than exactly: both sides
+        // are `ceil`ed independently after the float multiplier, so `h * 2 == w`
+        // would be wrong.
         assert!(
             vp.pixel_size.1 * 2 - vp.pixel_size.0 <= 2,
             "aspect drifted: {:?}",
             vp.pixel_size
         );
 
-        // A pinned axis says so in its own words. `--width 200000` is a clamp like
-        // any other, and reporting it as "655.35×" would name a number nobody
-        // typed — which is the reason `clamp_note` takes the spec and not the
-        // factor it resolved to.
+        // A pinned axis says so in its own words, which is why `clamp_note` takes the
+        // spec and not the factor it resolved to.
         let wide = ExportScale::Width(200_000);
         let vp = ondin_export::png::viewport_at(view, wide.factor(100.0, 50.0));
         let note = clamp_note(view, wide, vp.pixel_size).expect("200000w is past the limit");
         assert!(note.starts_with("200000w "), "{note}");
 
-        // Floored, not clamped: 0.01× of 100×50 is 1×0.5, and every side is lifted
-        // to a whole pixel. Bigger than asked, and silent.
+        // Floored, not clamped: every side is lifted to a whole pixel, and silent.
         let vp = ondin_export::png::viewport_at(view, 0.01);
         assert_eq!(vp.pixel_size, (1, 1));
         assert_eq!(
@@ -1341,9 +1131,8 @@ mod tests {
         assert!(err.contains("cannot read"), "{err}");
     }
 
-    /// `--all` is its own command, and the two flags that only make sense with it
-    /// are refused rather than ignored — an option silently doing nothing is how a
-    /// build script comes to believe it asked for something it did not.
+    /// `--all` is its own command; a format or `--folders` without it is refused
+    /// rather than ignored.
     #[test]
     fn export_all_is_a_command_of_its_own() {
         assert_eq!(
@@ -1374,23 +1163,12 @@ mod tests {
         );
     }
 
-    /// The reason export settings live in the document: a build step can run them
-    /// with no window, no GPU and nobody steering a dialog.
+    /// `--all` runs the document's own settings headlessly. Asserts the filenames
+    /// (suffix rule, extension per format, de-collision), not just that files
+    /// appeared; the last two thirds cover `--scale-override` on the same fixture.
     ///
-    /// It asserts the **filenames**, not just that files appeared — the suffix
-    /// rule, the extension per format and the de-collision are the whole of what a
-    /// script depends on, and a test that only counted files would pass with all
-    /// three of them wrong.
-    ///
-    /// The last two thirds are `--scale-override` (§15 D361), on the same fixture
-    /// so the forced pass can be read against the unforced one.
-    ///
-    /// ⚠️ **The collapse is flip-checked and bites exactly where it should.**
-    /// Dropping the dedupe leaves `["Close (2).png", "Close.png", "Close.svg"]` —
-    /// the de-collided junk file the rule exists to prevent, and the reason
-    /// overriding is not simply "set every scale": at 1× the marker that kept two
-    /// rows apart is gone, so without the collapse the pass writes the same asset
-    /// twice under a name nobody chose.
+    /// flip: dropping the dedupe in the plan → fails at the override's names,
+    /// leaving `["Close (2).png", "Close.png", "Close.svg"]`.
     #[test]
     fn export_all_runs_the_documents_own_settings() {
         use ondin_core::kurbo::Size;
@@ -1436,9 +1214,7 @@ mod tests {
         ]))
         .unwrap();
 
-        // Process-unique, per the house pattern — and this one opens by deleting
-        // the directory, so a concurrent run's fixture goes with it. This is the
-        // test that failed under a parallel workspace run on 2026-09-10.
+        // Process-unique: this one opens by deleting the directory.
         let dir = std::env::temp_dir().join(format!("ondin-export-all-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1460,8 +1236,7 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["Close.png", "Close.svg", "Close@2x.png"]);
-        // And the 2× really is twice as wide, which is the one claim the filenames
-        // cannot make for themselves.
+        // The 2× really is twice as wide, which the filenames cannot say.
         let big = std::fs::read(out.join("Close@2x.png")).unwrap();
         assert_eq!(
             u32::from_be_bytes(big[16..20].try_into().unwrap()),
@@ -1469,10 +1244,8 @@ mod tests {
             "a 24pt layer at 2× is 48 pixels"
         );
 
-        // **`--scale-override 1x` collapses the set it was built as.** The same
-        // three specs forced to 1× are a PNG, a PNG and an SVG — two of which are
-        // now the same file — so the pass writes two files rather than three, and
-        // the marker goes with the scale it described.
+        // `--scale-override 1x` collapses the set: the three specs become a PNG, a
+        // PNG and an SVG, two of them the same file, so two files are written.
         let flat = dir.join("flat");
         run_export_all(
             &src.to_string_lossy(),
@@ -1498,9 +1271,8 @@ mod tests {
             "forced to 1×, a 24pt layer is 24 pixels"
         );
 
-        // And a pinned axis overrides just as well, which is the case `--scale` on
-        // a one-off deliberately does not cover: across a *set*, "make everything
-        // 96 wide" is the question that has an answer.
+        // A pinned axis overrides just as well: across a set, "everything 96 wide"
+        // has an answer.
         let wide = dir.join("wide");
         run_export_all(
             &src.to_string_lossy(),
@@ -1516,39 +1288,21 @@ mod tests {
             "96w means 96 pixels wide whatever the layer's own size"
         );
 
-        // A document nobody has set up to export fails rather than succeeding
-        // silently: a build step that writes nothing must not exit 0.
+        // A document with no export settings fails: a build step that writes
+        // nothing must not exit 0.
         let bare = dir.join("bare.ondin");
         std::fs::write(&bare, ondin_core::io::save(&Document::new(root)).unwrap()).unwrap();
         let err = run_export_all(&bare.to_string_lossy(), None, false, None).unwrap_err();
         assert!(err.contains("no layer has export settings"), "{err}");
     }
 
-    /// **A document set up to export whose every file is skipped fails too**
-    /// (§15 D531) — `[S16.5-L1-01]`.
+    /// A document whose every export file is skipped fails too, and creates no
+    /// output directory. The earlier gate counts layers; this counts files produced.
     ///
-    /// The gate above fires on the set of *layers*; this is the set of *files
-    /// produced*, and they are not the same question. A layer with export
-    /// settings and no ink — an empty group, a fully hidden layer, a zero-size
-    /// shape — carrying a **raster** spec renders `None`: `png::raster_of`
-    /// opens with `extent(res, origins)?`. Before this the run wrote nothing,
-    /// did not create the output directory, said *"skipped …"* on **stderr**
-    /// where a build step does not read it, and returned `Ok(())`.
+    /// The spec has to be raster: `plan::render`'s SVG branch always answers
+    /// `Some`, so an SVG spec on the same empty group would pass under the defect.
     ///
-    /// Which is the failure `run_export_all`'s own doc says the exit-1 path
-    /// exists to prevent, three paragraphs above the code that did it: *"a
-    /// cheerful zero over nothing written. A build step that silently succeeds
-    /// without producing its output is the failure that gets noticed three
-    /// commits later."*
-    ///
-    /// ⚠️ **The spec has to be raster and the fixture asserts nothing else
-    /// about it, because the SVG arm cannot reach this at all** —
-    /// `plan::render`'s SVG branch always answers `Some`, so the same empty
-    /// group with an SVG spec writes a file and exits 0, correctly. A version
-    /// of this test using the default spec would pass under the defect.
-    ///
-    /// ⚠️ Flipped by removing the `written.is_empty()` branch: red at
-    /// `expect_err`, which panics with the `Ok(())` the finding measured.
+    /// flip: removing the `written.is_empty()` branch → fails at `expect_err`.
     #[test]
     fn an_export_all_that_skips_every_file_fails_rather_than_exiting_zero() {
         use ondin_core::{
@@ -1602,34 +1356,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// **`--all` says how many files it replaced** — §15 D652, `[S8.2-L5-07]`,
-    /// which is §15 D636's rule at the door D636 did not reach.
+    /// `--all` says how many files it replaced. The count is asserted on
+    /// `write_planned`, since the run only prints it. The second `write_planned`
+    /// shows a re-run legitimately replaces everything it wrote last time.
     ///
-    /// D636 decided that the disclosure belongs to the door: a *File* or an
-    /// *Archive* was named in a save dialog and the OS has already warned, so a
-    /// door that writes with **no dialog at all** owes a count instead. It gave
-    /// that count to the panel's folder arm. The CLI is the other such door and a
-    /// separately implemented walk (§15 D626), and it is the worse of the two,
-    /// because with no `-o` it writes into **the folder holding the `.ondin`** —
-    /// in the library, a project folder. A document with a layer named `logo`
-    /// replaced a hand-authored `logo.svg` beside it and said `wrote 1 file`.
-    ///
-    /// **The count is asserted on `write_planned` rather than on the run**,
-    /// because the run's only report of it is a `println!` a test cannot read;
-    /// lifting it out is §15 D269's shape and is what makes this assertable at
-    /// all.
-    ///
-    /// ⚠️ **The second `write_planned` is the half that says what the number
-    /// means.** A re-run of the same export legitimately replaces everything it
-    /// wrote last time, so `(2 replaced)` is the ordinary reading and not an
-    /// alarm — the count is a fact about the folder, not an accusation. Asserting
-    /// only the first run would leave that unstated and read as "a replacement is
-    /// a mistake".
-    ///
-    /// ⚠️ **Flip run.** Predicted failing assertion: the `1` on the first
-    /// `write_planned`. Deleting `if path.exists() { replaced += 1 }` fails there
-    /// at 0 against 1, and the report assertions above stay green — they are about
-    /// the sentence, and only this one is about the counting.
+    /// flip: deleting `if path.exists() { replaced += 1 }` → fails at the first
+    /// `write_planned` count, 0 against 1.
     #[test]
     fn export_all_says_how_many_files_it_replaced() {
         let out = std::path::Path::new("out");
@@ -1648,9 +1380,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
-        // The scene: a hand-authored file sitting where a planned export lands,
-        // and a second planned file whose name carries a folder that does not
-        // exist yet.
+        // A hand-authored file where a planned export lands, and a second planned
+        // file in a folder that does not exist yet.
         let decoy = dir.join("logo.svg");
         std::fs::write(&decoy, b"hand-authored").unwrap();
         let files = vec![

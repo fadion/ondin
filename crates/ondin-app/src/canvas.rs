@@ -6648,9 +6648,8 @@ impl OndinApp {
         (at.distance(screen) <= SET_PLUS_R + PICK_SLOP_PX).then_some(set)
     }
 
-    /// A selected set's `+`: a disc on the middle of its bottom edge, in the
-    /// set's tab's ground and border, adding a variant on a click. Drawn over the
-    /// selection's outline, which would otherwise cut it in two.
+    /// A selected set's `+`: a disc on its bottom edge's middle, in the tab's
+    /// ground and border; a click adds a variant. Drawn over the selection outline.
     fn draw_set_plus(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         let Some((_, at)) = self.set_plus(rect, ppp) else {
             return;
@@ -6667,12 +6666,10 @@ impl OndinApp {
         painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
     }
 
-    /// The neutral components chrome over the artwork (the violet outlines, chip
-    /// and tag are drawn with the selection, hover and labels):
-    /// - **a selected main's instances** each get a hairline round their box, so
-    ///   *where is this used* is answered by looking;
-    /// - **an entered instance** keeps a dashed boundary while it is entered, so it
-    ///   is clear where *inside* ends, and a quiet tag under it says how to leave.
+    /// The neutral components chrome over the artwork:
+    /// - **a selected main's instances** each get a hairline round their box;
+    /// - **an entered instance** keeps a dashed boundary and a quiet tag saying
+    ///   how to leave.
     fn draw_component_chrome(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         let doc = &self.session.doc;
         let hair = egui::Stroke::new(1.0, theme::text::FAINT);
@@ -6727,8 +6724,7 @@ impl OndinApp {
             let Some((label, galley)) = self.frame_label(ui, id, rect, ppp) else {
                 continue;
             };
-            // A main's violet chip and filled hexagon, the same hue selected or
-            // not.
+            // A main's violet chip and filled hexagon, selected or not.
             if self.session.doc.get(id).is_some_and(|n| n.component()) {
                 painter.rect_filled(label, 3.0, color::COMPONENT);
                 let at = label.min + CHIP_PAD;
@@ -6738,8 +6734,7 @@ impl OndinApp {
                         .find(|g| g.chr.to_string() == icon::HEXAGON)
                         .map(|g| g.logical_rect().translate(r.pos.to_vec2()))
                 }) {
-                    // A point above the cell's centre, which sat low beside the
-                    // name.
+                    // A point above the cell's centre, which sat low.
                     crate::ui::paint_hexagon_filled(
                         painter,
                         at + cell.center().to_vec2() - egui::vec2(0.0, 1.0),
@@ -6788,19 +6783,15 @@ impl OndinApp {
         }
     }
 
-    /// The columns and rows drawn over every frame that carries them
-    /// (`ondin_core::layout`).
-    ///
-    /// Chrome only — not in the scene, any export or the snapshot. Over the pixel
-    /// grid and under the frame labels. Each track is clipped to the frame's box
-    /// here rather than in `grid_tracks`, in local space so the bands turn with a
-    /// rotated frame. Hidden frames draw nothing.
+    /// The layout columns and rows drawn over every frame that carries them.
+    /// Chrome only — not in the scene, any export or the snapshot. Each track is
+    /// clipped to the frame's box here, in local space so bands turn with a
+    /// rotated frame.
     fn draw_layout_grids(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        // Present mode does not hide the grids; `rulers::guides_on` makes the
-        // same choice for guides, and each site has its own test.
+        // Present mode does not hide the grids, as `rulers::guides_on` for guides.
 
-        // The workspace switch: an outer gate, never a write to each grid's
-        // `LayoutGrid::visible`, so turning it back on restores every eye.
+        // An outer gate, never a write to each `LayoutGrid::visible`, so turning
+        // it back on restores every eye.
         if !self.show_layout_grids {
             return;
         }
@@ -6811,24 +6802,22 @@ impl OndinApp {
             if node.grids().is_empty() || !self.shown_visible(id) {
                 continue;
             }
-            // The display node's kind, so the grid re-flows against a resize
-            // being previewed.
+            // The display node's kind, so the grid follows a previewed resize.
             let Some(NodeKind::Artboard { size, .. }) =
                 self.session.display_node(id).map(|n| n.kind())
             else {
                 continue;
             };
             let mut grids = node.grids().to_vec();
-            // The in-flight value of a scrub, which lives on the app because the
-            // renderer has nothing to preview it with (`OndinApp::grid_scrub`).
+            // The in-flight scrub value (`OndinApp::grid_scrub`).
             if let Some((scrubbed, index, held)) = &self.in_flight.grid_scrub
                 && scrubbed.contains(&id)
                 && let Some(slot) = grids.get_mut(*index)
             {
                 slot.value = *held;
             }
-            // And the colour a picker is dragging (`OndinApp::grid_paint`), after
-            // the scrub so its stale colour does not win.
+            // The colour a picker is dragging (`OndinApp::grid_paint`), after the
+            // scrub so its stale colour does not win.
             if let Some((painted, index, color)) = &self.in_flight.grid_paint
                 && painted.contains(&id)
                 && let Some(slot) = grids.get_mut(*index)
@@ -6836,8 +6825,7 @@ impl OndinApp {
                 slot.color = *color;
             }
             let size = *size;
-            // The previewed transform, like the size above, or a moved frame
-            // slides out from under its grid.
+            // Previewed, or a moved frame slides out from under its grid.
             let Some(world) = self.session.preview_world_transform(id) else {
                 continue;
             };
@@ -6859,11 +6847,8 @@ impl OndinApp {
         }
     }
 
-    /// How far the chrome has to move to sit on the Alt-drag copy instead of on
-    /// the original, in screen points. Zero when no copy is in flight.
-    ///
-    /// The chrome follows the copy, which will be selected on release; the copy is
-    /// the original translated by one vector, so the chrome is too.
+    /// How far the chrome moves to sit on the Alt-drag copy (which will be
+    /// selected on release), in screen points. Zero when no copy is in flight.
     fn alt_clone_offset(&self, rect: egui::Rect, ppp: f32) -> egui::Vec2 {
         let Some(clone) = &self.alt_clone else {
             return egui::Vec2::ZERO;
@@ -6872,12 +6857,8 @@ impl OndinApp {
         self.to_screen(Point::ZERO + clone.delta, rect, ppp) - origin
     }
 
-    /// Outline the frame a live move would drop the selection into.
-    ///
-    /// Frame membership follows the artwork ([`Self::move_tx`]), so this
-    /// announces the reparent, as `panels::layers::paint_drop_hint` does. The
-    /// hover outline's weight, not the selection hairline's. Frames only: the
-    /// root has no box to outline.
+    /// Outline the frame a live move would drop the selection into (membership
+    /// follows the artwork, [`Self::move_tx`]). Frames only: the root has no box.
     fn draw_frame_drop_outline(
         &self,
         ui: &egui::Ui,
@@ -6889,8 +6870,7 @@ impl OndinApp {
         let Drag::Move { anchor } = self.drag else {
             return;
         };
-        // The delta the release would use, snapping included, so the outline
-        // switches on at the position the commit will actually evaluate.
+        // The release's delta, snapping included.
         let Some(pointer) = resp.interact_pointer_pos() else {
             return;
         };
@@ -6908,8 +6888,7 @@ impl OndinApp {
         }
         let stroke = egui::Stroke::new(3.0, color::SELECT);
         for frame in seen {
-            // The committed box, or a selected frame's outline would ride the
-            // drag it describes.
+            // Committed, or a selected frame's outline would ride the drag.
             if let Some(quad) = self.committed_quad(frame, rect, ppp) {
                 painter.add(egui::Shape::closed_line(quad.to_vec(), stroke));
             }
@@ -6917,8 +6896,7 @@ impl OndinApp {
     }
 
     /// Where a dragged flex item will drop, dashed — the slot read off the preview
-    /// ([`ondin_render::RenderOverrides::landings`]) so the outline and the
-    /// release agree, in the shape the container gives it.
+    /// ([`ondin_render::RenderOverrides::landings`]) so outline and release agree.
     fn draw_flex_landing(
         &self,
         ui: &egui::Ui,
@@ -6930,8 +6908,8 @@ impl OndinApp {
         let Drag::Move { anchor } = self.drag else {
             return;
         };
-        // Only for the item the release will reorder, at the release's delta: an
-        // item leaving its frame still has a slot in the preview.
+        // Only for the item the release will reorder: an item leaving its frame
+        // still has a slot in the preview.
         let Some(pointer) = resp.interact_pointer_pos() else {
             return;
         };
@@ -6941,7 +6919,6 @@ impl OndinApp {
             return;
         };
         let (_, _, ov) = self.session.render_inputs();
-        // Defensive: the gate above is what the tests pin.
         for (_, world, bx) in ov.landings().iter().filter(|(id, _, _)| *id == reordered) {
             let corners = [
                 Point::new(bx.x0, bx.y0),
@@ -6960,18 +6937,15 @@ impl OndinApp {
         }
     }
 
-    /// A grid container's tracks, read-only, over the artwork: each track edge a
-    /// 1px `SELECT_DIM` line (dashed for an explicit track, dotted for implicit),
-    /// each gap a [`color::GRID_GAP`] band. Not the layout grids of
-    /// [`Self::draw_layout_grids`].
+    /// A grid container's tracks, read-only: each edge a 1px `SELECT_DIM` line
+    /// (dashed for an explicit track, dotted for implicit), each gap a
+    /// [`color::GRID_GAP`] band. Not the layout grids of [`Self::draw_layout_grids`].
     ///
     /// For every selected container (from the preview,
     /// [`ondin_render::RenderOverrides::laid_grid`]) and a moved layer's container
-    /// (from [`ondin_core::build::drop_grid`], the grid the drop reads, so the
-    /// cells do not move under the pointer). Hidden with [`Self::chrome_hidden`],
-    /// except under an edit hold of the container's own layout, which is judged
-    /// by these lines. Uncached, since the preview does not move the revision;
-    /// the dashes are cut to the view ([`Self::dashed_in_view`]).
+    /// ([`ondin_core::build::drop_grid`], the grid the drop reads). Hidden with
+    /// [`Self::chrome_hidden`] except under an edit hold of its own layout.
+    /// Uncached, since the preview does not move the revision.
     fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if self.editing_in_place() {
             return;
@@ -6988,16 +6962,14 @@ impl OndinApp {
                 }
             }
         }
-        // A selected container's lines ride an Alt-drag's copy; a copied item's
-        // container stays put.
+        // A selected container's lines ride an Alt-drag's copy.
         let copied = self.alt_clone_offset(rect, ppp);
         for id in subjects {
             if !self.shown_visible(id) {
                 continue;
             }
             // Under an edit hold, hidden only while the preview restyles this
-            // container but not its layout — not "shown only for a layout edit",
-            // since the hold outlives the preview.
+            // container but not its layout; the hold outlives the preview.
             if held && ov.get(id).is_some_and(|o| o.display.is_none()) {
                 continue;
             }
@@ -7006,8 +6978,7 @@ impl OndinApp {
                 true => copied,
                 false => egui::Vec2::ZERO,
             };
-            // A moved item's container is placed as committed, as the drop reads
-            // it.
+            // A moved item's container is placed as committed, as the drop reads it.
             let placed = match selected {
                 true => self
                     .session
@@ -7018,13 +6989,11 @@ impl OndinApp {
             let Some((bx, world)) = placed else {
                 continue;
             };
-            // Culled to the view, the container before its layout pass so the
-            // pass is saved.
+            // Culled before the layout pass, which is then saved.
             let seen = |quad: [egui::Pos2; 4]| egui::Rect::from_points(&quad).intersects(rect);
             if !seen(self.local_quad(bx, world, rect, ppp).map(|p| p + offset)) {
                 continue;
             }
-            // A moved item's container is laid as the drop reads it (above).
             let grid = match selected {
                 true => ov.laid_grid(doc, res, id),
                 false => ondin_core::build::drop_grid(doc, res, id),
@@ -7057,16 +7026,10 @@ impl OndinApp {
         }
     }
 
-    /// A laid grid's lines and gaps in the container's own space, for
-    /// [`Self::draw_grid_tracks`]: every track edge once, as a segment across the
-    /// other axis's run of tracks — `bx`, the container's box, where that axis has
-    /// none — marked `true` where an **explicit** track has that edge; and every
-    /// space between two neighbouring tracks as a band across the same run — the
-    /// gap, and whatever `space-between` and its kin hand out there.
-    ///
-    /// Edges are merged where they coincide, so a grid with no gap draws one line
-    /// between two tracks rather than two on top of each other, and an explicit
-    /// track's edge stays dashed where an implicit one shares it.
+    /// A laid grid's lines and gaps in the container's own space: every track edge
+    /// once, across the other axis's run of tracks (`bx` where that axis has none),
+    /// marked `true` where an **explicit** track has it; and every space between
+    /// neighbouring tracks as a band. Coinciding edges merge.
     fn track_lines(grid: &ondin_core::container::LaidGrid, bx: KRect) -> TrackLines {
         use ondin_core::container::LaidTracks;
         let run = |t: &LaidTracks, lo: f64, hi: f64| match (t.spans.first(), t.spans.last()) {
@@ -7119,14 +7082,11 @@ impl OndinApp {
         out
     }
 
-    /// The part of the screen segment `a`→`b` worth dashing in `view`, for
-    /// [`Self::draw_grid_tracks`]: cut to the view grown by one dash `period` on
-    /// every side, its start pulled back to a whole number of periods from `a`.
-    /// `None` where the segment misses that.
-    ///
-    /// `dashed_line` emits a segment per dash over its whole length, so an uncut
-    /// line costs its screen length at any zoom. The pull-back keeps the pattern
-    /// still under a pan; the period of slack hides it off the view.
+    /// The part of the screen segment `a`→`b` worth dashing in `view`: cut to the
+    /// view grown by one dash `period`, its start pulled back to a whole number of
+    /// periods from `a` so the pattern holds still under a pan. `None` where the
+    /// segment misses. `dashed_line` emits a segment per dash, so an uncut line
+    /// costs its screen length.
     fn dashed_in_view(
         a: egui::Pos2,
         b: egui::Pos2,
@@ -7170,9 +7130,8 @@ impl OndinApp {
         self.quad_of(id, rect, ppp, true)
     }
 
-    /// The same outline from the **committed** document, ignoring whatever
-    /// gesture is in flight — which is where the copy an Alt-drag leaves behind
-    /// is going to land.
+    /// The same outline from the **committed** document, ignoring any gesture in
+    /// flight.
     fn committed_quad(&self, id: NodeId, rect: egui::Rect, ppp: f32) -> Option<[egui::Pos2; 4]> {
         self.quad_of(id, rect, ppp, false)
     }
@@ -7197,9 +7156,8 @@ impl OndinApp {
         Some(self.local_quad(local, world, rect, ppp))
     }
 
-    /// A local-space rectangle as four screen points, clockwise from the top-left
-    /// — a node's box through its own world transform, so a rotated one comes back
-    /// as a rotated quad rather than the upright region it covers.
+    /// A local-space rectangle through its world transform as four screen points,
+    /// clockwise from the top-left; a rotated one stays a rotated quad.
     pub(crate) fn local_quad(
         &self,
         local: KRect,
@@ -7228,12 +7186,9 @@ impl OndinApp {
         ))
     }
 
-    /// The selected railed text node and the screen point its type starts at —
-    /// where the *slide along the rail* handle is drawn and grabbed. One selected
-    /// node only.
-    ///
-    /// The preview layout, so the handle tracks the drag; the gesture's
-    /// arithmetic reads the committed one ([`Drag::RailOffset`]).
+    /// The selected railed text node and the screen point its type starts at,
+    /// where the *slide along the rail* handle sits. Read from the preview layout;
+    /// the gesture's arithmetic reads the committed one ([`Drag::RailOffset`]).
     fn rail_handle(&self, rect: egui::Rect, ppp: f32) -> Option<(NodeId, egui::Pos2)> {
         let id = self.session.selection.single()?;
         let layout = self.session.preview_text_layout(id)?;
@@ -7252,13 +7207,10 @@ impl OndinApp {
         (at.distance(screen) <= HANDLE_PICK_PX).then_some(id)
     }
 
-    /// The transaction sliding `id`'s type along its rail so that its start
-    /// follows `world`: `committed + nearest / len`, since `nearest` measures
-    /// from where the text currently begins.
-    ///
-    /// Read from `Resolved`, which a preview does not touch, so the sum is stable;
-    /// the preview would feed the gesture its own output. On a closed rail the
-    /// nearest reading means one drag goes at most half way round.
+    /// The transaction sliding `id`'s type along its rail so its start follows
+    /// `world`: `committed + nearest / len`. Read from `Resolved`, which a preview
+    /// does not touch, or the gesture would be fed its own output. On a closed rail
+    /// one drag goes at most half way round.
     fn rail_offset_tx(&self, id: NodeId, world: Point) -> Transaction {
         let Some(NodeKind::Text { on_path_offset, .. }) =
             self.session.doc.get(id).map(|n| n.kind())
@@ -7280,8 +7232,7 @@ impl OndinApp {
         }
         let along = warp.nearest(node_world.inverse() * world).0;
         let offset = on_path_offset + along / len;
-        // Kept inside one lap on a closed rail, since SVG's `startOffset` need not
-        // wrap a negative; past an open rail's end is a real place.
+        // One lap on a closed rail, since `startOffset` need not wrap a negative.
         let offset = match warp.is_closed() {
             true => offset.rem_euclid(1.0),
             false => offset,
@@ -7292,9 +7243,8 @@ impl OndinApp {
         }])
     }
 
-    /// Which end of the selected line `screen` is grabbing, if either.
-    ///
-    /// The corner handle's radius; the nearer end wins on a short line.
+    /// Which end of the selected line `screen` is grabbing, if either; the nearer
+    /// wins on a short line.
     fn grab_line_end(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<LineEnd> {
         // A line's endpoints are its handles: refused on a locked selection.
         if self.selection_locked() {
@@ -7309,14 +7259,12 @@ impl OndinApp {
             .map(|(which, _)| which)
     }
 
-    /// The oriented box a **multi-selection's** chrome sits on: the transform it is
-    /// turned by, and its extent measured in that frame's own axes — one answer
-    /// for the handles and the size pill.
+    /// The oriented box a **multi-selection's** chrome sits on: its frame transform
+    /// and its extent in that frame's axes, shared by the handles and the size pill.
     ///
     /// Over the members' geometry quads, not ink bounds: a quad transforms
     /// exactly, so with `frame = G · F` the gesture cancels
-    /// (`frame⁻¹ · (G · Wᵢ) = F⁻¹ · Wᵢ`) and the box does not grow as the set
-    /// turns. So it hugs geometry, as the single-layer box does.
+    /// (`frame⁻¹ · (G · Wᵢ) = F⁻¹ · Wᵢ`) and the box does not grow as the set turns.
     fn selection_frame_box(&self) -> Option<(Affine, KRect)> {
         let frame = self.selection_frame();
         let extent = self.selection_frame_extent(frame, |id| {
@@ -7328,20 +7276,15 @@ impl OndinApp {
         Some((frame, extent))
     }
 
-    /// The transform a multi-selection's frame is turned by: the stored
-    /// orientation, with whatever the gesture in flight is asking for composed on
-    /// top — the one place those two are combined, for the chrome, the snap axes
-    /// ([`Self::resize_axes`]) and the resize arithmetic.
+    /// A multi-selection's frame transform: the stored orientation with the gesture
+    /// in flight composed on top — the one place those are combined.
     fn selection_frame(&self) -> Affine {
         self.drag.selection_frame().unwrap_or(Affine::IDENTITY) * self.session.selection.frame()
     }
 
-    /// The selection's extent in `frame`'s own axes, over the members' geometry
-    /// **quads** as answered by `quad` — each member's local box and the world
-    /// transform placing it.
-    ///
-    /// Shared by the chrome (preview tree) and the resize arithmetic (committed
-    /// tree, or a scaled box compounds). `rulers.rs` owns `selection_extent`.
+    /// The selection's extent in `frame`'s axes over the members' **quads** from
+    /// `quad`. The chrome passes the preview tree, the resize the committed one, or
+    /// a scaled box compounds.
     fn selection_frame_extent(
         &self,
         frame: Affine,
@@ -7350,8 +7293,7 @@ impl OndinApp {
         let inv = frame.inverse();
         let mut out: Option<KRect> = None;
         for id in self.session.selection.ids() {
-            // A member with no box (an empty group, a group holding only a mask)
-            // contributes nothing rather than refusing the set.
+            // A member with no box (an empty group) contributes nothing.
             let Some((local, world)) = quad(*id) else {
                 continue;
             };
@@ -7373,11 +7315,8 @@ impl OndinApp {
         out
     }
 
-    /// The box a multi-selection **resizes** about — the same oriented box the
-    /// handles are drawn on, measured off the committed tree and the stored frame,
-    /// so a box being scaled does not compound. At the press it equals
-    /// [`Self::selection_frame_box`]; both go through
-    /// [`Self::selection_frame_extent`]. `None` means nothing contributed.
+    /// The box a multi-selection **resizes** about: the handles' oriented box off
+    /// the committed tree. `None` means nothing contributed.
     fn selection_resize_box(&self) -> Option<tools::SelectionBox> {
         let frame = self.session.selection.frame();
         let extent = self.selection_frame_extent(frame, |id| {
@@ -7389,14 +7328,10 @@ impl OndinApp {
         Some(tools::SelectionBox { frame, extent })
     }
 
-    /// The transform box for whatever is selected: one layer's own rotated box, or
-    /// the **oriented** box over a whole multi-selection — upright at rest, and
-    /// carrying whatever a turn or a lean has left on it — from the preview, so
-    /// the handles track a gesture in flight.
-    ///
-    /// A lone line has none, which removes all its box chrome at once
-    /// ([`Self::line_ends`] replaces it); refused on [`lone_line`], the kind, so
-    /// it cannot fail open.
+    /// The transform box for the selection: one layer's rotated box, or the
+    /// **oriented** box over a set, from the preview. A lone line has none
+    /// ([`Self::line_ends`] replaces it), refused on the kind ([`lone_line`]) so it
+    /// cannot fail open.
     fn selection_handles(&self, rect: egui::Rect, ppp: f32) -> Option<Handles> {
         if lone_line(&self.session).is_some() {
             return None;
@@ -7414,8 +7349,8 @@ impl OndinApp {
                 )
             }
             many => {
-                // A fixed box carried by the frame's transform, never a re-union of
-                // upright bounds, which would re-shape as the set shears or turns.
+                // Carried by the frame's transform, never a re-union of upright
+                // bounds, which would re-shape as the set shears or turns.
                 let _ = many;
                 let (frame, box_) = self.selection_frame_box()?;
                 (Target::Selection, box_, frame, None)
@@ -7438,9 +7373,8 @@ impl OndinApp {
         })
     }
 
-    /// Whether the selection holds an effectively locked layer — what refuses
-    /// its handles, a move of it and its spacing bands. The keyboard nudge does
-    /// not ask.
+    /// Whether the selection holds an effectively locked layer, which refuses its
+    /// handles, a move and its spacing bands. The keyboard nudge does not ask.
     pub(crate) fn selection_locked(&self) -> bool {
         let doc = &self.session.doc;
         self.session
@@ -7450,9 +7384,7 @@ impl OndinApp {
             .any(|id| ondin_core::is_effectively_locked(doc, *id))
     }
 
-    /// Where the pivot marker sits on screen, and whether the pointer is on it.
-    ///
-    /// Only for a single selection; a set has no shared pivot.
+    /// Where the pivot marker sits on screen. Single selection only.
     fn pivot_screen(&self, rect: egui::Rect, ppp: f32) -> Option<(NodeId, egui::Pos2)> {
         let [id] = *self.session.selection.ids() else {
             return None;
@@ -7462,10 +7394,8 @@ impl OndinApp {
         Some((id, self.to_screen(world * local, rect, ppp)))
     }
 
-    /// Whether a press at `screen` grabs the pivot marker.
-    ///
-    /// Ahead of the resize handles, or a pivot parked on a corner could never be
-    /// grabbed back.
+    /// Whether a press at `screen` grabs the pivot marker; asked ahead of the
+    /// resize handles, or a pivot parked on a corner could never be grabbed back.
     fn on_pivot(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
         // Drawn on a locked layer, but it does not move.
         if !self.show_pivot || self.mode != Mode::Normal || self.selection_locked() {
@@ -7476,19 +7406,15 @@ impl OndinApp {
             .map(|(id, _)| id)
     }
 
-    /// The pivot a release at `world` should commit, or `None` to clear it back
-    /// to the box's own centre.
-    ///
-    /// Snapped to the box's nine points within a few screen pixels. The centre
-    /// snaps to `None`, so dragging back to the middle clears the field.
+    /// The pivot a release at `world` should commit, snapped to the box's nine
+    /// points within a few screen pixels; `None` (the centre) clears it.
     fn pivot_at(&self, id: NodeId, world: Point) -> Option<Pivot> {
         let local_box = self.session.preview_local_box(id)?;
         let to_world = self.session.preview_world_transform(id)?;
         let at = to_world.inverse() * world;
 
-        // The screen-pixel threshold into local units: divided by the zoom and by
-        // the node's basis per axis (its column norms), since a node can carry
-        // scale and shear, not only rotation.
+        // The pixel threshold in local units: by zoom and the basis column norms,
+        // since a node can carry scale and shear.
         let c = to_world.as_coeffs();
         let zoom = self.points_per_world();
         let per_local_unit = |dx: f64, dy: f64| (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
@@ -7513,11 +7439,9 @@ impl OndinApp {
                 }
             }
         }
-        // The centre test is core's, shared with the inspector's origin fields.
         let node = self.session.display_node(id)?;
-        // Landed on a whole percent through the origin fields' own functions, so
-        // marker and fields store the same class of value; after the nine-point
-        // snap, whose 0/50/100 survive rounding.
+        // Whole percents through the origin fields' functions, so both store the
+        // same class of value; the snap's 0/50/100 survive rounding.
         let (px, py) = origin_percent(snapped, local_box);
         origin_pivot(
             node.kind(),
@@ -7528,8 +7452,7 @@ impl OndinApp {
     }
 
     /// The name of the box position `at` (local space) is sitting on, if it is on
-    /// one of the nine — what the drag badge reads out, so the placement can be
-    /// confirmed by word rather than by eye.
+    /// one of the nine — what the drag badge reads out.
     fn pivot_label(&self, id: NodeId, at: Point) -> Option<&'static str> {
         let b = self.session.preview_local_box(id)?;
         let third = |v: f64, min: f64, extent: f64| {
@@ -7566,13 +7489,12 @@ impl OndinApp {
         ppp: f32,
         resp: &egui::Response,
     ) {
-        // The mode's own artwork, re-installed every frame here, downstream of
-        // every way the state can change. Before `render_inputs` takes the borrow.
+        // The mode's own artwork, re-installed every frame, downstream of every way
+        // the state can change; before `render_inputs` takes the borrow.
         let ghost = self.image_ghost();
         self.session.set_chrome_ghost(ghost);
 
-        // The document itself. Split the borrow so the session's read-only
-        // render inputs and the mutable renderer can coexist.
+        // Split the borrow so the read-only inputs and the mutable renderer coexist.
         let camera = self.session.camera;
         let px = self.canvas_px;
         let backdrop = self.session.preview_canvas_background();
@@ -7584,45 +7506,36 @@ impl OndinApp {
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(tex, rect, uv, egui::Color32::WHITE);
         }
-        // An adjusted picture is showing a preview: ask for the later frame that
-        // promotes it, or the soft picture stays until the pointer moves (§5.5a).
+        // An adjusted picture is showing a preview: ask for the frame that
+        // promotes it, or the soft picture stays until the pointer moves.
         if self.canvas.images().wants_frame() {
             ui.ctx().request_repaint();
         }
-        // The eyedropper reads what was just drawn, and asks for the frame that
-        // collects its readback.
+        // The eyedropper reads what was just drawn.
         if self.dropper_frame(ui, resp, rect, ppp) {
             ui.ctx().request_repaint();
         }
 
-        // The pixel grid, over the artwork and under every other overlay.
+        // Overlays in paint order: the pixel grid over the artwork, then labels
+        // and tracks under everything that answers the pointer, then hover under
+        // the selection chrome.
         self.draw_pixel_grid(painter, rect, ppp);
 
-        // A frame's own columns and rows.
         self.draw_layout_grids(painter, rect, ppp);
 
-        // Each frame's name: a label on the artwork, under the gesture chrome.
         self.draw_frame_labels(ui, painter, rect, ppp);
 
-        // A selected main's instances, and an entered instance's edge.
         self.draw_component_chrome(painter, rect, ppp);
 
-        // A grid container's tracks, under everything that answers the pointer.
         self.draw_grid_tracks(painter, rect, ppp);
-        // A container's spacing bands, over its track lines and under the hover
-        // and selection chrome.
         self.draw_spacing_bands(painter, rect, ppp);
 
-        // The hover outline, under the selection chrome.
         self.draw_hover_outline(ui, painter, rect, ppp, resp);
 
-        // Where a live move would land, beside the hover outline and under the
-        // selection chrome.
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);
         self.draw_flex_landing(ui, painter, rect, ppp, resp);
 
-        // During an Alt-drag, a dim outline of the original, which stays put
-        // under the renderer's ghost of the copy.
+        // During an Alt-drag, a dim outline of the original under the ghost copy.
         if self.alt_clone.is_some() {
             let staying = egui::Stroke::new(1.0, color::SELECT_DIM);
             for id in self.session.selection.ids() {
@@ -7632,23 +7545,20 @@ impl OndinApp {
             }
         }
 
-        // Selection outlines from the preview: a 1.2px hairline round each node's
-        // own box. [`Self::chrome_hidden`] covers this down to the size badge,
-        // a set's `+` excepted.
+        // Selection outlines from the preview; `chrome_hidden` covers this down to
+        // the size badge, a set's `+` excepted.
         let offset = self.alt_clone_offset(rect, ppp);
         let stroke = egui::Stroke::new(1.2, color::SELECT);
         let chrome = !self.chrome_hidden();
 
-        // A text node's line box, rail, then baselines, all under the trimmed box
-        // and its handles, which must win.
+        // Text line box, rail, then baselines, under the box and handles.
         if chrome {
             self.draw_text_line_boxes(painter, rect, ppp, offset);
             self.draw_text_rails(painter, rect, ppp, offset);
             self.draw_text_baselines(painter, rect, ppp, offset);
         }
-        // A lone line is outlined along itself with handles at its ends
-        // ([`Self::line_ends`]), never boxed — the kind is asked separately, so a
-        // failed transform lookup draws nothing rather than a box.
+        // A lone line is outlined along itself, never boxed; the kind is asked
+        // separately, so a failed transform lookup draws nothing rather than a box.
         let lone = lone_line(&self.session).is_some();
         match self.line_ends(rect, ppp).filter(|_| chrome) {
             Some((_, a, b)) => {
@@ -7680,8 +7590,7 @@ impl OndinApp {
             None => {}
         }
 
-        // The rail handle: a filled dot where the type starts — round because it
-        // slides rather than resizes, filled because only our rail is under it.
+        // The rail handle: a filled dot where the type starts.
         if chrome
             && self.mode == Mode::Normal
             && let Some((_, at)) = self.rail_handle(rect, ppp)
@@ -7689,8 +7598,7 @@ impl OndinApp {
             painter.circle_filled(at + offset, HANDLE_PX * 0.5, color::SELECT);
         }
 
-        // Transform handles (not while editing text): hollow squares, so the
-        // corner they mark shows through.
+        // Transform handles (not while editing text): hollow, so the corner shows.
         if self.mode == Mode::Normal
             && chrome
             && let Some(h) = self.selection_handles(rect, ppp)
@@ -7698,7 +7606,6 @@ impl OndinApp {
             // A multi-selection's box, dimmer than the members' own outlines.
             let hue = self.selection_hue();
             if h.target == Target::Selection {
-                // `Handle::CORNERS` order is clockwise, so it closes as is.
                 let quad: Vec<egui::Pos2> = h.corners.iter().map(|(_, p)| *p + offset).collect();
                 let dim = if hue == color::COMPONENT {
                     color::COMPONENT_DIM
@@ -7717,22 +7624,18 @@ impl OndinApp {
             }
         }
 
-        // The key layer, over the selection boxes, which would otherwise cover
-        // its trace.
+        // The key layer, over the selection boxes.
         self.draw_key_outline(painter, rect, ppp);
 
-        // A selected set's `+`, over its outline. Not under `chrome`: its hit
-        // route (`set_plus_at`) works either way, so it must stay visible.
+        // Not under `chrome`: its hit route (`set_plus_at`) works either way.
         self.draw_set_plus(painter, rect, ppp);
 
-        // The transform origin, over the handles it can sit on top of.
         if self.mode == Mode::Normal && chrome {
             self.draw_pivot(ui, painter, rect, ppp, resp);
         }
 
-        // One readout in the slot under the selection: a create drag's size, else
-        // the origin fields while the crosshair is armed over one layer (also
-        // mid-gesture; `origin_fields` refuses a set), else the size badge.
+        // One readout under the selection: a create drag's size, else the origin
+        // fields while the crosshair is armed over one layer, else the size badge.
         if self.mode == Mode::Normal && chrome {
             let armed = self.show_pivot && self.session.selection.ids().len() == 1;
             if matches!(self.drag, Drag::Create { .. }) {
@@ -7744,16 +7647,13 @@ impl OndinApp {
             }
         }
 
-        // Image editing's *Done* pill in that slot, outside the `chrome` guard
-        // since the chrome is hidden for the whole of that mode.
+        // Outside the `chrome` guard: the chrome is hidden for that whole mode.
         let _ = self.crop_exit_pill(ui, rect, ppp);
 
-        // The Alt-hover measure, over the selection chrome: a number being read
-        // must not be crossed by a hairline.
+        // Over the selection chrome, so no hairline crosses the number.
         self.draw_measures(ui, painter, rect, ppp, resp);
 
-        // Snap lines for the live gesture, recomputed rather than stashed on
-        // `Drag`. The pen's come from the hover position, since it has no press.
+        // Snap lines for the live gesture; the pen's come from the hover position.
         if let Some(p) = resp
             .interact_pointer_pos()
             .or_else(|| resp.hover_pos().filter(|_| self.pen.is_some()))
@@ -7761,8 +7661,7 @@ impl OndinApp {
             let world = self.to_world(p, rect, ppp);
             let (shift, ctrl) =
                 ui.input(|i| (i.modifiers.shift, i.modifiers.ctrl || i.modifiers.command));
-            // `snap::Marks` for every arm (only a move makes gaps), so one match
-            // decides which gesture is running.
+            // `snap::Marks` for every arm (only a move makes gaps).
             let marks: snap::Marks = match &self.drag {
                 Drag::Move { anchor } => self.snapped_move(world - *anchor, shift).1,
                 Drag::Resize { target, handle } => {
@@ -7800,10 +7699,7 @@ impl OndinApp {
             }
         }
 
-        // The box a shape or frame tool is dragging out, as chrome, since the
-        // renderer's ghost can be culled with the root. Not for the line tool.
-        // From `create_outline_box` (via `create_box`, as the commit), so Shift
-        // and the pixel grid apply.
+        // As chrome, since the renderer's ghost can be culled with the root.
         if let Some(area) = self.create_outline_box(ui, rect, ppp, resp) {
             painter.rect_stroke(
                 self.world_rect_to_screen(area, rect, ppp),
@@ -7813,7 +7709,6 @@ impl OndinApp {
             );
         }
 
-        // Marquee.
         if let Drag::Marquee { origin, .. } = &self.drag
             && let Some(p) = resp.interact_pointer_pos()
         {
@@ -7839,8 +7734,7 @@ impl OndinApp {
             );
         }
 
-        // The in-progress pen path, from `tools::pen_outline` like the commit, and
-        // drawn as the stroke it will become (`PEN_STROKE_COLOR` at its width).
+        // The in-progress pen path, drawn as the stroke it will become.
         if let Some(pen) = &self.pen {
             let ink = color_to_egui(PEN_STROKE_COLOR);
             let width = (PEN_STROKE_WIDTH * self.session.camera.zoom) as f32 / ppp;
@@ -7852,8 +7746,7 @@ impl OndinApp {
             }
 
             // The segment the next click would add, at half opacity, to where the
-            // anchor would land (`pen_point`'s snap and Shift), or stopped dead on
-            // the first anchor when closing ([`PEN_PICK_PX`]).
+            // anchor would land, or to the first anchor when closing.
             let held = ui.input(|i| i.modifiers.shift);
             let pointer = resp
                 .hover_pos()
@@ -7887,8 +7780,7 @@ impl OndinApp {
                 painter.circle_filled(a, HANDLE_DOT_PX, color::SELECT);
                 painter.circle_filled(b, HANDLE_DOT_PX, color::SELECT);
             }
-            // The anchors placed so far, in the node tool's marker
-            // (`paint_anchor`), always circles since nothing is settled yet.
+            // The anchors placed so far, always circles since nothing is settled.
             for (i, a) in pen.anchors.iter().enumerate() {
                 let at = self.to_screen(a.at, rect, ppp);
                 paint_anchor(painter, at, color::POINT);
@@ -7902,8 +7794,7 @@ impl OndinApp {
                 }
             }
 
-            // Another path's open end, which a press would join, ringed the same
-            // way through the press's own query.
+            // Another path's open end, which a press would join, ringed likewise.
             if closing.is_none()
                 && let Some(p) = resp.hover_pos()
                 && let Some(edit) = self.pen_join_target(self.to_world(p, rect, ppp))
@@ -7921,8 +7812,8 @@ impl OndinApp {
         } else if self.drag.is_none()
             && !self.gesture_cancelled
             && let Some(p) = resp.hover_pos()
-            // The standalone pen reaches any open end; the bias this path's, via
-            // `pen_verb`. Only with nothing in hand, as `draw_points` gates hover.
+            // The standalone pen reaches any open end; the others via `pen_verb`.
+            // Only with nothing in hand, as `draw_points` gates hover.
             && let Some(edit) = match self.tool {
                 Tool::Pen => self.pen_resume_target(self.to_world(p, rect, ppp)),
                 _ => match self.pen_verb(self.to_world(p, rect, ppp)) {
@@ -7932,8 +7823,7 @@ impl OndinApp {
             }
             && let Some(end) = edit.endpoint()
         {
-            // An open endpoint the next press would resume, ringed as the close
-            // target is.
+            // An open endpoint the next press would resume.
             let at = self.to_screen(end, rect, ppp);
             paint_anchor(painter, at, color::POINT);
             painter.circle_stroke(
@@ -7943,24 +7833,21 @@ impl OndinApp {
             );
         }
 
-        // The node tool's points, in place of the selection box `chrome_hidden`
-        // took away.
         self.draw_points(painter, rect, ppp, resp);
 
-        // Image editing's crop window, likewise; at this level, not inside
-        // `draw_points`, which returns unless the node tool has a path.
+        // Image editing's crop window; not inside `draw_points`, which returns
+        // unless the node tool has a path.
         self.draw_crop_box(painter, rect, ppp);
 
-        // Text caret and selection highlight, through the node's world transform.
-        // The phase is asked unconditionally: `CaretBlink` notices a caret move by
-        // being asked.
+        // Text caret and selection highlight. The phase is asked unconditionally:
+        // `CaretBlink` notices a caret move by being asked.
         let (now, focused) = ui.input(|i| (i.time, i.focused));
         let caret = self.text.as_mut().map(|s| s.caret_phase(now, focused));
         if let Some(session) = &self.text
             && let Some(world) = self.session.preview_world_transform(session.id)
         {
-            // Quads, bent by a rail's warp like the ink; several per line on a
-            // curve, each convex, since `convex_polygon` mis-draws a concave one.
+            // Several convex quads per line on a curve: `convex_polygon` mis-draws
+            // a concave one.
             for q in session.editor.selection_quads() {
                 painter.add(egui::Shape::convex_polygon(
                     self.poly(&q, world, rect, ppp),
@@ -7980,17 +7867,15 @@ impl OndinApp {
                 }
             }
         }
-        // A repaint scheduled at the next blink flip, not every frame; `None`
-        // (unfocused) asks for nothing.
+        // Repaint at the next blink flip; `None` (unfocused) asks for nothing.
         if let Some((_, Some(after))) = caret {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_secs_f64(after));
         }
 
-        // Files dragged over the window, under the rulers like every overlay.
         self.draw_drop_indicator(ui, painter, rect, ppp);
 
-        // The rulers and their guides, over everything (`rulers.rs`).
+        // Over everything.
         self.draw_rulers_and_guides(painter, rect, ppp, resp.hover_pos());
 
         if resp.dragged() {
@@ -7999,12 +7884,9 @@ impl OndinApp {
     }
 
     /// The transform-origin marker: a crosshair on the point rotation and mirroring
-    /// turn about (not resize; Alt holds the box's own centre).
-    ///
-    /// Editable while the Transform panel's toggle is on and one layer is selected;
-    /// read-only on the hovered, unselected, undragged layer whose pivot has been
-    /// moved (Select tool only); absent otherwise. [`paint_pivot`] carries the two
-    /// weights.
+    /// turn about. Editable while the Transform panel's toggle is on and one layer
+    /// is selected; read-only on the hovered, unselected, undragged layer whose
+    /// pivot has been moved (Select tool only); absent otherwise.
     fn draw_pivot(
         &self,
         ui: &egui::Ui,
@@ -8089,14 +7971,10 @@ impl OndinApp {
         }
     }
 
-    /// Image editing's pointer exit: a *Done* pill in the size badge's slot, under
-    /// the crop window (§15 D270).
-    ///
-    /// It takes the badge's ground and ink (`color::BADGE`); the slot is free
-    /// because `chrome_hidden` holds throughout the mode. "Done" because every drag
-    /// commits on release, so there is nothing to save or discard. An `Area` at
-    /// `Foreground` like [`Self::origin_fields`], so egui routes the press itself
-    /// (pinned by `overlay_claim`); upright, since a widget cannot be rotated.
+    /// Image editing's pointer exit: a *Done* pill in the size badge's slot (free
+    /// because `chrome_hidden` holds for the mode). "Done" because every drag
+    /// commits on release. An `Area` like [`Self::origin_fields`], so egui routes
+    /// the press itself (`overlay_claim`); upright, as a widget cannot rotate.
     fn crop_exit_pill(&mut self, ui: &mut egui::Ui, rect: egui::Rect, ppp: f32) -> Option<()> {
         /// The badge's own padding, and the hover wash over its ground.
         const PAD: egui::Vec2 = egui::vec2(9.0, 3.0);
@@ -8119,7 +7997,7 @@ impl OndinApp {
             .order(crop_exit_layer(id).order)
             .fixed_pos(centre - size * 0.5)
             .show(ui.ctx(), |ui| {
-                // An allocated widget: the `Area`'s own response never reports a hover.
+                // Allocated: the `Area`'s own response never reports a hover.
                 let (r, resp) = ui.allocate_exact_size(size, egui::Sense::click());
                 let radius = egui::CornerRadius::same(4);
                 ui.painter().rect_filled(r, radius, color::BADGE);
@@ -8137,14 +8015,11 @@ impl OndinApp {
         Some(())
     }
 
-    /// The transform origin's two numbers, in the size badge's slot, while the
-    /// crosshair is armed (§15 D252).
-    ///
-    /// They replace the size badge (`badge_placement` is shared, so the swap cannot
-    /// move) and live in an `egui::Area` of their own: any `Area` shields the canvas
-    /// from the press (`an_overlay_takes_the_press_from_the_canvas_beneath`);
-    /// `Foreground` is only about painting above the chrome. A lone line gets them
-    /// too, with the degenerate axis dimmed ([`origin_percent`]).
+    /// The transform origin's two numbers, replacing the size badge in its slot
+    /// (`badge_placement` is shared) while the crosshair is armed. They live in an
+    /// `egui::Area`, which shields the canvas from the press
+    /// (`an_overlay_takes_the_press_from_the_canvas_beneath`). A lone line gets
+    /// them too, with the degenerate axis dimmed ([`origin_percent`]).
     fn origin_fields(&mut self, ui: &mut egui::Ui, rect: egui::Rect, ppp: f32) -> Option<()> {
         let [id] = *self.session.selection.ids() else {
             return None;
@@ -8152,7 +8027,6 @@ impl OndinApp {
         let layer = origin_fields_layer(id);
         let (edge, _) = self.badge_placement(rect, ppp, egui::Vec2::ZERO)?;
         let box_ = self.session.preview_local_box(id)?;
-        // The box above, not a second walk for the same one.
         let at = self.session.preview_pivot_in(id, box_)?;
         let (px, py) = origin_percent(at, box_);
 
@@ -8167,8 +8041,8 @@ impl OndinApp {
             .order(layer.order)
             .fixed_pos(top_left)
             .show(ui.ctx(), |ui| {
-                // The row must be as tall as the pills: `horizontal` centres content in
-                // the theme's 24pt `interact_size`, which would drop them below the badge's line.
+                // As tall as the pills: `horizontal` centres in the theme's 24pt
+                // `interact_size`, which would drop them below the badge's line.
                 ui.spacing_mut().interact_size.y = crate::ui::BADGE_FIELD_H;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ORIGIN_FIELD_GAP;
@@ -8189,8 +8063,8 @@ impl OndinApp {
                                 |d| d.suffix("%").custom_formatter(crate::ui::number(2)),
                             )
                         });
-                        // A disabled `Ui` reports no hover and `Ui::scope`'s response never
-                        // hovers, so the tooltip needs its own claimant.
+                        // A disabled `Ui` reports no hover, so the tooltip needs its
+                        // own claimant.
                         if shown.is_none() {
                             ui.interact(
                                 scoped.inner.rect,
@@ -8234,15 +8108,9 @@ impl OndinApp {
         Some(())
     }
 
-    /// The frame a badge is laid out in, the selection's box measured in that
-    /// frame, and the box whose numbers the badge quotes.
-    ///
-    /// Shared by the size badge and the origin fields, which take turns in one slot
-    /// and must hang in exactly the same place (§15 D252).
-    ///
-    /// Both arms hand back the edge the pill hangs from (§15 D327): a single
-    /// layer's off its own outline, a set's off the oriented box
-    /// `selection_frame_box` answers.
+    /// The edge a badge hangs from and the box whose numbers it quotes; shared by
+    /// the size badge and the origin fields, which take turns in one slot. A set's
+    /// edge comes off the oriented box `selection_frame_box` answers.
     fn badge_placement(
         &self,
         rect: egui::Rect,
@@ -8258,8 +8126,7 @@ impl OndinApp {
                 Some((badge_edge(&quad.map(|p| p + offset))?, local))
             }
             many => {
-                // The same oriented box the handles sit on (§15 D326); the numbers are
-                // the set's extent in its own axes.
+                // The box the handles sit on; the numbers are its extent.
                 let _ = many;
                 let (frame, box_) = self.selection_frame_box()?;
                 let quad = [
@@ -8274,16 +8141,12 @@ impl OndinApp {
         }
     }
 
-    /// The `W × H` pill under the selection (`design/Editor.dc.html`).
+    /// The `W × H` pill under the selection.
     ///
-    /// A single selection reports its own width and height (what the inspector
-    /// shows); a set reports the oriented box's extent. The pill turns with the
-    /// shape, hanging under the box's own bottom edge.
-    ///
-    /// A locked layer's badge carries the filled lock, read from
-    /// `is_effectively_locked` (§15 D348) so it answers the same question the
-    /// refusal did. `offset` moves the pill onto the Alt-drag copy
-    /// ([`Self::alt_clone_offset`]), applied to the box so it follows the copy's angle.
+    /// A single selection reports its own width and height; a set the oriented
+    /// box's extent. The pill turns with the shape. A locked layer's badge carries
+    /// the filled lock; `offset` moves it onto the Alt-drag copy
+    /// ([`Self::alt_clone_offset`]).
     fn draw_size_badge(
         &self,
         painter: &egui::Painter,
@@ -8291,8 +8154,8 @@ impl OndinApp {
         ppp: f32,
         offset: egui::Vec2,
     ) -> Option<()> {
-        // No badge on a lone line: its box is a rectangle nobody drew. Refused on
-        // `lone_line`, not `line_ends`, so a failed transform lookup cannot fail open.
+        // No badge on a lone line; refused on the kind, so a failed transform
+        // lookup cannot fail open.
         if lone_line(&self.session).is_some() {
             return None;
         }
@@ -8310,11 +8173,9 @@ impl OndinApp {
         Some(())
     }
 
-    /// The box the in-flight create drag would commit, in world units.
-    ///
-    /// One answer for the outline and the pill, as `create_box` is for the outline
-    /// and the transaction (§15 D51). `None` with no create in flight, no pointer,
-    /// or the Line tool, which makes no box.
+    /// The box the in-flight create drag would commit, in world units; one answer
+    /// for the outline and the pill. `None` with no create, no pointer, or the
+    /// Line tool.
     fn create_outline_box(
         &self,
         ui: &egui::Ui,
@@ -8339,12 +8200,8 @@ impl OndinApp {
         ))
     }
 
-    /// The size pill under a shape that is being *drawn*, in the badge's own slot
-    /// (§15 D292).
-    ///
-    /// The same pill as a selection's, down to the pixel: `draw_size_badge` reads
+    /// The size pill under a shape being *drawn*: `draw_size_badge` reads
     /// `selection.ids()`, and a shape being drawn is not selected until it commits.
-    /// Upright and unlocked, since the shape is axis-aligned and new.
     fn draw_create_badge(
         &self,
         ui: &egui::Ui,
@@ -8366,15 +8223,11 @@ impl OndinApp {
         Some(())
     }
 
-    /// Announce a drag of files over the window and which of the two things a
-    /// release would do: place a new layer, or replace the picture of the shape it
-    /// lands on (§15 D183, §15 D241).
-    ///
-    /// It asks the release's own questions, `drop_point` and `image_drop_target`,
-    /// so it cannot promise what the drop does not do. The border goes round the
-    /// frame the picture will land in, falling back to [`Self::canvas_inner`] when
-    /// there is none or it is not wholly on screen. The count is of files, since
-    /// bytes are not read until the drop. egui repaints by itself during the drag.
+    /// Announce a drag of files over the window and what a release would do: place
+    /// a new layer, or replace the picture of the shape it lands on. It asks the
+    /// release's own questions (`drop_point`, `image_drop_target`). The border goes
+    /// round the target frame, falling back to [`Self::canvas_inner`]. The count is
+    /// of files, since bytes are not read until the drop.
     fn draw_drop_indicator(
         &self,
         ui: &egui::Ui,
@@ -8403,13 +8256,9 @@ impl OndinApp {
             }
             None => None,
         };
-        // Where the picture goes: the shape, the drop point, or the view centre
-        // (`drop_images_at`'s fallback).
+        // Where the picture goes: the shape, the drop point, or the view centre.
         let world = anchor.or(at).unwrap_or_else(|| self.viewport_centre());
-        // The frame `target_artboard` picks (as `create_image_at` parents by), in
-        // `draw_frame_drop_outline`'s 3px `SELECT`. The canvas edge is the fallback
-        // for bare canvas or a frame not wholly on screen. `canvas_inner`, not `rect`,
-        // so neither mark crosses the rulers.
+        // `canvas_inner`, not `rect`, so neither mark crosses the rulers.
         let inner = self.canvas_inner(rect);
         let frame = self
             .target_artboard(world)
@@ -8442,11 +8291,9 @@ impl OndinApp {
         );
     }
 
-    /// Flatten a world-space path to screen points, fine enough to read as a curve
-    /// at the current zoom (the tolerance is in screen pixels).
-    ///
-    /// Each [`Polyline`] records whether its subpath closes, which the caller
-    /// cannot infer: `Shape::line` leaves the closing edge undrawn.
+    /// Flatten a world-space path to screen points at a screen-pixel tolerance.
+    /// Each [`Polyline`] records whether its subpath closes: `Shape::line` leaves
+    /// the closing edge undrawn.
     fn flatten_to_screen(
         &self,
         path: &ondin_core::kurbo::BezPath,
@@ -8493,25 +8340,19 @@ impl OndinApp {
     }
 }
 
-/// The layer name a picture takes among siblings called `taken`: the one it
-/// arrived with, or the next free `"Image N"`.
+/// The layer name a picture takes among siblings: the one it arrived with (a
+/// filename is identity), or the next free `"Image N"` for a paste.
 ///
-/// A picture that arrived with a name keeps it (a filename is identity); one that
-/// did not (a paste) is numbered like any other new layer.
-///
-/// `CreateNode { name: None }` would number it from the kind's stem ("Rectangle
-/// 4"), but an image is a fill on a Rect (§5.5a); `"Image"` stays out of core's
-/// `GENERATED_NAMES`, which inverts `NodeKind::default_name`. A free function over
-/// the document so a test needs no app.
+/// `CreateNode { name: None }` would number from the kind's stem ("Rectangle 4"),
+/// but an image is a fill on a Rect; `"Image"` stays out of core's
+/// `GENERATED_NAMES`, which inverts `NodeKind::default_name`.
 fn image_layer_name(doc: &Document, parent: NodeId, given: Option<String>) -> String {
     given.unwrap_or_else(|| ondin_core::free_name(&doc.child_names(parent, &[]), "Image", 1))
 }
 
-/// Image editing's chrome as a list of shapes: the dashed crop window, its four
-/// hollow corner handles, and the solid outline of the whole picture behind it
-/// when there is one. Both quads are screen-space corners, clockwise from the
-/// top-left, as `Handle::CORNERS` gives them. A free function so a test can ask
-/// what it draws (§15 D269).
+/// Image editing's chrome: the dashed crop window, its four hollow corner
+/// handles, and the outline of the whole picture behind it when there is one.
+/// Both quads are screen corners, clockwise from the top-left.
 fn crop_chrome(window: &[egui::Pos2], picture: Option<&[egui::Pos2]>) -> Vec<egui::Shape> {
     let mut out = Vec::new();
     if let Some(picture) = picture {
@@ -8545,11 +8386,8 @@ fn crop_chrome(window: &[egui::Pos2], picture: Option<&[egui::Pos2]>) -> Vec<egu
 /// A path anchor's mark: a filled disc with a hairline rim, [`POINT_PX`] across.
 ///
 /// One drawing for both tools, so a path does not change appearance when it
-/// commits. The pen's are always circles: the node tool's square marks a corner,
-/// and mid-draw nothing is settled to read.
+/// commits. The pen's are always circles: the node tool's square marks a corner.
 fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::Color32) {
-    // At the resting weight the inside bias is nothing; see [`POINT_STROKE_PX`]
-    // for the hovered case.
     let radius = POINT_PX * 0.5;
     painter.circle_filled(at, radius, fill);
     painter.circle_stroke(
@@ -8559,9 +8397,7 @@ fn paint_anchor(painter: &egui::Painter, at: egui::Pos2, fill: egui::Color32) {
     );
 }
 
-/// The marker: one Phosphor crosshair in the weight [`Marker`] picks, with no
-/// ground behind it. `Marker::ReadOnly`'s glyph is also the Transform panel's
-/// toggle icon.
+/// The marker: one Phosphor crosshair in the weight [`Marker`] picks, no ground.
 fn paint_pivot(painter: &egui::Painter, at: egui::Pos2, marker: Marker) {
     painter.text(
         at,
@@ -8588,10 +8424,10 @@ fn paint_pivot_badge(painter: &egui::Painter, at: egui::Pos2, name: &str) {
 
 /// The desktop cursor in physical screen pixels, or `None` off Windows.
 ///
-/// The one thing a Windows file drag will not tell us (§15 D184, D241), and the
-/// only Win32 call in the app. `GetCursorPos` reports in the same physical pixels
-/// as `Window::inner_position` ([`screen_pos_of_desktop_px`]). On a locked desktop
-/// it fails, and `None` puts the drop on the viewport centre.
+/// The one thing a Windows file drag will not tell us, and the app's only Win32
+/// call. Physical pixels, like `Window::inner_position`
+/// ([`screen_pos_of_desktop_px`]). On a locked desktop it fails, and `None` puts
+/// the drop on the viewport centre.
 #[cfg(windows)]
 fn os_cursor_desktop_px() -> Option<(f32, f32)> {
     use windows_sys::Win32::Foundation::POINT;
@@ -8611,12 +8447,9 @@ fn os_cursor_desktop_px() -> Option<(f32, f32)> {
     None
 }
 
-/// A desktop pixel in egui's screen space — the arithmetic half of
-/// [`os_cursor_screen_pos`], split out so it can be pinned.
-///
-/// `inner_rect` is the client area in points (`ViewportInfo` divides the physical
-/// rect by `pixels_per_point`). The physical reading is scaled first and the
-/// origin subtracted after; the other order is right only at 100%.
+/// A desktop pixel in egui's screen space — [`os_cursor_screen_pos`]'s arithmetic.
+/// `inner_rect` is the client area in points. The physical reading is scaled
+/// first and the origin subtracted after; the other order is right only at 100%.
 fn screen_pos_of_desktop_px(
     desktop_px: (f32, f32),
     inner_rect: egui::Rect,
@@ -8625,11 +8458,8 @@ fn screen_pos_of_desktop_px(
     egui::pos2(desktop_px.0, desktop_px.1) / pixels_per_point - inner_rect.min.to_vec2()
 }
 
-/// Where the pointer really is, in egui's screen space, asked of the OS rather
-/// than of the event stream.
-///
-/// `None` off Windows, and on a frame with no `inner_rect` (a minimized window,
-/// which takes no drop).
+/// Where the pointer really is in egui's screen space, asked of the OS. `None`
+/// off Windows, and with no `inner_rect` (a minimized window takes no drop).
 fn os_cursor_screen_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
     let desktop_px = os_cursor_desktop_px()?;
     let inner_rect = ctx.input(|i| i.viewport().inner_rect)?;
@@ -8640,10 +8470,9 @@ fn os_cursor_screen_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
     ))
 }
 
-/// What releasing the drag would do, in the words the message afterwards uses.
-///
-/// The future tense of `drop_images_at`'s messages. It names the shape in full,
-/// since the outline can be off screen and a destructive drop must not surprise.
+/// What releasing the drag would do, as the future tense of `drop_images_at`'s
+/// messages. It names the shape in full, since the outline can be off screen and
+/// a destructive drop must not surprise.
 fn drop_label(files: usize, replacing: Option<&str>) -> String {
     match (files, replacing) {
         (_, Some(name)) => format!("Replace image in {name}"),
@@ -8654,9 +8483,8 @@ fn drop_label(files: usize, replacing: Option<&str>) -> String {
 
 /// The drop's pill, laid out on `at` but kept inside `canvas`.
 ///
-/// The size badge's treatment ([`OndinApp::draw_size_badge`]) a step larger.
-/// Kept inside by hand rather than [`egui::Rect::clamp`], which panics on a rect
-/// narrower than the pill.
+/// Kept inside by hand: [`egui::Rect::clamp`] panics on a rect narrower than the
+/// pill.
 fn paint_drop_label(painter: &egui::Painter, canvas: egui::Rect, at: egui::Pos2, text: &str) {
     const PAD: egui::Vec2 = egui::vec2(9.0, 5.0);
     const GAP: f32 = 8.0;
@@ -8682,22 +8510,17 @@ fn paint_drop_label(painter: &egui::Painter, canvas: egui::Rect, at: egui::Pos2,
 /// to the keymap chord that shares it.
 ///
 /// `Alt`+arrows are letter spacing and line height (`docs/shortcuts.md` §10),
-/// resolved by `input::resolve`; without this gate both claimants fire.
-///
-/// It yields to `Alt` without `Ctrl`, matching the keymap's `alt_only`
-/// (`!command && alt`): a plain `!modifiers.alt` would hand `Ctrl+Alt+←` to
-/// neither. `the_two_claimants_of_an_arrow_key_never_both_fire` pins that this and
-/// `text_insert_mode` partition the modifier space; the loop is driven in
-/// `headless_app_tests::an_arrow_key_reaches_the_caret_or_the_keymap_but_never_both`
-/// (§15 D303).
+/// resolved by `input::resolve`; without this gate both claimants fire. It yields
+/// to `Alt` without `Ctrl`, matching the keymap's `alt_only`: a plain
+/// `!modifiers.alt` would hand `Ctrl+Alt+←` to neither
+/// (`the_two_claimants_of_an_arrow_key_never_both_fire`).
 fn arrow_moves_caret(modifiers: egui::Modifiers) -> bool {
     !(modifiers.alt && !modifiers.command)
 }
 
 /// The frame `id` **is**, or the nearest one above it; `None` on the bare canvas.
 ///
-/// Self first, then ancestors: a selected frame answers with itself (§15 D221).
-/// A free function over the `Document` so the walk is testable without an `OndinApp`.
+/// Self first, then ancestors: a selected frame answers with itself.
 fn enclosing_artboard(doc: &Document, id: NodeId) -> Option<NodeId> {
     let mut cursor = Some(id);
     while let Some(c) = cursor {
@@ -8713,27 +8536,21 @@ fn enclosing_artboard(doc: &Document, id: NodeId) -> Option<NodeId> {
 }
 
 /// The parent and index a panel *Paste* aims at: the slot immediately **above**
-/// `id` among its own siblings (§15 D226).
-///
-/// `+ 1` is above: `Node::children` ascends in z-order and the layers panel draws
-/// it reversed, as in `paste_clipboard_at`. `None` for the root and a row whose
-/// parent has gone; the caller then falls back to the chord's ordinary rule. A free
-/// function over the `Document` for `enclosing_artboard`'s reason.
+/// `id` among its siblings (`+ 1`, as `Node::children` ascends in z-order).
+/// `None` for the root and a row whose parent has gone.
 pub(crate) fn sibling_slot_above(doc: &Document, id: NodeId) -> Option<(NodeId, usize)> {
     let parent = doc.get(id)?.parent()?;
     let at = doc.get(parent)?.children().iter().position(|c| *c == id)?;
     Some((parent, at + 1))
 }
 
-/// Whether `id`'s canvas tag is withheld because it sits inside a component
-/// (§15 D1001) — **strictly** inside, so a main or an instance root answers for
-/// its own position, never for itself:
-/// - **anything inside an instance** — below any layer that carries a link,
-///   which is every layer of one: the instance's tag is its label, and an inner
-///   tag would be a pick past its group-like picking (§15 D981 (b));
-/// - **an instance inside a main**, which picks like a group and so never needed
-///   the tag as a handle. A plain frame inside a main keeps its tag: occupied,
-///   it is the frame's one handle besides its edge (§15 D22, D816).
+/// Whether `id`'s canvas tag is withheld because it sits **strictly** inside a
+/// component (a main or an instance root answers for its own position):
+/// - **anything inside an instance**: the instance's tag is its label, and an
+///   inner tag would be a pick past its group-like picking;
+/// - **an instance inside a main**, which picks like a group and never needed the
+///   tag as a handle. A plain frame inside a main keeps its tag: occupied, it is
+///   the frame's one handle besides its edge.
 fn tag_withheld(doc: &Document, id: NodeId) -> bool {
     let instance = ondin_core::component::instance_root(doc, id) == Some(id);
     let mut at = doc.get(id).and_then(|n| n.parent());
@@ -8746,9 +8563,8 @@ fn tag_withheld(doc: &Document, id: NodeId) -> bool {
     false
 }
 
-/// The colour a component's selection chrome takes (§15 D1001): `COMPONENT` for
-/// a main or an instance root, `SELECT` for everything else — a set and the
-/// layers inside a component included.
+/// The colour a component's selection chrome takes: `COMPONENT` for a main or an
+/// instance root, `SELECT` for everything else, sets and inner layers included.
 pub(crate) fn chrome_hue(doc: &Document, id: NodeId) -> egui::Color32 {
     let component = doc.get(id).is_some_and(|n| n.component())
         || ondin_core::component::instance_root(doc, id) == Some(id);
@@ -8760,13 +8576,9 @@ pub(crate) fn chrome_hue(doc: &Document, id: NodeId) -> egui::Color32 {
 }
 
 /// The one selection that gets **endpoint handles instead of a transform box**: a
-/// lone `Line`, with the far end it carries.
-///
-/// Exactly one selected node, of kind `Line`; a line inside a multi-selection keeps
-/// the union box. This one answer suppresses the transform chrome (corner handles,
-/// side bands, skew, rotate ring, size badge, cursors) because it all hangs off
-/// [`OndinApp::selection_handles`]. Read through the preview layer so the handles
-/// follow the drag.
+/// lone `Line`, with its far end. A line inside a multi-selection keeps the union
+/// box. This answer suppresses the transform chrome, which all hangs off
+/// [`OndinApp::selection_handles`]. Read through the preview layer.
 pub(crate) fn lone_line(session: &EditorSession) -> Option<(NodeId, Point)> {
     let [id] = *session.selection.ids() else {
         return None;
@@ -8777,32 +8589,22 @@ pub(crate) fn lone_line(session: &EditorSession) -> Option<(NodeId, Point)> {
     }
 }
 
-/// The local origin a pasted text layer takes so that its box is centred on
-/// `centre`.
-///
-/// `TextLayout::origin` is the offset from the local origin to the box's top-left
-/// and is non-zero for the default text (`default_text_parts` trims
-/// `CapToBaseline`); centring on `size` alone leaves every paste that much low. A
-/// free function like [`wrapped_paste_sizing`], to pin the arithmetic.
+/// The local origin a pasted text layer takes so its box is centred on `centre`.
+/// `TextLayout::origin` is non-zero for the default text (`default_text_parts`
+/// trims `CapToBaseline`); centring on `size` alone leaves every paste low.
 fn centred_paste_origin(centre: Point, size: ondin_core::kurbo::Size, box_offset: Vec2) -> Vec2 {
     (centre - size.to_vec2() / 2.0 - box_offset).to_vec2()
 }
 
 /// The sizing a pasted text layer needs when its one auto-width line would outrun
-/// the page, or `None` when auto width fits and is the answer.
-///
-/// `AutoHeight`, not `Fixed`: the width is the page's, the height the content's.
-/// Exactly-fits stays auto (`>=` would wrap a paste that fits). A free function
-/// because [`OndinApp::paste_text_as_layer`], its only caller, reaches the clipboard
-/// first.
+/// the page, or `None` when auto width fits. `AutoHeight`, not `Fixed`; exactly
+/// fits stays auto (`>=` would wrap a paste that fits).
 fn wrapped_paste_sizing(shaped_width: f64, available: f64) -> Option<ondin_core::TextSizing> {
     (shaped_width > available).then_some(ondin_core::TextSizing::AutoHeight(available))
 }
 
-/// An owned copy of `s`, or `None` when it is empty.
-///
-/// A copy with a bare caret must not reach the clipboard: `Context::copy_text("")`
-/// still counts as a copy and would clear what the user had there.
+/// An owned copy of `s`, or `None` when empty: `Context::copy_text("")` still
+/// counts as a copy and would clear the user's clipboard.
 fn non_empty(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
@@ -8832,12 +8634,8 @@ fn drag_create_again(drag: &Drag, id: NodeId, start: Point) -> Drag {
     }
 }
 
-/// The cursor over nothing in particular: an arrow for every tool that picks and
-/// moves, and the Scale tool's own glyph for Scale.
-///
-/// Scale shares every gesture with Select and its effect is invisible until
-/// something is scaled, so the cursor is the only warning that it is armed. A free
-/// function of the tool so the wiring can be pinned (§15 D65).
+/// The cursor over nothing: an arrow, or the Scale tool's own glyph, which shares
+/// every gesture with Select and so needs the cursor as its only warning.
 fn rest_cursor(tool: Tool) -> (egui::CursorIcon, Option<Bitmap>) {
     match tool {
         Tool::Scale => (egui::CursorIcon::Default, Some(Bitmap::Scale)),
@@ -8847,17 +8645,14 @@ fn rest_cursor(tool: Tool) -> (egui::CursorIcon, Option<Bitmap>) {
 
 /// The stock resize cursor for a handle facing `out` **on screen**.
 ///
-/// Snapped to the nearest eighth of a turn, all the four platform cursors resolve.
-/// The direction comes from the handle turned through the node's rotation
-/// ([`Handles::screen_direction`]), not its local corner. Unlike the hands and the
-/// pen (§15 D9), these are stock `CursorIcon`s.
+/// Snapped to the nearest eighth of a turn; the direction is the handle turned
+/// through the node's rotation ([`Handles::screen_direction`]).
 pub(crate) fn resize_icon(out: egui::Vec2) -> egui::CursorIcon {
     if out.length_sq() < f32::EPSILON {
         return egui::CursorIcon::Default;
     }
-    // Eighths of a turn from east, clockwise (screen y points down). Opposite
-    // handles land four octants apart and so share a cursor, which is right —
-    // they move the same axis.
+    // Eighths of a turn from east, clockwise (screen y points down); opposite
+    // handles share a cursor.
     let octant = (out.y.atan2(out.x) / (std::f32::consts::TAU / 8.0)).round() as i32;
     match octant.rem_euclid(4) {
         0 => egui::CursorIcon::ResizeHorizontal,
@@ -8867,23 +8662,17 @@ pub(crate) fn resize_icon(out: egui::Vec2) -> egui::CursorIcon {
     }
 }
 
-/// The angle a badge's label is laid at: along the edge it hangs from, turned
-/// end-for-end if that would read upside down (§15 D329).
-///
-/// Reducing by half turns, not quarters, keeps the label parallel to its edge; a
-/// quarter turn could flip it across the edge near 45°. On a steep edge the label
-/// is steep, and at the limit vertical, which beats a pill across the frame.
+/// The angle a badge's label is laid at: along its edge, turned end-for-end if
+/// upside down. Half turns, not quarters, keep it parallel to the edge.
 fn badge_text_angle(dir: egui::Vec2) -> f32 {
     const HALF: f32 = std::f32::consts::PI;
     let a = dir.angle();
     a - (a / HALF).round() * HALF
 }
 
-/// The layer the origin fields for `id` live in.
-///
-/// Shared by `origin_fields`, which builds its `egui::Area` from it, and
-/// `wheel_input`, which asks whether the pointer is over this layer (§15 D254).
-/// Keyed on the layer, so a half-typed value cannot carry across a selection change.
+/// The layer the origin fields for `id` live in, shared by `origin_fields` and
+/// `wheel_input`. Keyed on the node, so a half-typed value cannot carry across a
+/// selection change.
 fn origin_fields_layer(id: NodeId) -> egui::LayerId {
     egui::LayerId::new(
         egui::Order::Foreground,
@@ -8891,38 +8680,30 @@ fn origin_fields_layer(id: NodeId) -> egui::LayerId {
     )
 }
 
-/// The layer image editing's *Done* pill lives in (§15 D270).
-///
-/// A function for [`origin_fields_layer`]'s reason: the pill and the wheel handler
-/// must agree on the id.
+/// The layer image editing's *Done* pill lives in; the pill and the wheel handler
+/// must agree on the id, as for [`origin_fields_layer`].
 fn crop_exit_layer(id: NodeId) -> egui::LayerId {
     egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("crop-exit", id)))
 }
 
 /// Width of one origin pill, and the gap between the pair.
 ///
-/// One number for both, so `X` and `Y` are the same size whatever they read (see
-/// [`crate::ui::badge_field`]). It leaves 42pt for the digits, the widest being
-/// `-31.25%` at 41.44pt at the badge's 10.5pt (§15 D253).
+/// One number for both, so `X` and `Y` match (see [`crate::ui::badge_field`]). It
+/// leaves 42pt for the digits, the widest being `-31.25%` at 41.44pt.
 const ORIGIN_FIELD_W: f32 = 69.0;
 const ORIGIN_FIELD_GAP: f32 = 5.0;
 
 /// Below this an axis has no extent for the origin fields to be a percentage *of*.
 ///
-/// The same threshold `geometry::pivot_for` divides by, so both agree on whether
-/// a box is degenerate.
+/// The threshold `geometry::pivot_for` divides by, so both agree on degeneracy.
 const ORIGIN_MIN_EXTENT: f64 = 1e-9;
 
 /// The transform origin as a percentage of the node's own box, per axis.
 ///
-/// A percentage rather than local units (§15 D247, D252): the stored [`Pivot`] is a
-/// fraction for an authored box and an absolute point for an emergent one, so the
-/// display is a fraction for everything and `geometry::pivot_for` decides storage.
-/// It matches the marker's snap set (`0`, `50`, `100`, read out by
-/// [`OndinApp::pivot_label`]).
-///
-/// `None` on an axis with no extent (a flat line): every percentage there names the
-/// same point, so the caller dims that half and the other axis stays live.
+/// A percentage rather than local units: the stored [`Pivot`] is a fraction for an
+/// authored box and an absolute point for an emergent one, and
+/// `geometry::pivot_for` decides storage. `None` on an axis with no extent (a flat
+/// line), which the caller dims.
 fn origin_percent(at: Point, box_: KRect) -> (Option<f64>, Option<f64>) {
     let axis = |v: f64, min: f64, extent: f64| {
         (extent > ORIGIN_MIN_EXTENT).then(|| (v - min) / extent * 100.0)
@@ -8936,9 +8717,8 @@ fn origin_percent(at: Point, box_: KRect) -> (Option<f64>, Option<f64>) {
 /// The [`Pivot`] the origin fields' two percentages ask for, or `None` for the
 /// box's centre, which is the absence of a pivot ([`geometry::pivot_placed_at`]).
 ///
-/// Both axes at 50 clears the field, as the marker does when dragged back to the
-/// middle: both go through one core function. An axis with no extent contributes
-/// its own single position.
+/// Both axes at 50 clears the field, as the marker dragged back to the middle
+/// does. An axis with no extent contributes its own single position.
 fn origin_pivot(kind: &NodeKind, box_: KRect, x_pct: f64, y_pct: f64) -> Option<Pivot> {
     let axis = |pct: f64, min: f64, extent: f64| {
         if extent > ORIGIN_MIN_EXTENT {
@@ -8956,20 +8736,16 @@ fn origin_pivot(kind: &NodeKind, box_: KRect, x_pct: f64, y_pct: f64) -> Option<
 
 /// What the size pill says about a box: whole units, `W × H`.
 ///
-/// Whole units are a report, not a promise about the geometry; the W/H fields hold
-/// the exact value. One function for a selected and a drawn shape, so the number
-/// does not twitch on release (§15 D292).
+/// Whole units are a report; the W/H fields hold the exact value. One function for
+/// a selected and a drawn shape, so the number does not twitch on release.
 fn size_label(box_: KRect) -> String {
     format!("{} × {}", box_.width().round(), box_.height().round())
 }
 
 /// Paint the size pill under `oriented`, laid out in `frame`.
 ///
-/// Both a selection's badge and a shape being drawn use it (§15 D292), so they stay
-/// indistinguishable across the release.
-///
-/// `hue` is the pill's ground — `color::BADGE`, or `color::COMPONENT` under a
-/// component (§15 D1001) — and picks the ink that reads on it.
+/// Shared by a selection's badge and a shape being drawn. `hue` is the pill's
+/// ground (`color::BADGE`, or `color::COMPONENT`) and picks the ink.
 fn paint_size_pill(
     painter: &egui::Painter,
     edge: BadgeEdge,
@@ -8977,9 +8753,8 @@ fn paint_size_pill(
     locked: bool,
     hue: egui::Color32,
 ) {
-    /// Gap below the box, padding inside the pill, and the gap between the lock
-    /// and the text. The gap cannot go below `HANDLE_PICK_PX`, or the pill covers
-    /// the nearest handle's grab area on a narrow shape.
+    /// Gap below the box, padding inside the pill, and the lock-to-text gap. The
+    /// gap cannot go below `HANDLE_PICK_PX`, or the pill covers a handle's grab area.
     const GAP: f32 = HANDLE_PICK_PX;
     const PAD: egui::Vec2 = egui::vec2(7.0, 3.0);
     const LOCK_GAP: f32 = 5.0;
@@ -9028,9 +8803,8 @@ fn paint_size_pill(
 /// Where the size badge sits: laid along `edge`, pushed `gap` clear of it.
 ///
 /// Half the pill's height is the whole offset only because the label is parallel
-/// to the edge (§15 D329): [`badge_text_angle`] reduces by half turns. If the
-/// reduction ever returns to quarter turns, the offset must become the pill's
-/// half-extent projected onto `edge.out` again (§15 D328).
+/// to the edge ([`badge_text_angle`] reduces by half turns); with quarter turns
+/// it would be the half-extent projected onto `edge.out`.
 fn badge_frame(edge: BadgeEdge, pill: egui::Vec2, gap: f32) -> Frame2 {
     Frame2::rotated(
         badge_text_angle(edge.dir),
@@ -9038,10 +8812,9 @@ fn badge_frame(edge: BadgeEdge, pill: egui::Vec2, gap: f32) -> Frame2 {
     )
 }
 
-/// The edge of a selection's outline a badge hangs from: its midpoint, the way it
-/// runs, and which way is *out* of the shape.
-///
-/// [`badge_edge`] chooses the edge; [`badge_frame`] places a pill given one.
+/// The edge of a selection's outline a badge hangs from ([`badge_edge`] chooses
+/// it, [`badge_frame`] places a pill on it): midpoint, direction, and which way is
+/// *out* of the shape.
 #[derive(Clone, Copy)]
 struct BadgeEdge {
     mid: egui::Pos2,
@@ -9055,11 +8828,10 @@ struct BadgeEdge {
 /// Which edge of `quad` the badge hangs from: the one whose outward normal points
 /// most steeply down the screen.
 ///
-/// Chosen from the quad, not the layer's angle, so a sheared box works (§15 D327).
-/// The normal rather than the lowest midpoint: the normal switches at 45° whatever
-/// the aspect ratio, which is what protects the label's angle. The pill hangs off
-/// the edge's midpoint, so it clears the shape but can sit beside a lower corner.
-/// At exactly 45° the first edge found wins, deterministically
+/// Chosen from the quad, not the layer's angle, so a sheared box works. The normal
+/// rather than the lowest midpoint: it switches at 45° whatever the aspect ratio,
+/// which protects the label's angle. The pill hangs off the edge's midpoint, so it
+/// can sit beside a lower corner. At exactly 45° the first edge found wins
 /// (`the_badge_label_lies_along_its_edge_at_every_angle`). `None` for a degenerate
 /// outline.
 fn badge_edge(quad: &[egui::Pos2; 4]) -> Option<BadgeEdge> {
@@ -9093,7 +8865,7 @@ fn badge_edge(quad: &[egui::Pos2; 4]) -> Option<BadgeEdge> {
 /// `start` is square — a Shift-drawn rect, circle or regular polygon.
 ///
 /// The larger extent wins, so the shape encloses the pointer; each axis keeps its
-/// sign. A free function, like [`frame_covering`], to check without a live gesture.
+/// sign.
 fn squared_corner(start: Point, corner: Point) -> Point {
     let d = corner - start;
     let side = d.x.abs().max(d.y.abs());
@@ -9111,8 +8883,8 @@ fn centred_ends(start: Point, corner: Point) -> (Point, Point) {
 /// square, with the click at its top-left corner, or — under Alt — at its centre.
 ///
 /// Alt only moves the box: a click authors no extent, so doubling it (as a drag's
-/// Alt does) would give a 200-unit shape. Reaching half a side and letting
-/// [`centred_ends`] double it back keeps one rule for "hold the middle still".
+/// Alt does) would give a 200-unit shape. Half a side, doubled back by
+/// [`centred_ends`], keeps one rule.
 fn click_box(start: Point, alt: bool) -> (Point, Point) {
     let reach = tools::CLICK_CREATE_SIZE * if alt { 0.5 } else { 1.0 };
     let corner = start + Vec2::new(reach, reach);
@@ -9122,19 +8894,13 @@ fn click_box(start: Point, alt: bool) -> (Point, Point) {
     }
 }
 
-/// What a click selects, given the modifiers and the group chain above the leaf
-/// (§15 D805).
-///
-/// The whole click-to-select policy as a free function, so it is a table rather
-/// than five egui drives. After the `Ctrl`-only arm:
+/// What a click selects, given the modifiers and the group chain above the leaf:
+/// the whole click-to-select policy as a table. After the `Ctrl`-only arm:
 ///
 /// - no groups above the leaf: the leaf;
 /// - `Ctrl+Alt` with two or more groups: one level into the outermost;
 /// - `Ctrl+Alt` with exactly one: one level in is the leaf;
 /// - no modifier: the outermost group.
-///
-/// `chain` is built on the `Ctrl`-only path too: one shallow parent walk per hover
-/// frame.
 fn pick_from_chain(ctrl: bool, alt: bool, chain: &[NodeId], leaf: NodeId) -> NodeId {
     // `Ctrl` alone means this exact thing, the deepest layer; the chain is unread.
     if ctrl && !alt {
@@ -9149,7 +8915,7 @@ fn pick_from_chain(ctrl: bool, alt: bool, chain: &[NodeId], leaf: NodeId) -> Nod
 }
 
 /// The nearest group (or boolean) above `id`, if any — the container a move may
-/// not take `id` out of ([`OndinApp::move_destination`], §15 D876).
+/// not take `id` out of ([`OndinApp::move_destination`]).
 fn group_fence(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
     let mut up = doc.get(id)?.parent();
     while let Some(p) = up {
@@ -9163,7 +8929,7 @@ fn group_fence(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
 }
 
 /// Whether frame `f` is one of `moving`, or inside one — the frames a move can
-/// never land in (`OndinApp::moving_with`, §15 D997).
+/// never land in (`OndinApp::moving_with`).
 fn within_moving(
     doc: &ondin_core::Document,
     f: NodeId,
@@ -9174,14 +8940,13 @@ fn within_moving(
 }
 
 /// What a move says when a main dropped over a component set of another kind was
-/// kept out of it (§15 D1003 (5): one kind per set, refused with a message saying
-/// why). The layers panel's drop says the same.
+/// kept out of it (one kind per set). The layers panel's drop says the same.
 pub(crate) const SET_OF_ANOTHER_KIND: &str =
     "Not added to the set — a component set holds one kind of layer, and its variants are another";
 
 /// What a move says when mains of two kinds dropped together over a component
 /// set were kept out of it — an empty set fits either alone, and taking both
-/// would make it two kinds (§15 D1003 (5), `variant::takes_together`).
+/// would make it two kinds (`variant::takes_together`).
 pub(crate) const SET_OF_MIXED_KINDS: &str =
     "Not added to the set — a component set holds one kind of layer, and these mains mix kinds";
 
@@ -9189,8 +8954,7 @@ pub(crate) const SET_OF_MIXED_KINDS: &str =
 /// one covering more than half of it, or `None` for "no frame — the canvas".
 ///
 /// Area, not the centre point: a centre test flips while a large layer is still
-/// mostly outside and flickers along an edge. `frames` is in paint order, so the
-/// topmost qualifying one wins, as with a click.
+/// mostly outside. `frames` is in paint order, so the topmost qualifying one wins.
 fn frame_covering(bounds: KRect, frames: &[(NodeId, KRect)]) -> Option<NodeId> {
     let area = bounds.width() * bounds.height();
     if area <= 0.0 {
@@ -9219,9 +8983,8 @@ fn overlaps(a: KRect, b: KRect) -> bool {
 /// The character and paragraph span lists `tx` states for `id`, each `None` where
 /// the transaction says nothing about that scope.
 ///
-/// [`OndinApp::text_session_restyled_after`]'s whole decision, askable of a
-/// transaction. It is per scope: a character write must leave the editor's
-/// paragraph list alone, which may hold uncommitted session work.
+/// [`OndinApp::text_session_restyled_after`]'s decision. Per scope: a character
+/// write must leave the editor's paragraph list alone.
 fn stated_spans(tx: &Transaction, id: NodeId) -> (Option<CharSpans>, Option<ParaSpans>) {
     let mut spans = None;
     let mut para_spans = None;
@@ -9257,8 +9020,7 @@ mod tests {
         id
     }
 
-    /// Alt while drawing puts the press point at the centre, not at a corner (the
-    /// midpoint, not the extent, tells it from a doubled far corner).
+    /// Alt while drawing puts the press point at the centre, not at a corner.
     #[test]
     fn alt_grows_the_drawn_box_out_from_the_press_point() {
         let start = Point::new(100.0, 100.0);
@@ -9270,7 +9032,7 @@ mod tests {
     }
 
     /// `Alt`+`Shift` squares first and mirrors second, so the square is centred on
-    /// the press (the other order gives a square of the right size centred off it).
+    /// the press.
     #[test]
     fn alt_and_shift_centre_the_square_on_the_press_rather_than_near_it() {
         let start = Point::new(100.0, 100.0);
@@ -9345,7 +9107,7 @@ mod tests {
         );
     }
 
-    /// A character write states the character list and nothing else, for the edited node only (§15 D164).
+    /// A character write states the character list and nothing else, for the edited node only.
     #[test]
     fn a_transaction_states_only_the_scopes_it_carries() {
         let mut ids = ondin_core::IdSource::new(1);
@@ -9626,7 +9388,7 @@ mod tests {
     }
 
     /// The pill top sits at least `HANDLE_PICK_PX` below the box, through the real
-    /// `paint_size_pill` (shared by the create drag and the selection).
+    /// `paint_size_pill`.
     #[test]
     fn the_size_pill_hangs_clear_of_the_bottom_handles_grab_radius() {
         let box_ = egui::Rect::from_min_max(egui::pos2(100.0, 80.0), egui::pos2(300.0, 200.0));
@@ -9727,8 +9489,8 @@ mod tests {
                 edge.mid
             );
 
-            // `GAP` clear at the nearest corner and no further; asserted on the pill's
-            // corners because the centre distance would repeat `badge_frame`.
+            // `GAP` clear at the nearest corner and no further; on the corners, as
+            // the centre distance would repeat `badge_frame`.
             let clearances: Vec<f32> = badge
                 .rounded_rect(pill, 4.0)
                 .iter()
@@ -9809,8 +9571,6 @@ mod tests {
             let turn = |p: egui::Pos2| egui::pos2(p.x * cos - p.y * sin, p.x * sin + p.y * cos);
             let quad: Vec<egui::Pos2> = local.iter().copied().map(turn).collect();
 
-            // The label's angle comes off the edge it hangs from (§15 D329); for a
-            // turned rectangle that edge is within 45° of horizontal.
             let corners0: [egui::Pos2; 4] = [quad[0], quad[1], quad[2], quad[3]];
             let laid = badge_text_angle(badge_edge(&corners0).expect("edges").dir);
             // Within an eighth of a turn of upright, never upside down.
@@ -9841,8 +9601,8 @@ mod tests {
             let corners: [egui::Pos2; 4] = [quad[0], quad[1], quad[2], quad[3]];
             let edge = badge_edge(&corners).expect("edges");
             let badge = badge_frame(edge, pill, GAP);
-            // The pill clears the edge it hangs from, not the box's bottom: at an exact
-            // diagonal two edges tie and `badge_edge` takes one.
+            // Clear of the edge it hangs from, not the box's bottom: at a diagonal
+            // two edges tie.
             for p in badge.rounded_rect(pill, 4.0) {
                 assert!(
                     (p - edge.mid).dot(edge.out) > 0.0,
@@ -9867,8 +9627,8 @@ mod tests {
                 GAP + pill.y * 0.5
             );
 
-            // The edge's outward normal points most steeply down, not its midpoint lowest.
-            // `quad` runs clockwise on screen (y down), so the outward normal is `(e.y, -e.x)`.
+            // The outward normal points most steeply down, not the midpoint lowest;
+            // `quad` runs clockwise on screen, so it is `(e.y, -e.x)`.
             let down = |i: usize| {
                 let e = (quad[(i + 1) % 4] - quad[i]).normalized();
                 egui::vec2(e.y, -e.x).y
@@ -9893,7 +9653,7 @@ mod tests {
     }
 
     /// The label lies along its edge, with no angle where it jumps across it; the
-    /// 44/46 pair would have swung 88° under a quarter-turn reduction (§15 D329).
+    /// 44/46 pair would have swung 88° under a quarter-turn reduction.
     #[test]
     fn the_badge_label_lies_along_its_edge_at_every_angle() {
         let at = |d: f32| badge_text_angle(egui::Vec2::angled(d.to_radians())).to_degrees();
@@ -9933,8 +9693,7 @@ mod tests {
     }
 
     /// A Shift-drawn line lands on one of eight directions exactly: `dx` and `dy`
-    /// are whole numbers and equal (or one is zero). Reproduces `axial_corner`'s
-    /// body with the grid on, where the two requirements could conflict.
+    /// are whole numbers and equal (or one is zero), as `axial_corner` does.
     #[test]
     fn a_constrained_line_lands_on_an_exact_eighth_of_a_turn() {
         const OCTANT: f64 = std::f64::consts::TAU / 8.0;
@@ -10091,7 +9850,7 @@ mod tests {
         );
     }
 
-    /// The rotate ring is reachable out to the distance it claims (§15 D14).
+    /// The rotate ring is reachable out to the distance it claims.
     #[test]
     fn the_rotate_band_reaches_as_far_as_it_says() {
         let h = handles_for(0.0, KRect::new(0.0, 0.0, 200.0, 120.0));
@@ -10135,9 +9894,8 @@ mod tests {
     }
 }
 
-/// The layout grid overlay, driven through `draw_layout_grids` on a headless app
-/// (§15 D303): the wiring from `Node::grids` to the painter, the scrub buffer, and
-/// the switches that suppress it. The arithmetic is tested in core.
+/// The layout grid overlay through `draw_layout_grids` on a headless app: the wiring
+/// from `Node::grids` to the painter, the scrub buffer and the suppressing switches.
 #[cfg(test)]
 mod layout_grid_tests {
     use super::*;
@@ -10187,8 +9945,7 @@ mod layout_grid_tests {
         .collect()
     }
 
-    /// Four columns reach the painter and divide the frame's width; asserted as
-    /// spanning the frame, which holds at any zoom.
+    /// Four columns reach the painter and divide the frame's width.
     #[test]
     fn a_frames_columns_reach_the_painter_and_divide_its_box() {
         let ctx = egui::Context::default();
@@ -10221,8 +9978,7 @@ mod layout_grid_tests {
         );
     }
 
-    /// The bands follow a gesture that has not committed (§15 D391), asserted
-    /// against the previewing `selection_quad`; the move includes a rotation.
+    /// The bands follow a gesture that has not committed, including a rotation.
     /// flip: read `resolved.world_transform` → fails at "the run spans the frame"
     #[test]
     fn the_bands_follow_a_frame_that_is_still_being_dragged() {
@@ -10283,8 +10039,7 @@ mod layout_grid_tests {
     }
 
     /// A hidden grid and a hidden frame draw nothing; present mode is a chrome
-    /// switch and the grid still draws (§15 D750). The guides reach the same ruling
-    /// through `rulers::guides_on`, so this case is gated here too.
+    /// switch and the grid still draws.
     /// flip: reinstate `if self.present { return; }` → fails at "present mode is a chrome switch"
     #[test]
     fn a_hidden_grid_and_a_hidden_frame_draw_nothing_and_present_mode_draws_anyway() {
@@ -10320,9 +10075,8 @@ mod layout_grid_tests {
         );
     }
 
-    /// *View ▸ Show layout grid* (§15 D755) is an outer gate that hides the bands
-    /// without writing `LayoutGrid::visible` (the per-grid eye is saved), and back on
-    /// restores them.
+    /// *View ▸ Show layout grid* is an outer gate that hides the bands without
+    /// writing `LayoutGrid::visible`, and back on restores them.
     /// flip: write over `LayoutGrid::visible` → fails at "the switch left the document alone"
     #[test]
     fn the_workspace_switch_hides_every_band_and_spends_no_per_grid_state() {
@@ -10397,8 +10151,8 @@ mod layout_grid_tests {
         );
     }
 
-    /// The overlay reads the scrub buffer (on `OndinApp`, not the panel), so the
-    /// bands move with the number under the hand.
+    /// The overlay reads the scrub buffer, so the bands move with the number
+    /// under the hand.
     /// flip: drop the buffer read → fails at "the in-flight count is what is drawn"
     #[test]
     fn the_bands_follow_a_scrub_that_has_not_been_committed() {
@@ -10422,8 +10176,7 @@ mod layout_grid_tests {
         // The scrub has committed nothing yet.
         assert_eq!(app.session.doc.get(frame).unwrap().grids()[0].count, 4);
 
-        // A buffer naming a different frame is not this frame's; membership in the
-        // list, since the panel writes to a selection.
+        // A buffer naming a different frame is not this frame's.
         app.in_flight.grid_scrub = Some((
             vec![app.session.doc.root()],
             0,
@@ -10433,9 +10186,8 @@ mod layout_grid_tests {
     }
 }
 
-/// A selected grid container's track lines (§15 D921): their arithmetic in
-/// `track_lines`, and that `draw_grid_tracks` puts them over the right box, only
-/// while the container is selected, and follows a resize's preview.
+/// A selected grid container's track lines: `track_lines`' arithmetic, and that
+/// `draw_grid_tracks` puts them over the right box while selected.
 #[cfg(test)]
 mod grid_track_tests {
     use super::*;
@@ -10487,7 +10239,7 @@ mod grid_track_tests {
         ]))
         .expect("build the fixture");
         app.session.adopt_document(doc, None);
-        // The canvas the size of `AREA`: the lines are cut to the view (§15 D946).
+        // The canvas the size of `AREA`: the lines are cut to the view.
         app.canvas_px = (800, 600);
         (app, frame)
     }
@@ -10521,9 +10273,9 @@ mod grid_track_tests {
         app.to_screen(Point::new(x, 0.0), AREA, 1.0).x
     }
 
-    /// A selected grid draws a line at each column edge and a band in its gap; an
-    /// unselected one draws nothing until an item is moved; under an Alt-drag a
-    /// copied container's lines ride the copy and a copied item's container stays.
+    /// A selected grid draws a line per column edge and a band in its gap; an
+    /// unselected one nothing until an item moves; under an Alt-drag a copied
+    /// container's lines ride the copy and a copied item's container stays.
     /// flip: apply the offset to every subject → fails at "an item's container stays"
     #[test]
     fn a_selected_grid_draws_its_column_edges_and_gap() {
@@ -10542,7 +10294,7 @@ mod grid_track_tests {
         }
         assert_eq!(bands, 1, "one column gap, and no row gap");
 
-        // An item draws nothing until moved, then its container's lines (the drop writes a cell).
+        // An item draws nothing until moved, then its container's lines.
         let item = app.session.doc.get(frame).unwrap().children()[0];
         app.session.selection.set(vec![item]);
         assert_eq!(drawn(&app, &ctx), (Vec::new(), 0), "an item at rest");
@@ -10691,8 +10443,8 @@ mod grid_track_tests {
         app.session
             .set_preview(&Transaction(vec![Operation::SetTransform {
                 id: frame,
-                // Carried 305 right to stay in view (§15 D946) and put the turned row
-                // edges off every column edge.
+                // 305 right to stay in view and put the turned row edges off every
+                // column edge.
                 transform: Affine::translate((305.0, 0.0))
                     * Affine::rotate(std::f64::consts::FRAC_PI_2),
             }]));
@@ -10747,7 +10499,7 @@ mod grid_track_tests {
     }
 
     /// Under an inspector edit's hold, the lines stay for a scrub of the container's
-    /// own layout and go for any other, and return on release (§15 D925).
+    /// own layout and go for any other, and return on release.
     /// flip: the hold hides every subject → fails at "a gap scrub keeps them"; ignore the hold → "an opacity scrub hides them"
     #[test]
     fn a_layout_scrub_keeps_the_lines_and_any_other_hides_them() {
@@ -10787,9 +10539,8 @@ mod grid_track_tests {
         assert_eq!(drawn(&app, &ctx).0.len(), 4, "and they are back on release");
     }
 
-    /// While an item is moved, its container's lines are the grid the drop is aimed
-    /// against (§15 D946): the drawn column under the moved centre is the one the
-    /// drop writes.
+    /// While an item is moved, its container's lines are the grid the drop reads:
+    /// the drawn column under the moved centre is the one the drop writes.
     /// flip: read the container from `ov.laid_grid` → fails at "the drawn column under the centre is the one the drop writes"
     #[test]
     fn a_moved_items_lines_are_the_grid_its_drop_reads() {
@@ -10870,9 +10621,9 @@ mod grid_track_tests {
         assert_eq!(area[0], 1, "and the drop wrote the first column");
     }
 
-    /// A grid's lines cost what is on screen (§15 D946): a few hundred shapes at
-    /// 256×, none far off, dash phase fixed under a pan, and no layout pass
-    /// (`GRIDS_LAID`, §15 D951) for an off-screen container.
+    /// A grid's lines cost what is on screen: a few hundred shapes at 256×, dash
+    /// phase fixed under a pan, and no layout pass (`GRIDS_LAID`) for an
+    /// off-screen container.
     /// flip: `dashed_in_view` returns `[a, b]` → fails at "a few hundred at 256×"; cut starts at `t0` → "whole periods from the top"; container cull off → "and no layout pass for it either"
     #[test]
     fn the_lines_are_cut_to_the_view_and_hold_their_dashes_still() {
@@ -10951,7 +10702,7 @@ mod pivot_marker_tests {
     }
 
     /// The two weights are different glyphs (a tint would not survive small sizes)
-    /// and both fit the grab radius: the glyph is centred, so half its box is the reach.
+    /// and both fit the grab radius.
     #[test]
     fn the_two_marker_weights_differ_and_both_fit_the_grab_radius() {
         let editable = marker(Marker::Editable);
@@ -11021,8 +10772,8 @@ mod paste_text_tests {
         );
     }
 
-    /// A root, a frame in it, a group in the frame, a rect in the group, and a second
-    /// rect sitting straight on the canvas. Returns them in that order.
+    /// A root, a frame, a group in the frame, a rect in the group, and a rect
+    /// straight on the canvas, returned in that order.
     fn nested() -> (Document, [NodeId; 5]) {
         let mut ids = ondin_core::IdSource::new(1);
         let root = ids.mint();
@@ -11057,7 +10808,7 @@ mod paste_text_tests {
         (doc, [root, frame, group, deep, loose])
     }
 
-    /// A selected frame answers with itself, and a layer inside one with its frame (§15 D221).
+    /// A selected frame answers with itself, and a layer inside one with its frame.
     /// flip: seed the walk from `parent()` → fails at the first assertion only
     #[test]
     fn the_frame_a_paste_is_aimed_at_is_the_one_the_selection_is_or_is_inside() {
@@ -11092,14 +10843,13 @@ mod paste_text_tests {
         );
     }
 
-    /// A panel Paste lands above the clicked row, which is `+ 1` (§15 D226); the two
-    /// `None` cases are what the fallback in `paste_clipboard_beside` rests on.
+    /// A panel Paste lands above the clicked row, which is `+ 1`; the two `None`
+    /// cases are what the fallback in `paste_clipboard_beside` rests on.
     /// flip: `position(id)` without `+ 1` → fails at all four slot assertions
     #[test]
     fn a_panel_paste_lands_in_the_slot_above_the_clicked_row() {
         let (doc, [root, frame, group, deep, loose]) = nested();
 
-        // The fixture: root holds [frame, loose]; frame holds [group]; group holds [deep].
         assert_eq!(
             doc.get(root).map(|n| n.children().to_vec()),
             Some(vec![frame, loose])
@@ -11129,8 +10879,8 @@ mod paste_text_tests {
         );
     }
 
-    /// The box is centred, not the node's origin: default text's trimmed origin sits
-    /// 4.54 units above its box (a 24pt line is `55.11 × 17.46`).
+    /// The box is centred, not the node's origin (default text's trimmed origin
+    /// sits 4.54 units above its box).
     /// flip: drop the `box_offset` term → the first assertion passes, the second is 4.54 out
     #[test]
     fn a_pasted_layer_centres_its_box_and_not_its_origin() {
@@ -11276,8 +11026,7 @@ mod drop_label_tests {
     }
 
     /// The desktop cursor maps into egui space at a scale factor of 1.5, where the
-    /// wrong order of scaling and subtracting differs (x 233.3 against 200): a client
-    /// area at 100,50 points and a cursor at 450,375 physical land at 200,200.
+    /// wrong order of scaling and subtracting differs.
     #[test]
     fn the_desktop_cursor_lands_in_egui_space_at_a_scale_factor_that_is_not_one() {
         let inner = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 600.0));
@@ -11395,7 +11144,7 @@ mod autopan_tests {
         );
     }
 
-    /// Which gestures auto-pan and which are exempt, `Drag::Guide` and `PointRotate` included (§15 D760).
+    /// Which gestures auto-pan and which are exempt, `Drag::Guide` and `PointRotate` included.
     /// flip: drop `PointRotate` or `Guide` from the `matches!` → fails naming that case
     #[test]
     fn panning_and_rotating_do_not_autopan() {
@@ -11514,10 +11263,9 @@ mod autopan_tests {
 
 #[cfg(test)]
 mod text_gesture {
-    //! The egui behaviour the Text tool's gestures rest on (§15 D170):
-    //! `normal_mode_input` plants a node on `resp.clicked()` and begins a create on
-    //! `resp.drag_started()`, which are exclusive only because egui reports a press
-    //! as either. The routing itself is read, not tested.
+    //! The egui behaviour the Text tool's gestures rest on: `normal_mode_input`
+    //! plants a node on `resp.clicked()` and begins a create on
+    //! `resp.drag_started()`, exclusive only because egui reports a press as either.
 
     use super::MIN_CREATE_PX;
     use eframe::egui;
@@ -11576,13 +11324,11 @@ mod text_gesture {
     }
 
     /// egui's drag threshold (6px) sits at or above `MIN_CREATE_PX`, so no gesture
-    /// falls between the two; asserted as a relationship so raising `MIN_CREATE_PX`
-    /// fails here. A drag that goes out and comes back is the one the text arm plants
-    /// a caret for.
+    /// falls between the two; raising `MIN_CREATE_PX` fails here.
     #[test]
     fn egui_starts_a_drag_only_past_the_distance_a_create_needs() {
         let at = egui::pos2(100.0, 100.0);
-        // The largest move egui still calls a click, and the smallest it calls a drag.
+        // The largest move egui calls a click, and the smallest it calls a drag.
         let click_only = 6.0_f32;
         let drags = 6.5_f32;
         let (c, s, _) = gesture(at, &[egui::pos2(100.0 + click_only, 100.0)]);
@@ -11597,8 +11343,7 @@ mod text_gesture {
         );
     }
 
-    /// **A press is a click or a drag, never both.** Two gestures: one that does not
-    /// move at all, and one that moves far.
+    /// **A press is a click or a drag, never both.**
     #[test]
     fn a_press_is_reported_as_a_click_or_a_drag_and_never_both() {
         let at = egui::pos2(100.0, 100.0);
@@ -11615,8 +11360,7 @@ mod text_gesture {
             "and must not also be a click, or the Text tool would plant twice"
         );
 
-        // Out and back is a drag too: `finish_drag` has no box and no click was
-        // reported, so the text release arm is what acts on it.
+        // Out and back is a drag too, which the text release arm acts on.
         let (clicked, started, stopped) =
             gesture(at, &[egui::pos2(160.0, 100.0), egui::pos2(100.5, 100.0)]);
         assert!(started && stopped, "out and back is still a drag");
@@ -11626,13 +11370,12 @@ mod text_gesture {
 
 #[cfg(test)]
 mod crop_chrome_tests {
-    //! Image editing's chrome (§15 D269): these pin the shapes `crop_chrome` returns,
-    //! not where it is called from, which no test can observe.
+    //! Image editing's chrome: these pin the shapes `crop_chrome` returns, not where
+    //! it is called from.
 
     use super::*;
 
-    /// The window, 100×60 at (20, 30) in screen space, corners clockwise from the
-    /// top-left as `Handle::CORNERS` gives them.
+    /// The window, 100×60 at (20, 30), corners clockwise from the top-left.
     fn window() -> Vec<egui::Pos2> {
         vec![
             egui::pos2(20.0, 30.0),
@@ -11653,8 +11396,8 @@ mod crop_chrome_tests {
             .collect()
     }
 
-    /// All four sides carry dashes, asserted per side (a count is satisfied by three
-    /// sides), at a weight no lighter than the handles.
+    /// All four sides carry dashes, asserted per side, at a weight no lighter than
+    /// the handles.
     #[test]
     fn the_crop_window_is_dashed_on_all_four_sides() {
         let w = window();
@@ -11752,7 +11495,7 @@ mod crop_chrome_tests {
         assert_eq!(rects, 4, "the handles did not change");
         assert_eq!(paths, 1, "the picture's outline is one closed path");
 
-        // Hollow: a filled handle covers the corner it places (§15 D14).
+        // Hollow: a filled handle covers the corner it places.
         for s in &shapes {
             if let egui::Shape::Rect(r) = s {
                 assert_eq!(
@@ -11768,8 +11511,8 @@ mod crop_chrome_tests {
 
 #[cfg(test)]
 mod origin_field_tests {
-    //! The canvas origin fields' two decisions, the readout (`origin_percent`) and
-    //! the write (`origin_pivot`), which must be inverses (§15 D247, D252).
+    //! The canvas origin fields' readout (`origin_percent`) and write
+    //! (`origin_pivot`), which must be inverses.
     use super::*;
     use ondin_core::kurbo::Size;
 
@@ -11781,7 +11524,7 @@ mod origin_field_tests {
     }
 
     /// What a field shows is what typing it back asks for, so a scrub's identity
-    /// edit is a no-op; the box is offset from the local origin, as a group's is.
+    /// edit is a no-op; the box is offset from the local origin.
     /// flip: measure from `0` rather than `box_.x0` → the top-left shows −25%/25%
     #[test]
     fn the_shown_percentage_and_the_typed_one_are_inverses() {
@@ -11831,8 +11574,8 @@ mod origin_field_tests {
         );
     }
 
-    /// A dragged marker lands on a whole percent, the value the fields would produce
-    /// (§15 D253); the nine snap positions survive the rounding.
+    /// A dragged marker lands on a whole percent, the value the fields would
+    /// produce; the nine snap positions survive the rounding.
     /// flip: round to one decimal → passes the nine, fails the shown string ("30")
     #[test]
     fn a_dragged_origin_lands_on_a_whole_percent() {
@@ -11859,8 +11602,8 @@ mod origin_field_tests {
             );
         }
 
-        // An arbitrary spot comes back whole, asserted on the string the field paints:
-        // the stored fraction round-trips only to within float error (42.00000000000001).
+        // Asserted on the string the field paints: the stored fraction round-trips
+        // only to within float error.
         let shown = crate::ui::number(2);
         let (px, py) = round_trip(Point::new(box_.x0 + 23.8, box_.y0 + 16.932));
         assert_eq!(shown(px.expect("x"), 0..=2), "30");
@@ -11893,7 +11636,7 @@ mod origin_field_tests {
 
 #[cfg(test)]
 mod origin_pill_tests {
-    //! The origin pill's two measurements, its width and its row height (§15 D253).
+    //! The origin pill's width and its row height.
     use super::*;
     use eframe::egui;
 
@@ -11906,7 +11649,7 @@ mod origin_pill_tests {
     }
 
     /// The pill holds the widest value the fields can show, `-31.25%` (the fields
-    /// are unclamped), asserted as a relationship to the pill's chrome.
+    /// are unclamped).
     /// flip: `ORIGIN_FIELD_W` back to 62 → the two-decimal cases fail, `100%` passes
     #[test]
     fn the_number_has_room_for_the_widest_value_the_fields_can_show() {
@@ -11934,7 +11677,7 @@ mod origin_pill_tests {
     }
 
     /// The pill row is exactly as tall as a pill, so the pills hang where the size
-    /// badge does (`horizontal` centres content in the theme's 24pt `interact_size`).
+    /// badge does.
     /// flip: drop the `interact_size` line → the row measures 24
     #[test]
     fn the_pill_row_is_exactly_as_tall_as_a_pill() {
@@ -11990,9 +11733,8 @@ mod origin_pill_tests {
 
 #[cfg(test)]
 mod overlay_claim {
-    //! The egui behaviour the canvas's origin fields rest on (§15 D252): the fields
-    //! stay open while the canvas works around them, so the press must resolve to
-    //! the topmost layer by itself, which is pinned against egui directly.
+    //! The egui behaviour the canvas's origin fields rest on: a press must resolve
+    //! to the topmost layer by itself, pinned against egui directly.
 
     use eframe::egui;
 
@@ -12016,8 +11758,8 @@ mod overlay_claim {
                     ..Default::default()
                 },
                 |ui| {
-                    // The overlay first, the hostile order: in the app it is created after
-                    // the canvas, so this tests the area rather than registration order.
+                    // The overlay first, the hostile order, so this tests the area
+                    // rather than registration order.
                     egui::Area::new(egui::Id::new("overlay"))
                         .order(egui::Order::Foreground)
                         .fixed_pos(over.min)
@@ -12065,8 +11807,7 @@ mod overlay_claim {
     }
 
     /// `layer_id_at` names the area under the pointer, so `wheel_input` can take the
-    /// wheel back from an area that otherwise swallows it (§15 D254); the pills move
-    /// with the shape, so a rect would be a frame stale.
+    /// wheel back from an area that swallows it.
     /// flip: ask for a layer id no area was created with → the exemption never matches
     #[test]
     fn the_layer_under_the_pointer_is_nameable() {
@@ -12115,9 +11856,8 @@ mod overlay_claim {
     }
 
     /// A press on an `Area` does not reach the canvas beneath it, so pressing an
-    /// origin field cannot start a marquee. It is the `Area` that shields, whatever
-    /// its order or sense; the same rect interacted in the canvas's own `Ui` does
-    /// not. A press just outside must reach the canvas, or the harness delivered nothing.
+    /// origin field cannot start a marquee. A press just outside must reach the
+    /// canvas, or the harness delivered nothing.
     #[test]
     fn an_overlay_takes_the_press_from_the_canvas_beneath() {
         let over = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(120.0, 20.0));
@@ -12210,10 +11950,8 @@ mod arrow_claim_tests {
 
 #[cfg(test)]
 mod headless_app_tests {
-    //! Assertions against a real headless `OndinApp` (§15 D303), which swaps a wgpu
-    //! device, font threads and the preferences file for inert ones. `resize_opts`
-    //! and `resize_tx` are the subject: the `Target::Selection` arm reads the
-    //! selection off `self` and has no free-function twin.
+    //! Assertions against a real headless `OndinApp`, which swaps a wgpu device,
+    //! font threads and the preferences file for inert ones.
     use super::*;
     use ondin_core::kurbo::Size;
 
@@ -12225,7 +11963,7 @@ mod headless_app_tests {
     }
 
     /// Two 100×100 rects side by side, their union spanning (0,0)–(300,100);
-    /// `pub(super)` so `autopan_ownership_tests` shares the fixture (§15 D579).
+    /// `pub(super)` so `autopan_ownership_tests` shares the fixture.
     pub(super) fn app_with_two_rects(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(1);
@@ -12255,7 +11993,7 @@ mod headless_app_tests {
         (app, a, b)
     }
 
-    /// An `OndinApp` can be built without a GPU (§15 D303).
+    /// An `OndinApp` can be built without a GPU.
     #[test]
     fn the_app_builds_headless_and_holds_a_document() {
         let ctx = egui::Context::default();
@@ -12264,15 +12002,14 @@ mod headless_app_tests {
             app.session.doc.get(a).map(|n| n.kind()),
             Some(&rect(100.0, 100.0))
         );
-        // The decode cache is real even with no device (§15 D179).
+        // The decode cache is real even with no device.
         assert!(
             app.canvas.images().is_empty(),
             "nothing has been decoded yet"
         );
     }
 
-    /// `Shift` inverts the proportion lock rather than setting it (an exclusive-or),
-    /// as the inspector's chain tooltip promises.
+    /// `Shift` inverts the proportion lock rather than setting it (an exclusive-or).
     #[test]
     fn shift_inverts_the_proportion_lock_rather_than_setting_it() {
         let ctx = egui::Context::default();
@@ -12299,9 +12036,8 @@ mod headless_app_tests {
         }
     }
 
-    /// A multi-selection resize scales every member about the shared box: the union
-    /// is 300 × 100 and the drag doubles it, so the far rect must move (200 to 400)
-    /// as well as grow; resizing each member in place would leave it at 200.
+    /// A multi-selection resize scales every member about the shared box, so the
+    /// far rect must move (200 to 400) as well as grow.
     #[test]
     fn dragging_a_corner_of_a_multi_selection_scales_the_whole_box() {
         let ctx = egui::Context::default();
@@ -12330,9 +12066,8 @@ mod headless_app_tests {
         );
     }
 
-    /// A skewing set's frame leans instead of inflating (§15 D324): asserted on the
-    /// corners, since a width grows either way. The bottom pair (the held side) stays
-    /// put and the top pair slides by the same amount.
+    /// A skewing set's frame leans instead of inflating: the bottom pair (the held
+    /// side) stays put and the top pair slides by the same amount.
     /// flip: drop the `Drag::Skew` arm from `selection_handles` → fails at the held side (`BottomLeft` moves)
     #[test]
     fn a_skewing_selections_frame_leans_rather_than_inflating() {
@@ -12350,7 +12085,6 @@ mod headless_app_tests {
         };
 
         let before = corners(&app);
-        // The fixture: two 100-wide rects 200 apart, so an upright 300-wide union.
         let union = app
             .session
             .resolved
@@ -12417,9 +12151,8 @@ mod headless_app_tests {
         );
     }
 
-    /// A turning set's frame turns with it, keeping its 300×100 size (§15 D325),
-    /// through `Drag::selection_frame`; asserted on side lengths and diagonals, which
-    /// an axis-aligned bounding box cannot keep.
+    /// A turning set's frame turns with it, keeping its 300×100 size, through
+    /// `Drag::selection_frame`.
     /// flip: `Drag::selection_frame` answers `None` for a rotation → the sides come back 236.6 and 309.8
     #[test]
     fn a_turning_selections_frame_turns_and_keeps_its_size() {
@@ -12490,7 +12223,7 @@ mod headless_app_tests {
     }
 
     /// The frame keeps its orientation after release and gives it up when the
-    /// selection changes (§15 D326), driven through the real `finish_drag`.
+    /// selection changes, driven through the real `finish_drag`.
     /// flip: drop `set_frame` from the skew release arm → the frame squares up; `Selection::frame` ignores its stored ids → the last assertion; compose with `IDENTITY` → the first of two gestures is lost
     #[test]
     fn a_sets_frame_outlives_the_gesture_and_dies_with_the_selection() {
@@ -12553,7 +12286,7 @@ mod headless_app_tests {
     }
 
     /// Deselecting and reselecting the same pair must not resurrect the old
-    /// orientation (§15 D326): `clear()` only makes the stored ids stop matching, so
+    /// orientation: `clear()` only makes the stored ids stop matching, so
     /// `crate::session::Selection::forget_frame` runs on every mutator.
     /// flip: drop `forget_frame()` from `set` → fails here and in the sibling test; from `clear` alone changes nothing (defence in depth)
     #[test]
@@ -12606,9 +12339,8 @@ mod headless_app_tests {
         );
     }
 
-    /// The size pill sits on the same oriented box as the handles (§15 D326):
-    /// `badge_placement`'s box is the one `selection_frame_box` answers, not an
-    /// upright re-derivation.
+    /// The size pill sits on the same oriented box as the handles, not an upright
+    /// re-derivation.
     #[test]
     fn the_size_pill_measures_the_frame_the_handles_are_on() {
         let ctx = egui::Context::default();
@@ -12671,8 +12403,6 @@ mod headless_app_tests {
                 .children();
             assert_eq!(kids.len(), 4, "{label}: two originals and two copies");
             let at = |id: NodeId| kids.iter().position(|c| *c == id).expect("in the parent");
-            // Each copy is the child immediately above its own original, so the two
-            // originals cannot both be below both copies.
             assert_eq!(
                 at(b) - at(a),
                 2,
@@ -12748,8 +12478,8 @@ mod headless_app_tests {
     }
 
     /// A lone line wears no box handles, but a line in a set does (the rule is
-    /// "lone", not "line"). The outline guard in `draw_canvas` is unobservable on a
-    /// line a test can author, because `line_ends` is matched first.
+    /// "lone", not "line"). The outline guard in `draw_canvas` is unobservable,
+    /// because `line_ends` is matched first.
     #[test]
     fn a_lone_line_gets_no_selection_chrome_but_a_line_in_a_set_does() {
         let ctx = egui::Context::default();
@@ -12793,7 +12523,7 @@ mod headless_app_tests {
     }
 
     /// The size badge refuses a lone line on its own `lone_line` guard, separate
-    /// from `selection_handles`; driven at the method, whose `Option` is the observable.
+    /// from `selection_handles`.
     #[test]
     fn a_lone_line_gets_no_size_badge_and_a_rect_does() {
         let ctx = egui::Context::default();
@@ -12854,8 +12584,7 @@ mod headless_app_tests {
     /// armed and the pen bias on, which is what `pen_scope` asks for.
     fn app_editing_an_open_path(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let (mut app, a, _) = app_with_two_rects(ctx);
-        // The fixture's rects sit at (0,0) and (200,0); the path is put clear of
-        // both so "nothing under the pointer" is a state this document has.
+        // Clear of the rects, so "nothing under the pointer" is a reachable state.
         let mut p = ondin_core::kurbo::BezPath::new();
         p.move_to((0.0, 0.0));
         p.line_to((100.0, 0.0));
@@ -12877,8 +12606,7 @@ mod headless_app_tests {
         app.tool = Tool::Node;
         app.pen_bias = true;
         app.session.selection.set_one(id);
-        // The other rect is still there and still selectable, which is what the
-        // fourth case below needs. Kept out of the selection deliberately.
+        // The rects stay selectable, which the fourth case below needs.
         let _ = a;
         (app, id)
     }
@@ -12904,8 +12632,6 @@ mod headless_app_tests {
             matches!(app.pen_verb(at(-400.0, 400.0)), Some(PenVerb::NewSubpath)),
             "empty canvas starts a new run — the case the whole verb exists for"
         );
-        // The fixture's first rect covers (0,0)–(100,100) in world space, which is
-        // nowhere near the path.
         assert!(
             app.pen_verb(Point::new(50.0, 50.0)).is_none(),
             "another layer under the pointer still means *switch subject*; a pen \
@@ -12914,8 +12640,8 @@ mod headless_app_tests {
     }
 
     /// Auto-scroll moves the view toward the pointer, and `autopan_total` records
-    /// exactly what the camera did. Driven through `RawInput` with a press first,
-    /// since `interact_pointer_pos` is `None` otherwise and the test would assert nothing.
+    /// exactly what the camera did. A press comes first: `interact_pointer_pos` is
+    /// `None` otherwise.
     #[test]
     fn reaching_the_canvas_edge_scrolls_the_view_toward_the_pointer() {
         let ctx = egui::Context::default();
@@ -12949,8 +12675,7 @@ mod headless_app_tests {
         // A warm-up frame: egui resolves a press against last frame's widget rects.
         let middle = egui::pos2(400.0, 300.0);
         frame(&ctx, vec![egui::Event::PointerMoved(middle)], &mut app);
-        // Middle of the canvas: the press starts the interaction, and nothing here
-        // is in either band.
+        // Middle of the canvas: in neither band.
         frame(
             &ctx,
             vec![egui::Event::PointerMoved(middle), press(middle, true)],
@@ -12998,8 +12723,8 @@ mod headless_app_tests {
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
         let at = egui::pos2(400.0, 300.0);
 
-        // Two frames per case (egui resolves hover against last frame's rects); read
-        // the `FullOutput`, since `ctx.output()` afterwards is the next frame's empty one.
+        // Two frames per case (egui resolves hover against last frame's rects), read
+        // from the `FullOutput`.
         let icon = |app: &mut OndinApp, keys: Vec<egui::Key>| {
             let mut last = egui::CursorIcon::Default;
             for _ in 0..2 {
@@ -13052,8 +12777,7 @@ mod headless_app_tests {
             "a pan in hand outranks arming: a closed hand"
         );
 
-        // Space held part-way through drawing a rectangle. `reshape_create` claims
-        // it, so nothing will pan and the cursor must not say otherwise.
+        // `reshape_create` claims Space mid-draw, so nothing pans.
         app.drag = Drag::Create {
             id: a,
             parent: app.session.doc.root(),
@@ -13087,9 +12811,7 @@ mod headless_app_tests {
         assert!(app.cancel_gesture(&ctx), "a canvas drag is a witness");
         assert!(matches!(app.drag, Drag::None), "and it is dropped");
 
-        // The one that blinks is egui's, so the interesting cases are ours with
-        // `dragged_id` empty — which is what it is here, no widget having been
-        // touched.
+        // The one that blinks is egui's; ours are tested with `dragged_id` empty.
         assert!(ctx.dragged_id().is_none(), "the fixture has no egui drag");
         app.in_flight.session_scrub = Some((a, Default::default(), Default::default()));
         assert!(
@@ -13099,8 +12821,8 @@ mod headless_app_tests {
         );
         assert!(app.in_flight.session_scrub.is_none(), "and it is taken");
 
-        // Neither of these shows through `has_gesture_preview`: `SetExports` never
-        // reaches `set_preview` and `SetGuidePosition` leaves `overrides` empty.
+        // Neither shows through `has_gesture_preview`: `SetExports` never reaches
+        // `set_preview` and `SetGuidePosition` leaves `overrides` empty.
         app.in_flight.export_quality_scrub = Some((0, 0.8));
         assert!(
             app.cancel_gesture(&ctx),
@@ -13131,14 +12853,12 @@ mod headless_app_tests {
         crate::theme::install(&ctx);
         let (mut app, a, _) = app_with_two_rects(&ctx);
 
-        // Stand in for a live session's preview the way `preview_session` does.
         let session_tx = Transaction(vec![Operation::SetOpacity {
             id: a,
             opacity: 0.5,
         }]);
 
-        // One `run_ui` that allocates a widget, drives it to focused, then to
-        // unfocused — which is `engaged` then `was_engaged`, the disengage arm.
+        // Focused, then unfocused: `engaged` then `was_engaged`, the disengage arm.
         let drive = |app: &mut OndinApp, escape: bool, session: bool| {
             let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 60.0));
             let mut id = None;
@@ -13215,8 +12935,8 @@ mod headless_app_tests {
     }
 
     /// A valved field engaged over a live text session previews over the session's
-    /// content, and its release winds back to the session alone. A `SetOpacity`
-    /// stands in for the session's `SetText`, which would need a font.
+    /// content, and its release winds back to the session alone (a `SetOpacity`
+    /// stands in for `SetText`, which needs a font).
     #[test]
     fn a_valved_edit_engaged_over_a_live_text_session_previews_over_it_not_instead_of_it() {
         let ctx = egui::Context::default();
@@ -13233,8 +12953,8 @@ mod headless_app_tests {
         }]);
 
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 60.0));
-        // One frame of a valved field, `focused` deciding `engaged` and `escape`
-        // deciding which of the valve's two disengage arms is taken.
+        // One frame of a valved field: `focused` decides `engaged`, `escape` which
+        // disengage arm is taken.
         let frame = |app: &mut OndinApp, focused: bool, escape: bool, tx: Transaction| {
             let events = match escape {
                 true => vec![egui::Event::Key {
@@ -13309,8 +13029,7 @@ mod headless_app_tests {
             "with the gesture gone, only the session's preview is left"
         );
 
-        // The commit arm: the field's value goes to the document and the session's
-        // preview survives that commit.
+        // The commit arm: the session's preview survives it.
         frame(&mut app, true, false, field_tx.clone());
         frame(&mut app, false, false, field_tx);
         assert_eq!(
@@ -13325,8 +13044,8 @@ mod headless_app_tests {
         );
     }
 
-    /// A pointer far from a path does not walk its segments (counted, not timed),
-    /// while one on or within slop of the ink still finds its segment.
+    /// A pointer far from a path does not walk its segments (counted), while one
+    /// within slop of the ink still finds its segment.
     /// flip: drop the hull reject in `node_grab` → fails at the far-pointer count (1 against 0).
     #[test]
     fn a_pointer_away_from_a_path_does_not_walk_it() {
@@ -13338,8 +13057,7 @@ mod headless_app_tests {
         let mut doc = Document::new(root);
         let id = ids.mint();
 
-        // A long open path along y = 0; anchors 100 apart so a pointer on the ink is
-        // not within slop of an anchor and reaches the segment walk.
+        // Anchors 100 apart, so a pointer on the ink reaches the segment walk.
         let mut p = ondin_core::kurbo::BezPath::new();
         p.move_to(Point::new(0.0, 0.0));
         for i in 1..4096 {
@@ -13383,8 +13101,7 @@ mod headless_app_tests {
             "and so does one within grabbing distance of it"
         );
 
-        // The claim, counted: the walk runs for a pointer near the path and not
-        // for one far from it.
+        // Counted: the walk runs for a pointer near the path, not far from it.
         let walks = |at: Point| {
             let before = app.segment_walks.get();
             let _ = app.node_grab(at);
@@ -13455,8 +13172,7 @@ mod headless_app_tests {
     }
 
     /// Cancelling a drag that auto-scrolled puts the view back; only the
-    /// auto-scroll is undone (a zoom or wheel-pan stays), and the accumulator is
-    /// built by real auto-scrolling.
+    /// auto-scroll is undone (a zoom or wheel-pan stays).
     #[test]
     fn cancelling_a_drag_that_auto_scrolled_puts_the_view_back() {
         let ctx = egui::Context::default();
@@ -13554,8 +13270,7 @@ mod headless_app_tests {
                 name: None,
             }]))
             .expect("add the text node");
-        // No world point: `begin_edit_text` then selects all, which gives a caret
-        // with somewhere to go in both directions.
+        // No world point: it selects all, so the caret has room to move.
         app.begin_edit_text(Some(text), None);
 
         let caret = |app: &OndinApp| {
@@ -13614,8 +13329,8 @@ mod headless_app_tests {
         );
     }
 
-    /// `Ctrl+Shift+C` centres the paragraph without writing the clipboard (read from
-    /// `platform_output.commands`); the bare `Ctrl+C` control still copies.
+    /// `Ctrl+Shift+C` centres the paragraph without writing the clipboard; the bare
+    /// `Ctrl+C` control still copies.
     /// flip: drop `&& !shift` from the two arms → fails at the first assertion.
     #[test]
     fn ctrl_shift_c_centres_the_paragraph_without_copying() {

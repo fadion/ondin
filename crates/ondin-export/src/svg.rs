@@ -606,13 +606,45 @@ fn framing_of(
     Some(img.image.framing(frame, entry.width, entry.height))
 }
 
+/// Whether an image `brush` leaves part of the frame to its pad extend — a crop
+/// outside `0..1`, which the canvas fills with the edge pixels and a `<pattern>`
+/// with the next repeat. Fit's letterbox is clipped instead, so it does not count.
+fn crops_past_picture(
+    doc: &Document,
+    node: &Node,
+    res: &Resolved,
+    id: NodeId,
+    brush: &Brush,
+) -> bool {
+    let Some(f) = framing_of(doc, node, res, id, brush) else {
+        return false;
+    };
+    let (Brush::Image(img), Some(frame)) = (brush, paint_frame(node, res, id)) else {
+        return false;
+    };
+    let Some(entry) = doc.image(&img.image.id) else {
+        return false;
+    };
+    if f.extend != Extend::Pad || f.clip.is_some() {
+        return false;
+    }
+    let source = Rect::new(0.0, 0.0, f64::from(entry.width), f64::from(entry.height));
+    let picture = f.transform.transform_rect_bbox(source);
+    let tol = 1e-6;
+    picture.x0 > frame.x0 + tol
+        || picture.y0 > frame.y0 + tol
+        || picture.x1 < frame.x1 - tol
+        || picture.y1 < frame.y1 - tol
+}
+
 /// One image definition: a `<pattern>` in the node's own local space, wrapping
 /// the encoded original as an `<image>`.
 ///
 /// The tile is the intrinsic pixel box [`ondin_core::ImageRef::framing`] maps
 /// *from*, so the whole framing is the one `patternTransform`. A pattern tiles
 /// where the canvas pads, which differs only for a hand-edited crop outside
-/// `0..1`; Fit's letterbox is cut by [`with_image_clip`].
+/// `0..1` ([`crops_past_picture`] reports it); Fit's letterbox is cut by
+/// [`with_image_clip`].
 ///
 /// `alpha` is the sampler's (§5.5a); `filter` is an [`adjust_def`] id. Both are
 /// the node's, so they sit on the `<use>` of the shared `<image>`
@@ -1026,6 +1058,11 @@ fn emit_node(
     let fx = ondin_render::effects::any_ink(&drawn_fx) && defs.has(&effect_id(id));
     // Under the visibility guard: the report is a claim about the file.
     report_node(node, &drawn_fx, fx, report);
+    let paint = doc.resolved_paint(id, node.paint());
+    if visible_fills(&paint).any(|(_, f)| crops_past_picture(doc, node, res, id, f.brush.drawn())) {
+        report
+            .approximate("a crop past the picture's edge, repeated where the canvas stretches it");
+    }
     let wrap_pad = "  ".repeat(depth);
     let depth = depth + usize::from(fx);
     if fx {

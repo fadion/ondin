@@ -15,6 +15,7 @@
 mod css;
 mod dom;
 pub mod html;
+mod image;
 mod tokens;
 mod walk;
 

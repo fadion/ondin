@@ -9,6 +9,7 @@
 use super::Report;
 use super::css::{self, px};
 use super::dom::{Child, Classes, Element};
+use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
 use ondin_core::container::{
@@ -17,6 +18,7 @@ use ondin_core::container::{
 };
 use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
+use ondin_core::peniko::ImageQuality;
 use ondin_core::variable::VarId;
 use ondin_core::{
     Brush, BrushSource, Document, EffectKind, Fill, Node, NodeId, NodeKind, Resolved, Stroke,
@@ -182,12 +184,28 @@ impl Walk<'_> {
                 return Some("stroked text".into());
             }
         } else if !matches!(kind, NodeKind::Group) {
+            // `image-rendering` is the element's, so its pictures must agree on it.
+            let mut nearest = fills.iter().filter_map(|f| match f.brush.drawn() {
+                Brush::Image(img) => Some(img.sampler.quality == ImageQuality::Low),
+                _ => None,
+            });
+            if let Some(first) = nearest.next()
+                && nearest.any(|n| n != first)
+            {
+                return Some("pictures sampled two ways".into());
+            }
             for f in &fills {
-                if css::background_layer(f.brush.drawn(), size).is_none() {
-                    return Some(match f.brush.drawn() {
-                        Brush::Image(_) => "an image fill".into(),
-                        _ => "a gradient CSS cannot draw".into(),
-                    });
+                match f.brush.drawn() {
+                    Brush::Image(img) => {
+                        if let Err(why) = image::layer(doc, img, size) {
+                            return Some(why);
+                        }
+                    }
+                    b => {
+                        if css::background_layer(b, size).is_none() {
+                            return Some("a gradient CSS cannot draw".into());
+                        }
+                    }
                 }
             }
             match strokes.as_slice() {
@@ -580,22 +598,38 @@ impl Walk<'_> {
         // The resolved list for the tier's checks, the stored one for bindings;
         // resolving keeps every item in place.
         let stored = node.paint();
+        let mut pixelated = false;
+        let mut pictured = false;
         let layers: Vec<String> = paint
             .fills
             .iter()
             .zip(&stored.fills)
             .filter(|(f, _)| f.visible)
             .rev()
-            .filter_map(|(f, s)| match s.brush {
+            .filter_map(|(f, s)| match &s.brush {
                 BrushSource::Bound { var, alpha } => {
-                    let c = self.tokens.color(var, alpha);
+                    let c = self.tokens.color(*var, *alpha);
                     Some(format!("linear-gradient({c}, {c})"))
+                }
+                BrushSource::Literal(Brush::Image(img)) => {
+                    let layer = image::layer(self.doc, img, size).ok()?;
+                    if !self.assets.iter().any(|(p, _)| *p == layer.path)
+                        && let Some(bytes) = image::file(self.doc, &img.image)
+                    {
+                        self.assets.push((layer.path.clone(), bytes));
+                    }
+                    pixelated |= layer.pixelated;
+                    pictured = true;
+                    Some(layer.css)
                 }
                 BrushSource::Literal(_) => css::background_layer(f.brush.drawn(), size),
             })
             .collect();
         if !layers.is_empty() {
             el.set("background", layers.join(", "));
+        }
+        if pixelated {
+            el.set("image-rendering", "pixelated");
         }
         let kind = self.res.used_kind_of(node);
         let Some((s, raw)) = paint
@@ -645,6 +679,10 @@ impl Walk<'_> {
             }
         } else {
             el.set("box-sizing", "border-box");
+            // A picture is framed on the whole box, not inside the borders.
+            if pictured {
+                el.set("background-origin", "border-box");
+            }
             let [t, r, b, l] = side_widths(sides, s.width);
             // A bound width is every drawn side's, but for custom widths, which
             // carry their own numbers.

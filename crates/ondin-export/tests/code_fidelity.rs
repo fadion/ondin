@@ -1104,6 +1104,259 @@ fn variables_match_the_canvas_in_every_mode() {
     }
 }
 
+/// A 24×16 picture with a hard quadrant in each corner over a smooth ramp, so a
+/// mirror, a turn or a misplaced crop all move something visible.
+fn picture_png() -> Vec<u8> {
+    let (w, h) = (24u32, 16u32);
+    let mut rgba = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let px = match (x < 6, y < 4, x >= w - 6, y >= h - 4) {
+                (true, true, _, _) => [220, 40, 40, 255],
+                (_, true, true, _) => [40, 160, 60, 255],
+                (true, _, _, true) => [40, 70, 220, 255],
+                (_, _, true, true) => [240, 200, 40, 255],
+                _ => [(x * 10) as u8, (y * 15) as u8, 160, 255],
+            };
+            rgba.extend_from_slice(&px);
+        }
+    }
+    ondin_export::png::encode_rgba8(&rgba, w, h)
+}
+
+/// Image fills as backgrounds: each of the four fits, a turned, mirrored picture
+/// whose file is baked upright, and a crop under per-side borders.
+///
+/// flip: Fill written as `contain` → 155 at the first rect; the bake skipping the
+/// mirror → 149 at the fifth; `background-origin` left at `padding-box` → 50.8 at
+/// the bordered one.
+#[test]
+fn image_fills_match_the_canvas() {
+    use ondin_core::{
+        ImageBrush, ImageEntry, ImageFit, ImageFormat, ImageId, ImageOrient, ImageRef, ImageSource,
+    };
+    let mut d = Doc::new();
+    let id = ImageId("photo".into());
+    d.apply(vec![Operation::AddImage {
+        id: id.clone(),
+        entry: ImageEntry {
+            source: ImageSource::Embedded(picture_png().into()),
+            format: ImageFormat::Png,
+            width: 24,
+            height: 16,
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 502.0, 100.0, "Board");
+    let fills = |r: ImageRef| {
+        vec![Brush::Image(ImageBrush {
+            image: r,
+            sampler: Default::default(),
+        })]
+    };
+    let crop = ImageRef {
+        fit: ImageFit::Crop,
+        crop: ondin_core::kurbo::Rect::new(0.1, 0.2, 0.6, 0.9),
+        ..ImageRef::new(id.clone())
+    };
+    let base = ImageRef::new(id);
+    let cases = [
+        ImageRef {
+            fit: ImageFit::Fill,
+            ..base.clone()
+        },
+        ImageRef {
+            fit: ImageFit::Fit,
+            ..base.clone()
+        },
+        ImageRef {
+            fit: ImageFit::Crop,
+            crop: ondin_core::kurbo::Rect::new(0.1, 0.2, 0.6, 0.9),
+            ..base.clone()
+        },
+        ImageRef {
+            fit: ImageFit::Tile,
+            tile_scale: 1.5,
+            ..base.clone()
+        },
+        ImageRef {
+            orient: ImageOrient {
+                quarters: 1,
+                mirrored: true,
+            },
+            ..base.clone()
+        },
+    ];
+    for (i, r) in cases.into_iter().enumerate() {
+        let rect = d.rect(f, 10.0 + i as f64 * 82.0, 10.0, 72.0, 80.0, 0.0);
+        d.fills(rect, fills(r));
+    }
+    // Borders do not move the picture: it is framed on the whole box.
+    let bordered = d.rect(f, 420.0, 10.0, 72.0, 80.0, 0.0);
+    d.fills(bordered, fills(crop.clone()));
+    d.stroke(
+        bordered,
+        4.0,
+        StrokeAlign::Inside,
+        StrokeSides::Custom {
+            top: 10.0,
+            right: 0.0,
+            bottom: 2.0,
+            left: 6.0,
+        },
+    );
+    let (doc, res) = d.done();
+    holds("images", &doc, &res);
+    let export = html_of(&doc, &res, &[f]);
+    assert!(
+        export.positioned.is_empty(),
+        "all CSS: {:?}",
+        export.positioned
+    );
+    assert!(export.file("assets/photo.png").is_some());
+    assert!(
+        export.file("assets/photo-r1m.png").is_some(),
+        "the turned file is baked"
+    );
+}
+
+/// A GIF ships as a PNG of its first frame, the frame the canvas draws, since a
+/// browser would animate the GIF; and two pictures sampled differently on one
+/// layer go to SVG, `image-rendering` being the element's.
+#[test]
+fn a_gif_is_baked_and_mixed_sampling_is_svg() {
+    use ondin_core::peniko::{ImageQuality, ImageSampler};
+    use ondin_core::{ImageBrush, ImageEntry, ImageFormat, ImageId, ImageRef, ImageSource};
+    let frame = image::RgbaImage::from_pixel(4, 4, image::Rgba([200, 30, 30, 255]));
+    let mut gif = Vec::new();
+    image::codecs::gif::GifEncoder::new(&mut gif)
+        .encode_frame(image::Frame::new(frame))
+        .expect("a gif");
+    let mut d = Doc::new();
+    let id = ImageId("anim".into());
+    d.apply(vec![Operation::AddImage {
+        id: id.clone(),
+        entry: ImageEntry {
+            source: ImageSource::Embedded(gif.into()),
+            format: ImageFormat::Gif,
+            width: 4,
+            height: 4,
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+    let fill = |quality| {
+        Brush::Image(ImageBrush {
+            image: ImageRef::new(id.clone()),
+            sampler: ImageSampler {
+                quality,
+                ..Default::default()
+            },
+        })
+    };
+    let one = d.rect(f, 10.0, 10.0, 30.0, 30.0, 0.0);
+    d.fills(one, vec![fill(ImageQuality::Low)]);
+    let two = d.rect(f, 50.0, 10.0, 30.0, 30.0, 0.0);
+    d.fills(two, vec![fill(ImageQuality::Low), fill(ImageQuality::High)]);
+    d.apply(vec![Operation::SetName {
+        id: two,
+        name: "Mixed".into(),
+    }]);
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let png = export
+        .file("assets/anim.png")
+        .expect("the GIF is written as PNG");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    assert!(export.file("assets/anim.gif").is_none());
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains("image-rendering: pixelated"), "{css}");
+    assert_eq!(
+        export.positioned,
+        vec!["layer “Mixed”: pictures sampled two ways, written as inline SVG"]
+    );
+}
+
+/// A crop past the picture's edge, which the canvas fills with the edge pixels,
+/// has neither a CSS nor an SVG form: it is a PNG, and reported.
+///
+/// flip: the SVG writer not reporting `crops_past_picture` → `approximated` is
+/// empty and the layer goes out as an SVG that repeats the picture.
+#[test]
+fn a_crop_past_the_picture_is_a_reported_png() {
+    use ondin_core::{
+        ImageBrush, ImageEntry, ImageFit, ImageFormat, ImageId, ImageRef, ImageSource,
+    };
+    let mut d = Doc::new();
+    let id = ImageId("photo".into());
+    d.apply(vec![Operation::AddImage {
+        id: id.clone(),
+        entry: ImageEntry {
+            source: ImageSource::Embedded(picture_png().into()),
+            format: ImageFormat::Png,
+            width: 24,
+            height: 16,
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+    let r = d.rect(f, 10.0, 10.0, 72.0, 80.0, 0.0);
+    d.fills(
+        r,
+        vec![Brush::Image(ImageBrush {
+            image: ImageRef {
+                fit: ImageFit::Crop,
+                crop: ondin_core::kurbo::Rect::new(-0.2, 0.0, 0.8, 1.0),
+                ..ImageRef::new(id)
+            },
+            sampler: Default::default(),
+        })],
+    );
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    assert_eq!(
+        export.approximated,
+        vec![
+            "layer “Rect”: a crop past the picture's edge, repeated where the canvas stretches it, so it is a PNG"
+        ]
+    );
+    assert!(export.file("assets/rect.png").is_some());
+}
+
+/// A picture fill under 100% goes to SVG, CSS backgrounds having no opacity of
+/// their own. Not compared in a browser: the CPU renderer cannot draw an image
+/// paint with alpha (`vello_common` leaves it unimplemented).
+#[test]
+fn a_faint_picture_fill_is_written_as_svg() {
+    use ondin_core::{ImageBrush, ImageEntry, ImageFormat, ImageId, ImageRef, ImageSource};
+    let mut d = Doc::new();
+    let id = ImageId("photo".into());
+    d.apply(vec![Operation::AddImage {
+        id: id.clone(),
+        entry: ImageEntry {
+            source: ImageSource::Embedded(picture_png().into()),
+            format: ImageFormat::Png,
+            width: 24,
+            height: 16,
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 100.0, 100.0, "Board");
+    let r = d.rect(f, 10.0, 10.0, 72.0, 80.0, 0.0);
+    d.fills(
+        r,
+        vec![Brush::Image(ImageBrush {
+            image: ImageRef::new(id),
+            sampler: ondin_core::peniko::ImageSampler {
+                alpha: 0.5,
+                ..Default::default()
+            },
+        })],
+    );
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    assert_eq!(
+        export.positioned,
+        vec!["layer “Rect”: a picture fill under 100%, written as inline SVG"]
+    );
+}
+
 /// A text's bound colour and a single side's bound width are `var()` too, not the
 /// default mode's numbers.
 #[test]

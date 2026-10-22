@@ -37,7 +37,6 @@ export*).
   rows.
 - **React and Vue emitters, with components** (D1098 (1), (2), (9)).
 - **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
-- **Image fills as `background-image`** — they go to inline SVG today.
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
   has not run on CI's Linux and macOS legs; unverified until it does.
 - **Text styles as classes** — revisit once real exports exist (D1098 (7)).

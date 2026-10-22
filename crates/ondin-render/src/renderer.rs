@@ -2,9 +2,6 @@
 //!
 //! The drawing boundary itself is [`crate::scene::ScenePainter`]: the
 //! document→scene walk is written once and each backend implements the painter.
-//! An earlier design also named a `trait Renderer` plus a `RenderTarget`
-//! object; both sat here unimplemented while `ScenePainter` did the work, so
-//! they were removed rather than left as a decoy (§15, D2).
 
 use ondin_core::kurbo::Affine;
 use ondin_core::peniko::Color;
@@ -36,38 +33,25 @@ pub struct NodeOverride {
     /// Replacement kind — geometry edits and text content/style changes.
     pub kind: Option<NodeKind>,
     pub paint: Option<Paint>,
-    /// Replacement effect stack (§5.3a).
-    ///
-    /// **A field of its own rather than something folded into `paint`**, because
-    /// the model keeps them apart for a reason the preview inherits: effects live
-    /// on containers, which have no `Paint` for this to have ridden along inside.
-    ///
-    /// The whole stack, like the operation that produces it — so scrubbing one
-    /// shadow's blur previews through the same door as reordering two of them,
-    /// and there is one description of the edit rather than one per field
-    /// (§15 D245 is the bug where a field has no door at all).
+    /// Replacement effect stack (§5.3a), the whole stack as the operation carries it.
+    /// Kept apart from `paint` because effects live on containers, which have no `Paint`.
     pub effects: Option<Vec<ondin_core::Keyed<ondin_core::Effect>>>,
     pub opacity: Option<f32>,
     pub visible: Option<bool>,
     /// Re-shaped layout, when the kind change affected text.
     pub text: Option<TextLayout>,
-    /// Replacement insets (`ondin_core::container`, §15 D871) — read only by
-    /// [`RenderOverrides::relayout`], which turns them into the transform and kind
-    /// above. Nothing draws from this field directly.
+    /// Replacement insets, read only by [`RenderOverrides::relayout`], which turns
+    /// them into the transform and kind above. Nothing draws from this directly.
     pub insets: Option<ondin_core::Insets>,
-    /// Replacement layout (`ondin_core::container::Display`) — `Some(None)` takes
-    /// one away. Read only by the flex relayout, like `insets`.
+    /// Replacement layout — `Some(None)` takes one away. Read only by the flex relayout.
     pub display: Option<Option<ondin_core::container::Display>>,
-    /// The gap and padding bindings a `SetSpacingVars` earlier in the preview
-    /// set — read only by a later `SetDisplay`, which resolves with them rather
-    /// than judging the bindings kept against the document's, as the commit's
-    /// `keep_spacing_bindings` leaves a transaction that sets them alone (§15
-    /// D1090).
+    /// The gap and padding bindings an earlier `SetSpacingVars` in the preview set.
+    /// A later `SetDisplay` resolves with them, as the commit's
+    /// `keep_spacing_bindings` leaves a transaction that sets them alone.
     pub spacing_vars: Option<ondin_core::SpacingVars>,
-    /// Replacement layout-item properties, read only by the flex relayout (which
-    /// lays a grid as well, §15 D914).
+    /// Replacement layout-item properties, read only by the flex relayout.
     pub item: Option<ondin_core::container::LayoutItem>,
-    /// The box a group with a layout is given under this preview (§15 D869) —
+    /// The box a group with a layout is given under this preview —
     /// `Resolved::used_frame`'s twin, written by the flex relayout.
     pub frame: Option<ondin_core::kurbo::Size>,
 }
@@ -82,24 +66,13 @@ pub struct Ghost {
     pub parent: NodeId,
     /// Where among `parent`'s children it lands — the index its `InsertSubtree`
     /// names, so the preview stacks it where the commit will.
-    ///
-    /// **This used to be ignored, and ghosts simply drew last.** That was right for
-    /// as long as every caller appended: an Alt-drag copy is the thing under the
-    /// pointer and it did land on top. Once a copy started landing *immediately above
-    /// its original* rather than above everything, "last" became a different z-order
-    /// from the commit's, which is exactly the divergence a preview may not have.
     pub index: usize,
     pub node: GhostNode,
 }
 
 /// One node of a ghost subtree: everything the scene walk reads off a `Node`,
-/// for artwork there is no `Node` for yet.
-///
-/// A ghost used to be a single childless leaf, which is all a shape tool needs
-/// and is why it was one — but it also meant no gesture could preview a copy of
-/// a *group* or a *frame*, and that single limitation is what forced Alt-drag to
-/// move the original and leave the copy behind (§15, D40). Carrying children
-/// costs one recursive walk and removes the whole class of restriction.
+/// for artwork there is no `Node` for yet. It carries children so a gesture can
+/// preview a copy of a group or a frame.
 #[derive(Clone, Debug)]
 pub struct GhostNode {
     pub id: NodeId,
@@ -107,33 +80,20 @@ pub struct GhostNode {
     pub transform: Affine,
     pub kind: NodeKind,
     pub paint: Paint,
-    /// The effect stack this ghost draws with (§5.3a).
-    ///
-    /// Not an `Option` as it is on [`NodeOverride`]: a ghost is the whole node
-    /// rather than a patch over one, so "no effects" is the empty stack and there
-    /// is no third state meaning "ask the document". An Alt-drag copy therefore
-    /// carries its original's shadow from the first frame, which is what the copy
-    /// will have once it commits.
+    /// The effect stack this ghost draws with (§5.3a). Not an `Option` as on
+    /// [`NodeOverride`]: a ghost is the whole node, so "no effects" is the empty stack.
     pub effects: Vec<ondin_core::Keyed<ondin_core::Effect>>,
     pub text: Option<TextLayout>,
-    /// A `Boolean` ghost's combined outline, in its own local space — the ghost's
-    /// share of what `Resolved` keeps for a committed boolean.
-    ///
-    /// **Evaluated once, when the subtree is built**, beside the shaped text below
-    /// and for the identical reason: the scene walk must be *handed* derived geometry
-    /// rather than compute it, and path arithmetic per frame is worse than shaping
-    /// per frame. Alt-dragging a copy of a boolean group used to preview as its
-    /// *operands* — the shapes the operation is supposed to consume, drawn because
-    /// the ghost walk had no result to draw and no reason to stop.
+    /// A `Boolean` ghost's combined outline in its own local space, evaluated once
+    /// when the subtree is built: the scene walk is handed derived geometry, not
+    /// asked to compute it per frame.
     pub path: Option<kurbo::BezPath>,
     pub opacity: f32,
     pub visible: bool,
     /// Whether this ghost clips its children, as `Node::clip` does.
     pub clip: bool,
-    /// Whether this ghost masks the ghosts beside it, as `Node::mask` does.
-    ///
-    /// Only ever read of a **child** ghost, by the parent's walk — a run is a fact
-    /// about a list of siblings, and the root of a ghost forest has none.
+    /// Whether this ghost masks the ghosts beside it, as `Node::mask` does. Read
+    /// only of a child ghost, by the parent's walk.
     pub mask: bool,
     /// How it masks, as `Node::mask_mode` does. Read only when `mask` is set.
     pub mask_mode: ondin_core::MaskMode,
@@ -149,18 +109,13 @@ impl GhostNode {
             transform,
             kind,
             paint: Paint::default(),
-            // A shape dragged out with a tool has no effects for the same reason
-            // it has no fills of its own yet: nothing has been authored on it.
             effects: Vec::new(),
             text,
-            // No shape tool makes a boolean: it takes two layers that already exist,
-            // so there is no childless boolean for this to be `Some` for.
+            // No shape tool makes a boolean or a mask: both designate existing layers.
             path: None,
             opacity: 1.0,
             visible: true,
             clip: false,
-            // No shape tool makes a mask either: it is a designation put on a
-            // layer that already exists, so a leaf being dragged out is never one.
             mask: false,
             mask_mode: ondin_core::MaskMode::default(),
             children: Vec::new(),
@@ -186,29 +141,15 @@ impl GhostNode {
 /// Uncommitted gesture state, drawn without touching the `Document`
 /// (invariant 5).
 ///
-/// This is what makes a drag cheap. The alternative the app used to run —
-/// clone the document, apply the pending transaction, re-resolve — is correct
-/// but costs O(nodes) per frame *including re-shaping every text node*, where
-/// the gesture itself touches a handful. Overrides cost O(nodes touched).
+/// Cost is O(nodes touched) rather than a document clone and re-resolve per frame.
+/// Built from the very transaction the gesture will commit ([`Self::from_transaction`]),
+/// so the preview and the commit cannot drift.
 ///
-/// Built from the very transaction the gesture will eventually commit
-/// ([`Self::from_transaction`]), so what is previewed and what is committed
-/// cannot drift: there is only one description of the edit.
-///
-/// The structural operations that only *add* artwork become a [`Ghost`]: the
-/// single-node `CreateNode` a shape tool emits, and the `InsertSubtree` an
-/// Alt-drag carries. The ones that move or remove existing nodes — delete and
-/// reparent — are deliberately **not** representable, because a patch cannot say
-/// "this node is somewhere else in the tree now"; `from_transaction` returns
-/// `None` for those rather than silently previewing something different from what
-/// will be committed.
-///
-/// **A reorder is representable, and has been since flex** (§15 D877): the node
-/// stays in its parent, so what changes is one parent's child *order*, which is a
-/// patch on that parent — [`Self::children_of`]. All three readers of an order
-/// take it: the scene walk's paint order, the layout view's flow order — the one a
-/// drag-to-reorder in a flex row needs — and a boolean's operand order, which is a
-/// `Subtract`'s base.
+/// Operations that only add artwork become a [`Ghost`]. Delete and reparent are not
+/// representable (a patch cannot say "somewhere else in the tree"), so
+/// `from_transaction` returns `None` for them. A reorder is a patch on the parent's
+/// child order ([`Self::children_of`]), read by the scene walk, the layout view and
+/// a boolean's operand order (a `Subtract`'s base) (§15 D877).
 #[derive(Default, Debug)]
 pub struct RenderOverrides {
     nodes: FxHashMap<NodeId, NodeOverride>,
@@ -230,60 +171,31 @@ pub struct RenderOverrides {
     /// Outlines for the booleans this gesture reshapes, keyed by node — the
     /// preview's twin of `Resolved`'s cache. See [`Self::reevaluate_booleans`].
     boolean: FxHashMap<NodeId, kurbo::BezPath>,
-    /// A ground being dragged in the picker. Not part of the scene walk — the
-    /// backdrop is the clear colour, handed to the renderer separately — so it
-    /// rides here only to reach the caller that passes it.
+    /// A ground being dragged in the picker. Not part of the scene walk (the
+    /// backdrop is the clear colour), so it rides here only to reach the caller.
     canvas_background: Option<Color>,
-    /// Artwork drawn to *explain* a mode rather than to preview an edit — today
-    /// the faded whole picture behind a layer being cropped (§15 D268).
+    /// Artwork drawn to *explain* a mode rather than preview an edit — today the
+    /// faded whole picture behind a layer being cropped — glued to the `NodeId`
+    /// layer that [`Self::unsnapped`] needs.
     ///
-    /// **A ghost, because it is the same problem** — ink with no `Node` behind it,
-    /// wanted at a particular depth in one parent's z-order — and a separate field,
-    /// because it is not a preview and must not be counted as one. That is the
-    /// whole reason it is not simply pushed onto `ghosts`: [`Self::is_empty`] is
-    /// how the app asks "is a gesture in flight" (`Session::has_gesture_preview`),
-    /// and a mode that answered yes for as long as it was open would have
-    /// `cancel_gesture` unwinding a drag nobody started on every right-click.
-    ///
-    /// **Re-installed every frame, from one place** (`OndinApp::draw_canvas`), so
-    /// it survives a commit without the sprawl `preview_guide` pays for: a
-    /// `set_preview` replaces the whole of this struct, and a second call every
-    /// call site owes is a call site that will one day not owe it.
-    ///
-    /// **The `NodeId` is the layer it is glued to**, and it is here rather than
-    /// implied because [`Self::unsnapped`] needs it — see there.
+    /// A ghost in a field of its own: [`Self::is_empty`] answers "is a gesture in
+    /// flight" (`Session::has_gesture_preview`), and a mode must not read as one.
+    /// Re-installed every frame from `OndinApp::draw_canvas`, since `set_preview`
+    /// replaces this whole struct.
     chrome: Option<(NodeId, Ghost)>,
-    /// A text layout the caller has **already shaped**, for one node, live only
-    /// while [`Self::from_transaction_shaped`] is building (§15 D592,
-    /// `[A4-L4-01]`).
+    /// A text layout the caller has **already shaped** for one node, live only
+    /// while [`Self::from_transaction_shaped`] builds.
     ///
-    /// 🚨 **A construction argument wearing a field, and that is deliberate.**
-    /// [`Self::set_kind`] is reached from eleven arms of [`Self::absorb`] through
-    /// [`Self::patch_text`]; threading a parameter to all of them to say something
-    /// about *one* node would put the same `None` at ten call sites. It is set
-    /// before the absorb loop, read by `set_kind`, and cleared before the value is
-    /// returned, so no `RenderOverrides` a caller can observe ever holds one.
-    ///
-    /// **What it is for.** A live text session is a commit ahead of the document
-    /// by construction — one `SetText` at `finish_text_edit`, §9.3 — so
-    /// `set_kind`'s *"re-shape only when the text actually changed"* guard can
-    /// never fire for it, and every keystroke shaped the whole node a **second**
-    /// time. Measured in release on one node, mean of 20 inserts: at 16,000
-    /// characters, 4.76 ms in `TextEdit::reshape` and 5.44 ms again here; at
-    /// 64,000, 19.0 and 21.8. `TextEdit` has the answer already — `text_layout()`
-    /// is the `extract` half without the shape, 0.63 ms at 16k — and this is how
-    /// it reaches the preview.
+    /// A construction argument wearing a field on purpose: [`Self::set_kind`] is
+    /// reached from many arms of [`Self::absorb`], and a live text session is a
+    /// commit ahead of the document, so `set_kind`'s "re-shape only when the text
+    /// changed" guard can never fire for it. Cleared before the value is returned.
     prepared_text: Option<(NodeId, TextLayout)>,
 }
 
 impl RenderOverrides {
     /// Whether this preview says nothing — no patched node, no ghost, no ground.
-    ///
-    /// **[`Self::chrome`] is deliberately not a term.** This is the question "is
-    /// an edit in flight", asked by the fast paths that skip re-deriving bounds
-    /// and by `Session::has_gesture_preview`, and a mode's explanatory artwork is
-    /// an answer to a different one. The scene walk asks
-    /// [`Self::ghosts_of`] instead, which is why nothing draws less for this.
+    /// [`Self::chrome`] is deliberately not a term: this asks "is an edit in flight".
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
             && self.ghosts.is_empty()
@@ -292,36 +204,28 @@ impl RenderOverrides {
     }
 
     /// `parent`'s children in the order this preview gives them, where it
-    /// reorders them (§15 D877) — `None` for the committed order.
+    /// reorders them — `None` for the committed order.
     pub fn children_of(&self, parent: NodeId) -> Option<&[NodeId]> {
         self.order.get(&parent).map(Vec::as_slice)
     }
 
     /// Every flex item this preview **drags**, with where its container will lay
-    /// it on release: its world transform there and its box in its own space
-    /// (§15 D877).
+    /// it on release: its world transform there and its box in its own space.
     ///
-    /// **The insertion indicator's one source.** A dragged item is drawn under the
-    /// pointer, so the layout's own answer for it — its slot in the reordered flow,
-    /// which [`Self::flex_relayout`] computes and does not apply — is otherwise
-    /// thrown away. The canvas outlines it, so the gap the siblings open has the
-    /// shape of what will drop into it.
+    /// The insertion indicator's one source: the item is drawn under the pointer, so
+    /// the slot [`Self::flex_relayout`] computes for it is otherwise discarded.
     pub fn landings(&self) -> &[(NodeId, Affine, kurbo::Rect)] {
         &self.landing
     }
 
     /// The grid container `id` as **this preview** lays it — its tracks and its
     /// items' areas ([`ondin_core::container::laid_grid`] over the patched
-    /// fields), `None` where it is not a grid. With nothing patched it is the
-    /// grid the committed pass lays — which `build::laid_grid`, laying through the
-    /// stored document, is not for a grid pinned in a parent drawn at another size
-    /// than it stores (§15 D933, D942).
+    /// fields), `None` where it is not a grid.
     ///
-    /// **The canvas's track lines' one source** (§15 D921), so a container being
-    /// resized re-lays its lines against the box the gesture is drawing rather
-    /// than the one on disk — the half-previewing shape
-    /// §15 D391 found in the layout grids, where the box re-flowed and its bands
-    /// stayed put.
+    /// The canvas's track lines' one source, so a container being resized re-lays
+    /// them against the box the gesture draws rather than the one on disk.
+    /// `build::laid_grid` lays through the stored document and differs for a grid
+    /// pinned in a parent drawn at another size than it stores.
     pub fn laid_grid(
         &self,
         doc: &Document,
@@ -348,30 +252,12 @@ impl RenderOverrides {
 
     /// Draw `id` outside its parent's clip, in its own place in the tree.
     ///
-    /// **This is what makes dragging a layer out of a frame look like dragging it
-    /// out of a frame.** A clipping artboard limits its children to its own box,
-    /// and a child being dragged past that edge is still a child until the gesture
-    /// commits — so it drew cut off at the frame's boundary, with only the selection
-    /// box outside to say where it really was, and it snapped into view at the
-    /// instant of release.
-    ///
-    /// **Set exactly when the drop would take the layer out of that frame**, which
-    /// is what makes the drawing worth trusting: a shape rendering in full is the
-    /// tool saying "release now and this leaves the frame", and a shape still
-    /// clipped is it saying the opposite. The threshold is therefore not this
-    /// layer's to choose — it belongs to `canvas::frame_covering`, which owns what
-    /// the release does (more than half the layer's area inside a frame keeps it).
-    ///
-    /// **Z-order is untouched.** An escaping layer is drawn where its siblings
-    /// expect it, not on top: which layer covers which is information the user is
-    /// steering by, and a dragged shape that jumped to the front would lose it. So
-    /// the parent's clip layer is closed and reopened *around* this child rather
-    /// than the child being deferred to the end of the walk.
-    ///
-    /// Set from the *gesture*, never derived from the overrides. "Has a transform
-    /// override" is not the same question: a resize gives a child one too, and a
-    /// child growing past its frame's edge is meant to stay clipped — deriving it
-    /// would trade this pop-on-release for the mirror image of it.
+    /// Set exactly when the drop would take the layer out of that frame (the
+    /// threshold belongs to `canvas::frame_covering`), so a shape rendering in full
+    /// means "release now and it leaves". Z-order is untouched: the parent's clip
+    /// layer is closed and reopened around this child. Set from the gesture, never
+    /// derived from overrides — a resize also gives a child a transform override
+    /// and must stay clipped.
     pub fn escape_clip(&mut self, id: NodeId) {
         self.escaping.insert(id);
     }
@@ -382,12 +268,8 @@ impl RenderOverrides {
     }
 
     /// The ghosts are leaving their parent frame too, like [`Self::escape_clip`].
-    ///
-    /// **The Alt-drag copy needs this as much as the layer does**: the ghost hangs
-    /// off the original's parent, so a copy carried out of a clipping frame was cut
-    /// off at exactly the same edge. One switch for all of them, because the only
-    /// gesture that carries a ghost *and* moves it is Alt-drag — a shape being
-    /// created is being drawn inside its frame, where clipping is the truth.
+    /// One switch for all of them: only Alt-drag carries and moves a ghost, and a
+    /// shape being created is drawn inside its frame, where clipping is the truth.
     pub fn escape_clip_ghosts(&mut self) {
         self.escaping_ghosts = true;
     }
@@ -397,12 +279,8 @@ impl RenderOverrides {
         self.escaping_ghosts
     }
 
-    /// The ghosts hanging off `parent` — the preview's, and the chrome one.
-    ///
-    /// One iterator rather than two readers, so everything that already reasons
-    /// about ghosts covers the chrome one for free: the z-ordered draw loop, and
-    /// the cull that must not return before reaching a ghost drawn clear of every
-    /// committed bound.
+    /// The ghosts hanging off `parent` — the preview's, and the chrome one — in one
+    /// iterator so the z-ordered draw loop and the cull cover both.
     pub fn ghosts_of(&self, parent: NodeId) -> impl Iterator<Item = &Ghost> {
         self.ghosts
             .iter()
@@ -411,11 +289,8 @@ impl RenderOverrides {
     }
 
     /// Install (or clear) the mode's explanatory artwork — see [`Self::chrome`].
-    /// `glued` is the layer the ghost is a continuation of, and the ghost itself.
-    ///
-    /// Takes an `Option` rather than having a companion "clear", because the
-    /// caller runs unconditionally once a frame and the honest spelling of "no
-    /// mode is open" is the same call with nothing in it.
+    /// `glued` is the layer the ghost is a continuation of, and the ghost itself;
+    /// `None` clears it.
     pub fn set_chrome_ghost(&mut self, glued: Option<(NodeId, Ghost)>) {
         self.chrome = glued;
     }
@@ -423,46 +298,21 @@ impl RenderOverrides {
     /// Whether `id`'s box is exempt from device-pixel snapping
     /// (`scene::snapped_box_world`).
     ///
-    /// **Exactly two things are, and they are exempt *together*** (§15 D272): the
-    /// chrome ghost, and the layer it is glued to. Snapping rounds a box's edges to
-    /// the grid and then rebuilds its scale from the rounded span, so two
-    /// rectangles of different sizes round *differently* — and the crop offcut is a
-    /// continuation of the layer beneath it, drawn as a separate and much larger
-    /// rectangle. Rounding them apart slid the offcut against the picture it
-    /// belongs to by a device pixel at its far edge, changing as the crop was
-    /// dragged. Reported as exactly that.
-    ///
-    /// **Neither rounds, rather than the ghost being made to round like the
-    /// layer.** Making them *equal* is the requirement; the layer's rounding is
-    /// computed deep in the walk from the device base, so the only place the two
-    /// can be made to agree is by both opting out. What that costs is the seam
-    /// mitigation `SNAP_BOXES_TO_DEVICE_PIXELS` buys, on one layer, for as long as
-    /// somebody is looking at its crop — which is the trade that constant's own
-    /// doc describes in the other direction: snapping makes edges step rather than
-    /// glide, and a stepping edge is the thing being complained about here.
-    ///
-    /// Derived from [`Self::chrome`] rather than kept in a set of its own, so the
-    /// pair cannot come apart: there is one place that says which two boxes have
-    /// to agree, and it is the same place that creates the second one.
+    /// Exactly two things are, and together (§15 D272): the chrome ghost and the
+    /// layer it is glued to. Snapping rounds two rectangles of different sizes
+    /// differently, which slid the crop offcut against its picture by a device
+    /// pixel; the layer's rounding is computed deep in the walk, so the two agree
+    /// only by both opting out (at the cost of the seam mitigation on that layer).
+    /// Derived from [`Self::chrome`] so the pair cannot come apart.
     pub fn unsnapped(&self, id: NodeId) -> bool {
         self.chrome
             .as_ref()
             .is_some_and(|(node, g)| *node == id || g.node.id == id)
     }
 
-    /// The local transform to draw `id` with.
-    ///
-    /// **Ghosts first**, as every other reader of a ghost's fields does: `absorb`
-    /// writes a `SetTransform` aimed at a ghost into the ghost itself, so an override
-    /// entry is precisely what a ghost id does *not* have — and this used to answer
-    /// `Affine::IDENTITY` for one, having found neither an override nor a document
-    /// node. Nothing drew wrong from that (the ghost walk reads `GhostNode::transform`
-    /// directly), but a boolean evaluating over a ghost operand asks *here*.
-    ///
-    /// **Then the override, then the *used* local** (§15 D868) — where container
-    /// layout placed the node, which is the document's transform until it places
-    /// something. Not the document's: a node the gesture does not touch is drawn
-    /// where it is, and a layout can put it somewhere other than where it was typed.
+    /// The local transform to draw `id` with: a ghost's first (`absorb` writes a
+    /// ghost's `SetTransform` into the ghost, so it has no override entry), then the
+    /// override, then the *used* local, where container layout placed the node.
     pub fn transform_of(&self, doc: &Document, res: &Resolved, id: NodeId) -> Affine {
         if let Some(g) = self.ghost(id) {
             return g.transform;
@@ -476,40 +326,17 @@ impl RenderOverrides {
     /// The children `id` has as far as a boolean evaluated over it is concerned: its
     /// committed ones, plus any ghost this preview has parented to it.
     ///
-    /// **The ghost is a real operand.** Alt-dragging a copy of an operand *inside* a
-    /// boolean parents the copy to the boolean (`canvas::ClonedSubtree` lands a copy
-    /// beside its source), and on release it joins the operation — so the preview has
-    /// to combine it too, or the shape sits at its pre-drag outline and snaps on
-    /// release, which is the very report `reevaluate_booleans` exists to answer, one
-    /// gesture over.
+    /// The ghost is a real operand: an Alt-dragged copy of an operand inside a
+    /// boolean joins the operation on release, so the preview combines it too.
     ///
-    /// **Inserted at [`Ghost::index`], which is what the commit will do.** It used to
-    /// append, and that was exact twice over — ghosts drew after their parent's real
-    /// children, and `insert_subtrees` appended on commit — until a copy started
-    /// landing immediately above its original rather than above everything.
-    ///
-    /// ⚠️ **The argument that excused appending after that was measured false on
-    /// 2026-08-31** (§15 D239's amendment). It ran: `boolean::evaluate` is a left fold
-    /// in which only the *first* operand is order-sensitive, Subtract's tail being a
-    /// union and the other three commuting, so a copy that can never take slot 0 is
-    /// safe wherever else it lands. **The commuting is true of the mathematics and not
-    /// of this implementation.** Moving one operand of a twenty-circle `Exclude` to the
-    /// end of the fold changes the result by about **3% of its area** — 2,482 units of
-    /// 85,850, at an unchanged element count — because the accumulated geometry differs,
-    /// and the error grows with the operand count (0.009 at five operands, 1,654 at
-    /// twelve). `Union` and `Subtract` move by float noise; `Exclude` does not.
-    ///
-    /// So the preview was drawing a measurably different shape from the commit for an
-    /// Alt-drag into a large `Exclude`, and the fold order is now simply the commit's.
-    /// *Ascending, because that is the order `insert_subtrees` applies them in and two
-    /// ghosts landing in one parent must not swap.*
+    /// Inserted at [`Ghost::index`], ascending, which is the commit's order
+    /// (`insert_subtrees`). The fold order must match: `Exclude` over many operands
+    /// changes its result measurably when one operand moves to the end of the fold.
     fn operand_children(&self, doc: &Document, id: NodeId) -> Vec<NodeId> {
         if let Some(g) = self.ghost(id) {
             return g.children.iter().map(|c| c.id).collect();
         }
-        // The preview's order where it reorders this parent (§15 D877) — the third
-        // reader of it, beside the walk and the layout view: a `Subtract` reads its
-        // base off the first operand.
+        // A `Subtract` reads its base off the first operand, so the preview's order counts.
         let mut out = match self.children_of(id) {
             Some(order) => order.to_vec(),
             None => doc
@@ -521,8 +348,7 @@ impl RenderOverrides {
             self.ghosts_of(id).map(|g| (g.index, g.node.id)).collect();
         ghosts.sort_by_key(|(i, _)| *i);
         for (index, gid) in ghosts {
-            // Clamped rather than trusted: an index past the end is what appending
-            // always did, and is the only sane reading of "insert at 9 of 3".
+            // Clamped: an index past the end appends.
             out.insert(index.min(out.len()), gid);
         }
         out
@@ -568,22 +394,11 @@ impl RenderOverrides {
     }
 
     /// [`Self::from_transaction`] where the caller has **already shaped** one
-    /// node's text and would otherwise be paying for it twice (§15 D592,
-    /// `[A4-L4-01]`).
+    /// node's text (a live text session, whose `TextEdit` just shaped it), so the
+    /// preview does not shape it a second time per keystroke.
     ///
-    /// The one caller is a live text session: `TextEdit::reshape` has just run
-    /// parley over the edited string, and building the preview from the resulting
-    /// `SetText` ran it again from byte zero — 5.44 ms against 4.76 for a
-    /// 16,000-character node, per keystroke, none of which could produce a
-    /// different answer. `TextEdit::text_layout()` is the `extract` half of the
-    /// same work without the shape.
-    ///
-    /// ⚠️ **`shaped` must be the layout of the kind this transaction produces for
-    /// that node, or the canvas draws one thing and every measurement reads
-    /// another.** That is why the argument is a whole `TextLayout` keyed to a
-    /// `NodeId` rather than a flag: a caller cannot pass it by accident, and the
-    /// session's `text_layout()` is derived from exactly the parts its `SetText`
-    /// carries.
+    /// `shaped` must be the layout of the kind this transaction produces for that
+    /// node, or the canvas draws one thing and every measurement reads another.
     pub fn from_transaction_shaped(
         doc: &Document,
         res: &Resolved,
@@ -598,14 +413,9 @@ impl RenderOverrides {
     /// absorbed after `tx` and **laid out, never taken for the hand's own**.
     ///
     /// `tx` is the gesture: a `SetTransform` in it is where the pointer wants a
-    /// layer drawn, so [`Self::flex_relayout`] leaves a dragged item at it and
-    /// [`Self::relayout`] leaves a pinned layer placed by it. A follow is not that.
-    /// It is the main's value carried onto a copy, which the commit then draws
-    /// where the copy's own container places it — a right-pinned copy against its
-    /// instance's width, a copy's root by its own insets, a flex copy in its slot.
-    /// Read as the hand's, a pinned copy previewed at its main's local placement
-    /// and a moved flex item's copies were dragged along with it — none of which
-    /// the release delivers (`arch-scribe`, reading build step 6).
+    /// layer drawn, so [`Self::flex_relayout`] and [`Self::relayout`] leave it there.
+    /// A follow is the main's value carried onto a copy, which the commit draws
+    /// where the copy's own container places it.
     pub fn from_transaction_following(
         doc: &Document,
         res: &Resolved,
@@ -627,8 +437,7 @@ impl RenderOverrides {
         // box its container's layout has just given it.
         let dragged = out.flex_relayout(doc, res, tx);
         out.relayout(doc, res, tx);
-        // The dragged items' landings last, once every container they sit in has
-        // been placed by both passes (§15 D945).
+        // The dragged items' landings last, once both passes have placed their containers.
         for (id, placed) in dragged {
             if let Some(landing) = out.landing_of(doc, res, id, &placed) {
                 out.landing.push(landing);
@@ -639,50 +448,31 @@ impl RenderOverrides {
     }
 
     /// Re-lay, under this preview, every flex container a node it touches belongs
-    /// to — the whole chain up to the layout root, because a flex item's size moves
-    /// its siblings (§15 D875), and every layout root on the way up, which a plain
-    /// group between them hides from the outer pass (§15 D911).
+    /// to — the whole chain up to the layout root (a flex item's size moves its
+    /// siblings), and every layout root on the way up, which a plain group hides
+    /// from the outer pass.
     ///
-    /// **The preview's answer to a reflow, for flex.** `absorb` patches fields and
-    /// cannot re-run layout, so this runs `ondin_core::container::lay_out` — the
-    /// engine `Resolved` runs — over a [`PreviewView`] that reads the patched
-    /// fields, from each layout root between a touched node and its `chain_root`
-    /// inclusive, and writes what it places as
-    /// ordinary transform, kind and frame overrides. Before [`Self::relayout`], so
-    /// a pinned child is placed against the box its container's layout has just
-    /// given it.
+    /// `absorb` patches fields and cannot re-run layout, so this runs
+    /// `ondin_core::container::lay_out` over a [`PreviewView`] and writes what it
+    /// places as ordinary transform, kind and frame overrides. Runs before
+    /// [`Self::relayout`] so a pinned child is placed against its container's new box.
     ///
-    /// ⚠️ **A layer the transaction drags with `SetTransform` is skipped**: that is
-    /// where the drag wants it drawn. A *resized* item is re-laid like its
-    /// siblings, since its container can move it as its size changes — even when
-    /// the resize carries a `SetTransform` too, as a left- or top-handle one does
-    /// (§15 D877's amendment). So is a *turned* one — a `SetTransform` changing the
-    /// linear part, which the layout applies about the box centre in the slot
-    /// (§15 D896). And the
-    /// items of a layout this preview *removes* are put back by their transforms —
-    /// no pass roots at a container with no layout, so nothing else would.
+    /// A layer the transaction drags with `SetTransform` is skipped: that is where
+    /// the drag wants it. A *resized* item (even with a `SetTransform` from a left
+    /// or top handle) and a *turned* one (linear part changed, applied about the box
+    /// centre) are re-laid. Items of a layout this preview removes are put back by
+    /// their transforms, since no pass roots at a container with no layout.
     ///
-    /// **It hands back each dragged item's placement rather than composing its
-    /// landing**: `relayout` runs after it and may yet move the container, so the
-    /// landing is composed once that has run (§15 D945).
-    ///
-    /// ⚠️ **This doc was missing and `relayout`'s sat here** until 2026-09-24:
-    /// the function was inserted above `relayout` anchored on its `fn` line, which
-    /// took the whole insets paragraph and left `relayout` with none.
+    /// It hands back each dragged item's placement rather than composing its
+    /// landing: `relayout` may yet move the container.
     fn flex_relayout(
         &mut self,
         doc: &Document,
         res: &Resolved,
         tx: &Transaction,
     ) -> Vec<(NodeId, ondin_core::container::Placed)> {
-        // A layer the tool drags carries its own `SetTransform`, which is where the
-        // drag wants it drawn. A *resized* item is re-laid like its siblings: its
-        // container can move it (centred, spaced) as its size changes — and that
-        // holds when the resize carries a `SetTransform` too, as one from a left or
-        // top handle does to hold the opposite edge (§15 D877's amendment). The
-        // commit keeps the item's stored translation (`build::keep_flex_sizes`), so
-        // the layout places it; drawing it at the handle's box instead previewed a
-        // place the release does not deliver.
+        // The commit keeps a resized item's stored translation
+        // (`build::keep_flex_sizes`), so the layout places it, handle `SetTransform` or not.
         let resized: FxHashSet<NodeId> =
             tx.0.iter()
                 .filter_map(|op| match op {
@@ -690,13 +480,9 @@ impl RenderOverrides {
                     _ => None,
                 })
                 .collect();
-        // **A turn is not a drag** (§15 D896, the maintainer's ruling on an in-flow
-        // item's rotation): a `SetTransform` that changes the linear part — a
-        // rotation, a scale, a skew, a flip — is re-laid like a resize, and
-        // `item_placed` turns the item about its box centre in its slot, which is
-        // what the commit draws. Skipped as a drag it was drawn about the tool's
-        // pivot and jumped on release (§15 D877's second amendment). A move keeps
-        // the linear part and stays a drag.
+        // A turn is not a drag: a `SetTransform` that changes the linear part is
+        // re-laid like a resize, and `item_placed` turns the item about its box
+        // centre in its slot, as the commit draws. A move keeps the linear part.
         let linear = |a: Affine| {
             let [a, b, c, d, _, _] = a.as_coeffs();
             [a, b, c, d]
@@ -722,12 +508,9 @@ impl RenderOverrides {
                 .collect();
         let results = {
             let view = PreviewView { doc, ov: self, res };
-            // **Every layout root from a touched node up to its chain root**, not the
-            // chain root alone (§15 D911). The chain climbs through a plain group to
-            // the flex container it is an item of (§15 D899), and that container's
-            // pass stops at the plain group — so a layout nested inside it, which is
-            // a root of its own, went un-laid: its items kept their committed places
-            // while the commit, which lays every root it reaches, moved them.
+            // Every layout root from a touched node up to its chain root, not the chain
+            // root alone: the chain climbs through a plain group, where the outer
+            // container's pass stops, so a layout nested inside would go un-laid.
             let mut roots: Vec<NodeId> = Vec::new();
             for id in self.nodes.keys() {
                 let top = ondin_core::container::chain_root(&view, *id);
@@ -766,11 +549,9 @@ impl RenderOverrides {
             }
             results
         };
-        // **A layout taken away puts its items back.** A container whose layout this
-        // preview removes roots no pass, so nothing above re-lays its former items —
-        // and they would keep the committed flex placement showing through while
-        // the commit draws them by their transforms. Found by the preview/commit
-        // differential on exactly that edit.
+        // A layout taken away puts its items back: a container whose layout this
+        // preview removes roots no pass, so the committed flex placement would show
+        // through while the commit draws them by their transforms.
         let laid: FxHashSet<NodeId> = results.iter().map(|(id, _, _)| *id).collect();
         let released: Vec<NodeId> = self
             .nodes
@@ -800,10 +581,8 @@ impl RenderOverrides {
         let mut landings = Vec::new();
         for (id, root, placed) in results {
             if dragged.contains(&id) {
-                // Where it will land, for the insertion indicator (§15 D877) — the
-                // answer this preview computes for it and does not draw it at.
-                // Handed back rather than composed here: its container may yet be
-                // moved by this loop or by the insets pass (§15 D945).
+                // Where it will land, for the insertion indicator; handed back rather
+                // than composed, as its container may yet be moved.
                 if !root {
                     landings.push((id, placed));
                 }
@@ -816,7 +595,7 @@ impl RenderOverrides {
 
     /// One result of a layout pass written into this preview: an item's slot and
     /// size, a root's size — [`Self::flex_relayout`]'s, and [`Self::relayout`]'s
-    /// for a pinned root it re-lays (§15 D933).
+    /// for a pinned root it re-lays.
     fn apply_laid(
         &mut self,
         doc: &Document,
@@ -826,18 +605,11 @@ impl RenderOverrides {
         placed: ondin_core::container::Placed,
     ) {
         let Some(node) = doc.get(id) else { return };
-        // A root keeps where its parent puts it; an item goes where its
-        // container laid it — its stored transform when that is where, stated
-        // outright so a committed placement elsewhere does not show through.
-        //
-        // ⚠️ **"Stored" is what the pass read, which is this preview's transform
-        // where it has one** (`PreviewView::local`), not the document's.
-        // `item_placed` answers `local: None` when the slot is exactly that, and
-        // reading the document's here put the item at its committed transform
-        // instead. Nothing met it while a resized item's slot could not equal the
-        // shifted origin its tool writes; one aligned to the end of its line
-        // after a top-handle resize is laid exactly there, and previewed at its
-        // stored (300, 150) — found by the test for that resize (§15 D905).
+        // A root keeps where its parent puts it; an item goes where its container
+        // laid it, stated outright so a committed placement does not show through.
+        // "Stored" is what the pass read — this preview's transform where it has one
+        // (`PreviewView::local`), not the document's — since `item_placed` answers
+        // `local: None` when the slot is exactly that.
         if !root {
             let specified = self
                 .get(id)
@@ -845,10 +617,8 @@ impl RenderOverrides {
                 .unwrap_or_else(|| node.transform());
             self.entry(id).transform = Some(placed.local.unwrap_or(specified));
         }
-        // At its specified size — a bound width or height resolved, never the 0
-        // its literal holds (§15 D1061): an item the pass does not resize answers
-        // no kind, and the stored one drew a bound rect 0 wide in a row the
-        // preview re-laid.
+        // At its specified size — a bound width or height resolved, never the 0 its
+        // literal holds: an item the pass does not resize answers no kind.
         let Some(base) = self.current_kind(doc, id) else {
             return;
         };
@@ -874,8 +644,8 @@ impl RenderOverrides {
         placed: &ondin_core::container::Placed,
     ) -> Option<(NodeId, Affine, kurbo::Rect)> {
         let node = doc.get(id)?;
-        // `local: None` means the slot *is* the transform the pass read — the
-        // drag's own, not the document's (§15 D908, `flex_relayout`'s fallback).
+        // `local: None` means the slot *is* the transform the pass read — the drag's
+        // own, not the document's.
         let local = placed.local.unwrap_or_else(|| {
             self.get(id)
                 .and_then(|o| o.transform)
@@ -889,42 +659,30 @@ impl RenderOverrides {
                     .or_else(|| ondin_core::local_box(doc, res, id))?
             }
         };
-        // **The container where this preview draws it** (§15 D945, the release
-        // review's `[X4.2-L1-01]`): a reorder that grows or shrinks a hugging
-        // container moves it when an outer layout centres it, and the committed
-        // transform put the outline half the change away from the slot the
-        // siblings open.
+        // The container where this preview draws it: a reorder that resizes a hugging
+        // container moves it under an outer centring layout.
         let parent_world = self.world_transform(doc, res, node.parent()?)?;
         Some((id, parent_world * local, bx))
     }
 
     /// Re-place, under this preview, every pinned child whose placement it changes
-    /// — the children of a frame it resizes, and any layer whose insets it sets
-    /// (§15 D871).
+    /// — the children of a frame it resizes, and any layer whose insets it sets.
     ///
-    /// **The preview's answer to a reflow, for insets.** `absorb` patches fields
-    /// and cannot re-run layout, so without this a frame being dragged wider would
-    /// leave its right-pinned children where they were and snap them over on
-    /// release — the exact report `reevaluate_booleans` exists for, one feature
-    /// over. It runs `ondin_core::container::place`, the function `Resolved` runs,
-    /// against the preview's frame size and insets, and writes the result as
-    /// ordinary transform and kind overrides; a frame stretched this way hands its
-    /// own children the stretched size, so the walk is parents first.
+    /// `absorb` cannot re-run layout, so this runs `ondin_core::container::place`
+    /// against the preview's frame size and insets and writes ordinary transform
+    /// and kind overrides, parents first (a stretched frame hands its children the
+    /// stretched size).
     ///
-    /// ⚠️ **A layer the transaction places itself is skipped**: its own
-    /// `SetTransform` or `SetGeometry` already says where to draw it — that is how
-    /// a tool previews dragging a pinned child — and re-placing it by its old
-    /// insets would draw the drag somewhere the pointer is not. Flex has its own
-    /// pass, [`Self::flex_relayout`], run first (§15 D875); for absolute insets a
-    /// child's placement depends on its box and itself alone — except a pinned
-    /// **layout root**, which this lays out again at the size its insets give it
-    /// and whose items it places from that pass (§15 D933). A child with no insets
-    /// is left where the commit drew it, unless this preview unpinned it.
+    /// A layer the transaction places itself (`SetTransform` or `SetGeometry`) is
+    /// skipped, or the drag would be drawn away from the pointer. Flex has its own
+    /// pass, [`Self::flex_relayout`], run first. A pinned **layout root** is laid
+    /// out again at the size its insets give it, and its items placed from that. A
+    /// child with no insets is left where the commit drew it, unless this preview
+    /// unpinned it.
     fn relayout(&mut self, doc: &Document, res: &Resolved, tx: &Transaction) {
-        // Placed by the transaction: a transform, or a patch that changes the box.
-        // A corner radius or a side count does not place anything — it reshapes a
-        // kind still at its *stored* size — so a pinned layer given one is re-placed
-        // below, or a stretched layer would preview un-stretched (§15 D874).
+        // Placed by the transaction: a transform, or a patch that changes the box. A
+        // corner radius or side count reshapes a kind still at its *stored* size, so
+        // a pinned layer given one is re-placed below.
         let placed: FxHashSet<NodeId> =
             tx.0.iter()
                 .filter_map(|op| match op {
@@ -964,7 +722,7 @@ impl RenderOverrides {
                 },
             };
             // A frame's box is its size; a group with a layout's is the box the
-            // flex relayout just gave it, or the committed one (§15 D869).
+            // flex relayout just gave it, or the committed one.
             let size = match frame {
                 NodeKind::Artboard { size } => size,
                 NodeKind::Group => match self
@@ -981,29 +739,20 @@ impl RenderOverrides {
                 .get(id)
                 .and_then(|o| o.insets)
                 .unwrap_or(*node.insets());
-            // The kind this preview has given it — a new corner radius, say — else
-            // the document's; either way at its specified size, which `place`
-            // stretches from — a bound width or height resolved (§15 D1061).
+            // The kind this preview has given it, else the document's; either way at
+            // its specified size, which `place` stretches from.
             let Some(mut base) = self.current_kind(doc, id) else {
                 continue;
             };
-            // **A layer with no insets is not this pass's business** unless this
-            // preview unpinned it (§15 D933): with its kind changed it is drawn
-            // with that kind where it is, and **untouched it is drawn where the
-            // commit drew it**. This skipped only the first, so an untouched child
-            // of a resized frame fell through to `place`, which answers `None` for
-            // no insets, and was re-placed at its *stored* transform and kind — a
-            // layout root that hugs drawn at its stored size, and every item it lays
-            // piled at its stored transform, all snapping into place on release.
+            // A layer with no insets is not this pass's business unless this preview
+            // unpinned it: untouched, it is drawn where the commit drew it, not
+            // re-placed at its stored transform and kind (`place` answers `None`).
             if !insets.is_authored() && self.get(id).is_none_or(|o| o.insets.is_none()) {
                 continue;
             }
-            // **A pinned layout root is laid out again**, at the size its insets
-            // give it against the box this preview draws its parent at, and its
-            // items placed from that pass (§15 D933) — `Resolved`'s order, which
-            // lays a root before placing it. Its own size is the base `place`
-            // stretches from, as `resolve::root_used`'s is; the stored size was
-            // used, so a hugging root previewed at the size it was typed at.
+            // A pinned layout root is laid out again, `Resolved`'s order (a root is
+            // laid before it is placed). Its own size is the base `place` stretches
+            // from, as `resolve::root_used`'s is.
             let laid: Vec<(NodeId, bool, ondin_core::container::Placed)> = {
                 let view = PreviewView { doc, ov: self, res };
                 if insets.is_authored() && ondin_core::container::is_layout_root(&view, id) {
@@ -1049,10 +798,8 @@ impl RenderOverrides {
                     // Unpinned by this preview: back to where the document puts it.
                     None => (node.transform(), base.clone()),
                 };
-            // Against what would be drawn now — this preview's kind if it has one,
-            // else the committed used kind — so an absorbed kind at the stored size
-            // is always replaced by the placed one, even where the placed one
-            // happens to equal what was committed.
+            // Against what would be drawn now, so an absorbed kind at the stored size
+            // is always replaced by the placed one.
             let now = self
                 .get(id)
                 .and_then(|o| o.kind.clone())
@@ -1072,24 +819,13 @@ impl RenderOverrides {
 
     /// Re-derive the outline of every boolean above something this preview moves.
     ///
-    /// **Without this a boolean is a frame behind its own operands.** `Resolved`'s
-    /// cache is only refreshed on commit, so dragging an operand showed the shape
-    /// the boolean had *before* the drag, snapping into place on release — reported
-    /// as "the boolean is left behind and re-evaluates when I drop".
+    /// `Resolved`'s cache refreshes only on commit, so without this a boolean lags
+    /// its own operands until release. Runs once per preview build, deepest first,
+    /// so a nested boolean is evaluated before the parent that reads it.
     ///
-    /// Once per preview build, not once per frame: this is the same reason the scene
-    /// walk is handed a shaped text layout rather than shaping one. Deepest-first, so
-    /// a boolean nested inside a boolean is evaluated before the parent that reads it.
-    ///
-    /// **Three kinds of seed, because there are three ways a preview changes a
-    /// boolean's shape.** A moved node reshapes every boolean *above* it, and a ghost
-    /// reshapes the boolean it has been parented *to* — so a ghost's seed is its
-    /// parent itself rather than its parent's parent. Missing the second meant
-    /// Alt-dragging a copy of an operand out of a boolean previewed the pre-drag
-    /// outline: the copy joins the operation on release, so the shape jumped at the
-    /// instant of the drop. The third is a **reordered** parent (§15 D877): a
-    /// `Subtract` reads its base off its first operand, so a new order is a new shape
-    /// with nothing moved; this said *"two kinds"* until then.
+    /// Three kinds of seed: a moved node reshapes every boolean above it; a ghost
+    /// reshapes the boolean it is parented *to* (its seed is its parent itself); and
+    /// a reordered parent, since a `Subtract` reads its base off the first operand.
     fn reevaluate_booleans(&mut self, doc: &Document, res: &Resolved) {
         let mut affected: Vec<(usize, NodeId)> = Vec::new();
         let seeds = self
@@ -1097,31 +833,11 @@ impl RenderOverrides {
             .iter()
             .filter_map(|m| doc.get(*m).and_then(|n| n.parent()))
             .chain(self.ghosts.iter().map(|g| g.parent))
-            // A reordered parent: a `Subtract`'s operands in a new order are a
-            // new shape (§15 D877).
             .chain(self.order.keys().copied());
-        // **Depth from the root, taken per node** — not the distance walked from
-        // the seed (§15 D461). `[S11.2-L1-02]`: this counted *upward from the
-        // seed*, so a boolean nearer the root carried the **larger** number and
-        // `Reverse` evaluated the outermost one first — the opposite of the rule
-        // the comment below states. Measured in release on
-        // `Subtract(Union(r1, r2), r3)`, dragging `r2` 260 units: the inner
-        // union's preview followed the pointer to `x1 = 360` while the outer
-        // subtract sat at its **pre-drag** `x1 = 160` for the whole gesture and
-        // snapped into place on release — the exact report this function exists to
-        // answer, one level of nesting up.
-        //
-        // ⚠️ **Silent, because the fallback is plausible.** With the outer
-        // evaluated first, `self.boolean` has no entry for the inner one yet, so
-        // the `nested:` closure falls through to `Resolved`'s **committed** cache
-        // — a real path of the right shape, from before the gesture. §6.2's rule
-        // is that a missing preview is recoverable and a lying one is not.
-        //
-        // ⚠️ **And reversing the old key alone would not have been the fix.** A
-        // distance from *a* seed is not comparable between seeds: a multi-selection
-        // drag of two operands at different tree depths ordered their booleans by
-        // an accident of which seed reached each first. A depth from the root is
-        // one scale for the whole document, so it composes.
+        // Depth from the root, taken per node, not the distance walked from a seed:
+        // the latter is not comparable between seeds. Evaluated outermost-first, the
+        // `nested:` closure would silently fall through to `Resolved`'s committed
+        // cache, a plausible path from before the gesture.
         fn depth_from_root(doc: &Document, mut id: NodeId) -> usize {
             let mut d = 0usize;
             while let Some(p) = doc.get(id).and_then(|n| n.parent()) {
@@ -1158,21 +874,14 @@ impl RenderOverrides {
                 op,
                 &ondin_core::boolean::Operands {
                     local_of: &|c| self.transform_of(doc, res, c),
-                    // **The overridden kind, not the committed one.** A resize
-                    // expresses itself partly as new *geometry*, so reading the
-                    // document here moved the operands without resizing them: the
-                    // shape shuffled about under the pointer and snapped to the
-                    // right size on release.
+                    // The overridden kind, not the committed one: a resize is partly
+                    // new geometry.
                     kind_of: &|c| self.drawn_kind(doc, res, c),
-                    // The children in this preview's order plus its ghosts — a
-                    // preview cannot reparent or delete (`absorb` refuses both), but
-                    // it can *reorder* (§15 D877) and *add*, and both count. See
-                    // [`Self::operand_children`].
+                    // This preview's order plus its ghosts: it cannot reparent or
+                    // delete, but it can reorder and add. See [`Self::operand_children`].
                     children_of: &|c| self.operand_children(doc, c),
                     visible_of: &|c| self.operand_visible(doc, c),
-                    // The pending result if this preview has one, then a ghost's own —
-                    // evaluated when its subtree was built — else the committed cache,
-                    // which is what an untouched nested boolean still has.
+                    // The pending result, then a ghost's own, else the committed cache.
                     nested: &|c| {
                         self.boolean
                             .get(&c)
@@ -1216,12 +925,9 @@ impl RenderOverrides {
             return None;
         }
         patch(&mut kind);
-        // **A bound family written its empty literal draws its variable** (§15
-        // D1069), as the commit will leave it — `build::keep_text_bindings`
-        // keeps a family the op writes empty. Every row of the Type card writes
-        // the whole style with the family as stored, so without this a scrub of
-        // a family-bound text's size previewed it in no family at all. Not the
-        // content: an empty one written is a text emptied, and detaches.
+        // A bound family written its empty literal draws its variable, as the commit
+        // leaves it (`build::keep_text_bindings`). Not the content: an empty one
+        // written is a text emptied, and detaches.
         if let (Some(n), NodeKind::Text { style, .. }) = (doc.get(id), &kind) {
             let family = n.text_vars()[1].filter(|_| style.font_family.is_empty());
             if family.is_some() {
@@ -1235,12 +941,9 @@ impl RenderOverrides {
 
     fn absorb(&mut self, doc: &Document, res: &Resolved, op: &Operation) -> Option<()> {
         match op {
-            // Ghosts first, here and in every other setter: `insert_subtrees`
-            // follows its `InsertSubtree` with a `SetTransform` that places the
-            // new root, so a transaction that adds artwork and then positions it
-            // arrives as two ops about a node the document has never seen. Left
-            // to `entry`, that transform would become an override keyed to an
-            // absent node and be silently dropped by the walk.
+            // Ghosts first, here and in every other setter: `insert_subtrees` follows
+            // its `InsertSubtree` with a `SetTransform` about a node the document has
+            // never seen, which `entry` would key to an absent node and the walk drop.
             Operation::SetTransform { id, transform } => match self.ghost_mut(*id) {
                 Some(g) => g.transform = *transform,
                 None => {
@@ -1251,12 +954,8 @@ impl RenderOverrides {
             Operation::SetGeometry { id, geometry } => {
                 let base = self.current_kind(doc, *id)?;
                 let mut patched = geometry.applied_to(&base)?;
-                // **Any geometry write on a rect with bound corners draws the ones
-                // the commit keeps at their variables** (`build::kept_corner_vars`):
-                // the Scale tool's drag writes a bound corner its literal 0, which
-                // `keep_corner_bindings` keeps bound, and this drew it square — and
-                // so did a plain resize, whose `Size` patch carries the kind's
-                // literal 0s forward (`arch-scribe`'s reading of D1059's batch).
+                // Any geometry write on a rect with bound corners draws the ones the
+                // commit keeps at their variables (`build::kept_corner_vars`).
                 if let NodeKind::Rect { corner_radii, .. } = &mut patched
                     && doc
                         .get(*id)
@@ -1271,10 +970,9 @@ impl RenderOverrides {
                     let kept = ondin_core::build::kept_corner_vars(doc, *id, w);
                     *corner_radii = doc.corners_drawn_in(doc.variables(), *id, *corner_radii, kept);
                 }
-                // **And a bound width or height is drawn where the commit puts
-                // it** (`build::kept_size_vars`, §15 D1061): an axis written what
-                // it draws keeps its variable's number, one written past it — a
-                // resize — the written size, as `keep_size_bindings` detaches it.
+                // A bound width or height is drawn where the commit puts it
+                // (`build::kept_size_vars`): an axis written what it draws keeps its
+                // variable's number, one written past it the written size.
                 if let Some(written) = patched.box_size()
                     && doc
                         .get(*id)
@@ -1284,28 +982,20 @@ impl RenderOverrides {
                     patched = doc.size_drawn_in(doc.variables(), *id, &patched, kept);
                 }
                 self.set_kind(doc, res, *id, patched);
-                // A geometry change can move the node's own painted area but
-                // not its children's frame of reference, so only it is dirty.
+                // Only the node's own painted area moves, not its children's frame.
                 self.moved.insert(*id);
             }
-            // Recorded, not drawn: `relayout` turns the insets into a transform
-            // and a kind once every op is in. A ghost carries no insets — a copy
-            // is pinned at commit, by `build::keep_insets` — so there is nothing
-            // to record on one.
+            // Recorded, not drawn: `relayout` turns the insets into a transform and a
+            // kind once every op is in. A ghost carries none (`build::keep_insets`).
             Operation::SetInsets { id, insets } => {
                 if self.ghost(*id).is_none() {
                     self.entry(*id).insets = Some(*insets);
                     self.mark_moved(doc, *id);
                 }
             }
-            // Recorded, not drawn, `SetInsets`' way: the flex relayout turns a
-            // layout or an item's properties into placements for the whole chain.
-            // The commit's own checks, `SetOpacity`'s rule (§15 D937): a repeat
-            // count scrubbed past the track cap previewed the capped grid the
-            // template quietly lays, and the commit then refused it with
-            // `BadLayout` and the grid snapped back. Asked against the document's
-            // value, as `op_set_display` asks it, so a refused part a file carries
-            // and the edit only carries forward is not a reason to refuse.
+            // Recorded, not drawn, `SetInsets`' way: the flex relayout turns it into
+            // placements. The commit's own validity checks run here too (`SetOpacity`'s
+            // rule), asked against the document's value as `op_set_display` asks it.
             Operation::SetDisplay { id, display } => {
                 let was = doc.get(*id).and_then(|n| n.display());
                 if display
@@ -1314,15 +1004,10 @@ impl RenderOverrides {
                 {
                     return None;
                 }
-                // **Stored resolved** (§15 D1058): `PreviewView` answers an
-                // override's layout as it is, so a bound gap's 0 is laid out at its
-                // variable's number. Resolved with the bindings the commit will
-                // **keep** (`build::kept_spacing_vars`), so a slot a scrub writes
-                // past its drawn number is drawn at the written one, as
-                // `keep_spacing_bindings` will detach it to — unless a
-                // `SetSpacingVars` earlier in the preview set them, which that
-                // pass leaves alone and so must this (§15 D1090): a band drag
-                // to 0 cuts its binding that way.
+                // Stored resolved, as `PreviewView` answers an override's layout as it
+                // is. Resolved with the bindings the commit will keep
+                // (`build::kept_spacing_vars`), unless an earlier `SetSpacingVars` in
+                // the preview set them, which `keep_spacing_bindings` leaves alone.
                 if self.ghost(*id).is_none() {
                     let pending = self.get(*id).and_then(|o| o.spacing_vars);
                     let drawn = display.as_ref().map(|d| {
@@ -1334,12 +1019,9 @@ impl RenderOverrides {
                     self.mark_moved(doc, *id);
                 }
             }
-            // **A gap's or a padding's binding previews as the numbers it will lay
-            // out at** (§15 D1058) — the `--` list's highlight on a spacing field,
-            // as D1050 previews a corner's. Over the layout the ops before this one
-            // left (resolved, `SetDisplay`'s arm above), else the document's as
-            // laid out; a slot `vars` leaves unbound keeps what that answer holds,
-            // which for a detach is the number it drew.
+            // A gap's or padding's binding previews as the numbers it will lay out at,
+            // over the layout earlier ops left (else the document's); a slot `vars`
+            // leaves unbound keeps what that holds.
             Operation::SetSpacingVars { id, vars } => {
                 let pending = self.get(*id).and_then(|o| o.display.clone()).flatten();
                 let base = pending
@@ -1362,11 +1044,9 @@ impl RenderOverrides {
                     self.mark_moved(doc, *id);
                 }
             }
-            // The six text ops are one shape — patch a field of the node's
-            // `Text` kind and re-measure — so they share one helper rather than
-            // six copies of the destructure-and-rebuild. Rebuilding by hand is
-            // how a field added to the kind ends up preserved by five of the six
-            // and reset by the sixth.
+            // The text ops patch a field of the node's `Text` kind and re-measure, so
+            // they share `patch_text`; rebuilding the kind by hand is how a new field
+            // ends up preserved by some and reset by others.
             Operation::SetText {
                 id,
                 content,
@@ -1385,13 +1065,10 @@ impl RenderOverrides {
                     *psp = para_spans.clone();
                 }
             })?,
-            // Both halves of what `Document::op_set_text_style` does: the given list
-            // where the op carries one (the inverse's case), the re-statement where it
-            // does not (§15 D163). **Not for the pixels** — the re-statement only
-            // drops spans that have become echoes of the new defaults, so it cannot
-            // change what is drawn — but for the *model*, which the Type panel reads
-            // back through `display_node`. A preview whose kind disagrees with the
-            // commit's is the shape of bug D109 was.
+            // Both halves of `Document::op_set_text_style`: the given list where the op
+            // carries one, the re-statement where it does not (§15 D163). Not for the
+            // pixels but for the model, which the Type panel reads back through
+            // `display_node`.
             Operation::SetTextStyle { id, style, spans } => {
                 self.patch_text(doc, res, *id, |k| {
                     if let NodeKind::Text {
@@ -1442,8 +1119,7 @@ impl RenderOverrides {
                 }
             })?,
             Operation::SetOpacity { id, opacity } => {
-                // Value constraints are checked here too, so a preview can
-                // never show an edit that the commit will reject.
+                // Checked here too, so a preview never shows an edit the commit rejects.
                 if !build::valid_opacity(*opacity) {
                     return None;
                 }
@@ -1456,9 +1132,8 @@ impl RenderOverrides {
                 Some(g) => g.visible = *visible,
                 None => self.entry(*id).visible = Some(*visible),
             },
-            // **A visibility's binding previews as what it will show** (§15
-            // D1059) — the bound variable's value in the mode in force; unbound,
-            // the literal the ops before this one left, else the document's.
+            // A visibility's binding previews as the bound variable's value in the
+            // mode in force; unbound, the literal earlier ops left, else the document's.
             Operation::SetVisibleVar { id, var } => {
                 if self.ghost(*id).is_none() {
                     let shown = match var {
@@ -1474,10 +1149,7 @@ impl RenderOverrides {
                     self.entry(*id).visible = Some(shown);
                 }
             }
-            // **An opacity's binding previews as what it will draw** (§15
-            // D1072), the bound variable's percentage in the mode in force;
-            // unbound, the literal the ops before this one left, else the
-            // document's — `SetVisibleVar`'s rule above.
+            // An opacity's binding previews as it will draw: `SetVisibleVar`'s rule.
             Operation::SetOpacityVar { id, var } => {
                 let literal = match self.ghost(*id) {
                     Some(g) => g.opacity,
@@ -1499,29 +1171,18 @@ impl RenderOverrides {
             }
             Operation::SetStrokes { id, strokes } => {
                 let mut paint = self.current_paint(doc, *id)?;
-                // **As the commit will keep it** (§15 D1073): a bound width the
-                // write leaves bound stays bound, any other detached — the
-                // commit's own rule, `build::kept_stroke_widths`, so the scene's
-                // resolve draws the preview where the commit lands it.
+                // As the commit will keep it (`build::kept_stroke_widths`): a bound
+                // width the write leaves bound stays bound, any other detached.
                 paint.strokes = build::kept_stroke_widths(doc, *id, strokes.clone());
                 self.set_paint(*id, paint);
-                // A stroke's reach is part of the ink the cull tests, so a
-                // widened outside stroke — or a bound width's new number — must
-                // not be culled on the committed bounds (`SetEffects`' reason
-                // below; the sweep for §15 D1073 found it missing here).
+                // A stroke's reach is part of the ink the cull tests (`SetEffects`' reason).
                 self.mark_moved(doc, *id);
             }
-            // **Not in the invisible list above, even though the ops beside it
-            // there are also "one field on one node".** Every number in an
-            // effect popover is scrubbable, so each one needs a live preview or
-            // it is the unscrubbable field of §15 D245 — and a shadow reaches
-            // outside the node it hangs on, so the node is marked moved as well:
-            // its cached bounds no longer cover where its ink lands.
-            //
-            // **As the commit will keep it** (§15 D1074): a bound number the
-            // write leaves bound stays bound and the scene's resolve draws its
-            // variable's; any other is detached — the commit's own rule,
-            // `build::kept_effect_vars`.
+            // Every number in an effect popover is scrubbable, so it needs a live
+            // preview; a shadow reaches outside its node, so the node is marked moved
+            // (its cached bounds no longer cover its ink). Kept as the commit keeps it
+            // (`build::kept_effect_vars`): a bound number the write leaves bound stays
+            // bound, any other is detached.
             Operation::SetEffects { id, effects } => match self.ghost_mut(*id) {
                 Some(g) => g.effects = effects.clone(),
                 None => {
@@ -1530,8 +1191,7 @@ impl RenderOverrides {
                     self.mark_moved(doc, *id);
                 }
             },
-            // A shape tool dragging out a brand-new leaf. It has no children
-            // yet, so a childless ghost is exact.
+            // A shape tool dragging out a brand-new leaf: a childless ghost is exact.
             Operation::CreateNode {
                 id,
                 parent,
@@ -1544,8 +1204,8 @@ impl RenderOverrides {
                 if doc.contains(*id) || !build::can_parent(parent_kind, kind) {
                     return None;
                 }
-                // The ancestor half of the rule (§15 D876): a frame's ghost under a
-                // mask is a create `apply` will refuse.
+                // The ancestor half of the rule: a frame's ghost under a mask is a
+                // create `apply` will refuse.
                 if matches!(kind, NodeKind::Artboard { .. }) && !doc.frame_may_sit_under(*parent)
                 {
                     return None;
@@ -1561,19 +1221,10 @@ impl RenderOverrides {
                     ),
                 });
             }
-            // A whole subtree being added: the copy an Alt-drag carries.
-            //
-            // Addition is previewable in a way that moving is not — nothing in
-            // the committed tree changes, so there is no node whose absence the
-            // walk would have to fake. The same checks as `CreateNode`, because
-            // the same failures are possible: ids that already exist, and a root
-            // its destination will not accept.
-            //
-            // `index` **is** honoured, and has to be: an Alt-drag copy lands
-            // immediately above its original rather than on top of the parent, so a
-            // ghost that drew last would preview a different z-order from the one the
-            // release produces. The walk interleaves ghosts among the real children by
-            // this index ([`crate::scene`]).
+            // A whole subtree being added: the copy an Alt-drag carries. The same
+            // checks as `CreateNode`. `index` must be honoured: the copy lands just
+            // above its original, and the walk interleaves ghosts among the real
+            // children by it ([`crate::scene`]).
             Operation::InsertSubtree {
                 nodes,
                 parent,
@@ -1587,7 +1238,7 @@ impl RenderOverrides {
                 if !build::can_parent(&parent_kind, &node.kind) {
                     return None;
                 }
-                // And the ancestor half (§15 D876), above the paste and inside it.
+                // And the ancestor half, above the paste and inside it.
                 if frame_barred(nodes, doc.frame_may_sit_under(*parent)) {
                     return None;
                 }
@@ -1600,54 +1251,24 @@ impl RenderOverrides {
             Operation::SetCanvasBackground { background } => {
                 self.canvas_background = Some(*background);
             }
-            // Renaming and locking change nothing visible. Clipping does, but
-            // it is a checkbox rather than a gesture: it commits immediately,
-            // so there is nothing to preview and no override to carry it.
-            //
-            // Guides change nothing the *renderer* draws: they are egui chrome
-            // over the canvas, not scene content, so the app previews a guide
-            // being dragged from its own gesture state. Absorbed as a no-op
-            // rather than refused, so a transaction that moves a guide does not
-            // blank the preview of whatever else is in it.
-            //
-            // The proportion lock is a no-op for the same reason and it matters
-            // more here: it changes what a *future* handle drag does and nothing
-            // about what is on screen now, so refusing it would blank the
-            // preview of everything committed alongside it in exchange for
-            // fidelity there was never anything to gain.
-            //
-            // The pivot is the same case again, and by design: it is *baked* by
-            // the gesture that reads it rather than composed into the world
-            // transform (§15), so the renderer has nothing to do with it and the
-            // canvas draws its marker as chrome. What a pivot edit previews is
-            // that marker — from the live pointer for the canvas drag, and from
-            // `EditorSession::pivot_preview` for the inspector's origin fields,
-            // which have no pointer on the canvas to read.
-            //
-            // **A no-op here is therefore not the whole story**, and the app owes
-            // the other half: a preview that silently drops part of its
-            // transaction is what makes a field unscrubbable (§15 D245).
+            // Nothing the renderer draws, absorbed as a no-op rather than refused so
+            // the rest of the transaction still previews. Guides and layout grids are
+            // egui chrome the app previews from its own gesture state, and so is the
+            // pivot (it is baked by the gesture that reads it). The app owes that
+            // other half: a preview that drops part of its transaction leaves a field
+            // unscrubbable (§15 D245).
             Operation::SetName { .. }
             | Operation::SetLocked { .. }
             | Operation::SetProportionsLocked { .. }
             | Operation::SetPivot { .. }
-            // Export settings are read by the export path and by nothing that
-            // draws, so there is genuinely nothing to preview — this is the
-            // plain case the list was written for, not one of the two the
-            // comments above have to argue for.
             | Operation::SetExports { .. }
-            // A layout grid is chrome over a frame and never in the scene, so
-            // the same plain case as the exports above: the app draws it, this
-            // does not, and there is nothing here to preview.
             | Operation::SetLayoutGrids { .. }
-            // Being a main or being linked draws nothing (`changes_ink` says the
-            // same): the instance looks exactly like the nodes it holds.
+            // Being a main or linked draws nothing (`changes_ink` agrees), nor does a
+            // swap (the children its commit rewrites do) or a set's, variant's or
+            // component's properties.
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
-            // Nor does a swap: the children its commit rewrites do (§15 D983).
             | Operation::SetSwap { .. }
-            // Nor do a set's properties, a variant's values or a component's
-            // properties (§15 D982).
             | Operation::SetVariantSet { .. }
             | Operation::SetVariant { .. }
             | Operation::SetProperties { .. }
@@ -1656,38 +1277,18 @@ impl RenderOverrides {
             | Operation::SetGuidePosition { .. }
             | Operation::SetGuideColor { .. }
             | Operation::SetGuideScope { .. } => {}
-            // **A no-op here, and the only one that is not also invisible.** An
-            // image op changes what is drawn (`Operation::changes_ink`), so it
-            // does not belong with the list above on the merits — it is here
-            // because `RenderOverrides` has no image table to patch, and the two
-            // honest answers are this or refusing the whole preview. Refusing is
-            // worse: a transaction that places an image is `AddImage` *and* a
-            // `CreateNode`, so declining would blank the preview of the shape as
-            // well as the picture in it.
-            //
-            // What it costs is that a previewed image is not visible until the
-            // commit lands. Nothing exercises that yet — placing is a click, not
-            // a drag — and when something does, the fix is a preview table on the
-            // overrides, the shape `canvas_background` already has here.
-            //
-            // ⚠️ `changes_ink`'s `false` arm is therefore a **subset** of
-            // `absorb`'s no-ops, not the same list (§15 D659). Every transaction
-            // absorbed as nothing is invisible to `has_gesture_preview` and so to
-            // `cancel_gesture`'s gate; `overrides.rs ·
-            // every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
-            // pins the relationship.
+            // The one no-op that does change ink: `RenderOverrides` has no image table
+            // to patch, and refusing would also blank the `CreateNode` beside it. A
+            // previewed image shows only once committed. So `changes_ink`'s `false`
+            // arm is a subset of `absorb`'s no-ops, pinned by `overrides.rs ·
+            // every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`.
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
-            // **A cell's new value previews on everything that reads it** (§15
-            // D1056, D1037's premise (vi)): the colour popup drags a variable's
-            // colour now (D1052). The table has no override, so each node that
-            // reads a variable is patched with what it draws against the table
-            // with this one cell changed (`Variables::with_cell`, the document's
-            // `_in` doors — the committed rule, the table named): its paint as
-            // literals, a bound rect's kind as resolved radii. Built on the node's
-            // pending paint and kind, so ops before this one compose. ⚠️ **One
-            // cell per transaction**: the paint written is resolved, so a second
-            // `SetVariableCell` after it finds literals and moves nothing — the
-            // popup writes one. A cell or mode not in the table refuses.
+            // A cell's new value previews on everything that reads it. The table has
+            // no override, so each reading node is patched with what it draws against
+            // the table with this one cell changed (`Variables::with_cell`, the
+            // document's `_in` doors), built on its pending paint and kind. One cell
+            // per transaction: the paint written is resolved, so a second cell finds
+            // literals and moves nothing. A cell or mode not in the table refuses.
             Operation::SetVariableCell { id: var, mode, cell } => {
                 let t = doc.variables().with_cell(*var, *mode, cell.clone())?;
                 let bound: Vec<NodeId> = doc.bound_nodes().collect();
@@ -1698,8 +1299,7 @@ impl RenderOverrides {
                     let Some(paint) = self.current_paint(doc, n) else {
                         continue;
                     };
-                    // A bound stroke width too (§15 D1073), which the same
-                    // resolve reads — and moves the ink, so the cull hears it.
+                    // A bound stroke width too, which moves the ink, so the cull hears it.
                     let widths = paint.strokes.iter().any(|s| s.width_var.is_some());
                     let reads = paint.fills.iter().any(|f| f.brush.is_bound())
                         || paint.strokes.iter().any(|s| s.brush.is_bound())
@@ -1725,10 +1325,8 @@ impl RenderOverrides {
                         );
                         self.moved.insert(n);
                     }
-                    // A bound width or height the same way (§15 D1061), over the
-                    // kind pending or committed — after the corners above, whose
-                    // kind it starts from — and the layout pass lays the chain
-                    // again.
+                    // A bound width or height the same way, after the corners above,
+                    // whose kind it starts from; the layout pass lays the chain again.
                     if let Some(node) = doc.get(n)
                         && node.size_vars().iter().any(Option::is_some)
                         && let Some(base) = self.current_kind(doc, n)
@@ -1737,8 +1335,7 @@ impl RenderOverrides {
                         self.set_kind(doc, res, n, drawn);
                         self.mark_moved(doc, n);
                     }
-                    // A bound content or family the same way (§15 D1069) — a
-                    // string cell typed in the browser re-sets the text live.
+                    // A bound content or family the same way.
                     if let Some(node) = doc.get(n)
                         && node.text_vars().iter().any(Option::is_some)
                         && let Some(base) = self.current_kind(doc, n)
@@ -1747,13 +1344,11 @@ impl RenderOverrides {
                         self.set_kind(doc, res, n, drawn);
                         self.mark_moved(doc, n);
                     }
-                    // A bound visibility the same way (§15 D1059).
+                    // A bound visibility the same way.
                     if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
                         self.entry(n).visible = Some(doc.shown_in(&t, n));
                     }
-                    // And an effect's bound numbers (§15 D1074), over the list
-                    // pending or committed, resolved against the changed table —
-                    // and the ink moves, so the cull hears it.
+                    // And an effect's bound numbers; the ink moves, so the cull hears it.
                     if let Some(node) = doc.get(n)
                         && node.effects().iter().any(|e| e.vars.iter().any(Option::is_some))
                     {
@@ -1763,7 +1358,7 @@ impl RenderOverrides {
                         self.entry(n).effects = Some(drawn);
                         self.mark_moved(doc, n);
                     }
-                    // And a bound opacity (§15 D1072).
+                    // And a bound opacity.
                     if let Some(node) = doc.get(n)
                         && node.opacity_var().is_some()
                     {
@@ -1771,9 +1366,8 @@ impl RenderOverrides {
                             doc.opacity_drawn_in(&t, n, node.opacity(), node.opacity_var());
                         self.entry(n).opacity = Some(drawn);
                     }
-                    // A bound gap or padding the same way, against the table with
-                    // the cell changed, over the layout pending or committed
-                    // (§15 D1058) — and the layout pass lays the chain again.
+                    // A bound gap or padding the same way; the layout pass lays the
+                    // chain again.
                     if let Some(node) = doc.get(n)
                         && node.spacing_vars().iter().any(Option::is_some)
                     {
@@ -1786,14 +1380,9 @@ impl RenderOverrides {
                     }
                 }
             }
-            // **The rest of the table has no override** (§15 D1039): the walk
-            // reads it off the document, so a previewed rename, a new mode, or a
-            // variable added draws as committed — `AddImage`'s gap, for the same
-            // reason, and none of them is dragged. Absorbed rather than refused so
-            // a transaction carrying one still previews the rest. So are a kit's
-            // variable rewritten whole and a kit's modes (§15 D1064): written by a
-            // kit update and a mapping's pick, both committed at once, neither
-            // dragged.
+            // The rest of the table has no override: the walk reads it off the
+            // document, so these draw as committed. None is dragged, and absorbing
+            // rather than refusing keeps the rest of the transaction previewing.
             Operation::AddVariable { .. }
             | Operation::RemoveVariable { .. }
             | Operation::SetVariableName { .. }
@@ -1802,12 +1391,9 @@ impl RenderOverrides {
             | Operation::SetModeName { .. }
             | Operation::SetVariable { .. }
             | Operation::SetKitModes { .. } => {}
-            // **A style draws through the lists it is copied into** (§15 D1062):
-            // the table and a layer's binding to it draw nothing of themselves.
-            // The app's two previews of a style write the lists themselves — the
-            // *Apply style…* picker's highlight carries the `SetFills` and its
-            // kin `style::settle` would write, and an edit of a style is a card's
-            // own list writes (§15 D1063) — so these pass through.
+            // A style draws through the lists it is copied into; the table and a
+            // layer's binding draw nothing of themselves. The app's style previews
+            // write those lists directly, so these pass through.
             Operation::AddStyle { .. }
             | Operation::RemoveStyle { .. }
             | Operation::SetStyleName { .. }
@@ -1818,13 +1404,9 @@ impl RenderOverrides {
             | Operation::SetEffectsStyle { .. }
             | Operation::SetTypeStyle { .. }
             | Operation::SetLayoutStyle { .. } => {}
-            // **A corner's binding previews as the radii it will draw** (§15
-            // D1050): the `--` list's highlight on a radius field, which D1039
-            // refused here. The bound corners are resolved through the document —
-            // the mode in force is not previewed — over the literal kind the ops
-            // before this one left (`bind_corners_ops` zeroes the bound literals
-            // first), and the rect's kind is patched as a `SetGeometry` would be.
-            // `vars` is the whole binding, so every bound slot is resolved.
+            // A corner's binding previews as the radii it will draw: the bound corners
+            // are resolved through the document (the mode in force is not previewed)
+            // over the literal kind earlier ops left, `vars` being the whole binding.
             Operation::SetCornerVars { id, vars } => {
                 let NodeKind::Rect {
                     size,
@@ -1850,11 +1432,8 @@ impl RenderOverrides {
                 self.set_kind(doc, res, *id, NodeKind::Rect { size, corner_radii });
                 self.moved.insert(*id);
             }
-            // **A width's or a height's binding previews as the size it will
-            // draw** (§15 D1061) — the `--` list's highlight on W or H, D1050's
-            // corner preview for a size. Over the kind the ops before this one
-            // left, else the document's at its drawn size; an axis `vars` leaves
-            // unbound keeps what that holds, which for a detach is what it drew.
+            // A width's or height's binding previews as the size it will draw, over
+            // the kind earlier ops left; an axis `vars` leaves unbound keeps that.
             Operation::SetSizeVars { id, vars } => {
                 let base = self.current_kind(doc, *id)?;
                 base.box_size()?;
@@ -1862,11 +1441,9 @@ impl RenderOverrides {
                 self.set_kind(doc, res, *id, drawn);
                 self.moved.insert(*id);
             }
-            // **A content's or a family's binding previews as the string it
-            // will draw** (§15 D1069) — the `--` list's highlight on the Content
-            // or the family row, as `SetSizeVars` above. The bind verb's
-            // `SetText` and `SetTextStyle` come first and leave the fields
-            // empty; a field `vars` leaves unbound keeps what they left.
+            // A content's or family's binding previews as the string it will draw, as
+            // `SetSizeVars`; the bind verb's `SetText` and `SetTextStyle` come first
+            // and leave the fields empty.
             Operation::SetTextVars { id, vars } => {
                 let base = self.current_kind(doc, *id)?;
                 if !matches!(base, NodeKind::Text { .. }) {
@@ -1876,29 +1453,19 @@ impl RenderOverrides {
                 self.set_kind(doc, res, *id, drawn);
                 self.moved.insert(*id);
             }
-            // A frame's mode changes what a whole subtree resolves to — read
-            // through the document and `Resolved`, neither of which an override
-            // patches. It is a click, committed rather than dragged.
+            // A frame's mode changes what a whole subtree resolves to, read through
+            // the document and `Resolved`, which no override patches.
             Operation::SetMode { .. } => return None,
-            // **Structural in the sense that matters here**: a mask changes which
-            // *other* nodes the walk clips, and an override is a patch on one
-            // node. Nothing sets it mid-gesture — it is a click on the identity
-            // row — so refusing costs a preview nobody asks for.
+            // A mask changes which *other* nodes the walk clips, and an override
+            // patches one node. Nothing sets these mid-gesture.
             Operation::SetClip { .. }
             | Operation::SetMask { .. }
             | Operation::SetMaskMode { .. }
-            // **Refused for the same reason and not the same cause.** A fill rule is
-            // not structural — it patches one node and nothing else — but there is no
-            // `NodeOverride` field for it, and adding one would buy a live preview of
-            // a control that is a click. `build::boolean` also emits it when it makes
-            // an `Exclude`, and a boolean is committed rather than dragged out. If
-            // something ever scrubs this, the fix is a field here rather than a
-            // change of category.
+            // A fill rule is not structural, but `NodeOverride` has no field for it
+            // and nothing scrubs it; if something does, add a field.
             | Operation::SetFillRule { .. } => return None,
-            // **A reorder is a patch on the parent** (§15 D877): the node stays
-            // where it is in the tree and its parent's order changes, which both
-            // the walk and the layout view read through `children_of`. The index
-            // is `Document::apply`'s — into the list with the node taken out —
+            // A reorder is a patch on the parent, read through `children_of`. The
+            // index is `Document::apply`'s — into the list with the node taken out —
             // and one it would refuse is refused here.
             Operation::Reorder { id, index } => {
                 let parent = doc.get(*id)?.parent()?;
@@ -1913,18 +1480,13 @@ impl RenderOverrides {
                 }
                 order.insert(*index, *id);
                 self.order.insert(parent, order);
-                // Its container may lay out anew, so it is touched: that is how
-                // `flex_relayout` finds the chain to re-lay.
+                // Touched, so `flex_relayout` finds the chain to re-lay.
                 self.entry(*id);
             }
-            // Genuinely structural: these move or remove nodes the walk is
-            // about to read out of the committed tree, and no patch can say
-            // "somewhere else" or "not there".
+            // Structural: no patch can say "somewhere else" or "not there".
             Operation::DeleteNode { .. } | Operation::Reparent { .. } => return None,
-            // The vault coming and going (§15 D1012) draws nothing, but it is a
-            // root, and no gesture builds one — a kit insert is a click. Refused
-            // rather than filed with the no-ops, whose count is pinned against
-            // `changes_ink`'s.
+            // A vault draws nothing but is a root no gesture builds. Refused rather
+            // than filed with the no-ops, whose count is pinned against `changes_ink`'s.
             Operation::OpenVault { .. }
             | Operation::CloseVault { .. }
             | Operation::SetOrigin { .. } => return None,
@@ -1948,27 +1510,23 @@ impl RenderOverrides {
     /// The kind as the transaction has left it so far — later ops in the same
     /// transaction build on earlier ones, as they would when applied.
     ///
-    /// **The document's kind under the overrides, not the used one** (§15 D868),
-    /// because this is what an op is *applied to*: a `SetGeometry` patches the size
-    /// the user set, and building it on a size layout computed would write the used
-    /// value back as though it had been typed. Drawing asks [`Self::drawn_kind`].
+    /// The document's kind under the overrides, not the used one: this is what an
+    /// op is *applied to*, and building on a laid-out size would write it back as
+    /// typed. Drawing asks [`Self::drawn_kind`].
     fn current_kind(&self, doc: &Document, id: NodeId) -> Option<NodeKind> {
         if let Some(g) = self.ghost(id) {
             return Some(g.kind.clone());
         }
-        // **At its drawn size** where a width or a height is bound (§15 D1061):
-        // the stored literal there is 0, and a patch over it — a corner, a side
-        // count, a corner binding's preview — carried that 0 into the override
-        // and drew the layer with no size. Unbound, this is the stored kind.
+        // At its drawn size where a width or height is bound: the stored literal
+        // there is 0. Unbound, this is the stored kind.
         self.get(id)
             .and_then(|o| o.kind.clone())
             .or_else(|| specified_kind(doc, id))
     }
 
     /// The kind to **measure and draw** `id` with: a ghost's, then the override's,
-    /// then the used kind (§15 D868) — [`Self::current_kind`]'s twin for the
-    /// reading side, and the only difference between them is that last fallback.
-    /// Equal until container layout resizes something.
+    /// then the used kind — [`Self::current_kind`]'s twin for the reading side;
+    /// they differ only in that last fallback.
     fn drawn_kind(&self, doc: &Document, res: &Resolved, id: NodeId) -> Option<NodeKind> {
         if let Some(g) = self.ghost(id) {
             return Some(g.kind.clone());
@@ -1988,15 +1546,9 @@ impl RenderOverrides {
     }
 
     fn set_kind(&mut self, doc: &Document, res: &Resolved, id: NodeId, kind: NodeKind) {
-        // Re-shape only when the text actually changed; reuse the cached layout
-        // otherwise so a resize drag does not re-run parley.
-        //
-        // ⚠️ **The cached-layout guard cannot fire for a live session** (§15 D592).
-        // `doc.get(id)` is the last *commit* and a session commits once, at
-        // `finish_text_edit` (§9.3), so the two kinds are unequal for the whole
-        // session by construction and every keystroke took the `shaped` arm. The
-        // caller that already holds the answer hands it over in `prepared_text`;
-        // see the field for the measurements.
+        // Re-shape only when the text changed, so a resize drag does not re-run
+        // parley. The guard cannot fire for a live session, which commits once at
+        // `finish_text_edit` (§9.3); that caller hands its layout over in `prepared_text`.
         let text = match &kind {
             NodeKind::Text { .. } => match self.prepared_text.as_ref() {
                 Some((for_id, laid)) if *for_id == id => Some(laid.clone()),
@@ -2040,24 +1592,16 @@ impl RenderOverrides {
 }
 
 /// A preview as the flex engine sees it (`ondin_core::container::LayoutView`):
-/// every answer the **specified** value the transaction leaves — its kind
-/// (`current_kind`, the one ops are applied to), its layout, item properties,
-/// insets and visibility — over the document's tree, **bindings resolved**: an
-/// override's layout is stored resolved and the document's answered through
-/// `resolved_display` (§15 D1058), and a visibility is the override's else
-/// `doc.shown` (§15 D1059). `Resolved`'s `UsedView` is
-/// the committed twin (its `DocView` with the used box a pinned root stretches
-/// against, §15 D933); one engine runs over both.
+/// the **specified** value the transaction leaves (kind, layout, item, insets,
+/// visibility) over the document's tree, bindings resolved. `Resolved`'s
+/// `UsedView` is the committed twin; one engine runs over both.
 ///
-/// **Ghosts are not in the tree it describes**: a copy being Alt-dragged into a
-/// flex container is laid out on release, and until then its siblings do not make
-/// room for it.
+/// Ghosts are not in the tree it describes: a copy Alt-dragged into a flex
+/// container is laid out on release, and until then its siblings make no room.
 ///
-/// **Its one used answer is the box a pinned root is stretched against**
-/// ([`LayoutView::parent_box`](ondin_core::container::LayoutView::parent_box),
-/// §15 D933): the parent's size as this preview draws it, else as `res` says it
-/// is drawn — so a frame pinned inside a frame being resized is laid at the width
-/// the commit will lay it at.
+/// Its one used answer is the box a pinned root is stretched against
+/// ([`LayoutView::parent_box`](ondin_core::container::LayoutView::parent_box)):
+/// the parent's size as this preview draws it, else as `res` says it is drawn.
 struct PreviewView<'a> {
     doc: &'a Document,
     ov: &'a RenderOverrides,
@@ -2081,8 +1625,8 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
         self.ov.current_kind(self.doc, id)
     }
     /// An override's layout is stored **resolved** — its bound gaps and padding
-    /// already the numbers they draw (`SetDisplay`'s and `SetSpacingVars`' absorb,
-    /// §15 D1058) — so it is answered as it is; the document's is resolved here.
+    /// already the numbers they draw (`SetDisplay`'s and `SetSpacingVars`' absorb) —
+    /// so it is answered as it is; the document's is resolved here.
     fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, ondin_core::container::Display>> {
         match self.ov.get(id).and_then(|o| o.display.as_ref()) {
             Some(d) => d.as_ref().map(std::borrow::Cow::Borrowed),
@@ -2129,9 +1673,8 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
         }
     }
     /// The committed pass's measurement where this preview leaves the node's kind
-    /// alone (§15 D936) — a drag or a resize re-lays its containers every frame,
-    /// and re-shaped every text item in them each time. A node this preview gives
-    /// a kind of its own is measured afresh.
+    /// alone, so a per-frame re-lay does not re-shape every text item. A node this
+    /// preview gives a kind of its own is measured afresh.
     fn measured(&self, id: NodeId, kind: &NodeKind) -> Option<kurbo::Rect> {
         if self.ov.get(id).and_then(|o| o.kind.as_ref()).is_none()
             && let Some(b) = self.res.remembered_text_box(id, kind)
@@ -2160,14 +1703,12 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
 }
 
 /// Whether an `InsertSubtree`'s `nodes` would put a frame under a boolean or a
-/// mask (§15 D876) — `Document::apply`'s walk, asked of a subtree that is not in
-/// the document yet. `above_ok` is the destination's own answer,
+/// mask — `Document::apply`'s walk, asked of a subtree not yet in the document.
+/// `above_ok` is the destination's own answer,
 /// [`ondin_core::Document::frame_may_sit_under`].
 ///
-/// Walked from each frame up through the list rather than down from the root,
-/// because the list is not yet a tree anyone has validated; a malformed one is
-/// [`ghost_subtree`]'s to refuse, and a parent the list does not contain is where
-/// the subtree meets the document.
+/// Walked up from each frame, since the list is not yet a validated tree
+/// ([`ghost_subtree`] refuses a malformed one).
 fn frame_barred(nodes: &[ondin_core::Node], above_ok: bool) -> bool {
     let by_id: FxHashMap<NodeId, &ondin_core::Node> = nodes.iter().map(|n| (n.id(), n)).collect();
     let bars = |n: &ondin_core::Node| matches!(n.kind(), NodeKind::Boolean { .. }) || n.mask();
@@ -2192,13 +1733,11 @@ fn frame_barred(nodes: &[ondin_core::Node], above_ok: bool) -> bool {
 /// ghost of it.
 ///
 /// `None` if the list is not a single well-formed tree: no root, more than one
-/// root, or a child id the list does not contain. Those are the same conditions
-/// `Document::apply` rejects the op for, so a subtree that cannot be ghosted is
-/// one that was never going to be inserted either.
+/// root, or a child id the list does not contain — the conditions `Document::apply`
+/// rejects the op for.
 fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode> {
     let by_id: FxHashMap<NodeId, &ondin_core::Node> = nodes.iter().map(|n| (n.id(), n)).collect();
-    // The root is the one node whose parent is outside the list — the insert op
-    // is what will give it a real one.
+    // The root is the one node whose parent is outside the list.
     let mut roots = nodes
         .iter()
         .filter(|n| n.parent().is_none_or(|p| !by_id.contains_key(&p)));
@@ -2209,21 +1748,18 @@ fn ghost_subtree(doc: &Document, nodes: &[ondin_core::Node]) -> Option<GhostNode
     build_ghost(doc, root, &by_id, &mut FxHashMap::default())
 }
 
-/// A captured node's kind at its drawn size: a bound width or height resolved
-/// through `doc` in the default mode, [`ghost_shown`]'s reading (§15 D1061). The
-/// literal is 0 there, and an Alt-drag copy of a bound layer previewed with no
-/// size. And a bound content or family the same way (§15 D1069), whose literal
-/// is empty.
+/// A captured node's kind at its drawn size: a bound width, height, content or
+/// family resolved through `doc` in the default mode, [`ghost_shown`]'s reading
+/// (their literals are 0 or empty).
 fn ghost_kind(doc: &Document, n: &ondin_core::Node) -> NodeKind {
     let sized = doc.size_drawn_in(doc.variables(), n.id(), n.kind(), n.size_vars());
     let kind = doc.text_drawn_in(doc.variables(), n.id(), &sized, n.text_vars());
     with_corners_drawn(doc, n, kind)
 }
 
-/// `id`'s kind as specified, with every binding of its own resolved — size,
-/// text and corners — and not layout's: what a preview patches and what it
-/// draws a node the layout lets go with. `Document::resolved_kind` leaves the
-/// corners to `Resolved`, which a preview's re-laid kind never passes through.
+/// `id`'s kind as specified, with every binding of its own resolved (size, text,
+/// corners) and not layout's. `Document::resolved_kind` leaves the corners to
+/// `Resolved`, which a preview's re-laid kind never passes through.
 fn specified_kind(doc: &Document, id: NodeId) -> Option<NodeKind> {
     let kind = doc.resolved_kind(id)?.into_owned();
     Some(with_corners_drawn(doc, doc.get(id)?, kind))
@@ -2247,10 +1783,9 @@ fn with_corners_drawn(doc: &Document, n: &ondin_core::Node, kind: NodeKind) -> N
     }
 }
 
-/// Whether a captured node shows: its binding resolved through `doc` — in the
-/// **default mode**, the ghost's id being in no frame yet, as `paint_ghost`
-/// resolves a bound paint — else its literal (§15 D1059). An Alt-drag copy of a
-/// layer its variable hides previewed shown, and vanished on release.
+/// Whether a captured node shows: its binding resolved through `doc` in the
+/// **default mode** (the ghost's id is in no frame yet, as `paint_ghost` resolves a
+/// bound paint), else its literal.
 fn ghost_shown(doc: &Document, n: &ondin_core::Node) -> bool {
     match n.visible_var() {
         Some(v) => match doc.resolve_var(n.id(), v) {
@@ -2261,10 +1796,8 @@ fn ghost_shown(doc: &Document, n: &ondin_core::Node) -> bool {
     }
 }
 
-/// `derived` accumulates the boolean outlines built so far, so a boolean nested
-/// inside a boolean is read from it rather than evaluated twice. Filled
-/// children-first, which this recursion is by construction — the children are built
-/// before the node that reads them.
+/// Builds the ghost of `node` and its subtree. `derived` accumulates the boolean
+/// outlines built so far, filled children-first, so a nested boolean is read from it.
 fn build_ghost(
     doc: &Document,
     node: &ondin_core::Node,
@@ -2275,11 +1808,8 @@ fn build_ghost(
     for id in node.children() {
         children.push(build_ghost(doc, by_id.get(id)?, by_id, derived)?);
     }
-    // **The captured `Node`s, not the `GhostNode`s just built.** A capture is a real
-    // subtree with its parent and child links intact, so `boolean`'s own recursion
-    // walks it directly — which is the point of that recursion taking lookups rather
-    // than a `Document`. A second walk over the ghosts would be a second reading of
-    // what an operand contributes, and the two would drift.
+    // Over the captured `Node`s, not the `GhostNode`s just built: a second walk over
+    // the ghosts would be a second reading of what an operand contributes.
     let path = match node.kind() {
         NodeKind::Boolean { op } => {
             let result = ondin_core::boolean::evaluate_node(
@@ -2309,25 +1839,18 @@ fn build_ghost(
     Some(GhostNode {
         id: node.id(),
         transform: node.transform(),
-        // A captured subtree carries its own text, but not the *shaped* layout —
-        // `Resolved` holds those and has never seen this node. Shape it once
-        // here rather than per frame: a ghost's text is fixed for the gesture.
-        // Shaped from the kind it draws, a bound content's string and not its
-        // empty literal (§15 D1069).
+        // Shaped once here, not per frame, from the kind it draws (a bound
+        // content's string); `Resolved` has never seen this node.
         text: shaped(&kind),
         kind,
-        // Resolved here, in the default mode `paint_ghost`'s own resolve reads a
-        // ghost in, so `scene::ghost_ink` — which has no document — measures a
-        // bound stroke width's number and not its 0 (§15 D1073).
+        // Resolved at capture in the default mode `paint_ghost` reads a ghost in,
+        // so `scene::ghost_ink`, which has no document, measures the drawn stroke width.
         paint: doc.resolved_paint(node.id(), node.paint()).into_owned(),
-        // Resolved at capture, as the paint above (§15 D1074): `paint_ghost` and
-        // `scene::ghost_ink` read a ghost's effects with no resolve of their own.
+        // Resolved at capture like the paint: nothing downstream resolves effects.
         effects: doc.resolved_effects(node.id(), node.effects()).into_owned(),
         path,
-        // As drawn, a bound opacity resolved (§15 D1072) — over the captured node,
-        // whose id is in no document, so `drawn_opacity` would answer its
-        // missing-node 1 for every ghost; read in the default mode, as
-        // `ghost_shown` reads a visibility.
+        // A bound opacity resolved in the default mode, as `ghost_shown`: the id is
+        // in no document, so `drawn_opacity` would answer 1 for every ghost.
         opacity: doc.opacity_drawn_in(
             doc.variables(),
             node.id(),

@@ -65,7 +65,11 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
     } = c;
     let is_app = name == "App";
     let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
+    let uses = super::with_defaults(uses, props);
     let mut out = String::new();
+    if props.iter().any(|(_, d)| matches!(d, Arg::Component(_))) {
+        out.push_str("import type { ComponentType } from \"react\";\n");
+    }
     let _ = writeln!(out, "import \"{up}base.css\";");
     if tokens {
         let _ = writeln!(out, "import \"{up}tokens.css\";");
@@ -97,6 +101,8 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
             let ty = match d {
                 Arg::Bool(_) => "boolean",
                 Arg::Text(_) => "string",
+                // What a slot gives any component it draws: the class placing it.
+                Arg::Component(_) => "ComponentType<{ className?: string }>",
             };
             let _ = writeln!(out, "  {p}?: {ty};");
         }
@@ -110,6 +116,8 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
         params.extend(props.iter().map(|(p, d)| match d {
             Arg::Bool(b) => format!("{p} = {b}"),
             Arg::Text(t) => format!("{p} = {}", js_string(t)),
+            // Destructured into a capitalised binding, which JSX reads as a tag.
+            Arg::Component(c) => format!("{p}: {} = {c}", super::jsx::slot_binding(p)),
         }));
         let _ = writeln!(
             out,

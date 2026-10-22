@@ -53,10 +53,16 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
         .zip(&trees)
         .map(|(c, bodies)| (c.name.clone(), classes_in(bodies)))
         .collect();
+    // A slot may draw any component, so its class keeps off all of theirs.
+    let any: HashSet<String> = classes
+        .iter()
+        .filter(|(name, _)| *name != "App")
+        .flat_map(|(_, c)| c.iter().cloned())
+        .collect();
     for bodies in &mut trees {
         let mut mine = classes_in(bodies);
         for body in bodies.iter_mut() {
-            keep_uses_apart(body, &classes, &roots, &mut mine);
+            keep_uses_apart(body, &classes, &any, &roots, &mut mine);
         }
     }
 
@@ -94,18 +100,24 @@ fn classes_in(bodies: &[Element]) -> HashSet<String> {
 /// Renames each use in `el`'s tree whose class is also a class of the file it
 /// uses, where that file's own rule would reach the root the class lands on.
 /// Its root's own class is harmless on a component of one tree, which wears it
-/// anyway. `mine` is the file's classes, which a new name joins.
+/// anyway. A slot's class keeps off `any`, every component's classes. `mine` is
+/// the file's classes, which a new name joins.
 fn keep_uses_apart(
     el: &mut Element,
     classes: &HashMap<String, HashSet<String>>,
+    any: &HashSet<String>,
     roots: &HashMap<&str, Vec<&str>>,
     mine: &mut HashSet<String>,
 ) {
     if let Some(i) = &el.instance {
-        let theirs = classes.get(&i.component);
-        let own_root = roots
-            .get(i.component.as_str())
-            .is_some_and(|r| r.len() == 1 && r[0] == el.class);
+        let theirs = match i.slot {
+            Some(_) => Some(any),
+            None => classes.get(&i.component),
+        };
+        let own_root = i.slot.is_none()
+            && roots
+                .get(i.component.as_str())
+                .is_some_and(|r| r.len() == 1 && r[0] == el.class);
         if let Some(theirs) = theirs.filter(|t| !own_root && t.contains(&el.class)) {
             let base = el.class.clone();
             let mut n = 2;
@@ -118,7 +130,7 @@ fn keep_uses_apart(
     }
     for c in &mut el.children {
         if let Child::Element(e) = c {
-            keep_uses_apart(e, classes, roots, mine);
+            keep_uses_apart(e, classes, any, roots, mine);
         }
     }
 }
@@ -128,6 +140,7 @@ fn keep_uses_apart(
 fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> String {
     let is_app = c.name == "App";
     let (uses, _) = super::references(bodies.iter());
+    let uses = super::with_defaults(uses, &c.props);
     // A chain of `v-if`s is one root to Vue, so a class still falls through. The
     // default variant's tree is last, with no condition.
     for (i, (body, (when, _))) in bodies.iter_mut().zip(&c.bodies).enumerate() {
@@ -146,6 +159,9 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
     }
 
     let mut out = String::from("<script setup lang=\"ts\">\n");
+    if c.props.iter().any(|(_, d)| matches!(d, Arg::Component(_))) {
+        out.push_str("import type { Component } from \"vue\";\n");
+    }
     let _ = writeln!(out, "import \"{up}base.css\";");
     if tokens {
         let _ = writeln!(out, "import \"{up}tokens.css\";");
@@ -168,6 +184,7 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
             let ty = match d {
                 Arg::Bool(_) => "boolean",
                 Arg::Text(_) => "string",
+                Arg::Component(_) => "Component",
             };
             let _ = writeln!(out, "    {p}?: {ty};");
         }
@@ -179,6 +196,8 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
             let v = match d {
                 Arg::Bool(b) => b.to_string(),
                 Arg::Text(t) => js_string(t),
+                // An object prop's default is returned by a function.
+                Arg::Component(c) => format!("() => {c}"),
             };
             let _ = writeln!(out, "    {p}: {v},");
         }

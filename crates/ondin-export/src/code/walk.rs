@@ -20,7 +20,7 @@ use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
 use ondin_core::variable::VarId;
-use ondin_core::variant::{self, PropKind, PropValue};
+use ondin_core::variant::{self, PropKind, PropValue, Property};
 use ondin_core::{
     Brush, BrushSource, Document, EffectKind, Fill, ItemId, Node, NodeId, NodeKind, Resolved,
     Stroke, StrokeAlign, StrokeSides, TextSizing, TextStyle,
@@ -197,6 +197,14 @@ struct Signature {
     choices: Vec<(String, String)>,
 }
 
+/// One thing an instance sets apart from its component's defaults.
+enum Difference {
+    /// The value of its set's variant property at this index.
+    Choice(usize, String),
+    /// A property's value, by item.
+    Prop(ItemId, PropValue),
+}
+
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
 fn label(node: &Node) -> String {
     if node.name().is_empty() {
@@ -252,24 +260,8 @@ impl Walk<'_> {
     fn why_inline(&self, root: NodeId) -> Option<String> {
         let doc = self.doc;
         let main = component::main_of(doc, root)?;
-        if doc.in_vault(main) {
-            return Some("its main is from a kit, which is written out as layers".into());
-        }
-        // Every variant is a tree of the component, so each must be a CSS root.
-        let trees = match variant::set_of(doc, main) {
-            Some(set) => {
-                let values = doc.get(main)?.variant();
-                if variant::find_variant(doc, set, values) != Some(main) {
-                    return Some("its variant has the values of another, which is written".into());
-                }
-                variant::variants(doc, set)
-            }
-            None => vec![main],
-        };
-        for t in trees {
-            if self.css_blocker(doc.get(t)?).is_some() {
-                return Some("its main is drawn as a picture".into());
-            }
+        if let Some(why) = self.unwritable(main) {
+            return Some(why);
         }
         const OVERRIDES: &str = "inlined because of overrides; make it a property to keep the link";
         let mut at = root;
@@ -282,9 +274,15 @@ impl Walk<'_> {
             if drift.removed + drift.order + drift.local > 0 {
                 return Some(OVERRIDES.into());
             }
+            // The fields a use can set: a boolean's, a text's, and the swap of a
+            // swap property that is a prop, when it shows a main a use can show.
             let props: HashSet<(NodeId, PropKind)> = variant::instance_properties(doc, at)
                 .iter()
-                .filter(|p| matches!(p.kind, PropKind::Boolean | PropKind::Text))
+                .filter(|p| match p.kind {
+                    PropKind::Boolean | PropKind::Text => true,
+                    PropKind::Swap => self.swap_default(p).is_some(),
+                    PropKind::Nested => false,
+                })
                 .flat_map(|p| {
                     variant::counterparts(doc, at, p)
                         .into_iter()
@@ -292,7 +290,10 @@ impl Walk<'_> {
                 })
                 .collect();
             for id in reset::scope_nodes(doc, at) {
-                if id != at && doc.get(id)?.swap().is_some() {
+                if id != at
+                    && let Some(swap) = doc.get(id)?.swap()
+                    && (!props.contains(&(id, PropKind::Swap)) || self.unwritable(swap).is_some())
+                {
                     return Some(OVERRIDES.into());
                 }
                 for o in reset::overrides(doc, id) {
@@ -302,6 +303,7 @@ impl Walk<'_> {
                             id == at || props.contains(&(id, PropKind::Boolean))
                         }
                         O::SetText { .. } => props.contains(&(id, PropKind::Text)),
+                        O::SetSwap { .. } => props.contains(&(id, PropKind::Swap)),
                         O::SetGeometry { .. } => id == at,
                         _ => false,
                     };
@@ -318,6 +320,110 @@ impl Walk<'_> {
         }
     }
 
+    /// Why no component can be made from `main`, or `None` when one can.
+    fn unwritable(&self, main: NodeId) -> Option<String> {
+        let doc = self.doc;
+        if doc.in_vault(main) {
+            return Some("its main is from a kit, which is written out as layers".into());
+        }
+        if let Some(set) = variant::set_of(doc, main)
+            && variant::find_variant(doc, set, doc.get(main)?.variant()) != Some(main)
+        {
+            return Some("its variant has the values of another, which is written".into());
+        }
+        // Every variant is a tree of the component, so each must be a CSS root.
+        for t in self.trees(main).0 {
+            if self.css_blocker(doc.get(t)?).is_some() {
+                return Some("its main is drawn as a picture".into());
+            }
+        }
+        None
+    }
+
+    /// The trees the component made from `main` draws — its set's variants, the
+    /// first of any that share their values, or the main alone — and its default:
+    /// the set's default variant, else the main.
+    fn trees(&self, main: NodeId) -> (Vec<NodeId>, NodeId) {
+        let doc = self.doc;
+        let Some(set) = variant::set_of(doc, main) else {
+            return (vec![main], main);
+        };
+        let mut seen = HashSet::new();
+        let trees: Vec<NodeId> = variant::variants(doc, set)
+            .into_iter()
+            .filter(|v| seen.insert(doc.get(*v).map(|n| n.variant().to_vec())))
+            .collect();
+        let default = ondin_core::kit::default_variant(doc, set)
+            .filter(|d| trees.contains(d))
+            .unwrap_or(main);
+        (trees, default)
+    }
+
+    /// Property `p`'s default: its value on the default tree, where it reaches it.
+    fn prop_default(&self, p: &Property, default: NodeId) -> Option<PropValue> {
+        let doc = self.doc;
+        let b = p
+            .bound
+            .iter()
+            .find(|b| under(doc, **b, default))
+            .or(p.bound.first())?;
+        variant::field_value(doc, *b, p.kind)
+    }
+
+    /// The main a swap property's slots show, when the property can be a prop:
+    /// every slot it is bound to shows that main, as a use setting nothing.
+    fn swap_default(&self, p: &Property) -> Option<NodeId> {
+        let doc = self.doc;
+        let mut shown = None;
+        for b in &p.bound {
+            let m = component::main_of(doc, *b)?;
+            if shown.is_some_and(|s| s != m)
+                || component::instance_root(doc, *b) != Some(*b)
+                || self.why_inline(*b).is_some()
+                || !self.differences(*b).is_empty()
+            {
+                return None;
+            }
+            shown = Some(m);
+        }
+        shown
+    }
+
+    /// What the instance at `root` sets apart from its component's defaults, in
+    /// what a use can say: the variant values, by index into its set's
+    /// properties, and the properties, by item.
+    fn differences(&self, root: NodeId) -> Vec<Difference> {
+        let doc = self.doc;
+        let Some(main) = component::main_of(doc, root) else {
+            return Vec::new();
+        };
+        let default = self.trees(main).1;
+        let mut out = Vec::new();
+        if let (Some(m), Some(d)) = (doc.get(main), doc.get(default)) {
+            for (i, (v, dv)) in m.variant().iter().zip(d.variant()).enumerate() {
+                if v != dv {
+                    out.push(Difference::Choice(i, v.clone()));
+                }
+            }
+        }
+        for p in variant::instance_properties(doc, root).iter() {
+            let default = match p.kind {
+                PropKind::Boolean | PropKind::Text => self.prop_default(p, default),
+                PropKind::Swap => self.swap_default(p).map(PropValue::Swap),
+                PropKind::Nested => None,
+            };
+            let value = variant::counterparts(doc, root, p)
+                .first()
+                .and_then(|c| variant::field_value(doc, *c, p.kind));
+            if let (Some(v), Some(d)) = (value, default)
+                && v != d
+            {
+                out.push(Difference::Prop(p.id, v));
+            }
+        }
+        out
+    }
+
     /// The instance at `node` as a use of its main's component, placed as `place`
     /// says, with the variant and the properties it sets apart from the defaults.
     fn instance(&mut self, node: &Node, place: Place) -> Element {
@@ -329,27 +435,35 @@ impl Walk<'_> {
         let bx = self.box_rect(node);
         self.place(&mut el, node, &kind, bx, place);
         let mut args = Vec::new();
-        let values = doc.get(main).map(Node::variant).unwrap_or_default();
-        for ((prop, default), value) in sig.choices.iter().zip(values) {
-            if value != default {
-                args.push((prop.clone(), Arg::Text(value.clone())));
+        for d in self.differences(node.id()) {
+            match d {
+                Difference::Choice(i, v) => {
+                    if let Some((prop, _)) = sig.choices.get(i) {
+                        args.push((prop.clone(), Arg::Text(v)));
+                    }
+                }
+                Difference::Prop(item, v) => {
+                    let Some((_, prop, _)) = sig.props.iter().find(|(id, ..)| *id == item) else {
+                        continue;
+                    };
+                    let v = match v {
+                        PropValue::Boolean(b) => Arg::Bool(b),
+                        PropValue::Text(t) => Arg::Text(t),
+                        PropValue::Swap(m) => Arg::Component(self.component(m).name),
+                    };
+                    args.push((prop.clone(), v));
+                }
             }
         }
-        for p in variant::instance_properties(doc, node.id()).iter() {
-            let Some((_, prop, default)) = sig.props.iter().find(|(id, ..)| *id == p.id) else {
-                continue;
-            };
-            let value = variant::counterparts(doc, node.id(), p)
-                .first()
-                .and_then(|c| variant::field_value(doc, *c, p.kind))
-                .and_then(arg);
-            if let Some(v) = value.filter(|v| v != default) {
-                args.push((prop.clone(), v));
-            }
-        }
+        let slot = self
+            .bound
+            .get(&node.id())
+            .filter(|b| b.kind == PropKind::Swap)
+            .map(|b| b.name.clone());
         el.instance = Some(Instance {
             component: sig.name,
             args,
+            slot,
         });
         el
     }
@@ -370,21 +484,7 @@ impl Walk<'_> {
         let mut taken: HashSet<String> = ["className", "key", "ref", "children"]
             .map(String::from)
             .into();
-        // The variants, the first of any that share their values, and the default.
-        let (trees, default) = match owner.set() {
-            Some(_) => {
-                let mut seen = HashSet::new();
-                let trees: Vec<NodeId> = variant::variants(doc, owner_id)
-                    .into_iter()
-                    .filter(|v| seen.insert(doc.get(*v).map(|n| n.variant().to_vec())))
-                    .collect();
-                let default = ondin_core::kit::default_variant(doc, owner_id)
-                    .filter(|d| trees.contains(d))
-                    .unwrap_or(main);
-                (trees, default)
-            }
-            None => (vec![main], main),
-        };
+        let (trees, default) = self.trees(main);
         let default_values = doc.get(default).map(Node::variant).unwrap_or_default();
         let choices: Vec<(String, Vec<String>, String)> = owner
             .set()
@@ -404,21 +504,28 @@ impl Walk<'_> {
         let mut bound = HashMap::new();
         let mut props = Vec::new();
         for p in owner.props() {
-            if !matches!(p.kind, PropKind::Boolean | PropKind::Text) {
-                continue;
-            }
-            // The default variant's value, where the property reaches it.
-            let Some(default) = p
-                .bound
-                .iter()
-                .find(|b| under(doc, **b, default))
-                .or(p.bound.first())
-                .and_then(|b| variant::field_value(doc, *b, p.kind))
-                .and_then(arg)
-            else {
-                continue;
+            let value = match p.kind {
+                PropKind::Boolean | PropKind::Text => match self.prop_default(p, default) {
+                    Some(PropValue::Boolean(b)) => Arg::Bool(b),
+                    Some(PropValue::Text(t)) => Arg::Text(t),
+                    _ => continue,
+                },
+                // Made first, so it is written before the component using it.
+                PropKind::Swap => match self.swap_default(p) {
+                    Some(m) => Arg::Component(self.component(m).name),
+                    None => continue,
+                },
+                PropKind::Nested => continue,
             };
-            let prop = unique(prop_name(&p.name), &mut taken);
+            let mut prop = unique(prop_name(&p.name), &mut taken);
+            if p.kind == PropKind::Swap {
+                // Its binding is a tag in JSX, so no component may be named it.
+                let names = &mut self.components.as_mut().expect("components are on").names;
+                while names.contains(&super::jsx::slot_binding(&prop)) {
+                    prop = unique(prop_name(&p.name), &mut taken);
+                }
+                names.insert(super::jsx::slot_binding(&prop));
+            }
             for b in &p.bound {
                 let styled = match doc.get(*b).map(Node::kind) {
                     Some(NodeKind::Text { content, spans, .. }) => {
@@ -435,7 +542,7 @@ impl Walk<'_> {
                     },
                 );
             }
-            props.push((p.id, prop, default));
+            props.push((p.id, prop, value));
         }
         let sig = Signature {
             name: name.clone(),
@@ -1599,15 +1706,6 @@ fn under(doc: &Document, id: NodeId, ancestor: NodeId) -> bool {
         at = doc.get(a).and_then(Node::parent);
     }
     false
-}
-
-/// A property value as an argument; a swap is not one.
-fn arg(v: PropValue) -> Option<Arg> {
-    match v {
-        PropValue::Boolean(b) => Some(Arg::Bool(b)),
-        PropValue::Text(t) => Some(Arg::Text(t)),
-        PropValue::Swap(_) => None,
-    }
 }
 
 /// The runs of ASCII letters and digits in `name`.

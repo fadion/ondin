@@ -486,3 +486,161 @@ fn a_set_is_one_component_choosing_its_variant_by_a_union_prop() {
         "a use's class is none of the used file's: {app}"
     );
 }
+
+/// Mains *Star* and *Heart*, a *Card* main whose *Icon* slot shows Star and is
+/// bound to a swap property, and an instance of Card whose slot shows Heart.
+fn swap_card() -> (Document, NodeId) {
+    let mut ids = IdSource::new(0x5A);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = |w, h| NodeKind::Artboard {
+        size: Size::new(w, h),
+    };
+    let dot = || NodeKind::Rect {
+        size: Size::new(10.0, 10.0),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    let [star, star_dot, heart, heart_dot] = [(); 4].map(|_| ids.mint());
+    let [card, slot, slot_dot] = [(); 3].map(|_| ids.mint());
+    doc.apply(&Transaction(vec![
+        create(star, (root, 0), frame(20.0, 20.0), (0.0, 0.0), "Star"),
+        create(star_dot, (star, 0), dot(), (5.0, 5.0), "Dot"),
+        create(heart, (root, 1), frame(20.0, 20.0), (40.0, 0.0), "Heart"),
+        create(heart_dot, (heart, 0), dot(), (2.0, 2.0), "Dot"),
+        create(card, (root, 2), frame(100.0, 40.0), (0.0, 50.0), "Card"),
+        create(slot, (card, 0), frame(20.0, 20.0), (10.0, 10.0), "Star"),
+        create(slot_dot, (slot, 0), dot(), (5.0, 5.0), "Dot"),
+        Operation::SetComponent {
+            id: star,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: heart,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: card,
+            component: true,
+        },
+        Operation::SetLink {
+            id: slot,
+            link: Some(star),
+        },
+        Operation::SetLink {
+            id: slot_dot,
+            link: Some(star_dot),
+        },
+    ]))
+    .unwrap();
+    let (tx, _) = variant::define(&doc, &mut ids, card, "Icon", PropKind::Swap, vec![slot])
+        .expect("a property");
+    doc.apply(&tx).unwrap();
+
+    let [inst, inst_slot, inst_dot] = [(); 3].map(|_| ids.mint());
+    doc.apply(&Transaction(vec![
+        create(inst, (root, 3), frame(100.0, 40.0), (0.0, 100.0), "Card"),
+        create(
+            inst_slot,
+            (inst, 0),
+            frame(20.0, 20.0),
+            (10.0, 10.0),
+            "Star",
+        ),
+        create(inst_dot, (inst_slot, 0), dot(), (5.0, 5.0), "Dot"),
+        Operation::SetLink {
+            id: inst,
+            link: Some(card),
+        },
+        Operation::SetLink {
+            id: inst_slot,
+            link: Some(slot),
+        },
+        Operation::SetLink {
+            id: inst_dot,
+            link: Some(slot_dot),
+        },
+    ]))
+    .unwrap();
+    // The swap, with the rewrite of the slot's contents the commit adds to it.
+    let p = &variant::instance_properties(&doc, inst)[0];
+    let mut tx = Transaction(variant::set_property(
+        &doc,
+        &[inst],
+        p,
+        &PropValue::Swap(heart),
+    ));
+    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+    doc.apply(&tx).unwrap();
+    (doc, inst)
+}
+
+/// A swap property is a component-typed prop defaulting to the slot's main; the
+/// slot draws whichever component it is given, and a use passes its swap.
+/// flip: `Walk::why_inline` refusing every `SetSwap` → fails at "the swapped
+/// instance is a use".
+#[test]
+fn a_swap_property_is_a_component_prop() {
+    let (doc, inst) = swap_card();
+    let drift = ondin_core::reset::drift(&doc, inst);
+    assert_eq!(
+        (drift.fields, drift.removed, drift.order, drift.local),
+        (1, 0, 0, 0),
+        "the instance differs from its main in its swap alone"
+    );
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &[inst]);
+    assert!(
+        out.inlined.is_empty(),
+        "the swapped instance is a use: {:?}",
+        out.inlined
+    );
+
+    let card = file(&out, "components/Card.tsx");
+    assert!(
+        card.starts_with("import type { ComponentType } from \"react\";\n"),
+        "{card}"
+    );
+    assert!(card.contains("import Star from \"./Star\";"), "{card}");
+    assert!(
+        card.contains("  icon?: ComponentType<{ className?: string }>;"),
+        "{card}"
+    );
+    assert!(
+        card.contains("function Card({ className, icon: IconSlot = Star }: CardProps)"),
+        "{card}"
+    );
+    assert!(
+        card.contains("<IconSlot className={styles.star} />"),
+        "{card}"
+    );
+
+    let app = file(&out, "App.tsx");
+    assert!(
+        app.contains("import Heart from \"./components/Heart\";"),
+        "{app}"
+    );
+    assert!(
+        app.contains("<Card className={styles.card} icon={Heart} />"),
+        "{app}"
+    );
+    assert!(out.file("components/Heart.tsx").is_some());
+    assert!(out.file("components/Star.tsx").is_some());
+
+    let out = vue_of(&doc, &res, &[inst]);
+    let card = file(&out, "components/Card.vue");
+    assert!(
+        card.contains("import type { Component } from \"vue\";"),
+        "{card}"
+    );
+    assert!(card.contains("    icon?: Component;"), "{card}");
+    assert!(card.contains("    icon: () => Star,"), "{card}");
+    assert!(
+        card.contains("<component :is=\"icon\" class=\"star-2\" />"),
+        "the slot keeps off every component's classes: {card}"
+    );
+    let app = file(&out, "App.vue");
+    assert!(
+        app.contains("<Card class=\"card\" :icon=\"Heart\" />"),
+        "{app}"
+    );
+}

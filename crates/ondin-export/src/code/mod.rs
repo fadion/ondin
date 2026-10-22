@@ -206,7 +206,8 @@ pub(crate) fn stylesheet(root: &dom::Element, up: &str) -> String {
 }
 
 /// The components the trees under `roots` use and the pictures they link, each
-/// once, in document order.
+/// once, in document order. A slot's default and a component passed to a swap
+/// property are uses: the file names both.
 pub(crate) fn references<'a>(
     roots: impl IntoIterator<Item = &'a dom::Element>,
 ) -> (Vec<String>, Vec<String>) {
@@ -214,10 +215,16 @@ pub(crate) fn references<'a>(
     let mut images = Vec::new();
     roots.into_iter().for_each(|root| {
         root.each(&mut |e| {
-            if let Some(i) = &e.instance
-                && !uses.contains(&i.component)
-            {
-                uses.push(i.component.clone());
+            if let Some(i) = &e.instance {
+                let passed = i.args.iter().filter_map(|(_, a)| match a {
+                    dom::Arg::Component(c) => Some(c),
+                    _ => None,
+                });
+                for c in std::iter::once(&i.component).chain(passed) {
+                    if !uses.contains(c) {
+                        uses.push(c.clone());
+                    }
+                }
             }
             if e.tag == "img"
                 && let Some((_, src)) = e.attrs.iter().find(|(k, _)| *k == "src")
@@ -228,6 +235,19 @@ pub(crate) fn references<'a>(
         })
     });
     (uses, images)
+}
+
+/// `uses` with every component a swap property defaults to, which the file
+/// names whether or not a slot of it is drawn.
+pub(crate) fn with_defaults(mut uses: Vec<String>, props: &[(String, dom::Arg)]) -> Vec<String> {
+    for (_, d) in props {
+        if let dom::Arg::Component(c) = d
+            && !uses.contains(c)
+        {
+            uses.push(c.clone());
+        }
+    }
+    uses
 }
 
 /// Rules every page starts with: no default margins, and sizes that include

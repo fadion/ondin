@@ -187,6 +187,16 @@ fn decode(s: &str) -> String {
         .replace("&amp;", "&")
 }
 
+/// The binding a swap property `prop` is destructured into, which JSX can use
+/// as a tag: `icon` → `IconSlot`. The walk keeps it off every component's name.
+pub(crate) fn slot_binding(prop: &str) -> String {
+    let mut c = prop.chars();
+    match c.next() {
+        Some(f) => format!("{}{}Slot", f.to_ascii_uppercase(), c.as_str()),
+        None => "Slot".into(),
+    }
+}
+
 /// The binding an asset is imported as: `assets/card-box.png` → `cardBoxPng`.
 pub(crate) fn asset_binding(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);

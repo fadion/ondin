@@ -34,7 +34,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 (`export.md`, *Code export*).
 
 - **The components still written out as layers** (D1098 (9)):
-  - swap properties as child props;
   - nested (*shown from nested*) properties;
   - kit components, under a folder named for the kit;
   - instances whose root sets a mode.

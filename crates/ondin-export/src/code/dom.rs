@@ -33,6 +33,9 @@ pub(crate) struct Element {
 pub(crate) struct Instance {
     pub component: String,
     pub args: Vec<(String, Arg)>,
+    /// The swap property choosing the component, when the use is its slot:
+    /// [`Self::component`] is then only the default.
+    pub slot: Option<String>,
 }
 
 /// A component property's value.
@@ -40,6 +43,8 @@ pub(crate) struct Instance {
 pub(crate) enum Arg {
     Bool(bool),
     Text(String),
+    /// A component, by name: a swap property's.
+    Component(String),
 }
 
 /// What an element holds.
@@ -161,8 +166,20 @@ impl Element {
     }
 
     /// A component's tag, placed by this element's class, with its arguments.
+    /// A slot's component is the swap property's value: a binding in JSX, a
+    /// dynamic `component` in Vue.
     fn use_of(&self, out: &mut String, i: &Instance, syntax: Syntax) {
-        let _ = write!(out, "<{}", i.component);
+        match (&i.slot, syntax) {
+            (Some(prop), Syntax::Jsx) => {
+                let _ = write!(out, "<{}", super::jsx::slot_binding(prop));
+            }
+            (Some(prop), _) => {
+                let _ = write!(out, "<component :is=\"{prop}\"");
+            }
+            (None, _) => {
+                let _ = write!(out, "<{}", i.component);
+            }
+        }
         self.class_attr(out, syntax);
         if let (Some(prop), Syntax::Vue) = (&self.shown_by, syntax) {
             let _ = write!(out, " v-if=\"{prop}\"");
@@ -185,6 +202,12 @@ impl Element {
                 }
                 (Arg::Text(t), _) => {
                     let _ = write!(out, " {name}=\"{}\"", escape(t));
+                }
+                (Arg::Component(c), Syntax::Jsx) => {
+                    let _ = write!(out, " {name}={{{c}}}");
+                }
+                (Arg::Component(c), _) => {
+                    let _ = write!(out, " :{name}=\"{c}\"");
                 }
             }
         }

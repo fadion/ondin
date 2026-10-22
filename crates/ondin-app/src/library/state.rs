@@ -2,16 +2,12 @@
 //! entries, and the sort the dashboard is showing them in.
 //!
 //! **Rebuilt from disk rather than maintained.** Every write in
-//! [`super::store`] changes files, and this is re-scanned afterwards rather than
-//! patched to match — which is what makes the filesystem the truth in practice
-//! and not only in the module docs. A patched list and a scanned one disagree the
-//! first time something changes the folder that is not this app, and the base
-//! folder is explicitly meant to be a synced directory where that happens all the
-//! time.
+//! [`super::store`] is followed by a re-scan, not a patch: a patched list drifts
+//! the first time something other than this app changes the synced base folder.
 //!
-//! ⚠️ **So a scan is a real cost and must not be per-frame.** [`Library::refresh`]
-//! reads every document's prefix; sixty documents is sixty file opens. The
-//! dashboard calls it when it is entered, after a write, and on nothing else.
+//! ⚠️ **A scan is a real cost and must not be per-frame.** [`Library::refresh`]
+//! opens every document's prefix. The dashboard calls it when entered and after a
+//! write, and on nothing else.
 
 use super::cache::LocalIndex;
 use super::project::{Project, Projects, ProjectsRead};
@@ -22,8 +18,8 @@ use std::path::{Path, PathBuf};
 /// How the dashboard orders what it shows.
 ///
 /// The four the design's sort control cycles. Stored in preferences by
-/// [`Sort::id`] rather than by index, so inserting one later cannot silently
-/// change what an existing install opens on.
+/// [`Sort::id`] rather than by index, so inserting one cannot change what an
+/// existing install opens on.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Sort {
     #[default]
@@ -74,61 +70,41 @@ impl Sort {
 
 /// Everything the dashboard reads, plus where it came from.
 pub struct Library {
-    /// The resolved base folder. **Resolved once and kept**, so that a setting
-    /// edited mid-session cannot make two halves of one frame disagree about
-    /// where the library is.
+    /// The resolved base folder, resolved once so a setting edited mid-session
+    /// cannot make two halves of a frame disagree.
     pub root: PathBuf,
     pub projects: Projects,
     /// Every document found by the last [`Self::refresh`].
     pub entries: Vec<Entry>,
     /// The trash's listing as of the last [`Self::refresh_trash`] (§15 D728).
     ///
-    /// 🚨 **Held because reading it is a scan, and the sidebar asks every frame.**
-    /// `store::trashed` is `scan::scan_dir`, which opens and JSON-prefix-parses
-    /// **every file in `.trash`** — and `dashboard_sidebar` paints the *Trash*
-    /// count on every nav, whether or not the trash is being looked at, with
-    /// `visible_entries` scanning a second time for the same frame when it is.
-    /// With 200 documents in the trash that was 200 file opens a frame, 400 on
-    /// *Trash*, for a number that changes only when the user acts
-    /// (`[S20.1-L3-07]`).
+    /// Held because reading it is a scan and the sidebar asks every frame:
+    /// `store::trashed` is `scan::scan_dir`, which opens every file in `.trash`,
+    /// and `dashboard_sidebar` paints the *Trash* count on every nav.
     ///
-    /// ⚠️ **This module's own head already forbade it** — *"a refresh reads every
-    /// document's prefix… **Nothing in this file may call it from inside a layout
-    /// loop**"* — and named `Library::refresh` as the thing not to call. This was
-    /// the same hazard by a route that sentence does not enumerate, which is
-    /// exactly why it read as guarded and was not. **A rule that names one road
-    /// is not a rule about the destination.**
-    ///
-    /// ⚠️ **Private, unlike [`Self::entries`].** A `pub` field is a second way to
-    /// get the answer and the wrong one to reach for; [`Self::trashed`] is the
-    /// read, and the only way to move this is a refresh — which is what keeps the
-    /// invalidation enumerable.
+    /// ⚠️ Private, unlike [`Self::entries`]: [`Self::trashed`] is the read, and the
+    /// only way to move this is a refresh, which keeps the invalidation
+    /// enumerable.
     trashed: Vec<Entry>,
     /// Per-machine facts — the *last opened* times behind the Recent list.
     pub local: LocalIndex,
     /// Set when `projects.json` exists but could not be read.
     ///
-    /// ⚠️ **A latch on writing, not a message.** With this set, the app has an
-    /// empty project list and a file on disk that is not empty — so creating a
-    /// project would write one project over however many were really there.
-    /// Every writer checks it; see [`Self::may_write_projects`].
+    /// ⚠️ A latch on writing: the in-memory list is empty but the file is not, so
+    /// creating a project would overwrite the real ones. Every writer checks it;
+    /// see [`Self::may_write_projects`].
     pub projects_unreadable: bool,
     /// Set when the base folder could not be listed **and** this machine has
     /// recorded documents in it — an unplugged drive, a sync folder that has not
     /// mounted, a library renamed in Explorer (§15 D384).
     ///
-    /// ⚠️ **The second half is what makes this a fact rather than a guess.** A
-    /// fresh install has no base folder either — it is created by the first
-    /// write, not at launch — so an unreadable root on its own is the ordinary
-    /// state of an app nobody has saved anything with yet. What tells the two
-    /// apart is [`LocalIndex::is_empty`]: a per-machine index with something in
-    /// it is this computer saying it has seen documents in this library, and an
-    /// empty scan is then a *disagreement* rather than an answer.
+    /// ⚠️ The second half makes this a fact: a fresh install has no base folder
+    /// until the first write, so an unreadable root alone is ordinary. A non-empty
+    /// [`LocalIndex`] says this machine has seen documents here, which makes an
+    /// empty scan a disagreement.
     ///
-    /// A latch on writing as well as a message, for `projects_unreadable`'s
-    /// reason one level up: creating a document while the real library is offline
-    /// makes a **second** library at the same path, which is the shape of loss a
-    /// sync client then resolves by picking one.
+    /// A latch on writing as well as a message: creating a document while the
+    /// real library is offline makes a second library at the same path.
     pub root_unavailable: bool,
 }
 
@@ -140,23 +116,15 @@ impl Library {
 
     /// [`Self::open`], with the per-machine index handed in rather than read.
     ///
-    /// **For a change of base folder, which already holds the index** (§15
-    /// D848, `[X1.1-L6-01]`). The index is one file per machine and keyed by
-    /// document id rather than by folder, so the copy in memory is what `load`
-    /// would read, with two exceptions worth naming: a write by another window
-    /// since launch, which this window's next `save` overwrites whole either way;
-    /// and the `unreadable` latch, which stays set until relaunch rather than
-    /// being asked again — the conservative direction for a latch that exists to
-    /// stop a write. Handing it across is what lets a test reach
-    /// [`Self::root_unavailable`] through the constructor the app uses. Under
-    /// §15 D807's `cfg!(test)` gate `load` answers an empty index, so a library
-    /// built by `open` in a test could never be unavailable, and the one test
-    /// that said it existed to prove D384's latch through a settings change was
-    /// green for a reason unrelated to the line it was about.
+    /// For a change of base folder, which already holds the index (§15 D848). The
+    /// index is per machine and keyed by document id, so the in-memory copy is
+    /// what `load` would read; the `unreadable` latch stays set until relaunch,
+    /// the conservative direction. It also lets a test reach
+    /// [`Self::root_unavailable`] through the app's constructor, since `load`
+    /// answers an empty index under `cfg!(test)` (§15 D807).
     ///
-    /// ⚠️ **A parameter, not the constructor-set flag `cache::index_is_reachable`
-    /// rejects** — that argument is about a field a later `open` would silently
-    /// discard, which a value passed in cannot be.
+    /// A parameter, not the constructor-set flag `cache::index_is_reachable`
+    /// rejects: a value passed in cannot be silently discarded by a later `open`.
     pub fn open_with_index(root: PathBuf, local: LocalIndex) -> Self {
         let read = Projects::read(&root);
         let projects_unreadable = matches!(read, ProjectsRead::Unreadable);
@@ -164,7 +132,7 @@ impl Library {
             root,
             projects: read.or_empty(),
             entries: Vec::new(),
-            // Both filled by the `refresh` below, which is what `open` is for.
+            // Both filled by the `refresh` below.
             trashed: Vec::new(),
             local,
             projects_unreadable,
@@ -176,20 +144,14 @@ impl Library {
 
     /// Re-read the folder. See the module note on why this is not per-frame.
     ///
-    /// ⚠️ **The sweep is gated on the folder having been readable, and that is
-    /// the destructive half of this function.** [`LocalIndex::retain_known`]
-    /// drops every id the scan did not see — which is right after a delete and
-    /// catastrophic after an unplugged drive, where the scan sees *nothing*: one
-    /// launch with the library offline and every star on the machine is gone, for
-    /// good, the moment anything saves the index afterwards. The list being empty
-    /// is not evidence that the documents are; only a folder that was actually
-    /// listed is.
+    /// ⚠️ **The sweep is gated on the folder having been readable.**
+    /// [`LocalIndex::retain_known`] drops every id the scan did not see, which is
+    /// right after a delete and catastrophic after an unplugged drive: every star
+    /// on the machine would be lost once the index is next saved. An empty list is
+    /// not evidence the documents are gone; only a folder that was listed is.
     ///
-    /// The read is a second syscall rather than something [`scan::scan`] returns,
-    /// because *every other* error that walk meets is one it is right to drop
-    /// (see its own note) and threading a result type through it would be a worse
-    /// trade than one `read_dir` per refresh — which is already sixty file opens
-    /// for sixty documents.
+    /// The read is a second syscall rather than part of [`scan::scan`]'s result,
+    /// since every other error that walk meets is right to drop.
     pub fn refresh(&mut self) {
         let readable = scan::readable(&self.root);
         self.entries = scan::scan(&self.root);
@@ -208,52 +170,31 @@ impl Library {
 
     /// The trash's listing, as of the last refresh (§15 D728).
     ///
-    /// **Cheap, and it is the only way to ask.** `store::trashed` is a scan; see
-    /// the field.
+    /// Cheap, and the only way to ask: `store::trashed` is a scan; see the field.
     pub fn trashed(&self) -> &[Entry] {
         &self.trashed
     }
 
     /// Re-read the trash alone (§15 D728).
     ///
-    /// **The narrow half of [`Self::refresh`], for callers that moved a file into
-    /// or out of `.trash` and changed nothing else** — `purge_trash` at launch and
-    /// from the Settings card, and the **permanent delete** below. A full `refresh`
-    /// re-scans the whole library to learn a number that came from one folder.
+    /// The narrow half of [`Self::refresh`], for callers that moved a file into or
+    /// out of `.trash` and changed nothing else (`purge_trash` and the permanent
+    /// delete). Trashing, `delete_project`'s member sweep and `Act::Restore` move
+    /// files between the library and `.trash`, so they need a full `refresh`.
     ///
-    /// ⚠️ **The other delete paths are not callers of this and should not be**:
-    /// trashing a document, `delete_project`'s member sweep and `Act::Restore` each
-    /// move a file *between* the library and `.trash`, so both listings changed and
-    /// a full `refresh` is the right reach.
-    ///
-    /// 🚨 **This is the invalidation point, and it is the whole risk of caching
-    /// the trash.** `entries` has one producer (`scan::scan`) and one consumer
-    /// contract; the trash is written by `store::trash`, `store::purge_trash`,
-    /// `relocate` **and one door that goes through none of them**, and *before this
-    /// cache existed not one of them had to tell anybody*. `refresh` calls this, so
-    /// anything that already refreshed is covered without being changed.
-    ///
-    /// 🚨 **The door outside `store` is the one that was missed, and the enumeration
-    /// is why.** `trash_or_purge`'s `Nav::Trash` arm deletes for good with a bare
-    /// `fs::remove_file` in a panel — so a grep for `store::trash` / `store::purge_trash`
-    /// cannot see it, and the permanently-deleted document stayed in the Trash list
-    /// and in the sidebar's count until something unrelated refreshed. Fixed at that
-    /// site the day after this cache landed; §15 D728 carries the episode.
-    ///
-    /// ⚠️ **A count is deliberately not written here.** This doc said *"two of the
-    /// five call sites … a sixth writer added later has to know"*, and the sixth
-    /// writer was **already in the tree** — a number in prose is a gate nobody built,
-    /// and this one read as a survey of a closed set. Enumerate instead, from the
-    /// repository root, and read both:
+    /// 🚨 **This is the invalidation point, and the whole risk of caching the
+    /// trash.** `store::trash`, `store::purge_trash`, `relocate` and `trash_or_purge`'s
+    /// `Nav::Trash` arm (a bare `fs::remove_file` in a panel) all write `.trash`;
+    /// the last is invisible to a grep for `store::`. Enumerate the writers
+    /// rather than trusting a list, from the repository root:
     ///
     /// ```text
     /// grep -rn 'store::trash(\|store::purge_trash(' crates/ondin-app/src --include=*.rs
     /// grep -rn 'remove_file\|fs::rename' crates/ondin-app/src --include=*.rs
     /// ```
     ///
-    /// The first finds the doors that announce themselves; **the second is the one
-    /// that matters**, because a writer that reaches `.trash` without naming `store`
-    /// is exactly the writer this cache cannot survive.
+    /// The second matters: a writer that reaches `.trash` without naming `store`
+    /// is the one this cache cannot survive. (§15 D728)
     pub fn refresh_trash(&mut self) {
         self.trashed = super::store::trashed(&self.root);
     }
@@ -278,16 +219,13 @@ impl Library {
 
     /// Whether it is safe to create anything in the base folder.
     ///
-    /// False only when [`Self::root_unavailable`] — i.e. the folder could not be
-    /// listed and this machine says there should be documents in it. **Every
-    /// write here is a `create_dir_all` away from resurrecting the path**, so
-    /// filing a new document into an offline library does not fail: it succeeds,
-    /// into a brand-new empty folder wearing the missing one's name, and the sync
-    /// client that brings the real one back then has two libraries to reconcile.
+    /// False only when [`Self::root_unavailable`]. Every write is a
+    /// `create_dir_all` away from resurrecting the path, so filing into an offline
+    /// library would succeed into a brand-new empty folder and leave the sync
+    /// client two libraries to reconcile.
     ///
-    /// Not the same question as [`Self::may_write_projects`], which is about one
-    /// file being unparseable rather than the folder being gone, and both are
-    /// asked because either can be true without the other.
+    /// Not the same question as [`Self::may_write_projects`] (one unparseable
+    /// file); either can be true without the other.
     pub fn may_write(&self) -> bool {
         !self.root_unavailable
     }
@@ -304,12 +242,9 @@ impl Library {
 
     /// The project an entry belongs to, by the id in its own metadata.
     ///
-    /// `None` covers both "belongs to no project" and "belongs to a project id
-    /// nothing on this machine knows about" — the second being what a document
-    /// synced from a machine whose `projects.json` has not arrived yet looks
-    /// like. Treating it as unfiled is right: the document shows up in *All
-    /// files*, nothing is lost, and it joins its project the moment the list
-    /// syncs.
+    /// `None` covers both "no project" and an id nothing here knows (a document
+    /// synced before its `projects.json`). Treating it as unfiled loses nothing:
+    /// it joins its project once the list syncs.
     pub fn project_of(&self, entry: &Entry) -> Option<&Project> {
         self.projects.get(entry.meta.project.as_deref()?)
     }
@@ -317,24 +252,17 @@ impl Library {
     /// Whether this document is a sync client's conflict copy, and the name of
     /// the document it is a copy of.
     ///
-    /// **The scan cannot answer this and this is why it is here**:
-    /// [`scan::conflict_marker`] reads one filename, and half its answers
-    /// ([`scan::Conflict::Suspected`]) are only conflicts if the document they
-    /// claim to copy is sitting beside them — which is a question about the
-    /// *list*. `landing-v4 (1).ondin` next to `landing-v4.ondin` is a sync
-    /// artefact; on its own it is somebody's file, and marking it would be the
-    /// app telling a user their document is broken because of a bracket.
+    /// [`scan::conflict_marker`] reads one filename, and a
+    /// [`scan::Conflict::Suspected`] answer holds only if the original sits beside
+    /// it — a question about the list. `landing-v4 (1)` next to `landing-v4` is a
+    /// sync artefact; alone it is somebody's file.
     ///
-    /// ⚠️ **Same directory, not merely the same stem.** A project is a folder
-    /// (`super::project`), so `landing-v4.ondin` at the root and
-    /// `landing-v4 (1).ondin` inside *Kestrel* are two unrelated documents that a
-    /// stem comparison alone would pair. Compared case-insensitively because the
-    /// filesystem this most often runs on is.
+    /// ⚠️ **Same directory, not merely the same stem**: a project is a folder
+    /// (`super::project`), so a root document and a same-named copy inside
+    /// *Kestrel* are unrelated. Compared case-insensitively, like the filesystem.
     ///
-    /// **Linear, and that is affordable because the marker is checked first.**
-    /// The scan of `entries` only happens for a filename that already carries a
-    /// suspected marker, which is nearly none of them — a per-frame `O(n²)` over
-    /// every card would not be (see this module's note on cost).
+    /// Linear over `entries`, affordable because only a filename that already
+    /// carries a suspected marker reaches the scan.
     pub fn conflict(&self, entry: &Entry) -> Option<String> {
         let (kind, base) = scan::conflict_marker(&entry.stem)?;
         match kind {
@@ -368,16 +296,13 @@ impl Library {
 
     /// Order a set of entries in place.
     ///
-    /// **Every sort is broken by name and then by stem**, so the order is total:
-    /// two documents of the same size, or two created in the same second — which
-    /// is what a bulk import produces — would otherwise land in whatever order
-    /// the directory read happened to give, and shuffle between visits for no
-    /// reason the user could see.
+    /// Every sort is broken by name and then by stem, so the order is total; ties
+    /// (a bulk import shares a created second) would otherwise follow directory
+    /// order and shuffle between visits.
     pub fn sort_entries(&self, entries: &mut [Entry], sort: Sort) {
         entries.sort_by(|a, b| {
             let primary = match sort {
-                // Descending: the most recent first, which is what every one of
-                // these questions is actually asking.
+                // Descending: largest or most recent first.
                 Sort::Edited => b.modified.cmp(&a.modified),
                 Sort::Created => b.meta.created.cmp(&a.meta.created),
                 Sort::Size => b.size.cmp(&a.size),
@@ -395,10 +320,8 @@ impl Library {
 
     /// The documents this machine has opened, most recent first.
     ///
-    /// **Only documents that have actually been opened here**, which is what
-    /// makes this different from sorting everything by edit time: a library
-    /// synced onto a new machine has a full *All files* and an empty *Recent*,
-    /// and that is the honest answer.
+    /// Only documents actually opened here: a library synced onto a new machine
+    /// has a full *All files* and an empty *Recent*.
     pub fn recent(&self) -> Vec<Entry> {
         let mut out: Vec<(u64, Entry)> = self
             .entries
@@ -448,8 +371,7 @@ mod tests {
         for s in Sort::ALL {
             assert_eq!(Sort::from_id(s.id()), s);
         }
-        // ⚠️ An unknown key degrades rather than failing — the whole reason the
-        // preference stores an id instead of an index.
+        // An unknown key degrades rather than failing.
         assert_eq!(Sort::from_id("by-vibes"), Sort::Edited);
         assert_eq!(Sort::from_id(""), Sort::Edited);
         // And the cycle closes.
@@ -463,10 +385,8 @@ mod tests {
     /// Build an entry directly, so the display name and the stem can be set
     /// independently.
     ///
-    /// ⚠️ **Not written to disk, and that is the point — see
-    /// `a_tied_sort_falls_back_to_the_name`.** A sort test built from a temp
-    /// folder is partly answered by the filesystem rather than by the code under
-    /// test.
+    /// Not written to disk: a sort test over a temp folder is partly answered by
+    /// the filesystem (see `a_tied_sort_falls_back_to_the_name`).
     fn entry(name: &str, stem: &str, modified: u64, created: u64, size: u64) -> Entry {
         Entry {
             path: PathBuf::from(format!("/lib/{stem}.ondin")),
@@ -484,29 +404,19 @@ mod tests {
         }
     }
 
-    /// ⚠️ Sorting by a field that ties must still be a total order. Documents
-    /// created in the same second — which is what an import produces — are
-    /// ordered by name.
+    /// A tied sort is still a total order: documents created in the same second
+    /// are ordered by name.
     ///
-    /// ⚠️ **This test was vacuous in its first form and the flip is what found
-    /// it.** It built three documents in a temp folder and asserted they came
-    /// back alphabetically; dropping the whole `then_with` chain left it green,
-    /// because **`read_dir` on NTFS returns entries already sorted by
-    /// filename** — so the assertion was being satisfied by the operating system
-    /// and the tie-break could have been deleted without a single test noticing.
-    /// Any sort test whose fixture is a real directory has that problem.
+    /// Entries are constructed, not scanned (`read_dir` on NTFS is already
+    /// filename-sorted and would satisfy the assertion), and the stems run
+    /// opposite to the names so a fall-through to the stem also fails.
     ///
-    /// Two things fix it and both are needed: the entries are constructed rather
-    /// than scanned, so the input order is chosen; and the stems are in the
-    /// *opposite* order to the display names, so a tie-break that fell through to
-    /// the stem — the second link in the chain — would also fail. Flipped again
-    /// afterwards: dropping the chain now fails here, and dropping only the
-    /// display-name link fails here too.
+    /// flip: dropping the `then_with` chain, or only the display-name link, fails
+    /// at the names assertion.
     #[test]
     fn a_tied_sort_falls_back_to_the_name() {
         let lib = Library::open(temp_root("ties"));
-        // Stems ascend a, b, c while names descend Zebra, Mango, Apple, and the
-        // input order is a third order again.
+        // Stems ascend a, b, c; names descend Zebra, Mango, Apple; input is a third order.
         let mut entries = vec![
             entry("Mango", "b", 100, 100, 10),
             entry("Zebra", "a", 100, 100, 10),
@@ -528,15 +438,14 @@ mod tests {
         ];
         lib.sort_entries(&mut entries, Sort::Name);
         let names: Vec<String> = entries.iter().map(|e| e.display_name()).collect();
-        // ⚠️ Byte order would put every capital before every lowercase, so this
-        // reads "Alpha", "Gamma", "beta" without the fold. The stems are in
-        // reverse order so the fall-through cannot produce this by accident.
+        // Byte order would give "Alpha", "Gamma", "beta"; the stems run reverse so
+        // the fall-through cannot produce this by accident.
         assert_eq!(names, vec!["Alpha", "beta", "Gamma"]);
         let _ = std::fs::remove_dir_all(&lib.root);
     }
 
-    /// The descending sorts, which the tie-break tests above deliberately do not
-    /// exercise — every fixture there is tied on its primary key.
+    /// The descending sorts, which the tie-break tests (tied on the primary key)
+    /// do not exercise.
     #[test]
     fn edited_created_and_size_all_read_largest_first() {
         let lib = Library::open(temp_root("desc"));
@@ -594,13 +503,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ The latch. A `projects.json` that cannot be parsed must not be
-    /// overwritten by the empty list that failure produced.
+    /// A `projects.json` that cannot be parsed is not overwritten by the empty
+    /// list that failure produced.
     ///
-    /// Flip-check, run: making `save_projects` write unconditionally leaves the
-    /// first two assertions green and fails the last — and the damage it models
-    /// is real, since the bytes it would replace are somebody's whole project
-    /// list mid-sync.
+    /// flip: making `save_projects` write unconditionally leaves the first two
+    /// assertions green and fails the last.
     #[test]
     fn a_broken_projects_file_is_never_written_over() {
         let root = temp_root("latch");
@@ -621,19 +528,14 @@ mod tests {
     /// A stated conflict stands alone; a suspected one needs the document it
     /// claims to copy, in the same folder (§15 D375).
     ///
-    /// ⚠️ **The fixture is written by hand rather than through `store`,** because
-    /// nothing in this app can produce these filenames — that is the property
-    /// `conflict_marker` leans on. `std::fs::copy` of a real document is also what
-    /// makes the point the mark exists for: the copy carries the original's
-    /// metadata, so both entries report the same `Entry::display_name`, the same
-    /// project and the same id, and only the stem differs.
+    /// The fixture is copied by hand, not filed through `store`, since nothing in
+    /// the app can produce these filenames; a copy carries the original's
+    /// metadata, so only the stem differs.
     ///
-    /// **Flip-checked** by making `Conflict::Suspected` return `Some` without
-    /// consulting `entries`: the second assertion fails with the lone `(1)` file
-    /// marked as a copy of "Orphan", which is somebody's document being told it is
-    /// broken. Predicted that site and it was that site;
-    /// `a_conflict_is_matched_inside_one_folder_only` fails on the same flip, at
-    /// its only assertion.
+    /// flip: making `Conflict::Suspected` return `Some` without consulting
+    /// `entries` fails at the second assertion (the lone `orphan (1)` file marked
+    /// as a copy); `a_conflict_is_matched_inside_one_folder_only` fails on the
+    /// same flip.
     #[test]
     fn a_suspected_conflict_needs_its_original_and_a_stated_one_does_not() {
         let root = temp_root("conflict");
@@ -675,7 +577,7 @@ mod tests {
         );
         assert_eq!(of("landing-v4"), None, "the original is not the conflict");
 
-        // ⚠️ The thing the mark is for: without it these two are the same card.
+        // What the mark is for: without it these are the same card.
         let names: Vec<String> = lib
             .entries
             .iter()
@@ -724,31 +626,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A library whose folder cannot be read **keeps this machine's index**, and
-    /// says so — the case a scan cannot tell from an empty library on its own.
+    /// A library whose folder cannot be read keeps this machine's index, and says
+    /// so. The star assertion is the one with teeth: an ungated sweep would drop
+    /// every star at a launch with the drive unplugged.
     ///
-    /// ⚠️ **The first assertion is the one with teeth, and it is about data
-    /// rather than about a message.** `retain_known` drops every id the scan did
-    /// not see; with the folder gone the scan sees none, so an ungated sweep
-    /// takes every star on the machine at the first launch with the drive
-    /// unplugged — permanently, as soon as anything saves the index afterwards.
-    /// The label on the empty state is the cheap half of this feature.
+    /// Built by hand, not through `Library::open`, which calls `LocalIndex::load`
+    /// and would read the developer's real index.
     ///
-    /// ⚠️ **Built by hand rather than through `Library::open`**, which calls
-    /// `LocalIndex::load` and would read the *developer's real* library index off
-    /// this machine — making the fixture whatever happens to be in the cache
-    /// directory, and this assertion about nothing.
-    ///
-    /// Flip-check, run: ungating the sweep (`if false` in place of `if
-    /// !readable`, which is the edit that leaves the rest of `refresh` intact)
-    /// fails here at the **star** — line one of the assertions, not the flag —
-    /// which is the honest site, since the message is a consequence and the star
-    /// is the loss. See the sibling test below for the other half of the pair.
+    /// flip: `if false` in place of `if !readable` in `refresh` fails at the
+    /// star assertion, not the flag. See the sibling test for the other half.
     #[test]
     fn a_library_that_cannot_be_read_keeps_its_stars_and_reports_itself() {
         let root = temp_root("offline");
-        // Gone after the fixture, which is the unplugged drive: a path that
-        // resolves to nothing rather than to an empty folder.
+        // The unplugged drive: a path that resolves to nothing.
         std::fs::remove_dir_all(&root).unwrap();
         let mut local = LocalIndex::default();
         local.mark_opened("doc-1");
@@ -779,16 +669,11 @@ mod tests {
     /// The same unreadable folder on a machine that has **never** seen this
     /// library is an ordinary fresh install, not a fault.
     ///
-    /// ⚠️ **This is the assertion that stops the feature crying wolf**, and it is
-    /// why the flag is not simply "the folder could not be read": `~/.ondin` does
-    /// not exist until the first document is filed, so every first launch would
-    /// otherwise open on a warning about a library the user has not made yet.
+    /// Stops the feature crying wolf: `~/.ondin` does not exist until the first
+    /// document is filed, so every first launch would otherwise warn.
     ///
-    /// Flip-check, run: dropping `&& !self.local.is_empty()` from `refresh`
-    /// leaves the test above **green** — it is about the sweep, and the sweep is
-    /// gated on readability alone — and fails here, at `root_unavailable`. Which
-    /// is the pair worth having: one test for the data, one for the claim, and
-    /// neither covers the other.
+    /// flip: dropping `&& !self.local.is_empty()` from `refresh` leaves the test
+    /// above green (it is about the sweep) and fails here, at `root_unavailable`.
     #[test]
     fn an_unreadable_folder_on_a_machine_that_knows_nothing_is_a_fresh_install() {
         let root = temp_root("fresh");

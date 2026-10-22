@@ -1,42 +1,31 @@
 //! Ruler guides — the straight lines a designer pulls out of a ruler to line
 //! work up against.
 //!
-//! Guides are **document state**, saved with the file, for the same reason the
-//! canvas ground is (§15 D18/D28): people place them for the artwork, not for
-//! the sitting. A guide down the middle of a layout is part of how that layout
-//! was built, and losing it on reopen would make it worthless. They are the
-//! second thing in a `Document` that is not a node.
+//! Guides are document state, saved with the file (§15 D18/D28): people place them
+//! for the artwork, not for the sitting.
 //!
-//! They are not nodes, though, and deliberately so. A guide has no parent, no
-//! transform, no paint and no bounds; it never renders into the scene, never
-//! participates in hit-testing for artwork, and must not show up in the layers
-//! tree or be swept up by Select All. Every one of those would have to be
-//! special-cased away if a guide were a `Node`, which is a longer list than the
-//! five operations it takes to keep them apart.
+//! They are deliberately not nodes: a guide has no parent, transform, paint or
+//! bounds, never renders into the scene or takes part in hit-testing, and must not
+//! appear in the layers tree or be swept up by Select All. As a `Node` each of
+//! those would need special-casing away.
 //!
-//! A guide **does** now reference a node — [`Guide::owner`], the frame it is
-//! scoped to — which is the one thing about them that has moved toward the tree.
-//! It is a reference and not membership: a scoped guide still has no parent, no
-//! transform of its own and no place in the layers tree.
+//! A guide references a node through [`Guide::owner`], the frame it is scoped to;
+//! that is a reference, not membership in the tree.
 
 use crate::id::NodeId;
 use peniko::Color;
 
-/// The colour a guide is drawn in until someone overrides it — the design's
-/// dark red (`design/Editor.dc.html`).
+/// The colour a guide is drawn in until someone overrides it: a dark red.
 ///
-/// Deliberately not the selection blue: guides sit over artwork permanently,
-/// and a permanent line in the colour the app uses to say "this is selected"
-/// would be a standing lie.
+/// Deliberately not the selection blue, which would make a permanent line say
+/// "this is selected".
 pub const DEFAULT_GUIDE_COLOR: Color = Color::from_rgba8(0xa3, 0x33, 0x2d, 255);
 
 /// Stable identity for a guide.
 ///
 /// A [`NodeId`] under the newtype, minted from the session's one [`IdSource`]
-/// (§5.2) — so a guide id and a node id can never collide, and the reservation
-/// a loaded file gets covers both without a second counter. The wrapper is what
-/// stops the two being passed to each other's functions: nothing in the model
-/// accepts "an id", only a node id or a guide id.
+/// (§5.2), so the two never collide and one reservation covers both. The wrapper
+/// stops either being passed to the other's functions.
 ///
 /// [`IdSource`]: crate::id::IdSource
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -62,10 +51,8 @@ impl GuideId {
 
 /// Which way a guide runs.
 ///
-/// Named for the *line*, as a designer names it: a **horizontal** guide is a
-/// horizontal line, and the number that places it is therefore a `y`. The axis
-/// a guide constrains is the opposite of the one it is named for, which is
-/// exactly the confusion [`Self::position_label`] exists to settle.
+/// Named for the line: a horizontal guide is a horizontal line, placed by a `y`
+/// (the confusion [`Self::position_label`] settles).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GuideAxis {
@@ -92,35 +79,25 @@ impl GuideAxis {
 pub struct Guide {
     pub id: GuideId,
     pub axis: GuideAxis,
-    /// Where the line sits — `y` for a horizontal guide, `x` for a vertical one
-    /// — read in [`Self::owner`]'s **local** space when it has one and in
-    /// **world** space when it does not.
-    ///
-    /// Never view space either way: a guide is anchored to the artwork, so
-    /// panning and zooming move it on screen and change nothing about it.
+    /// Where the line sits — `y` for a horizontal guide, `x` for a vertical one —
+    /// in [`Self::owner`]'s local space when it has one, else in world space.
+    /// Never view space: panning and zooming change nothing about a guide.
     pub position: f64,
-    /// An override for [`DEFAULT_GUIDE_COLOR`]. `None` means "the default", not
-    /// "a copy of today's default" — so retuning the default carries every
-    /// guide that was never recoloured with it, and the inspector's reset has
-    /// something to reset *to* rather than a colour to re-enter.
+    /// An override for [`DEFAULT_GUIDE_COLOR`]. `None` means "the default", not a
+    /// copy of today's, so retuning the default carries every guide never
+    /// recoloured and the inspector's reset has something to reset to.
     pub color: Option<Color>,
     /// The frame this guide is scoped to, or `None` for a guide that runs the
     /// whole canvas.
     ///
-    /// **A reference to a node, from the one thing in the document that is not
-    /// one.** It is stored as an owner on a flat list rather than as a
-    /// `Vec<Guide>` per node, which keeps [`Document::guides`] one id-sorted
-    /// list — so a one-guide edit is still a one-line diff (§5.11 invariant 9)
-    /// — and makes changing scope a **field edit** rather than a move between
-    /// two collections. That is what lets a guide be dragged from global to
-    /// scoped and back as one undoable operation
-    /// ([`Operation::SetGuideScope`]).
+    /// Kept as an owner on a flat list rather than a `Vec<Guide>` per node, so
+    /// [`Document::guides`] stays one id-sorted list (a one-guide edit is a
+    /// one-line diff, invariant 9) and changing scope is a field edit, one undoable
+    /// operation ([`Operation::SetGuideScope`]).
     ///
-    /// Two invariants ride on it, both enforced rather than hoped for: the
-    /// owner is a live node ([`Document::apply`] refuses a guide owned by one
-    /// that is not, and the loader rejects a dangling reference), and deleting a
-    /// frame takes its guides with it in the same transaction
-    /// ([`crate::build::guides_of`]).
+    /// The owner is a live node ([`Document::apply`] refuses otherwise and the
+    /// loader rejects a dangling reference), and deleting a frame takes its guides
+    /// with it in the same transaction ([`crate::build::guides_of`]).
     ///
     /// [`Document::guides`]: crate::document::Document::guides
     /// [`Document::apply`]: crate::document::Document::apply
@@ -138,15 +115,13 @@ impl Guide {
 /// A guide's line across `box_`, as two points in the same space `box_` and
 /// `position` are measured in.
 ///
-/// The span is the frame's own box for a scoped guide and the visible world for
-/// a global one; the caller supplies whichever it means, so this stays the one
-/// place that knows a horizontal guide is placed by its `y` and drawn along its
-/// `x`.
+/// The caller supplies the frame's box for a scoped guide or the visible world for
+/// a global one; this is the one place that knows a horizontal guide is placed by
+/// its `y` and drawn along its `x`.
 ///
-/// **The span is not clamped to the box on the guide's own axis**, deliberately.
-/// A guide whose offset has outgrown a shrunk frame keeps the number and lets
-/// the clip hide the line, so re-growing the frame brings it back — the same
-/// bargain a corner radius that exceeds half the shorter side makes (§5.6).
+/// The position is deliberately not clamped to the box: a guide outgrown by a
+/// shrunk frame keeps its number and the clip hides the line, so re-growing the
+/// frame brings it back.
 pub fn guide_span(
     axis: GuideAxis,
     position: f64,
@@ -167,10 +142,8 @@ pub fn guide_span(
 /// The component of `p` that places a guide of this axis: `y` for a horizontal
 /// one, `x` for a vertical one.
 ///
-/// The inverse of [`guide_span`]'s placement, and the reason a pointer position
-/// can be turned into a guide coordinate in any space without each caller
-/// re-deciding which component it wants. Getting that backwards is silent — the
-/// guide simply tracks the wrong axis — so it is spelled once.
+/// The inverse of [`guide_span`]'s placement, spelled once because getting the
+/// component backwards is silent: the guide just tracks the wrong axis.
 pub fn guide_coord_of(axis: GuideAxis, p: kurbo::Point) -> f64 {
     match axis {
         GuideAxis::Horizontal => p.y,
@@ -182,10 +155,9 @@ pub fn guide_coord_of(axis: GuideAxis, p: kurbo::Point) -> f64 {
 /// coordinate at zero.
 ///
 /// For projecting a guide between spaces: a scoped guide's world coordinate is
-/// `world * guide_point(axis, local)` read back through [`guide_coord_of`], and
-/// that is only meaningful when the owner is upright — which is exactly the
-/// condition [`crate::build::Orientation`] is asked about at the one site that
-/// does it (`OndinApp::guide_lines`).
+/// `world * guide_point(axis, local)` read back through [`guide_coord_of`], which
+/// is only meaningful when the owner is upright ([`crate::build::Orientation`],
+/// asked at `OndinApp::guide_lines`).
 pub fn guide_point(axis: GuideAxis, position: f64) -> kurbo::Point {
     match axis {
         GuideAxis::Horizontal => kurbo::Point::new(0.0, position),

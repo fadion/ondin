@@ -5,30 +5,16 @@
 //! ruler guides on the page; if one lands within a few screen pixels, the
 //! gesture is nudged onto it and a line is drawn.
 //!
-//! **Two kinds of snap, and the difference is what they draw.** An *alignment*
-//! puts a feature on a coordinate — an edge on an edge, a centre on a guide — and
-//! explains itself with a bare [`Guide`], a line with no number because the number
-//! would be zero. A *spacing* snap ([`spacing_candidates`]) equalizes the **gaps**
-//! either side of the box instead, and a gap is only worth drawing with its number,
-//! so it explains itself with [`Measure`]s — the same type the Alt-hover measure
-//! produces, drawn by the same function. Both arrive together in [`Marks`].
+//! An *alignment* puts a feature on a coordinate and is explained by a bare
+//! [`Guide`]; a *spacing* snap ([`spacing_candidates`]) equalizes the gaps either
+//! side of the box and is explained by [`Measure`]s. Both arrive in [`Marks`]. They
+//! compete on one scale: the nearer claims the axis, alignment taking ties.
 //!
-//! They compete on one scale: whichever is nearer claims the axis, with alignment
-//! taking ties. See the comment at the spacing loop in [`snap_rect`] for why that
-//! way round.
+//! [`Guide`] here is a transient line drawn for one frame; `ondin_core::Guide` is
+//! a persistent ruler guide. This module snaps to the latter and draws the former.
 //!
-//! **Two things here are called a guide and they are not the same.** [`Guide`]
-//! in this module is a *transient* line drawn for one frame to explain a snap
-//! that is happening. A `ondin_core::Guide` is a **ruler guide** — a persistent
-//! line the designer placed, saved with the document (`rulers.rs`). This module
-//! snaps *to* the latter and draws the former.
-//!
-//! Everything is computed in world space but the tolerance is in *screen*
-//! pixels, so snapping feels equally sticky at every zoom level — at 10% zoom a
-//! fixed world tolerance would snap across half the canvas.
-//!
-//! This is pure geometry over `Resolved` bounds: no document mutation, no egui.
-//! The gesture applies the returned adjustment and draws the returned guides.
+//! The tolerance is in screen pixels, so snapping is equally sticky at every zoom.
+//! Pure geometry over `Resolved` bounds: no document mutation, no egui.
 
 use crate::measure::{self, Axis, Measure};
 use ondin_core::kurbo::{Point, Rect, Vec2};
@@ -39,90 +25,52 @@ const TOLERANCE_PX: f64 = 6.0;
 
 /// Round to the pixel grid, whose pitch is **one world unit**.
 ///
-/// That equivalence — a world unit is a pixel at 100% zoom — is how the whole
-/// app has always behaved (`Viewport` derives zoom from the ratio of a world
-/// rect to a pixel size, and the design's 51.94% shows 100 units every 51.94px)
-/// but it was never written down as a rule. This function and the grid in
-/// `grid.rs` are the first two things to *depend* on it, so it is stated here
-/// rather than left implicit: they must round and draw the same lattice, or the
-/// app shows one grid and honours another.
+/// A world unit is a pixel at 100% zoom; this function and the grid in `grid.rs`
+/// must round and draw the same lattice, or the app shows one grid and honours
+/// another.
 fn to_pixel(value: f64) -> f64 {
     value.round()
 }
 
 /// The delta that puts `value` on the pixel grid.
 ///
-/// **The fallback under every snap, never a competitor to one.** An alignment
-/// or guide match on an axis wins outright and this is not consulted: a shape
-/// lined up with another shape's edge at 100.5 belongs at 100.5, and rounding
-/// it to 100 afterwards would break the very alignment that was just found. So
-/// pixel rounding only fills the axes nothing else claimed — which is most of
-/// them, most of the time, and is what keeps geometry whole without the
-/// designer thinking about it.
-///
-/// Skipped on an axis a Shift-constrained gesture has locked, along with the
-/// rest of snapping: the layer must not creep onto the grid perpendicular to the
-/// line the user is holding it to, however fractional it was to begin with.
+/// The fallback under every snap, never a competitor: an alignment or guide match
+/// on an axis wins outright, because rounding afterwards would break it. Skipped
+/// on an axis a Shift-constrained gesture has locked.
 fn pixel_delta(value: f64) -> f64 {
     to_pixel(value) - value
 }
 
-/// What a gesture is allowed to snap to — the toggles in the top bar's **Snap**
-/// menu (`design/Editor.dc.html`), resolved into the sources they admit.
+/// What a gesture is allowed to snap to — the top bar's **Snap** menu toggles,
+/// resolved into the sources they admit.
 ///
-/// A struct rather than one parameter each, because they are one decision —
-/// "what may snapping consult" — and threading them separately is how a call
-/// site ends up honouring some and quietly forgetting one. That is not
-/// hypothetical arithmetic: this said "the three" until baselines made it four
-/// (§15 D355), and a **count** in a doc comment is a fact that goes stale on the
-/// next row without anything failing. Owned
-/// rather than borrowed: `targets` is a fresh `Vec` every gesture frame anyway
-/// (it is culled to the viewport), so there is nothing to save by lending it.
-///
-/// A source that is switched off arrives **empty**, not flagged. The functions
-/// below then need no `if` for it: an empty candidate list cannot win, so the
-/// toggle is enforced by construction at one site instead of being re-checked at
-/// every comparison.
+/// One struct so no call site honours some toggles and forgets one. A source that
+/// is switched off arrives **empty**, so it cannot win and needs no `if`.
 pub struct Snapping {
     /// Node bounds. Empty when *Snap to shapes* is off.
     pub targets: Vec<Rect>,
     /// Ruler guides. Empty when *Snap to guides* is off.
     pub guides: GuideLines,
-    /// Text baselines in world space, as bare ys (§15 D355). Empty when *Snap to
-    /// baselines* is off, or when nothing in view is a text node.
+    /// Text baselines in world space, as bare ys. Empty when *Snap to baselines*
+    /// is off, or when nothing in view is a text node.
     ///
-    /// **Its own source rather than more `guides.y`**, though the shape is
-    /// identical, because the two differ in every way that matters downstream: a
-    /// ruler guide is *already a drawn line* and a baseline is not, so a match on
-    /// one wants a mark and a match on the other does not (see [`Matched`]); and a
-    /// guide is something the user placed where a baseline is inherent, which is
-    /// why they answer to different switches.
+    /// Its own source rather than more `guides.y`: a ruler guide is already a
+    /// drawn line and a baseline is not, so only a baseline match wants a mark
+    /// (see [`Matched`]).
     pub baselines: Vec<f64>,
     /// Whether an axis nothing else claimed falls to the whole-pixel lattice —
-    /// *Snap to grid*. The one source that has to be a flag rather than an empty
-    /// list, because the lattice is everywhere.
+    /// *Snap to grid*. A flag rather than an empty list, because the lattice is
+    /// everywhere.
     pub pixel: bool,
-    /// Logical points per world unit, which turns the screen-space tolerance into
-    /// world units. Deliberately not `Default`-able: a zero zoom would make the
-    /// tolerance effectively infinite and snap everything to everything.
-    ///
-    /// ⚠️ **This said device pixels, and was built from `camera.zoom`, until §15
-    /// D853** — so the snap tolerance shrank with the display scale while the
-    /// pointer it is aimed by is measured in points. `OndinApp::snapping` passes
-    /// `points_per_world` now; at 100% scaling the two are the same number.
+    /// Logical points per world unit (the pointer is measured in points), which
+    /// turns the screen-space tolerance into world units. A zero zoom would make
+    /// the tolerance infinite, so there is no `Default`.
     pub zoom: f64,
 }
 
 impl Snapping {
     /// Snapping that consults nothing — the base a test adds one source to.
-    ///
-    /// `#[cfg(test)]` because that is now the whole truth about it. This used to
-    /// be the Shift case, built by `OndinApp::snapping` whenever the key was
-    /// down; Shift constrains a gesture instead of silencing snapping now (§15),
-    /// and the menu's own everything-off state goes through the ordinary path with
-    /// empty sources rather than through here. Left `pub` without the gate
-    /// it would be a constructor that looks like production API and is reachable
-    /// only from tests, which is the kind of decoy §15 D2 exists to warn about.
+    /// `#[cfg(test)]` so it does not pose as production API.
     #[cfg(test)]
     pub fn none(zoom: f64) -> Self {
         Self {
@@ -137,10 +85,8 @@ impl Snapping {
 
 /// The ruler guides worth snapping to, split by the axis each one pins.
 ///
-/// Coordinates rather than `ondin_core::Guide`s, so this module keeps knowing
-/// nothing about the document: a guide is a number on an axis as far as
-/// snapping is concerned, and `x`/`y` here mean the same thing they do on a
-/// `Rect`'s features, which is what makes the comparison one loop.
+/// Coordinates rather than `ondin_core::Guide`s, so this module knows nothing
+/// about the document and the comparison against a `Rect`'s features is one loop.
 #[derive(Clone, Debug, Default)]
 pub struct GuideLines {
     /// Xs — from *vertical* guides, which pin an x.
@@ -162,20 +108,14 @@ pub struct Guide {
     pub to: f64,
 }
 
-/// What a snap drew, so the gesture can hand the whole explanation to the overlay
-/// as one thing.
+/// What a snap drew, handed to the overlay as one thing.
 ///
-/// Two lists rather than one, because the two say different kinds of thing and are
-/// drawn differently. A [`Guide`] is an *alignment*: a bare line saying "these
-/// coincide", with no number because the number would be zero. A [`Measure`] is a
-/// **gap**, which is only worth drawing *with* its number — and it is the same type
-/// the Alt-hover measure produces, so both go through `canvas::draw_measure` and a
-/// red number on the canvas means one thing everywhere.
+/// A [`Guide`] is an alignment (a bare line); a [`Measure`] is a gap drawn with its
+/// number, the same type the Alt-hover measure produces, via `canvas::draw_measure`.
 #[derive(Default, Debug)]
 pub struct Marks {
     pub guides: Vec<Guide>,
-    /// The gaps a spacing snap equalized, labelled. Empty for every snap that is
-    /// not a spacing one, which today is every snap but a move's.
+    /// The gaps a spacing snap equalized, labelled. Empty for every other snap.
     pub gaps: Vec<Measure>,
 }
 
@@ -198,43 +138,26 @@ pub struct Snap {
 /// What the best candidate on an axis turned out to be.
 ///
 /// The distinction is only about what to *draw*. A node match needs a line
-/// spanning both boxes to show the relationship; a ruler guide **is already a
-/// drawn line**, so a second one laid exactly along it would say nothing and
-/// muddy the one that is already there.
-///
-/// It used to say "a line across the whole canvas in its own colour", and both
-/// halves have since stopped being true — a frame-scoped guide spans only its
-/// owner's box, and a selected one is drawn in the selection blue (§15 D139). The
-/// rule survives all of that because what it rests on is only that the line is
-/// there at all.
+/// spanning both boxes; a ruler guide is already a drawn line, so a second one
+/// along it would say nothing.
 #[derive(Clone, Copy)]
 enum Matched {
     Node(Rect),
     RulerGuide,
-    /// A text baseline (§15 D355). **Draws a mark, unlike `RulerGuide`**, and for
-    /// that variant's own stated reason read the other way: the rule there is
-    /// "the line is already there", and a baseline's is not — the overlay draws
-    /// baselines only for a *selected* text node, and the node being snapped to is
-    /// by definition not the one being dragged. Without a mark, a baseline snap is
-    /// the box jumping to a coordinate with nothing on screen explaining it.
-    ///
-    /// **Carries the y it matched**, where `Node` carries a rect and re-derives
-    /// the feature with `nearest_of`. A rect has three features per axis and the
-    /// winner has to be recovered; a baseline *is* the coordinate, so passing it
-    /// through is both simpler and exact — there is nothing to re-derive and so
-    /// nothing to re-derive wrongly.
+    /// A text baseline. Draws a mark, unlike `RulerGuide`: the overlay shows
+    /// baselines only for a selected text node, never the one being snapped to.
+    /// Carries the matched y, since a baseline is the coordinate and `Node` needs
+    /// `nearest_of` to recover its winning feature.
     Baseline(f64),
     Spacing(Spacing),
 }
 
-/// What a **spacing** match was, kept so the gaps can be drawn once the delta it
-/// asked for has actually been applied.
+/// What a **spacing** match was, kept so the gaps can be measured once the delta
+/// has been applied.
 ///
-/// The neighbours rather than the finished measures, deliberately: a candidate is
-/// judged before it wins, and the gaps it produces are only true at the position it
-/// would move the box to. Building the measures at candidate time would have them
-/// quoting the *unsnapped* gaps — off by the very delta the snap is about, which is
-/// a label that is wrong by exactly the amount that makes it interesting.
+/// The neighbours rather than finished measures: a gap is only true at the
+/// position the candidate moves the box to, so measuring at candidate time would
+/// quote the unsnapped gaps.
 #[derive(Clone, Copy)]
 struct Spacing {
     /// The neighbour below the moving box on this axis, when the gap to it is part
@@ -242,46 +165,25 @@ struct Spacing {
     low: Option<Rect>,
     /// The neighbour above it.
     high: Option<Rect>,
-    /// The gap that already existed and that this match *copied*, drawn beside the
-    /// new one so "the same as that" is a thing you can see rather than infer.
-    ///
-    /// `None` for a centring, where both drawn gaps are new and equal to each other
-    /// — there the equality *is* the two labels agreeing.
+    /// The existing gap this match copied, drawn beside the new one. `None` for a
+    /// centring, where both drawn gaps are new.
     rhythm: Option<Measure>,
 }
 
 /// How near two boxes have to come, in world units, before the gap between them
 /// counts as a gap at all.
 ///
-/// A spacing snap over a zero gap is not spacing, it is two boxes touching — which
-/// alignment already handles and labels with nothing. Without this floor, a row of
-/// flush boxes offers "equalize these two zero gaps" candidates at every position,
-/// all of them a no-op with two `0` labels on them.
+/// A spacing snap over a zero gap is two boxes touching, which alignment already
+/// handles; the floor stops flush rows offering no-op candidates labelled `0`.
 const MIN_GAP: f64 = 0.5;
 
-/// The **spacing** candidates on one axis: put the moving box halfway between its
-/// two neighbours, or a neighbour's own gap away from it.
+/// The **spacing** candidates on one axis: centre the moving box between its two
+/// nearest neighbours, or match the gap between the two nearest on one side (so a
+/// row spaces itself as it is built).
 ///
-/// This is the other half of "figure out distances", and the half that acts rather
-/// than reports. Two candidates, and between them they cover what a designer is
-/// actually doing when they nudge a box in a row:
-///
-/// - **Centre it between the two neighbours it sits between.** The gap on each side
-///   ends up the average of the two, which is the only position that equalizes them
-///   without moving anything else.
-/// - **Match the rhythm already there.** Past the end of a run, the gap between the
-///   last two members is what the next gap wants to be — so a third box lands the
-///   same distance from the second as the second is from the first, and a row spaces
-///   itself as it is built.
-///
-/// **Only boxes that share a band with the moving one.** Two shapes whose vertical
-/// extents miss each other entirely are not in a row, and the horizontal "gap"
-/// between them is a number about nothing. Requiring a strict overlap is also what
-/// keeps the candidate set small on a busy canvas: it is a row, not the viewport.
-///
-/// **Nothing here is offered for a box that overlaps a neighbour on this axis.**
-/// There is no gap to equalize when the two are on top of each other, and the sign
-/// of the "gap" would flip under the pointer.
+/// Only boxes that share a band with the moving one count (a strict overlap on the
+/// other axis), and nothing is offered for a box that overlaps a neighbour along
+/// this axis, where there is no gap to equalize.
 fn spacing_candidates(moving: Rect, targets: &[Rect], axis: Axis) -> Vec<(f64, Spacing)> {
     let along = |r: &Rect| match axis {
         Axis::Horizontal => (r.min_x(), r.max_x()),
@@ -294,9 +196,7 @@ fn spacing_candidates(moving: Rect, targets: &[Rect], axis: Axis) -> Vec<(f64, S
     let (m_lo, m_hi) = along(&moving);
     let m_band = band(&moving);
 
-    // The row the moving box is in, split by which side of it each member is on.
-    // A target overlapping it along the axis is in neither list, which is the "no
-    // gap to equalize" rule.
+    // The row, split by side; a target overlapping along the axis is in neither list.
     let mut before: Vec<Rect> = Vec::new();
     let mut after: Vec<Rect> = Vec::new();
     for t in targets {
@@ -317,9 +217,7 @@ fn spacing_candidates(moving: Rect, targets: &[Rect], axis: Axis) -> Vec<(f64, S
 
     let mut out = Vec::new();
 
-    // Centre between the two nearest neighbours. The delta that equalizes the two
-    // gaps is half their difference, and the gap it lands on is their average — so
-    // it is offered only when that average is a real gap.
+    // Centre between the two nearest: offered only when the average gap is real.
     if let (Some(low), Some(high)) = (before.first(), after.first()) {
         let gap_low = m_lo - along(low).1;
         let gap_high = along(high).0 - m_hi;
@@ -335,14 +233,12 @@ fn spacing_candidates(moving: Rect, targets: &[Rect], axis: Axis) -> Vec<(f64, S
         }
     }
 
-    // Match the rhythm on either side: the gap between the two nearest neighbours
-    // on that side is what the gap to the nearer of them wants to become.
+    // Match the rhythm: the gap between the two nearest on a side is what the gap
+    // to the nearer of them wants to become.
     for (side, sign) in [(&before, 1.0), (&after, -1.0)] {
         let (Some(near), Some(next)) = (side.first(), side.get(1)) else {
             continue;
         };
-        // The existing gap has to be a real one, and the pair has to be separated
-        // along the axis for it to exist at all.
         let Some(rhythm) = measure::gap(*near, *next, axis) else {
             continue;
         };
@@ -369,8 +265,7 @@ fn spacing_candidates(moving: Rect, targets: &[Rect], axis: Axis) -> Vec<(f64, S
 /// the box to.
 fn spacing_marks(moved: Rect, sp: Spacing, axis: Axis) -> Vec<Measure> {
     let mut out = Vec::new();
-    // The copied gap first, so it reads as the thing being matched rather than as a
-    // third measurement of the moving box.
+    // The copied gap first, so it reads as the thing being matched.
     out.extend(sp.rhythm);
     for neighbour in [sp.low, sp.high].into_iter().flatten() {
         out.extend(measure::gap(moved, neighbour, axis));
@@ -382,22 +277,12 @@ fn spacing_marks(moved: Rect, sp: Spacing, axis: Axis) -> Vec<Measure> {
 /// the world bounds of everything in `targets` and the ruler guides in
 /// `guides`.
 ///
-/// `zoom` converts the screen-pixel tolerance to world units.
+/// `axes` says which world axes the gesture is free to move along, as for
+/// [`snap_point`]. A locked axis must come back with an adjustment of exactly zero
+/// and no guide, so it is gated here rather than zeroed afterwards.
 ///
-/// `axes` says which world axes the gesture is free to move along, as it does
-/// for [`snap_point`]. Both are true for an ordinary move; a Shift-constrained
-/// one is locked to a single axis, and the locked axis must come back with an
-/// adjustment of exactly zero — otherwise a snap would slide the box off the
-/// line the user is holding it to. Gating it here rather than zeroing the result
-/// afterwards is what also suppresses the *guide* for that axis: a line drawn to
-/// explain a snap that was then discarded is worse than no line.
-///
-/// **A ruler guide wins a tie with a node.** Someone placed the guide on
-/// purpose, and to line work up against; a node's edge that happens to sit at
-/// the same coordinate is a coincidence. The two would land the box in the same
-/// place anyway, so the tie only decides which line is drawn — but preferring
-/// the guide is also what stops a snap flickering between the two as a node
-/// moves under it.
+/// A ruler guide wins a tie with a node: the user placed it on purpose, and
+/// preferring it stops a snap flickering between the two.
 pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
     let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
     let mut snap = Snap::default();
@@ -425,20 +310,10 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
             }
         }
     }
-    // **Baselines on the nodes' terms** (§15 D355): they must *beat* the best so
-    // far rather than tie it, so a ruler guide the user placed still wins a dead
-    // heat against a baseline they did not. Only `moving_y` — a baseline is a y
-    // and has no x to offer.
-    //
-    // ⚠️ **The position of this block is not what enforces that, though it reads
-    // as if it were.** Guides tie (`true`) and baselines do not (`false`), and
-    // that pair settles the dead heat in *either* order: baselines first, the
-    // guide equals and takes it; guides first, the baseline cannot beat and the
-    // guide keeps it. Measured — moving this block below the guide one changes no
-    // test, and so does flipping the flag on its own; only doing both together
-    // hands the tie to the baseline. So the property is over-determined, which is
-    // robust and means **neither mechanism is individually pinned**. Read the flag
-    // as the rule and this position as convention.
+    // Baselines must *beat* the best so far, so a ruler guide still wins a dead
+    // heat. Only y: a baseline has no x. Guides tie and baselines do not, which
+    // settles the heat in either block order, so neither mechanism is pinned alone;
+    // read the flag as the rule and this position as convention.
     if axes.1 {
         for m in moving_y {
             for t in &s.baselines {
@@ -446,8 +321,7 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
             }
         }
     }
-    // Guides last, and allowed to equal rather than beat the best so far, which
-    // is what gives them the tie.
+    // Guides last, allowed to equal the best so far: that is their tie.
     if axes.0 {
         for m in moving_x {
             for t in &s.guides.x {
@@ -463,19 +337,9 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
         }
     }
 
-    // Spacing last, and it has to be **strictly** closer than both to win.
-    //
-    // The order is the precedence, exactly as it is for the guides above: an
-    // alignment lands an edge or a centre on a coordinate, which is an exact
-    // statement about two things; a spacing snap invents a position. Where the two
-    // are equally near, the alignment is the more useful answer and the more
-    // predictable one, because the edge it names is visible and the gap it would
-    // have equalized is not. Where spacing is nearer it wins outright, which is what
-    // makes dropping a box into the middle of a row feel like it snaps there.
-    //
-    // A disabled *Snap to shapes* leaves `targets` empty, so this is switched off by
-    // construction along with the alignment candidates — one toggle, one source,
-    // no second thing to remember (see [`Snapping`]).
+    // Spacing last, and it must be strictly closer than an alignment to win: an
+    // alignment names a visible edge, a spacing snap invents a position. Empty
+    // `targets` (Snap to shapes off) switches this off too.
     for (axis, best, free) in [
         (Axis::Horizontal, &mut best_x, axes.0),
         (Axis::Vertical, &mut best_y, axes.1),
@@ -493,8 +357,7 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
         let snapped = moving + Vec2::new(delta, 0.0);
         match what {
             Matched::Node(target) => {
-                // Which of the three features actually matched, so the line sits on
-                // it.
+                // The feature that matched, so the line sits on it.
                 let at = nearest_of(
                     [snapped.min_x(), snapped.center().x, snapped.max_x()],
                     [target.min_x(), target.center().x, target.max_x()],
@@ -506,25 +369,20 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
                     to: snapped.max_y().max(target.max_y()),
                 });
             }
-            // Measured at `snapped`, not at `moving`: the gaps a spacing snap
-            // reports are the ones it just created.
+            // Measured at `snapped`: the gaps reported are the ones just created.
             Matched::Spacing(sp) => {
                 snap.marks
                     .gaps
                     .extend(spacing_marks(snapped, sp, Axis::Horizontal))
             }
             Matched::RulerGuide => {}
-            // Unreachable: a baseline is a y, and is only ever offered to
-            // `best_y`. Spelled out rather than merged into the arm above so that
-            // adding an x-bearing source later has to come here and decide.
+            // Unreachable (a baseline is only offered to `best_y`); spelled out so
+            // an x-bearing source added later has to decide here.
             Matched::Baseline(_) => {}
         }
     } else {
-        // Nothing claimed this axis, so the pixel grid takes it — if it is
-        // switched on, and if the gesture is free to move along it at all. The
-        // box's *leading* edge is what gets rounded: that is the node's position,
-        // the number the inspector's X field holds, and rounding it leaves the
-        // width alone, so a whole-pixel shape stays one.
+        // Nothing claimed this axis, so the pixel grid takes it. The leading edge
+        // is rounded: it is the node's position, and the width stays whole.
         if s.pixel && axes.0 {
             snap.adjust.x = pixel_delta(moving.min_x());
         }
@@ -551,11 +409,8 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
                     .extend(spacing_marks(snapped, sp, Axis::Vertical))
             }
             Matched::RulerGuide => {}
-            // **A baseline gets a mark where a ruler guide does not**, and the
-            // span is the moving box's own: there is no target rect to reach
-            // towards, because what was matched is a line inside a text node
-            // rather than that node's box, and a mark stretched to the text's
-            // bounds would point at the wrong edge of it.
+            // A baseline gets a mark spanning the moving box only: what matched is
+            // a line inside a text node, not that node's box.
             Matched::Baseline(at) => snap.marks.guides.push(Guide {
                 axis: Axis::Horizontal,
                 at,
@@ -573,15 +428,9 @@ pub fn snap_rect(moving: Rect, axes: (bool, bool), s: &Snapping) -> Snap {
 /// Which axes a move may travel along: both, or — while Shift is held — only
 /// the one the drag has gone furthest along.
 ///
-/// **Shift constrains, it does not switch snapping off.** Locking a drag to one
-/// axis is what Shift does in every design tool, and it is the more useful of the
-/// two meanings: snapping already has switches of its own in the Snap menu,
-/// where a modifier held down mid-drag cannot be (§15).
-///
-/// Re-read from the live delta on every frame rather than fixed when Shift went
-/// down, so a drag that starts sideways and turns downward follows the pointer to
-/// the axis it is now mostly travelling along. The tie goes to x, which is what
-/// makes the first pixel of a Shift-drag horizontal rather than undefined.
+/// Shift constrains rather than switching snapping off (the Snap menu does that).
+/// The axis is re-read from the live delta every frame, so a drag that turns
+/// follows the pointer; the tie goes to x.
 pub fn move_axes(raw: Vec2, shift: bool) -> (bool, bool) {
     if !shift {
         return (true, true);
@@ -608,17 +457,11 @@ pub struct PointSnap {
 /// Snap a dragged **point** — a resize handle — onto nearby features, on the
 /// axes it is free to move.
 ///
-/// The resize counterpart of [`snap_rect`], and it has to be a different
-/// function rather than a reuse of it. A move translates the whole box, so
-/// every one of its edges is a candidate and any of them may pull it; a resize
-/// moves *one corner or edge* and must leave the opposite one exactly where it
-/// is. Snapping the box would drag the anchored side along with it, which is
-/// the one thing a resize may not do.
+/// The resize counterpart of [`snap_rect`]: a resize moves one corner or edge and
+/// must leave the opposite one in place, which snapping the whole box would not.
 ///
-/// `axes` says which world axes the handle actually travels along — a side
-/// handle on an upright node moves in one, a corner in both, and a rotated
-/// node's side in both (`OndinApp::resize_axes`). Snapping an axis the handle
-/// cannot move would move the anchored edge.
+/// `axes` says which world axes the handle travels along (`OndinApp::resize_axes`);
+/// snapping any other would move the anchored edge.
 pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
     let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
     let mut out = PointSnap {
@@ -667,9 +510,7 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
 
     if let Some((_, delta, what)) = best_x {
         out.at.x += delta;
-        // A line from the target to the handle, so the edge being dragged and
-        // the thing it caught are visibly connected. Nothing for a ruler guide,
-        // as in `snap_rect`: it is already a drawn line.
+        // A line from the target to the handle; none for a ruler guide.
         if let Matched::Node(t) = what {
             out.guides.push(Guide {
                 axis: Axis::Vertical,
@@ -679,21 +520,9 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
             });
         }
     } else if s.pixel && axes.0 {
-        // The dragged edge lands on a whole pixel, so a resize against an
-        // already-whole opposite edge produces a whole width.
-        //
-        // ⚠️ **`s.pixel`, which this arm and the one below it used to omit**
-        // (§15 D440).
-        // The other three pixel-fallback sites all ask — `snap_rect` writes
-        // `if s.pixel && axes.0`, `snap_guide` writes `None if s.pixel =>`, and
-        // `canvas::axial_corner` writes `if self.snap_grid` — and `pen_point`'s
-        // own doc quotes that last one as *"still rounds along the constrained
-        // direction **when the grid is on**"*. So the field `Snapping::pixel`
-        // documents itself as *Snap to grid* and five gestures ignored it:
-        // resize handles, line endpoints, the pen, point drags and segment
-        // drags all rounded to the whole-unit lattice with every snap source
-        // switched off. At 8× zoom that is a visible click onto a lattice the
-        // user has turned off, and a fractional resize was unreachable by hand.
+        // The dragged edge lands on a whole pixel, so a resize against a whole
+        // opposite edge gives a whole width. Gated on `s.pixel` like every other
+        // pixel fallback: with Snap to grid off, nothing may round.
         out.at.x += pixel_delta(out.at.x);
     }
     if let Some((_, delta, what)) = best_y {
@@ -714,15 +543,9 @@ pub fn snap_point(at: Point, axes: (bool, bool), s: &Snapping) -> PointSnap {
 
 /// Snap a ruler guide being dragged onto the edges and centres of nearby nodes.
 ///
-/// The mirror of [`snap_rect`]'s guide handling, and it earns its place through
-/// a workflow rather than through symmetry: block a layout out with plain
-/// rectangles, drop guides onto their edges, delete the rectangles. Without
-/// this, the guides in that sequence are placed by eye and the rectangles were
-/// pointless.
-///
-/// Only nodes, deliberately — not other guides. Two guides at the same
-/// coordinate are a mistake rather than a goal, and making them attract each
-/// other would make that mistake easier to commit.
+/// Supports the block-out workflow: rectangles, guides dropped onto their edges,
+/// rectangles deleted. Only nodes, not other guides: two guides at one coordinate
+/// are a mistake, not a goal.
 pub fn snap_guide(position: f64, axis: Axis, s: &Snapping) -> f64 {
     let tolerance = TOLERANCE_PX / s.zoom.max(f64::EPSILON);
     let mut best: Option<(f64, f64)> = None;
@@ -738,10 +561,8 @@ pub fn snap_guide(position: f64, axis: Axis, s: &Snapping) -> f64 {
             }
         }
     }
-    // A guide that caught nothing still lands on a whole pixel, when the grid is
-    // on. A guide half a pixel off is worse than a shape half a pixel off:
-    // everything aligned to it inherits the error, which is the opposite of what
-    // a guide is for.
+    // A guide that caught nothing still lands on a whole pixel when the grid is
+    // on: everything aligned to it inherits any error.
     match best {
         Some((_, at)) => at,
         None if s.pixel => to_pixel(position),
@@ -762,13 +583,8 @@ fn consider(
     consider_delta_with(best, t - m, tolerance, what, ties);
 }
 
-/// [`consider`] for a candidate that already knows its delta rather than the pair of
-/// coordinates it came from.
-///
-/// A spacing candidate has no "feature that matched a feature" — its delta is the
-/// answer to an arithmetic question about three boxes, not the distance between two
-/// numbers — so it cannot be expressed as an `(m, t)` pair. Never takes ties, for the
-/// reason at the call site.
+/// [`consider`] for a spacing candidate, whose delta is not the distance between
+/// two coordinates. Never takes ties.
 fn consider_delta(
     best: &mut Option<(f64, f64, Matched)>,
     delta: f64,
@@ -816,23 +632,10 @@ fn nearest_of(moving: [f64; 3], target: [f64; 3]) -> f64 {
 /// World bounds worth snapping to: everything visible that the gesture is not
 /// itself carrying.
 ///
-/// **The gesture's own subtree, and nothing else.** A node cannot snap to itself
-/// or to something it is dragging along with it — those bounds move with the
-/// pointer, so a match is guaranteed and means nothing. Every other visible
-/// node is fair game, its **container chain included**.
-///
-/// That last part is the correction. This used to exclude the moving node's
-/// ancestors too, on the reasoning that a node is always flush with some feature
-/// of its own container and would feel stuck to its parent. True of a group,
-/// whose bounds *are* the union of its children — but a group is not in the
-/// spatial index ([`ondin_core::nodes_in_view`] yields drawable leaves and
-/// artboards), so that exclusion could never fire on one. The only ancestor it
-/// ever reached was an **artboard**, whose rect is its own declared size and has
-/// nothing to do with what is inside it. So the rule excluded exactly the thing
-/// its own comment claimed it kept, and a shape could not snap to the edges of
-/// the frame it lived in — which, since a layer joins a frame the moment it is
-/// more than half inside one (`canvas::move_tx`), is very nearly every shape on
-/// the page (§15).
+/// Only the gesture's own subtree is excluded: its bounds move with the pointer,
+/// so a match is guaranteed and means nothing. The container chain stays, so a
+/// shape snaps to the edges of its own frame (groups are not in the spatial index,
+/// see [`ondin_core::nodes_in_view`]; an artboard's rect is its declared size).
 pub fn targets(
     doc: &Document,
     res: &Resolved,
@@ -851,8 +654,7 @@ pub fn targets(
         if let Some(b) = res.world_bounds(id) {
             out.push(b);
         }
-        // Snapping is a comfort feature, not a correctness one: on a very
-        // busy viewport, stop rather than spend the frame on it.
+        // Snapping is a comfort feature: on a very busy viewport, stop at `limit`.
         if out.len() >= limit {
             break;
         }
@@ -870,14 +672,9 @@ fn ancestors(doc: &Document, id: NodeId) -> Vec<NodeId> {
     out
 }
 
-/// Whether `id` sits under any of `moving` — the ancestry half of *"everything
-/// being transformed is excluded from the snap targets"*.
-///
-/// **`pub(crate)` because `canvas::baseline_lines` asks the same question**
-/// (§15 D468). That function filtered on `moving.contains(&id)` alone, so a text
-/// node **inside** a moving group was still offered as a baseline and the group
-/// snapped to the baseline of the text it was carrying. One rule with two
-/// spellings, one of them incomplete; there is one spelling now.
+/// Whether `id` sits under any of `moving` — the ancestry half of excluding
+/// everything being transformed from the snap targets. `pub(crate)` because
+/// `canvas::baseline_lines` asks the same question.
 pub(crate) fn is_inside_any(doc: &Document, id: NodeId, moving: &[NodeId]) -> bool {
     ancestors(doc, id).iter().any(|a| moving.contains(a))
 }
@@ -887,8 +684,7 @@ mod tests {
     use super::*;
     use ondin_core::kurbo::Rect;
 
-    /// An unconstrained move — both axes free, which is every gesture that is
-    /// not holding Shift. The axis lock has its own tests below.
+    /// An unconstrained move: both axes free.
     const FREE: (bool, bool) = (true, true);
 
     fn r(x0: f64, y0: f64, x1: f64, y1: f64) -> Rect {
@@ -897,7 +693,7 @@ mod tests {
 
     #[test]
     fn a_near_edge_snaps_flush() {
-        // Moving box's left edge is 2 units from the target's left edge.
+        // Left edge 2 units from the target's left edge.
         let moving = r(102.0, 300.0, 152.0, 350.0);
         let target = r(100.0, 0.0, 200.0, 50.0);
         let snap = snap_rect(moving, FREE, &shapes(&[target], 1.0));
@@ -909,8 +705,7 @@ mod tests {
 
     #[test]
     fn distant_edges_do_not_snap() {
-        // Already on whole pixels, so the fallback has nothing to do either and
-        // the box genuinely does not move.
+        // On whole pixels, so the grid fallback has nothing to do either.
         let moving = r(400.0, 400.0, 450.0, 450.0);
         let target = r(0.0, 0.0, 50.0, 50.0);
         let snap = snap_rect(moving, FREE, &shapes(&[target], 1.0));
@@ -928,20 +723,17 @@ mod tests {
         assert!((landed.min_x() - 400.0).abs() < 1e-9, "{landed:?}");
         assert!((landed.min_y() - 401.0).abs() < 1e-9, "{landed:?}");
         assert!((landed.width() - 50.0).abs() < 1e-9, "size changed");
-        // The grid is not a *relationship*, so it explains itself with nothing:
-        // the lattice is already on screen wherever it is worth drawing.
+        // The grid is not a relationship, so it draws nothing.
         assert!(snap.marks.guides.is_empty());
     }
 
-    /// An alignment match beats the grid outright on its own axis. A shape lined
-    /// up with an edge at 100.5 belongs at 100.5 — rounding afterwards would
-    /// undo the alignment that was just found.
+    /// An alignment match beats the grid on its own axis: an edge at 100.5 is not
+    /// rounded away.
     #[test]
     fn an_alignment_match_is_not_then_rounded_away() {
         let moving = r(102.0, 300.4, 152.0, 350.4);
         let target = r(100.5, 0.0, 200.5, 50.0);
-        // Both sources on, which is the whole point: the grid must not undo what
-        // the shapes just did.
+        // Both sources on: the grid must not undo the shapes.
         let snap = snap_rect(
             moving,
             FREE,
@@ -959,8 +751,7 @@ mod tests {
         // y caught nothing, so y alone went to the grid.
         assert!((landed.min_y() - 300.0).abs() < 1e-9, "{landed:?}");
 
-        // The same for a guide at a fractional coordinate: the user put it
-        // there, so it is honoured exactly.
+        // The same for a guide at a fractional coordinate.
         let g = snap_rect(
             moving,
             FREE,
@@ -973,9 +764,7 @@ mod tests {
         assert!(((moving + g.adjust).min_x() - 100.5).abs() < 1e-9);
     }
 
-    /// Each source can be switched off on its own, and off means off — not
-    /// "off unless something else is also in reach". This is the Snap menu's
-    /// contract, and the reason a disabled source arrives as an empty list.
+    /// Each source can be switched off on its own, and off means off.
     #[test]
     fn each_snap_source_can_be_switched_off_independently() {
         let moving = r(102.4, 203.4, 152.4, 253.4);
@@ -999,9 +788,8 @@ mod tests {
             g.adjust
         );
 
-        // Guides only, with a shape in reach that must not be consulted: the
-        // guide at 105 is 2.6 from the box's left edge, the shape's own edge at
-        // 100 is 2.4 — nearer, and still ignored.
+        // Guides only: the shape's edge at 100 is nearer than the guide at 105
+        // and must still be ignored.
         let gl = snap_rect(moving, FREE, &guides(&[105.0], &[], 1.0));
         assert!(
             ((moving + gl.adjust).min_x() - 105.0).abs() < 1e-9,
@@ -1011,8 +799,7 @@ mod tests {
         assert_eq!(gl.adjust.y, 0.0, "y had no guide and no grid");
     }
 
-    /// A resize rounds the dragged edge, and still only on the axes it moves —
-    /// the grid must not become a back door to moving the anchored edge.
+    /// A resize rounds the dragged edge, only on the axes it moves.
     #[test]
     fn a_resize_rounds_the_dragged_edge_only() {
         let at = Point::new(102.4, 203.6);
@@ -1028,13 +815,12 @@ mod tests {
         assert_eq!(snap_point(at, (false, false), &grid(1.0)).at, at);
     }
 
-    /// A guide that catches nothing still lands on a whole pixel — a guide half
-    /// a pixel off passes its error to everything aligned against it.
+    /// A guide that catches nothing still lands on a whole pixel.
     #[test]
     fn a_guide_that_catches_nothing_lands_on_a_whole_pixel() {
         assert_eq!(snap_guide(400.4, Axis::Vertical, &grid(1.0)), 400.0);
         assert_eq!(snap_guide(400.6, Axis::Horizontal, &grid(1.0)), 401.0);
-        // But a shape edge at a fraction still wins, as it does everywhere else.
+        // A shape edge at a fraction still wins.
         let target = r(100.5, 40.0, 200.0, 240.0);
         let got = snap_guide(102.0, Axis::Vertical, &shapes(&[target], 1.0));
         assert!((got - 100.5).abs() < 1e-9, "{got}");
@@ -1052,9 +838,7 @@ mod tests {
 
     #[test]
     fn tolerance_follows_zoom_not_world_units() {
-        // Nearest feature pair is 20 world units apart: far at 1x, but within
-        // tolerance at 0.2x zoom (20 * 0.2 = 4 screen px, under the 6px
-        // threshold). Same y extent, so only x is in question.
+        // 20 world units apart: out of reach at 1x, 4 screen px at 0.2x.
         let moving = r(70.0, 0.0, 120.0, 50.0);
         let target = r(0.0, 0.0, 50.0, 50.0);
         assert_eq!(
@@ -1076,7 +860,7 @@ mod tests {
     #[test]
     fn the_closest_candidate_wins() {
         let moving = r(103.0, 500.0, 153.0, 550.0);
-        // Left edge is 3 away from 100, but only 1 away from 104.
+        // Left edge is 3 from 100 but 1 from 104.
         let near = r(104.0, 0.0, 154.0, 20.0);
         let far = r(100.0, 0.0, 150.0, 20.0);
         let snap = snap_rect(moving, FREE, &shapes(&[far, near], 1.0));
@@ -1090,9 +874,7 @@ mod tests {
         }
     }
 
-    /// Snapping with the shape targets on and the other two off — the shape of
-    /// the tests written before the Snap menu existed, so they still say exactly
-    /// what they always said.
+    /// Snapping to shape targets only.
     fn shapes(targets: &[Rect], zoom: f64) -> Snapping {
         Snapping {
             targets: targets.to_vec(),
@@ -1116,12 +898,10 @@ mod tests {
         }
     }
 
-    /// A ruler guide snaps like any other feature, on either axis, and with the
-    /// same screen-pixel tolerance.
+    /// A ruler guide snaps on either axis, with the same screen-pixel tolerance.
     #[test]
     fn a_box_snaps_to_a_ruler_guide() {
         let moving = r(102.0, 203.0, 152.0, 253.0);
-        // A vertical guide at x=100 and a horizontal one at y=200.
         let snap = snap_rect(moving, FREE, &guides(&[100.0], &[200.0], 1.0));
         assert!((snap.adjust.x + 2.0).abs() < 1e-9, "{:?}", snap.adjust);
         assert!((snap.adjust.y + 3.0).abs() < 1e-9, "{:?}", snap.adjust);
@@ -1131,12 +911,8 @@ mod tests {
         assert_eq!(far.adjust, Vec2::ZERO);
     }
 
-    /// The guide is already a drawn line, so snapping to one draws no second line
-    /// along it. A node snap on the other axis still draws its own.
-    ///
-    /// Deliberately *not* "a line across the whole canvas in its own colour" any
-    /// more: neither is true of a frame-scoped or a selected guide, and the rule
-    /// never depended on either.
+    /// Snapping to a ruler guide draws no second line; a node snap on the other
+    /// axis still draws its own.
     #[test]
     fn snapping_to_a_ruler_guide_draws_no_extra_line() {
         let moving = r(102.0, 203.0, 152.0, 253.0);
@@ -1168,8 +944,7 @@ mod tests {
     #[test]
     fn a_ruler_guide_takes_ties_but_not_a_closer_node() {
         let moving = r(103.0, 500.0, 153.0, 550.0);
-        // Node edge 1 away at 104, guide 3 away at 100 — the node wins, and
-        // says so by drawing its line.
+        // Node edge 1 away, guide 3 away: the node wins and draws its line.
         let near_node = r(104.0, 0.0, 154.0, 20.0);
         let node_wins = snap_rect(
             moving,
@@ -1187,7 +962,7 @@ mod tests {
         );
         assert_eq!(node_wins.marks.guides.len(), 1);
 
-        // Both 3 away, on opposite sides: the guide takes it, so no line.
+        // Both 3 away: the guide takes it, so no line.
         let tied_node = r(106.0, 0.0, 156.0, 20.0);
         let tie = snap_rect(
             moving,
@@ -1213,21 +988,9 @@ mod tests {
         }
     }
 
-    /// **A baseline pulls an edge or a centre, and draws a line saying which**
-    /// (§15 D355).
-    ///
-    /// The mark is the half that separates a baseline from a ruler guide: a guide
-    /// is already drawn on the canvas, so a second line along it would say
-    /// nothing, whereas a baseline is invisible unless its own node is selected —
-    /// and the node being dragged is by definition not that one. Without the mark
-    /// the box jumps to a coordinate with nothing on screen explaining it.
-    ///
-    /// ⚠️ The mark sits on the **baseline**, not on the snapped box's edge. Those
-    /// coincide in this fixture, which is why the second case moves a *centre*
-    /// onto the baseline instead: there the two differ by half the box, so an
-    /// implementation that drew `snapped.min_y()` passes the first and fails the
-    /// second. That is the arithmetic error `Matched::Baseline` carrying its own
-    /// `f64` exists to make unspellable.
+    /// A baseline pulls an edge or a centre and draws a mark on the baseline itself.
+    /// The second case snaps a centre, where the baseline and the box edge differ,
+    /// so a mark drawn at `snapped.min_y()` fails there.
     #[test]
     fn a_baseline_pulls_a_box_and_marks_the_line_it_pulled_to() {
         // Top edge 2 above a baseline at 300.
@@ -1242,8 +1005,7 @@ mod tests {
             "the mark is on the baseline"
         );
 
-        // Centre 1 below a baseline at 500: the box moves up 1, and the mark is
-        // still the baseline rather than either edge of the box.
+        // Centre 1 below a baseline at 500.
         let by_centre = r(10.0, 476.0, 60.0, 526.0);
         let snap = snap_rect(by_centre, FREE, &baselines(&[500.0], 1.0));
         assert!((snap.adjust.y + 1.0).abs() < 1e-9, "{:?}", snap.adjust);
@@ -1254,16 +1016,11 @@ mod tests {
         );
     }
 
-    /// **A baseline offers no x**, so a vertical edge near one in *value* is not
-    /// a candidate.
-    ///
-    /// Worth its own case because the source is a bare `Vec<f64>` with nothing in
-    /// the type saying which axis it belongs to — the only thing that makes it a
-    /// y is that `snap_rect` consults it under `axes.1` alone, which is one line
-    /// and easy to copy into the wrong block.
+    /// A baseline offers no x: a vertical edge near one in value is not a
+    /// candidate. The source is a bare `Vec<f64>`; only `axes.1` makes it a y.
     #[test]
     fn a_baseline_never_claims_the_horizontal_axis() {
-        // Left edge at 302, two from the *value* 300, and far from it in y.
+        // Left edge two from the value 300.
         let moving = r(302.0, 20.0, 352.0, 70.0);
         let snap = snap_rect(moving, FREE, &baselines(&[300.0], 1.0));
         assert_eq!(
@@ -1273,29 +1030,16 @@ mod tests {
         assert!(snap.marks.guides.is_empty());
     }
 
-    /// **A ruler guide still takes a tie against a baseline, and a nearer
-    /// baseline still beats a further guide.**
+    /// A ruler guide takes a tie against a baseline, and a nearer baseline beats a
+    /// further guide.
     ///
-    /// The precedence the sources were given: baselines are considered on the
-    /// nodes' terms — they must *beat* the best so far — and the guide block runs
-    /// after them with the tie. So a line the user placed by hand outranks one
-    /// that is a property of somebody's text, where the two are equally near.
-    ///
-    /// ⚠️ **Two flips predicted, neither bit, and the finding is better than the
-    /// test.** Moving the baseline block after the guide block changes nothing;
-    /// so does giving baselines the tie flag on its own. The dead heat is settled
-    /// by the *pair* — guides tie, baselines do not — and that holds in either
-    /// order, so each mechanism alone is enough. **Only both together** (baselines
-    /// after guides *and* allowed to tie) hands it over, and then this fails on
-    /// the first assertion at `y: 3.0` where `-3.0` is due.
-    ///
-    /// So this test pins the behaviour and pins **neither implementation detail**,
-    /// which is worth knowing before anyone "simplifies" one of them on the
-    /// strength of a green suite. The comment at the call site now says the same.
+    /// Pins the behaviour, not either mechanism: moving the baseline block after
+    /// the guide block, or giving baselines the tie flag, changes nothing alone;
+    /// only both together fail the first assertion (`y: 3.0` where `-3.0` is due).
     #[test]
     fn a_ruler_guide_takes_a_tie_against_a_baseline() {
         let moving = r(10.0, 303.0, 60.0, 353.0);
-        // Guide 3 above at 300, baseline 3 below at 306 — a dead heat.
+        // Guide 3 above, baseline 3 below: a dead heat.
         let tie = snap_rect(
             moving,
             FREE,
@@ -1325,12 +1069,8 @@ mod tests {
         assert!((nearer.adjust.y - 1.0).abs() < 1e-9, "{:?}", nearer.adjust);
         assert_eq!(nearer.marks.guides.len(), 1, "and it draws its line");
 
-        // **And a node edge keeps a tie too — this is where the flag alone does
-        // the work.** Nodes are always considered first and also do not tie, so
-        // unlike the guide case above there is no second mechanism propping this
-        // up: give baselines `true` and they take it. Flipped exactly that way,
-        // and it fails here at 3.0 against −3.0 while every other case stays
-        // green, which is what makes this the assertion the flag is pinned by.
+        // A node edge keeps a tie too; this pins the tie flag alone. flip: give
+        // baselines `true` → fails here at 3.0 against −3.0.
         let node_tie = snap_rect(
             moving,
             FREE,
@@ -1347,8 +1087,7 @@ mod tests {
         );
     }
 
-    /// Centres snap to guides too, not just edges — a guide down the middle of
-    /// a layout is there to centre things on.
+    /// Centres snap to guides too, not just edges.
     #[test]
     fn a_box_centres_on_a_ruler_guide() {
         // Centre x = 153; guide at 150.
@@ -1357,31 +1096,27 @@ mod tests {
         assert!((snap.adjust.x + 3.0).abs() < 1e-9, "{:?}", snap.adjust);
     }
 
-    /// A resize snaps the dragged handle and nothing else. Only the axes the
-    /// handle travels along may move: snapping an axis it is anchoring would
-    /// drag the opposite edge, which is the one thing a resize may not do.
+    /// A resize snaps only on the axes the handle travels along.
     #[test]
     fn a_resize_handle_snaps_only_on_the_axes_it_moves() {
         let at = Point::new(102.0, 203.0);
         let both_axes = || guides(&[100.0], &[200.0], 1.0);
 
-        // A corner travels along both, so both catch.
+        // A corner travels along both.
         let corner = snap_point(at, (true, true), &both_axes());
         assert!((corner.at.x - 100.0).abs() < 1e-9, "{:?}", corner.at);
         assert!((corner.at.y - 200.0).abs() < 1e-9, "{:?}", corner.at);
 
-        // A vertical side travels along x only: y must be left exactly alone,
-        // even though a horizontal guide is within reach of it.
+        // A vertical side travels along x only, though a horizontal guide is in reach.
         let side = snap_point(at, (true, false), &both_axes());
         assert!((side.at.x - 100.0).abs() < 1e-9, "{:?}", side.at);
         assert_eq!(side.at.y, 203.0, "the anchored axis moved");
 
-        // And neither, when the handle is frozen on both.
+        // Frozen on both.
         assert_eq!(snap_point(at, (false, false), &both_axes()).at, at);
     }
 
-    /// It snaps to shape edges as well as guides, and draws a line for a shape
-    /// (which needs one to show what it caught) but not for a guide.
+    /// A handle snaps to shape edges and guides, drawing a line only for a shape.
     #[test]
     fn a_resize_handle_snaps_to_shapes_and_explains_only_those() {
         let at = Point::new(102.0, 500.0);
@@ -1389,7 +1124,7 @@ mod tests {
         let node = snap_point(at, (true, false), &shapes(&[target], 1.0));
         assert!((node.at.x - 100.0).abs() < 1e-9, "{:?}", node.at);
         assert_eq!(node.guides.len(), 1);
-        // The line reaches from the shape it caught to the handle itself.
+        // The line reaches from the shape to the handle.
         let g = node.guides[0];
         assert_eq!(g.axis, Axis::Vertical);
         assert!(g.from <= 0.0 && g.to >= 500.0, "{g:?}");
@@ -1399,28 +1134,26 @@ mod tests {
         assert!(guide.guides.is_empty(), "a guide is already its own line");
     }
 
-    /// A guide being dragged catches shape edges and centres — the block-out
-    /// workflow: rectangles, guides onto their sides, delete the rectangles.
+    /// A guide being dragged catches shape edges and centres.
     #[test]
     fn a_dragged_guide_catches_shape_edges_and_centres() {
         let target = r(100.0, 40.0, 200.0, 240.0);
         let boxes = [target];
-        // Left edge, centre, right edge on the x axis.
+        // Left edge, centre, right edge on x.
         for (from, want) in [(102.0, 100.0), (148.0, 150.0), (203.0, 200.0)] {
             let got = snap_guide(from, Axis::Vertical, &shapes(&boxes, 1.0));
             assert!((got - want).abs() < 1e-9, "{from} -> {got}, want {want}");
         }
-        // And the y features on the other axis.
+        // And on y.
         for (from, want) in [(43.0, 40.0), (142.0, 140.0), (238.0, 240.0)] {
             let got = snap_guide(from, Axis::Horizontal, &shapes(&boxes, 1.0));
             assert!((got - want).abs() < 1e-9, "{from} -> {got}, want {want}");
         }
-        // Out of reach, and the guide stays exactly where the pointer put it.
+        // Out of reach, and the tolerance is in screen pixels here too.
         assert_eq!(
             snap_guide(400.0, Axis::Vertical, &shapes(&boxes, 1.0)),
             400.0
         );
-        // The tolerance is in screen pixels here too.
         assert_eq!(
             snap_guide(120.0, Axis::Vertical, &shapes(&boxes, 1.0)),
             120.0
@@ -1440,10 +1173,8 @@ mod tests {
 
     // --- spacing: equal gaps -----------------------------------------------
 
-    /// Two neighbours far enough apart to sit between, with bands tall enough that
-    /// **no alignment candidate is in reach** — otherwise these tests would be
-    /// measuring the alignment snap. The moving box is 40 wide, so the position with
-    /// equal gaps is `180..220` and every case below is stated as an offset from it.
+    /// Two neighbours with bands tall enough that no alignment candidate is in
+    /// reach. A 40-wide moving box has equal gaps at `180..220`.
     fn a_row() -> [Rect; 2] {
         [r(0.0, 0.0, 100.0, 1000.0), r(300.0, 0.0, 400.0, 1000.0)]
     }
@@ -1454,17 +1185,11 @@ mod tests {
         out
     }
 
-    /// **A box dropped between two others lands halfway between them**, and the two
-    /// labels quote the gaps it *made*.
-    ///
-    /// The second half is the one worth guarding. A candidate is judged before it
-    /// wins, so the gaps it produces are only true at the position it moves the box
-    /// to; building the measures where the pointer actually is would label them 84
-    /// and 76 — off by exactly the delta the snap is about, which is the one error
-    /// that makes the numbers worse than no numbers.
+    /// A box dropped between two others lands halfway, and the labels quote the
+    /// gaps it made, not the 84/76 under the pointer.
     #[test]
     fn a_box_between_two_others_centres_itself_and_says_by_how_much() {
-        // 4 right of centre, inside the 6px tolerance.
+        // 4 right of centre.
         let moving = r(184.0, 17.0, 224.0, 73.0);
         let snap = snap_rect(moving, FREE, &shapes(&a_row(), 1.0));
         assert!((snap.adjust.x + 4.0).abs() < 1e-9, "{:?}", snap.adjust);
@@ -1476,48 +1201,36 @@ mod tests {
             vec![80.0, 80.0],
             "the labels must quote the gaps the snap made, not the 84/76 it found"
         );
-        // Gaps are horizontal distances, so they are drawn as horizontal lines — and
-        // an equalized axis draws no alignment line, because nothing aligned.
+        // Gaps draw horizontally, and an equalized axis draws no alignment line.
         assert!(snap.marks.gaps.iter().all(|m| m.axis == Axis::Horizontal));
         assert!(snap.marks.guides.is_empty(), "{:?}", snap.marks.guides);
     }
 
-    /// **Past the end of a run, the gap the run already has is the gap the next box
-    /// takes** — so a row spaces itself as it is built rather than only once it is
-    /// finished and distributed.
+    /// Past the end of a run, the run's existing gap is the gap the next box takes.
     #[test]
     fn a_third_box_takes_the_rhythm_the_first_two_set() {
-        // A 0..100, B 200..300: an existing gap of 100.
+        // An existing gap of 100.
         let row = [r(0.0, 0.0, 100.0, 1000.0), r(200.0, 0.0, 300.0, 1000.0)];
-        // 3 too far right of the rhythm position, which is 400.
+        // 3 right of the rhythm position, 400.
         let moving = r(403.0, 17.0, 453.0, 73.0);
         let snap = snap_rect(moving, FREE, &shapes(&row, 1.0));
         assert!((snap.adjust.x + 3.0).abs() < 1e-9, "{:?}", snap.adjust);
         assert!(((moving + snap.adjust).min_x() - 400.0).abs() < 1e-9);
-        // Both the gap it copied and the gap it made, so "the same as that" is
-        // visible rather than inferred.
+        // Both the gap it copied and the gap it made.
         assert_eq!(gaps_of(&snap), vec![100.0, 100.0]);
     }
 
-    /// **An alignment wins unless spacing is strictly nearer.** An edge landing on a
-    /// coordinate is an exact statement about two visible things; a spacing snap
-    /// invents a position, so it does not get to displace one for free.
+    /// An alignment wins unless spacing is strictly nearer.
     #[test]
     fn an_alignment_beats_spacing_unless_spacing_is_strictly_nearer() {
         let moving = r(184.0, 17.0, 224.0, 73.0); // spacing wants -4
 
-        // A third box in a band of its own, so it can align but can never be a
-        // spacing neighbour — and shaped so its **right edge is its only feature in
-        // reach**, which is the whole difficulty of writing this fixture. A box has
-        // three features per axis, and the first version of this was 100 wide at
-        // x: its *centre* then landed 4 from the moving box's right edge, so the
-        // test compared an alignment against an alignment and reported that spacing
-        // had lost. Left long and starting far away, the left edge and the centre
-        // are both out of range and the delta is the one being asked about.
+        // A box in a band of its own, so it can align but never be a spacing
+        // neighbour; its right edge is its only feature in reach (a narrower box
+        // would put its centre in reach and compare alignment with alignment).
         let elsewhere = |right: f64| r(100.0, 2000.0, right, 2100.0);
 
-        // Tie at 4: the alignment takes it, and says so by drawing a line and no
-        // numbers.
+        // Tie at 4: the alignment takes it, drawing a line and no numbers.
         let tie = snap_rect(
             moving,
             FREE,
@@ -1527,7 +1240,7 @@ mod tests {
         assert!(tie.marks.gaps.is_empty(), "spacing took a tie");
         assert_eq!(tie.marks.guides.len(), 1, "{:?}", tie.marks.guides);
 
-        // Alignment nearer at 2: it wins on distance as well.
+        // Alignment nearer at 2.
         let nearer = snap_rect(
             moving,
             FREE,
@@ -1536,8 +1249,7 @@ mod tests {
         assert!((nearer.adjust.x + 2.0).abs() < 1e-9, "{:?}", nearer.adjust);
         assert!(nearer.marks.gaps.is_empty());
 
-        // Alignment further at 6: spacing wins outright, which is what makes
-        // dropping a box into a row feel like it snaps there.
+        // Alignment further at 6: spacing wins.
         let spacing = snap_rect(
             moving,
             FREE,
@@ -1551,21 +1263,17 @@ mod tests {
         assert_eq!(gaps_of(&spacing), vec![80.0, 80.0]);
     }
 
-    /// **Boxes that do not share a band are not a row.** Two shapes whose vertical
-    /// extents miss each other entirely have no horizontal gap worth equalizing, and
-    /// a snap that thought otherwise would drag a layer sideways to line it up with
-    /// something on the other side of the page.
+    /// Boxes that do not share a band are not a row.
     #[test]
     fn spacing_ignores_boxes_that_are_not_in_the_same_row() {
         let moving = r(184.0, 17.0, 224.0, 73.0);
-        // The same row, moved down past the moving box entirely.
+        // The same row, moved down past the moving box.
         let away = [r(0.0, 500.0, 100.0, 600.0), r(300.0, 500.0, 400.0, 600.0)];
         let snap = snap_rect(moving, FREE, &shapes(&away, 1.0));
         assert!(snap.marks.gaps.is_empty(), "{:?}", snap.marks.gaps);
-        // The pixel grid is what claims x instead, the box being already whole.
         assert_eq!(snap.adjust.x, 0.0, "{:?}", snap.adjust);
 
-        // Touching bands are still not a row: flush edges share no interior.
+        // Touching bands are not a row either.
         let flush = [r(0.0, 73.0, 100.0, 600.0), r(300.0, 73.0, 400.0, 600.0)];
         assert!(
             snap_rect(moving, FREE, &shapes(&flush, 1.0))
@@ -1575,20 +1283,12 @@ mod tests {
         );
     }
 
-    /// **A gap too small to be spacing is left to alignment** — `MIN_GAP`.
+    /// A gap too small to be spacing is left to alignment (`MIN_GAP`).
     ///
-    /// **This has to be tested just above zero, not at it.** The obvious fixture is
-    /// a row of *flush* boxes, and it proves nothing: a zero-length gap is dropped by
-    /// `measure::gap`'s own epsilon, so `marks.gaps` comes back empty whether the
-    /// floor exists or not, and the test passes for a reason that has nothing to do
-    /// with it. Checked, and it did exactly that.
-    ///
-    /// Just above zero the floor is the only thing deciding, and it decides something
-    /// visible. Gaps of 0.4 and 0.5 put the *spacing* delta at 0.05 — nearer than
-    /// either alignment, which sit at 0.4 and 0.5 — so without the floor spacing wins
-    /// a contest it should not be in, moves the box a twentieth of a unit, and labels
-    /// two 0.45 gaps that no one was asking about. With it, the box lands flush on the
-    /// neighbour it was nearly touching, which is what the designer meant.
+    /// Tested just above zero, not at it: `measure::gap`'s epsilon already drops a
+    /// zero gap, so a flush row passes without the floor. Gaps of 0.4 and 0.5 put
+    /// the spacing delta at 0.05, nearer than either alignment, so only the floor
+    /// keeps spacing out.
     #[test]
     fn a_gap_too_small_to_be_spacing_is_left_to_alignment() {
         let row = [r(0.0, 0.0, 100.0, 1000.0), r(140.9, 0.0, 240.9, 1000.0)];
@@ -1605,8 +1305,7 @@ mod tests {
             snap.adjust
         );
 
-        // The control, so this is not a test about a fixture that could never reach
-        // the state: widen the same row and spacing fires on the same geometry.
+        // Control: widen the row and spacing fires.
         let wide = [r(0.0, 0.0, 100.0, 1000.0), r(300.0, 0.0, 400.0, 1000.0)];
         let between = r(184.0, 17.0, 224.0, 73.0);
         assert_eq!(
@@ -1615,28 +1314,23 @@ mod tests {
         );
     }
 
-    /// A Shift-locked axis gets no spacing, for the reason it gets no alignment: a
-    /// snap there would slide the layer off the line the user is holding it to.
+    /// A Shift-locked axis gets no spacing, as it gets no alignment.
     #[test]
     fn a_locked_axis_gets_no_spacing_either() {
         let moving = r(184.0, 17.0, 224.0, 73.0);
         let locked = snap_rect(moving, (false, true), &shapes(&a_row(), 1.0));
         assert_eq!(locked.adjust.x, 0.0, "{:?}", locked.adjust);
         assert!(locked.marks.gaps.is_empty(), "{:?}", locked.marks.gaps);
-        // Free, the same box centres itself.
+        // Free, it centres.
         assert!((snap_rect(moving, FREE, &shapes(&a_row(), 1.0)).adjust.x + 4.0).abs() < 1e-9);
     }
 
-    /// Spacing is a *move* behaviour and stays one. A resize changes the box's size,
-    /// so "equalize these gaps" would have to decide whether to do it by moving the
-    /// dragged edge or the anchored one — and the anchored edge is the thing a resize
-    /// may not touch (see `snap_point`).
+    /// Spacing is a move behaviour: a resize may not touch the anchored edge (see
+    /// `snap_point`).
     #[test]
     fn a_resize_handle_gets_no_spacing() {
         let at = Point::new(184.0, 45.0);
         let out = snap_point(at, (true, true), &shapes(&a_row(), 1.0));
-        // Only the pixel fallback moved it, and nothing was explained by a gap:
-        // `PointSnap` has no gaps to carry.
         assert_eq!(out.at, at);
         assert!(out.guides.is_empty());
     }
@@ -1689,14 +1383,7 @@ mod tests {
         (doc, res, frame, inside, outside)
     }
 
-    /// **A shape inside a frame can snap to that frame's edges.**
-    ///
-    /// The regression this exists for: `targets` excluded the moving node's
-    /// ancestors, and since the only ancestor kind that reaches the spatial
-    /// index is an artboard, the rule excluded frames and nothing else. Because
-    /// a layer joins a frame as soon as it is more than half inside one, almost
-    /// every shape on the page was in this case — dragging one up to its own
-    /// frame's edge felt dead, with no candidate to explain why.
+    /// A shape inside a frame can snap to that frame's edges.
     #[test]
     fn a_shape_snaps_to_the_frame_it_lives_in() {
         let (doc, res, frame, inside, _) = frame_and_shapes();
@@ -1708,34 +1395,32 @@ mod tests {
             "the parent frame {frame_box:?} is not a target: {targets:?}"
         );
 
-        // And it snaps: the shape's left edge 2 units off the frame's own.
+        // Left edge 2 units off the frame's own.
         let moving = r(2.0, 200.0, 52.0, 250.0);
         let snap = snap_rect(moving, FREE, &shapes(&targets, 1.0));
         assert!((snap.adjust.x + 2.0).abs() < 1e-9, "{:?}", snap.adjust);
     }
 
-    /// The gesture's own subtree still has to stay out — those bounds travel
-    /// with the pointer, so they would match at every offset and pin the drag.
+    /// The gesture's own subtree stays out of the targets.
     #[test]
     fn a_gesture_never_snaps_to_what_it_is_carrying() {
         let (doc, res, frame, inside, outside) = frame_and_shapes();
         let view = r(-1000.0, -1000.0, 1000.0, 1000.0);
 
-        // Dragging the frame: neither it nor the shape it contains may appear.
+        // Dragging the frame: neither it nor its shape may appear.
         let targets = targets(&doc, &res, &[frame], view, 200);
         for id in [frame, inside] {
             let b = res.world_bounds(id).unwrap();
             assert!(!targets.contains(&b), "{id:?} {b:?} is in {targets:?}");
         }
-        // The layer beside the frame is exactly what is left.
+        // The layer beside the frame is what is left.
         assert_eq!(targets, vec![res.world_bounds(outside).unwrap()]);
     }
 
     // --- the axis lock -----------------------------------------------------
 
     /// Shift picks the axis the drag has gone furthest along, and re-picks it as
-    /// the drag turns — so a gesture that starts sideways and swings downward
-    /// follows the hand rather than staying committed to its first few pixels.
+    /// the drag turns.
     #[test]
     fn shift_locks_the_axis_the_drag_is_mostly_travelling_along() {
         let v = Vec2::new;
@@ -1743,28 +1428,21 @@ mod tests {
         assert_eq!(move_axes(v(-40.0, 3.0), true), (true, false), "leftward");
         assert_eq!(move_axes(v(3.0, 40.0), true), (false, true));
         assert_eq!(move_axes(v(3.0, -40.0), true), (false, true), "upward");
-        // The tie, and the first frame of every drag, go to x: an undefined
-        // answer here is a layer that will not move at all until the pointer
-        // happens to break the tie.
+        // The tie, and the first frame of every drag, go to x.
         assert_eq!(move_axes(v(0.0, 0.0), true), (true, false));
         assert_eq!(move_axes(v(9.0, 9.0), true), (true, false));
         // Without Shift nothing is constrained.
         assert_eq!(move_axes(v(3.0, 40.0), false), (true, true));
 
-        // And the constraint really zeroes the other axis.
+        // The constraint zeroes the other axis.
         assert_eq!(
             constrain(v(40.0, 3.0), move_axes(v(40.0, 3.0), true)),
             v(40.0, 0.0)
         );
     }
 
-    /// **A locked axis comes back with no adjustment and no line.**
-    ///
-    /// The reason this is gated inside `snap_rect` rather than zeroed by the
-    /// caller: a snap on the locked axis would slide the layer off the line the
-    /// user is holding it to, and — worse — would draw a guide taking credit for
-    /// a move that then got discarded. The box here is 2 from an alignment on
-    /// *both* axes, so a leak in either direction shows up.
+    /// A locked axis comes back with no adjustment and no line. The box is 2 from
+    /// an alignment on both axes, so a leak in either direction shows up.
     #[test]
     fn a_locked_axis_neither_snaps_nor_explains_itself() {
         let moving = r(102.0, 202.0, 152.0, 252.0);
@@ -1783,8 +1461,8 @@ mod tests {
         assert_eq!(locked.marks.guides.len(), 1);
         assert_eq!(locked.marks.guides[0].axis, Axis::Vertical);
 
-        // And the grid does not sneak in behind it either. Nothing is in reach
-        // on y, so the pixel fallback is what would otherwise claim it.
+        // The grid does not sneak in behind it: nothing is in reach on y, so the
+        // pixel fallback would otherwise claim it.
         let off_grid = r(102.0, 202.7, 152.0, 252.7);
         let locked = snap_rect(off_grid, (true, false), &grid(1.0));
         assert_eq!(locked.adjust.y, 0.0, "the grid rounded a locked axis");
@@ -1793,33 +1471,12 @@ mod tests {
         assert!((free.adjust.y - 0.3).abs() < 1e-9, "{:?}", free.adjust);
     }
 
-    /// **`[S13.2-L2-01]`'s loss: `snap_point` rounded to the lattice whether
-    /// *Snap to grid* was on or off.**
+    /// `snap_point` rounds to the lattice only when *Snap to grid* is on. Both
+    /// axes are checked, since the two arms are separate `else if`s; the grid-on
+    /// case is the control.
     ///
-    /// Three of the four pixel-fallback sites consult the toggle — `snap_rect`
-    /// (`if s.pixel && axes.0`), `snap_guide` (`None if s.pixel =>`) and
-    /// `canvas::axial_corner` (`if self.snap_grid`), whose guard `pen_point`'s
-    /// doc quotes by name — and this one did not, while `Snapping::pixel`'s own
-    /// doc calls the field *Snap to grid*. **Five gestures reach it**: resize
-    /// handles, line endpoints, the pen, point drags and segment drags. Switch
-    /// every snap source off in the top bar's Snap menu and all five still
-    /// landed on whole world units; at 8× zoom that is a visible click onto a
-    /// lattice the user has turned off, and a fractional resize was unreachable
-    /// by hand.
-    ///
-    /// **Both axes and both directions**, because the two arms are separate
-    /// `else if`s and a fix that repaired one would look right in a single-axis
-    /// probe. The grid-on case is the control: this is a toggle being honoured,
-    /// not a rounding being removed.
-    ///
-    /// Flip-check, run per arm: dropping `s.pixel` from the **y** arm fails at
-    /// the very first assertion, `(102.4, 204.0)` against `(102.4, 203.6)` — the
-    /// axis is named by the pair, which is why both coordinates are compared
-    /// together rather than one at a time. ⚠️ **The predicted site was the
-    /// single-axis assertion further down and it never runs**: the first
-    /// assertion covers both axes, so it catches either arm, and the single-axis
-    /// pair below is there for the *locked*-axis rule rather than as a second
-    /// witness to this one.
+    /// flip: drop `s.pixel` from the y arm of `snap_point` → fails at the first
+    /// assertion, `(102.4, 204.0)` against `(102.4, 203.6)`.
     #[test]
     fn a_dragged_point_falls_to_the_grid_only_when_the_grid_is_on() {
         let at = Point::new(102.4, 203.6);
@@ -1838,7 +1495,7 @@ mod tests {
             "and with the grid on it lands on the lattice, both axes"
         );
 
-        // One axis at a time, because the arms are separate `else if`s.
+        // One axis at a time.
         let x_only = snap_point(at, (true, false), &Snapping::none(1.0));
         assert_eq!((x_only.at.x, x_only.at.y), (102.4, 203.6));
         let y_only = snap_point(at, (false, true), &grid(1.0));

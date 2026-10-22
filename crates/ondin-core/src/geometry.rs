@@ -21,20 +21,13 @@ const EPS: f64 = 1e-9;
 
 /// One subpath of a `BezPath`, as anchors *and the segments between them*.
 ///
-/// **The canonical anchor numbering, and it lives in core because the model
-/// does.** A `Path` carries a radius per anchor (`NodeKind::Path::corner_radii`),
-/// so "which anchor is number three" stopped being the app's private business
-/// the moment it had to survive being saved. `tools::pen_anchors` produces the
-/// same order — with handles attached, which this does not need — and
+/// This is the canonical anchor numbering: a `Path` carries a radius per anchor
+/// (`NodeKind::Path::corner_radii`), so the order is part of the saved model.
+/// `tools::pen_anchors` produces the same order, and
 /// `the_app_and_core_number_a_paths_anchors_alike` keeps the two from drifting.
-/// If they drift, a radius set on one corner appears on another.
 ///
-/// **The segments are carried, not just their endpoints, and that is not
-/// convenience.** The first version kept `points` and a `straight` flag, so
-/// rounding rebuilt the path from its vertices — and every curve in it was
-/// flattened to a line the moment any corner had a radius. Reported as "the
-/// smooth point became a corner". Holding the real `PathSeg` makes that
-/// unsayable: an untouched segment is re-emitted as itself.
+/// The real `PathSeg`s are carried, not just endpoints, so rounding re-emits an
+/// untouched segment as itself instead of flattening curves to lines.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnchorRun {
     /// The anchor positions, in order.
@@ -118,9 +111,8 @@ pub fn anchor_count(path: &BezPath) -> usize {
 pub struct SegmentHit {
     /// Which anchor run — the subpath index.
     pub subpath: usize,
-    /// The anchor the segment **leaves**, which is what makes this a name an
-    /// editor can act on: it is the same index a corner radius is stored at, so
-    /// "the segment after point 3" needs no second numbering.
+    /// The anchor the segment **leaves** — the same index a corner radius is
+    /// stored at.
     pub anchor: usize,
     /// Parameter along the segment, 0..=1.
     pub t: f64,
@@ -131,19 +123,12 @@ pub struct SegmentHit {
 
 /// The segment of `path` nearest `p`.
 ///
-/// **The mapping back to `(subpath, anchor)` is the whole reason this is here
-/// rather than over `BezPath::segments`.** `segments()` yields one flat run with
-/// no subpath boundaries and no anchor numbers in it, so every caller would have
-/// to re-derive the numbering — a third walk beside this module's and
-/// `tools::pen_anchors`', and the one that drifts is the one that puts an
-/// inserted point on the wrong side of a corner. [`AnchorRun`] already carries
-/// the real `PathSeg`s indexed by the anchor each one leaves, so the query is a
-/// scan over that.
+/// Scans [`AnchorRun`] rather than `BezPath::segments`, which has no subpath
+/// boundaries or anchor numbers, so the result is already in the canonical numbering.
 ///
-/// `None` for a path with no segments at all — a single `MoveTo`, or nothing.
-/// A closed run includes its closing segment (`segs` has one per anchor); an open
-/// one has no segment leaving its last anchor, which is why the answer is the
-/// anchor a segment *leaves* rather than the one it arrives at.
+/// `None` for a path with no segments at all. A closed run includes its closing
+/// segment; an open one has none leaving its last anchor, hence the answer names
+/// the anchor a segment *leaves*.
 pub fn nearest_segment(path: &BezPath, p: Point) -> Option<SegmentHit> {
     let mut best: Option<SegmentHit> = None;
     for (subpath, run) in anchor_runs(path).iter().enumerate() {
@@ -164,45 +149,30 @@ pub fn nearest_segment(path: &BezPath, p: Point) -> Option<SegmentHit> {
     best
 }
 
-/// Accuracy for the nearest-point solves [`nearest_segment`] runs. Well under a
-/// device pixel at any sane zoom, and the query is answering a pointer.
+/// Accuracy for the nearest-point solves [`nearest_segment`] runs; well under a
+/// device pixel at any sane zoom.
 const NEAREST_ACC: f64 = 1e-3;
 
 /// Accuracy for the arc-length solves that trim a segment back from a corner.
-/// Well under a device pixel at any sane zoom.
 const ARCLEN_ACC: f64 = 1e-4;
 
 /// `path` with a fillet cut into each corner that has a radius.
 ///
-/// **Every corner, whatever its neighbours are.** An earlier cut rounded only
-/// where both adjoining segments were straight, and that was wrong in use rather
-/// than merely limited: a quadrilateral with one curved side rounded exactly one
-/// of its three corners, because the other two each had the curve on one side.
-/// A corner is a corner — what the neighbours do is not the question the radius
-/// is asking. The legs are trimmed back **by arc length**, so a curved one is
-/// shortened rather than replaced.
+/// Every corner is rounded whatever its neighbours are; the legs are trimmed back
+/// **by arc length**, so a curved leg is shortened rather than replaced.
 ///
-/// **What the fillet *is* depends on the legs, and it has to.** Between two
-/// straight legs it is an exact circular arc, so a path rounded this way and a
-/// `Rect` rounded by `RoundedRect` agree. Against a curve there is generally no
-/// circle tangent to both at the trim points, so the join is a cubic that meets
-/// each side along its own tangent — smooth where it matters, and the very same
-/// construction a circular arc is when the legs happen to be straight.
+/// Between two straight legs the fillet is an exact circular arc (agreeing with
+/// `RoundedRect`). Against a curve there is generally no tangent circle, so the
+/// join is a cubic meeting each side along its own tangent.
 ///
-/// An endpoint of an open subpath is never rounded: one adjoining segment is no
-/// corner. A radius on a **smooth** anchor does nothing, because the two tangents
-/// are collinear and there is no turn to cut — the behaviour asked for, falling
-/// out of the geometry rather than needing a rule of its own.
+/// An endpoint of an open subpath is never rounded, and a radius on a **smooth**
+/// anchor does nothing, because the tangents are collinear.
 ///
-/// **Each radius is clamped to half of each adjoining segment**, which stops two
-/// rounded corners sharing a short edge from eating past each other and turning
-/// the outline inside out. `RoundedRect::from_rect` clamps for the same reason.
+/// **Each radius is clamped to half of each adjoining segment**, so two rounded
+/// corners sharing a short edge cannot eat past each other and invert the outline.
 pub fn round_corners(path: &BezPath, radii: &[f64]) -> BezPath {
-    // `any(> 0)` rather than `all(<= 0)`, which are not each other's negation in
-    // the presence of `NaN` — see the guard in `round_run` (§15 D640). A list of
-    // nothing but `NaN`s takes this fast path now, which is the same answer the
-    // per-corner guard gives one at a time; before, it fell through to a walk
-    // that rounded every corner to its maximum.
+    // `any(> 0)` rather than `all(<= 0)`: they are not each other's negation
+    // with `NaN` (see the guard in `round_run`).
     if !radii.iter().any(|r| *r > 0.0) {
         return path.clone();
     }
@@ -243,29 +213,10 @@ fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
     let mut fillets: Vec<Option<Fillet>> = (0..n).map(|_| None).collect();
     let mut trim_start = vec![0.0f64; ns];
     let mut trim_end = vec![1.0f64; ns];
-    // **Each segment's arc length, computed at most once** (§15 D507's neighbour,
-    // §15 D510, `[S4.2-L4-04]`). Every interior segment borders two corners, so
-    // `fillet` used to measure it **twice** — once as the arriving leg of corner
-    // *i*, once as the leaving leg of corner *i+1* — and a cubic's `arclen` is a
-    // numeric integration, with `inv_arclen` a root-find that calls it again per
-    // iteration. `local_path` runs on every painted node on **every frame**, so
-    // this is per-frame work.
-    //
-    // **Lazy rather than a pre-pass**, which is the half that matters for the
-    // ordinary document: `round_corners` takes this route as soon as *one* radius
-    // is non-zero, and a length is only ever needed beside a corner that is
-    // actually rounded. Filling all `ns` up front would make one rounded corner on
-    // a long path cost what rounding every corner costs.
-    //
-    // ⚠️ **It is worth about 7%, not the half `[S4.2-L4-04]` estimated, and only
-    // measuring said so.** Release, a ring of cubics, every corner rounded:
-    // 11.68 → 10.64 ms at 10,000 anchors, 0.84 → 0.79 at 1,000. The redundant
-    // `arclen` is real and is now gone, but `inv_arclen` is a **root-find that
-    // calls `arclen` again per iteration** and there are two of those per corner,
-    // so removing one of two direct calls is a small share of the work. The
-    // finding's larger fix — caching the rounded outline on `Resolved` beside
-    // `boolean`, so the walk is *handed* it like every other derived geometry —
-    // is untouched and is where the rest of it is.
+    // Each segment's arc length is computed at most once: an interior segment
+    // borders two corners and a cubic's `arclen` is a numeric integration, on a
+    // per-frame path. Lazy rather than a pre-pass, so one rounded corner on a long
+    // path does not cost what rounding every corner costs.
     let mut lens: Vec<Option<f64>> = vec![None; ns];
     if n >= 3 {
         for i in 0..n {
@@ -281,30 +232,14 @@ fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
             let (Some(sa), Some(sb)) = (run.segs.get(ia), run.segs.get(ib)) else {
                 continue;
             };
-            // Hoisted out of `fillet` so the memo below is only ever filled for a
-            // corner that is going to be cut. `ia` and `ib` are distinct here —
-            // they coincide only at `n == 1`, which this arm excludes.
+            // Hoisted out of `fillet` so the memo below is only filled for a
+            // corner that is going to be cut.
             let radius = radii.get(i).copied().unwrap_or(0.0);
-            // ⚠️ **Written to reject `NaN` by construction, not by `<= 0.0`**
-            // (§15 D640, `[S4.2-L1-06]`). Every comparison against `NaN` is
-            // false, so `radius <= 0.0` *lets it through*, and what it reaches is
-            // `fillet`'s `(radius / …).min(la * 0.5).min(lb * 0.5)` — where
-            // `f64::min` returns the **non-`NaN`** operand. The corner is then
-            // cut by the largest trim the clamp allows, so a square carrying a
-            // `NaN` radius draws as its inscribed circle: not a refusal, not a
-            // `NaN` path, the maximum fillet. The guard reads as doing the
-            // opposite of what it does.
-            //
-            // `inf` is deliberately still accepted and is not the same case: it
-            // is a magnitude, and *"each radius is clamped to half of each
-            // adjoining segment"* is this function's documented answer to one
-            // that is too big — the same answer radius 500 gets.
-            //
-            // ⚠️ Spelled with `is_nan()` rather than as `!(radius > 0.0)`, which
-            // is the same predicate and is what `clippy::neg_cmp_op_on_partial_ord`
-            // objects to — for precisely the reason this bug happened: a negated
-            // comparison hides the incomparable case, and hiding it is what the
-            // old guard did.
+            // `NaN` must be rejected explicitly: `radius <= 0.0` is false for it,
+            // and `fillet`'s `f64::min` clamp returns the non-`NaN` operand, so a
+            // `NaN` radius would draw the maximum fillet. `inf` stays accepted
+            // (it clamps like any oversized radius). `is_nan()` rather than
+            // `!(radius > 0.0)`, which clippy rejects.
             if radius.is_nan() || radius <= 0.0 {
                 continue;
             }
@@ -343,11 +278,8 @@ fn round_run(out: &mut BezPath, run: &AnchorRun, radii: &[f64]) {
 /// The fillet at the corner where `sa` arrives and `sb` leaves, or `None` when
 /// there is no corner there to cut.
 ///
-/// `la` and `lb` are the two legs' arc lengths. **Passed in rather than measured
-/// here** (§15 D510): every interior segment borders two corners, so measuring
-/// them at the point of use did each one twice, and a cubic's `arclen` is a
-/// numeric integration. `round_run` memoizes them; the caller has also already
-/// established `radius > 0.0`, which is why there is no check for it here.
+/// `la` and `lb` are the two legs' arc lengths, passed in because `round_run`
+/// memoizes them; the caller has already established `radius > 0.0`.
 fn fillet(sa: &PathSeg, sb: &PathSeg, radius: f64, la: f64, lb: f64) -> Option<Fillet> {
     let corner = sa.eval(1.0);
     // The directions the two legs actually leave the corner in — tangents, so a
@@ -465,32 +397,20 @@ fn arc_to(out: &mut BezPath, from: Point, to: Point, corner: Point) {
 }
 
 /// The node's outline in its own local space. `None` for the pure containers, for
-/// text and for a boolean — see below for the last two, which have an outline that
-/// is not a function of this argument.
+/// text and for a boolean.
 ///
-/// One definition, because more than one consumer needs the *same* outline: the
-/// scene walk strokes and fills it, and the SVG writer needs it verbatim as a
-/// `clipPath` for aligned strokes. Two copies would drift, and the symptom
-/// would be an export that clips a stroke slightly differently from the canvas.
+/// One definition: the scene walk strokes and fills it and the SVG writer uses it
+/// verbatim as the `clipPath` for aligned strokes, so two copies would drift.
 ///
-/// **A `Boolean` answers `None` here and it is not a shape without one.** Its
-/// outline is a function of its whole subtree, not of its kind, so it cannot be
-/// built from the argument this function takes — read
-/// [`crate::Resolved::local_path`] instead, which returns the cached result for a
-/// boolean and defers to this for everything else. Every caller that draws or
-/// measures has a `Resolved` to hand.
-///
-/// **A `Text` node answers `None` too, and for the same shape of reason.** Its
-/// outline is the outline of its *glyphs*, which needs the shaped layout rather
-/// than the kind — [`crate::text::outline`] builds it from the cached
-/// `TextLayout`, and [`stroke_align_applies`] answers yes for text on that basis.
+/// A `Boolean` answers `None` because its outline is a function of its subtree,
+/// not its kind; read [`crate::Resolved::local_path`], which returns the cached
+/// result for a boolean and defers to this otherwise. A `Text` node's outline is
+/// its glyphs', built by [`crate::text::outline`] from the cached `TextLayout`.
 pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
     match kind {
-        // **A frame has an outline, and it is its own frame.** This is what a
-        // frame's stroke is drawn along and what its alignment clip and its four
-        // sides are built from — square-cornered, because a frame carries no
-        // radii, so it comes out of the same `Rect::to_path` a square-cornered
-        // rect does and the two cannot drift (§15 D144).
+        // A frame's outline is its own box, square-cornered through the same
+        // `Rect::to_path` a square rect uses; its stroke, alignment clip and
+        // sides are built from it.
         NodeKind::Artboard { size, .. } => {
             Some(Rect::new(0.0, 0.0, size.width, size.height).to_path(TOLERANCE))
         }
@@ -505,23 +425,10 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
                 RoundedRect::from_rect(rect, *corner_radii).to_path(TOLERANCE)
             })
         }
-        // **Closed by hand**, because `Ellipse::to_path` does not close it — four
-        // cubics whose last point is the first one, and no `ClosePath`. It is the
-        // only shape here that needed saying: `Rect`, `RoundedRect` and `star_path`
-        // all close their own outlines.
-        //
-        // A fill cannot tell the difference, which is why this survived. A *stroke*
-        // can: an unclosed outline is an **open** path, so the backend caps its two
-        // ends instead of joining them, and at large widths an open expansion is a
-        // different shape from a closed one. Measured either side of this line: the
-        // expansion's winding at the ellipse's centre is 0 unclosed and 4 closed.
-        //
-        // **One half of "a very wide stroke leaves a hole in the middle of its own
-        // ink", not the whole of it** (§15 D131). Closing the outline was necessary
-        // and is not sufficient — a *rect*, closed all along, holes from 330pt on the
-        // same 200×120 box — so `scene::lay_stroke` is what actually fixes the hole
-        // and this is what stops the ellipse being a second, differently-shaped case
-        // of it.
+        // Closed by hand, because `Ellipse::to_path` emits four cubics and no
+        // `ClosePath`. A fill cannot tell, but an unclosed stroke is an open path:
+        // its ends are capped rather than joined, and a wide open expansion differs
+        // from a closed one. `scene::lay_stroke` fixes the wide-stroke hole itself.
         NodeKind::Ellipse { size } => {
             let mut path = Ellipse::new(
                 (size.width * 0.5, size.height * 0.5),
@@ -542,13 +449,10 @@ pub fn local_path(kind: &NodeKind) -> Option<BezPath> {
             PathEl::MoveTo(Point::ZERO),
             PathEl::LineTo(*end),
         ])),
-        // **The one place a path's corner radii become geometry.** Every consumer
-        // that draws, measures, exports or hit-tests a path reaches it through
-        // here or through `Resolved::local_path` above it, so the rounding is
-        // resolved once and cannot be forgotten by one of them (§15 D119).
+        // The one place a path's corner radii become geometry; every consumer
+        // reaches it through here or `Resolved::local_path`.
         NodeKind::Path { path, corner_radii } => Some(round_corners(path, corner_radii)),
-        // `Boolean` and `Text` included, and see the notes above: both have an
-        // outline, neither has one this argument can build.
+        // Both have an outline this argument cannot build (see above).
         NodeKind::Root | NodeKind::Group | NodeKind::Text { .. } | NodeKind::Boolean { .. } => None,
     }
 }
@@ -567,21 +471,14 @@ pub const MIN_INNER_RATIO: f64 = 0.05;
 /// `size` exactly**.
 ///
 /// `inner` turns it into a star — every other vertex is pulled in to that
-/// fraction of the radius, so a polygon is simply the case with no inner ring.
-/// One function because they are one construction, and two copies would drift
-/// on the details that matter: both start at the top, so a triangle points up
-/// and a five-pointed star sits the way one is drawn.
+/// fraction of the radius, so a polygon is the case with no inner ring.
 ///
 /// **Filling the box is not cosmetic.** `local_bounds` reports `0,0..w,h` for
-/// these kinds, and the selection rect, the snap targets and the resize handles
-/// all come from it. A triangle merely *inscribed* in the circle spans three
-/// quarters of its box's height, so every one of those would sit away from the
-/// shape. Normalising the vertices to the box is what keeps the reported bounds
-/// honest — and it is also what a designer means by dragging out a shape.
+/// these kinds and the selection rect, snap targets and resize handles come from
+/// it; a merely inscribed triangle spans three quarters of its box's height.
 ///
-/// Counts are clamped here rather than on the way into the model, like a rect's
-/// corner radii: dragging the sides field down through 2 and back must not lose
-/// the number the user was heading for.
+/// Counts are clamped here rather than on the way into the model, so dragging the
+/// sides field down through 2 and back does not lose the number the user wanted.
 fn star_path(size: Size, n: u32, inner: Option<f64>) -> BezPath {
     let n = n.clamp(MIN_SIDES, MAX_SIDES);
     let vertices = match inner {
@@ -664,10 +561,8 @@ pub fn uniform_radius(radii: &RoundedRectRadii) -> Option<f64> {
 /// an inside/outside stroke to sit in.
 ///
 /// A subpath counts as closed if it ends in `ClosePath` **or** its last point
-/// lands back on its first. Both are needed: `Rect::to_path` emits the explicit
-/// `ClosePath`, while `Ellipse::to_path` is four cubics that simply arrive back
-/// where they started. Testing only for the marker would decide that ellipses
-/// have no inside.
+/// lands back on its first; testing only the marker would say ellipses have no
+/// inside.
 pub fn is_closed(path: &BezPath) -> bool {
     /// Slack for "lands back on its first point", in local units.
     const EPS: f64 = 1e-6;
@@ -712,21 +607,12 @@ pub fn is_closed(path: &BezPath) -> bool {
 /// outline to have an inside.
 ///
 /// **A `Boolean` answers yes without being measured**, because [`local_path`]
-/// cannot build its outline (see the note there) and the test below would
-/// therefore read "not closed" — the one answer a boolean's outline is never. Every
-/// subpath `boolean::from_flo` emits is explicitly closed, and each one's winding is
-/// normalized against its nesting depth, which is precisely what makes an inside
-/// well defined even where the shape has holes.
+/// cannot build its outline and the test below would read "not closed". Every
+/// subpath `boolean::from_flo` emits is closed, with winding normalized against
+/// nesting depth, so an inside is well defined even with holes.
 ///
-/// It was measured, and the two symptoms were a matched pair: the alignment
-/// dropdown was absent from a boolean's Stroke panel, and `Resolved` sized the node
-/// as though an outside stroke were there while both the canvas and the SVG drew it
-/// centred.
-/// **A `Text` node answers yes without being measured, for the same reason.** Its
-/// outline is its glyphs' ([`crate::text::outline`]), which [`local_path`] cannot
-/// build either — and every contour a font emits is closed, which is precisely what
-/// makes outlined type expressible: an outside stroke on text is the whole point of
-/// the alignment control being offered there at all.
+/// A `Text` node answers yes for the same reason: its outline is its glyphs'
+/// ([`crate::text::outline`]) and every font contour is closed.
 pub fn stroke_align_applies(kind: &NodeKind) -> bool {
     match kind {
         NodeKind::Boolean { .. } | NodeKind::Text { .. } => true,
@@ -737,18 +623,11 @@ pub fn stroke_align_applies(kind: &NodeKind) -> bool {
 
 /// Whether a node's outline has corners for a join to shape.
 ///
-/// The sibling [`stroke_align_applies`] and [`stroke_sides_apply`] were both
-/// precedents for: a control that cannot change anything is offered as one that
-/// can, and the user is left looking for the difference. An **ellipse** is four
-/// cubics that meet tangentially, so every "corner" is already smooth; a **line**
-/// has two ends and no interior vertex at all. Miter, Round and Bevel are the same
-/// drawing on either.
+/// An **ellipse** is four tangent cubics, so every "corner" is already smooth; a
+/// **line** has no interior vertex. Miter, Round and Bevel draw the same on either.
 ///
-/// **Gated on the kind, not on the geometry.** A rect whose four corners are fully
-/// rounded has no sharp vertex either, and gating on that would make the control
-/// appear and disappear while the radius field is being scrubbed — a flicker in
-/// exchange for a distinction nobody is looking for. A rect is a thing you put a
-/// mitre on; that is the honest answer at the granularity the panel works in.
+/// **Gated on the kind, not on the geometry**, so the control does not appear and
+/// disappear while a rect's radius field is being scrubbed.
 pub fn stroke_join_applies(kind: &NodeKind) -> bool {
     match kind {
         NodeKind::Rect { .. }
@@ -760,9 +639,7 @@ pub fn stroke_join_applies(kind: &NodeKind) -> bool {
         | NodeKind::Boolean { .. }
         // A frame is a box, so it has the four corners a rect has.
         | NodeKind::Artboard { .. }
-        // Glyph outlines are full of corners — a stem meeting a serif, the apex of
-        // an A — and a stroked one shapes every last of them. It reads at the
-        // weights outlined type is set at, which is the only reason to offer it.
+        // Glyph outlines are full of corners.
         | NodeKind::Text { .. } => true,
         // No corners: smooth throughout, and no interior vertex respectively.
         NodeKind::Ellipse { .. } | NodeKind::Line { .. } => false,
@@ -773,17 +650,8 @@ pub fn stroke_join_applies(kind: &NodeKind) -> bool {
 
 /// Whether a node's stroke can be put on one named side: it needs four of them.
 ///
-/// **The two boxes only**, and narrower than it might look. An ellipse, a polygon,
-/// a star and a path have no top edge to speak of, and a `Line` has no sides at
-/// all — so the answer there is no, exactly as [`stroke_align_applies`] says no to
-/// an open path. Text is no for the same reason: a paragraph's outline is its
-/// glyphs, which have no four edges between them.
-///
-/// **`Artboard` used to be excluded for a second reason and no longer is.** The
-/// scene walk painted a frame's one background and returned, so a frame drew no strokes
-/// of any kind and offering it a per-side one would have promised ink nothing paints
-/// — the widening §15 D68 held open until frames stroked. They do (§15 D144), and a
-/// frame is exactly the shape a per-side border is for.
+/// **The two boxes only.** An ellipse, polygon, star, path and text have no four
+/// edges, and a `Line` has no sides at all.
 pub fn stroke_sides_apply(kind: &NodeKind) -> bool {
     matches!(kind, NodeKind::Rect { .. } | NodeKind::Artboard { .. })
 }
@@ -791,10 +659,8 @@ pub fn stroke_sides_apply(kind: &NodeKind) -> bool {
 /// The sides a stroke actually occupies on this kind — [`StrokeSides::All`]
 /// wherever the field cannot be honoured.
 ///
-/// The sibling of `stroke_align_applies`'s use in the walk: the value stays in
-/// the model untouched, and every consumer asks this rather than reading `sides`
-/// directly, so a rect that becomes an ellipse draws its whole outline instead of
-/// a stray edge.
+/// The stored value stays in the model untouched; every consumer asks this rather
+/// than reading `sides`, so a rect that becomes an ellipse draws its whole outline.
 pub fn effective_sides(kind: &NodeKind, stroke: &Stroke) -> StrokeSides {
     if stroke_sides_apply(kind) {
         stroke.sides
@@ -806,17 +672,13 @@ pub fn effective_sides(kind: &NodeKind, stroke: &Stroke) -> StrokeSides {
 /// The **open** outline of one side of a rect, with each corner arc split at its
 /// midpoint so the top edge owns half of each top corner.
 ///
-/// This is what a per-side stroke is drawn along, and splitting at the midpoint
-/// is what CSS does with `border-top` against `border-radius`: two adjacent sides
-/// of different widths meet on the diagonal, and a rounded corner belongs half to
-/// each of the sides that share it. Cutting at the *straight* edge instead would
-/// leave a rounded rect's corners bare, which reads as four gaps rather than a
-/// border.
+/// A per-side stroke is drawn along this. Splitting at the midpoint matches CSS
+/// `border-top` against `border-radius`: a rounded corner belongs half to each side
+/// sharing it, where cutting at the straight edge would leave corners bare.
 ///
 /// The radii come back off [`RoundedRect::from_rect`] rather than being clamped
-/// here, so a side's arc is the same curve the fill and the closed outline use —
-/// two clamping rules would show up as a stroke sitting a fraction off its own
-/// shape. A corner with no radius contributes its sharp vertex instead of an arc.
+/// here, so the arc is the same curve the fill uses. A corner with no radius
+/// contributes its sharp vertex.
 ///
 /// `None` for any kind [`stroke_sides_apply`] rejects.
 pub fn side_path(kind: &NodeKind, side: Side) -> Option<BezPath> {
@@ -931,15 +793,10 @@ fn corners(size: Size, radii: RoundedRectRadii) -> [Corner; 4] {
 fn append_arc(path: &mut BezPath, arc: &Arc) {
     for (i, el) in arc.path_elements(TOLERANCE).enumerate() {
         match el {
-            // An `Arc` leads with a `MoveTo` to its start point. Mid-path that
-            // start has to be *reached*, not jumped to — dropping the element
-            // would leave the following curve's control points describing an arc
-            // from somewhere the pen is not.
-            // **`elements()`, not `BezPath::is_empty`.** kurbo reads that as
-            // "contains no *segments*", so a path holding a lone `MoveTo` is
-            // empty by it — and this branch would then emit a second `MoveTo`,
-            // leaving a side made of two jumps and no ink at all. What is being
-            // asked here is whether the pen has been put down yet.
+            // An `Arc` leads with a `MoveTo`; mid-path that start must be
+            // *reached*, not jumped to. `elements()`, not `BezPath::is_empty`,
+            // which counts segments: a lone `MoveTo` is empty by it and would get
+            // a second `MoveTo`, leaving a side with no ink.
             PathEl::MoveTo(p) if i == 0 => {
                 if path.elements().is_empty() {
                     path.move_to(p);
@@ -956,15 +813,12 @@ fn append_arc(path: &mut BezPath, arc: &Arc) {
 /// `width` actually being laid down (which is the stroke's own except on a
 /// `Custom` side).
 ///
-/// Two things the model deliberately leaves until here, because both need
-/// numbers the model does not carry (§5.3):
+/// Two things the model leaves until here, because both need numbers it does not
+/// carry (§5.3):
 ///
-/// - **A dot is a zero-length dash**, which is what makes its spacing
-///   unambiguously centre-to-centre — but a zero-length dash draws *nothing*
-///   under `Cap::Butt` or `Cap::Square`, so the stroke would vanish. Those two
-///   get a square dot one width long instead, with the gap shortened to match so
-///   the **period is preserved** and the spacing field keeps meaning the same
-///   thing under all three caps.
+/// - **A dot is a zero-length dash**, which draws nothing under `Cap::Butt` or
+///   `Cap::Square`. Those get a square dot one width long, with the gap shortened
+///   so the **period is preserved**.
 /// - **Fit to corners** scales the pattern so a whole number of periods spans the
 ///   outline, which needs the path's length.
 pub fn resolved_dashes(stroke: &Stroke, width: f64, path: &BezPath) -> Vec<f64> {
@@ -990,23 +844,14 @@ pub fn resolved_dashes(stroke: &Stroke, width: f64, path: &BezPath) -> Vec<f64> 
 /// with the pattern resolved for it — or `None` when the whole path is one piece and
 /// [`resolved_dashes`] answers on its own.
 ///
-/// **Fitting is per subpath, and that is why this exists.** `dash_fit` scales the
-/// period so a whole number of them spans the outline, and a scale is a property of
-/// *one* closed run of the path: two subpaths of different lengths need two
-/// different scales to each land on their own corners, and one pattern cannot say
-/// two things. Fitting the total instead — which is what this replaced — is exact
-/// for a single-subpath shape and drifts by up to half a period on every subpath of
-/// a path that has several, worst where the subpaths differ most in length.
+/// **Fitting is per subpath**: subpaths of different lengths need different scales
+/// to land on their own corners, and fitting the total drifts by up to half a
+/// period on each.
 ///
-/// `None` for everything else, and that is the common case doing no work: a solid
-/// stroke, an unfitted pattern, or a path with one subpath all go down the
-/// single-pattern route with no path cloned and no perimeter measured twice.
-///
-/// A subpath's own `perimeter` is what each is fitted against, so a stroke crossing
-/// from one to the next restarts its phase there — which it already did, since
-/// `dash_offset` is measured from each subpath's start.
-///
-/// §15 D147; it closes the approximation D69 recorded.
+/// `None` for a solid stroke, an unfitted pattern or a single subpath, so the
+/// common case clones no path and measures no perimeter twice. Each subpath is
+/// fitted against its own `perimeter`, restarting phase there as `dash_offset`
+/// already does.
 pub fn dash_fit_pieces(
     stroke: &Stroke,
     width: f64,
@@ -1032,9 +877,8 @@ pub fn dash_fit_pieces(
 
 /// `path`'s subpaths, one per `MoveTo`.
 ///
-/// Shared rather than spelled per consumer: the scene walk, the SVG writer and
-/// [`dash_fit_pieces`] all need the same split, and the walk's own copy of it is
-/// load-bearing for the wide-stroke construction (`scene::outermost_subpaths`).
+/// Shared by the scene walk, the SVG writer and [`dash_fit_pieces`], which all need
+/// the same split.
 pub fn subpaths(path: &BezPath) -> Vec<BezPath> {
     let mut out: Vec<BezPath> = Vec::new();
     for el in path.elements() {
@@ -1050,14 +894,9 @@ pub fn subpaths(path: &BezPath) -> Vec<BezPath> {
 
 /// `dashes` scaled so a whole number of periods spans `length` exactly.
 ///
-/// Rounding to the *nearest* whole number of periods rather than the floor: the
-/// point of fitting is that the pattern lands where the shape turns, and the
-/// nearest count moves each dash by at most half a period where flooring can
-/// stretch every one of them by a full one.
-///
-/// `length` is one subpath's perimeter, not necessarily the whole path's — see
-/// [`dash_fit_pieces`], which is what splits a multi-subpath path so that each
-/// piece is fitted against its own corners.
+/// Rounds to the *nearest* whole number of periods rather than the floor, so each
+/// dash moves by at most half a period. `length` is one subpath's perimeter (see
+/// [`dash_fit_pieces`]).
 pub fn fitted_dashes(dashes: &[f64], length: f64) -> Vec<f64> {
     let period: f64 = dashes.iter().sum();
     // `is_finite` covers the NaN a bad pattern could sum to; the comparison then
@@ -1090,25 +929,15 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
             0.0_f64.max(end.x),
             0.0_f64.max(end.y),
         )),
-        // **The box of what is actually drawn, radii and all**, which is what
-        // `Rect` reports too — and the correction is that the two were never
-        // disagreeing in the first place. The old rule kept the *unrounded* path
-        // here "as `Rect` does", but a `Rect`'s rounded corners cut inward from
-        // corners that are not on any extreme: its box is unchanged by a radius, so
-        // the unrounded box was exact for that kind and merely a superset for this
-        // one. The symmetry was the wrong way round, and what it cost was the
-        // inspector reading a few units generous on a heavily rounded path (§15).
-        //
-        // `local_path` hands the path straight back when there are no radii, so the
-        // ordinary case pays nothing.
+        // The box of the rounded outline: a rect's box is unchanged by a radius,
+        // but a rounded path's can shrink. `round_corners` returns the path
+        // unchanged when there are no radii.
         NodeKind::Path { path, corner_radii } => {
             Some(round_corners(path, corner_radii).bounding_box())
         }
-        // **The box, not `0,0..w,h`.** A trimmed text node's box starts below
-        // its local origin ([`TextLayout::origin`]), which is what lets trimming
-        // tighten the box without moving the ink — so this is the one kind whose
-        // local bounds need not begin at the origin, and every consumer of this
-        // function gets the trim for free.
+        // The layout's box, not `0,0..w,h`: a trimmed text node's box starts
+        // below its local origin ([`TextLayout::origin`]), so this is the one kind
+        // whose local bounds need not begin at the origin.
         NodeKind::Text { .. } => {
             let parts = crate::node::TextRef::of(kind)?;
             Some(match text {
@@ -1127,8 +956,7 @@ pub fn local_bounds(kind: &NodeKind, text: Option<&TextLayout>) -> Option<Rect> 
 ///
 /// `local` is the node's geometry box — [`local_bounds`] for a shape, the union
 /// of its children for a container ([`crate::local_box`]). An unset pivot is that
-/// box's centre, which is the fixed point every gesture used before the field
-/// existed, so a document that never touched a pivot behaves exactly as it did.
+/// box's centre.
 pub fn pivot_point(pivot: Option<Pivot>, local: Rect) -> Point {
     match pivot {
         None => local.center(),
@@ -1143,18 +971,11 @@ pub fn pivot_point(pivot: Option<Pivot>, local: Rect) -> Point {
 /// The [`Pivot`] that puts a node of this kind at the local point `at`, given its
 /// box.
 ///
-/// The one place [`Pivot`]'s two variants are chosen between, so that "authored
-/// box → fraction, emergent box → absolute point" is a single statement rather
-/// than a rule every caller has to remember. The test is the same one the resize
-/// gesture uses to decide whether a node has a box of its own to edit
-/// (`tools::resizable_size` is its app-side twin), because that is precisely the
-/// question being asked: is this extent a field someone typed, or a consequence
-/// of what is inside?
-///
-/// Auto-sized text is the interesting case and it comes out right: its box is a
-/// field once it has been dragged, and before that it has no authored extent at
-/// all — so it lands in the emergent half, where a later content edit cannot drag
-/// the pivot around with the wrapping.
+/// The one place [`Pivot`]'s variants are chosen between: authored box → fraction,
+/// emergent box → absolute point. The test matches the resize gesture's
+/// (`tools::resizable_size` is its app-side twin): is the extent a typed field or a
+/// consequence of what is inside? Auto-sized text lands in the emergent half, so a
+/// content edit cannot drag the pivot around with the wrapping.
 pub fn pivot_for(kind: &NodeKind, local: Rect, at: Point) -> Pivot {
     let authored = match kind {
         NodeKind::Rect { .. }
@@ -1167,9 +988,8 @@ pub fn pivot_for(kind: &NodeKind, local: Rect, at: Point) -> Pivot {
         | NodeKind::Group
         | NodeKind::Line { .. }
         | NodeKind::Path { .. }
-        // Emergent, like a group's: a boolean has no authored box, only whatever
-        // its operands add up to, so a *fraction* of that box is not a stable
-        // place to pin a pivot — editing an operand would move it.
+        // Emergent, like a group's: editing an operand would move a fraction of
+        // its box.
         | NodeKind::Boolean { .. } => false,
     };
     if authored && local.width() > MIN_EXTENT && local.height() > MIN_EXTENT {
@@ -1190,26 +1010,15 @@ const MIN_EXTENT: f64 = 1e-9;
 /// `at` **is** the box's centre — which is the absence of a pivot rather than a
 /// pivot in the middle of it.
 ///
-/// **One rule, two doors** (§15 D247). The canvas marker and the inspector's origin
-/// fields both have to agree that the middle clears the field, or dragging the marker
-/// back to the centre and typing 50/50 would leave the document in two different
-/// states — one with `pivot: None`, one holding a stored half that resolves to the
-/// same point. They are not the same state: `None` is what [`crate::build::flip`]
-/// and the pre-field gestures read, and it is the one the canvas stops drawing an
-/// affordance for, so it is worth being able to get back to exactly.
+/// **One rule for both the canvas marker and the inspector's origin fields**, so
+/// dragging back to the centre and typing 50/50 leave the same state: `None` is
+/// what [`crate::build::flip`] reads and the canvas draws no affordance for.
 ///
-/// **A degenerate axis is always centred**, and that falls out rather than being
-/// special-cased: a box with no extent on an axis has one position on it, its
-/// minimum, which is also its centre. So an axis-aligned line's origin clears on
-/// the *other* axis alone — where the marker's own snap test insisted on a middle
-/// third that a zero extent can never report, and a horizontal line's pivot could
-/// not be dragged back to nothing at all.
+/// A degenerate axis is always centred (its one position is its minimum), so an
+/// axis-aligned line's origin clears on the *other* axis alone.
 ///
-/// The epsilon is [`MIN_EXTENT`] because it is the same question in the same
-/// units: is a distance in local space zero? Both callers arrive at the centre by
-/// evaluating the same expression the centre is defined by — a snap to the middle
-/// third, or a fraction of exactly `0.5` — so the comparison is against rounding,
-/// not against tolerance.
+/// The epsilon is [`MIN_EXTENT`]: both callers arrive at the centre by the
+/// expression that defines it, so the comparison is against rounding, not tolerance.
 pub fn pivot_placed_at(kind: &NodeKind, local: Rect, at: Point) -> Option<Pivot> {
     let centre = local.center();
     if (at.x - centre.x).abs() <= MIN_EXTENT && (at.y - centre.y).abs() <= MIN_EXTENT {
@@ -1221,31 +1030,19 @@ pub fn pivot_placed_at(kind: &NodeKind, local: Rect, at: Point) -> Option<Pivot>
 /// How far the widest visible stroke reaches *outside* the geometry. Used to
 /// expand bounds, and as the hit-test tolerance for open shapes.
 ///
-/// Alignment-aware: an inside stroke adds nothing to the bounds, an outside one
-/// adds its full width. Getting this wrong shows up as an outside stroke being
-/// clipped by its own artboard, or culled a frame early when scrolled to the
-/// edge of the viewport.
+/// Alignment-aware: an inside stroke adds nothing, an outside one its full width.
 ///
-/// **Takes the kind, because it has to answer the same question the walk does.**
-/// This is the one bounds consumer that reads `sides`, and reading the *stored*
-/// field rather than [`effective_sides`] is a way to disagree with what gets
-/// painted: on a kind with no nameable sides, `Custom { 0, 0, 0, 0 }` reports no
-/// reach at all while the walk strokes the whole outline at full width — ink
-/// outside its own reported bounds, which is exactly the clipped-and-culled
-/// failure above. The panel gates the control so only a hand-edited file can set
-/// that up, but the two functions must be unable to disagree rather than merely
-/// unlikely to; passing the kind is what makes it structural. Pinned by
+/// **Takes the kind** so it reads [`effective_sides`] rather than the stored
+/// `sides`: on a kind with no nameable sides, `Custom { 0, 0, 0, 0 }` would report
+/// no reach while the walk strokes the whole outline. Pinned by
 /// `bounds_allow_for_a_stroke_the_walk_will_actually_draw`.
 pub fn stroke_expansion(kind: &NodeKind, paint: &Paint) -> f64 {
     paint
         .strokes
         .iter()
         .filter(|s| s.visible)
-        // The widest side, not the stroke's nominal width: a `Custom` set of
-        // per-side widths reaches only as far as its thickest one, and one that
-        // is 0 on every side reaches nowhere at all. Still a single number for
-        // all four sides — see [`StrokeSides::max_width`] for why generous is
-        // the safe direction here.
+        // The widest side, not the nominal width; see [`StrokeSides::max_width`]
+        // for why generous is the safe direction.
         .map(|s| effective_sides(kind, s).max_width(s.width) * s.align.outward_fraction())
         .fold(0.0, f64::max)
 }
@@ -1255,11 +1052,8 @@ pub fn stroke_expansion(kind: &NodeKind, paint: &Paint) -> f64 {
 /// `Resolved` level). See [`local_bounds`] for the `text` argument.
 ///
 /// **Parts, because no caller has the kind a `Node` would hand it.** Render
-/// previews measure the bounds a node *would* have under a pending edit, where the
-/// kind and paint come from an override; `Resolved` measures at the **used** kind,
-/// which is the node's own only until container layout resizes it (§15 D868).
-/// There was a `world_bounds_of(node, …)` wrapper beside this for the second
-/// caller, and it went when that caller stopped being able to use it.
+/// previews measure under a pending edit's override, and `Resolved` measures at the
+/// **used** kind, which is the node's own only until container layout resizes it.
 pub fn world_bounds_of_parts(
     kind: &NodeKind,
     paint: &Paint,
@@ -1271,30 +1065,20 @@ pub fn world_bounds_of_parts(
     measurable(transform_rect(world, local.inflate(expansion, expansion)))
 }
 
-/// `r` if it is a box anything can be measured against, `None` otherwise
-/// (§15 D495).
+/// `r` if it is a box anything can be measured against, `None` otherwise.
 ///
-/// **Two tests, because either one alone lets half the bad boxes through**, and
-/// that asymmetry is the whole of this function:
+/// **Two tests, because either alone lets bad boxes through:**
 ///
-/// - **Ordered**, which is [`crate::resolve`]'s `clipped_to` guard — the one
-///   place in the model that already rejected an inverted rect. A `NaN` in the
-///   transform gives `Rect { x0: inf, x1: -inf }`, because `f64::min` and
-///   `f64::max` return the operand that is *not* `NaN` and so leave both seeds
-///   where [`transform_rect`] put them.
-/// - **Finite**, which ordering does not imply. `Affine::new([1e308, 0, 0,
-///   1e308, 0, 0])` has every coefficient finite — so a guard on the *operands*
-///   of `SetTransform` accepts it — and the overflow happens in the corner
-///   multiply, giving `Rect { x0: 0, y0: 0, x1: inf, y1: inf }`, correctly
-///   ordered and useless. `transform="scale(1e308)"` in an imported SVG is the
-///   short way to one.
+/// - **Ordered**, as in [`crate::resolve`]'s `clipped_to` guard. A `NaN` in the
+///   transform gives `Rect { x0: inf, x1: -inf }`, because `f64::min`/`max` return
+///   the non-`NaN` operand and leave both seeds where [`transform_rect`] put them.
+/// - **Finite**, which ordering does not imply: `Affine::new([1e308, 0, 0, 1e308,
+///   0, 0])` has finite coefficients but overflows in the corner multiply to an
+///   ordered, infinite rect.
 ///
-/// **`None` rather than a clamp**, because both callers already answer
-/// `Option<Rect>` and every consumer of theirs already handles the absence: a
-/// node with no bounds is out of the spatial index, out of the cull and out of
-/// *zoom to selection*, which is the honest description of a layer whose extent
-/// is not a number. A clamped box would put a click target on the artwork
-/// instead.
+/// **`None` rather than a clamp**: a node with no bounds is out of the spatial
+/// index, the cull and *zoom to selection*, where a clamped box would put a click
+/// target on the artwork.
 pub fn measurable(r: Rect) -> Option<Rect> {
     (r.x1 >= r.x0
         && r.y1 >= r.y0
@@ -1308,9 +1092,8 @@ pub fn measurable(r: Rect) -> Option<Rect> {
 /// World bounds of a node whose outline is *derived* rather than declared — a
 /// [`NodeKind::Boolean`], measured from the outline `Resolved` has cached for it.
 ///
-/// Separate from [`world_bounds_of_parts`] rather than a fifth argument to it, because
-/// the two are asked by different callers: everything measures a shape from its
-/// kind, and only `Resolved` — which owns the cache — can measure this.
+/// Separate from [`world_bounds_of_parts`] because only `Resolved`, which owns the
+/// cache, can measure this.
 pub fn world_bounds_of_path(
     path: &BezPath,
     paint: &Paint,
@@ -1327,18 +1110,13 @@ pub fn world_bounds_of_path(
 
 /// Axis-aligned bounding box of `rect` after `affine`.
 ///
-/// Transforms all four corners rather than the two opposite ones, which is what
-/// makes it correct for *any* affine — a rotation, a flip, or a skew, where two
-/// corners no longer bound the box the other two are in.
+/// Transforms all four corners, so it is correct for any affine (rotation, flip,
+/// skew).
 ///
-/// ⚠️ **It can return a rect nothing can use, and it says so rather than
-/// refusing** (§15 D495). `f64::min` and `f64::max` return the operand that is
-/// *not* `NaN`, so four `NaN` corners leave the seeds where they started and the
-/// answer is `Rect { x0: inf, y0: inf, x1: -inf, y1: -inf }` — inverted rather
-/// than empty. A finite affine whose product overflows gives an ordered but
-/// infinite one. Callers that answer `Option<Rect>` pass the result through
-/// [`measurable`]; this stays total because several callers have a `Rect` to
-/// return and nowhere to put the absence.
+/// It can return a rect nothing can use: four `NaN` corners leave the seeds at
+/// `Rect { x0: inf, y0: inf, x1: -inf, y1: -inf }`, and an overflowing product gives
+/// an infinite one. Callers answering `Option<Rect>` pass the result through
+/// [`measurable`]; this stays total for callers with nowhere to put the absence.
 pub fn transform_rect(affine: Affine, rect: Rect) -> Rect {
     let corners = [
         affine * Point::new(rect.x0, rect.y0),
@@ -1363,32 +1141,16 @@ pub fn transform_rect(affine: Affine, rect: Rect) -> Rect {
 /// Closed shapes test filled area; lines test distance to the segment. See
 /// [`local_bounds`] for the `text` argument.
 ///
-/// `slop` is an extra picking allowance in local units, and **every kind uses it
-/// now** — as a band reaching *outward* from the ink, on top of whatever interior
-/// the shape has.
-///
-/// **This used to be open shapes only, and that was wrong on the report.** The
-/// argument for withholding it was that a filled shape has an interior to aim at,
-/// so "a click a few units outside a rectangle selecting it would be wrong". What
-/// that missed is the shape with a stroke and *no fill*, which is most of what a
-/// pen draws and plenty of what a rectangle is: the ink you can see is the
-/// outline, so the outline is where you aim — and landing a pixel outside it hit
-/// nothing at all. Reported as "selecting a shape is a bit tricky, I need to move
-/// the mouse within the stroke". The band is strictly a superset of the old test,
-/// so nothing that used to be selectable stopped being so; what it costs is that a
-/// shape now shadows the few units just outside its edge, which is the trade every
-/// editor makes.
-///
-/// The allowance is the ink's own reach plus `slop`, exactly as a `Line` has
-/// always computed it — so a heavy stroke is grabbable across its whole width
-/// *and* keeps the same comfort margin beyond it.
+/// `slop` is an extra picking allowance in local units that **every kind** uses, as
+/// a band reaching *outward* from the ink: with no fill the outline is what the
+/// user aims at. The allowance is the ink's own reach plus `slop`, so a heavy stroke
+/// is grabbable across its width and keeps the same margin beyond it.
 ///
 /// **`kind` is the node's *used* kind, `paint` its paint as drawn, and `node`
-/// supplies the rest** — the fill rule a path is tested under (§15 D868). The
-/// kind is the node's own until container layout resizes it, and then the click
-/// target has to be the box that is drawn; the paint is
-/// `Document::resolved_paint`'s, a bound stroke width its number (§15 D1073),
-/// since the stroke's reach is read from it.
+/// supplies the rest** — the fill rule a path is tested under. The kind is the
+/// node's own until container layout resizes it, and then the click target has to
+/// be the box that is drawn; the paint is `Document::resolved_paint`'s, a bound
+/// stroke width its number.
 pub fn contains_local(
     node: &Node,
     paint: &Paint,
@@ -1404,9 +1166,7 @@ pub fn contains_local(
         }
         NodeKind::Ellipse { size } => {
             // Grown radii rather than a distance to the true ellipse, which has no
-            // closed form. The error is a fraction of `tol` at the diagonals and
-            // nobody can feel it; an exact solve here would be arithmetic nothing
-            // asked for.
+            // closed form; the error is a fraction of `tol`.
             let (rx, ry) = (size.width * 0.5 + tol, size.height * 0.5 + tol);
             if rx <= 0.0 || ry <= 0.0 {
                 return false;
@@ -1416,16 +1176,9 @@ pub fn contains_local(
             nx * nx + ny * ny <= 1.0
         }
         NodeKind::Line { end } => {
-            // **The ink's own reach, plus the caller's picking allowance.** A line is the
-            // one kind with no interior to aim at: its whole target is the width of its
-            // stroke, so a hairline was a one-unit band and reported as "a very narrow
-            // window to click and select a line with a thin stroke". `slop` is what the
-            // caller thinks a comfortable grab is, in *world* units — the canvas derives
-            // it from a screen distance and the zoom, so the band is the same size under
-            // the pointer at any magnification, which a constant here could not be.
-            //
-            // Added to the reach rather than maxed with it, so a heavy stroke is still
-            // grabbable across its whole width *and* keeps the same comfort margin.
+            // A line has no interior, so its whole target is its stroke's width
+            // plus `slop`, which the canvas derives from a screen distance and the
+            // zoom. Added to the reach rather than maxed with it.
             distance_point_segment(p, Point::ZERO, *end) <= tol
         }
         // Star spokes and a polygon's corners leave a lot of the box empty, so
@@ -1434,50 +1187,31 @@ pub fn contains_local(
         NodeKind::Polygon { .. } | NodeKind::Star { .. } => {
             local_path(kind).is_some_and(|path| path.contains(p) || near_outline(&path, p, tol))
         }
-        // **An open path is grabbed by its stroke, not only by the region it
-        // happens to enclose.** `BezPath::contains` closes the path implicitly and
-        // asks for a winding number, so a pen squiggle was selectable by the empty
-        // space inside its imaginary closure and hardly at all by the ink.
-        // **The rounded outline, not the authored one.** A fillet cuts the corner
-        // away, so testing the raw path would keep the cut-off triangle clickable
-        // — a few units of shape that is no longer drawn. `local_path` is free
-        // when there are no radii: it returns the path unchanged.
-        // **`node.fill_rule()` and not `contains`, which is non-zero** (§15 D239): a
-        // path that fills even-odd has holes where its subpaths overlap, and testing
-        // it with a winding number makes those holes clickable — a hit target over
-        // artwork that is not there. `near_outline` stays either way, because the
-        // ink of the outline is grabbable under both rules.
+        // An open path is grabbed by its stroke: `BezPath::contains` closes it
+        // implicitly, which would make the empty space inside the closure
+        // selectable. The rounded outline is tested, not the authored one, so a
+        // cut-off corner is not clickable. `node.fill_rule()` rather than the
+        // non-zero `contains`, so even-odd holes are not hit targets;
+        // `near_outline` applies under both rules.
         NodeKind::Path { .. } => local_path(kind)
             .is_some_and(|path| node.fill_rule().contains(&path, p) || near_outline(&path, p, tol)),
-        // ⚠️ **This arm spent nothing until §15 D483** (`[S4.2-L2-03]`), and it is
-        // the kind users click most. D115 rewrote every arm to add `tol` and its
-        // own enumeration of what it had rewritten — `Rect`/`Artboard`, `Ellipse`,
-        // `Polygon`/`Star`/`Path` — never says `Text`, so the sweep skipped it and
-        // neither the entry nor §5.10's prose noticed. Two consequences, and the
-        // second is the sharper one because it is a *disagreement* rather than a
-        // missing comfort margin: the picking allowance did nothing here, and a
-        // text node with a 40pt **outside** stroke reported world bounds 40 units
-        // wider on every side than the region that could be clicked — a band of the
-        // layer's own stated extent selecting nothing.
+        // `tol` must apply here too: the world bounds include an outside stroke,
+        // so the click region has to match them.
         NodeKind::Text { .. } => match local_bounds(kind, text) {
             Some(b) => b.inflate(tol, tol).contains(p),
             None => false,
         },
-        // A boolean *is* hit-testable — it has one filled outline, and clicking it
-        // must select it rather than falling through to the page. But the outline
-        // is not this function's to build, so the test lives beside the cache in
-        // `query::hit_test`, which has the `Resolved` this needs.
+        // A boolean is hit-testable, but its outline is not this function's to
+        // build; the test lives beside the cache in `query::hit_test`.
         NodeKind::Group | NodeKind::Root | NodeKind::Boolean { .. } => false,
     }
 }
 
 /// Whether `p` is within `tol` of a path's outline, curves included.
 ///
-/// Flattened rather than solved: a cubic has no closed-form point distance, and
-/// the tolerance here is a picking allowance measured in a few units, so a
-/// polyline accurate to a fraction of it answers the same question. The flattening
-/// tolerance is tied to `tol` so a generous allowance does not pay for precision
-/// it cannot use.
+/// Flattened rather than solved, since a cubic has no closed-form point distance;
+/// the flattening tolerance is tied to `tol` so a generous allowance does not pay
+/// for precision it cannot use.
 fn near_outline(path: &BezPath, p: Point, tol: f64) -> bool {
     if tol <= 0.0 {
         return false;
@@ -1532,9 +1266,7 @@ mod tests {
         }
     }
 
-    /// A node of `kind` with nothing else on it — no paint, so `stroke_expansion`
-    /// contributes zero and a hit-test assertion is about the *allowance* rather
-    /// than about some stroke width chosen in the fixture.
+    /// A node of `kind` with no paint, so `stroke_expansion` contributes zero.
     fn bare(kind: NodeKind) -> Node {
         Node {
             id: crate::IdSource::new(1).mint(),
@@ -1577,9 +1309,8 @@ mod tests {
         }
     }
 
-    /// `local_path` is the *only* outline: the scene walk fills and strokes it,
-    /// and the SVG writer clips with it. If it collapsed four radii back to one
-    /// the canvas and the export would round a shape the document never said.
+    /// Four radii stay four: `local_path` is the only outline, so collapsing them
+    /// would misround both canvas and export.
     #[test]
     fn each_corner_rounds_independently() {
         let square = local_path(&rect(RoundedRectRadii::default())).unwrap();
@@ -1629,8 +1360,6 @@ mod tests {
     }
 
     /// A polygon fills its box, has the vertices it says it has, and points up.
-    /// The last is what a user notices instantly and no type can enforce: a
-    /// triangle drawn from angle 0 rather than −90° comes out lying on its side.
     #[test]
     fn a_polygon_has_n_vertices_and_points_up() {
         for sides in [3u32, 5, 8] {
@@ -1642,8 +1371,6 @@ mod tests {
             let pts = corners_of(&path);
             assert_eq!(pts.len(), sides as usize, "{sides} sides");
 
-            // Fills its box exactly — see `star_path`: the reported bounds, the
-            // selection rect and the resize handles all assume it does.
             let b = path.bounding_box();
             assert!(
                 (b.x0).abs() < 1e-6
@@ -1661,8 +1388,7 @@ mod tests {
         }
     }
 
-    /// A star fills its box too, and keeps doing so as the inner ring moves —
-    /// the ratio must not shrink the shape away from the selection rect.
+    /// A star fills its box at every inner ratio.
     #[test]
     fn a_star_fills_its_box_at_every_ratio() {
         for ratio in [0.05, 0.382, 0.8, 1.0] {
@@ -1683,14 +1409,9 @@ mod tests {
         }
     }
 
-    /// A star alternates outer and inner vertices, so it has twice the points it
-    /// is asked for, every other one is pulled in, and it is strictly leaner
-    /// than the polygon around it.
-    ///
-    /// Radii are compared *relatively*, not against absolute numbers: filling
-    /// the box stretches x and y by different factors whenever the vertex ring
-    /// is not square, so the exact distances are not the ones the ratio names.
-    /// What has to hold is the alternation, and that the ratio drives it.
+    /// A star has twice the points it is asked for, every other one pulled in, and
+    /// is leaner than its polygon. Radii are compared relatively, since filling the
+    /// box stretches x and y unevenly.
     #[test]
     fn a_star_alternates_between_two_radii() {
         let size = Size::new(100.0, 100.0);
@@ -1726,9 +1447,8 @@ mod tests {
         );
     }
 
-    /// Two sides is not a shape. The count is clamped where the outline is built
-    /// rather than on the way into the model, so dragging the field down through
-    /// 2 and back up does not lose the number the user was heading for.
+    /// Two sides is not a shape: the count is clamped to `MIN_SIDES..=MAX_SIDES`
+    /// where the outline is built.
     #[test]
     fn a_degenerate_side_count_still_builds_a_shape() {
         for sides in [0u32, 1, 2] {
@@ -1740,7 +1460,7 @@ mod tests {
             assert_eq!(corners_of(&path).len(), MIN_SIDES as usize, "{sides} sides");
             assert!(path.area().abs() > 0.0, "{sides} sides enclosed nothing");
         }
-        // And the cap holds, so a fat number cannot tessellate the app to death.
+        // And the cap holds.
         let path = local_path(&NodeKind::Polygon {
             size: Size::new(80.0, 80.0),
             sides: 10_000,
@@ -1749,15 +1469,8 @@ mod tests {
         assert_eq!(corners_of(&path).len(), MAX_SIDES as usize);
     }
 
-    /// **The reported bug: a shape you can only select by landing on its stroke.**
-    ///
-    /// The ink of an unfilled shape *is* its outline, so that is where the pointer
-    /// goes — and a pixel outside it used to hit nothing, because the test was the
-    /// exact interior with no allowance. The allowance now reaches outward from
-    /// the edge, so the band the user is aiming at is grabbable from both sides.
-    ///
-    /// Asserted at three radii rather than one, because "outside now hits" would
-    /// also pass for an allowance that had swallowed the whole canvas.
+    /// The picking allowance reaches a few units outward from the edge, not far
+    /// outside it; three distances are asserted so a canvas-wide allowance fails.
     #[test]
     fn a_shape_is_grabbable_just_outside_its_edge_not_far_outside() {
         let node = bare(NodeKind::Rect {
@@ -1799,8 +1512,7 @@ mod tests {
             ),
             "9 units outside is not: the band is a few units, not a halo"
         );
-        // And with no allowance asked for, the old exact behaviour is unchanged —
-        // which is what keeps a marquee or a snapshot hit test from widening.
+        // With no allowance asked for, the test is exact.
         assert!(!contains_local(
             &node,
             node.paint(),
@@ -1811,14 +1523,8 @@ mod tests {
         ));
     }
 
-    /// An open path is grabbed by its **stroke**, where it used to be grabbed by
-    /// the region its implied closure encloses.
-    ///
-    /// `BezPath::contains` closes a path implicitly and asks for a winding number,
-    /// so a shallow pen squiggle was selectable in the empty air under its arc and
-    /// barely at all on the ink. The two assertions are the whole reversal: on the
-    /// line hits, and the enclosed emptiness a long way from any segment does not
-    /// have to.
+    /// An open path is grabbed by its stroke, not by the region its implied
+    /// closure encloses.
     #[test]
     fn an_open_path_is_grabbed_by_its_ink() {
         let mut path = BezPath::new();
@@ -1853,11 +1559,8 @@ mod tests {
         );
     }
 
-    /// **All four corners of a square rounded is a rounded rectangle**, which is
-    /// the strongest thing this can be checked against: `RoundedRect` is kurbo's
-    /// own, built by a different route, so agreeing with it to within a
-    /// flattening tolerance says the fillet is right rather than merely
-    /// self-consistent.
+    /// Rounding all four corners of a square agrees with kurbo's `RoundedRect`,
+    /// which is built by a different route.
     #[test]
     fn rounding_every_corner_of_a_square_gives_a_rounded_rectangle() {
         let mut square = BezPath::new();
@@ -1875,13 +1578,11 @@ mod tests {
             rounded.area().abs(),
             want.area().abs()
         );
-        // The bounding box is untouched: a fillet only ever cuts inward, which is
-        // what lets `local_bounds` keep reporting the authored box.
+        // The bounding box is untouched: a fillet only cuts inward.
         let (a, b) = (rounded.bounding_box(), square.bounding_box());
         assert!((a.x0 - b.x0).abs() < 1e-9 && (a.x1 - b.x1).abs() < 1e-9);
         assert!((a.y0 - b.y0).abs() < 1e-9 && (a.y1 - b.y1).abs() < 1e-9);
-        // And the sharp vertex is actually gone, rather than an arc having been
-        // drawn beside it.
+        // The sharp vertex is gone, not an arc drawn beside it.
         assert!(
             !rounded.elements().iter().any(|el| matches!(
                 el,
@@ -1891,7 +1592,7 @@ mod tests {
             rounded.elements()
         );
 
-        // Zero radii are the identity, and cost nothing: the common path.
+        // Zero radii are the identity.
         assert_eq!(round_corners(&square, &[]).elements(), square.elements());
         assert_eq!(
             round_corners(&square, &[0.0; 4]).elements(),
@@ -1899,9 +1600,8 @@ mod tests {
         );
     }
 
-    /// A radius past what the edges can give rounds **as far as it can** rather
-    /// than turning the outline inside out — `RoundedRect::from_rect` clamps for
-    /// the same reason, and an inverted contour is the failure being prevented.
+    /// A radius past what the edges can give rounds as far as it can rather than
+    /// inverting the outline.
     #[test]
     fn an_over_large_radius_clamps_instead_of_inverting() {
         let mut square = BezPath::new();
@@ -1926,44 +1626,15 @@ mod tests {
         );
     }
 
-    /// A `NaN` radius is **no** radius, and it used to be the largest one
-    /// (§15 D640, `[S4.2-L1-06]`).
+    /// A `NaN` radius is no radius, while `inf` is a magnitude that clamps to the
+    /// inscribed circle (the control).
     ///
-    /// This test is deliberately beside `an_over_large_radius_clamps_…` because
-    /// that test asserts the answer this bug produced: the inscribed circle. Both
-    /// guards were spelled `<= 0.0`, every comparison against `NaN` is false, so
-    /// the value reached `fillet`'s `.min(la * 0.5).min(lb * 0.5)` — and
-    /// `f64::min` returns the non-`NaN` operand, which is the *maximum* trim the
-    /// clamp allows. A square carrying a `NaN` radius drew, exported and
-    /// hit-tested as a circle, with nothing reporting it.
+    /// Two guards cover `NaN`, and the test pins each:
     ///
-    /// ⚠️ **`inf` is the control and it is deliberately unchanged.** It is a
-    /// magnitude, so the clamp is the documented answer to it, and it is asserted
-    /// here as *still* rounding — otherwise the fix reads as "reject anything not
-    /// finite" and the next reader tightens the guard onto a case the function
-    /// has always answered on purpose. That the two used to be byte-identical is
-    /// what identified `f64::min` as the mechanism in the first place.
-    ///
-    /// 🚨 **Three flips run, and the pair is the finding: neither guard alone
-    /// produced the reported symptom.**
-    ///
-    /// - Fast path only reverted to `all(|r| *r <= 0.0)`: red at the first
-    ///   assertion, and the left side is **the square**, not a circle — the
-    ///   per-corner guard catches every `NaN` on the way through, and all the
-    ///   walk changes is that the closing edge arrives as an explicit `LineTo`.
-    ///   So the first assertion is pinning *which route* `[NaN; 4]` takes, which
-    ///   is stronger than "was not rounded" and is deliberate.
-    /// - Per-corner guard only reverted to `radius <= 0.0`: the first assertion
-    ///   stays **green** — the fast path answers `[NaN; 4]` before the walk ever
-    ///   runs — and it is red at *"the NaN corner was cut"*, with `(0,0)` filleted
-    ///   50 units, i.e. the maximum.
-    /// - Both reverted: red at the first assertion with four `CurveTo`s and no
-    ///   straight edge left, which is `[S4.2-L1-06]`'s measured inscribed circle
-    ///   reproduced exactly.
-    ///
-    /// ⚠️ **A fix at either site alone would have closed the reported symptom
-    /// and left the other guard reading as doing the opposite of what it does.**
-    /// That is why both are here and why the mixed case exists at all.
+    /// - `round_corners`' fast path reverted to `all(|r| *r <= 0.0)`: red at the
+    ///   first assertion, which pins the route `[NaN; 4]` takes.
+    /// - `round_run`'s per-corner guard reverted to `radius <= 0.0`: the first
+    ///   assertion stays green and `the NaN corner was cut` fails.
     #[test]
     fn a_nan_radius_is_no_radius_where_an_infinite_one_is_the_largest() {
         let mut square = BezPath::new();
@@ -1973,19 +1644,15 @@ mod tests {
         square.line_to((0.0, 100.0));
         square.close_path();
 
-        // Untouched, element for element — not merely "about 10000 units", which
-        // a path rounded by a hair also satisfies.
+        // Untouched, element for element.
         assert_eq!(
             round_corners(&square, &[f64::NAN; 4]).elements(),
             square.elements(),
             "a NaN radius rounded the square"
         );
 
-        // ⚠️ **And the per-corner guard, not only the fast path — which needs a
-        // radius that is really a radius beside it.** `[NaN, 0, 0, 0]` would not
-        // do: no element of it is `> 0`, so it takes `round_corners`' early
-        // return and never reaches `round_run` at all. One live 20 is what forces
-        // the walk, and then the `NaN` corner has to survive it on its own.
+        // The per-corner guard needs a real radius beside the `NaN`:
+        // `[NaN, 0, 0, 0]` would take the early return and never reach `round_run`.
         let mixed = round_corners(&square, &[f64::NAN, 20.0, 0.0, 0.0]);
         let vertex = |p: Point| {
             mixed.elements().iter().any(|el| {
@@ -2004,8 +1671,7 @@ mod tests {
             "the 20-unit corner beside it should still have rounded"
         );
 
-        // The control, and the contrast: an infinite radius still clamps to half
-        // each edge, which is the inscribed circle.
+        // The control: an infinite radius clamps to half each edge.
         let circle = std::f64::consts::PI * 50.0 * 50.0;
         let inf = round_corners(&square, &[f64::INFINITY; 4]);
         assert!(
@@ -2015,26 +1681,16 @@ mod tests {
         );
     }
 
-    /// **A corner rounds even when a neighbour curves, and the curve survives.**
-    ///
-    /// Both halves were bugs, reported together from one drawing: a quadrilateral
-    /// with three corners and one curved side rounded exactly *one* of its
-    /// corners — the only one with a straight segment on both sides — and the
-    /// smooth point turned into a corner, because rounding rebuilt the path from
-    /// its vertices and flattened every curve in it.
-    ///
-    /// **The earlier version of this test passed while both bugs were live**,
-    /// which is the thing to learn from: it asserted the vertex survived (it did
-    /// — as a polyline vertex) and that the area shrank (it did — flattening a
-    /// bulge shrinks it). Neither said the curve was *still a curve*, so neither
-    /// could fail. Assert the segment kinds.
+    /// A corner rounds even when a neighbour curves, and the curve survives as a
+    /// curve. The segment kinds are asserted, since a flattened bulge also shrinks
+    /// the area.
     #[test]
     fn a_corner_rounds_beside_a_curve_and_leaves_the_curve_a_curve() {
         let mut path = BezPath::new();
         path.move_to((0.0, 0.0));
         path.line_to((100.0, 0.0));
-        // A bulging side, so the two anchors bounding it each have a curve on one
-        // side and a line on the other — the shape that rounded nothing.
+        // A bulging side: its two anchors each have a curve on one side and a
+        // line on the other.
         path.curve_to((160.0, 30.0), (160.0, 70.0), (100.0, 100.0));
         path.line_to((0.0, 100.0));
         path.close_path();
@@ -2057,9 +1713,7 @@ mod tests {
                 out.elements()
             );
         }
-        // And the bulge is still curved, not a chord across it. The trimmed
-        // remains of it must still bow out past the straight line between its
-        // ends, which flattening could not do.
+        // The trimmed bulge still bows out past the chord between its ends.
         let far = out
             .segments()
             .filter_map(|s| match s {
@@ -2073,9 +1727,7 @@ mod tests {
         );
     }
 
-    /// An endpoint of an **open** subpath has one adjoining segment, so there is
-    /// no corner there to cut — and rounding it would need a neighbour that does
-    /// not exist.
+    /// An endpoint of an open subpath has one adjoining segment, so no corner.
     #[test]
     fn only_interior_anchors_of_an_open_path_round() {
         let mut path = BezPath::new();
@@ -2100,9 +1752,8 @@ mod tests {
         );
     }
 
-    /// The indexing a radius is stored against. The fold is the subtle half —
-    /// a closed path written by the pen repeats its first point, and counting
-    /// that would put every radius one corner out.
+    /// The indexing a radius is stored against; a closed path written by the pen
+    /// repeats its first point, which must fold.
     #[test]
     fn anchors_are_numbered_across_subpaths_with_the_closing_point_folded() {
         let mut path = BezPath::new();
@@ -2134,11 +1785,8 @@ mod tests {
         assert_eq!(anchor_count(&path), 5, "numbering runs across subpaths");
     }
 
-    /// **A rounded path reports the box of what is drawn**, and a rounded `Rect`
-    /// always did — which is the correction. The old rule kept the *unrounded* box
-    /// here "as `Rect` does", but a rectangle's fillets cut in from corners that
-    /// are not on any extreme, so its box never changed in the first place: the
-    /// symmetry it appealed to did not exist, and only the path paid for it.
+    /// A rounded path reports the box of what is drawn, while a rounded `Rect`'s
+    /// box is unchanged.
     #[test]
     fn a_rounded_path_reports_the_box_it_draws_and_a_rounded_rect_is_unchanged() {
         // A triangle with its apex at the top; rounding it cuts the top away.
@@ -2166,8 +1814,7 @@ mod tests {
         );
         assert_eq!(cut.max_y(), plain.max_y(), "the flat side is untouched");
 
-        // And the kind whose symmetry was appealed to: a `Rect`'s box is the same
-        // rounded or not, because its fillets cut in from corners, not from edges.
+        // A `Rect`'s fillets cut in from corners, not edges, so its box is the same.
         let size = Size::new(100.0, 60.0);
         let sharp = NodeKind::Rect {
             size,
@@ -2180,9 +1827,8 @@ mod tests {
         assert_eq!(local_bounds(&sharp, None), local_bounds(&soft, None));
     }
 
-    /// A segment is named by the anchor it **leaves**, in the same numbering a
-    /// radius is stored against — which is the whole point of answering from
-    /// `anchor_runs` rather than from a flat `segments()` walk.
+    /// A segment is named by the anchor it **leaves**, in the numbering a radius is
+    /// stored against.
     #[test]
     fn a_segment_is_named_by_the_anchor_it_leaves_across_subpaths() {
         // Subpath 0: a closed triangle written the way `pen_outline` writes one.
@@ -2203,9 +1849,7 @@ mod tests {
         assert!((hit.distance - 2.0).abs() < 1e-6, "{hit:?}");
         assert!((hit.at - Point::new(50.0, 0.0)).hypot() < 1e-6, "{hit:?}");
 
-        // The **closing** segment of the closed run is the one leaving its last
-        // anchor — the case an open run does not have, and the one a walk that
-        // numbered by arrival would get wrong.
+        // The closing segment of the closed run leaves its last anchor.
         let closing = nearest_segment(&path, Point::new(48.0, 52.0)).expect("a hit");
         assert_eq!((closing.subpath, closing.anchor), (0, 2), "{closing:?}");
 
@@ -2220,49 +1864,19 @@ mod tests {
         assert!(nearest_segment(&BezPath::new(), Point::ZERO).is_none());
     }
 
-    /// **Two rounded corners sharing a short edge each take half of it** — the
-    /// clamp `round_corners`' own doc names, and the one case where a leg's arc
-    /// **length** is load-bearing rather than incidental (§15 D510,
-    /// `[S4.2-L4-04]`).
+    /// Two rounded corners sharing a short edge each take half of it: pins
+    /// `t = (radius / tan(θ/2)).min(la/2).min(lb/2)`, the one arithmetic that reads
+    /// the memoized leg lengths.
     ///
-    /// D510 stopped measuring each interior segment twice — once as the arriving
-    /// leg of one corner, once as the leaving leg of the next — and memoized it
-    /// instead. That is a pure cost change with no answer to get wrong **except
-    /// through the memo**, so this pins the one arithmetic that reads the value:
-    /// `t = (radius / tan(θ/2)).min(la/2).min(lb/2)`.
+    /// Measured as how far the outline stays from the original corner: at a right
+    /// angle that is `t(√2 − 1)`, so `2.071` clamped and `0.828` for the unclamped
+    /// control.
     ///
-    /// ⚠️ **The fixture is 10 × 40 with a 10-unit radius, and both halves of that
-    /// are load-bearing.** With a 100-unit box and a radius of 10,
-    /// `radius / tan(π/4)` is 10 and every half-length is 50, so `la` and `lb`
-    /// never enter the answer at all and a wrong leg length is invisible. And with
-    /// a *square*, the two legs at a corner are equal, so the `min` has nothing to
-    /// choose between and only a leg that came back too **small** could be seen —
-    /// measured, not reasoned: on a 10 × 10 fixture, quadrupling one leg left this
-    /// test green. The rectangle gives each corner a short leg and a long one.
-    ///
-    /// Asserted as **how far the outline stays from the original corner**, which
-    /// is a function of the trim and of nothing else: at a right angle the fillet's
-    /// radius *is* `t`, its centre is at `(t, t)`, and the nearest point of the arc
-    /// to `(0, 0)` is `t(√2 − 1)`. So the clamped case reads `2.071` and the
-    /// unclamped control `0.828`, and the two are far enough apart that a wrong
-    /// leg length cannot land on the right answer.
-    ///
-    /// ⚠️ **The obvious assertion was wrong and the run said so.** The first
-    /// spelling expected `5` — the trim distance — on the reasoning that the
-    /// corner is cut back by half a side. It is, but the *arc* then bulges back
-    /// toward the corner, and what the fixture measures is the arc.
-    ///
-    /// **Flip run**, one leg's length quadrupled where the memo hands it over:
-    /// fails at **4.142 against 2.071**, `t` coming out 10 instead of 5 — the
-    /// predicted site. On the square fixture the same flip was **green**, which
-    /// is why the rectangle is there.
+    /// flip: one leg's memoized length quadrupled in `round_run` → fails at
+    /// 4.142 against 2.071. The fixture is 10 × 40, not square, because on a square
+    /// the same flip stays green.
     #[test]
     fn two_rounded_corners_on_a_short_edge_take_half_of_it_each() {
-        // 10 × 40, **not a square**: each corner then has a short leg and a long
-        // one, so the `min` has something to choose between and a memo handing
-        // back the wrong segment's length changes the answer in *both*
-        // directions. On a square the two legs are equal and only a leg that came
-        // back too small could ever be seen.
         let mut square = BezPath::new();
         square.move_to(Point::new(0.0, 0.0));
         square.line_to(Point::new(10.0, 0.0));
@@ -2291,10 +1905,8 @@ mod tests {
             clearance(&rounded),
             want(5.0)
         );
-        // The control: a radius small enough that the clamp does not bind, where
-        // `t` is the radius itself. Its answer must be the *other* number, which
-        // is what says the one above came from `la`/`lb` rather than from the
-        // radius.
+        // The control: a radius small enough that the clamp does not bind, so the
+        // answer above came from `la`/`lb` rather than the radius.
         let gentle = round_corners(&square, &[2.0; 4]);
         assert!(
             (clearance(&gentle) - want(2.0)).abs() < 0.02,
@@ -2304,34 +1916,11 @@ mod tests {
         );
     }
 
-    /// **A box that is not a number is no box at all** (`[S4.2-L1-01]`, §15 D495).
+    /// A box that is not a number is no box at all. The last two rows are correctly
+    /// ordered and only finiteness rejects them; the identity row is the control.
     ///
-    /// `world_bounds_of` — a wrapper over `world_bounds_of_parts`, deleted when
-    /// §15 D868 left it no production caller — used to have exactly one `None`
-    /// route — an empty
-    /// `local_bounds` — so a bad *transform* had none, and every one of the four
-    /// cases below came back `Some` with a rectangle nothing can use.
-    ///
-    /// ⚠️ **The last two are the finding**, and they are why `measurable` tests
-    /// two things rather than one. `scale(1e308)` and `translate(inf)` are
-    /// correctly **ordered**; only finiteness rejects them. Copying
-    /// `resolve::clipped_to`'s ordering guard — the guard that already existed
-    /// next door — would have closed the `NaN` half and passed these, and a
-    /// finiteness guard on `SetTransform`'s own coefficients passes `scale(1e308)`
-    /// too, because every coefficient in it *is* finite and the overflow happens
-    /// in the corner multiply.
-    ///
-    /// The identity row is the control: an ordinary transform still answers a box,
-    /// and a predicate with one comparison backwards would take every layer in the
-    /// app out of the spatial index with everything else green.
-    ///
-    /// **Two flips run, and the second is the one that pays for the predicate's
-    /// shape.** `measurable` returning `Some(r)` unconditionally fails here on *"a
-    /// NaN scale"*, at `Rect { x0: inf, x1: -inf }` — the predicted site.
-    /// `measurable` reduced to the **ordering** test alone — i.e. the guard
-    /// `resolve::clipped_to` already had, the one a reader would reach for — gets
-    /// past both `NaN` rows and fails on *"an infinite translation"*, at
-    /// `Rect { x0: inf, x1: inf }`. Ordered and useless.
+    /// flip: `measurable` reduced to the ordering test alone → fails at "an
+    /// infinite translation", `Rect { x0: inf, x1: inf }`.
     #[test]
     fn a_transform_that_cannot_be_measured_gives_no_bounds() {
         let node = bare(rect(RoundedRectRadii::from_single_radius(0.0)));
@@ -2341,8 +1930,7 @@ mod tests {
         path.line_to((10.0, 10.0));
         path.close_path();
 
-        // The fixture's own claim, asserted rather than asserted-about-in-prose:
-        // this is the transform a guard on `SetTransform`'s coefficients accepts.
+        // A transform a guard on `SetTransform`'s coefficients would accept.
         let overflowing = Affine::new([1e308, 0.0, 0.0, 1e308, 0.0, 0.0]);
         assert!(
             overflowing.as_coeffs().iter().all(|c| c.is_finite()),

@@ -3,9 +3,8 @@
 //! One picker, three faces — solid, linear, radial — that differ only in the
 //! geometry controls above the ramp. It floats over the canvas and is dragged
 //! rather than docked into the inspector, because a gradient is judged against
-//! the artwork it sits on, not against a panel. It has no title bar, so egui
-//! makes the whole card the grab surface — but only the parts of it that are
-//! not themselves controls, which on this card is not much.
+//! the artwork it sits on, not against a panel. It has no title bar, so the parts
+//! of the card that are not controls are the grab surface.
 //!
 //! **It holds no colour of its own.** Every frame it reads the brush back out of
 //! the target slot and writes edits through the inspector's preview→commit valve
@@ -15,13 +14,11 @@
 //! forgets hue at zero saturation and most of the saturation range near black), and
 //! a half-typed hex.
 //!
-//! **Two of this card's gestures the shared valve cannot see**, both handled in
-//! [`OndinApp::pointer_slot`] below and both for the same underlying reason — these
-//! controls are *position*-valued, so a colour exists the moment the pointer is over
-//! them, where the valve is cut for controls whose value comes from a drag's delta. A
-//! **click** sets neither `dragged` nor `changed`, so it commits directly; a **press**
-//! sets neither either, so the frames before the gesture travels far enough to count
-//! as a drag preview through `preview_slot` (§15 D129).
+//! **Two gestures the shared valve cannot see**, handled in
+//! [`OndinApp::pointer_slot`]: these controls are *position*-valued, so a colour
+//! exists the moment the pointer is over them. A **click** sets neither `dragged`
+//! nor `changed`, so it commits directly; a **press** sets neither either, so the
+//! frames before the gesture counts as a drag preview through `preview_slot`.
 use super::binding::{FaceTarget, FieldKey};
 use super::paint::{self, PaintKind, PaintSlot};
 use crate::app::OndinApp;
@@ -45,41 +42,34 @@ pub struct Picker {
     /// The HSV the picker last wrote, and the 8-bit colour it produced.
     ///
     /// **The handle's position is re-derived from the stored colour every frame, and
-    /// HSV↔RGB does not round-trip near the edges of the cube.** Hue is the famous
-    /// case — a grey has no hue, so dragging value to zero and back comes out red —
-    /// and it was the only component carried. Saturation goes the same way near
-    /// black, and worse: measured over the 218pt plane, at `v = 0.02` there are
-    /// **nine distinct 8-bit colours across the whole saturation range**, and the
-    /// recovered handle jumps up to 36pt sideways while the pointer moves smoothly.
-    /// Value is fine throughout (a quarter of a point at most). Reported as the
-    /// cursor jumping near the bottom of the wheel.
+    /// HSV↔RGB does not round-trip near the edges of the cube.** A grey has no hue,
+    /// so dragging value to zero and back comes out red; near black, saturation
+    /// collapses to a handful of 8-bit colours and the handle would jump sideways
+    /// while the pointer moves smoothly.
     ///
-    /// Keyed by the colour it produced rather than gated on a threshold, so the
-    /// remembered intent is trusted exactly while the slot still holds what the
-    /// picker put there. An edit from anywhere else — the hex field, another panel,
-    /// undo — changes the key and falls straight back to deriving from the colour.
+    /// Keyed by the colour it produced, so the remembered intent is trusted exactly
+    /// while the slot still holds what the picker put there. An edit from anywhere
+    /// else — the hex field, another panel, undo — changes the key and falls back to
+    /// deriving from the colour.
     intent: Option<(Hsv, [u8; 4])>,
     /// A hex field mid-edit. `None` when the field is showing the brush.
     hex: Option<String>,
     /// Where the window goes, and whether it has been put there yet.
     ///
     /// Forced with `current_pos` on the first frame rather than offered as a
-    /// `default_pos`, because egui keeps an area's position under its id for
-    /// the life of the process and ignores `default_pos` once the window has
-    /// been shown once. Without the override a picker the user had dragged
-    /// would reopen where they left it — **which is not wanted here**. The
-    /// picker is placed relative to the field it edits, and moving it is a way
-    /// to clear space for the artwork underneath, not a preference about where
-    /// pickers live. Every open starts beside the swatch that opened it.
+    /// `default_pos`, because egui keeps an area's position under its id for the
+    /// life of the process and ignores `default_pos` once shown. Moving the picker
+    /// clears space for the artwork, not a preference, so every open starts beside
+    /// the swatch that opened it.
     spawn: egui::Pos2,
     placed: bool,
-    /// The *Variables* face asked for over a paint that is not bound (§15 D1043).
-    /// A bound paint shows that face whatever this says — the binding is its kind.
+    /// The *Variables* face asked for over a paint that is not bound. A bound paint
+    /// shows that face whatever this says — the binding is its kind.
     pub(crate) browse: bool,
     /// The *Variables* face's search.
     pub(crate) search: String,
     /// Whether the current variable's row has been scrolled into view since the
-    /// picker opened on this slot (E1: *"scrolled into view on open"*).
+    /// picker opened on this slot.
     pub(crate) scrolled: bool,
     /// The hex row's pick button is armed: a canvas click picks into this slot
     /// (`crate::eyedropper`).
@@ -116,9 +106,8 @@ impl Picker {
             self.slot = slot;
             self.stop = 0;
             self.hex = None;
-            // A different slot holds a different colour, so the remembered intent
-            // describes nothing here. Its key would rule it out anyway; dropping it
-            // says so rather than relying on two colours differing.
+            // A different slot holds a different colour; its key would rule the
+            // intent out anyway, but dropping it does not rely on that.
             self.intent = None;
             self.browse = false;
             self.search.clear();
@@ -130,41 +119,25 @@ impl Picker {
 }
 /// Geometry from the design: a card of 11px-padded rows.
 ///
-/// The width is **pinned**, not derived from the contents. The three faces do
-/// not need the same room — radial's `CX`/`CY` pair beside the preview chip is
-/// the widest thing in the panel — and an auto-sized window would jump every
-/// time the user changed tabs. It was radial's requirement, 240 (a little over
-/// the design's 222), until a fourth tab, *Variables*, needed room for its label
-/// (§15 D1043): 272 is the width `Styles and Variables.dc.html` E1 draws the
-/// popup at, and every face stretches to it.
+/// The width is **pinned**, not derived from the contents: the faces do not need
+/// the same room, and an auto-sized window would jump every time the user changed
+/// tabs. 272 is what the *Variables* tab's label needs; every face stretches to it.
 pub(super) const WIDTH: f32 = 272.0;
 /// Roughly the tallest face, for placing the window clear of the screen edge.
 pub(super) const HEIGHT_HINT: f32 = 300.0;
 const PAD: f32 = 11.0;
-/// ⚠️ **26 until the popovers were levelled** (§15 D386): the picker is one more
-/// card hanging beside the panel, so its rows are [`ui::CONTROL_H`] like the
-/// panel's and the two popovers'.
+/// The picker is one more card hanging beside the panel, so its rows are
+/// [`ui::CONTROL_H`] like the panel's and the two popovers'.
 const ROW_H: f32 = ui::CONTROL_H;
 /// The **track**'s thickness — the hue ramp and the alpha strip — not a knob
-/// diameter (§15 D766).
+/// diameter.
 ///
-/// 🚨 **Named `SLIDER_H` until D766, in a module that also imports `ui::`, where
-/// [`ui::SLIDER_H`] is a different quantity of a different value.** That one is
-/// the **knob diameter** (11.0, with a 3pt rail under it); this is the rail
-/// itself, and this module's knob is a fixed 6.5/7.0 that the constant does not
-/// derive. §15 D673 read the pair as *"two hand-rolled sliders and two rules about
-/// whether a row owes its knob any space"* and asked which was right — but
-/// **unifying the value would have been a category error**: setting this to 11
-/// thickens the two gradient strips, re-corners them (`mask_corners` reads
-/// `× 0.5`), and leaves the knob exactly where it was.
-///
-/// ⚠️ **And the two sliders do not disagree the way D673 says.** Measured: this
-/// one bounds its knob **vertically** — that is what the `+ 6.0` at
-/// `slider_track` buys, 7.0 of reach against a 7.5 half-row — and lets it hang
-/// **7pt off each horizontal end**, unclamped, where `ui::slider` does the reverse
-/// (1pt of shadow below the row, and travel clamped so the knob cannot leave the
-/// rail). They bound different axes; neither is *the* answer, and there was no
-/// "which is right" to rule on as posed.
+/// [`ui::SLIDER_H`] is a different quantity (the knob diameter); this module's
+/// knob is a fixed 6.5/7.0 that this constant does not derive, so unifying the two
+/// values would thicken the strips and re-corner them. The two sliders bound
+/// different axes: this one bounds its knob vertically (the `+ 6.0` in
+/// `slider_track`) and lets it hang 7pt off each horizontal end, where `ui::slider`
+/// clamps travel so the knob cannot leave the rail.
 const TRACK_H: f32 = 9.0;
 const STOP_BAR_H: f32 = 11.0;
 /// Corner radius of the document-palette chips along the bottom of the card.
@@ -172,11 +145,10 @@ const SWATCH_RADIUS: f32 = 5.0;
 /// The picker window's name, which `picker_window` also makes its `Area` id and
 /// so its layer's.
 ///
-/// Named because a *second* popup has to recognise a click that landed in it: the
-/// typography popup can open this picker from a decoration's swatch, and would
-/// otherwise dismiss itself — and so the picker — the moment it was touched. The
-/// rect is not available to that caller (the picker draws after the inspector), so
-/// identity is the only question it can ask. See [`layer_id`].
+/// Named because the typography popup, which can open this picker, has to
+/// recognise a click that landed in it; the rect is not available to it (the
+/// picker draws after the inspector), so identity is the only question it can ask.
+/// See [`layer_id`].
 const WINDOW_NAME: &str = "colour-picker";
 
 /// The layer the picker draws into.
@@ -189,22 +161,6 @@ pub(crate) fn layer_id() -> egui::Id {
 /// Shared with the test below rather than spelled twice, because the thing that
 /// has to be true is a property of *this* builder — a test that rebuilt it
 /// would keep passing after someone removed the line it exists to defend.
-///
-/// ⚠️ **These five lines were sitting on `WINDOW_NAME` above** (§15 D717,
-/// `[S23.1-L3-06]`), stacked at the *bottom* of that constant's own doc with no
-/// blank `///` between the two — so a `&str` constant claimed to be "a builder"
-/// that is "shared with the test below", `WINDOW_NAME`'s real summary line was
-/// buried mid-paragraph where rustdoc will not use it, and **this function
-/// documented itself nowhere**. `layer_id` was inserted between the two and kept
-/// its own doc, which is what makes the boundary hard to see on a read.
-///
-/// 🚨 **The stolen sentence is an instruction, which is what made this cost
-/// something.** *"A test that rebuilt it would keep passing after someone removed
-/// the line it exists to defend"* tells a future maintainer **not** to inline this
-/// builder into `the_picker_opens_where_it_was_spawned_on_the_very_first_frame` —
-/// and it was filed under a string constant, where the person about to do that
-/// would never meet it. See `CLAUDE.md`'s *Editing files* list, which keeps the
-/// running tally of these and the two checks that find them.
 fn picker_window() -> egui::Window<'static> {
     egui::Window::new(WINDOW_NAME)
         // Set, not derived: egui hashes the title as an `Option`, so the id a
@@ -215,23 +171,13 @@ fn picker_window() -> egui::Window<'static> {
         // min == max pins the width; the height still follows the face.
         .min_width(WIDTH)
         .max_width(WIDTH)
-        // **Height zero, and do not "correct" it to the real one.**
-        //
-        // On the frame an `Area` first appears it has no stored size, so it
-        // lays out once invisibly to measure itself — and for that pass it
-        // assumes `Style::spacing::default_area_size`, 600×400. egui then
-        // constrains *that* box to the screen, which shoves a picker opened
-        // near the bottom edge upwards (and leftwards, on a screen narrower
-        // than `spawn.x + 600`) by the overhang of a window that does not
-        // exist. The shoved position is what gets stored, and by the next frame
-        // the picker is already `placed`, so `current_pos` never corrects it:
-        // measured 60px out at 1600×900 and 160px at 1280×800, on the first
-        // opening only, since the measured size outlives the window closing.
-        //
-        // An estimate of zero cannot overhang anything, so it cannot be clamped
-        // too far; the real height is still measured on that same pass. An
-        // estimate *larger* than the true height brings the bug back in
-        // proportion, which is why the honest 294 would be the wrong answer.
+        // **Height zero, and do not "correct" it to the real one.** On its first
+        // frame an `Area` has no stored size and measures itself assuming
+        // `default_area_size` (600×400), which egui constrains to the screen —
+        // shoving a picker opened near the bottom edge up by the overhang of a
+        // window that does not exist. The shoved position is stored and `placed`
+        // never corrects it. An estimate of zero cannot overhang; the real height
+        // is still measured on that pass, and a larger estimate brings the bug back.
         .default_size(egui::vec2(WIDTH, 0.0))
         // Above the inspector column, which is also a floating area: dragged
         // over it, the picker has to stay on top or it vanishes mid-edit.
@@ -256,103 +202,55 @@ impl OndinApp {
     pub(crate) fn picker_ui(&mut self, ctx: &egui::Context) {
         let Some(p) = &self.picker else { return };
         let (node, slot, spawn, placed) = (p.node, p.slot, p.spawn, p.placed);
-        // The picker belongs to the layer it was opened from, so it goes away
-        // when that layer does — deselected, or replaced by another. Leaving it
-        // up means a panel quietly editing something the canvas no longer shows
-        // as chosen. The canvas ground is the mirror image: it is what the
-        // inspector shows when *nothing* is selected, so selecting anything
-        // closes it.
+        // The picker belongs to the layer it was opened from, so it goes away when
+        // that layer is deselected or replaced; leaving it up would edit something
+        // the canvas no longer shows as chosen.
         let orphaned = match slot {
-            // The ground's picker is what the inspector offers when *nothing*
-            // is selected, so selecting anything closes it — a guide included.
-            // `is_empty` would be the wrong question here: it answers about
-            // layers, and a guide selection leaves it true while the inspector
-            // has already moved on to the Guide panel (`Selection`).
+            // The ground's picker is what the inspector offers when *nothing* is
+            // selected. `is_empty` would be wrong: it answers about layers, and a
+            // guide selection leaves it true while the inspector shows the Guide panel.
             PaintSlot::Canvas => !self.session.selection.nothing(),
-            // A guide's picker belongs to the guides the inspector is showing,
-            // so it goes away when they stop being the selection — the same
-            // rule as a layer's, with the guides standing in for the node.
             // `guides()`, not `guide()`: the latter answers "and is it the only
-            // one", which would close the picker the moment a second guide was
-            // Shift-clicked, exactly when a colour over the pair is what is
-            // wanted.
+            // one", which would close the picker when a second guide is Shift-clicked.
             PaintSlot::Guide => self.session.selection.guides().is_empty(),
-            // These three belong to the *selection* rather than to any one layer,
-            // so what orphans them is the selection emptying — not a particular
-            // node leaving it. Changing which layers are selected re-scopes the
-            // edit instead of cancelling it, which is what makes it possible to
-            // add a layer to the set while the picker is up.
+            // These belong to the *selection*, so only it emptying orphans them;
+            // changing which layers are selected re-scopes the edit.
             PaintSlot::Selection(..)
             | PaintSlot::SelectionAll(_)
             | PaintSlot::GroupColor(_)
             | PaintSlot::GroupGradient(_) => self.session.selection.ids().is_empty(),
-            // **Both character-scoped slots** (`paint::char_scoped` is the same
-            // pair), and the only arm here that orphans on a **row** rather than on
-            // a node: the rows that open them live on the Character tab of a popup
-            // that can be closed or switched away from, so a picker left up over a
-            // hidden row is the "quietly editing something no longer shown" this
-            // whole list prevents.
-            //
-            // A `TextDecoration` switched off needs no term of its own —
-            // `slot_brush`'s `char_slot_color` reads `None` and the close below
-            // answers it. ⚠️ **Whether an absent run colour behaves the same way is
-            // not established**, and that is worth knowing rather than assuming:
-            // the sentence was written for the decoration half, before `TextColor`
-            // joined the arm (§15 D154).
+            // Both character-scoped slots (`paint::char_scoped` is the same pair)
+            // orphan on a **row**: the rows that open them live on the Character tab
+            // of a popup that can be closed or switched away from. A switched-off
+            // `TextDecoration` is answered by `slot_brush` reading `None`; whether an
+            // absent run colour behaves the same way is not established.
             PaintSlot::TextDecoration(_) | PaintSlot::TextColor => {
                 self.type_menu != Some(crate::app::TypeTab::Character)
                     || !self.session.selection.contains(node)
             }
-            // **The third arm that orphans on a *row* rather than on a node**
-            // (§15 D476). An effect row is drawn only where the selected layers
-            // **agree** — the card says *"these layers have different effects"*
-            // and draws no rows at all otherwise — so a picker left up over a
-            // disagreement is a control whose row is not on screen, which is the
-            // *"quietly editing something no longer shown"* this whole list
-            // prevents.
-            //
-            // ⚠️ **The catch-all below is not enough and is what let this
-            // through.** `[S14.5-L1-01]`: `PaintSlot::Effect` fell into
-            // `!selection.contains(node)`, and the anchor is still contained after
-            // a Shift-click widens the selection — so the picker survived a
-            // widening the *card* did not, and one click on its colour plane
-            // replaced another layer's whole stack. The four slots two arms above
-            // survive a widening deliberately, and can: every one of them is
-            // scoped to the selection, so re-scoping is harmless. `Effect(i)` is
-            // scoped to **one node's list** and inherited the survival anyway.
+            // An effect row is drawn only where the selected layers **agree**. The
+            // catch-all below is not enough: the anchor stays contained after a
+            // Shift-click widens the selection, so the picker would survive a
+            // widening the card did not and replace another layer's whole stack.
+            // `Effect(i)` is scoped to one node's list, unlike the selection-scoped
+            // slots above.
             PaintSlot::Effect(_) => {
                 !self.session.selection.contains(node)
                     || self.shared_effects(self.session.selection.ids()).is_none()
             }
-            // **The fourth arm that orphans on a row, and the fourth slot the
-            // catch-all below was governing that it should not have been**
-            // (§15 D553, `[S23.1-L1-04]`). The Layout grid card draws its rows
-            // only where the selected frames **agree** — `shared_grids` answers
-            // `None` otherwise and the card shows a sentence instead — so the
-            // `Effect` arm's whole argument applies here verbatim, and this slot
-            // was left out of it.
-            //
-            // ⚠️ **The damage was narrower than `Effect`'s and it was still
-            // silent.** `slot_transaction`'s `Grid` arm writes through
-            // `frame_subjects()` rather than through `node`, and reads *each
-            // subject's own list* — so a hex typed after a Shift-click widened
-            // the selection recoloured the other frame's grid while keeping its
-            // track count, on a row that had stopped being drawn. The `Effect`
-            // arm cloned the anchor's whole `Vec`, which is why that one was worse
-            // and why fixing it did not reach this; it reads each subject's own
-            // list too since §15 D476.
-            //
-            // **`frame_subjects()` and not `selection.ids()`, which is the one
-            // place this differs from the arm above**: the card is drawn over the
-            // artboards in the selection, so a Shift-clicked *rect* does not make
-            // the grids disagree and must not close the picker.
+            // The Layout grid card draws its rows only where the selected frames
+            // **agree** (`shared_grids`), so the `Effect` argument applies. Its
+            // write goes through `frame_subjects()` and reads each subject's own
+            // list, so a hex typed after a widening would recolour another frame's
+            // grid on a row no longer drawn. `frame_subjects()` and not
+            // `selection.ids()`: a Shift-clicked *rect* does not make the grids
+            // disagree and must not close the picker.
             PaintSlot::Grid(_) => {
                 !self.session.selection.contains(node)
                     || self.shared_grids(&self.frame_subjects()).is_none()
             }
-            // **A variable's cell belongs to the browser, not to the selection**
-            // (§15 D1052): it goes when the browser does, or the variable or its
-            // mode does — never because a layer was selected beside it.
+            // A variable's cell belongs to the browser, not to the selection: it
+            // goes when the browser, the variable or its mode does.
             PaintSlot::VarCell(var, mode) => {
                 self.var_browser.is_none()
                     || self.session.doc.variables().get(var).is_none()
@@ -360,13 +258,12 @@ impl OndinApp {
             }
             _ => !self.session.selection.contains(node),
         };
-        // A cell's previewed colour lives only while a button is held — the drag
-        // that made it — so a cancelled press cannot leave the picker reading a
-        // colour the table never took (`OndinApp::var_cell_preview`). **Not on
-        // the frame it is released**: the valve commits inside this frame's
-        // body, after `slot_brush` has read, so dropping it here drew the old
-        // colour for that one frame (`arch-scribe`'s read of §15 D1052's first
-        // cut; reasoned, not measured). The valve's release clears it itself.
+        // A cell's previewed colour lives only while a button is held, so a
+        // cancelled press cannot leave the picker reading a colour the table never
+        // took (`OndinApp::var_cell_preview`). **Not on the release frame**: the
+        // valve commits inside this frame's body, after `slot_brush` has read, so
+        // dropping it here would draw the old colour for a frame. The valve's
+        // release clears it itself.
         if !ctx.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
             self.var_cell_preview = None;
         }
@@ -405,9 +302,7 @@ impl OndinApp {
         }
         window.show(ctx, |ui| {
             ui.set_width(WIDTH - PAD * 2.0);
-            // Named rather than repeated — one number across every popover in the
-            // app (§15 D275). The value here does not move; what changes is that
-            // retuning it now moves all five together.
+            // One number across every popover in the app.
             ui.spacing_mut().item_spacing.y = crate::ui::POPOVER_SECTION_GAP;
             close = self.picker_body(ui, node, slot, &brush, box_size);
         });
@@ -428,19 +323,13 @@ impl OndinApp {
         box_size: Size,
     ) -> bool {
         let kind = paint::kind_of(brush);
-        // **The colour picker has nothing to say about a picture, so it closes
-        // rather than drawing itself over one.** Every control below is written
-        // against the stop list, and an image's is a placeholder grey invented
-        // for the swatch (`paint::stops_of`) — so the panel would offer a hue
-        // wheel, a stop bar and a hex field for a colour the picture does not
-        // have. The writes are already refused (`paint::with_stops` returns an
-        // image unchanged), which is what makes this a *looks* wrong rather than
-        // a *is* wrong, and one guard is the whole fix.
-        //
-        // An image row does not open the picker in the first place
-        // (`inspector::paint_row`); this is the second half, for a picker left
-        // open over a slot whose brush has since become an image — a relink, an
-        // undo, a paste.
+        // **The picker closes rather than drawing itself over a picture.** An
+        // image's stop list is a placeholder grey (`paint::stops_of`), so the
+        // controls would offer a colour the picture does not have; writes are
+        // already refused (`paint::with_stops` returns an image unchanged). An
+        // image row does not open the picker (`inspector::paint_row`); this is for
+        // a picker left open over a slot that has since become an image — a relink,
+        // an undo, a paste.
         if kind == PaintKind::Image {
             return true;
         }
@@ -450,25 +339,18 @@ impl OndinApp {
         // gap before it do not, so the row lands exactly on the right margin.
         //
         // **A slot that cannot hold a gradient shows the tabs anyway, with Linear
-        // and Radial disabled.** They used to be dropped entirely, on the grounds
-        // that three tabs where two collapse back to the first is worse than none.
-        // What that actually left was a header holding nothing but a close button,
-        // reported as looking empty — and it also made the guide's picker look like
-        // a *different, smaller* panel rather than the same one with two choices
-        // unavailable. Disabled says which it is (§9.4, the identity row's mask
-        // button makes the same bargain), and the row keeps the height it has
-        // everywhere else.
+        // and Radial disabled**, so the header is not empty and the panel reads as
+        // the same one with two choices unavailable (§9.4).
         //
-        // **A slot a variable can bind carries a fourth tab, *Variables*** (§15
-        // D1043, D1038 E1): a binding is another kind of paint, so it sits with the
-        // kinds. A bound paint opens on it; leaving it for *Solid* detaches to the
-        // colour drawn, and for a gradient converts what is drawn, which detaches
-        // too — *"picking a colour on Solid while bound detaches, like any edit"*.
+        // **A slot a variable can bind carries a fourth tab, *Variables***: a
+        // binding is another kind of paint. A bound paint opens on it; leaving it
+        // for *Solid* detaches to the colour drawn, and for a gradient converts what
+        // is drawn, which detaches too.
         const CLOSE_W: f32 = 18.0;
         const TAB_GAP: f32 = 6.0;
         let gradients = slot.takes_gradients();
-        // A variable's cell rides the same tab (§15 D1052): there a pick makes the
-        // cell an alias, and *Solid* writes the colour drawn, ending it.
+        // A variable's cell rides the same tab: a pick makes the cell an alias, and
+        // *Solid* writes the colour drawn, ending it.
         let key = match slot {
             PaintSlot::VarCell(var, mode) => Some(FaceTarget::Cell(var, mode)),
             _ => super::binding::paint_item(slot)
@@ -557,10 +439,9 @@ impl OndinApp {
                 }
             });
         });
-        // The face keeps the Solid face's height (E1: *"the popup keeps its
-        // height on every tab, so nothing jumps under the pointer"*) — measured
-        // from that face when it was last drawn, the mockup's 206-point list
-        // until it has been.
+        // The face keeps the Solid face's height so nothing jumps under the
+        // pointer — measured from that face when last drawn, a 206-point list
+        // until then.
         let face_top = ui.cursor().top();
         let solid_h = egui::Id::new("picker-solid-face-h");
         if let (true, Some(k)) = (on_vars, key) {
@@ -576,9 +457,8 @@ impl OndinApp {
             PaintKind::Solid => {}
             PaintKind::Linear => self.linear_controls(ui, node, slot, brush, box_size),
             PaintKind::Radial => self.radial_controls(ui, node, slot, brush, box_size),
-            // Unreachable: the guard at the top of this function returned. Spelled
-            // out rather than wildcarded so that removing that guard stops
-            // compiling here instead of silently drawing a stop bar over a photo.
+            // Unreachable (the guard above returned); spelled out so removing that
+            // guard stops compiling here rather than drawing a stop bar over a photo.
             PaintKind::Image => {}
         }
         if kind != PaintKind::Solid {
@@ -593,10 +473,9 @@ impl OndinApp {
             .unwrap_or(0)
             .min(stops.len() - 1);
         let current = stops[index].1;
-        // A gradient face's plane is shorter by what its geometry row and stop
-        // bar add over the Solid face's alpha slider and swatches, so all four
-        // faces are one height (E1: *"the popup keeps its height on every tab"*;
-        // §15 D1057) — 84 had the gradient faces 8 points taller.
+        // A gradient face's plane is shorter by what its geometry row and stop bar
+        // add over the Solid face's alpha slider and swatches, so all four faces
+        // are one height.
         let plane_h = if kind == PaintKind::Solid {
             104.0
         } else {
@@ -762,15 +641,12 @@ impl OndinApp {
         );
         let p = ui.painter();
         ui::paint_checkerboard(p, bar, 5.0);
-        // **`stop_colours`, not `ramp`** — see that function. This bar is the
-        // editing surface for the stops and sits under the opacity slider; fading
-        // it as the slider moves would dim the handles being dragged (§15 D773).
+        // **`stop_colours`, not `ramp`** — see that function.
         ui::paint_ramp(p, bar, &stop_colours(brush));
         mask_corners(p, bar, 5.0, color::CARD);
-        // The bar is registered *before* the handles that sit on it. egui gives
-        // an overlapping click to whichever widget was registered last, so this
-        // ordering is what makes grabbing a handle grab the handle rather than
-        // dropping a new stop underneath it.
+        // The bar is registered *before* the handles on it: egui gives an
+        // overlapping click to the widget registered last, so grabbing a handle
+        // grabs the handle rather than dropping a new stop underneath it.
         let bar_resp = ui.interact(bar, ui.id().with("stop-bar"), egui::Sense::click());
         let mut hit_handle = false;
         let mut add_stop: Option<f32> = None;
@@ -947,21 +823,11 @@ impl OndinApp {
     }
     /// A 9pt slider track in a 15pt row, so the knob clears it vertically.
     ///
-    /// **The `+ 6.0` is the knob's room and it is only the vertical half** (§15
-    /// D766). [`slider_knob`] draws to radius 7.0 — a 6.5 disc under a 1pt stroke
-    /// at 6.5 — against a half-row of 7.5, so 0.5 of slack top and bottom. ⚠️ **On
-    /// the horizontal axis it is unclamped**: the centre is
-    /// `track.min.x + track.width() * t`, so at `t = 0` and `t = 1` the knob hangs
-    /// **7pt past each end** of the allocated row. That lands inside the card's
-    /// [`PAD`] of 11 and has always looked right; nothing said so until
-    /// `the_alpha_knob_stays_inside_the_cards_padding_at_both_ends`.
-    ///
-    /// ⚠️ **`ui::slider` bounds the other axis** — its travel is clamped to
-    /// `half..width - half` so the knob cannot leave the rail, and its shadow
-    /// leaves the row by 1pt below. So the two hand-rolled sliders in this app
-    /// bound *different* axes rather than disagreeing about whether a row owes its
-    /// knob room, which is what §15 D673 asked and is not a question with a side to
-    /// take.
+    /// **The `+ 6.0` is the knob's room and it is only the vertical half.**
+    /// [`slider_knob`] draws to radius 7.0 against a half-row of 7.5. On the
+    /// horizontal axis it is unclamped: at `t = 0` and `t = 1` the knob hangs 7pt
+    /// past each end of the row, which stays inside the card's [`PAD`] of 11.
+    /// `ui::slider` bounds the other axis (travel clamped to the rail).
     fn slider_track(&self, ui: &mut egui::Ui, width: f32) -> (egui::Rect, egui::Response) {
         let (row, resp) = ui.allocate_exact_size(
             egui::vec2(width, TRACK_H + 6.0),
@@ -1026,85 +892,34 @@ impl OndinApp {
             {
                 p.hex = Some(text.clone());
             }
-            // Applied on defocus (which Enter also triggers), not per keystroke:
-            // typing "6D8CD9" one character at a time would otherwise be six
-            // commits, and "6D" would land as a real colour on the way. Clearing
-            // the buffer is also what strips a typed or pasted `#` — the field
-            // falls back to `hex_of`, which never writes one.
+            // Applied on defocus (which Enter also triggers), not per keystroke,
+            // so "6D" does not land as a colour on the way to "6D8CD9". Clearing
+            // the buffer also strips a typed or pasted `#`: the field falls back
+            // to `hex_of`, which never writes one.
             //
-            // 🚨 **[`ui::defocus_commits`] and not a bare `lost_focus()`** (§15
-            // D841). `Escape` surrenders focus like every other way out, so a
-            // bare check commits the value the user was cancelling — **the same
-            // input and the same two numbers §15 D808 records as the bug**, at a
-            // site D808 did not enumerate. Its own entry names the four fields
-            // it audited and never claims four is the population, so this is a
-            // gap rather than a live entry re-argued.
-            //
-            // ⚠️ **No gate sees this.** `nothing_commits_on_the_expression_d316_removed`
-            // fires only where `lost_focus()` sits within 160 characters of
-            // `changed()`; here they are ~700 apart, in two separate conditions,
-            // and that gate is about D316's compound expression rather than
-            // about `Escape`. What finds this shape is
-            // `grep -rn "lost_focus()"` and reading each hit.
-            //
-            // ⚠️ **The condition stays `lost_focus()` and the *write* is what
-            // `Escape` suppresses**, which is not interchangeable: the buffer
-            // clear at the end of this block has to run on every defocus, or a
-            // cancelled edit leaves its typed text sitting in the field for the
-            // next person to look at. Gating the whole block was the first shape
-            // of this fix and it did exactly that.
+            // 🚨 **[`ui::defocus_commits`] and not a bare `lost_focus()`**: `Escape`
+            // surrenders focus too, so a bare check commits the value being
+            // cancelled. The condition stays `lost_focus()` and the *write* is what
+            // `Escape` suppresses, because the buffer clear below must run on every
+            // defocus. No gate sees this shape; `grep -rn "lost_focus()"` does.
             if resp.lost_focus() {
-                // 🚨 **Nothing is written unless the typed colour differs from
-                // the one that is there** (§15 D730, `[S23.1-L1-05]`) —
-                // `inspector::paint_hex_field`'s guard, which has carried it since
-                // §15 D517 and which this independently-written copy never got.
-                //
-                // ⚠️ **Compared as *bytes*, not as components**, for the reason
-                // that entry gives: `text` is seeded from `hex_of`, which rounds
-                // each channel to 8 bits, and `parse_hex` hands them back for
-                // `from_rgba8` to re-expand — so a colour off the 8-bit lattice,
-                // **which is anything this picker's own HSV plane produced**, came
-                // back *changed* by a click that typed nothing. Measured here:
-                // `[0.5, 0.5, 0.5, 1.0]` → `[0.5019608, …]`, and an undo step with
-                // it. Comparing the floats would not catch that — they really do
-                // differ; what has to match is what the *field* can express.
-                //
-                // ⚠️ **`SelectionAll` is exempt for D540's reason**, the same
-                // exemption `paint_hex_field` makes: over a set that disagrees
-                // there is no one colour to compare against, and picking them all
-                // to one is exactly the edit being asked for. `current` there is
-                // the stand-in brush, so comparing against it would refuse the
-                // edit whenever the stand-in happened to match what was typed.
+                // 🚨 **Nothing is written unless the typed colour differs from the
+                // one that is there** (as `inspector::paint_hex_field` does),
+                // compared as *bytes*: `text` is seeded from `hex_of`, which rounds
+                // to 8 bits, so a colour the HSV plane produced would otherwise come
+                // back changed — with an undo step — by a click that typed nothing.
+                // `SelectionAll` is exempt: over a set that disagrees there is no
+                // one colour to compare against, and `current` is a stand-in.
                 let mixed = matches!(slot, PaintSlot::SelectionAll(_));
                 let unchanged = !mixed && parse_hex(&text) == parse_hex(&hex_of(current));
                 let abandoned = !ui::defocus_commits(&resp);
                 if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged && !abandoned) {
                     let rgb = Color::from_rgba8(r, g, b, 255);
                     // ⚠️ **Over a selection, each paint keeps its own opacity**
-                    // (§15 D540) — `inspector::paint_hex_field`'s branch, which
-                    // has carried this since it was written and whose comment is
-                    // the whole argument: *"this field owns the colour and the
-                    // field at the other end of the row owns the number, and over
-                    // a set that disagrees there is no one number to send with the
-                    // colour."* Here that other field is literally in the same
-                    // `field_row`, eight lines down.
-                    //
-                    // `[S23.1-L1-02]`: `current` over a *Mixed* row is the
-                    // **stand-in** brush — one member of the disagreeing set —
-                    // so its alpha went out through `slot_transaction`'s
-                    // `SelectionAll` arm, which writes the whole brush onto every
-                    // paint in scope. Two layers at 100% and 40%, type `00FF00`,
-                    // press Enter: both come back green **at 100%**, and the 40%
-                    // is gone. The single-layer control in the same run keeps its
-                    // alpha, which is what says the loss is the *scope* and not
-                    // this field's arithmetic.
-                    //
-                    // **Not the picker's general rule, and that is why this is a
-                    // branch rather than a change to the slot.** The plane and the
-                    // strips send a whole brush to every layer on purpose — *"a
-                    // gradient chosen in the picker is a gradient the user asked
-                    // every one of them to have"* — and they have no separate
-                    // opacity field. The hex field does.
+                    // (`write_slot_rgb`): `current` over a *Mixed* row is a
+                    // stand-in brush, so sending its alpha would flatten the set.
+                    // The plane and the strips send a whole brush on purpose and
+                    // have no opacity field; the hex field does.
                     self.write_slot_rgb(node, slot, rgb);
                     if let Some(p) = &mut self.picker {
                         p.hex = None;
@@ -1137,28 +952,12 @@ impl OndinApp {
                         .max_decimals(0)
                         .range(0.0..=100.0),
                 );
-                // ⚠️ **This out-clamp is the shape §15 D552 deleted from the
-                // CX/CY field, and it stays** — recorded because a reader taking
-                // that entry's *"the clamp only ever fired on a value the document
-                // already held"* as general will find one still in this function.
-                // The difference is the producer: a radial centre can legitimately
-                // be `1.5`, where an alpha is meant to be `0..1`.
-                //
-                // 🚨 **And the sentence that used to end here is why the clamp
-                // stays: *"an alpha **is** 0..1 by construction … this clamp cannot
-                // fire"*. It gained a producer on 2026-09-15 and became false**
-                // (§15 D767, D713's lesson one field later). `alpha_of` now returns
+                // 🚨 **This out-clamp stays.** `alpha_of` returns
                 // `GradientBrush::opacity` for a gradient — a `#[serde(default)]`
-                // field, so any six characters in a `.ondin` become it — where
-                // before it folded `Color::components[3]`, which the importer had
-                // already bounded. **A safety argument that enumerates its producers
-                // is false the day a second one appears**, and this one enumerated
-                // two by name.
-                //
-                // It is guarded in three places now — `build::brush_is_finite`'s
-                // `valid_opacity` at the op boundary, `alpha_of`'s own clamp, and
-                // here — and this is the one that would catch a fourth producer
-                // nobody has thought of. **Not dead weight any more.**
+                // field that any `.ondin` file can set — so the value is not 0..1 by
+                // construction. It is guarded at the op boundary
+                // (`build::brush_is_finite`'s `valid_opacity`), in `alpha_of`, and
+                // here, which would catch a producer nobody has thought of.
                 let pct = pct.clamp(0.0, 100.0);
                 let a = (pct / 100.0).clamp(0.0, 1.0);
                 let next = if single {
@@ -1175,10 +974,10 @@ impl OndinApp {
     /// Give `slot`'s edited colour this RGB and keep its alpha — what typing a hex
     /// does, and what the eyedropper does (its rule 3). One transaction.
     ///
-    /// ⚠️ **Over a selection, each paint keeps its own opacity** (§15 D540): this
-    /// owns the colour and the `%` beside it owns the number, and over a set that
-    /// disagrees there is no one number to send with the colour. The plane and the
-    /// strips send a whole brush on purpose; the hex does not.
+    /// ⚠️ **Over a selection, each paint keeps its own opacity**: this owns the
+    /// colour and the `%` beside it owns the number, and over a set that disagrees
+    /// there is no one number to send with the colour. The plane and the strips send
+    /// a whole brush on purpose; the hex does not.
     pub(crate) fn write_slot_rgb(&mut self, node: NodeId, slot: PaintSlot, rgb: Color) {
         if let PaintSlot::SelectionAll(target) = slot {
             let tx = self.edit_paints_all(target, move |b| {
@@ -1201,9 +1000,8 @@ impl OndinApp {
         next[index].1 = rgb.with_alpha(stops[index].1.components[3]);
         self.write_slot(node, slot, paint::with_stops(&brush, next));
     }
-    /// The colours already in this document, most-used first. A real palette
-    /// beats a decorative one: it is how a second shape gets the exact fill the
-    /// first one has.
+    /// The colours already in this document, most-used first — how a second shape
+    /// gets the exact fill the first one has.
     #[allow(clippy::too_many_arguments)]
     fn document_swatches(
         &mut self,
@@ -1226,13 +1024,10 @@ impl OndinApp {
         let mut chosen = None;
         for (i, col) in palette.iter().enumerate() {
             // **Rounded to whole pixels — but not for the fill's sake.** epaint
-            // snaps every `RectShape` to the pixel grid itself
-            // (`TessellationOptions::round_rects_to_pixels`), so the chip's own
-            // edges come out crisp from a fractional `cw` either way; that was
-            // measured, and it is *not* what fixed the dirty right-hand side
-            // (§15 D32). What epaint does not snap is a `Mesh` — so this is
-            // here to put `mask_corners` and `ui.interact` on the same grid the
-            // fill has already been moved to, instead of a fractional one.
+            // snaps every `RectShape` itself
+            // (`TessellationOptions::round_rects_to_pixels`); what it does not snap
+            // is a `Mesh`, so this puts `mask_corners` and `ui.interact` on the
+            // same grid as the fill.
             let rect = egui::Rect::from_min_size(
                 egui::pos2(row.min.x + i as f32 * (cw + gap), row.min.y),
                 egui::vec2(cw, 14.0),
@@ -1241,44 +1036,25 @@ impl OndinApp {
             let resp = ui.interact(rect, ui.id().with(("swatch", i)), egui::Sense::click());
             let p = ui.painter();
             let radius = egui::CornerRadius::same(SWATCH_RADIUS as u8);
-            // **One rounded rect, and nothing underneath it.**
+            // **One rounded rect, and nothing underneath it.** A mask over a square
+            // fill hard-steps the corners (a `Mesh` is not feathered), and
+            // `paint_checkerboard` lays a **white** base that a rounded fill
+            // anti-aliases against, haloing the chip. So the board is drawn only
+            // when there is transparency to show, inset so the fill's soft edge
+            // never lands on it.
             //
-            // The chip used to be a checkerboard, then a square fill, then
-            // `mask_corners` carving the corners back out. Two artefacts came
-            // out of that. The mask emits a `Mesh`, which epaint rasterizes
-            // without feathering — deliberately, see its own note on the spikes
-            // an anti-aliased fill throws off a zero-degree vertex — so the
-            // corners were hard-stepped, and nothing here drew the smoothing
-            // hairline the other call sites use. Worse, `paint_checkerboard`
-            // lays down a **white** base before its grey cells, and a rounded
-            // fill over it is anti-aliased against that white rather than
-            // against the card: a pale halo around every chip, on all four
-            // sides, however clean the corners were.
-            //
-            // So the board is only drawn when there is transparency to show,
-            // and then inset so the fill's soft edge never lands on it.
-            //
-            // **One physical pixel, not one point.** `shrink(1.0)` is 1.5
-            // device pixels at 150%, and epaint rounds the near and far edges
-            // the same way, so the gap came out 2px on the left and top against
-            // 1px on the right and bottom — measured, and visible as a chip
-            // that looks off-centre inside its own outline. Dividing by the
-            // scale lands the board on the pixel grid the snapped chip is
-            // already on, and the ring is 1px on all four sides at 100%, 125%,
-            // 150% and 200%.
+            // **One physical pixel, not one point**: `shrink(1.0)` is 1.5 device
+            // pixels at 150% and the gap comes out uneven; dividing by the scale
+            // keeps the board on the pixel grid.
             if col.components[3] < 1.0 {
                 let inset = 1.0 / ui.pixels_per_point();
                 ui::paint_checkerboard(p, rect.shrink(inset), 4.0);
                 mask_corners(p, rect.shrink(inset), SWATCH_RADIUS - inset, color::CARD);
             }
             p.rect_filled(rect, radius, color_to_egui(*col));
-            // The same hairline the inspector's chips wear, for the same reason
-            // and against a ground only 10 levels off theirs — the palette is
-            // built from the document's own colours, so a dark drawing fills this
-            // row with chips that would otherwise be six invisible gaps. It goes
-            // on unconditionally, *under* the in-use ring below rather than
-            // instead of it: one says "this is a chip", the other "this is the
-            // one you have".
+            // The inspector chips' hairline: a dark drawing would otherwise fill
+            // this row with invisible chips. Unconditional, *under* the in-use ring
+            // below rather than instead of it.
             p.rect_stroke(
                 rect,
                 radius,
@@ -1299,12 +1075,9 @@ impl OndinApp {
             }
         }
         if let Some(col) = chosen {
-            // The swatch carries the colour, the alpha slider owns the alpha —
-            // and over a selection that means **each paint's own** alpha, not the
-            // stand-in's (§15 D540). Same sentence as `hex_row`'s above, same
-            // missing scope check, and `[S23.1-L1-02]` names both: one fix has to
-            // cover the two, because a Mixed row's swatch grid and its hex field
-            // are the same edit by two doors.
+            // The swatch carries the colour, the alpha slider owns the alpha — over
+            // a selection, **each paint's own**, as in `hex_row`: a Mixed row's
+            // swatch grid and hex field are the same edit by two doors.
             if let PaintSlot::SelectionAll(target) = slot {
                 let tx = self.edit_paints_all(target, move |b| {
                     Brush::Solid(col.with_alpha(paint::alpha_of(b)))
@@ -1326,10 +1099,8 @@ impl OndinApp {
     /// Distinct solid colours used by the document's fills, strokes and artboard
     /// backgrounds, most-used first.
     ///
-    /// The whole-document scope of the same census the Group Colors panel runs
-    /// over a selection (`build::colors_in`). One walk serves both: this row and
-    /// that panel are the same question asked of different subtrees, and two
-    /// copies would answer it differently the first time either learnt about a
+    /// The whole-document scope of the census the Group Colors panel runs over a
+    /// selection (`build::colors_in`); one walk serves both, so neither misses a
     /// new place a colour can hide.
     fn document_palette(&self, want: usize) -> Vec<Color> {
         ondin_core::colors_in(&self.session.doc, &[self.session.doc.root()])
@@ -1372,28 +1143,19 @@ impl OndinApp {
     /// Commit a slot edit driven by a pointer gesture: the **press** shows the colour
     /// at once, a drag keeps showing it, and the release commits.
     ///
-    /// `edit_valve` alone is not enough for these, twice over. It fires on `dragged` /
-    /// `drag_stopped` / `changed`, none of which a plain click sets — so a single
-    /// click on the saturation plane or the hue bar would move the handle and
-    /// then change nothing.
+    /// `edit_valve` alone is not enough, twice over. It fires on `dragged` /
+    /// `drag_stopped` / `changed`, none of which a plain click sets; and none of
+    /// which a *press* sets either, because egui does not call a gesture a drag
+    /// until it has travelled, so the frames between button-down and the first
+    /// movement would show nothing.
     ///
-    /// **And none of which a *press* sets either**, which is the second gap and was
-    /// reported as "you click, you see nothing happening, and only after you move the
-    /// mouse it actually starts changing the color". egui does not call a gesture a
-    /// drag until it has travelled (`Flags::DRAGGED` waits on
-    /// `interact_widgets.dragged`), so the frames between button-down and the first
-    /// movement fell through both branches.
-    ///
-    /// **The press is already a value on these controls, and that is what tells them
-    /// apart from a value field.** A plane or a strip reads the pointer's *position*,
-    /// so where the button went down names a colour on its own; a `DragValue` reads
-    /// its *delta*, so a press there carries nothing and must stay silent. That
-    /// difference is why the fix belongs here rather than in the shared valve.
+    /// **The press is already a value on these controls**: a plane or a strip reads
+    /// the pointer's *position*, where a `DragValue` reads its *delta* and must stay
+    /// silent on a press. That is why the fix is here and not in the shared valve.
     ///
     /// Shown rather than committed, because the gesture is not over: the release
-    /// commits through `clicked()` above if it never travelled, or through
-    /// `drag_stopped()` in the valve if it did — so every press this previews is
-    /// followed by a commit that clears the preview.
+    /// commits through `clicked()` if it never travelled, or through the valve's
+    /// `drag_stopped()` if it did, clearing the preview.
     fn pointer_slot(&mut self, resp: &egui::Response, node: NodeId, slot: PaintSlot, brush: Brush) {
         // A cancelled drag across the plane must not land as a click on
         // release, which is the one way a colour could still get through.
@@ -1404,18 +1166,15 @@ impl OndinApp {
             self.write_slot(node, slot, brush);
             return;
         }
-        // `is_pointer_button_down_on` is true from the press frame to the release,
-        // where `dragged` is true only once egui has decided. The two overlap once
-        // travel begins, and the valve owns that half.
+        // `is_pointer_button_down_on` and `dragged` overlap once travel begins;
+        // the valve owns that half.
         if resp.is_pointer_button_down_on()
             && !resp.dragged()
             && self.preview_slot(node, slot, brush.clone())
         {
-            // The colour on screen just changed, so the selection chrome owes the same
-            // retreat it owes every other inspector edit (§15 D128). `true` because
-            // the button is down: the 1.5s must not start counting until it lifts.
-            // Nothing downstream would do it — `edit_note` reads `dragged()` and
-            // `changed()`, and a raw sensed region sets neither on the press frame.
+            // The selection chrome owes the same retreat it owes every inspector
+            // edit; `true` because the button is down. Nothing downstream does it:
+            // `edit_note` reads `dragged()` and `changed()`, which a press sets neither.
             self.note_live_edit(true);
             return;
         }
@@ -1439,26 +1198,9 @@ fn slider_knob(p: &egui::Painter, track: egui::Rect, t: f32, fill: egui::Color32
 /// A brush's stops as an egui ramp, **with `GradientBrush::opacity` folded in** —
 /// what the paint looks like, for every surface that is showing a paint.
 ///
-/// 🚨 **This doc said the opposite of the function under it for four days** (§15
-/// D784). It was written as the *statement of the defect* — "it does not fold in
-/// `GradientBrush::opacity`, and since §15 D767 that is a gap" — and D773 then
-/// fixed the gap by folding the multiplier in **here**, three lines below, without
-/// the paragraph following. **A comment that describes the bug you are fixing is
-/// the one a fix leaves standing**, because its author reads it as the problem
-/// statement rather than as a claim about the code, and the more precisely it
-/// describes the defect the more invisible it becomes once the defect is gone.
-/// Nothing gates it: it compiles, it lints, its links resolve.
-///
-/// ⚠️ **It also proposed the design that was not taken.** *"That is what makes this
-/// a caller-side fix rather than a change here"* — the fix is not caller-side. The
-/// multiplier is folded in here and [`stop_colours`] is the named opt-out, so the
-/// common case is the default and the one surface that edits the stops themselves
-/// opts out by name. That is the better shape and it is the one shipped; the
-/// sentence describing the alternative outlived the decision to reject it.
-///
-/// ⚠️ **The picture arm is closed too now** (§15 D784), so the asymmetry this
-/// paragraph used to record is gone: [`crate::ui::Swatch::Picture`] and the layers
-/// row both fold `ImageSampler::alpha` in.
+/// [`stop_colours`] is the named opt-out for the one surface that edits the stops
+/// themselves. [`crate::ui::Swatch::Picture`] and the layers row fold
+/// `ImageSampler::alpha` in likewise.
 pub(super) fn ramp(brush: &Brush) -> Vec<(f32, egui::Color32)> {
     let opacity = match brush {
         Brush::Gradient(g) => g.opacity.clamp(0.0, 1.0),
@@ -1471,30 +1213,14 @@ pub(super) fn ramp(brush: &Brush) -> Vec<(f32, egui::Color32)> {
 }
 
 /// The stops as they are **stored**, with no ramp opacity folded in — for the one
-/// surface that is editing those stops rather than showing the paint (§15 D773).
+/// surface that is editing those stops rather than showing the paint.
 ///
-/// 🚨 **[`ramp`] folds `GradientBrush::opacity` in and this does not, and the
-/// defaulting is deliberate.** Three of the four callers are *chips* — the picker's
-/// 34×34 preview, the inspector's paint row, the Type panel's text swatch — and
-/// they must look like the canvas. One is the **stop bar**, which sits directly
-/// under the opacity slider and is the surface for editing the stops themselves; a
-/// bar that faded as the slider moved would be dimming the very handles the user is
-/// dragging. So the common case is the default and the exception opts out by name:
-/// a new chip written next year gets it right by doing nothing.
-///
-/// ⚠️ **This gap was introduced by §15 D767 and is `[S23.2-L1-01]`'s shape — §15
-/// D564's *one document drawn two ways in one frame*.** Until the ramp's opacity
-/// moved off the stops, `stops_of` *was* what the paint looked like and every chip
-/// was right for free. **A derived value that becomes a stored one turns every
-/// reader of the old derivation into a bug**, silently, and no gate can see it.
-///
-/// ⚠️ **The image arm is closed** (§15 D784). D773 recorded it as a real defect it
-/// was deliberately not taking — `ImageSampler::alpha` folded in by neither
-/// function, so a half-faded photograph had an opaque thumbnail — precisely so
-/// that fixing the gradient alone did not read as a decision somebody took. It was
-/// then put to the maintainer and taken. **Writing down the half you are not doing
-/// is what got it done**, which is the argument for the paragraph rather than for
-/// the silence.
+/// 🚨 **[`ramp`] folds `GradientBrush::opacity` in and this does not, deliberately.**
+/// The callers that are *chips* (the picker's preview, the inspector's paint row,
+/// the Type panel's text swatch) must look like the canvas; the **stop bar** sits
+/// under the opacity slider, and a bar that faded as the slider moved would dim the
+/// very handles being dragged. The common case is the default, so a new chip gets
+/// it right by doing nothing.
 pub(super) fn stop_colours(brush: &Brush) -> Vec<(f32, egui::Color32)> {
     paint::stops_of(brush)
         .into_iter()
@@ -1507,12 +1233,9 @@ mod tests {
     /// A translucent chip's checkerboard is inset by exactly one **physical**
     /// pixel, on every side, at every scale the app is likely to meet.
     ///
-    /// `shrink(1.0)` is the obvious spelling and it is wrong above 100%: at
-    /// 150% it insets by 1.5 device pixels, epaint rounds the near and far
-    /// edges the same way, and the gap lands 2px on the left and top against
-    /// 1px on the right and bottom. Arithmetic rather than pixels, because
-    /// that is all it takes — the chip rect is already snapped, so an inset
-    /// that is a whole number of device pixels keeps the board on the grid.
+    /// `shrink(1.0)` is wrong above 100%: at 150% it insets by 1.5 device pixels
+    /// and the gap lands unevenly. Arithmetic rather than pixels: the chip rect is
+    /// already snapped, so a whole-device-pixel inset keeps the board on the grid.
     #[test]
     fn the_translucent_chip_board_is_inset_one_device_pixel_all_round() {
         for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
@@ -1537,19 +1260,10 @@ mod tests {
             }
         }
     }
-    /// The picker opens where it was asked to **the first time too**.
-    ///
-    /// It did not, and the asymmetry is the tell: an `Area` measures itself on
-    /// the frame it first appears, assuming 600×400 until it knows better, and
-    /// egui constrains that imaginary box to the screen. A picker spawned near
-    /// the bottom was shoved up by the overhang — 60px at 1600×900, 160px at
-    /// 1280×800 — and the shoved position was stored before `placed` turned
-    /// off the correction. Every *later* opening was fine, because the measured
-    /// size outlives the window closing. See `picker_window`.
-    ///
-    /// The spawns below are chosen to overhang the 600×400 estimate on both
-    /// screens while fitting the real window, so the right answer is `spawn`
-    /// untouched and a regression shows up as a plain mismatch.
+    /// The picker opens where it was asked to **the first time too**: an `Area`
+    /// assumes 600×400 on its first frame and would be shoved up by the overhang
+    /// (see `picker_window`). The spawns overhang that estimate on both screens
+    /// while fitting the real window, so the right answer is `spawn` untouched.
     #[test]
     fn the_picker_opens_where_it_was_spawned_on_the_very_first_frame() {
         for (w, h) in [(1600.0_f32, 900.0_f32), (1280.0, 800.0)] {
@@ -1575,8 +1289,7 @@ mod tests {
                 let _ = ctx.run_ui(input(), |_| {
                     picker_window().current_pos(spawn).show(&ctx, body);
                 });
-                // Frame two: `placed`, so the app leaves the position alone —
-                // this is the frame the user actually sees.
+                // Frame two: `placed`, so the app leaves the position alone.
                 let mut seen = None;
                 let _ = ctx.run_ui(input(), |_| {
                     seen = picker_window().show(&ctx, body).map(|r| r.response.rect);
@@ -1606,11 +1319,9 @@ fn with_stop_rgb(brush: &Brush, stop: usize, [r, g, b]: [u8; 3]) -> Brush {
 /// The HSV to draw the handle at: the picker's remembered intent while the slot
 /// still holds the colour it produced, otherwise derived from that colour.
 ///
-/// **A free function because it is the whole decision** — so it can be asserted on
-/// its own terms rather than through a panel that would have to be drawn first.
-///
-/// The key comparison is what makes it safe: an intent is only reused for the exact
-/// colour it produced, so this can never report a colour the slot does not hold.
+/// A free function so the decision can be asserted without drawing a panel. An
+/// intent is only reused for the exact colour it produced, so this can never report
+/// a colour the slot does not hold.
 fn hsv_for(intent: Option<(Hsv, [u8; 4])>, c: Color) -> Hsv {
     match intent {
         Some((hsv, key)) if key == c.to_rgba8().to_u8_array() => hsv,
@@ -1622,17 +1333,10 @@ fn hsv_for(intent: Option<(Hsv, [u8; 4])>, c: Color) -> Hsv {
 mod handle_tests {
     use super::*;
 
-    /// **The handle stays where the pointer put it, near black.** The plane is
-    /// 218×104 and the handle's position is re-derived from the *stored* colour every
-    /// frame, so it is only as stable as HSV↔RGB is invertible. It is not: at
-    /// `v = 0.02` the whole saturation range maps to **nine** distinct 8-bit colours,
-    /// and deriving `s` back out of one of them moved the handle up to 36pt sideways
-    /// while the pointer moved smoothly. Reported as the cursor jumping near the
-    /// bottom of the wheel.
-    ///
-    /// Both halves matter, so both are asserted: the intent is honoured for the
-    /// colour it produced, and ignored for any other — otherwise the picker could
-    /// show a colour the slot does not hold.
+    /// **The handle stays where the pointer put it, near black**, where the whole
+    /// saturation range maps to a handful of 8-bit colours. Both halves are
+    /// asserted: the intent is honoured for the colour it produced and ignored for
+    /// any other, or the picker could show a colour the slot does not hold.
     #[test]
     fn the_handle_honours_what_the_picker_wrote_and_only_that() {
         const W: f32 = 218.0;
@@ -1673,19 +1377,11 @@ mod handle_tests {
 
 #[cfg(test)]
 mod pointer_slot_tests {
-    //! **Which of the three slot verbs a pointer state selects** — the picker's
-    //! frame-by-frame call pattern, which the roadmap carried as read-only until
-    //! §15 D303 and which my own notes record as having burned three
-    //! code-reasoned fixes for one frozen picker before an `eprintln!` named the
-    //! cause in a single run. *"Who calls this and how often" is never in the text
-    //! of the function*, so it is asserted here by driving real frames rather than
-    //! by reading `OndinApp::pointer_slot`.
-    //!
-    //! The three states are told apart by egui, not by us: a **click** sets neither
-    //! `dragged` nor `changed` and commits directly; the frames of a **press** that
-    //! has not yet travelled far enough to be a drag preview; and everything else
-    //! goes to the valve. Getting the middle one wrong is what makes a picker look
-    //! frozen — the press paints nothing until the pointer moves.
+    //! **Which of the three slot verbs a pointer state selects**, asserted by
+    //! driving real frames: who calls `OndinApp::pointer_slot` and how often is not
+    //! in the text of the function. A **click** commits directly; a **press** that
+    //! has not yet travelled previews; everything else goes to the valve. Getting
+    //! the middle one wrong makes a picker look frozen.
     use super::*;
     use crate::app::OndinApp;
     use ondin_core::{Operation, Transaction};
@@ -1757,15 +1453,10 @@ mod pointer_slot_tests {
         }
     }
 
-    /// **A press previews and the release that completes a click commits** — the two
-    /// halves of the pattern, and the ones that are wrong together when the picker
-    /// looks dead.
-    ///
-    /// A press sets neither `dragged` nor `changed`, so the shared valve is cut for
-    /// it; without the explicit `is_pointer_button_down_on() && !dragged()` arm
-    /// nothing at all happens until the pointer travels, which is exactly "I press
-    /// on the plane and the colour does not change". The assertion is therefore that
-    /// the **preview** is installed on the press frame, before any movement.
+    /// **A press previews and the release that completes a click commits.** Without
+    /// the explicit `is_pointer_button_down_on() && !dragged()` arm nothing happens
+    /// until the pointer travels, so the **preview** must be installed on the press
+    /// frame, before any movement.
     #[test]
     fn a_press_previews_before_it_travels_and_the_click_commits() {
         let (ctx, mut app, id, _) = app_with_a_fill();
@@ -1814,13 +1505,9 @@ mod pointer_slot_tests {
         );
     }
 
-    /// **A cancelled gesture must not land as a click on release**, which is the one
-    /// way a colour could still get through after Escape.
-    ///
-    /// Asserted at the *release*, because that is where it would get through: the
-    /// press is already gone by then and `clicked()` is the state that fires
-    /// afterwards. A guard checked only on the press frame would pass a test that
-    /// looked at the press.
+    /// **A cancelled gesture must not land as a click on release**, the one way a
+    /// colour could still get through after Escape. Asserted at the *release*,
+    /// where `clicked()` fires.
     #[test]
     fn a_cancelled_gesture_does_not_land_as_a_click() {
         let (ctx, mut app, id, _) = app_with_a_fill();
@@ -1850,23 +1537,14 @@ mod pointer_slot_tests {
 
 #[cfg(test)]
 mod mixed_hex_tests {
-    //! **The picker's hex field carries a colour, not an opacity** — §15 D540,
-    //! `[S23.1-L1-02]`.
+    //! **The picker's hex field carries a colour, not an opacity.**
     //!
-    //! Over a *Mixed* row `current` is the **stand-in** brush — one member of the
-    //! disagreeing set — and its alpha went out with the colour through
-    //! `slot_transaction`'s `SelectionAll` arm, which writes the whole brush onto
-    //! every paint in scope. Two layers at 100% and 40%, `00FF00` typed and
-    //! committed: both came back green **at 100%**, and the 40% was gone.
+    //! Over a *Mixed* row `current` is a stand-in brush, and its alpha would go out
+    //! with the colour through `slot_transaction`'s `SelectionAll` arm, which writes
+    //! the whole brush onto every paint in scope: two layers at 100% and 40%, with
+    //! `00FF00` typed, would both come back green at 100%.
     //!
-    //! The guard has existed twelve hundred lines away since it was written —
-    //! `inspector::paint_hex_field` — under the comment that is the whole
-    //! argument: *"this field owns the colour and the field at the other end of
-    //! the row owns the number, and over a set that disagrees there is no one
-    //! number to send with the colour."* In `hex_row` that other field is
-    //! literally in the same `field_row`.
-    //!
-    //! (Plain backticks, not `[links]` — §15 D319's convention.)
+    //! (Plain backticks, not `[links]`: this module is `cfg(test)`.)
 
     use super::*;
     use crate::app::OndinApp;
@@ -1878,11 +1556,8 @@ mod mixed_hex_tests {
     };
 
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
-    /// Measured by sweep: with the picker spawned at `(400, 300)` the hex field's
-    /// hit band is **x 420…485, y 512…537**, and identical at 1.0, 1.25, 1.5 and
-    /// 2.0 `pixels_per_point` (event positions are in points, so the scaling
-    /// sweep is a null result rather than a confirmation — worth having run only
-    /// because it says this is not a physical-pixel number that could drift).
+    /// Inside the hex field's hit band (x 420…485, y 512…537) with the picker
+    /// spawned at `(400, 300)`, in points at any `pixels_per_point`.
     const HEX_FIELD: egui::Pos2 = egui::pos2(450.0, 524.0);
 
     /// Two rects, one solid fill each, at the two given alphas.
@@ -1979,27 +1654,13 @@ mod mixed_hex_tests {
         }
     }
 
-    /// **A hex typed over a Mixed row leaves each layer its own opacity.**
+    /// **A hex typed over a Mixed row leaves each layer its own opacity.** The hex
+    /// is typed rather than preset, so the events must reach *this* widget.
     ///
-    /// ⚠️ **Typed rather than preset, and that is the fixture assertion's whole
-    /// job.** `hex_row` seeds its buffer from `picker.hex` when that is `Some`,
-    /// so a test that set `hex = Some("00FF00")` directly would commit from
-    /// wherever focus happened to be — green, correct, and equally green with the
-    /// click missing the field entirely. `hex` going `FF0000` → `00FF00` is what
-    /// says the events reached *this* widget.
-    ///
-    /// ⚠️ **Flipped** by deleting `hex_row`'s `SelectionAll` branch so it falls
-    /// through to `write_slot`: B comes back `[0, 255, 0, 255]` and the assertion
-    /// on its alpha bites. **Two of the four assertions do not**, and both are
-    /// still worth writing:
-    ///
-    /// - **`undo_depth` is 1 either way.** It is here to say the fix did not turn
-    ///   one commit into two — which `edit_paints_all` plus `commit_edit` could
-    ///   easily have done — not to catch the regression.
-    /// - **The single-layer control is green under the flip**, unchanged. That is
-    ///   the point of it: it turns *"the loss is the scope, not this field's
-    ///   arithmetic"* from a sentence into a measurement. **A test with only the
-    ///   control in it would have passed all along.**
+    /// flip: delete `hex_row`'s `SelectionAll` branch → fails at B's alpha. The
+    /// `undo_depth` assertion (one edit, one step) and the single-layer control
+    /// stay green under it; the control shows the loss is the scope, not the
+    /// field's arithmetic.
     #[test]
     fn a_mixed_rows_hex_field_leaves_each_layer_its_own_opacity() {
         let ctx = egui::Context::default();
@@ -2044,39 +1705,14 @@ mod mixed_hex_tests {
         assert_eq!(rgba8(&app, a), [255, 0, 0, 255], "control: A is untouched");
     }
 
-    /// **A bare click through the picker's hex field writes nothing** (§15 D730,
-    /// `[S23.1-L1-05]`).
+    /// **A bare click through the picker's hex field writes nothing.** `hex_row`
+    /// would parse its own unchanged text back: `parse_hex` gives `u8`s and
+    /// `from_rgba8` re-expands them, so `0.5` came back `0.5019608` and cost an
+    /// undo step. The typed control guards against a guard that refuses everything.
     ///
-    /// Open the picker on a colour no hex string names, click once in the field,
-    /// type nothing, leave. `hex_row` parsed its own unchanged text back and
-    /// committed it: `parse_hex` gives `u8`s and `from_rgba8` re-expands them, so
-    /// **`0.5` came back `0.5019608`** on every channel — and it cost an undo
-    /// step. Anything off the 8-bit lattice is affected, which is anything the
-    /// picker's own HSV plane produced.
-    ///
-    /// 🚨 **`inspector::paint_hex_field` has had this guard since §15 D517 and
-    /// this copy never got it**, which is the finding's real content — but its
-    /// *fix sketch* is no longer available. It says to delete this field and call
-    /// `paint_hex_field`; since it was written, `hex_row` gained the
-    /// `SelectionAll` branch (D540) and, more decisively, it edits **one stop of a
-    /// gradient by `index`**, which `paint_hex_field` has no concept of. The two
-    /// are not one control written twice any more; they are two controls that
-    /// share a guard. **A fix sketch is a hypothesis about code the reviewer did
-    /// not change**, and this one aged out between the review and the fix.
-    ///
-    /// ⚠️ **Compared as bytes, not as floats**, exactly as `paint_hex_field` does
-    /// and for the reason its comment gives: the floats really do differ, and what
-    /// has to match is what the *field* can express.
-    ///
-    /// **The typed control is the other half.** A guard that refused everything
-    /// would pass the first three assertions.
-    ///
-    /// ⚠️ **Flip-check, run: `!mixed` inverted to `mixed`**, which makes the guard
-    /// apply to the case it exempts and skip the case it is for. Red here at
-    /// `[0.5019608, …]` against `[0.5, …]`, and
-    /// `a_mixed_rows_hex_field_leaves_each_layer_its_own_opacity` above stays
-    /// **green** — the exemption is unobservable from that test, so the two are
-    /// asking different questions and both are needed.
+    /// flip: `!mixed` inverted to `mixed` in `hex_row` → fails at the colour
+    /// (`[0.5019608, …]` against `[0.5, …]`); the Mixed-row test above stays green,
+    /// so both are needed.
     #[test]
     fn a_bare_click_through_the_hex_field_writes_nothing() {
         let ctx = egui::Context::default();
@@ -2125,22 +1761,15 @@ mod mixed_hex_tests {
             ],
         );
         frame(&ctx, &mut app, vec![button(HEX_FIELD, false)]);
-        // ⚠️ **The click has to have landed in the field.** `hex_row` arms
-        // `picker.hex` on focus, so this is the one observable that says the
-        // events reached *this* widget — without it a click that missed would
-        // make every assertion below pass for nothing.
+        // The click has to have landed in the field: `hex_row` arms `picker.hex`
+        // on focus, the one observable that says the events reached this widget.
         assert!(
             app.picker.as_ref().and_then(|p| p.hex.as_ref()).is_some(),
             "the click has to focus the hex field, or this test is about nothing"
         );
-        // ⚠️ **`Enter`, not a click away, and the difference was measured.**
-        // `hex_row` commits on `lost_focus()`, and its comment says Enter
-        // triggers that too — so this is the same door. A click elsewhere *in the
-        // picker* does **not** open it: driven at `(430, 380)`, on the SV plane,
-        // `picker.hex` was still `Some` three frames later, so the field kept the
-        // caret and the commit path was never reached. The first version of this
-        // test did exactly that and was green **for that reason** rather than for
-        // the fix. The `is_none()` assertion below is what caught it and is kept.
+        // `Enter`, not a click away: a click elsewhere in the picker (on the SV
+        // plane) leaves the field focused, so the commit path is never reached.
+        // The `is_none()` assertion below catches that.
         frame(
             &ctx,
             &mut app,
@@ -2196,17 +1825,13 @@ mod mixed_hex_tests {
 #[cfg(test)]
 mod radial_centre_tests {
     //! **A radial centre the document holds outside the shape survives being
-    //! drawn** — §15 D552, `[S23.1-L1-01]`.
+    //! drawn.** SVG allows one, and the picker's CX/CY fields are a
+    //! `ui::value_field` ranged `0..=100`. egui's `clamp_existing_to_range`
+    //! defaults to `true`, which would paint `100` for a centre stored at `1.5`,
+    //! mark the response changed, and have `valve_slot` commit the rewrite on a bare
+    //! click; `value_field_f64` turns it off.
     //!
-    //! SVG allows a radial gradient centred outside the shape it paints, and a
-    //! highlight sitting off one edge is the reason anyone writes one. The picker's
-    //! CX/CY fields are `pct = centre * 100.0` in a `ui::value_field` ranged
-    //! `0..=100`. egui's `clamp_existing_to_range` defaults to `true` and is
-    //! applied every frame, which would paint `100` for a centre stored at `1.5`,
-    //! mark the response changed, and have `valve_slot` commit the rewrite on a
-    //! bare click; `value_field_f64` turns it off (§15 D425).
-    //!
-    //! (Plain backticks, not `[links]` — §15 D319's convention.)
+    //! (Plain backticks, not `[links]`: this module is `cfg(test)`.)
 
     use super::*;
     use crate::app::OndinApp;
@@ -2219,10 +1844,8 @@ mod radial_centre_tests {
 
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
     const BOX: Size = Size::new(100.0, 100.0);
-    /// Measured with a throwaway probe that dumped every text galley in the frame:
-    /// with the picker spawned at `(400, 300)` the CX row's label sits at
-    /// `(463, 360)` and its number at `(491, 358.5)`, so this lands inside the
-    /// field rather than on the label.
+    /// With the picker spawned at `(400, 300)` the CX label sits at `(463, 360)`
+    /// and its number at `(491, 358.5)`; this lands inside the field, not the label.
     const CX_FIELD: egui::Pos2 = egui::pos2(495.0, 360.0);
 
     /// A 100×100 rect filled with a radial gradient centred at `cx` of its width.
@@ -2321,13 +1944,7 @@ mod radial_centre_tests {
     ///
     /// ⚠️ **The `Tab` is not decoration and the test is vacuous without it.** The
     /// commit is `app::edit_valve`'s `engaged → !engaged` transition, and a click
-    /// leaves the field *focused* — so `engaged` stays true and nothing is written
-    /// while the caret is still in there. Measured, not reasoned: with the fix
-    /// reverted and no `Tab`, the centre came back `(1.5, 0.5)` at `undo_depth` 0,
-    /// which is the *correct* answer arrived at by never reaching the code under
-    /// test. Adding the `Tab` makes the same flip report `(1.5 → 1.0, 0.5)` at
-    /// depth 1, which is `[S23.1-L1-01]`'s own measured table.
-    ///
+    /// leaves the field focused, so nothing is written while the caret is in there.
     /// `Tab` rather than a click elsewhere because a click outside the popover
     /// closes it, and a closed picker draws no rows to assert on.
     fn bare_click_and_leave(ctx: &egui::Context, app: &mut OndinApp) {
@@ -2375,31 +1992,14 @@ mod radial_centre_tests {
     }
 
     /// **The field shows what the document holds, and a bare click leaves it
-    /// there.**
-    ///
-    /// ⚠️ **The galley assertion is the one that names the bug.** The centre
-    /// surviving the click is the *consequence*; what is wrong before any click is
-    /// that the card and the document disagree about the number, and the card is
-    /// the one that is wrong. A test asserting only the document would pass against
-    /// a version that painted `100` and merely declined to commit it — which is a
-    /// control lying about the value under it, still.
-    ///
-    /// ⚠️ **The in-range control is what says this is about the clamp and not about
-    /// the click.** Without it, a fix that stopped `valve_slot` committing
-    /// altogether would pass — and the picker's own `pointer_slot` tests are the
-    /// evidence that committing is wanted.
+    /// there.** The galley assertion names the bug (the card painting `100` for a
+    /// stored `150`); the in-range control shows it is about the clamp, not the
+    /// click.
     ///
     /// flip: `.clamp_existing_to_range(true)` added in the CX/CY field's `build` →
-    /// fails at the galley, `"100"` where `"150"` was: it is wrong on the first
-    /// frame, before any event. A `clamp(0.0, 1.0)` on `pct / 100.0` in
-    /// `radial_controls` fails at the centre instead, `(1.0, 0.5)`.
-    ///
-    /// ⚠️ **A flip that does *not* bite here, which says where the teeth are:**
-    /// `.range(0.0..=100.0)` deleted from the field. This test stays green, because
-    /// with the clamp gone the range bounds only what a drag or a keystroke may
-    /// reach and neither happens here. That is not a gap — it is
-    /// `a_number_typed_past_the_fields_range_is_still_bounded_by_it` below, which
-    /// the same flip fails at `5.0`.
+    /// fails at the galley, `"100"` where `"150"` was. A `clamp(0.0, 1.0)` on
+    /// `pct / 100.0` in `radial_controls` fails at the centre, `(1.0, 0.5)`.
+    /// Deleting `.range(0.0..=100.0)` does not bite here; the test below covers it.
     #[test]
     fn a_radial_centre_outside_the_shape_is_shown_and_not_rewritten_by_a_bare_click() {
         let ctx = egui::Context::default();
@@ -2412,11 +2012,9 @@ mod radial_centre_tests {
              empty"
         );
 
-        // **Three frames before reading any ink**, because the first frame of a
-        // headless `Context` has no fonts and the picker's placement settles over
-        // two (`the_picker_opens_where_it_was_spawned_on_the_very_first_frame` is
-        // about the *rect*, not the galleys). A read on frame one comes back with
-        // no shapes at all, which reads exactly like a missing row.
+        // Three frames before reading any ink: the first frame of a headless
+        // `Context` has no fonts and placement settles over two, so an earlier
+        // read looks like a missing row.
         for _ in 0..3 {
             let _ = galleys(&ctx, &mut app, Vec::new());
         }
@@ -2524,22 +2122,14 @@ mod radial_centre_tests {
 
 #[cfg(test)]
 mod grid_orphan_tests {
-    //! **A grid picker goes away when the card's row does** — §15 D553,
-    //! `[S23.1-L1-04]`.
+    //! **A grid picker goes away when the card's row does.** The anchor stays
+    //! contained after a Shift-click widens the selection, so without its own arm
+    //! the picker would survive a widening the *card* did not: `shared_grids`
+    //! answers `None` once two frames' grid lists differ and the card draws a
+    //! sentence instead of rows. A hex typed into it would then recolour **B's**
+    //! grid, on a row no longer drawn. Same argument as the `Effect(i)` arm.
     //!
-    //! `picker_ui`'s orphan match governs every slot in the app, and `Grid(i)` fell
-    //! into its catch-all `!selection.contains(node)`. The anchor is still
-    //! contained after a Shift-click widens the selection, so the picker survived a
-    //! widening the *card* did not: `shared_grids` answers `None` the moment two
-    //! frames' grid lists differ and the Layout grid card draws a sentence instead
-    //! of rows, while the picker went on floating over A's red. A hex typed into it
-    //! then recoloured **B's** grid, on a row that had stopped being drawn.
-    //!
-    //! This is the `Effect(i)` arm's argument verbatim (`[S14.5-L1-01]`, D476) at
-    //! the fourth slot, and fixing that one did not reach this one — its arm names
-    //! `PaintSlot::Effect(_)` and nothing else.
-    //!
-    //! (Plain backticks, not `[links]` — §15 D319's convention.)
+    //! (Plain backticks, not `[links]`: this module is `cfg(test)`.)
 
     use super::*;
     use crate::app::OndinApp;
@@ -2550,10 +2140,8 @@ mod grid_orphan_tests {
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
 
     const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
-    /// `mixed_hex_tests`' measured hit band for the hex field, at the same spawn.
-    /// Repeated rather than shared because the two modules are independent
-    /// fixtures and a constant reaching across them would tie one's spawn to the
-    /// other's.
+    /// `mixed_hex_tests`' hit band for the hex field, at the same spawn; repeated
+    /// because the two modules are independent fixtures.
     const HEX_FIELD: egui::Pos2 = egui::pos2(450.0, 524.0);
 
     fn grid(count: u32, color: Color) -> LayoutGrid {
@@ -2668,28 +2256,14 @@ mod grid_orphan_tests {
     }
 
     /// **Widening the selection past agreement closes the grid picker**, so the
-    /// hex that follows reaches nothing.
+    /// hex that follows reaches nothing. The damage assertion is `b`'s colour, not
+    /// the picker being `None`, which a fix closing it for the wrong reason would
+    /// also satisfy. Control 1 shows the write path works; control 2 shows the
+    /// question is `frame_subjects`' and not `selection.ids()`'.
     ///
-    /// ⚠️ **The damage assertion is `b`'s colour and not the picker being `None`.**
-    /// The picker closing is the *mechanism*; what the user loses is a grid colour
-    /// on a frame whose row is not on screen. A test asserting only
-    /// `app.picker.is_none()` would pass against a fix that closed the picker for
-    /// the wrong reason — the anchor being dropped, say — so the hex is typed
-    /// anyway and B is read back off the document.
-    ///
-    /// ⚠️ **Two controls, and each rules out a different wrong fix.** *A alone*
-    /// says the fixture and the write path work at all — without it, a version that
-    /// closed the picker unconditionally would pass. *A plus the rect* says the
-    /// question asked is `frame_subjects`' and not `selection.ids()`': a Shift-clicked
-    /// rectangle cannot make two frames' grids disagree, and closing the picker
-    /// over it would be a regression this arm could easily have introduced.
-    ///
-    /// ⚠️ **Flip-check, run: the `PaintSlot::Grid(_)` arm deleted so the slot falls
-    /// back into the catch-all.** Fails on B's colour with `[0, 255, 0, 255]` where
-    /// `[0, 0, 255, 255]` was — the finding's own measurement — and the *track
-    /// count* assertion stays green, which is the finding's point that `Grid`'s
-    /// damage is narrower than `Effect`'s because its arm reads each subject's own
-    /// list. Both controls stay green under the flip, as they must.
+    /// flip: delete the `PaintSlot::Grid(_)` arm of `picker_ui`'s orphan match →
+    /// fails at B's colour, `[0, 255, 0, 255]` where `[0, 0, 255, 255]` was; the
+    /// track-count assertion and both controls stay green.
     #[test]
     fn widening_past_agreement_closes_the_grid_picker_before_it_can_write() {
         let ctx = egui::Context::default();
@@ -2705,8 +2279,7 @@ mod grid_orphan_tests {
              row and the picker stays up"
         );
 
-        // The Shift-click. `shared_grids` now answers `None` — 5 tracks against
-        // 10 — so the card stops drawing rows.
+        // The Shift-click: `shared_grids` now answers `None` (5 tracks against 10).
         app.session.selection.set(vec![a, b]);
         assert!(
             app.shared_grids(&app.frame_subjects()).is_none(),
@@ -2760,31 +2333,14 @@ mod grid_orphan_tests {
         );
     }
 
-    /// **A palette chip whose colour is already in the slot costs no undo step** —
-    /// `[S23.1-L1-03]`, and it was closed by §15 D428 before anybody wrote this.
+    /// **A palette chip whose colour is already in the slot costs no undo step.**
+    /// Driven at `write_slot`, the single line the chip's click handler runs
+    /// (`document_swatches`), rather than through a click: the chips are laid out
+    /// from the document's own colours, so a hit coordinate would rot.
     ///
-    /// ⚠️ **Pinned rather than fixed, which is why it is worth having.** The
-    /// finding measured `undo_depth 0 → 1` for a click on the chip the picker
-    /// itself rings — the ring means *"this is the one you have"* — with the brush
-    /// read back byte-identical. Its own fix sketch named G16's single guard,
-    /// `Transaction::changes_nothing` at `session::commit_inner`, and that landed
-    /// as D428. Nothing since then has said this door is covered, and the door is
-    /// three functions away from the guard.
-    ///
-    /// ⚠️ **Driven at `write_slot` rather than through a click on the chip, and
-    /// the reason is a fixture that would rot.** The palette row's chips are laid
-    /// out from the *document's own* colours, so a hit position depends on how
-    /// many distinct colours the fixture has and on the row's wrapping — a
-    /// coordinate that changes when the palette does, which is
-    /// `atomic::leftover_temps`' warning in another dress. `write_slot` is the
-    /// single line the click handler runs (`document_swatches`:
-    /// `self.write_slot(node, slot, paint::with_stops(brush, stops))`), so this
-    /// asserts the whole of what the click does and none of where it is.
-    ///
-    /// ⚠️ **Flip-check, run: the `tx.changes_nothing(&self.doc)` guard removed
-    /// from `commit_inner`.** Fails on the first assertion at depth 1, and — the
-    /// half that says the test is not vacuous — the *second* assertion stays
-    /// green, so a version that refused every write would not pass.
+    /// flip: remove the `tx.changes_nothing(&self.doc)` guard from `commit_inner` →
+    /// fails at the first assertion (depth 1); the control stays green, so a
+    /// version that refused every write would not pass.
     #[test]
     fn a_palette_chip_already_in_the_slot_costs_no_undo_step() {
         use ondin_core::Fill;
@@ -2838,28 +2394,14 @@ mod grid_orphan_tests {
         }
     }
 
-    /// **A chip shows the ramp's opacity; the stop bar shows the stops** (§15 D773).
+    /// **A chip shows the ramp's opacity; the stop bar shows the stops.** Both
+    /// halves are asserted, because the defaulting is the decision: checking only
+    /// the chip would pass if `stop_colours` folded the opacity in too, dimming the
+    /// handles being dragged. The chip assertion is a `<` rather than an equality;
+    /// the rounding of `gamma_multiply` is egui's business.
     ///
-    /// 🚨 **§15 D767 introduced this gap and the entire suite stayed green**, which
-    /// is why the assertion exists rather than the fix alone. Until the ramp's
-    /// opacity moved off the stops, `stops_of` *was* what the paint looked like, so
-    /// every chip in the app was correct for free; the moment it became a stored
-    /// field, every reader of the old derivation became a bug. **A derived value
-    /// that becomes a stored one is invisible to every gate in this project** — the
-    /// types are unchanged, the callers still compile, and the picture is wrong.
-    ///
-    /// ⚠️ **Both halves, because the defaulting is the decision.** An assertion that
-    /// only checked the chip would be satisfied by folding the opacity into
-    /// `stop_colours` as well, which dims the handles the user is dragging.
-    ///
-    /// **Flip, run:** making `ramp` return `stop_colours(brush)` unchanged — the
-    /// pre-D773 body — fails at the chip assertion, whose message reports the faded
-    /// chip reading the control's own `255`. Predicted correctly. ⚠️ **No pair of
-    /// numbers here**, because this is an `assert!` rather than an `assert_eq!`:
-    /// the failure names what the chip *did* read and never the value it should
-    /// have, so a "`255` against `76`" gloss describes a message the run does not
-    /// print. The assertion is deliberately a `<` rather than an equality — the
-    /// rounding of `gamma_multiply` is egui's business and not this test's.
+    /// flip: `ramp` returns `stop_colours(brush)` unchanged → fails at the chip
+    /// assertion, the faded chip reading the control's own `255`.
     #[test]
     fn a_faded_gradient_dims_its_chip_and_not_its_stop_bar() {
         let brush = crate::panels::paint::default_brush(
@@ -2891,42 +2433,20 @@ mod grid_orphan_tests {
     }
 
     /// **The knob hangs 7pt past each end of its row, and the card's padding is
-    /// what catches it** (§15 D766).
+    /// what catches it.** The vertical reach is bounded (7.0 in a 7.5 half-row);
+    /// the horizontal is not, and fits only because `PAD` is 11 — an accidental
+    /// clearance a layout change could spend. The ink is read out of the painter
+    /// rather than recomputed from constants.
     ///
-    /// 🚨 **Nothing in this module asserted a single dimension of the sliders**
-    /// before this — eleven tests covering chips, placement, hex fields, radial
-    /// centres and palettes, and none touching `slider_track` or `slider_knob`. So
-    /// §15 D673 could describe the geometry wrongly for six days (it says this
-    /// slider *"is given room where `ui::slider`'s overhangs"*, true only of the
-    /// vertical axis) and nothing disagreed.
-    ///
-    /// The vertical half is genuinely bounded — 7.0 of reach in a 7.5 half-row. The
-    /// horizontal half is not bounded at all: `slider_knob` puts the centre at
-    /// `track.min.x + width * t` with no inset, so `t = 0` and `t = 1` reach 7pt
-    /// outside. It fits because `PAD` is 11, which is a fact about the *card*
-    /// rather than about the slider, and is exactly the kind of accidental clearance
-    /// that a later layout change spends without noticing.
-    ///
-    /// **Flip, run:** dropping `PAD` to 6 fails at the horizontal assertion — the
-    /// knob would be drawn outside the card. Predicted correctly. Growing the knob's
-    /// outer stroke radius from 6.5 to 8.0 fails the vertical one, which is the
-    /// change somebody adjusting the knob's weight would actually make.
-    ///
-    /// ⚠️ **A first draft of this asserted constants against constants** — it
-    /// recomputed the knob's reach as a literal and compared it to `TRACK_H + 6.0`
-    /// and `PAD`, which clippy's `assertions_on_constants` reported and which was
-    /// right to report: it restated arithmetic rather than measuring the drawing,
-    /// so it would have passed against any `slider_knob` at all. The ink is read
-    /// out of the painter now, which is `ui.rs`'s own slider test's method and the
-    /// reason that one has teeth.
+    /// flip: `PAD` dropped to 6 → fails at the horizontal assertion; the knob's
+    /// outer stroke radius grown from 6.5 to 8.0 → fails the vertical one.
     #[test]
     fn the_alpha_knob_stays_inside_the_cards_padding_at_both_ends() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let track = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(120.0, TRACK_H));
 
-        // Both ends, because the overhang is symmetric and a knob clamped at one
-        // end only is a plausible wrong version.
+        // Both ends: a knob clamped at one end only is a plausible wrong version.
         for (label, t) in [("t = 0", 0.0_f32), ("t = 1", 1.0)] {
             let out = ctx.run_ui(
                 egui::RawInput {
@@ -2976,13 +2496,8 @@ mod grid_orphan_tests {
 
 #[cfg(test)]
 mod text_colour_route_tests {
-    //! **How the picker reaches a text layer's colour, and which valve arm it
-    //! does not use** (§15 D802).
-    //!
-    //! Written while trying to cover `char_valve`'s third arm, which the roadmap
-    //! held as *"writable now and unwritten"*. It is not writable from here: the
-    //! controls §15 D523 kept that arm for do not reach it. What is here instead
-    //! is the route they *do* take, which had no test either.
+    //! **How the picker reaches a text layer's colour**: a click goes through
+    //! `write_slot` and a drag through `char_valve`.
     use super::*;
     use crate::app::OndinApp;
     use crate::theme;
@@ -3031,8 +2546,7 @@ mod text_colour_route_tests {
         app.session.adopt_document(doc, None);
         app.session.selection.set_one(id);
         // Without this the picker orphans itself on its first frame: `TextColor`
-        // is only *shown* while the Type panel's Character tab is up, so a picker
-        // left over it would be editing something not on screen.
+        // is only shown while the Type panel's Character tab is up.
         app.type_menu = Some(crate::app::TypeTab::Character);
         app.picker = Some(Picker::new(
             id,
@@ -3049,50 +2563,16 @@ mod text_colour_route_tests {
         }
     }
 
-    /// **A click on the picker's plane sets a text layer's colour** — by a
-    /// route that does not go through `char_valve` at all (§15 D802).
+    /// **A click on the picker's plane sets a text layer's colour.** The route is
+    /// `sv_plane` → `write_stop_colour` → `pointer_slot`, which on `clicked()`
+    /// calls `write_slot` directly and never reaches `valve_slot`; a drag enters
+    /// the valve (see `a_drag_on_the_picker_writes_a_text_layers_colour_once`).
+    /// This route is read, not instrumented, so the test does not assert it.
     ///
-    /// ⚠️ **That second clause is the route, read, and not an assertion**: no
-    /// arm is instrumented here, and the title used to say it as though it were
-    /// asserted (§15 D849, `[X4-L6-03]`). The route that *does* enter the valve
-    /// is the drag, and `a_drag_on_the_picker_writes_a_text_layers_colour_once`
-    /// below is its test. The paragraph on the third arm is history: §15 D812
-    /// deleted that arm on the strength of this measurement.
-    ///
-    /// The route is `hue_slider`/`sv_plane` → `write_stop_colour` →
-    /// `pointer_slot`, and the first thing `pointer_slot` does after the
-    /// cancelled-gesture bail is `if resp.clicked() { self.write_slot(…);
-    /// return; }`. **A click never reaches `valve_slot`**, so it never reaches
-    /// `char_valve`; a *drag* does, as the engaged arm, and its release as the
-    /// falling edge.
-    ///
-    /// 🚨 **Which makes `char_valve`'s third arm unreachable from the controls
-    /// §15 D523 kept it for.** That entry's reason reads *"without it a click on
-    /// the hue strip would commit nothing, ever"*. Measured by instrumenting all
-    /// three arms and driving this very click: `char_valve` is entered with
-    /// `changed=false dragged=false focus=false lost_focus=false` on every frame,
-    /// so no arm fires — and the colour commits anyway, through `write_slot`, one
-    /// call earlier. Flipping the third arm out entirely leaves this test green.
-    /// **The arm's users are not the ones named**, which is why removing it left
-    /// 1,042 tests green and why the roadmap's "write a test for it" is the wrong
-    /// next move: what is owed first is whether anything reaches it.
-    ///
-    /// ⚠️ **The fixture is two things, and the picker closes itself without the
-    /// second.** A text node selected is not enough: `TextColor` orphans unless
-    /// `type_menu` is on the Character tab, because the slot is only *shown*
-    /// there and a picker over an unshown control is what that guard prevents.
-    /// Without it `app.picker` is `None` by the second frame and every click in a
-    /// 5 × 66 sweep landed on nothing — which reads exactly like "the click does
-    /// not work" and is the fixture not being in the state the test is about.
-    ///
-    /// ⚠️ **The coordinate is measured, not derived.** With the picker spawned at
-    /// (400, 300), (500, 344) is on the saturation/value plane. The sweep that
-    /// found it also says what is *not* there: no column in x ∈ {420…600} over
-    /// y ∈ [280, 800] ever moved the hue off red, so the plane is what this
-    /// reaches and the hue strip's own band is still unlocated. ⚠️ **The colour
-    /// expected is a reading too**: `152` at the picker's old 240 width, `165` once
-    /// it widened to 272 for the *Variables* tab (§15 D1043) — the same point is
-    /// further left on a wider plane, so less saturated.
+    /// The fixture needs the Character tab up, or `TextColor` orphans the picker.
+    /// The coordinate (500, 344) with the picker spawned at (400, 300) is on the
+    /// saturation/value plane, and the expected colour is a reading at the 272
+    /// width: the same point is less saturated on a wider plane.
     #[test]
     fn a_click_on_the_picker_writes_a_text_layers_colour() {
         let ctx = egui::Context::default();
@@ -3139,24 +2619,14 @@ mod text_colour_route_tests {
     }
 
     /// **A drag on the picker's plane sets a text layer's colour through
-    /// `char_valve`, and commits once, on the release** (§15 D849,
-    /// `[X4-L6-03]`).
+    /// `char_valve`, and commits once, on the release.** This is the route that
+    /// enters the valve (`pointer_slot` → `valve_slot` →
+    /// `write_char_slot(CharWrite::Valve)`), previewing every frame and committing
+    /// on the falling edge. One undo step fails a commit-while-dragging version;
+    /// the colour landing fails a version with no falling edge.
     ///
-    /// The click test above covers the route that returns before the valve; this
-    /// is the one that enters it — `pointer_slot`'s fall-through to `valve_slot`
-    /// → `write_char_slot(CharWrite::Valve)` → `char_valve`, previewing on every
-    /// frame the plane is dragged and committing on the falling edge. §15 D812
-    /// left `char_valve` with exactly those two arms, so a picker drag over a
-    /// text colour now commits through the falling edge alone, and until this
-    /// nothing in the workspace drove it.
-    ///
-    /// ⚠️ **One undo step, not one per frame**, is the assertion a
-    /// commit-while-dragging version fails; *"the colour landed"* is the one a
-    /// version with no falling edge fails.
-    ///
-    /// ⚠️ **Flip-check, run**: `char_valve`'s `else if was_engaged` arm disabled
-    /// fails at *"the drag writes a colour"* — the preview is dropped on the
-    /// floor and nothing commits.
+    /// flip: disable `char_valve`'s `else if was_engaged` arm → fails at "the drag
+    /// writes a colour".
     #[test]
     fn a_drag_on_the_picker_writes_a_text_layers_colour_once() {
         let ctx = egui::Context::default();

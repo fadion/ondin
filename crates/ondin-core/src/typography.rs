@@ -6,24 +6,19 @@
 //! overrides). A paragraph attribute and a block attribute may not vary within a
 //! node today, so each is a plain field of [`ParagraphStyle`] / [`BlockStyle`].
 //! Scope is therefore a type-level fact: nothing can write a per-range
-//! alignment, because there is no span type that carries one. See §15 for why
-//! paragraph attributes are node-level rather than spanned — the short version is
-//! that parley lays a whole node out as one `Layout`, so a second `Alignment`
-//! would be a value the model could hold and the renderer had to ignore.
+//! alignment, because there is no span type that carries one. Parley lays a
+//! whole node out as one `Layout`, so a second `Alignment` would be a value the
+//! model could hold and the renderer had to ignore.
 //!
-//! **One span carries one attribute.** Two adjacent runs differing only in
-//! weight share every other attribute rather than duplicating a whole style
-//! struct, which is also the shape parley resolves styles in — so the layout
-//! call in `text.rs` is a translation rather than a reconciliation.
+//! **One span carries one attribute**, the shape parley resolves styles in, so
+//! the layout call in `text.rs` is a translation rather than a reconciliation.
 //!
 //! ## The boundary rule
 //!
 //! **Typing at the edge of a span inherits from the character to the left**,
 //! unless the caret was explicitly restyled while empty (`TextEdit::pending`).
-//! Every rich-text bug in every editor lives in this question, so it is stated
-//! once here rather than rediscovered per attribute; [`CharSpans::edited`] is
-//! the single implementation, and `spans_grow_leftwards_when_typing_at_a_seam`
-//! is the guard.
+//! [`CharSpans::edited`] is the single implementation, and
+//! `spans_grow_leftwards_when_typing_at_a_seam` is the guard.
 
 use peniko::Color;
 use serde::{Deserialize, Serialize};
@@ -36,16 +31,13 @@ use std::ops::Range;
 /// A length that is either absolute or a fraction of the font size.
 ///
 /// One type for line height, letter spacing, word spacing, paragraph spacing,
-/// indent, baseline shift and decoration thickness/offset — which is what makes
-/// [`Scaling::Photographic`](crate::node::TextSizing) legible as one rule
-/// ("multiply the `Px`, leave the `Em`") instead of a per-field list the scale
-/// tool has to remember.
+/// indent, baseline shift and decoration thickness/offset, so
+/// [`Scaling::Photographic`](crate::node::TextSizing) is one rule: multiply the
+/// `Px`, leave the `Em`.
 ///
-/// **`Em` is a fraction, not a CSS percentage.** The UI shows it as one (×100,
-/// which is the unit designers read) but the stored number is em, because CSS's
-/// own percentages do not mean this: `letter-spacing` rejects them outright, and
-/// for `text-indent` and margins they resolve against the containing block's
-/// width — a different basis, and never what is meant here.
+/// **`Em` is a fraction, not a CSS percentage.** The UI shows it ×100, but CSS's
+/// own percentages resolve against a different basis (`letter-spacing` rejects
+/// them, `text-indent` uses the containing block's width).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Length {
     Px(f64),
@@ -57,9 +49,7 @@ pub enum Length {
 ///
 /// **Canonicalized on write, so span coalescing can use exact equality.**
 /// Without it a drag producing `0.020000000000000004` never merges with a typed
-/// `0.02`: the span list fragments, the file grows, and every diff churns. Four
-/// places is a ten-thousandth of an em — finer than any font's unit grid — and
-/// a hundredth of a percent in the display unit.
+/// `0.02`. Four places is finer than any font's unit grid.
 const LENGTH_PLACES: i32 = 4;
 
 impl Default for Length {
@@ -74,16 +64,13 @@ impl Length {
     /// This length rounded to [`LENGTH_PLACES`] — the only form that is stored.
     ///
     /// Every constructor path goes through here: the setters below, the scale
-    /// tool, and IO on load, so a hand-edited file cannot smuggle a value that
-    /// defeats coalescing.
+    /// tool, and load, so a hand-edited file cannot smuggle a value that defeats
+    /// coalescing.
     ///
-    /// ⚠️ **"IO on load" was aspirational until 2026-09-06 and is now true, but by
-    /// a road worth naming.** Nothing in `io/` calls this function — `TextStyle`
-    /// and `Spans<A>` are plain `#[derive(Deserialize)]`, so serde builds them
-    /// field by field. What reaches it is [`Spans::clamped`], the loader's one
-    /// pass over every span, through [`canonical_attr`] → `set_on` → the `set` arm
-    /// that calls this. **The defaults themselves are still not canonicalized on
-    /// load**; `canonical_attr`'s doc says why and how far that reaches.
+    /// Load reaches it indirectly: `io/` does not call it (serde builds the
+    /// structs field by field), but [`Spans::clamped`] passes every span through
+    /// [`canonical_attr`]. The defaults themselves are not canonicalized on load;
+    /// `canonical_attr`'s doc says why.
     pub fn canonical(self) -> Self {
         let round = |v: f64| {
             if !v.is_finite() {
@@ -120,46 +107,21 @@ impl Length {
     /// **not** `Em(0.0)`.
     ///
     /// The `skip_serializing_if` predicate for every optional [`Length`] in this
-    /// module (§15 D537). [`Self::is_zero`] was that predicate and answers `true`
-    /// for both variants, so a field holding `Em(0.0)` was **absent from the
-    /// file** and came back as `Px(0.0)`, because [`Length::default`] is `Px`.
-    /// `[S6.1-L1-03]`: set the letter-spacing field to `%`, leave it at 0, save,
-    /// reopen — the suffix reads `px`. Measured: `Em(0) reload = Px(0.0)
-    /// unit=Px`.
+    /// module. [`Self::is_zero`] answers `true` for both variants, so an `Em(0.0)`
+    /// would be absent from the file and reload as `Px(0.0)` ([`Length::default`]),
+    /// losing the user's choice of unit.
     ///
-    /// **Zero is the one value at which the unit is unobservable in the
-    /// drawing and still observable in the panel**, which is what makes it the
-    /// only value this can go wrong at: `resolve` gives `0.0` for both, so
-    /// nothing rendered ever disagrees, and the suffix toggle
-    /// ([`Self::in_unit`]) is a pure model call that maps `Px(0.0)` straight to
-    /// `Em(0.0)`. The user's choice of unit is real data and survives now.
+    /// Zero is the one value at which the unit is unobservable in the drawing but
+    /// observable in the panel: `resolve` gives `0.0` for both, while the suffix
+    /// toggle ([`Self::in_unit`]) maps `Px(0.0)` straight to `Em(0.0)`.
     ///
-    /// **Costs four bytes and only where the unit is `Em`.** The common case —
-    /// a field never touched, sitting at the `Px(0.0)` default — is elided
-    /// exactly as before, so no existing file grows.
+    /// No schema bump: it only adds a key an older reader already understands.
     ///
-    /// ⚠️ **No schema bump.** This only ever *adds* a key an older reader
-    /// already understands: the field is `#[serde(default)]` and `Em` is not a
-    /// new variant, so a file written here loads in an older build as `Em(0.0)`
-    /// and a file written there loads here as `Px(0.0)` — which is what it
-    /// always meant. The change is invisible to `io::MIGRATIONS`.
-    ///
-    /// ⚠️ **This closes the *save* half of `[S6.1-L1-03]` and deliberately not
-    /// the other half.** A zero-valued `Em` span is still kept by `normalize`
-    /// (which compares structurally) and so still reported *Mixed* through
-    /// `shared_in` for text whose letter spacing is zero everywhere. The two
-    /// halves pull opposite ways — preserving the unit **requires** keeping the
-    /// span, so making `Em(0.0)` and `Px(0.0)` compare equal would fix the
-    /// readout by throwing away the very thing this predicate exists to keep.
-    /// The readout is a comparison on the *resolved* value and belongs at the
-    /// reader, and **that is where it now is** (§15 D799):
-    /// `panels::typography`'s `agreed_zero`, reached from `TypeSubject::shared`
-    /// and `para_shared` only after `shared_in` has answered `None`, so nothing
-    /// here or in `normalize` had to change. ⚠️ **It stops at zero deliberately**
-    /// — zero is the one amount at which the unit says nothing about the ink,
-    /// which is why it was the only amount that read wrong; widening it to
-    /// lengths that merely resolve alike *at the current size* is a further
-    /// decision and is argued at `agreed_zero`.
+    /// A zero-valued `Em` span is still kept by `normalize` (it compares
+    /// structurally) and so still reads *Mixed* through `shared_in`; preserving the
+    /// unit requires keeping the span. The readout compares resolved values at the
+    /// reader instead: `panels::typography`'s `agreed_zero` (§15 D799), which
+    /// stops at zero deliberately.
     pub fn is_default_zero(&self) -> bool {
         matches!(self, Length::Px(v) if *v == 0.0)
     }
@@ -307,18 +269,14 @@ pub const ITAL: Tag = Tag::new(*b"ital");
 /// The `slnt` axis, the other way a family expresses a slope.
 pub const SLNT: Tag = Tag::new(*b"slnt");
 
-/// Axes the panel does not list, because a dedicated control already drives
-/// them and two controls for one axis is two chances to disagree.
-///
-/// `opsz` is *not* here: it has its own Auto/Manual mode and its own row, which
-/// is the row this list would otherwise hide.
+/// Axes the panel does not list, because a dedicated control already drives them.
+/// `opsz` is not here: it has its own Auto/Manual row.
 pub const AXES_DRIVEN_ELSEWHERE: [Tag; 3] = [WGHT, ITAL, SLNT];
 
 /// Quantum an axis value is rounded to.
 ///
-/// Tenths: fine enough for `wght` (a 1–1000 axis) and for `opsz` in points,
-/// coarse enough that dragging a slider cannot fill the file with sixteen
-/// digits. Canonicalized for the same reason [`Length`] is.
+/// Tenths: fine enough for `wght` and `opsz`, coarse enough that a slider drag
+/// cannot fill the file with digits. Canonicalized for [`Length`]'s reason.
 const AXIS_QUANTUM: f64 = 0.1;
 
 impl AxisSetting {
@@ -340,26 +298,12 @@ fn quantize(v: f64, q: f64) -> f64 {
     round_to_places(r)
 }
 
-/// Round to [`LENGTH_PLACES`] decimals **without overflowing** (§15 D424).
+/// Round to [`LENGTH_PLACES`] decimals **without overflowing**.
 ///
-/// ⚠️ **The obvious spelling, `(v * 10^places).round() / 10^places`, turns a
-/// finite number into an infinite one**, and the guard above it does not help:
-/// `is_finite` is asked of the *input*. `10^4` is the multiplier here, so any
-/// `|v| > f64::MAX / 1e4 ≈ 1.7977e304` overflows in the multiply and
-/// `inf.round() / 1e4` is `inf`. Measured: `canonical(Px(1e304))` is finite,
-/// `canonical(Px(1e305))` is `inf`.
-///
-/// **That is a document that never opens again**, because `Px(inf)` is written
-/// by `serde_json` as `null` and refused on the way back in. And it is reachable
-/// through the documented door — `Spans::set` routes every value through the
-/// canonicalizer — so this is the sanitizer *manufacturing* the bad value out of
-/// a good one, which is the one position in this class where the operation-level
-/// guard would be the wrong answer: it would report a refused letter-spacing
-/// edit for a number the user is entitled to type.
-///
-/// A magnitude that large has no fractional part left to round — the gap between
-/// representable neighbours is astronomically larger than `1e-4` — so returning
-/// it unchanged is not an approximation but the exact answer.
+/// The obvious `(v * 10^places).round() / 10^places` turns a finite `|v|` above
+/// `f64::MAX / 1e4` into `inf`, which `serde_json` writes as `null` and refuses on
+/// load: a document that never opens again. Such a magnitude has no fractional
+/// part left to round, so returning it unchanged is the exact answer.
 fn round_to_places(v: f64) -> f64 {
     let scale = 10_f64.powi(LENGTH_PLACES);
     if v.abs() >= f64::MAX / scale {
@@ -379,26 +323,21 @@ pub struct FeatureSetting {
 
 /// `Some(n)` for `ss01`–`ss20`, the stylistic sets.
 ///
-/// **The number, not the prefix.** `"ss".starts_with` is the obvious test and it
-/// is wrong twice: it accepts `ssty` (math script-style alternates, a shaping
-/// mechanic) and it says nothing about which set, which is the whole of the
-/// generic name a face that leaves `FeatureParams` NULL gets. Anything that
-/// wants "is this a stylistic set" wants this.
+/// **The number, not the prefix.** `"ss".starts_with` accepts `ssty` (math
+/// script-style alternates) and says nothing about which set, which is the whole
+/// of the generic name a face with NULL `FeatureParams` gets.
 ///
-/// The range is closed at 20 because the registry closes it there — a `ss21` is
-/// an unregistered private tag, and treating it as a set would invent a meaning
-/// the spec does not give it.
+/// The range closes at 20 because the registry does; `ss21` is a private tag.
 pub fn stylistic_set(tag: Tag) -> Option<u8> {
     numbered_tag(tag, b"ss", 1..=20)
 }
 
 /// `Some(n)` for `cv01`–`cv99`, the character variants.
 ///
-/// The other font-defined range, and the other half of [`stylistic_set`]'s
-/// reasoning. `cvXX` differs in what the font may say about it: a
+/// The other font-defined range, by [`stylistic_set`]'s reasoning. A
 /// `CharacterVariantParams` table carries a label, a tooltip, the characters the
-/// feature varies and a count of *named values*, where a stylistic set carries a
-/// label alone.
+/// feature varies and a count of named values; a stylistic set carries a label
+/// alone.
 pub fn character_variant(tag: Tag) -> Option<u8> {
     numbered_tag(tag, b"cv", 1..=99)
 }
@@ -425,9 +364,8 @@ fn numbered_tag(tag: Tag, prefix: &[u8; 2], range: std::ops::RangeInclusive<u8>)
 
 /// How a run's characters are cased on the way to the shaper.
 ///
-/// **A display transform, never a rewrite of `content`.** The stored text is
-/// what the user typed, so switching back to [`TextCase::Original`] recovers it
-/// exactly and a search or an export reads the real string.
+/// **A display transform, never a rewrite of `content`**, so switching back to
+/// [`TextCase::Original`] recovers the typed text exactly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextCase {
     #[default]
@@ -439,11 +377,8 @@ pub enum TextCase {
 }
 
 impl TextCase {
-    /// **Display order, and it is not the declaration order.** The panel draws
-    /// this as one four-cell track, and the three transforms read as a scale
-    /// there — nothing done, then a capital per word, then all capitals, then
-    /// none — which is the order a designer scans them in. `Title` is declared
-    /// last because it was added last; where it *sits* is a UI question.
+    /// **Display order, not declaration order**: nothing done, a capital per word,
+    /// all capitals, none — the order the panel's four-cell track reads as a scale.
     pub const ALL: [TextCase; 4] = [
         TextCase::Original,
         TextCase::Title,
@@ -451,11 +386,8 @@ impl TextCase {
         TextCase::Lower,
     ];
 
-    /// **The label is a sample of what the cell does**, not a name for it: three
-    /// of the four are one word each in every language and the picture is faster
-    /// to read than any of them. `Aa`/`AA`/`aa` rather than `Ag`/`AG`/`ag` — the
-    /// doubled letter is what the rest of the industry draws, and consistency
-    /// with what a designer already recognises beats the descender.
+    /// The label is a sample of what the cell does (`Aa`/`AA`/`aa`, as the rest of
+    /// the industry draws it), not a name for it.
     pub fn label(self) -> &'static str {
         match self {
             TextCase::Original => "As typed",
@@ -468,9 +400,8 @@ impl TextCase {
 
 /// How the ink of an underline or strikethrough is broken up.
 ///
-/// Ours, not parley's — parley draws no decoration at all, it only reports where
-/// one goes. Solid and the two dashed forms reuse the stroke dash machinery
-/// (§6.3); wavy is a sine sampled along the run.
+/// Ours, not parley's (it only reports where a decoration goes). Solid and the
+/// dashed forms reuse the stroke dash machinery (§6.3); wavy is a sampled sine.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LineStyle {
     #[default]
@@ -500,16 +431,12 @@ impl LineStyle {
 
 /// An underline or a strikethrough.
 ///
-/// **`None` means "the font decides"** for thickness, offset and colour — the
-/// same "absence is a state" pattern as [`Pivot`](crate::node::Pivot), and what
-/// keeps the value correct across a font swap: a stored 1.2px underline on a
-/// 12px face is wrong the moment the family changes, where the font's own `post`
-/// entry is right on both.
+/// **`None` means "the font decides"** for thickness, offset and colour, which
+/// stays correct across a font swap where a stored 1.2px underline would not.
 ///
 /// **[`Self::skip_ink`] is the one field whose default is not the zero value**, so
-/// [`Default`] is written out below rather than derived: skip-ink is on unless it
-/// is switched off, and a derived `false` would have silently changed what every
-/// `..Decoration::default()` in the workspace means.
+/// [`Default`] is written out rather than derived: a derived `false` would change
+/// what every `..Decoration::default()` means.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Decoration {
     /// `None` = the font's own thickness (`post.underlineThickness`,
@@ -518,15 +445,10 @@ pub struct Decoration {
     pub thickness: Option<Length>,
     /// Distance from the baseline, `None` = the font's own.
     ///
-    /// **Signed, and positive is *up*** — against the direction every other y in
-    /// the model runs, because this one is parley's, inherited from
-    /// `post.underlinePosition`. `text::decoration_ink` computes
-    /// `top = baseline - offset` and the panel's tooltip says upwards; this
-    /// comment used to say *down*, and was the odd one out of the three.
-    ///
-    /// The practical consequence, and the reason it is worth a paragraph: pushing
-    /// an underline further **away** from the glyphs means typing a *negative*
-    /// number.
+    /// **Signed, and positive is *up*** — against every other y in the model,
+    /// because it is parley's, inherited from `post.underlinePosition`
+    /// (`text::decoration_ink` computes `top = baseline - offset`). Pushing an
+    /// underline further from the glyphs means typing a *negative* number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset: Option<Length>,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -536,19 +458,14 @@ pub struct Decoration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Color>,
     /// Whether the band breaks around the glyph ink it crosses — CSS's
-    /// `text-decoration-skip-ink` (§5.4, `text::skip_ink`, §15 D356/D357).
+    /// `text-decoration-skip-ink` (§5.4, `text::skip_ink`).
     ///
-    /// **`true` is the default and the CSS initial value**, which is why this is
-    /// the field that costs `Decoration` its derived [`Default`]: `false` is the
-    /// state somebody asked for, and it is stored rather than the other way round
-    /// so that every file written before the toggle existed keeps the drawing it
-    /// was saved with.
+    /// **`true` is the default and the CSS initial value**, stored that way round
+    /// so files written before the toggle existed keep their drawing.
     ///
-    /// **Read for underlines only**, because css-text-decor-4 skips underlines and
-    /// overlines and never a `line-through` — a strikethrough is *meant* to cross
-    /// the letters. A strikethrough therefore carries this field and nothing looks
-    /// at it, and the panel does not offer the toggle on one: a control whose state
-    /// changed nothing would be the more expensive kind of honesty.
+    /// **Read for underlines only**: css-text-decor-4 never skips a `line-through`,
+    /// which is meant to cross the letters. A strikethrough carries the field
+    /// unread and the panel offers no toggle on one.
     #[serde(default = "skips_ink", skip_serializing_if = "is_skipping_ink")]
     pub skip_ink: bool,
 }
@@ -628,48 +545,21 @@ pub enum CharAttrKind {
     Strikethrough,
     Case,
     BaselineShift,
-    /// **Appended, and that is load-bearing rather than tidiness.** This order *is*
-    /// the `(attribute, start)` sort a saved file is written in, so a variant that
-    /// **moves** reorders the spans of every document already on disk — every one of
-    /// them churns a diff on its next save, saying nothing.
-    ///
-    /// ⚠️ **The hazard is a variant that moves, not a variant that arrives** (§15
-    /// D598, correcting the reason §15 D154 gave and this comment repeated). A *new*
-    /// kind inserted in the middle leaves the fourteen already here in the same
-    /// relative order, so a document that does not use it sorts and serializes
-    /// byte-for-byte as before; what churns every file is swapping two of the
-    /// fourteen, which is a one-line edit with no other symptom. Appending is still
-    /// the rule, because it is the only edit that *cannot* move one — but
-    /// [`CharAttrKind::ALL`] is what enforces it, and it enforces the real rule
-    /// rather than this one's proxy.
+    /// **Appended, and that is load-bearing.** This order is the
+    /// `(attribute, start)` sort a saved file is written in, so a variant that
+    /// moves reorders the spans of every document on disk. A new kind appended
+    /// moves none of the others; [`CharAttrKind::ALL`] enforces that.
     Color,
 }
 
 impl CharAttrKind {
-    /// Every kind, in the declaration order that *is* the on-disk span sort.
+    /// Every kind, in the declaration order that *is* the on-disk span sort
+    /// (§5.11, invariant 9), written out so that a reorder is a diff — see
+    /// `char_attribute_kinds_keep_the_order_a_saved_file_is_written_in`.
     ///
-    /// **Written out so that a reorder is a diff.** The order of these fifteen is
-    /// invariant 9's byte-stability guarantee (§5.11), and until §15 D598 nothing
-    /// could see it change: `colour_sorts_after_every_other_attribute` compared
-    /// `Color` against a hand-written list of the other fourteen, and swapping any
-    /// two of those fourteen leaves all fourteen comparisons true. The measured flip
-    /// — `Family` and `Size` exchanged, one line — left the whole workspace green.
-    ///
-    /// ⚠️ **Completeness is not compiler-checked and deliberately so.** A sixteenth
-    /// variant that is not added here makes no test red, and that is the correct
-    /// answer rather than a hole: a kind appended after `Color` moves none of these
-    /// fifteen, so no document on disk changes and there is nothing to catch. What
-    /// this list is for is the edit that *does* churn every file, and for that it is
-    /// exact — see `char_attribute_kinds_keep_the_order_a_saved_file_is_written_in`.
-    ///
-    /// 🚨 **Adding a sixteenth kind here *will* go red, and this is the note that
-    /// says what to do about it.** That test also asserts `ALL.last() == Color`,
-    /// which restates D154's own rule — so appending, the one edit D154 blesses,
-    /// fails it. **Amend the assertion; do not move `Color` to keep it.** Moving a
-    /// variant that is already on disk is the exact thing this list exists to
-    /// prevent, and the ascending assertion above it is the load-bearing half
-    /// (§15 D598). Written here rather than only in the test, because the person
-    /// who trips it will be standing at the enum.
+    /// Completeness is deliberately not checked: a kind appended after `Color`
+    /// changes no document on disk. Appending one will fail that test's
+    /// `ALL.last() == Color` assertion; amend the assertion, never move `Color`.
     pub const ALL: [CharAttrKind; 15] = [
         CharAttrKind::Family,
         CharAttrKind::Size,
@@ -758,17 +648,13 @@ pub struct TextStyle {
     pub baseline_shift: Length,
     /// The ink the glyphs are drawn in, or `None` for **the node's own fill stack**.
     ///
-    /// **The one character attribute whose absence is not merely a default**, and
-    /// the reason it is `Option` rather than a `Color`: a text node's colour is
-    /// already expressed, as `Paint.fills` — a *list*, which a character attribute
-    /// cannot be without a coalescing story for `Vec<Fill>` and its visibility
-    /// flags. So `None` keeps the multi-fill feature working for every run that has
-    /// not been given a colour of its own, and needs no migration: every existing
-    /// document deserializes to `None` and draws exactly as it did.
+    /// **The one character attribute whose absence is not merely a default**: the
+    /// node's colour is `Paint.fills`, a *list* a character attribute cannot be
+    /// without a coalescing story for `Vec<Fill>`. So `None` keeps multi-fill
+    /// working for every run without a colour of its own.
     ///
-    /// A run *with* a colour draws once, in that colour. The asymmetry is
-    /// deliberate — a node can have two stacked translucent fills and a run cannot
-    /// — and it is the same trade [`Decoration::color`] already makes.
+    /// A run *with* a colour draws once, in that colour, as [`Decoration::color`]
+    /// already does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<Color>,
 }
@@ -870,35 +756,16 @@ impl TextStyle {
     }
 
     /// The photographic scale tool's pass over the **node default** scope —
-    /// [`ParagraphStyle::scaled`]'s twin, and the one that was missing (§15 D664,
-    /// `[S6.1-L3-07]`).
+    /// [`ParagraphStyle::scaled`]'s twin. `Size` is clamped to
+    /// [`MIN_FONT_SIZE`]`..=`[`MAX_FONT_SIZE`], the four lengths go through
+    /// [`Length::scaled`], both decorations through [`scale_decoration`].
     ///
-    /// 🚨 **Core owned this rule for the span half and published nothing for the
-    /// node half, so `ondin-app` re-wrote it.** `CharAttr::scaled_by` already
-    /// encodes all six decisions — `Size` clamped to
-    /// [`MIN_FONT_SIZE`]`..=`[`MAX_FONT_SIZE`], the four lengths through
-    /// [`Length::scaled`], both decorations through [`scale_decoration`] — and
-    /// `tools::scaled_text_scopes` re-stated every one of them in a `TextStyle`
-    /// literal, above a **byte-identical private twin** of `scale_decoration`.
-    /// The two agreed; nothing made them agree tomorrow, and the asymmetry was
-    /// the tell: `ParagraphStyle::scaled` existed for the paragraph scope and its
-    /// caller sat one line below the copy.
-    ///
-    /// 🚨 **Written as a field literal and *not* as a loop through
-    /// [`Self::set`], which is the obvious spelling and is wrong here.** `set`
-    /// canonicalizes — [`Length::canonical`] rounds, `canonical_decoration`
-    /// floors a thickness at zero — and [`Spans::scaled`] does **not**: it maps
-    /// `scaled_by` over the span attrs and hands them to `from_parts` raw. A
-    /// canonicalized default compared against an un-canonicalized span is a
-    /// different comparison from the one `normalize` makes today, so a span that
-    /// equalled the default before the scale could stop equalling it after and be
-    /// **stored** where it used to vanish. The two scopes have to be scaled the
-    /// same way or the normalization between them stops meaning what it says.
-    ///
-    /// What keeps this and [`CharAttr::scaled_by`] in step is therefore a test
-    /// rather than the type system — `typography::tests::
-    /// a_scaled_style_agrees_with_the_span_rule_attribute_by_attribute` — and it
-    /// is the reason [`scale_decoration`] is called from both rather than copied.
+    /// **A field literal, not a loop through [`Self::set`].** `set` canonicalizes
+    /// and [`Spans::scaled`] does not (it hands `scaled_by` results to
+    /// `from_parts` raw); a canonicalized default compared against an
+    /// un-canonicalized span could stop equalling it and be stored where it used to
+    /// vanish. `a_scaled_style_agrees_with_the_span_rule_attribute_by_attribute`
+    /// keeps this in step with [`CharAttr::scaled_by`].
     #[must_use]
     pub fn scaled(&self, factor: f64) -> Self {
         TextStyle {
@@ -915,17 +782,9 @@ impl TextStyle {
 
     /// Whether `opsz` is being tracked from the font size rather than typed.
     ///
-    /// ⚠️ **The rule this predicate serves lives in `text::axis_settings`, and
-    /// there used to be a second copy of it here** (§15 D571). `[S6.1-L3-04]`:
-    /// `TextStyle::optical_size` computed the same value, clamped it to the axis
-    /// range where `axis_settings` passes a stored coordinate through raw, carried
-    /// the only test of the Manual arm anywhere — and had **zero production
-    /// callers**, so the tested copy was not the one that ran. `dead_code` cannot
-    /// say so: a `pub` item in a library crate is API whatever calls it.
-    ///
-    /// It is deleted. This predicate is the half `axis_settings` actually asks, and
-    /// keeping it here rather than beside the synthesis is deliberate — it is a
-    /// question about the *style*, and the panel asks it too.
+    /// The rule this predicate serves lives in `text::axis_settings`. It sits here
+    /// rather than beside the synthesis because it is a question about the
+    /// *style*, and the panel asks it too.
     pub fn optical_size_is_auto(&self) -> bool {
         !self.variations.iter().any(|a| a.tag == OPSZ)
     }
@@ -934,27 +793,14 @@ impl TextStyle {
 /// A decoration rounded to what the file and the controls can express, and with
 /// its **thickness floored at zero**.
 ///
-/// ⚠️ **The offset is signed and the thickness is not, and they used to share a
-/// range** (§15 D546). `[S6.3-L1-02]`: the panel's `optional_length_field` serves
-/// both fields and was handing thickness the *offset's* symmetric range, so
-/// `−5 px` was accepted, shown, and saved. **One value then rendered three
-/// ways** — `text::decoration_ink` floors the resolved size with `.max(0.0)` and
-/// drew nothing, `export::svg::run_attrs` has no counterpart and wrote
-/// `text-decoration-thickness="-5px"` verbatim, and re-importing that file gave
-/// a third answer, because `svg_in` reads no decoration thickness at all and the
-/// line came back at the face's own weight. No warning on any of them.
+/// The offset is signed and the thickness is not. A negative thickness would
+/// render three ways (the canvas draws nothing, the SVG export writes it verbatim,
+/// re-import ignores it), so the floor is in the model, like the `Size` and
+/// `Weight` clamps in `TextStyle::set`: a range only the panel enforces is ignored
+/// by a hand-edited file or an MCP client.
 ///
-/// **The clamp is here rather than only at the panel, and that is the point.**
-/// `TextStyle::set`'s `Size` and `Weight` arms clamp two lines above this for the
-/// same reason — the model outlives the control, and a range the model does not
-/// enforce is a range a hand-edited file, an MCP client or a future writer
-/// ignores. Flooring at the panel alone would have left every already-saved file
-/// carrying a negative thickness.
-///
-/// **Zero is kept rather than turned into `None`**, because they are different
-/// answers: `None` is *"the font decides"* and draws the face's own weight, while
-/// `Some(0.0)` is *"no line"* — which is what a negative was already drawing on
-/// the canvas, so this makes the file say what the screen already showed.
+/// **Zero is kept rather than turned into `None`**: `None` is "the font decides",
+/// `Some(0.0)` is "no line".
 fn canonical_decoration(mut d: Decoration) -> Decoration {
     d.thickness = d.thickness.map(Length::canonical).map(|t| match t {
         Length::Px(v) => Length::Px(v.max(0.0)),
@@ -968,20 +814,12 @@ fn canonical_decoration(mut d: Decoration) -> Decoration {
 /// A colour rounded to what the file and the controls can actually express, so
 /// that equality is exact and spans coalesce.
 ///
-/// **`Color` is `[f32; 4]`, so equality is float equality** — this is
-/// [`Length::canonical`]'s lesson in another type. The same colour typed as hex and
-/// dragged off the picker's plane can differ in the last bit, and two spans that
-/// differ in the last bit never merge: the list grows, and every save churns a diff
-/// that says nothing.
+/// **`Color` is `[f32; 4]`, so equality is float equality**: a colour typed as hex
+/// and one dragged off the picker can differ in the last bit and never merge.
 ///
-/// **8 bits per channel, alpha included.** The hex field is 8-bit and the opacity
-/// field is whole percents, so nothing the UI can express is lost; `from_rgba8` is
-/// the round-trip both of those already go through. Quantizing alpha to 1/255 is a
-/// real consequence and the deliberate one — a stored alpha finer than the control
-/// that set it is a value the user cannot reproduce or clear.
-///
-/// This is also what `Decoration::color` was missing: it canonicalized its two
-/// `Length`s from the start and left its colour raw.
+/// **8 bits per channel, alpha included**, the round-trip the hex and opacity
+/// fields already go through. A stored alpha finer than the control that set it
+/// is a value the user cannot reproduce or clear.
 fn canonical_color(c: Color) -> Color {
     let rgba = c.to_rgba8();
     Color::from_rgba8(rgba.r, rgba.g, rgba.b, rgba.a)
@@ -994,25 +832,20 @@ fn canonical_color(c: Color) -> Color {
 /// One attribute of a scope whose values may be overridden over a byte range.
 ///
 /// **Implemented twice, so [`Spans`] is written once**: by [`CharAttr`] over
-/// [`TextStyle`] for the character scope, and by [`ParaAttr`] over
-/// [`ParagraphStyle`] for the paragraph one. Every invariant in `Spans`'
-/// documentation — the coalescing, the boundary rule, the byte-stable sort —
-/// is a property of the *list* rather than of the values in it, and a second
-/// copy of that list is how the two scopes would come to disagree about the
-/// question every rich-text bug lives in.
+/// [`TextStyle`] and by [`ParaAttr`] over [`ParagraphStyle`]. The coalescing, the
+/// boundary rule and the byte-stable sort are properties of the *list*, and a
+/// second copy is how the scopes would disagree.
 ///
-/// The methods are deliberately **not** named `kind`/`get`/`set`/`scaled`. The
-/// concrete types keep inherent methods under those names and the app calls them
-/// from everywhere; a trait method shadowing one would be a way to change what a
-/// call site means without changing what it says.
+/// The methods are deliberately **not** named `kind`/`get`/`set`/`scaled`: the
+/// concrete types keep inherent methods under those names, and a trait method
+/// shadowing one would change what a call site means without changing what it says.
 pub trait SpanAttr: Clone + PartialEq {
     /// The set of defaults a span of this attribute overrides.
     type Defaults: Clone;
     /// This attribute's identity without its value.
     ///
     /// `Ord` because the variant order *is* the `(attribute, start)` sort a
-    /// saved file is written in (§5.11, invariant 9) — which is why a new
-    /// variant is appended rather than inserted.
+    /// saved file is written in (§5.11, invariant 9).
     type Kind: Copy + Eq + Ord;
 
     fn attr_kind(&self) -> Self::Kind;
@@ -1020,9 +853,8 @@ pub trait SpanAttr: Clone + PartialEq {
     /// invisible against, and therefore the one that is never stored.
     fn from_defaults(defaults: &Self::Defaults, kind: Self::Kind) -> Self;
     /// Write this value into a set of defaults, canonicalizing exactly as that
-    /// scope's own setter does. Span coalescing is exact equality, so a value
-    /// that reached the list by another road never merges with one that came
-    /// through here.
+    /// scope's own setter does; coalescing is exact equality, so a value that
+    /// reached the list another way never merges.
     fn set_on(self, defaults: &mut Self::Defaults);
     /// This value under the photographic scale tool (§5.6): absolute lengths
     /// move, everything unitless stays.
@@ -1064,8 +896,8 @@ impl<A> Span<A> {
 ///    the file);
 /// 4. the list is sorted by `(kind, start)` — the byte-stable order §5.11 wants.
 ///
-/// (2) and (3) are what make "does this range agree?" a cheap question and what
-/// stops a drag on a field from fragmenting the list into one span per frame.
+/// (2) and (3) make "does this range agree?" cheap and stop a field drag from
+/// fragmenting the list.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Spans<A>(Vec<Span<A>>);
 
@@ -1075,15 +907,12 @@ pub type CharSpans = Spans<CharAttr>;
 /// A text node's per-**paragraph** overrides — the indents and the spacing, and
 /// deliberately nothing else (§15 D77).
 ///
-/// Keyed by byte range like [`CharSpans`], not by paragraph index, because the
-/// question "where is this override now?" after an edit is the same question in
-/// both scopes and [`Spans::edited`] is the one answer. A paragraph reads the
-/// value in force at its **first byte** (`text::Paragraphs`).
+/// Keyed by byte range like [`CharSpans`], so [`Spans::edited`] answers "where is
+/// this override now?" for both scopes. A paragraph reads the value in force at
+/// its **first byte** (`text::Paragraphs`).
 pub type ParaSpans = Spans<ParaAttr>;
 
-// Hand-written rather than derived: `#[derive(Default)]` on a generic newtype
-// asks for `A: Default`, and an *attribute* has no default — only the scope's
-// defaults do.
+// Hand-written: `#[derive(Default)]` would demand `A: Default`.
 impl<A> Default for Spans<A> {
     fn default() -> Self {
         Spans(Vec::new())
@@ -1092,37 +921,19 @@ impl<A> Default for Spans<A> {
 
 /// One attribute value put through its own scope's setter and read back (§15 D443).
 ///
-/// **This is the only way to canonicalize an attribute without a per-variant
-/// list**, and it needs no maintenance: [`SpanAttr::set_on`] is documented as
-/// canonicalizing *"exactly as that scope's own setter does"* — because it **is**
-/// that setter — and [`SpanAttr::from_defaults`] reads the stored value back out.
-/// A variant added to `CharAttr` is covered the moment its `set` arm is written.
+/// The only way to canonicalize an attribute without a per-variant list:
+/// [`SpanAttr::set_on`] canonicalizes exactly as the scope's setter does, and
+/// [`SpanAttr::from_defaults`] reads the stored value back out.
 ///
-/// ⚠️ **`set_on`'s own doc predicted the bug this closes**: *"Span coalescing is
-/// exact equality, so a value that reached the list by another road never merges
-/// with one that came through here."* Deserialization is that other road —
-/// `Spans<A>` is `#[derive(Deserialize)]` over the raw vector — so until
-/// 2026-09-06 a hand-edited `"letter_spacing":{"Em":0.020000000000000004}`
-/// survived the load intact, and a user who then set `Em(0.02)` over part of the
-/// run got two spans that could never merge — breaking [`Spans`]'s own invariant
-/// (2), so every save wrote two spans where the document has one value.
+/// Deserialization builds the raw `Vec`, so without this a hand-edited
+/// `Em(0.020000000000000004)` would survive load and never merge with a typed
+/// `Em(0.02)`, breaking [`Spans`]'s invariant (2). The read path is immune
+/// regardless (`values_in` resolves through `set_on`), so the panel never says
+/// *Mixed* for it.
 ///
-/// ⚠️ **Not the *Mixed* bug, though the review filed it as one.** `[S6.1-L3-05]`
-/// states the cost as `shared_in` answering `None`. It does not: `values_in`
-/// reads each cut through [`Spans::resolve`], which applies `set_on`, **and
-/// `set_on` canonicalizes** — so the read path was always immune and the panel
-/// never said *Mixed*. The loss is storage, which is smaller and still real.
-/// Measured, and the measurement is in
-/// `a_hand_edited_span_value_is_canonicalized_on_the_way_in`, whose `shared_in`
-/// assertion is kept green under the flip precisely to hold this correction down.
-///
-/// **The residue, stated so it is not assumed away:** this canonicalizes the
-/// *spans*, against whatever defaults it is handed. A non-canonical value in the
-/// **defaults themselves** is untouched — closing that needs a list of every
-/// `Kind`, which is the hand-maintained enumeration this function exists to
-/// avoid — so a span whose canonical value equals such a default fails to elide.
-/// Narrower than what is fixed here, and it cannot produce the *Mixed* symptom,
-/// because that comes from two spans rather than from a span and a default.
+/// This canonicalizes the spans against whatever defaults it is handed; a
+/// non-canonical value in the defaults themselves is untouched, so a span whose
+/// canonical value equals it fails to elide.
 fn canonical_attr<A: SpanAttr>(attr: A, defaults: &A::Defaults) -> A {
     let kind = attr.attr_kind();
     let mut scope = defaults.clone();
@@ -1142,13 +953,8 @@ impl<A: SpanAttr> Spans<A> {
     /// Rebuild from loose parts, normalizing — so a hand-edited file cannot
     /// install overlapping spans.
     ///
-    /// ⚠️ **Not IO's way in**, which this said until 2026-09-06. Serde's derived
-    /// impl on the newtype builds the `Vec` directly and never calls a
-    /// constructor; the load path reaches [`Self::normalize`] through
-    /// [`Self::clamped`] instead. The invariants are re-established either way —
-    /// it is the sentence about *who calls this* that was wrong, and it mattered
-    /// because it made the loader look guarded at a function the loader never
-    /// touches.
+    /// Not IO's way in: serde builds the `Vec` directly, and the load path reaches
+    /// [`Self::normalize`] through [`Self::clamped`].
     pub fn from_parts(spans: Vec<Span<A>>, default: &A::Defaults) -> Self {
         let mut s = Spans(spans);
         s.normalize(default);
@@ -1199,17 +1005,9 @@ impl<A: SpanAttr> Spans<A> {
     /// Every distinct value of one attribute over `range`, in the order they
     /// first appear.
     ///
-    /// What [`Self::shared_in`] is computed from, and through it the panel's
-    /// **mixed** state: one value means the control shows it, more than one means it
-    /// shows *mixed*. An empty `range` (a bare caret) reports the one value at that
-    /// point, which is what a caret's fields should show.
-    ///
-    /// ⚠️ **That first clause read *"what the panel's mixed state is computed
-    /// from"* and named a caller this function does not have** (§15 D571,
-    /// `[S6.1-L3-04]`). The panel asks `shared_in`; `shared_in` is this function's
-    /// **only** caller in the workspace. Harmless as prose and not as a lead: it is
-    /// the sentence that makes a reader looking for the mixed rule stop one function
-    /// short of where the collapse to `Option` actually happens.
+    /// What [`Self::shared_in`] is computed from: one value means the control shows
+    /// it, more than one means *mixed*. An empty `range` (a bare caret) reports the
+    /// one value at that point.
     pub fn values_in(&self, default: &A::Defaults, kind: A::Kind, range: Range<usize>) -> Vec<A> {
         let mut out: Vec<A> = Vec::new();
         let mut push = |v: A| {
@@ -1229,22 +1027,12 @@ impl<A: SpanAttr> Spans<A> {
 
     /// One attribute's runs across `range`, as `(sub-range, value)` — what
     /// [`Self::values_in`] answers, without the deduplication and with the ranges
-    /// kept (§15 D752).
+    /// kept, for a caller that writes each run something computed from what it had
+    /// (merging one OpenType tag into a selection without flattening the others).
     ///
-    /// **The ranges are the point.** `values_in` says *what values are in here*,
-    /// which is enough to draw a mixed readout; a caller that wants to **write**
-    /// each run something different — computed from what that run already had —
-    /// needs to know where each run is. Merging one OpenType tag into a selection
-    /// without flattening the others is the case this was added for.
-    ///
-    /// ⚠️ **The cut walk lives here and `values_in` calls it**, rather than the
-    /// two each walking the spans. They have to agree about where a run begins,
-    /// and two copies of a boundary rule is how a readout comes to disagree with
-    /// the write it is a readout of.
-    ///
-    /// An empty `range` yields nothing. `values_in` keeps its own answer for that
-    /// case — the value resolved *at* the caret, which is a question about a point
-    /// rather than about a span, and is not a run.
+    /// The cut walk lives here and `values_in` calls it, so a readout and the write
+    /// it reads out agree about where a run begins. An empty `range` yields
+    /// nothing; `values_in` answers that case itself, resolving at the caret.
     pub fn runs_of(
         &self,
         default: &A::Defaults,
@@ -1403,57 +1191,28 @@ impl<A: SpanAttr> Spans<A> {
 
     /// Re-establish every invariant in the type's doc comment.
     ///
-    /// **Overlaps are resolved by painting, not by truncating** (§15 D643,
-    /// `[S6.1-L1-06]`). Spans of one kind are laid down in sorted order and each
-    /// byte takes the value of the last one covering it; a span that is painted
-    /// over keeps whatever lies **outside** the shared bytes, on both sides.
+    /// **Overlaps are resolved by painting, not by truncating.** Spans of one kind
+    /// are laid down in sorted order and each byte takes the value of the last one
+    /// covering it; a span that is painted over keeps whatever lies outside the
+    /// shared bytes, on both sides (§15 D643).
     ///
-    /// 🚨 **The previous rule was neither of the two things its own comment
-    /// claimed.** It said *"equal values join, unequal ones let the later span
-    /// keep the shared bytes (it is the one a caller set most recently)"* — but
-    /// the list has just been sorted, so *later* meant "starts further right",
-    /// which has nothing to do with recency; and for two spans sharing a start
-    /// the sort was stable, so the winner was decided by **the order the file's
-    /// array happened to be in**. Measured, on a stock `TextStyle`:
+    /// **`Reverse(end)` in the sort key makes the answer independent of file
+    /// order**: widest first, so the narrower span paints over it. Two spans with an
+    /// identical range and different values are still decided by array order; this
+    /// crate cannot produce that case. After this runs no two spans of a kind share
+    /// a start, so the sort is still `(kind, start)` for §5.11's byte-stable save.
     ///
-    /// | file order | result | bytes 5..10 |
-    /// | --- | --- | --- |
-    /// | `[{0..10, W700}, {0..5, W300}]` | `[{0..5, W300}]` | lost their 700 |
-    /// | `[{0..5, W300}, {0..10, W700}]` | `[{0..10, W700}]` | the 300 is gone |
-    ///
-    /// Two documents from one set. The truncating arm set `prev.end =
-    /// span.start` and then popped `prev` when that emptied it, which discards
-    /// `prev`'s whole range **including the part beyond `span.end`** — bytes
-    /// nothing overlapped.
-    ///
-    /// ⚠️ **`Reverse(end)` in the sort key is what makes the answer
-    /// order-independent**, and it is the only reason two spans with the same
-    /// start have a defined winner: widest first, so the narrower one paints over
-    /// it and keeps the shared bytes. Two spans with an identical *range* and
-    /// different values are still decided by array order, because nothing here
-    /// compares values — that case has no defensible answer and is not one this
-    /// crate can produce.
-    ///
-    /// ⚠️ **The sort is still `(kind, start)` as far as §5.11's byte-stable save
-    /// is concerned.** After this runs, one kind's spans do not overlap, so no
-    /// two share a start and the third key never breaks a tie in the output.
-    ///
-    /// **Reachability is IO only, and that is the honest bound.** `set` splits
-    /// the old span around the new range, `edited`'s maps are monotonic, and
-    /// `clamped`/`restated`/`scaled` preserve ranges — so a containment comes
-    /// from a hand-edited or foreign-written file, which `schema.rs` chooses to
-    /// normalize rather than reject.
+    /// Overlap is reachable from IO only: `set`, `edited`, `clamped`, `restated`
+    /// and `scaled` never create it, but a hand-edited or foreign file can, and
+    /// `schema.rs` normalizes rather than rejects.
     fn normalize(&mut self, default: &A::Defaults) {
         self.0
             .retain(|s| s.start < s.end && s.attr != A::from_defaults(default, s.attr.attr_kind()));
         self.0
             .sort_by_key(|s| (s.attr.attr_kind(), s.start, std::cmp::Reverse(s.end)));
-        // The runs `span` paints over are always a **suffix** of `merged`: the
-        // list is non-overlapping and sorted, and `span.start` is at least every
-        // start already laid down. At most one of them can begin before
-        // `span.start` (it is the one containing that byte) and at most one can
-        // end after `span.end` (the last, which has the greatest end) — so the
-        // whole repair is one head, one tail, and everything between them gone.
+        // The runs `span` paints over are always a suffix of `merged`: at most one
+        // begins before `span.start` and at most one ends after `span.end`, so the
+        // repair is one head, one tail, and everything between them gone.
         let mut merged: Vec<Span<A>> = Vec::with_capacity(self.0.len());
         for span in std::mem::take(&mut self.0) {
             let kind = span.attr.attr_kind();
@@ -1484,9 +1243,8 @@ impl<A: SpanAttr> Spans<A> {
             merged.extend(tail);
         }
         // Touching or overlapping runs of one kind carrying equal values are one
-        // span. This used to be an arm of the loop above; painting can produce
-        // the same situation by splitting a run around one of equal value, so it
-        // is a pass of its own now.
+        // span; painting can split a run around one of equal value, so this is a
+        // pass of its own.
         let mut out: Vec<Span<A>> = Vec::with_capacity(merged.len());
         for span in merged {
             match out.last_mut() {
@@ -1504,16 +1262,13 @@ impl<A: SpanAttr> Spans<A> {
     /// **defaults** owes the overrides.
     ///
     /// A span equal to the *old* default was never stored, so a default that moves
-    /// would silently restyle those bytes too. Re-stating is what keeps "this run is
-    /// 24pt" true when the node's own size changes underneath it, and it drops the
-    /// spans that were only echoing the default.
+    /// would silently restyle those bytes too. Re-stating keeps "this run is 24pt"
+    /// true when the node's own size changes underneath it, and drops the spans
+    /// that only echoed the default.
     ///
-    /// **A method rather than three lines at each caller**, because there are now
-    /// four of them in two crates: `Document`'s two style ops, and the render
-    /// *preview* of each. The preview used to leave the list alone — invisible in the
-    /// drawing, since what this drops is by definition an echo of the new defaults,
-    /// and visible to the Type panel, which reads the override's kind back through
-    /// `display_node` (§15 D163).
+    /// Callers are `Document`'s two style ops and the render preview of each; the
+    /// preview must restate too, because the Type panel reads the override's kind
+    /// back through `display_node`.
     pub fn restated(&self, default: &A::Defaults) -> Self {
         Self::from_parts(self.as_slice().to_vec(), default)
     }
@@ -1522,33 +1277,18 @@ impl<A: SpanAttr> Spans<A> {
     /// (§15 D422) — what the loader owes a file whose spans outrun its text, and
     /// what `SetText` owes content it did not author.
     ///
-    /// ⚠️ **The boundary half is the one that was missing, and without it a file
-    /// crashed the app at every launch.** A `.ondin` with `content: "aéb"` and a
-    /// span of `0..2` — byte 2 is *inside* `é`, which occupies bytes 1..3 —
-    /// loaded with no complaint and then panicked on every render:
-    /// `text::cased_text` slices `content[range]` directly, and one line later
-    /// parley's style builder does the same. Both are `ondin-core`'s own runs,
-    /// so the early return for `TextCase::Original` is not a guard; it only
-    /// moves which of the two fires.
+    /// The boundary half is load-bearing: a span ending inside a multi-byte
+    /// character panics `text::cased_text` and parley's style builder on every
+    /// render, and `library::cover::rasterize` renders every dashboard document
+    /// with no `catch_unwind`, so one such file would crash every launch.
     ///
-    /// **The blast radius is the dashboard.** `library::cover::rasterize` loads
-    /// and rebuilds every document the grid draws, synchronously inside the egui
-    /// pass and with no `catch_unwind` anywhere on the path — so one such file
-    /// in the base folder crashes the app at every launch, and `Cover::Failed`
-    /// never records it because a panic does not get that far.
+    /// **Snapped outward rather than dropped**, keeping the styling the file asked
+    /// for over the whole character it half-named (§5.11); a span that collapses is
+    /// dropped by [`Self::normalize`].
     ///
-    /// **Snapped outward rather than dropped**, which keeps §5.11's stated
-    /// posture — *"a stale range is a hand-edit or an older writer's rounding,
-    /// not a corrupt tree"* — and keeps the styling the file asked for over the
-    /// whole character it half-named. A span that collapses is then dropped by
-    /// [`Self::normalize`], which already retains only `start < end`.
-    ///
-    /// ⚠️ **Takes the content, not its length, and that is the fix rather than a
-    /// convenience.** The magnitude clamp cannot *create* an off-boundary index
-    /// — `len` is always a boundary — but it could not repair one either, and
-    /// this function is the *only* correct site: `op_set_text` and
-    /// `op_set_text_style` call it too, so a repair placed at the loader alone
-    /// would have left the live-editing route open.
+    /// Takes the content, not its length, because a length is always a boundary and
+    /// cannot repair one. `op_set_text` and `op_set_text_style` call this too, so
+    /// the live-editing route is covered.
     pub fn clamped(&self, content: &str, default: &A::Defaults) -> Self {
         let len = content.len();
         // `is_char_boundary` is true at 0 and at `len`, so both walks terminate.
@@ -1637,10 +1377,9 @@ fn scale_decoration(mut d: Decoration, factor: f64) -> Decoration {
 
 /// Horizontal alignment of a line within its box.
 ///
-/// `Start`/`End` are preferred over `Left`/`Right` in new documents — parley's
-/// own docs recommend them for direction-aware text, and they are what makes an
-/// RTL paragraph align correctly without a second field. The physical pair is
-/// kept because every file written before this existed holds one.
+/// `Start`/`End` are preferred over `Left`/`Right` in new documents: they align an
+/// RTL paragraph correctly without a second field. The physical pair is kept for
+/// files that hold one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextAlign {
     /// Left in LTR text, right in RTL.
@@ -1680,10 +1419,9 @@ impl TextAlign {
 
 /// Where the *last* line of a justified paragraph goes.
 ///
-/// `Start` is parley's own `Justify` — it leaves the last line unstretched and
-/// start-aligned. The other two are ours: the line is not re-spaced, only
-/// translated, which is why they are affordable where "justify all" is not (that
-/// would be reimplementing the part of justification parley owns).
+/// `Start` is parley's own `Justify`, leaving the last line unstretched. The other
+/// two are ours: the line is only translated, not re-spaced, which is why they are
+/// affordable where "justify all" (reimplementing parley's justification) is not.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JustifyLast {
     #[default]
@@ -1737,8 +1475,7 @@ pub enum WrapMode {
 }
 
 impl WrapMode {
-    /// Off before on, as every other segmented track in the popup reads: the
-    /// cell that does nothing sits on the left.
+    /// Off before on, as every segmented track in the popup reads.
     pub const ALL: [WrapMode; 2] = [WrapMode::NoWrap, WrapMode::Wrap];
 
     pub fn label(self) -> &'static str {
@@ -1761,10 +1498,9 @@ pub enum WordBreak {
 impl WordBreak {
     pub const ALL: [WordBreak; 3] = [WordBreak::Normal, WordBreak::BreakAll, WordBreak::KeepAll];
 
-    /// **"By script", not "Normal".** All three cells are normal for *some*
-    /// writing system, and what `Normal` actually means is "use the line-breaking
-    /// rules of whatever script this is" — which is the one thing a designer
-    /// needs to know to choose between it and the two overrides beside it.
+    /// **"By script", not "Normal"**: `Normal` means the line-breaking rules of
+    /// whatever script this is, which is what a designer needs to choose between it
+    /// and the two overrides.
     pub fn label(self) -> &'static str {
         match self {
             WordBreak::Normal => "By script",
@@ -1785,19 +1521,16 @@ pub enum OverflowWrap {
 }
 
 impl OverflowWrap {
-    /// Ordered by how much damage the cell permits: never break the word, break
-    /// it only when there is no other way, break it anywhere. Declaration order
-    /// puts `Anywhere` in the middle, which reads as a scale that goes back on
-    /// itself.
+    /// Ordered by how much damage the cell permits (never, only when there is no
+    /// other way, anywhere); declaration order would put `Anywhere` in the middle.
     pub const ALL: [OverflowWrap; 3] = [
         OverflowWrap::Normal,
         OverflowWrap::BreakWord,
         OverflowWrap::Anywhere,
     ];
 
-    /// **"Never", not "Normal".** This control only ever answers one question —
-    /// may a word too wide for its box be cut? — so the resting cell says no
-    /// rather than naming itself.
+    /// **"Never", not "Normal"**: the control answers one question, may a word too
+    /// wide for its box be cut?
     pub fn label(self) -> &'static str {
         match self {
             OverflowWrap::Normal => "Never",
@@ -1809,23 +1542,17 @@ impl OverflowWrap {
 
 /// What a list item draws in its gutter.
 ///
-/// **The core of CSS's `list-style-type`, and deliberately not a free string.** A
-/// custom marker is a `String` on what is otherwise a `Copy` attribute, and it
-/// raises a second question this does not have to answer — whether a custom marker
-/// counts, and what its ordinal would mean — so it is left out rather than
-/// half-built.
+/// **The core of CSS's `list-style-type`, deliberately not a free string**: a
+/// custom marker would make a `Copy` attribute own a `String` and raise the
+/// question of whether it counts.
 ///
-/// The three unordered glyphs were checked against the bundled Inter before being
-/// offered: U+2022, U+25E6 and U+25AA all resolve (and to the same advance, so
-/// switching between them moves no text), while the tempting U+25FE and U+2219 come
-/// back as `.notdef`. *A marker set is a claim about the font, not about CSS.*
+/// The three unordered glyphs (U+2022, U+25E6, U+25AA) resolve in the bundled
+/// Inter with the same advance, so switching moves no text; U+25FE and U+2219 come
+/// back as `.notdef`.
 ///
-/// **Nesting does not rotate the glyph**, the way HTML's default stylesheet turns a
-/// disc into a circle and then a square one `<ul>` down. There it is a default over
-/// markup that names no marker of its own; here every paragraph stores the marker it
-/// asked for, so deriving one from [`ParagraphStyle::level`] would draw something
-/// other than the value in the model — and that value was picked from a list of
-/// eight. Wanting hollow bullets for an inner list is two clicks, not a rule.
+/// **Nesting does not rotate the glyph**: every paragraph stores the marker it
+/// asked for, and deriving one from [`ParagraphStyle::level`] would draw something
+/// other than the model's value.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ListMarker {
     /// `•`
@@ -1863,8 +1590,7 @@ impl ListMarker {
     /// consecutive paragraphs agree about a list only if they agree about this.
     ///
     /// A run of bullets interrupted by one numbered item is two lists and a third,
-    /// and the numbering restarts — the same rule CSS gets from the markup, taken
-    /// here from the one thing the model has instead of markup.
+    /// and the numbering restarts.
     pub fn ordered(self) -> bool {
         !matches!(
             self,
@@ -1888,10 +1614,8 @@ impl ListMarker {
 
     /// The text this marker draws for the `n`th item of its list, counting from 1.
     ///
-    /// **The counter systems fall back to decimal rather than to nothing** where
-    /// they run out — roman past 3999, and either past a zero — because a marker
-    /// that vanishes reads as a broken list where an out-of-system number reads as
-    /// a long one. CSS says the same for `upper-roman`.
+    /// The counter systems fall back to decimal where they run out (roman past
+    /// 3999, either at zero), because a vanished marker reads as a broken list.
     pub fn text(self, n: usize) -> String {
         match self {
             ListMarker::Disc => "\u{2022}".into(),
@@ -1960,15 +1684,12 @@ fn roman(n: usize, upper: bool) -> String {
 /// A text node's paragraph attributes — the value every paragraph carries unless
 /// a [`ParaSpans`] entry says otherwise.
 ///
-/// **Only some of these can be overridden per paragraph, and that split is the
-/// design rather than an unfinished job** (§15 D77). parley lays the whole node
-/// out as one `Layout`, and its per-line controls (`line_x`, `line_max_advance`)
-/// can vary a paragraph's *measure* — the fields [`ParaAttr`] names. What is
-/// genuinely one value per layout is the `Alignment` handed to `Layout::align`
-/// (and with it `Justify`, which adjusts cluster advances) and the bidi base
-/// direction; a span carrying either would be a value the renderer had to ignore,
-/// which is worse than not being able to say it, because then the model lies
-/// about what is on screen. Figma does not offer per-paragraph alignment either.
+/// **Only some of these can be overridden per paragraph, by design** (§15 D77).
+/// Parley's per-line controls (`line_x`, `line_max_advance`) can vary a
+/// paragraph's *measure* — the fields [`ParaAttr`] names. The `Alignment` handed
+/// to `Layout::align` (with `Justify`) and the bidi base direction are one value
+/// per layout; a span carrying either would be a value the renderer had to ignore,
+/// and the model would lie about what is on screen.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ParagraphStyle {
     #[serde(default, skip_serializing_if = "is_default")]
@@ -1976,22 +1697,16 @@ pub struct ParagraphStyle {
     /// Space **before** this paragraph, ignored on the first one. Absolute by
     /// default: it belongs to the layout's spacing scale, not to the type.
     ///
-    /// *Before* rather than *after* is what makes the node-level value mean
-    /// exactly what it has always meant — extra space at every hard break, and
-    /// none above the opening line — while leaving one paragraph free to ask for
-    /// its own gap. Applied by `text::y_map`, not by parley.
+    /// *Before* rather than *after* keeps the node-level value meaning extra space
+    /// at every hard break and none above the opening line. Applied by
+    /// `text::y_map`, not by parley.
     #[serde(default, skip_serializing_if = "Length::is_default_zero")]
     pub spacing: Length,
     /// First-line indent, signed. With [`Self::hanging`] it indents the
     /// continuation lines instead.
     ///
-    /// **It reaches every paragraph unless a [`ParaSpans`] entry overrides one.**
-    /// CSS spells the distinction `text-indent: … each-line` and this used to
-    /// carry the flag, but with it off the indent reached only the first line of
-    /// the whole *layout* — type an indent into a three-paragraph node and one
-    /// line moved while the other two stayed flush, which reads as a bug rather
-    /// than as a setting (§15 D103). Naming a paragraph is now the model's job
-    /// rather than a boolean's.
+    /// **It reaches every paragraph unless a [`ParaSpans`] entry overrides one**
+    /// (CSS's `each-line` behaviour, with no flag; §15 D103).
     #[serde(default, skip_serializing_if = "Length::is_default_zero")]
     pub indent: Length,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -2005,9 +1720,7 @@ pub struct ParagraphStyle {
     pub indent_start: Length,
     /// The paragraph's own end edge, measured in from the box's.
     ///
-    /// **Inert on an auto-width node**, which has no wrap width for it to narrow
-    /// — the honest answer rather than a number that quietly does nothing on one
-    /// sizing mode and something on another.
+    /// **Inert on an auto-width node**, which has no wrap width for it to narrow.
     #[serde(default, skip_serializing_if = "Length::is_default_zero")]
     pub indent_end: Length,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -2023,99 +1736,58 @@ pub struct ParagraphStyle {
     /// The list marker this paragraph draws in its gutter, or `None` for an
     /// ordinary paragraph.
     ///
-    /// **The marker is never in [`crate::node::NodeKind::Text`]'s `content`**, and
-    /// that is the whole reason lists cost so little here: byte indices are the
-    /// currency of the span lists, the caret, the hit test and the case transform,
-    /// so a marker in the string would need every one of them to know it was not
-    /// text. Ink without bytes cannot be selected, cannot be typed into, and cannot
-    /// move a span.
+    /// **The marker is never in [`crate::node::NodeKind::Text`]'s `content`**:
+    /// byte indices are the currency of the span lists, the caret, the hit test and
+    /// the case transform, and ink without bytes cannot be selected or typed into.
     ///
-    /// **Nor is it a parley inline box**, which was the route the plan named.
-    /// `InlineBoxKind::OutOfFlow` is the only kind that reserves no space in the
-    /// line — what a hanging marker wants — and parley honours the kind when it
-    /// *draws* and ignores it in `Cluster::visual_offset`, `Cluster::from_point` and
-    /// `Selection::geometry`. Measured: a 30px out-of-flow box at byte 0 leaves the
-    /// first glyph at x 0 and puts the caret and the highlight's left edge at x 30.
-    /// The gutter comes from [`Self::indent_start`] instead, which every line of the
-    /// paragraph already honours — that *is* the hanging measure, and it was built
-    /// in §15 D163.
+    /// **Nor is it a parley inline box.** `InlineBoxKind::OutOfFlow` reserves no
+    /// space, but parley ignores that in `Cluster::visual_offset`,
+    /// `Cluster::from_point` and `Selection::geometry`, so the caret and highlight
+    /// land at the box's width. The gutter comes from [`Self::indent_start`]
+    /// instead (§15 D163).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub marker: Option<ListMarker>,
     /// How deeply nested this paragraph is: `0` is the outer level, and each level
     /// steps the start edge in by one more [`Self::indent_start`].
     ///
-    /// **The step is `indent_start` rather than a number of its own**, which is the
-    /// answer to the one thing nesting had to decide — what a level-2 item's gutter
-    /// is measured from. It is measured from the level-1 edge, and the amount is the
-    /// gutter the marker already sits in, so every level is one gutter wider than
-    /// the last. CSS's default stylesheet says the same thing with one number
-    /// (`padding-left: 40px` per `<ul>`, which is also where the marker goes), and a
-    /// second length here would be a second number to keep in step with the first
-    /// for no gain: a list whose levels step by an amount unrelated to its gutter is
-    /// not what anyone means by a nested list.
+    /// **The step is `indent_start` rather than a number of its own**, as CSS's
+    /// default stylesheet steps nested lists by the one gutter the marker sits in.
     ///
-    /// **It is a field and not a reading of `indent_start`.** Grouping the numbering
-    /// by indent was the tempting version and is what this rejects: `indent_start` is
-    /// a `Length` a user *drags*, so nudging one item's indent by a hair would
-    /// silently renumber the list around it.
+    /// **A field, not a reading of `indent_start`**: that is a `Length` a user
+    /// drags, so grouping the numbering by it would renumber the list on a nudge.
     ///
-    /// **A level on a paragraph with no marker still indents it**, which is how a
-    /// continuation paragraph sits under the item it belongs to. Making the multiplier
-    /// conditional on [`Self::marker`] would store a number the renderer ignores,
-    /// which §15 D77's own reasoning calls worse than not being able to say it. It
-    /// does not keep that paragraph *inside* the list — a paragraph with no marker
-    /// still ends every open run, exactly as it does at level 0.
+    /// **A level on a paragraph with no marker still indents it**, so a continuation
+    /// paragraph sits under its item; making it conditional on [`Self::marker`]
+    /// would store a number the renderer ignores. Such a paragraph still ends every
+    /// open run, as it does at level 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub level: u8,
     /// Whether each line is placed by its **ink** at the paragraph's two edges
     /// rather than by its glyphs' advance origins — optical margin alignment
     /// (§15 D830).
     ///
-    /// **Off by default and the app authors nothing**, which is deliberately *not*
-    /// [`crate::typography::BoxTrim`]'s shape (§15 D199 turns trim on for new text
-    /// while the format default stays `None`). Trim moves the *box* around ink that
-    /// does not move; this moves the *ink* out past the box it was authored in, so
-    /// a document changes appearance the moment it is switched on. A default that
-    /// makes every new text node differ from what the same document shows in any
-    /// other tool is a bigger claim than trim's, and it can be made later without a
-    /// format change — which is not true in the other direction.
+    /// **Off by default and the app authors nothing**, unlike
+    /// [`crate::typography::BoxTrim`] (§15 D199 trims new text). Trim moves the box
+    /// around fixed ink; this moves the ink past the box, so switching it on
+    /// changes a document's appearance. A default can be added later without a
+    /// format change, not the other way round.
     ///
-    /// **Why it is wanted**: a glyph's advance carries its side bearings, so a line
-    /// placed by the advance origin starts a bearing's width *inside* the measure,
-    /// and the width differs per glyph. Measured on the default face at 16 px, the
-    /// left bearing runs from **0.98%** of the font size (`f`) to **10.06%** (`'`),
-    /// with capitals spanning 2.34% (`W`, `A`, `V`, `Y`) to 8.59% (`H`, `I`, `L`) —
-    /// so two stacked left-aligned labels can sit about 9% of the font size out of
-    /// alignment, which is 1.5 px at 16 px and 9 px at 100 px.
+    /// A glyph's advance carries its side bearings, so a line placed by the advance
+    /// origin starts a bearing inside the measure. On the default face the left
+    /// bearing runs from about 1% of the font size (`f`) to 10% (`'`), and among
+    /// capitals from 2.3% (`W`, `A`) to 8.6% (`H`, `I`, `L`).
     ///
-    /// ⚠️ **`roadmap.md` named the wrong letter for as long as the bullet stood.**
-    /// (*For as long as* rather than a duration: `.git` was reset on 2026-09-16
-    /// and nothing dates that bullet, so any number here would be a figure the
-    /// tree cannot falsify.) Its statement
-    /// of this item read *"a left-aligned label still reads as indented, because
-    /// `H` has almost no left side bearing"*; `H` has the **largest** bearing of
-    /// the capitals measured. The complaint was real and the example inverted it,
-    /// which is what an unmeasured illustration costs.
-    ///
-    /// **Paragraph scope and not spannable**, on §15 D77's own test — the question
-    /// that entry asks is whether anyone would set the value *per paragraph*, and
-    /// nobody sets optical alignment on one paragraph of a layer and not the next.
-    /// It sits beside [`Self::align`], [`Self::wrap`] and [`Self::direction`] —
-    /// though only [`Self::wrap`] is non-spannable for *that* reason. ⚠️ **D77
-    /// gives two**, and this is in the weaker class: [`Self::align`] and the base
-    /// direction are one value per parley `Layout` and cannot be spanned **at
-    /// all**, where `wrap` and this merely have no user, so nothing but the
-    /// absence of demand would stop either being spanned later. It is
-    /// not [`crate::typography::BlockStyle`]'s either: that scope is about the
-    /// *box* — vertical alignment, trim, overflow, max lines — and this is about
-    /// how a line sits against its measure, which is flow.
+    /// **Paragraph scope and not spannable**, on §15 D77's test that nobody sets
+    /// optical alignment on one paragraph and not the next. Like [`Self::wrap`] it
+    /// merely has no user, whereas [`Self::align`] and the base direction cannot be
+    /// spanned at all. It is not [`crate::typography::BlockStyle`]'s: that scope is
+    /// the *box*, and this is how a line sits against its measure.
     #[serde(default, skip_serializing_if = "is_default")]
     pub optical_margins: bool,
 }
 
-/// How deeply a list may nest. Past this the innermost item's start edge is eight
-/// gutters in and the level has stopped describing a list; it is a bound on the
-/// control and on a hand-edited file, not a layout limit.
+/// How deeply a list may nest: a bound on the control and on a hand-edited file,
+/// not a layout limit.
 pub const MAX_LIST_LEVEL: u8 = 8;
 
 impl ParagraphStyle {
@@ -2135,15 +1807,12 @@ impl ParagraphStyle {
     /// Where this paragraph's lines start, in px from the box's own start edge:
     /// [`Self::indent_start`] stepped by [`Self::level`].
     ///
-    /// **One function because two readers have to agree.** The lines get it through
-    /// `line_geometry`, which hands parley a `line_x`; the list marker gets it as the
-    /// x its right edge lands on. Two copies of the multiplication is exactly how a
-    /// marker ends up on a gutter its own text is not using — the class of bug §15
-    /// D163 was, one edge derived twice.
+    /// **One function because two readers have to agree**: the lines get it through
+    /// `line_geometry` (parley's `line_x`) and the list marker as the x its right
+    /// edge lands on; two copies put a marker on a gutter its text is not using.
     ///
-    /// `saturating_add` because a hand-edited file can carry any `u8`, and the sum is
-    /// a multiplier rather than an index — a level of 255 draws absurdly far in, which
-    /// is the honest picture of what the file says, but it must not wrap to zero.
+    /// `saturating_add` because a hand-edited file can carry any `u8`, and a level
+    /// of 255 must not wrap to zero.
     pub fn start_edge(&self, font_size: f64) -> f64 {
         self.indent_start.resolve(font_size) * f64::from(self.level.saturating_add(1))
     }
@@ -2158,9 +1827,8 @@ impl ParagraphStyle {
             ParaAttr::IndentStart(v) => self.indent_start = v.canonical(),
             ParaAttr::IndentEnd(v) => self.indent_end = v.canonical(),
             ParaAttr::Marker(v) => self.marker = v,
-            // Clamped for the same reason the lengths are canonicalized: this is the
-            // one door every edit comes through, so the bound belongs here rather
-            // than at each control that writes one.
+            // Clamped here, the one door every edit comes through, rather than at
+            // each control.
             ParaAttr::Level(v) => self.level = v.min(MAX_LIST_LEVEL),
         }
     }
@@ -2188,11 +1856,9 @@ impl ParagraphStyle {
 /// One paragraph attribute, as a [`ParaSpans`] entry carries it.
 ///
 /// **The membership of this enum is the whole design of per-paragraph attributes**
-/// (§15 D77): every variant here is something one `Layout` can honour per
-/// paragraph, through parley's per-line `line_x`/`line_max_advance` or through
-/// `text::y_map`. Alignment, justification and direction are absent because they
-/// are one value per layout, and a span holding a value the renderer must ignore
-/// makes the model lie about the screen.
+/// (§15 D77): every variant is something one `Layout` can honour per paragraph,
+/// through parley's `line_x`/`line_max_advance` or `text::y_map`. Alignment,
+/// justification and direction are absent because they are one value per layout.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ParaAttr {
     Spacing(Length),
@@ -2200,19 +1866,17 @@ pub enum ParaAttr {
     Hanging(bool),
     IndentStart(Length),
     IndentEnd(Length),
-    /// `None` is "not a list item", which is a value like any other — a span
-    /// carrying it is how one paragraph opts *out* of a node-level marker.
+    /// `None` is "not a list item"; a span carrying it opts one paragraph *out* of
+    /// a node-level marker.
     Marker(Option<ListMarker>),
-    /// Nesting depth — see [`ParagraphStyle::level`]. Spannable because a nested
-    /// item is by definition a *paragraph* that disagrees with its neighbours.
+    /// Nesting depth — see [`ParagraphStyle::level`].
     Level(u8),
 }
 
 /// Which attribute a [`ParaAttr`] is, without its value.
 ///
-/// As with [`CharAttrKind`], this variant order *is* the `(attribute, start)`
-/// sort a saved file is written in (§5.11, invariant 9), so a new attribute is
-/// appended rather than inserted.
+/// As with [`CharAttrKind`], the variant order *is* the on-disk sort (§5.11,
+/// invariant 9): append, never insert.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ParaAttrKind {
     Spacing,
@@ -2228,9 +1892,7 @@ impl ParaAttrKind {
     /// Every kind, in the declaration order that *is* the on-disk span sort.
     ///
     /// [`CharAttrKind::ALL`]'s twin, for the same reason and with the same reading
-    /// of what it does and does not catch (§15 D598). The paragraph list had no
-    /// guard at all — not even the fourteen-comparison one — so a swap here was
-    /// invisible from the start.
+    /// of what it does and does not catch.
     pub const ALL: [ParaAttrKind; 7] = [
         ParaAttrKind::Spacing,
         ParaAttrKind::Indent,
@@ -2272,11 +1934,9 @@ impl SpanAttr for ParaAttr {
         defaults.set(self);
     }
 
-    /// Every length here is a measure, so all four move; `Hanging` is a
-    /// direction and stays, and `Marker` is a kind — its ink scales because the
-    /// *type* scales, which is `TextStyle::font_size`'s business and not this one's.
-    /// `Level` is a count of gutters and stays for the same reason: the gutter it
-    /// counts is `IndentStart`, which scales here, so the nesting scales with it.
+    /// Every length here is a measure, so all four move. `Hanging` and `Marker` stay
+    /// (the marker's ink scales with the type), and `Level` counts gutters of
+    /// `IndentStart`, which scales, so the nesting scales with it.
     fn scaled_by(self, factor: f64) -> Self {
         match self {
             ParaAttr::Spacing(v) => ParaAttr::Spacing(v.scaled(factor)),
@@ -2322,21 +1982,16 @@ impl VerticalAlign {
 /// Which font metric the node's box is measured to.
 ///
 /// **A box attribute, not a drawing one: trimming never moves the ink.** The
-/// glyphs stay where they are and the reported box tightens around them, which
-/// is what makes trim useful for aligning one label's cap height to another's —
-/// and what stops toggling it from shifting every text node in every saved file.
-/// The offset that buys this is [`crate::TextLayout::origin`]; see §15 for the
-/// two decisions it settles.
+/// reported box tightens around the glyphs, which aligns one label's cap height to
+/// another's. The offset that buys this is [`crate::TextLayout::origin`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BoxTrim {
     /// The full line box, leading included — what every file written before this
     /// existed means, and how those files drew.
     ///
-    /// **This being the `#[default]` does not mean trim is off.** The field
-    /// serializes with `skip_serializing_if`, so the default is what an *absent* key
-    /// means and it has to go on meaning this or every text node in every saved file
-    /// re-measures on open (§15 D78). New text is trimmed, and the app is what
-    /// authors that — `FontService::default_text_parts`, §15 D199.
+    /// **This being the `#[default]` does not mean trim is off**: it is what an
+    /// absent key means, and changing it would re-measure every saved text node
+    /// (§15 D78). New text is trimmed by `FontService::default_text_parts` (§15 D199).
     #[default]
     None,
     /// Cap height down to the baseline: the box a designer sees.
@@ -2414,8 +2069,7 @@ fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
 
-/// Most lines the field will accept. Past this the limit has stopped describing
-/// a paragraph and the incremental break loop is doing work for nothing.
+/// Most lines the field will accept.
 pub const MAX_LINE_LIMIT: u32 = 1000;
 
 #[cfg(test)]
@@ -2426,11 +2080,8 @@ mod tests {
         TextStyle::default()
     }
 
-    /// **`ssty` is not stylistic set anything**, and the prefix test everybody
-    /// writes says it is. It is math script-style alternates — a mechanic the
-    /// shaper applies — and the panel sorted it in with the sets a designer
-    /// chooses between; read-fonts will likewise parse its (nonexistent) params
-    /// table as a stylistic set's, because it too dispatches on two bytes.
+    /// `ssty` (math script-style alternates) is not a stylistic set, though a
+    /// prefix test says it is.
     #[test]
     fn a_numbered_tag_range_is_read_as_a_number_and_not_as_a_prefix() {
         assert_eq!(stylistic_set(Tag::parse("ss01").unwrap()), Some(1));
@@ -2466,33 +2117,12 @@ mod tests {
         assert_eq!(dragged, Length::Em(0.02));
     }
 
-    /// A hand-edited file's non-canonical span value must not survive the load:
-    /// it fragments the stored list, breaking `Spans`'s own invariant (2) —
-    /// *"two spans of the same `SpanAttr::Kind` never overlap or touch while
-    /// carrying equal values (they are merged)"* — so every save writes two spans
-    /// where the document has one letter spacing.
+    /// A hand-edited file's non-canonical span value is canonicalized by `clamped`
+    /// (the load seam) so equal values merge into one span.
     ///
-    /// `clamped` is the seam — `io::schema::normalize_kind` calls it on load, and
-    /// `op_set_text`/`op_set_text_style` call it live — and it now puts every
-    /// span's attribute through `canonical_attr`.
-    ///
-    /// ⚠️ **The review filed this with a symptom that does not reproduce, and the
-    /// correction is the useful half.** `[S6.1-L3-05]` states the cost as
-    /// `shared_in` returning `None` — *"the panel says Mixed for a node whose
-    /// letter spacing is one value to sixteen decimal places"*. It does not:
-    /// `values_in` reads each cut through `Spans::resolve`, which applies
-    /// `set_on`, **and `set_on` canonicalizes**. So the read path was already
-    /// immune and `shared_in` answers `Some(Em(0.02))` even with the two spans
-    /// unmerged. What is actually lost is the *storage* invariant, which is
-    /// smaller and still real — and asserting only the symptom the finding named
-    /// would have made this test vacuous.
-    ///
-    /// ⚠️ **Flipped** by restoring `attr: s.attr.clone()` in `clamped`'s map. The
-    /// predicted failure site was the `shared_in` assertion and **that was wrong**
-    /// — it bit on the span count, `left: 2 right: 1`, which is how the paragraph
-    /// above came to be written. The `shared_in` assertion is kept anyway, and
-    /// deliberately: it is the thing that stays green under the flip, and so the
-    /// standing record that this bug is not the *Mixed* bug.
+    /// flip: restore `attr: s.attr.clone()` in `clamped`'s map → fails at the span
+    /// count. The `shared_in` assertion stays green under the flip: the read path
+    /// canonicalizes through `set_on`, so the loss is storage, not a *Mixed* readout.
     #[test]
     fn a_hand_edited_span_value_is_canonicalized_on_the_way_in() {
         let style = TextStyle::default();
@@ -2527,8 +2157,7 @@ mod tests {
             CharAttr::LetterSpacing(Length::Em(0.02)),
             "at the canonical value, not the smuggled one"
         );
-        // Green before the fix as well as after — see the ⚠️ above. Kept as the
-        // record that the read path was never the broken half.
+        // Green under the flip too; see the doc.
         assert_eq!(
             loaded.shared_in(&style, CharAttrKind::LetterSpacing, 0..8),
             Some(CharAttr::LetterSpacing(Length::Em(0.02)))
@@ -2620,10 +2249,9 @@ mod tests {
         assert_eq!(spans.as_slice().len(), 1, "got {:?}", spans);
     }
 
-    /// The colour sibling of the test above, and the reason `canonical_color`
-    /// exists. `Color` is `[f32; 4]`: the same colour typed as hex and nudged off
-    /// the picker's plane differs in the last bit, two spans that differ in the last
-    /// bit never merge, and the list grows on every touch.
+    /// The colour sibling of the test above: a hex-typed colour and one nudged off
+    /// the picker's plane differ in the last bit, so `canonical_color` must make
+    /// them merge.
     #[test]
     fn a_typed_colour_and_a_picked_one_coalesce() {
         let d = style();
@@ -2647,46 +2275,14 @@ mod tests {
         assert_eq!(spans.as_slice()[0].range(), 0..8);
     }
 
-    /// **The declaration order of these kinds *is* the `(attribute, start)` sort a
-    /// saved file is written in** (§5.11, invariant 9), so two of them exchanged
-    /// reorders the spans of every document already on disk — each one churning a
-    /// diff on its next save while saying nothing. Stated as a test because the
-    /// failure is invisible: the code compiles, the document loads, and only a diff
-    /// of two saves shows it.
+    /// The declaration order of these kinds is the on-disk span sort (§5.11,
+    /// invariant 9): two exchanged would silently re-sort every saved document. Only
+    /// the ascending assertion is load-bearing; the `last == Color` one restates the
+    /// append rule. A permutation is visible only to a test holding both kinds it
+    /// permutes, hence asserting the list rather than sampling it.
     ///
-    /// ⚠️ **This replaces `colour_sorts_after_every_other_attribute`, which could
-    /// not see either change §15 D154 warns about** (§15 D598). That test asserted
-    /// `Color > kind` for a hand-written list of the other fourteen, and every one of
-    /// those fourteen comparisons survives any permutation of the fourteen. The
-    /// measured flip — `CharAttrKind::Family` and `CharAttrKind::Size` exchanged, one
-    /// line, no other change — left **1,479 tests green**, the `every-kind.json`
-    /// golden included. D154 names that test by hand as the enforcement of the rule,
-    /// which is `[S6.1-L6-02]`: a verdict whose reason names a code fact, where the
-    /// code fact was not true.
-    ///
-    /// ⚠️ **And D154's *reason* was a proxy, which is why the replacement asserts
-    /// something narrower than "`Color` is last".** A kind that *arrives* in the
-    /// middle moves nothing — the fourteen keep their relative order, so a document
-    /// that does not use the newcomer serializes byte-for-byte as before. What churns
-    /// every file is a kind that *moves*. Both assertions are here, and only the
-    /// first one is load-bearing; the second restates D154's rule for the reader who
-    /// comes to it from the entry.
-    ///
-    /// Flip-check, run: the `Family`/`Size` swap fails here at the ascending
-    /// assertion, naming both kinds and their index — *"Family and Size are out of
-    /// declaration order at index 0"* — where the test this replaces was green.
-    ///
-    /// ⚠️ **It fails here and nowhere else, which was the predicted site and was
-    /// *not* the prediction written first.** The draft of this comment said the swap
-    /// would also take
-    /// `spans_sort_by_attribute_then_start_for_byte_stable_saves` below, and it does
-    /// not: that test's two spans are `Size` and `Weight`, whose relative order a
-    /// `Family`/`Size` exchange does not touch. **A permutation is only visible to a
-    /// test that holds both of the kinds it permutes** — which is the whole argument
-    /// for asserting the list rather than sampling it, arriving from the direction
-    /// that makes it concrete. The sibling below bites the *other* flip (the sort key
-    /// with the attribute deleted), and between them the two flips cover the order
-    /// and the bytes.
+    /// flip: exchange `Family` and `Size` in `CharAttrKind` → fails at the ascending
+    /// assertion, and nowhere else.
     #[test]
     fn char_attribute_kinds_keep_the_order_a_saved_file_is_written_in() {
         for (i, w) in CharAttrKind::ALL.windows(2).enumerate() {
@@ -2705,8 +2301,8 @@ mod tests {
         );
     }
 
-    /// The paragraph list carries the same guarantee and had no guard of any kind
-    /// (§15 D598). Same reading as the character test above.
+    /// The paragraph list carries the same guarantee; same reading as the character
+    /// test above.
     #[test]
     fn paragraph_attribute_kinds_keep_the_order_a_saved_file_is_written_in() {
         for (i, w) in ParaAttrKind::ALL.windows(2).enumerate() {
@@ -2719,10 +2315,7 @@ mod tests {
         }
     }
 
-    /// A decoration's colour goes through the same rounding, which it did not
-    /// before: `canonical_decoration` canonicalized its two `Length`s from the start
-    /// and left the colour raw, so an underline recoloured by a drag fragmented its
-    /// spans exactly as a run colour would have.
+    /// A decoration's colour goes through the same rounding as a run colour.
     #[test]
     fn a_decorations_colour_is_canonicalized_too() {
         let d = style();
@@ -2745,44 +2338,13 @@ mod tests {
         );
     }
 
-    /// **A decoration's thickness is floored at zero and its offset is not** —
-    /// `[S6.3-L1-02]`, §15 D546.
+    /// A decoration's thickness is floored at zero (staying `Some`, so the line does
+    /// not reappear as "the font decides") and its offset keeps its sign (§15 D151).
+    /// Both `Px` and `Em` are covered, being separate arms of the floor; the offset
+    /// control catches a fix that floors both fields.
     ///
-    /// The panel's `optional_length_field` serves both fields and was handing
-    /// thickness the **offset's** symmetric range, so `−5 px` was accepted, shown
-    /// and saved. **One value then rendered three ways**: `text::decoration_ink`
-    /// floors the resolved size and drew nothing, `export::svg::run_attrs` had no
-    /// counterpart and wrote `text-decoration-thickness="-5px"` verbatim, and
-    /// re-importing that file gave a third answer because `svg_in` reads no
-    /// decoration thickness at all. No warning on any of them.
-    ///
-    /// **The clamp is at the model as well as at the panel**, for the reason
-    /// `TextStyle::set`'s `Size` and `Weight` arms already carry: the model
-    /// outlives the control, and flooring at the panel alone leaves every
-    /// already-saved file and every non-panel writer open.
-    ///
-    /// ⚠️ **The offset assertion is the one that would catch an over-broad
-    /// fix**, and it is the whole reason both fields are here. The offset is
-    /// legitimately signed — positive-**up**, so clearing the descenders means
-    /// typing a negative — and a `canonical_decoration` that floored both would
-    /// pass every thickness assertion while silently breaking the field the range
-    /// was written for. §15 D151 fixes that sign convention.
-    ///
-    /// ⚠️ **`Em` as well as `Px`**, because the two are separate arms of the
-    /// `map` and a fix applied to one compiles perfectly with the other left
-    /// signed.
-    ///
-    /// ⚠️ **Zero is kept rather than turned into `None`.** They are different
-    /// answers — `None` is *"the font decides"* and draws the face's own weight,
-    /// `Some(0.0)` is *"no line"* — so a fix that mapped a negative to `None`
-    /// would make the line **reappear**, which is the third of the three
-    /// renderings this is closing.
-    ///
-    /// ⚠️ **Flipped** by dropping the `.max(0.0)` map: fails on the first
-    /// assertion at `Some(Px(-5.0))` against `Some(Px(0.0))`. The offset control
-    /// stays green.
-    ///
-    /// (Plain backticks rather than `[links]`, §15 D319's convention.)
+    /// flip: drop the `.max(0.0)` map in `canonical_decoration` → fails at the first
+    /// assertion, `Some(Px(-5.0))` against `Some(Px(0.0))`; the offset control stays green.
     #[test]
     fn a_decorations_thickness_is_floored_at_zero_and_its_offset_is_not() {
         let d = style();
@@ -2936,26 +2498,12 @@ mod tests {
         assert!(after.is_empty(), "got {:?}", after);
     }
 
-    /// The sort key is `(attribute, start)`, and **the two spans share a start so
-    /// that the attribute half is what decides** (§15 D598).
+    /// The sort key is `(attribute, start)`, and the two spans share a start so
+    /// that the attribute half is what decides. The order assertion is
+    /// load-bearing; `a == b` says insertion order does not survive.
     ///
-    /// ⚠️ **The fixture used to be `Size 0..2` and `Weight 4..8`, whose *starts*
-    /// already order them the way the kind does** — so the test named for the sort
-    /// key never exercised the key. Measured, before the rebuild: deleting the
-    /// attribute from the key outright (`sort_by_key(|s| (s.start, s.start))`) left
-    /// this test **green**, and the only casualty anywhere in the workspace was
-    /// `a_paragraph_span_list_round_trips_through_json` — one failure out of 1,479,
-    /// in a test that is not about the sort at all. `[S6.1-L6-02]`.
-    ///
-    /// The explicit order assertion is the load-bearing one; the `a == b` that was
-    /// here before is kept because it says the *insertion* order does not survive,
-    /// which is the property a byte-stable save actually needs.
-    ///
-    /// Flip-check, run: with the key back at `(s.start, s.start)` this now fails at
-    /// the order assertion — `left: [Weight, Size]`, `right: [Size, Weight]` — and
-    /// `a_paragraph_span_list_round_trips_through_json` fails beside it, as it did
-    /// before. **Two failures where the finding measured one, and the new one is at
-    /// the test named for the key.**
+    /// flip: `sort_by_key(|s| (s.start, s.start))` in `normalize` → fails at the
+    /// order assertion, and `a_paragraph_span_list_round_trips_through_json` beside it.
     #[test]
     fn spans_sort_by_attribute_then_start_for_byte_stable_saves() {
         let d = style();
@@ -2976,40 +2524,15 @@ mod tests {
         assert_eq!(a, b, "the same overrides must serialize identically");
     }
 
-    /// **One set of spans is one document, whatever order the file lists them
-    /// in — and a span painted over keeps the bytes nobody claimed** (§15 D643,
-    /// `[S6.1-L1-06]`).
+    /// One set of spans is one document whatever order the file lists them in, and
+    /// a span painted over keeps the bytes nobody claimed (§15 D643). Built with
+    /// `from_parts` because `set` cannot produce a containment. Assertion 1 is
+    /// order-independence, 2 is that nothing outside the overlap changes hands, 3 is
+    /// the straddling control.
     ///
-    /// Built with `from_parts` rather than `set`, on purpose: `set` splits the
-    /// old span around the new range and cannot produce a containment at all, so
-    /// the only producer is a hand-edited or foreign-written file, which
-    /// `schema.rs` normalizes rather than rejects. A test driven through `set`
-    /// would be green against the old code.
-    ///
-    /// The three assertions are three different claims and each one failed
-    /// against a different half of the old arm:
-    ///
-    /// 1. **Order-independence.** The two array orders gave `[{0..5, W300}]` and
-    ///    `[{0..10, W700}]` — two documents from one set.
-    /// 2. **Nothing outside the overlap changes hands.** Bytes 5..10 were never
-    ///    covered by the 300 and lost their 700 to the node default anyway,
-    ///    because emptying `prev` popped its *whole* range.
-    /// 3. **The straddling control is unchanged**, which is what says this is a
-    ///    repair to one arm rather than a new rule: it behaved as documented
-    ///    before and behaves the same way now.
-    ///
-    /// Two flips, run, and **each bites at exactly one assertion with the other
-    /// green** — which is what says the tie-break and the split are two separate
-    /// halves of the fix rather than one written twice.
-    ///
-    /// - Sort key back to `(kind, start)`: red at assertion 1, `left` the fixed
-    ///   pair and `right` `[{0..10, W700}]`, because with the narrow span first
-    ///   the wide one paints straight over it.
-    /// - Tail dropped from the split (`prev.end > span.end` blinded): assertion 1
-    ///   **green** — both orders agree on the wrong answer — and red at assertion
-    ///   2 with `[{0..5, W300}]` alone.
-    ///
-    /// Assertion 3 survives both, which is the control doing its job.
+    /// flip: sort key back to `(kind, start)` in `normalize` → fails at assertion 1
+    /// only. flip: blind the `prev.end > span.end` tail → assertion 1 stays green
+    /// and 2 fails.
     #[test]
     fn an_overlap_resolves_the_same_way_whichever_order_the_file_lists_it_in() {
         let d = style();
@@ -3047,8 +2570,7 @@ mod tests {
             "bytes 5..10 were never overlapped"
         );
 
-        // The control: a *straddling* overlap, which the old comment described
-        // correctly and which this change does not touch.
+        // The control: a straddling overlap.
         let straddle = CharSpans::from_parts(
             vec![
                 Span {
@@ -3081,16 +2603,8 @@ mod tests {
         );
     }
 
-    /// **The predicate only** — the value it gates is `text::axis_settings`', and
-    /// the test of *that* is
-    /// `text::tests::a_stored_opsz_reaches_the_shaper_raw_and_an_absent_one_tracks_the_size`
-    /// (§15 D571).
-    ///
-    /// ⚠️ **This test used to cover `TextStyle::optical_size`, which nothing
-    /// called.** Its three value assertions were the only coverage the Manual arm
-    /// had anywhere, and they were assertions about a function that could not affect
-    /// a pixel — including the clamp, which the live rule deliberately does not do.
-    /// Moved rather than deleted, which is the half a straight removal loses.
+    /// The predicate only; the value it gates is tested by
+    /// `text::tests::a_stored_opsz_reaches_the_shaper_raw_and_an_absent_one_tracks_the_size`.
     #[test]
     fn optical_size_is_auto_until_a_coordinate_is_typed() {
         let mut s = style();
@@ -3137,18 +2651,13 @@ mod tests {
 
     // --- paragraph spans ---------------------------------------------------
     //
-    // The list machinery itself is `Spans<A>`, already covered above through
-    // `CharSpans`; what these pin is the half that is *this* scope's — that
-    // `ParagraphStyle::get`/`set` round-trip every spannable attribute, that the
-    // canonicalization and the default-elision reach it, and that the two block
-    // indents move under the scale tool. A generic list with a wrong `SpanAttr`
-    // impl under it is a list that quietly stores nothing.
+    // `Spans<A>` is covered above through `CharSpans`; these pin this scope's half:
+    // `get`/`set` round-trips, canonicalization, default-elision, and the scale tool.
 
     #[test]
     fn every_paragraph_attribute_round_trips_through_get_and_set() {
-        // The exhaustive check `TextStyle` gets by having a variant per field —
-        // spelled out here because a new `ParaAttr` that `get` and `set` disagree
-        // about is a span that reads back as something else.
+        // Spelled out because a `ParaAttr` that `get` and `set` disagree about is a
+        // span that reads back as something else.
         let values = [
             ParaAttr::Spacing(Length::Px(12.0)),
             ParaAttr::Indent(Length::Em(1.5)),
@@ -3177,9 +2686,7 @@ mod tests {
     fn a_paragraph_span_is_canonicalized_so_two_of_them_coalesce() {
         let d = ParagraphStyle::default();
         let mut spans = ParaSpans::default();
-        // The rounding `Length::canonical` does, reached through `set` — a dragged
-        // value and a typed one have to become the same span or the list grows one
-        // entry per frame.
+        // A dragged value and a typed one must become the same span.
         spans.set(
             0..4,
             ParaAttr::IndentStart(Length::Px(24.000000000000004)),
@@ -3220,13 +2727,11 @@ mod tests {
         let mut spans = ParaSpans::default();
         // "one\ntwo" — the span is on the second paragraph.
         spans.set(4..7, ParaAttr::IndentStart(Length::Px(20.0)), &d);
-        // Type one character into the *first* paragraph. Without this re-basing,
-        // the second paragraph now starts at byte 5 and the span still claims 4..7,
-        // which is the whole reason `SetText` carries this list.
+        // Type one character into the first paragraph; the span must follow.
         let after = spans.edited(1, 0, 1, &d);
         assert_eq!(after.as_slice()[0].range(), 5..8);
-        // Splitting a paragraph carries the override onto the new one, because the
-        // span grows over inserted text at its edge — the boundary rule.
+        // Splitting a paragraph carries the override onto the new one (the boundary
+        // rule).
         let split = spans.edited(6, 0, 1, &d);
         assert_eq!(split.as_slice()[0].range(), 4..8);
     }
@@ -3250,9 +2755,8 @@ mod tests {
         assert!(doubled.hanging, "a direction is not a length");
     }
 
-    /// **The level is a count of gutters, and the gutter is the one that scaled.**
-    /// Doubling it here would step a nested item four gutters in on a scale that
-    /// already doubled the gutter itself.
+    /// The level counts gutters, and the gutter is the one that scaled; doubling the
+    /// level too would double the nesting twice.
     #[test]
     fn the_scale_tool_leaves_the_nesting_level_alone() {
         let p = ParagraphStyle {
@@ -3269,9 +2773,8 @@ mod tests {
         );
     }
 
-    /// The bound lives on the one door every edit comes through, so a control cannot
-    /// route around it — and a hand-edited file's absurd level cannot wrap the
-    /// multiplier to zero and draw flush.
+    /// The bound lives on the one door every edit comes through, and a hand-edited
+    /// file's absurd level cannot wrap the multiplier to zero.
     #[test]
     fn a_levels_bound_is_enforced_where_it_is_written_and_survives_a_wild_file() {
         let mut p = ParagraphStyle::default();
@@ -3284,8 +2787,7 @@ mod tests {
             level: u8::MAX,
             ..ParagraphStyle::default()
         };
-        // 255 rather than 256: `saturating_add` is what stops the multiplier wrapping
-        // to zero, and one lost gutter at level 255 is the whole cost of that.
+        // 255 rather than 256: `saturating_add` stops the wrap to zero.
         assert_eq!(wild.start_edge(16.0), 2550.0, "255 gutters, not none");
     }
 
@@ -3311,36 +2813,13 @@ mod tests {
         );
     }
 
-    /// **A zero length keeps its unit across a save** — `[S6.1-L1-03]`, §15 D537.
+    /// A zero length keeps its unit across a save, while the default zero is still
+    /// elided. Asserted on the JSON text, since a round-tripped value says nothing
+    /// about whether the key was written; a paragraph field is checked too, as the
+    /// predicate is named on both types.
     ///
-    /// `Length::is_zero` was the `skip_serializing_if` on all seven optional
-    /// lengths in this module and answers `true` for `Em(0.0)` as readily as for
-    /// `Px(0.0)`, so a letter-spacing field set to `%` and left at zero was
-    /// **absent from the file** and came back `Px`. The drawing is identical
-    /// either way — `resolve` is `0.0` for both — which is exactly why nothing
-    /// rendered ever disagreed and why the only place the loss shows is the
-    /// suffix on a panel, one reopen later.
-    ///
-    /// **The elided control is half the test.** `is_default_zero` has to keep
-    /// eliding the *default* zero or the fix is "write every field always",
-    /// which would grow every file in the library for a case that has no data in
-    /// it. Asserted on the JSON text rather than on the round-tripped value,
-    /// because a value that round-trips says nothing about whether the key was
-    /// written.
-    ///
-    /// **And a paragraph field, because the seven move together.** The predicate
-    /// is named seven times across `TextStyle` and `ParagraphStyle`; a test that
-    /// pinned only `letter_spacing` would be green against a fix applied to one
-    /// of them.
-    ///
-    /// ⚠️ **Flipped** by putting `is_zero` back on `letter_spacing`: fails on the
-    /// first assertion — the key is absent — which is the predicted site. Flipped
-    /// the other way too, by making `is_default_zero` return `false`
-    /// unconditionally: the *control* fails on the elision, at
-    /// `letter_spacing` present in a default style. Both halves bite.
-    ///
-    /// (Plain backticks, not `[links]` — `cargo doc` builds without the `test`
-    /// cfg, so a link here is decoration no gate can validate, §15 D319.)
+    /// flip: `is_zero` back on `letter_spacing` → fails at the first assertion.
+    /// flip: `is_default_zero` returns `false` → the control fails.
     #[test]
     fn a_zero_length_keeps_its_unit_across_a_save() {
         let em0 = TextStyle {
@@ -3381,28 +2860,13 @@ mod tests {
         assert_eq!(back.indent, Length::Em(0.0));
     }
 
-    /// Canonicalizing a **finite** length leaves it finite, however large.
+    /// Canonicalizing a finite length leaves it finite, however large: the
+    /// multiply by `10^LENGTH_PLACES` overflows after the `is_finite` guard. The
+    /// values either side of the threshold bracket it; `AxisSetting` is the second
+    /// site of the same mechanism.
     ///
-    /// ⚠️ **The failure this pins is the sanitizer manufacturing the bad value**,
-    /// which is the opposite direction from every other finiteness guard in the
-    /// workspace: `Length::canonical` opens with `if !v.is_finite() { return 0.0 }`
-    /// and then multiplies by `10^LENGTH_PLACES`, so the guard answers about the
-    /// input and the overflow happens two lines later. `Px(inf)` is written by
-    /// `serde_json` as `null` and refused on the way back in — a document that
-    /// never opens again, produced by a documented door
-    /// (`Spans::set` routes every value through the canonicalizer).
-    ///
-    /// **The controls either side of the threshold are the point of the
-    /// bracketing.** 1e304 was always fine and 1e305 was always `inf`, so a test
-    /// that only tried one of them would have been green for the wrong reason at
-    /// whichever end it picked.
-    ///
-    /// ⚠️ **`AxisSetting` is the second site of one mechanism**, not a second
-    /// bug: `quantize` carries the identical guard and the identical settle, and
-    /// is the only sanitizer a variable-axis value meets.
-    ///
-    /// Flip-check, run: putting `(v * scale).round() / scale` back unguarded
-    /// fails on the first assertion, printing `Px(inf)`.
+    /// flip: unguarded `(v * scale).round() / scale` in `round_to_places` → fails at
+    /// the first assertion, printing `Px(inf)`.
     #[test]
     fn canonicalizing_a_finite_length_leaves_it_finite() {
         for v in [1e304, 1e305, 1e307, f64::MAX, -1e305, -f64::MAX] {
@@ -3415,8 +2879,7 @@ mod tests {
             assert!(got_em.is_finite(), "canonical(Em({v:e}))");
         }
 
-        // The control below the threshold, which always worked and has to keep
-        // working: rounding to four places is the whole point of the function.
+        // The control below the threshold: rounding to four places still works.
         assert_eq!(Length::Px(1.000_049).canonical(), Length::Px(1.0));
         assert_eq!(Length::Px(1.000_051).canonical(), Length::Px(1.0001));
         assert_eq!(Length::Px(1e303).canonical(), Length::Px(1e303));
@@ -3432,37 +2895,15 @@ mod tests {
         );
     }
 
-    /// **`TextStyle::scaled` and `CharAttr::scaled_by` are one rule, and this is
-    /// what holds them to it** — §15 D664, `[S6.1-L3-07]`.
+    /// `TextStyle::scaled` and `CharAttr::scaled_by` are one rule, and this holds
+    /// them to it: `Spans::normalize` compares span against default, so a
+    /// disagreement drops a span that mattered or keeps one that did not. Asked
+    /// over `CharAttrKind::ALL`, so a new attribute is covered automatically. The
+    /// fixture is non-default in every scalable field (the defaults are zero and
+    /// `0 * factor == 0`), which the `assert_ne!` checks.
     ///
-    /// The node default and the spans over it are scaled by two different
-    /// functions, because they are two different shapes: one is a struct and the
-    /// other a stream of attribute values. `Spans::normalize` then compares the
-    /// two — a span equal to the default is not stored — so the moment they
-    /// disagree about one attribute, a scale either drops a span that mattered or
-    /// keeps one that did not.
-    ///
-    /// 🚨 **They lived in two crates until 2026-09-09.** Core published
-    /// `ParagraphStyle::scaled` for the paragraph scope and nothing for this one,
-    /// so `ondin-app::tools::scaled_text_scopes` re-stated all six decisions in a
-    /// `TextStyle` literal, above a byte-identical private twin of
-    /// `scale_decoration`. They agreed; nothing made them agree tomorrow, which
-    /// is what this test now does.
-    ///
-    /// **Asked over `CharAttrKind::ALL`**, so a sixteenth attribute is covered the
-    /// day it exists rather than the day somebody remembers this test.
-    ///
-    /// ⚠️ **The fixture has to be non-default in every scalable field**, or the
-    /// test is about nothing: `TextStyle::default`'s lengths are zero and
-    /// `0 * 1.75 == 0`, so a `scaled` that returned `self.clone()` would pass over
-    /// the defaults. The `assert_ne!` below is what says the fixture moved.
-    ///
-    /// ⚠️ **Flip run**, `baseline_shift` left unscaled in `TextStyle::scaled` —
-    /// the plausible slip, since it is the one field of the six whose name does
-    /// not say "length". Fails at `BaselineShift(Px(-3.0))` against
-    /// `BaselineShift(Px(-5.25))`, naming the attribute in the message, which is
-    /// the whole reason the loop asserts per kind rather than comparing two
-    /// structs.
+    /// flip: leave `baseline_shift` unscaled in `TextStyle::scaled` → fails at
+    /// `BaselineShift(Px(-3.0))` against `BaselineShift(Px(-5.25))`.
     #[test]
     fn a_scaled_style_agrees_with_the_span_rule_attribute_by_attribute() {
         let base = TextStyle {

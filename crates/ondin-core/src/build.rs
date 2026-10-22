@@ -1,13 +1,11 @@
 //! Composite transaction builders and the world-space projection facade
 //! (§5.7 `TransactionBuilder`, §8.4 `place_at_world`).
 //!
-//! Each function turns a user-level intent ("group these", "put this at these
-//! world coordinates") into one `Transaction`, one undo step. It lives in core so
-//! the UI, MCP write tools and the command line share one projection. Nothing
-//! here mutates: each is a pure `(&Document, &Resolved, …) -> Transaction`.
-//!
-//! The document stores local transforms only; `local = parent_world⁻¹ · world`
-//! is written once, in [`local_for_world`].
+//! Each function turns a user-level intent into one `Transaction`, one undo step,
+//! as a pure `(&Document, &Resolved, …) -> Transaction`, so the UI, MCP write
+//! tools and the command line share one projection. The document stores local
+//! transforms only; `local = parent_world⁻¹ · world` is written once, in
+//! [`local_for_world`].
 
 use crate::document::Document;
 use crate::id::{IdSource, NodeId};
@@ -25,16 +23,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// (§5.3): a frame hangs off the root, another frame or a group, and nothing may
 /// hold a `Root`.
 ///
-/// The root may hold loose shapes (a shape dragged out of a frame lands there),
-/// frames nest, and a frame may sit in any group (a flex row of cards is a group
-/// of frames), so removing a group's layout never has to be refused.
-///
-/// A frame still may not sit under a boolean or a mask at any depth; that is an
-/// ancestor question, asked by [`Document::frame_may_sit_under`], and every door
-/// that asks this asks that too.
-///
-/// The one statement of the parent rule: `apply`, the loader, the layer tree's
-/// drop greying and render previews all call it.
+/// A frame may sit in any group, so removing a group's layout is never refused;
+/// it still may not sit under a boolean or a mask at any depth, an ancestor
+/// question asked by [`Document::frame_may_sit_under`]. The one statement of the
+/// parent rule: `apply`, the loader and the layer tree all call it.
 pub fn can_parent(parent: &NodeKind, child: &NodeKind) -> bool {
     match child {
         // There is exactly one root and it is nobody's child.
@@ -56,37 +48,27 @@ pub fn valid_opacity(opacity: f32) -> bool {
 
 /// Whether every coefficient of a transform is finite (`OpError::NonFinite`).
 ///
-/// A field invariant of the model, asked by the operation that writes the field
-/// and by the loader that reads it back.
-///
-/// [`local_for_world`] produces the value this refuses: `parent_world.inverse()`
-/// on a singular parent is all `NaN`. The guard lives here, not in the
-/// projection, because the projection has no way to report an error and the
-/// operation returns a `Result` every commit path handles.
+/// Asked by the operation that writes the field and by the loader. [`local_for_world`]
+/// can produce the value this refuses (a singular parent inverts to `NaN`) but
+/// cannot report an error, so the guard lives here.
 pub fn affine_is_finite(t: Affine) -> bool {
     t.as_coeffs().iter().all(|c| c.is_finite())
 }
 
 /// Whether `t` can be inverted without manufacturing a value the file cannot
-/// hold (§15 D713).
+/// hold.
 ///
-/// Finite is not enough: a singular matrix has finite coefficients but inverts to
-/// all `NaN`, which `serde_json` writes as `null` and the next load rejects.
-/// Threshold-free on purpose: it asks whether the inverse is representable, so
-/// there is no epsilon to tune, and it is the only spelling of that test (a
-/// determinant epsilon is relative, a determinant is in squared world units).
-///
-/// Not a validator for the model: a singular transform is legal to store (the
-/// loader accepts one); this is the guard a reader asks before inverting.
+/// A singular matrix has finite coefficients but inverts to all `NaN`, which
+/// `serde_json` writes as `null` and the next load rejects. Threshold-free on
+/// purpose (no epsilon to tune). Not a model validator: a singular transform is
+/// legal to store; this is the guard a reader asks before inverting.
 pub fn affine_is_invertible(t: Affine) -> bool {
     affine_is_finite(t) && affine_is_finite(t.inverse())
 }
 
-/// Whether every number in a brush is finite (`OpError::NonFinite`) — §15 D451.
+/// Whether every number in a brush is finite (`OpError::NonFinite`).
 ///
-/// The paint half of invariant 8. It covers everything `serde_json` would refuse
-/// to write: a solid colour's components, a gradient's geometry, every stop's
-/// offset and colour, and the gradient's transform.
+/// The paint half of invariant 8: everything `serde_json` would refuse to write.
 pub fn brush_is_finite(brush: &crate::Brush) -> bool {
     fn color_ok(c: peniko::color::AlphaColor<peniko::color::Srgb>) -> bool {
         c.components.iter().all(|f| f.is_finite())
@@ -102,21 +84,18 @@ pub fn brush_is_finite(brush: &crate::Brush) -> bool {
             affine_is_finite(g.transform)
                 && gradient_kind_is_finite(&g.gradient)
                 && stops_ok(&g.gradient)
-                // `valid_opacity`, not `is_finite`: the loader validates nothing,
-                // and a finite out-of-range value (`-5`, `1e30`) would silently
-                // distort every stop and survive a round trip.
+                // `valid_opacity`, not `is_finite`: a finite out-of-range value
+                // would distort every stop and survive a round trip.
                 && valid_opacity(g.opacity)
         }
         peniko::Brush::Image(i) => i.sampler.alpha.is_finite() && image_ref_is_finite(&i.image),
     }
 }
 
-/// Invariant 8 for an effect's numbers (§15 D641).
+/// Invariant 8 for an effect's numbers.
 ///
-/// Also matters before any save: an infinite blur radius makes `effect::escaped`
-/// compute `inf − inf = NaN` and return no escape, so the cull, export plan and
-/// backend buffer boxes would believe the blur reaches nowhere. Refusing at the
-/// operation keeps `escaped`'s input finite. A shadow's `color` is included.
+/// An infinite blur radius makes `effect::escaped` compute `NaN` and report no
+/// escape, so cull and export boxes would think the blur reaches nowhere.
 pub fn effect_is_finite(effect: &crate::Effect) -> bool {
     fn shadow_ok(s: &crate::Shadow) -> bool {
         s.offset.x.is_finite()
@@ -139,11 +118,8 @@ pub fn effect_is_finite(effect: &crate::Effect) -> bool {
 
 /// The numbers an [`crate::ImageRef`] carries, which are not peniko's.
 ///
-/// The reference hanging off an image brush (crop, tile scale, the adjustment
-/// sliders) is this crate's, not peniko's, so checking `peniko::Brush` alone stops
-/// one level short. This is the second guard behind `image::usable_span`, which
-/// stops a crop span overflowing; see
-/// `image::tests::a_crop_whose_span_overflows_never_reaches_the_document`.
+/// Crop, tile scale and the adjustment sliders, so checking `peniko::Brush` alone
+/// stops one level short. The second guard behind `image::usable_span`.
 fn image_ref_is_finite(r: &crate::ImageRef) -> bool {
     let a = &r.adjust;
     [r.crop.x0, r.crop.y0, r.crop.x1, r.crop.y1, r.tile_scale]
@@ -162,11 +138,8 @@ fn image_ref_is_finite(r: &crate::ImageRef) -> bool {
         .all(|f| f.is_finite())
 }
 
-/// The coordinates a gradient's own kind carries, in the space its transform
-/// maps from.
-///
-/// Exhaustive over `GradientKind` with no wildcard, so a new peniko kind stops
-/// the build here rather than going unchecked.
+/// The coordinates a gradient's own kind carries. Exhaustive with no wildcard, so
+/// a new peniko kind stops the build here.
 fn gradient_kind_is_finite(g: &peniko::Gradient) -> bool {
     match &g.kind {
         peniko::GradientKind::Linear(p) => [p.start.x, p.start.y, p.end.x, p.end.y]
@@ -220,10 +193,8 @@ pub fn place_at_world(
     }]))
 }
 
-/// Translate every node in `ids` by `delta` in world space.
-///
-/// Nodes whose ancestor is also in `ids` are skipped: moving the ancestor
-/// already carries them, and emitting both would move them twice.
+/// Translate every node in `ids` by `delta` in world space, skipping nodes whose
+/// ancestor is also in `ids` (emitting both would move them twice).
 pub fn move_by_world(
     doc: &Document,
     res: &Resolved,
@@ -276,16 +247,13 @@ pub fn reparent_preserving_world(
     ]))
 }
 
-/// The operations that write `local` and `kind` into `node` as its own — a
-/// `SetTransform` where `local` is not its stored transform, and a `SetGeometry`
-/// where `kind` is not its stored kind and has a size to write (a shape's or a
-/// frame's size, a text's sizing via [`kept_text_mode`]). Nothing for a kind whose
-/// size is not in it: a path's, a group's, an image's.
+/// The operations that write `local` and `kind` into `node` as its own: a
+/// `SetTransform` where `local` differs, and a `SetGeometry` where `kind` differs
+/// and has a size to write (a shape's or frame's size, a text's sizing via
+/// [`kept_text_mode`]; not a path's, group's or image's).
 ///
 /// The one spelling of "keep it where it is drawn" for every edit that takes a
-/// layer out of whatever was placing it: the structural verbs through [`baked`],
-/// a Position pin change, *Unpin and return to the layout*, a layout set to
-/// `none`, and (its `SetGeometry` half alone) W/H `px` from the sizing menu.
+/// layer out of whatever was placing it.
 pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind) -> Vec<Operation> {
     let mut ops = Vec::new();
     if node.transform() != local {
@@ -319,10 +287,9 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
 /// The sizing to bake for a text drawn as `kind` (sizing `drawn`): its stored
 /// mode, kept where that draws the same.
 ///
-/// A label a container stretched is drawn as a `Fixed` box, and baking that would
-/// stop an auto-width label growing with its words. Where the stored mode is
-/// `Auto`/`AutoHeight` and the drawn box is exactly as tall as its lines,
-/// `AutoHeight` at the drawn width is the same picture; a taller box stays `Fixed`.
+/// Baking a container-stretched label as `Fixed` would stop an auto-width label
+/// growing with its words; where the drawn box is exactly as tall as its lines,
+/// `AutoHeight` at the drawn width is the same picture.
 fn kept_text_mode(
     node: &crate::Node,
     kind: &NodeKind,
@@ -346,21 +313,14 @@ fn kept_text_mode(
 }
 
 /// The operations that make `id` **store where it is drawn**, for a door that
-/// takes it out of the layout that placed it or takes that layout away — so the
-/// edit moves nothing on screen (§9's rule for structural edits).
+/// takes it out of its layout or takes that layout away, so the edit moves nothing
+/// on screen (§9's rule for structural edits). Empty for a layer already stored
+/// where it is drawn.
 ///
-/// An in-flow item's stored transform and size are not where and what it is
-/// drawn as; group, frame selection, boolean, mask, ungroup and *Display → none*
-/// each take items out of a layout and write this first.
-///
-/// Three parts: the used transform and kind ([`baked_ops`]); and, for a container
-/// with a layout of its own, the size its parent's pass gave it on an axis where
-/// its own pass would give another (a hugging frame becomes `auto` with the kind
-/// carrying the drawn size; a layout group takes the drawn size in px). An axis
-/// its own pass sizes alike is left alone.
-///
-/// Empty for a layer already stored where it is drawn, so documents with no
-/// layout are unchanged.
+/// The used transform and kind ([`baked_ops`]); and, for a container with a layout
+/// of its own, the size its parent's pass gave it on an axis where its own pass
+/// would give another (a hugging frame becomes `auto`; a layout group takes the
+/// drawn size in px).
 pub fn baked(doc: &Document, res: &Resolved, id: NodeId) -> Vec<Operation> {
     use crate::container::Dimension;
     let Some(node) = doc.get(id) else {
@@ -413,13 +373,11 @@ fn baked_size(doc: &Document, res: &Resolved, id: NodeId) -> impl Iterator<Item 
 }
 
 /// Where a new container lands among `siblings` once `members` have been
-/// reparented into it: the topmost member's slot (§15 D286).
+/// reparented into it: the topmost member's slot.
 ///
-/// The index counts the non-members below the topmost member, so a
-/// non-contiguous selection leaves every unselected layer where it was. It must
-/// be `rposition` (the topmost member), not `position`: selecting `back` and
-/// `front` of `back`/`mid`/`front` must give `[mid, NEW]`, and the `filter` only
-/// means anything against `rposition`.
+/// Counts the non-members below the topmost member. It must be `rposition`, not
+/// `position`: selecting `back` and `front` of `back`/`mid`/`front` gives
+/// `[mid, NEW]`.
 fn container_slot(siblings: &[NodeId], members: &FxHashSet<NodeId>) -> Result<usize, OpError> {
     let top = siblings
         .iter()
@@ -435,12 +393,9 @@ fn container_slot(siblings: &[NodeId], members: &FxHashSet<NodeId>) -> Result<us
 /// z-order, and the z-position of the topmost member.
 ///
 /// Returns the transaction and the id minted for the group. Members must be
-/// siblings; grouping across parents is rejected rather than guessed. Frames can
-/// be grouped.
-///
-/// The group is created with an identity transform in the shared parent's space,
-/// so each member keeps its local transform, written first where it is drawn
-/// ([`baked`]) so a flex or grid member does not jump.
+/// siblings; grouping across parents is rejected. The group is created with an
+/// identity transform, so each member keeps its local transform, written first
+/// where it is drawn ([`baked`]) so a flex or grid member does not jump.
 pub fn group(
     doc: &Document,
     res: &Resolved,
@@ -452,7 +407,6 @@ pub fn group(
     }
     let unique: FxHashSet<NodeId> = members.iter().copied().collect();
 
-    // One shared parent, and no root member.
     let mut parent = None;
     for id in &unique {
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
@@ -469,7 +423,6 @@ pub fn group(
     let parent = parent.expect("non-empty member set");
     let siblings = doc.get(parent).expect("checked above").children().to_vec();
 
-    // Members in their current z-order, so the group preserves relative order.
     let ordered: Vec<NodeId> = siblings
         .iter()
         .copied()
@@ -479,8 +432,7 @@ pub fn group(
 
     let group_id = ids.mint();
     let mut ops = Vec::with_capacity(ordered.len() + 2);
-    // Append first (a valid index regardless of how many members there are),
-    // then reorder into place once the members have moved inside.
+    // Append first (always a valid index), reorder once the members are inside.
     ops.push(Operation::CreateNode {
         id: group_id,
         parent,
@@ -506,23 +458,19 @@ pub fn group(
 }
 
 /// Which of `members` becomes the mask: the key if one is designated, else the
-/// bottom-most member that is not a picture, else the bottom-most, among the
-/// members that [`can_be_mask`] when any can (otherwise [`mask`] reports the
-/// refusal). `None` only when `members` is empty or names nothing in the document.
+/// bottom-most member that is not a picture, else the bottom-most, among those
+/// that [`can_be_mask`] when any can. `None` only when `members` is empty or names
+/// nothing in the document.
 ///
-/// A "picture" is an image-filled layer ([`crate::Paint::image_fill`]), a shape
-/// whose outline is a rectangle; masking with it would crop everything to a
-/// rectangle, and z-order alone picks it whenever the photo sits lower. A key
-/// (`Alt+Shift`) overrides, the same gesture that overrides a `Subtract` base.
-///
-/// Two callers ask: this builder and the inspector, which needs to say why its
-/// control is dim.
+/// A "picture" is an image-filled layer ([`crate::Paint::image_fill`]); masking
+/// with it would crop everything to a rectangle. The inspector asks too, to say
+/// why its control is dim.
 pub fn mask_target(doc: &Document, members: &[NodeId], key: Option<NodeId>) -> Option<NodeId> {
     let unique: FxHashSet<NodeId> = members.iter().copied().collect();
     if let Some(key) = key.filter(|k| unique.contains(k)) {
         return Some(key);
     }
-    // Parent's child order is paint order; the selection's order is click order.
+    // Child order is paint order; the selection's is click order.
     let parent = doc.get(*members.first()?)?.parent()?;
     let ordered: Vec<NodeId> = doc
         .get(parent)?
@@ -556,19 +504,13 @@ pub fn can_be_mask(doc: &Document, id: NodeId) -> bool {
 }
 
 /// *Use as mask* — make one of `members` the mask for the rest, **wrapping them
-/// in a group** when there is more than one.
+/// in a group** when there is more than one. Returns the transaction and the id to
+/// select.
 ///
-/// Returns the transaction and the id the caller should select.
-///
-/// The group keeps the mask and its subjects one draggable thing. One member is
-/// the exception and takes no group: a lone layer masks the siblings it already
-/// has ([`crate::Document::governing_mask`]), and wrapping it would change which
-/// layers it masks.
-///
-/// [`mask_target`] picks the mask; it moves to index 0 of the new group and the
-/// rest keep their z-order, the same smallest rearrangement [`boolean`] makes for
-/// a `Subtract` base. A mask clips what is drawn above it, so designating one is
-/// a reorder, not a flag on the selection.
+/// One member takes no group: a lone layer masks the siblings it already has
+/// ([`crate::Document::governing_mask`]), and wrapping it would change which.
+/// [`mask_target`] picks the mask; it moves to index 0 of the new group (a mask
+/// clips what is drawn above it, so designating one is a reorder, not a flag).
 pub fn mask(
     doc: &Document,
     res: &Resolved,
@@ -580,7 +522,6 @@ pub fn mask(
     if unique.is_empty() {
         return Err(OpError::MalformedSubtree);
     }
-    // One shared parent, asked here because the mask choice uses its child order.
     let mut parent = None;
     for id in &unique {
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
@@ -592,8 +533,7 @@ pub fn mask(
         }
     }
     let parent = parent.expect("non-empty member set");
-    // Nothing masks inside a boolean (operands, not artwork); refused so the chord
-    // path gets an error rather than a silent no-op.
+    // Nothing masks inside a boolean; an error rather than a silent no-op.
     if matches!(
         doc.get(parent).map(|n| n.kind()),
         Some(NodeKind::Boolean { .. })
@@ -618,7 +558,6 @@ pub fn mask(
     {
         return Err(OpError::WrongKindForOp);
     }
-    // `apply` refuses this too; asked here before a group is planned around it.
     if doc.holds_a_frame(chosen) {
         return Err(OpError::ArtboardPlacement);
     }
@@ -633,7 +572,6 @@ pub fn mask(
         return Ok((Transaction(ops), chosen));
     }
 
-    // `group` owns the rest of the admission test and the placement rule.
     let (Transaction(mut ops), group_id) = group(doc, res, ids, members)?;
     if chosen != bottom {
         ops.push(Operation::Reorder {
@@ -648,22 +586,15 @@ pub fn mask(
     Ok((Transaction(ops), group_id))
 }
 
-/// Wrap `members` in a new **frame** ([`NodeKind::Artboard`]) sized to their union,
-/// preserving their world positions, relative z-order, and the z-position of the
-/// topmost member ([`container_slot`], §15 D286).
+/// [`group`]'s sibling: wrap `members` in a new **frame** ([`NodeKind::Artboard`])
+/// sized to their union, preserving world positions and z-order
+/// ([`container_slot`]). Returns the transaction and the frame's id.
 ///
-/// Returns the transaction and the id minted for the frame. [`group`]'s sibling,
-/// a second function because a frame has a box:
-///
-/// - It is created at the union's corner, so every member is moved back by exactly
-///   that corner (`translate(−origin) · local`, from the member's used transform;
-///   a flex item's stretched size is baked too, [`baked`]). `Resolved` is needed
-///   to measure a text node's or container's box.
-/// - The parent has to accept a frame (§5.3): never under a boolean or a mask.
-///   Refused with [`OpError::ArtboardPlacement`] rather than framed elsewhere.
-///
-/// The frame is created with no background and does not clip: framing changes
-/// nothing you can see. [`can_frame`] is the question a menu row asks first.
+/// Created at the union's corner, so every member moves back by that corner
+/// (`translate(−origin) · local`, from its used transform; a flex item's size is
+/// baked too, [`baked`]). A parent that cannot accept a frame (§5.3) is refused
+/// with [`OpError::ArtboardPlacement`]. No background and no clip, so framing
+/// changes nothing visible. [`can_frame`] is the question a menu row asks first.
 pub fn frame(
     doc: &Document,
     res: &Resolved,
@@ -675,7 +606,6 @@ pub fn frame(
     }
     let unique: FxHashSet<NodeId> = members.iter().copied().collect();
 
-    // One shared parent; only the root is refused as a member.
     let mut parent = None;
     for id in &unique {
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
@@ -691,8 +621,6 @@ pub fn frame(
     }
     let parent = parent.expect("non-empty member set");
     let parent_node = doc.get(parent).ok_or(OpError::NoSuchNode(parent))?;
-    // §5.3's placement rule, asked before anything is planned so the failure is
-    // one the caller can explain.
     if !can_parent(
         parent_node.kind(),
         &NodeKind::Artboard {
@@ -711,9 +639,8 @@ pub fn frame(
         .collect();
     let final_index = container_slot(&siblings, &unique)?;
 
-    // The union in the shared parent's space, from each member's box through its
-    // used transform; `world_bounds` would pick up an axis-aligned box for a
-    // rotated member.
+    // Each member's box through its used transform (`world_bounds` would give an
+    // axis-aligned box for a rotated member).
     let union = ordered
         .iter()
         .filter_map(|id| {
@@ -726,13 +653,11 @@ pub fn frame(
         .reduce(|a, b| a.union(b))
         .ok_or(OpError::MalformedSubtree)?;
     let origin = union.origin();
-    // The floor `create_artboard` uses: a zero-extent line would give a frame
-    // nothing can be dropped into.
+    // The floor `create_artboard` uses.
     let size = kurbo::Size::new(union.width().max(1.0), union.height().max(1.0));
 
     let frame_id = ids.mint();
     let mut ops = Vec::with_capacity(ordered.len() * 2 + 2);
-    // Appended first and reordered last, as `group` does.
     ops.push(Operation::CreateNode {
         id: frame_id,
         parent,
@@ -764,20 +689,16 @@ pub fn frame(
     Ok((Transaction(ops), frame_id))
 }
 
-/// Whether [`frame`] would accept `members` — one shared parent that can hold a
-/// frame, with no boolean or mask above it, and nothing that cannot be moved.
-///
-/// The builder's own question, so a menu row cannot offer what the verb would
-/// refuse (`context-menus.md` §3). It does not ask whether the members' boxes
-/// resolve (that needs a [`Resolved`]); [`frame`] reports that.
+/// Whether [`frame`] would accept `members`, so a menu row cannot offer what the
+/// verb would refuse. It does not ask whether the members' boxes resolve (that
+/// needs a [`Resolved`]); [`frame`] reports that.
 pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
     let mut parent = None;
     for id in members {
         let Some(node) = doc.get(*id) else {
             return false;
         };
-        // Expressive, not load-bearing: `Root` is the only parentless node, so the
-        // `let else` below already refuses it; kept so the answer is readable here.
+        // Redundant with the `let else` below (`Root` is the only parentless node).
         if matches!(node.kind(), NodeKind::Root) {
             return false;
         }
@@ -801,21 +722,17 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
 
 /// Wrap `members` in a [`NodeKind::Boolean`] container performing `op`.
 ///
-/// The same shape as [`group`] (one new container, members reparented in z-order,
-/// reordered into the topmost member's slot) with three differences:
+/// Shaped like [`group`], with three differences:
 ///
 /// - Two members minimum: a boolean of one shape is that shape.
-/// - Text is refused: it has no outline (`resolve::operand_path` is `None`). The
-///   user converts it first with [`outline_text`]; converting silently would take
-///   a one-way door for them.
+/// - Text is refused: it has no outline, and converting silently ([`outline_text`])
+///   would take a one-way door for the user.
 /// - The result inherits the bottom member's paint, since a fresh container has no
 ///   fills and would draw nothing.
 ///
-/// `key`, when given, is the member placed at the bottom, the base `Subtract` cuts
-/// into and the paint source. It applies to `Subtract` only: Union, Intersect and
-/// Exclude fold commutatively, so reordering would change the layer list while
-/// leaving the shape identical. It is creation-time ordering, not a stored
-/// property: afterwards operand order is child order.
+/// `key` is the member placed at the bottom (`Subtract`'s base and the paint
+/// source). `Subtract` only: the other operations fold commutatively, so
+/// reordering would change the layer list and not the shape.
 pub fn boolean(
     doc: &Document,
     res: &Resolved,
@@ -852,13 +769,12 @@ pub fn boolean(
     let parent = parent.expect("non-empty member set");
     let siblings = doc.get(parent).expect("checked above").children().to_vec();
 
-    // Z-order is the operand order: index 0 is the bottom, `Subtract`'s base.
+    // Z-order is the operand order: index 0 is `Subtract`'s base.
     let mut ordered: Vec<NodeId> = siblings
         .iter()
         .copied()
         .filter(|c| unique.contains(c))
         .collect();
-    // The key goes to the bottom; the rest keep their relative order.
     if op == crate::node::BoolOp::Subtract
         && let Some(key) = key
         && let Some(at) = ordered.iter().position(|c| *c == key)
@@ -878,8 +794,7 @@ pub fn boolean(
         transform: None,
         name: None,
     });
-    // No fill rule is set: `Node::fill_rule` derives it from the operation.
-    // The bottom member's paint, read before anything moves.
+    // No fill rule: `Node::fill_rule` derives it from the operation.
     let base = doc.get(ordered[0]).expect("checked above");
     ops.extend(carried_paint(base, bool_id));
     for (i, member) in ordered.iter().enumerate() {
@@ -888,7 +803,6 @@ pub fn boolean(
             new_parent: bool_id,
             index: i,
         });
-        // Operands are drawn where they were, as in `group`.
         ops.extend(baked(doc, res, *member));
     }
     ops.push(Operation::Reorder {
@@ -899,10 +813,7 @@ pub fn boolean(
 }
 
 /// Change which operation a `Boolean` container performs, leaving its children
-/// and its paint alone.
-///
-/// A kind edit rather than a rebuild, so switching Union → Subtract on a boolean
-/// the user has already styled keeps the styling — and is one undo step.
+/// and its paint alone (a kind edit, not a rebuild, so styling survives).
 pub fn set_boolean_op(
     doc: &Document,
     id: NodeId,
@@ -916,13 +827,10 @@ pub fn set_boolean_op(
                 id,
                 geometry: crate::GeometryPatch::BoolOp(op),
             }];
-            // No `SetFillRule`: it follows the operation. Rename only a name we
-            // gave it (`is_boolean_label` is strict: "Badge 2" stays the user's).
+            // Rename only a name we gave it ("Badge 2" stays the user's).
             if crate::naming::is_boolean_label(node.name()) {
                 // The number comes across so flipping back and forth does not walk
-                // it; a name with no number joins the series at 1. The container
-                // is excluded from `taken` so its own old name does not push the
-                // new one a number along.
+                // it; the container is excluded from `taken` for the same reason.
                 let parent = node.parent().unwrap_or(doc.root());
                 let taken = doc.child_names(parent, &[id]);
                 let from = crate::naming::numbered(node.name()).map_or(1, |(_, n)| n);
@@ -939,18 +847,16 @@ pub fn set_boolean_op(
 
 /// Replace a selection with the single `Path` its outlines add up to (§9.4).
 ///
-/// The one destructive shape operation, the counterpart to [`ungroup`]: a boolean
-/// container keeps its operands; flattening throws them away and keeps the answer.
+/// The one destructive shape operation: flattening throws the operands away and
+/// keeps the answer.
 ///
 /// - One boolean: its derived outline in its own local space, keeping its
 ///   transform, paint, name and opacity.
-/// - Two or more layers: their union in the parent's space (as `boolean(Union)`
-///   then flattening, in one undo step); groups and booleans contribute through
-///   [`Resolved::operand_path`].
+/// - Two or more layers: their union in the parent's space; groups and booleans
+///   contribute through [`Resolved::operand_path`].
 ///
-/// A single non-boolean layer is refused; turning a rect into a path is
-/// [`outline`] (§15 D230). Text is refused for [`boolean`]'s reason; `Artboard`
-/// and `Root` are not shapes.
+/// A single non-boolean layer is refused (that is [`outline`]). Text is refused for
+/// [`boolean`]'s reason.
 pub fn flatten(
     doc: &Document,
     res: &Resolved,
@@ -975,8 +881,7 @@ fn flatten_boolean(
     if !matches!(node.kind(), NodeKind::Boolean { .. }) {
         return Err(OpError::WrongKindForOp);
     }
-    // The same two `None`s as `flatten_union`'s, read from the cache's `failed`
-    // mark rather than this thread's counter (the cache was filled on an earlier pass).
+    // The `failed` mark, not this thread's counter: the cache was filled on an earlier pass.
     let path = match res.boolean_path(id).cloned() {
         Some(path) => path,
         None if res.boolean_failed(id) => return Err(OpError::BooleanAbandoned),
@@ -987,14 +892,10 @@ fn flatten_boolean(
 
 /// Whether [`outline`] would produce a layer *different* from the one it replaces.
 ///
-/// The kind gate and the no-op check in one answer: a rect, ellipse, polygon, star
-/// or line has an outline that is not already a `Path`, and a `Path` has one only
-/// while its corner radii are still in the model (§15 D119).
-///
-/// Refused: a `Boolean` ([`flatten`]'s), a `Group` (no outline of its own), an
-/// `Artboard` (a page), and `Text`, which needs the resolved layout and so is
-/// [`outline_text`] (§15 D260). A menu row takes presence from the kind and
-/// dimming from this (`docs/context-menus.md` §3).
+/// A rect, ellipse, polygon, star or line has an outline that is not already a
+/// `Path`; a `Path` has one only while its corner radii are still in the model.
+/// Refused: a `Boolean` ([`flatten`]'s), a `Group`, an `Artboard`, and `Text`
+/// ([`outline_text`], which needs the resolved layout).
 pub fn can_outline(kind: &NodeKind) -> bool {
     match kind {
         NodeKind::Rect { .. }
@@ -1002,9 +903,7 @@ pub fn can_outline(kind: &NodeKind) -> bool {
         | NodeKind::Polygon { .. }
         | NodeKind::Star { .. }
         | NodeKind::Line { .. } => true,
-        // `round_corners` returns the path untouched when no radius is `> 0`, so
-        // this is "baking the radii would change something". Keep `any(> 0)`:
-        // `all(<= 0)` is not its negation because `NaN` fails both comparisons.
+        // Keep `any(> 0)`: `all(<= 0)` is not its negation because `NaN` fails both.
         NodeKind::Path { corner_radii, .. } => corner_radii.iter().any(|r| *r > 0.0),
         NodeKind::Root
         | NodeKind::Group
@@ -1015,18 +914,12 @@ pub fn can_outline(kind: &NodeKind) -> bool {
 }
 
 /// Replace one shape with the `Path` its own outline traces — *Outline shape*
-/// (§9.4, §15 D230).
+/// (§9.4). A separate verb from [`flatten`]; they share only [`replace_with_path`].
 ///
-/// The counterpart to [`flatten`], deliberately a separate verb: flatten keeps the
-/// answer of several operands; this stops describing one shape parametrically and
-/// describes it as anchors. They share only [`replace_with_path`].
-///
-/// It takes a [`Resolved`] for the kind the node is sized with (§15 D930): a shape
-/// a container stretched is drawn at a size its stored kind does not hold, and a
-/// path cannot stretch afterwards.
-///
-/// The radii are not carried onto the result: they are baked into the geometry,
-/// and `NodeKind::Path::corner_radii` is indexed by anchor.
+/// Takes a [`Resolved`] for the kind the node is drawn with: a shape a container
+/// stretched has a size its stored kind does not hold, and a path cannot stretch
+/// afterwards. The radii are baked into the geometry, not carried (they are
+/// indexed by anchor).
 pub fn outline(
     doc: &Document,
     res: &Resolved,
@@ -1045,13 +938,9 @@ pub fn outline(
 /// Replace a `Text` layer with the `Path` its glyphs trace — *Convert to path*
 /// (`docs/context-menus.md` §5.6).
 ///
-/// A third verb rather than an arm of [`outline`]: a text node's outline is a
-/// shaped thing, so this takes a [`Resolved`] for the shaping. `text::outline`
-/// yields contours already in the node's local coordinates.
-///
-/// A one-way door with no confirmation; undo is the way back, and a caller should
-/// say so in the status line. Empty content is refused with `EmptyGeometry`, since
-/// an empty `Path` would draw nothing and never be selectable.
+/// Takes a [`Resolved`] for the shaping; `text::outline` yields contours already
+/// in local coordinates. A one-way door; undo is the way back. Empty content is
+/// refused with `EmptyGeometry`, since an empty `Path` would never be selectable.
 pub fn outline_text(
     doc: &Document,
     res: &Resolved,
@@ -1070,21 +959,16 @@ pub fn outline_text(
     replace_with_path(doc, ids, id, path)
 }
 
-/// Whether [`outline_text`] would produce anything — the row's dimming, and the
-/// builder's own precondition asked without building it.
-///
-/// Not just "is it text": empty or all-space content shapes to no contours, so the
-/// row must be dim. It asks `text::outline`, as the verb does, not the content.
+/// Whether [`outline_text`] would produce anything. Empty or all-space content
+/// shapes to no contours, so this asks `text::outline`, not the kind.
 pub fn can_outline_text(res: &Resolved, id: NodeId) -> bool {
     res.text_layout(id)
         .is_some_and(|l| !crate::text::outline(l).elements().is_empty())
 }
 
-/// Whether `id` is **artwork** a rail may be made of — the one question both
-/// rail doors ask ([`text_on_new_path`] and `query::outline_at`). Three roles
-/// reach them as ordinary kinds and are not: a page (a frame or the root, whose
-/// consumption orphans its guides), a boolean's operand (its edge lies on the
-/// result's silhouette, and consuming it guts the boolean) and a mask
+/// Whether `id` is **artwork** a rail may be made of, asked by both rail doors
+/// ([`text_on_new_path`], `query::outline_at`). Not a page (consuming it orphans
+/// its guides), a boolean's operand (consuming it guts the boolean) or a mask
 /// (consuming it unmasks what it hid).
 pub fn is_rail_artwork(doc: &Document, id: NodeId) -> bool {
     let Some(node) = doc.get(id) else {
@@ -1104,14 +988,10 @@ pub fn is_rail_artwork(doc: &Document, id: NodeId) -> bool {
 }
 
 /// Make a **new, empty** text node set along `path`, consuming it — the Text
-/// tool's click on an outline (§15 D408).
+/// tool's click on an outline. *Detach from path* is the way back.
 ///
-/// The only way type gets onto a curve (§15 D409); *Detach from path* is the way
-/// back.
-///
-/// The new node takes the path's own transform, so the rail needs no rebasing. It
-/// goes in the consumed layer's own slot, not on top, so typing does not reorder
-/// the drawing.
+/// The new node takes the path's own transform, so the rail needs no rebasing, and
+/// the consumed layer's slot, so typing does not reorder the drawing.
 pub fn text_on_new_path(
     doc: &Document,
     res: &Resolved,
@@ -1125,14 +1005,12 @@ pub fn text_on_new_path(
     if !is_rail_artwork(doc, path) {
         return Err(OpError::WrongKindForOp);
     }
-    // The outline as drawn, as `outline` reads it.
     let rail = crate::geometry::local_path(res.used_kind(doc, path).unwrap_or(node.kind()))
         .ok_or(OpError::EmptyGeometry)?;
     if rail.elements().is_empty() {
         return Err(OpError::EmptyGeometry);
     }
-    // The type starts where the pointer was. Go through the world transform, not
-    // `node.transform()`, which is only local-to-parent and is wrong inside a frame.
+    // The world transform, not `node.transform()`, which is wrong inside a frame.
     let local = res
         .world_transform(path)
         .ok_or(OpError::NoSuchNode(path))?
@@ -1157,8 +1035,6 @@ pub fn text_on_new_path(
             Operation::CreateNode {
                 id,
                 parent,
-                // Appended then reordered into the consumed layer's slot, as
-                // `replace_with_path` does: `siblings.len()` is always in range.
                 index: siblings.len(),
                 kind: NodeKind::Text {
                     content: String::new(),
@@ -1167,15 +1043,13 @@ pub fn text_on_new_path(
                     para_spans: parts.para_spans.clone(),
                     paragraph: parts.paragraph.clone(),
                     block: parts.block,
-                    // `Auto`, whatever the defaults say: the rail is the measure, and a
-                    // stored wrap width would resurface when the type is detached.
+                    // `Auto`: a stored wrap width would resurface on detach.
                     sizing: crate::node::TextSizing::Auto,
                     on_path: Some(Box::new(rail)),
                     on_path_flip: false,
                     on_path_offset: offset,
                 },
                 transform: Some(node.transform()),
-                // Numbered like any other text layer.
                 name: None,
             },
             Operation::DeleteNode { id: path },
@@ -1188,12 +1062,9 @@ pub fn text_on_new_path(
 /// Take a text node off its rail, leaving the rail behind as a `Path` layer —
 /// *Detach from path*.
 ///
-/// The rail comes back as a layer, which makes [`text_on_new_path`] a two-way door.
-/// It carries the text node's own transform (the rail was stored in that space)
-/// and is inserted above the text.
-///
-/// The path comes back with no paint: the layer that carried it was deleted, and
-/// keeping its fills on the text node would be state that outlives its reason.
+/// Makes [`text_on_new_path`] a two-way door. The path carries the text node's
+/// transform (the rail was stored in that space), sits above the text and has no
+/// paint: the layer that carried it was deleted.
 pub fn detach_text_path(
     doc: &Document,
     ids: &mut IdSource,
@@ -1218,15 +1089,12 @@ pub fn detach_text_path(
         Operation::CreateNode {
             id: new,
             parent,
-            // Appended then reordered, as `replace_with_path` does; `at + 1` is
-            // directly above the text.
             index: siblings.len(),
             kind: NodeKind::Path {
                 path: rail,
                 corner_radii: Vec::new(),
             },
             transform: Some(node.transform()),
-            // Numbered like any other path.
             name: None,
         },
         Operation::Reorder {
@@ -1243,10 +1111,7 @@ pub fn detach_text_path(
 
 /// The body [`flatten`]'s single-boolean arm, [`outline`] and [`outline_text`]
 /// share: `id` becomes a `Path` holding `path`, in `id`'s own slot, carrying
-/// everything about the layer that is not its geometry.
-///
-/// One function because "what survives being redrawn" is a list, and a list
-/// written three times drifts.
+/// everything about the layer that is not its geometry (one list, not three).
 fn replace_with_path(
     doc: &Document,
     ids: &mut IdSource,
@@ -1268,20 +1133,16 @@ fn replace_with_path(
     let mut ops = vec![Operation::CreateNode {
         id: new,
         parent,
-        // Appended, then reordered into the old node's slot once it is gone.
         index: siblings.len(),
         kind: NodeKind::Path {
             path,
             corner_radii: Vec::new(),
         },
         transform: Some(node.transform()),
-        // The layer's name survives, even one we gave it.
         name: Some(node.name().to_string()),
     }];
     ops.extend(carried_paint(node, new));
-    // This is the same layer, so everything that is not geometry comes across
-    // (`flatten_union` makes a new layer and inherits only paint). Opacity and
-    // visibility are written resolved: the path is unbound.
+    // Opacity and visibility are written resolved: the path is unbound.
     let opacity = doc.drawn_opacity(id);
     if opacity != 1.0 {
         ops.push(Operation::SetOpacity { id: new, opacity });
@@ -1292,42 +1153,34 @@ fn replace_with_path(
             visible: false,
         });
     }
-    // A moved pivot: the local space is unchanged, so it means what it meant.
     if let Some(pivot) = node.pivot() {
         ops.push(Operation::SetPivot {
             id: new,
             pivot: Some(pivot),
         });
     }
-    // A mask: same shape in the same slot, so it clips the same run; dropping it
-    // would release the mask as a side effect.
+    // A mask: dropping it would release the mask as a side effect.
     if node.mask() {
         ops.push(Operation::SetMask {
             id: new,
             mask: true,
         });
     }
-    // The effect stack (§5.3a), as the whole stack; skipped when empty.
     if !node.effects().is_empty() {
         ops.push(Operation::SetEffects {
             id: new,
             effects: node.effects().to_vec(),
         });
     }
-    // The fill rule, the one carry that changes what is drawn: `Node::fill_rule`
-    // derives even-odd for an `Exclude` from the operation (§15 D239), so the
-    // derivation would die with the container and every hole would fill in. Carried
-    // as the effective rule, which also keeps a stored even-odd on an [`outline`]d
-    // `Path`. Skipped at the default.
+    // `Node::fill_rule` derives even-odd for an `Exclude` from the operation, which
+    // would die with the container and fill in every hole; carry the effective rule.
     if node.fill_rule() != crate::node::FillRule::default() {
         ops.push(Operation::SetFillRule {
             id: new,
             rule: node.fill_rule(),
         });
     }
-    // Its place in a layout: insets and item properties (grid cell, growth,
-    // `align-self`), skipped at the defaults. `display` does not come across: a
-    // path holds no children (`container::is_container`).
+    // Its place in a layout; `display` does not come across (a path holds no children).
     if node.insets().is_authored() {
         ops.push(Operation::SetInsets {
             id: new,
@@ -1340,8 +1193,8 @@ fn replace_with_path(
             item: *node.item(),
         });
     }
-    // Not carried: *Lock* (a locked result would refuse the tidying that follows)
-    // and the proportion lock (a path has no authored box).
+    // Not carried: *Lock* (it would refuse the tidying that follows) and the
+    // proportion lock (a path has no authored box).
     ops.push(Operation::DeleteNode { id });
     ops.push(Operation::Reorder { id: new, index: at });
     Ok((Transaction(ops), new))
@@ -1364,9 +1217,8 @@ fn flatten_union(
         ) {
             return Err(OpError::WrongKindForOp);
         }
-        // A group holding a frame is refused as in `boolean`, and here nothing else
-        // would stop it: the union deletes the members, orphaning the frame's
-        // guides into a file that fails to load.
+        // Nothing else stops it here: deleting the members would orphan the
+        // frame's guides into a file that fails to load.
         if doc.holds_a_frame(*id) {
             return Err(OpError::ArtboardPlacement);
         }
@@ -1380,7 +1232,6 @@ fn flatten_union(
     let parent = parent.expect("non-empty member set");
     let siblings = doc.get(parent).expect("parent of a live node").children();
     let set: FxHashSet<NodeId> = members.iter().copied().collect();
-    // Bottom of the stack first, as `boolean` orders its operands.
     let ordered: Vec<NodeId> = siblings
         .iter()
         .copied()
@@ -1388,15 +1239,13 @@ fn flatten_union(
         .collect();
     let final_index = container_slot(siblings, &set)?;
 
-    // Each member's contribution in the parent's space.
     let outlines: Vec<kurbo::BezPath> = ordered
         .iter()
         .filter_map(|m| res.operand_path(doc, *m))
         .collect();
-    // `None` has two meanings: shapes that cancel out (`EmptyGeometry`) and a
-    // union flo_curves unwound out of (`BooleanAbandoned`). Only
-    // `boolean::failures` separates them, so bracket it. This door is outside the
-    // commit-time bracket because a builder evaluates while making the transaction.
+    // `None` is either shapes that cancel out (`EmptyGeometry`) or a union
+    // flo_curves unwound out of (`BooleanAbandoned`); only `boolean::failures`
+    // separates them. A builder evaluates outside the commit-time bracket.
     let before = crate::boolean::failures();
     let path = match crate::boolean::evaluate(crate::node::BoolOp::Union, &outlines) {
         Some(path) => path,
@@ -1409,8 +1258,7 @@ fn flatten_union(
         path,
         corner_radii: Vec::new(),
     };
-    // Named here, not in `op_create`: the create precedes the deletes, so the
-    // operands would still count. Numbered against the siblings that survive.
+    // Named here: the create precedes the deletes, so the operands would still count.
     let name = crate::naming::free_name(&doc.child_names(parent, &ordered), kind.default_name(), 1);
     let mut ops = vec![Operation::CreateNode {
         id: new,
@@ -1420,7 +1268,6 @@ fn flatten_union(
         transform: None,
         name: Some(name),
     }];
-    // The bottom member's paint, read before anything is deleted, as `boolean` does.
     let base = doc.get(ordered[0]).expect("checked above");
     ops.extend(carried_paint(base, new));
     for member in &ordered {
@@ -1433,10 +1280,8 @@ fn flatten_union(
     Ok((Transaction(ops), new))
 }
 
-/// The paint a node built out of others inherits from the one it stands in for.
-///
-/// Emitted only where there is something to say. A fresh node has no fills, so
-/// without inheriting the result would draw nothing.
+/// The paint a node built out of others inherits from the one it stands in for; a
+/// fresh node has no fills and would draw nothing.
 fn carried_paint(from: &Node, to: NodeId) -> Vec<Operation> {
     let mut ops = Vec::new();
     if !from.paint().fills.is_empty() {
@@ -1458,13 +1303,12 @@ fn carried_paint(from: &Node, to: NodeId) -> Vec<Operation> {
 /// parent at its own z-position and folding its transform into each child so
 /// nothing moves.
 ///
-/// A boolean releases through here: its operands kept their geometry, transforms
-/// and paint, so taking one apart is the same splice a group needs. The boolean's
-/// own fill and stroke vanish with it; each operand's own paint comes back.
+/// A boolean releases through here too; its own fill and stroke vanish and each
+/// operand's own paint comes back.
 ///
-/// Folded from where things are drawn (§15 D929): the container's used transform
-/// into each child's used transform, and each child's used size written as its
-/// own ([`baked`]). For a layout group neither stored number is a place.
+/// Folded from where things are drawn: the container's used transform into each
+/// child's, and each child's used size written as its own ([`baked`]). For a
+/// layout group neither stored number is a place.
 pub fn ungroup(doc: &Document, res: &Resolved, id: NodeId) -> Result<Transaction, OpError> {
     let node = doc.get(id).ok_or(OpError::NoSuchNode(id))?;
     if !matches!(node.kind(), NodeKind::Group | NodeKind::Boolean { .. }) {
@@ -1486,7 +1330,6 @@ pub fn ungroup(doc: &Document, res: &Resolved, id: NodeId) -> Result<Transaction
         let child_local = res
             .used_local(doc, *child)
             .ok_or(OpError::NoSuchNode(*child))?;
-        // The group's parent replaces the group as the frame of reference.
         ops.push(Operation::SetTransform {
             id: *child,
             transform: group_transform * child_local,
@@ -1504,24 +1347,18 @@ pub fn ungroup(doc: &Document, res: &Resolved, id: NodeId) -> Result<Transaction
 
 /// Dissolve several containers as **one** transaction, in the order given.
 ///
-/// One transaction, so one keypress is one undo step and a failure partway leaves
-/// nothing behind (§15 D521).
+/// One undo step; a failure partway leaves nothing behind.
 ///
-/// Built against a document advanced as it goes, not index arithmetic: [`ungroup`]
-/// reads the container's position, the splice moves later siblings, and a
-/// container nested in an earlier one has a new parent and transform by its turn.
-/// A whole `Document` is cloned (an ungroup rewrites transforms too), except for
-/// the one-container case.
-///
-/// Each id must be a live `Group` or `Boolean`; anything else returns [`ungroup`]'s
-/// error with no ops built.
+/// Built against a document advanced as it goes, not index arithmetic: the splice
+/// moves later siblings, and a container nested in an earlier one has a new parent
+/// and transform by its turn. Each id must be a live `Group` or `Boolean`, else
+/// [`ungroup`]'s error comes back with no ops built.
 pub fn ungroup_all(doc: &Document, res: &Resolved, ids: &[NodeId]) -> Result<Transaction, OpError> {
     if let [only] = ids {
         return ungroup(doc, res, *only);
     }
-    // The derived layer advances too, since [`ungroup`] folds from where things
-    // are drawn: `res` for the first container, then one rebuild and an
-    // incremental update per step.
+    // The derived layer advances too: `res` for the first container, then one
+    // rebuild and an incremental update per step.
     let mut advanced = doc.clone();
     let mut resolved: Option<Resolved> = None;
     let mut ops = Vec::new();
@@ -1551,17 +1388,13 @@ pub struct Placement {
 /// `offset` in its parent's space. Returns the transaction and the new root ids
 /// in placement order.
 ///
-/// One transaction, so a paste is one undo step and a failure leaves nothing behind.
-///
 /// Each index is advanced past the earlier inserts that landed at or below it, not
 /// by a flat count: copies land above their originals, so two layers copied
-/// top-down arrive as index 2 then 1 and indices need not ascend (§15 D54).
+/// top-down arrive as index 2 then 1 and indices need not ascend.
 ///
-/// Components (§15 D978, D979 (e)): a copy of a main lands as an instance of it,
-/// and every copy's links are settled for where it lands (`component::settle_copy`).
-/// An instance keeps its main's names, so copy numbering is skipped for one.
-/// [`insert_subtrees_as`] with [`crate::component::MainCopy::NewMain`] is
-/// *Duplicate as component*.
+/// A copy of a main lands as an instance of it, and every copy's links are settled
+/// for where it lands (`component::settle_copy`). An instance keeps its main's
+/// names, so copy numbering is skipped for one.
 pub fn insert_subtrees(
     doc: &Document,
     ids: &mut IdSource,
@@ -1577,7 +1410,8 @@ pub fn insert_subtrees(
     )
 }
 
-/// [`insert_subtrees`], saying how a copy of a main lands.
+/// [`insert_subtrees`], saying how a copy of a main lands;
+/// [`crate::component::MainCopy::NewMain`] is *Duplicate as component*.
 pub fn insert_subtrees_as(
     doc: &Document,
     ids: &mut IdSource,
@@ -1585,7 +1419,6 @@ pub fn insert_subtrees_as(
     offset: Vec2,
     mains: crate::component::MainCopy,
 ) -> (Transaction, Vec<NodeId>) {
-    // The indices already inserted at, per parent (not a count; see the doc).
     let mut added: FxHashMap<NodeId, Vec<usize>> = FxHashMap::default();
     let mut ops = Vec::with_capacity(placements.len() * 2);
     let mut created = Vec::with_capacity(placements.len());
@@ -1630,8 +1463,8 @@ pub fn insert_subtrees_as(
 /// The names a paste or duplicate has already handed out, per destination parent.
 ///
 /// Several copies in one transaction have to remember each other: the document
-/// has not seen the earlier ones, so pasting three "Rectangle 2"s would otherwise
-/// make three "Rectangle 3"s. Per parent, because numbering is per parent (§15 D127).
+/// has not seen the earlier ones, so three pasted "Rectangle 2"s would all become
+/// "Rectangle 3". Per parent, because numbering is.
 #[derive(Default)]
 pub struct CopyNames(FxHashMap<NodeId, Vec<String>>);
 
@@ -1639,9 +1472,7 @@ impl CopyNames {
     /// The `SetName` a copy of a layer called `was_called` needs to join `parent`,
     /// or nothing when it keeps the name it has.
     ///
-    /// A `SetName` op rather than a rewritten `Node`: `Node`'s fields are private
-    /// (invariant 2). Only the root is renamed; a duplicated group's children keep
-    /// their names, being unique within the new group.
+    /// Only the root is renamed; a duplicated group's children keep their names.
     pub fn rename(
         &mut self,
         doc: &Document,
@@ -1660,13 +1491,9 @@ impl CopyNames {
 
 /// Every image `nodes` reference, once each and in sorted order.
 ///
-/// [`Document::capture_subtree`] clones nodes but an [`ImageId`](crate::ImageId)
-/// is a key into the document's table, so the pictures must be taken while the
-/// source document is open (at copy time for a clipboard), or the fill draws the
-/// missing-picture placeholder.
-///
-/// Hidden fills count: visibility says whether to draw, not whether the bytes are
-/// needed. Ids are content hashes (`image.rs`), so nothing is remapped on arrival.
+/// An [`ImageId`](crate::ImageId) is a key into the document's table, so the
+/// pictures must be taken while the source document is open (at copy time for a
+/// clipboard). Hidden fills count; ids are content hashes, so nothing is remapped.
 pub fn image_ids_in(nodes: &[Node]) -> Vec<crate::ImageId> {
     let mut out: Vec<crate::ImageId> = nodes
         .iter()
@@ -1689,11 +1516,9 @@ pub fn image_ids_in(nodes: &[Node]) -> Vec<crate::ImageId> {
 
 /// The `AddImage` ops `doc` needs before it can show `held`.
 ///
-/// Only what is missing, so it is safe on every paste: pasting back into the
-/// source document produces nothing.
-///
-/// The ops go first in the transaction that inserts the nodes, so the inverse
-/// removes the table entry after the layers using it. `app::insert_all` owes that.
+/// Only what is missing, so pasting back into the source produces nothing. The ops
+/// go first in the inserting transaction, so the inverse removes the table entry
+/// after the layers using it.
 pub fn missing_image_ops(
     doc: &Document,
     held: &[(crate::ImageId, crate::ImageEntry)],
@@ -1708,8 +1533,7 @@ pub fn missing_image_ops(
 }
 
 /// The members of `ids` that have no ancestor in `ids`, in input order and
-/// de-duplicated. Operating on these alone avoids applying an edit twice to a
-/// node that is also carried by its ancestor.
+/// de-duplicated, so an edit is not applied twice to a node its ancestor carries.
 pub fn outermost(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     let set: FxHashSet<NodeId> = ids.iter().copied().collect();
     let mut seen = FxHashSet::default();
@@ -1733,23 +1557,17 @@ pub fn outermost(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 /// [`outermost`], re-ordered into the order the document paints them — bottom of
 /// the stack first.
 ///
-/// What every export of a selection owes its writer: SVG has no z-index, so the
-/// last thing emitted is on top, but a selection is in pick order. Both export
-/// doors go through here. `outermost` does not sort itself because bulk edit paths
-/// want the caller's order (the key layer, the z-order verbs).
-///
-/// One pre-order walk emitting a member when reached; see [`all_in_document_order`].
+/// SVG has no z-index, so an export of a selection must be painted in document
+/// order, not pick order. `outermost` does not sort because bulk edit paths want
+/// the caller's order. See [`all_in_document_order`].
 pub fn in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     all_in_document_order(doc, &outermost(doc, ids))
 }
 
-/// `ids` in document order, keeping a member that sits inside another (§15 D516).
+/// `ids` in document order, keeping a member that sits inside another.
 ///
-/// [`in_document_order`] without its `outermost` filter: that is right for a
-/// selection (a group and its child both picked would plan the child twice), but
-/// wrong for the layers carrying export settings, where a spec on a nested layer
-/// is deliberate and exporting the group makes a different file. A matched member
-/// is descended into for the same reason.
+/// [`in_document_order`] without its `outermost` filter, which is wrong for the
+/// layers carrying export settings: a spec on a nested layer is deliberate.
 pub fn all_in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     let want: FxHashSet<NodeId> = ids.iter().copied().collect();
     let mut out = Vec::with_capacity(want.len());
@@ -1767,11 +1585,9 @@ pub fn all_in_document_order(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 /// The `RemoveGuide` operations that must accompany deleting the subtrees rooted
 /// at `ids` — every guide scoped to a frame inside them.
 ///
-/// These belong at the front of the delete transaction, ahead of the
-/// `DeleteNode`s: the inverse reverses the order, so the frame is back before its
-/// guide is re-added (`Document::check_guide_owner`). The other order deletes
-/// correctly and makes the undo fail. Sorted by id so the transaction is
-/// deterministic.
+/// These go ahead of the `DeleteNode`s: the inverse reverses the order, so the
+/// frame is back before its guide is re-added (`Document::check_guide_owner`); the
+/// other order makes the undo fail. Sorted by id for determinism.
 pub fn guides_of(doc: &Document, ids: &[NodeId]) -> Vec<Operation> {
     let doomed: FxHashSet<NodeId> = subtree_nodes(doc, ids).into_iter().collect();
     let mut guides: Vec<_> = doc
@@ -1793,17 +1609,13 @@ pub fn guides_of(doc: &Document, ids: &[NodeId]) -> Vec<Operation> {
 /// deterministic pre-order.
 ///
 /// The apply-once rule (§5.7a) for properties: members are reduced to the
-/// outermost, then each subtree is walked in full ([`outermost`] alone would hand
-/// back a group with no paint of its own).
+/// outermost, then each subtree is walked in full.
 ///
-/// Document order, roots included (§15 D646): an operation list must replay
-/// identically on another replica (§12), so it cannot depend on hash order or on
-/// the order a caller passes its selection in.
+/// Document order, roots included: an operation list must replay identically on
+/// another replica (§12), so it cannot depend on hash or pick order.
 pub fn subtree_nodes(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
-    // The roots are ordered too, since `outermost` keeps input (pick) order. Only
-    // with more than one root, because `all_in_document_order` walks the whole
-    // document; the multi-root cost is paid per call, and several panels call it
-    // every frame.
+    // Roots are sorted only when there is more than one: that walks the whole
+    // document, and several panels call this every frame.
     let roots = outermost(doc, ids);
     let roots = if roots.len() > 1 {
         all_in_document_order(doc, &roots)
@@ -1825,32 +1637,25 @@ pub fn subtree_nodes(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ColorUse {
     pub color: Color,
-    /// Every fill and stroke carrying this exact colour. A layer whose fill and
-    /// stroke match counts twice, so this is the wrong number beside a select
-    /// button; see `nodes`.
+    /// Every fill and stroke carrying this exact colour; a layer whose fill and
+    /// stroke match counts twice, so use `nodes` beside a select button.
     pub uses: usize,
-    /// The distinct layers carrying it, in document order: the set the Group
-    /// Colors panel counts and its select button acts on, taken from the one
-    /// census walk.
+    /// The distinct layers carrying it, in document order.
     pub nodes: Vec<NodeId>,
 }
 
 /// The distinct solid colours inside the subtrees rooted at `ids`, most-used
 /// first.
 ///
-/// What the Group Colors panel lists and the picker's palette row shows, the same
-/// census at two scopes. Pass the root for the whole document.
-///
-/// Solids only: a gradient has no single swatch and nothing sensible for
-/// [`recolor`] to do. Hidden paints count, or a recolour would skip them and the
-/// old colour reappear when the fill is switched back on.
+/// Pass the root for the whole document. Solids only: a gradient has no single
+/// swatch for [`recolor`]. Hidden paints count, or the old colour would reappear
+/// when the fill is switched back on.
 pub fn colors_in(doc: &Document, ids: &[NodeId]) -> Vec<ColorUse> {
     census(doc, ids, |brush| match brush {
         Brush::Solid(c) => Some(c.to_rgba8().to_u8_array()),
         _ => None,
     })
     .into_iter()
-    // A colour is its own key, so the location is ignored.
     .map(|([r, g, b, a], uses, nodes, _)| ColorUse {
         color: Color::from_rgba8(r, g, b, a),
         uses,
@@ -1861,9 +1666,8 @@ pub fn colors_in(doc: &Document, ids: &[NodeId]) -> Vec<ColorUse> {
 
 /// One place a paint sits: a node, which of its two lists, and where in it.
 ///
-/// Two lists and an index, on every kind (§15 D400). Small, `Copy` and `Eq` so a
-/// UI slot can carry it (`inspector::PaintSlot`), and a location survives an edit
-/// that a value key (the old brush) does not.
+/// Small, `Copy` and `Eq` so a UI slot can carry it, and a location survives an
+/// edit that a value key (the old brush) does not.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PaintAt {
     pub node: NodeId,
@@ -1879,8 +1683,8 @@ pub struct GradientUse {
     pub brush: Brush,
     pub uses: usize,
     pub nodes: Vec<NodeId>,
-    /// The first place this gradient was found, in document order: what the row
-    /// hands the picker, stable to name; the edit reaches all uses ([`repaint`]).
+    /// The first place found, in document order; the edit reaches all uses
+    /// ([`repaint`]).
     pub at: PaintAt,
 }
 
@@ -1903,35 +1707,28 @@ pub fn gradients_in(doc: &Document, ids: &[NodeId]) -> Vec<GradientUse> {
     .collect()
 }
 
-/// The census walk both public censuses are: every paint in the subtrees, grouped
-/// by whatever `key` makes of its brush, most-used first. A `None` key skips the
-/// paint.
-///
-/// One walk with a key function so the two answers agree about what they found.
+/// The walk both public censuses share: every paint in the subtrees, grouped by
+/// what `key` makes of its brush (`None` skips it), most-used first.
 fn census<K: PartialEq>(
     doc: &Document,
     ids: &[NodeId],
     key: impl Fn(&Brush) -> Option<K>,
 ) -> Vec<(K, usize, Vec<NodeId>, PaintAt)> {
-    // A `Vec`: the counts are few, and insertion order makes ties stable.
     let mut counts: Vec<(K, usize, Vec<NodeId>, PaintAt)> = Vec::new();
     let mut bump = |brush: &Brush, at: PaintAt| {
         let Some(k) = key(brush) else { return };
         match counts.iter_mut().find(|(other, _, _, _)| *other == k) {
             Some((_, n, nodes, _)) => {
                 *n += 1;
-                // The layers, not the paint slots; pre-order makes checking the
-                // tail enough to stay distinct and in document order.
+                // Pre-order makes checking the tail enough to stay distinct.
                 if nodes.last() != Some(&at.node) {
                     nodes.push(at.node);
                 }
-                // The location stays the first place met.
             }
             None => counts.push((k, 1, vec![at.node], at)),
         }
     };
-    // Literal paints only: a bound paint's colour is its variable's, and a
-    // recolour would have to detach it.
+    // Literal paints only: a bound paint's colour is its variable's.
     for id in subtree_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         for (i, f) in node.paint().fills.iter().enumerate() {
@@ -1969,8 +1766,8 @@ fn census<K: PartialEq>(
 /// The brush at a location, as the committed document holds it.
 ///
 /// `None` when the place has gone (layer deleted, list shrank), which tells a UI
-/// slot pointing at it to close. As held: a bound paint answers its binding; a
-/// caller that draws it asks [`Document::resolve_brush`].
+/// slot to close. As held: a bound paint answers its binding; a caller that draws
+/// it asks [`Document::resolve_brush`].
 pub fn paint_at(doc: &Document, at: PaintAt) -> Option<crate::BrushSource> {
     let node = doc.get(at.node)?;
     match at.target {
@@ -1980,18 +1777,15 @@ pub fn paint_at(doc: &Document, at: PaintAt) -> Option<crate::BrushSource> {
 }
 
 /// Replace every use of the brush `from` with `to` inside the subtrees rooted at
-/// `ids` — every fill and every stroke, in one transaction.
+/// `ids` — every fill and every stroke, frames included, in one transaction.
 ///
-/// Frames are included: a frame's ground is an ordinary fill entry (§15 D400).
-///
-/// [`recolor`]'s twin for the paints a colour cannot name. Not a generalisation of
-/// it: `recolor` matches exact RGBA bytes, this matches whole brushes with `==`,
-/// and folding them would make a row disagree with its own edit.
+/// [`recolor`]'s twin for the paints a colour cannot name. Not a generalisation:
+/// `recolor` matches RGBA bytes, this whole brushes, and folding them would make a
+/// row disagree with its own edit.
 pub fn repaint(doc: &Document, ids: &[NodeId], from: &Brush, to: &Brush) -> Transaction {
     let mut ops = Vec::new();
     for id in subtree_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
-        // A bound paint is no brush's use: the census never lists one.
         let swap = |b: &crate::BrushSource| {
             if b.literal() == Some(from) {
                 to.clone().into()
@@ -2038,13 +1832,12 @@ fn is_solid(brush: &crate::BrushSource, key: [u8; 4]) -> bool {
 
 /// Replace every use of `from` with `to` inside the subtrees rooted at `ids`.
 ///
-/// The Group Colors edit: one colour, wherever it appears, in one transaction.
-/// Matched on the exact RGBA bytes [`colors_in`] counts by, so the panel and this
-/// cannot disagree. Nodes with no matching paint contribute no operation.
+/// The Group Colors edit, matched on the RGBA bytes [`colors_in`] counts by so the
+/// panel and this cannot disagree.
 pub fn recolor(doc: &Document, ids: &[NodeId], from: Color, to: Color) -> Transaction {
     let key = from.to_rgba8().to_u8_array();
-    // Opening and closing a picker without moving arrives as a same-colour
-    // recolour; rewriting would be an invisible undo step.
+    // A picker opened and closed unmoved arrives as a same-colour recolour, which
+    // would be an invisible undo step.
     if to.to_rgba8().to_u8_array() == key {
         return Transaction(Vec::new());
     }
@@ -2098,10 +1891,8 @@ pub enum PaintTarget {
 
 /// The nodes a bulk paint edit over `ids` actually writes to.
 ///
-/// A group is organisation, so an edit passes through it to the shapes inside. A
-/// frame is drawn and has paint of its own, so it is the target and the walk stops
-/// there, including a frame reached through a group (§15 D400). That is why paint
-/// has its own walk rather than [`subtree_nodes`], which the colour census wants.
+/// A group is organisation, so an edit passes through it; a frame has paint of its
+/// own, so the walk stops there. Hence a walk apart from [`subtree_nodes`].
 pub fn paint_targets(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack: Vec<NodeId> = outermost(doc, ids).into_iter().rev().collect();
@@ -2120,18 +1911,14 @@ pub fn paint_targets(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
 
 /// What a paint panel has to show over a scope.
 ///
-/// Two states: the targets agree on a list (possibly empty), or anything else at
-/// all is one stand-in row, including one unpainted target among painted ones
-/// (§15 D53). Agreement is on the whole list, since the panel lets rows be added
-/// and removed over a selection.
+/// Two states: the targets agree on a whole list (possibly empty), or anything
+/// else, including one unpainted target among painted ones, is one stand-in row.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaintShown<T> {
     /// These rows, true of every target. Empty means no target has any paint.
     List(Vec<T>),
-    /// One stand-in row: the targets disagree and at least one has a paint for it
-    /// to stand for. One is enough: "No stroke" would be false of half the
-    /// selection. What the row says is decided property by property
-    /// ([`shared_over_fills`], [`shared_over_strokes`]).
+    /// One stand-in row: "No stroke" would be false of half the selection. What it
+    /// says is decided per property ([`shared_over_fills`], [`shared_over_strokes`]).
     Mixed,
 }
 
@@ -2156,17 +1943,15 @@ impl<T> PaintShown<T> {
 
 /// Fold one list per target into the panel's answer.
 ///
-/// Agreement is by value, not by item (§15 D980): equal fills added separately
-/// carry different item ids. The list returned is the first target's, ids and all,
-/// the anchor a multi-selection write retargets from (`item::retarget`), never to
-/// be written verbatim onto the others.
+/// Agreement is by value, not by item: equal fills added separately carry
+/// different item ids. The list returned is the first target's, the anchor a
+/// multi-selection write retargets from (`item::retarget`), never to be written
+/// verbatim onto the others.
 fn paint_shown<T: PartialEq>(lists: impl Iterator<Item = Vec<Keyed<T>>>) -> PaintShown<Keyed<T>> {
     let mut first: Option<Vec<Keyed<T>>> = None;
     for list in lists {
         match &first {
             None => first = Some(list),
-            // Any disagreement is the mixed row; empty lists are equal, so a
-            // disagreement means something in scope is painted.
             Some(f) if !same_values(f, &list) => return PaintShown::Mixed,
             Some(_) => {}
         }
@@ -2198,10 +1983,9 @@ pub fn shared_strokes(doc: &Document, ids: &[NodeId]) -> PaintShown<Keyed<Stroke
 /// The one value every fill of every paint target in scope agrees on, or `None`
 /// when they differ or there are none.
 ///
-/// Over all the fills of all the targets: the mixed row stands for every one, so
-/// it may state only what they all state, property by property. A target with no
-/// fill at all disagrees with every value (absence is a value), or a row would
-/// state a 4pt stroke half the selection has not got.
+/// The mixed row stands for every fill, so it may state only what they all state.
+/// A target with no fill disagrees with every value (absence is a value), or a row
+/// would state a 4pt stroke half the selection has not got.
 pub fn shared_over_fills<T: PartialEq>(
     doc: &Document,
     ids: &[NodeId],
@@ -2257,9 +2041,8 @@ pub fn shared_over_strokes<T: PartialEq>(
 
 /// Change every fill of every paint target in scope, in place.
 ///
-/// The non-destructive half of the bulk paint API: each target keeps its own
-/// list (length, order, every property `edit` does not touch). [`set_fills_all`]
-/// is the other half, for "make them all this".
+/// The non-destructive half of the bulk paint API: each target keeps its own list.
+/// [`set_fills_all`] is the other half, for "make them all this".
 pub fn edit_fills_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Fill)) -> Transaction {
     let mut ops = Vec::new();
     for id in paint_targets(doc, ids) {
@@ -2275,14 +2058,13 @@ pub fn edit_fills_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Fill)) 
     Transaction(ops)
 }
 
-/// What an edit of a paint **as it is drawn** leaves it (§15 D1039): `edit` is
-/// handed the brush the user sees — a bound paint's resolved solid — and its
-/// answer is written back.
+/// What an edit of a paint **as it is drawn** leaves it: `edit` is handed the
+/// brush the user sees (a bound paint's resolved solid) and its answer is written
+/// back.
 ///
-/// A bound paint keeps its binding when only its `%` moved: the variable carries
-/// its own alpha and the fill's `%` is a separate multiplier (D1038), so the same
-/// colour at another alpha is a new `%` (drawn alpha over the variable's). Any
-/// other answer detaches to a colour of the user's own.
+/// A bound paint keeps its binding when only its `%` moved (the variable carries
+/// its own alpha; the fill's `%` is a separate multiplier). Any other answer
+/// detaches to a colour of the user's own.
 pub fn edited_brush(
     doc: &Document,
     id: NodeId,
@@ -2319,8 +2101,8 @@ pub fn edited_brush(
 }
 
 /// Every fill's (or stroke's) brush of every paint target in scope, edited as
-/// drawn by [`edited_brush`]: the mixed row's colour, hex and `%` writes.
-/// [`edit_fills_all`] with the paint's node in hand, which the binding needs.
+/// drawn by [`edited_brush`]: [`edit_fills_all`] with the node in hand, which the
+/// binding needs.
 pub fn edit_brushes_all(
     doc: &Document,
     ids: &[NodeId],
@@ -2450,12 +2232,10 @@ pub fn set_top_paint_all(
     Transaction(ops)
 }
 
-/// Bind rectangle `id`'s corners to `vars` — `None` leaving a corner as it is
-/// (§15 D1039). The bound corners' literals are written 0, so a rectangle compares
-/// equal to its instance's copy bound to the same variable (overrides compare the
-/// binding, §5.3d); the literal is never drawn while bound.
-///
-/// Empty when `id` is not a rectangle or nothing would change.
+/// Bind rectangle `id`'s corners to `vars` — `None` leaving a corner as it is. The
+/// bound corners' literals are written 0, so a rectangle compares equal to its
+/// instance's copy bound to the same variable (§5.3d). Empty when `id` is not a
+/// rectangle or nothing would change.
 pub fn bind_corners_ops(doc: &Document, id: NodeId, vars: crate::CornerVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2489,8 +2269,7 @@ pub fn bind_corners_ops(doc: &Document, id: NodeId, vars: crate::CornerVars) -> 
     ops
 }
 
-/// Detach rectangle `id`'s bound corners to the radii they draw (D1038's detach):
-/// the literal becomes the resolved number and the binding goes. Empty when no
+/// Detach rectangle `id`'s bound corners to the radii they draw. Empty when no
 /// corner is bound. Any write of a radius to a bound corner must carry this, or it
 /// lands on a literal nobody draws.
 pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
@@ -2515,10 +2294,8 @@ pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     ]
 }
 
-/// [`detach_corners_ops`] for the one corner at `slot` of a `CornerVars` (TL,
-/// TR, BR, BL) — a per-corner chip's detach (§15 D1049): that corner's literal
-/// becomes the radius it draws and its binding goes, the other three as they
-/// are. Empty when that corner is not bound.
+/// [`detach_corners_ops`] for the one corner at `slot` of a `CornerVars` (TL, TR,
+/// BR, BL), the other three as they are. Empty when that corner is not bound.
 pub fn detach_corner_ops(doc: &Document, id: NodeId, slot: usize) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2551,9 +2328,9 @@ pub fn detach_corner_ops(doc: &Document, id: NodeId, slot: usize) -> Vec<Operati
 }
 
 /// Item `index` of every target's fill (or stroke) list, given what `brush_of`
-/// makes of it, handed the node so a binding can resolve there. The binding
-/// verbs' one write (§15 D1041): bind, detach, and a literal typed over a chip,
-/// which replaces the binding rather than going through [`edited_brush`].
+/// makes of it, handed the node so a binding can resolve there. The binding verbs'
+/// one write: bind, detach, and a literal typed over a chip (which replaces the
+/// binding rather than going through [`edited_brush`]).
 pub fn set_brush_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -2590,9 +2367,8 @@ pub fn set_brush_at_all(
     Transaction(ops)
 }
 
-/// Bind item `index` of every target's list to colour variable `var` (D1038):
-/// the paint becomes the variable's colour, **keeping its own `%`** — a literal
-/// solid's alpha, a bound paint's binding alpha, full for anything else.
+/// Bind item `index` of every target's list to colour variable `var`, **keeping
+/// its own `%`** — a literal solid's alpha, a bound paint's binding alpha, else full.
 pub fn bind_brush_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -2611,7 +2387,7 @@ pub fn bind_brush_at_all(
 }
 
 /// Detach item `index` of every target's list: each bound paint becomes the
-/// solid it draws there (D1038's *Detach variable*).
+/// solid it draws there.
 pub fn detach_brush_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -2624,10 +2400,9 @@ pub fn detach_brush_at_all(
 }
 
 /// The corner bindings rectangle `id` keeps when its radii are written `written`
-/// (TL, TR, BR, BL) — [`keep_corner_bindings`]' judgement, corner by corner: a
-/// bound corner written what it draws, or its own literal, keeps its variable;
-/// any other comes back `None`. Shared with the preview (`absorb`'s `SetGeometry`
-/// arm), so a kept corner is not drawn square until the commit.
+/// (TL, TR, BR, BL) — [`keep_corner_bindings`]' judgement, corner by corner; any
+/// corner not kept comes back `None`. Shared with the preview (`absorb`'s
+/// `SetGeometry` arm), so a kept corner is not drawn square until the commit.
 pub fn kept_corner_vars(doc: &Document, id: NodeId, written: [f64; 4]) -> crate::CornerVars {
     let Some(node) = doc.get(id) else {
         return Default::default();
@@ -2654,22 +2429,17 @@ pub fn kept_corner_vars(doc: &Document, id: NodeId, written: [f64; 4]) -> crate:
     std::array::from_fn(|k| bound[k].filter(|_| written[k] == drawn[k] || written[k] == literal[k]))
 }
 
-/// A radius written over a bound corner detaches it (D1038 (2)): the commit-time
-/// half of the binding's rule, so no writer of a radius has to know about
-/// bindings. This adds the `SetCornerVars` that lets the written value be drawn.
+/// A radius written over a bound corner detaches it: the commit-time half of the
+/// binding, so no writer of a radius has to know about bindings. It adds the
+/// `SetCornerVars` that lets the written value be drawn.
 ///
-/// Compared against what each corner draws, not its literal: the fields read the
-/// corners as drawn, so a per-corner edit hands back all four and a bare click
-/// writes what is already drawn. A bound corner written its drawn value stays
-/// bound, its literal put back to 0 in the patch; any other value detaches it.
-///
-/// One written its own literal stays bound too, since some writers build the radii
-/// from the document's kind (the Scale tool's `0 × s`, a per-corner ↺). The price:
-/// a 0 typed over a bound corner detaches nothing; the chip's retype is that
-/// value's door.
-///
-/// A transaction that sets a node's corner bindings itself is left to say what it
-/// means.
+/// This is the rule the other `keep_*_bindings` follow. A bound value written what
+/// it draws stays bound, its literal put back in the patch (the fields read values
+/// as drawn, so a per-corner edit hands back all four); any other value detaches.
+/// A value written its own literal stays bound too, since some writers build from
+/// the stored kind (the Scale tool's `0 × s`, a per-corner ↺); the price is that a
+/// 0 typed over a bound value detaches nothing, and the chip's retype is its door.
+/// A transaction that sets the binding itself is left alone.
 pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     let sets_vars: FxHashSet<NodeId> =
         tx.0.iter()
@@ -2713,7 +2483,6 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
             if vars[k].is_none() {
                 continue;
             }
-            // Its drawn value, or its own literal, leaves it bound.
             if kept[k].is_some() {
                 written[k] = literal[k];
             } else {
@@ -2739,9 +2508,8 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
 }
 
 /// Bind container `id`'s gaps and padding to `vars` — `None` leaving a slot as
-/// it is (§15 D1058), [`bind_corners_ops`]' shape: the bound slots' literals are
-/// written 0 and never laid out while bound. Empty when `id` has no layout or
-/// nothing would change.
+/// it is, [`bind_corners_ops`]' shape: the bound slots' literals are written 0.
+/// Empty when `id` has no layout or nothing would change.
 pub fn bind_spacing_ops(doc: &Document, id: NodeId, vars: crate::SpacingVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2777,9 +2545,7 @@ pub fn bind_spacing_ops(doc: &Document, id: NodeId, vars: crate::SpacingVars) ->
 }
 
 /// Detach the slots of container `id` that `which` names to the numbers they
-/// lay out at (D1038's detach, §15 D1058): each literal becomes its variable's
-/// number and the binding goes, the other slots as they are. Empty when none of
-/// them is bound.
+/// lay out at, the other slots as they are. Empty when none of them is bound.
 pub fn detach_spacing_ops(doc: &Document, id: NodeId, which: [bool; 6]) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2813,10 +2579,9 @@ pub fn detach_spacing_ops(doc: &Document, id: NodeId, which: [bool; 6]) -> Vec<O
 }
 
 /// The bindings container `id` keeps when its layout is written `written` —
-/// [`keep_spacing_bindings`]' judgement, slot by slot (§15 D1058): a bound slot
-/// written what it lays out at, or its own literal, keeps its variable; any
-/// other slot comes back `None`. Shared with the preview (`absorb`'s `SetDisplay`
-/// arm), so a scrub draws the slot where the commit will put it.
+/// [`keep_spacing_bindings`]' judgement, slot by slot; any slot not kept comes
+/// back `None`. Shared with the preview (`absorb`'s `SetDisplay` arm), so a scrub
+/// draws the slot where the commit will put it.
 pub fn kept_spacing_vars(
     doc: &Document,
     id: NodeId,
@@ -2837,19 +2602,10 @@ pub fn kept_spacing_vars(
     std::array::from_fn(|k| bound[k].filter(|_| w[k] == drawn[k] || w[k] == literal[k]))
 }
 
-/// A gap or padding written over a bound slot detaches it (D1038 (2), §15 D1058):
-/// [`keep_corner_bindings`]' rule for a container's spacing, adding the
-/// `SetSpacingVars` that lets the written value be laid out. Propagation runs
-/// after it (`propagate::owed`), so a copy follows a detach through the main's
-/// `SetSpacingVars`.
-///
-/// The same two halves: a slot written what it lays out at, or its own literal 0
-/// (writers that carry the other slots forward, the flex/grid switch, the Scale
-/// tool), stays bound with the literal put back to 0; anything else detaches. A 0
-/// typed over a bound slot keeps the binding; the chip's retype is its door.
-///
-/// A layout taken away (`SetDisplay` to `None`) clears every binding. A
-/// transaction that sets the node's spacing bindings itself is left alone.
+/// [`keep_corner_bindings`]' rule for a container's gaps and padding, adding the
+/// `SetSpacingVars`. Propagation runs after it (`propagate::owed`), so a copy
+/// follows a detach through the main's `SetSpacingVars`. A layout taken away
+/// (`SetDisplay` to `None`) clears every binding.
 pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     let sets_vars: FxHashSet<NodeId> =
         tx.0.iter()
@@ -2902,9 +2658,8 @@ pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
-/// Bind layer `id`'s visibility to boolean variable `var` (§15 D1059). The literal
-/// is written true ([`bind_corners_ops`]' canonical-literal rule) and never read
-/// while bound. Empty when nothing would change.
+/// Bind layer `id`'s visibility to boolean variable `var`; the literal is written
+/// true. Empty when nothing would change.
 pub fn bind_visible_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2919,8 +2674,7 @@ pub fn bind_visible_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Op
     ops
 }
 
-/// Detach layer `id`'s visibility to whether it is shown (D1038's detach, §15
-/// D1059). Empty when it is not bound.
+/// Detach layer `id`'s visibility to whether it is shown. Empty when not bound.
 pub fn detach_visible_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2937,16 +2691,10 @@ pub fn detach_visible_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     ]
 }
 
-/// A visibility written over a bound layer detaches it (D1038 (2), §15 D1059):
-/// the commit-time half of the binding, so every writer of `SetVisible` is
-/// unchanged.
-///
-/// One half, not [`keep_corner_bindings`]' two: a write of what the layer shows
-/// stays bound, but a write of its own literal is not excused. The literal is the
-/// `true` [`bind_visible_ops`] writes, and a hidden bound layer brought back with
-/// `visible: true` writes exactly that, so the edit would do nothing.
-///
-/// A transaction that sets the layer's binding itself is left alone.
+/// [`keep_corner_bindings`]' rule for `SetVisible`, with one half only: a write of
+/// its own literal is not excused. The literal is the `true` [`bind_visible_ops`]
+/// writes, and bringing a hidden bound layer back writes exactly that, so excusing
+/// it would make the edit do nothing.
 pub fn keep_visible_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     let sets_var: FxHashSet<NodeId> =
         tx.0.iter()
@@ -2980,10 +2728,9 @@ pub fn keep_visible_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
-/// Bind layer `id`'s opacity to number variable `var` (§15 D1072), read as a
-/// percentage. The literal is written 0 (D1039's canonical literal), so a reader
-/// that skips [`Document::drawn_opacity`] draws the layer invisible rather than
-/// nearly right. Empty when nothing would change.
+/// Bind layer `id`'s opacity to number variable `var`, read as a percentage. The
+/// literal is written 0, so a reader that skips [`Document::drawn_opacity`] draws
+/// the layer invisible rather than nearly right. Empty when nothing would change.
 pub fn bind_opacity_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -2998,8 +2745,7 @@ pub fn bind_opacity_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Op
     ops
 }
 
-/// Detach layer `id`'s opacity to what it draws (D1038's detach, §15 D1072).
-/// Empty when it is not bound.
+/// Detach layer `id`'s opacity to what it draws. Empty when it is not bound.
 pub fn detach_opacity_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -3016,16 +2762,9 @@ pub fn detach_opacity_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     ]
 }
 
-/// An opacity written over a bound layer detaches it (D1038 (2), §15 D1072): the
-/// commit-time half of the binding, so every writer of `SetOpacity` (the field,
-/// [`set_opacity_all`], number keys, *Paste properties*, MCP) is unchanged.
-///
-/// One half, [`keep_visible_bindings`]' rule: a write of what the layer draws
-/// stays bound, but its own literal is not excused. The literal is the 0
-/// [`bind_opacity_ops`] writes, and 0% typed over a bound layer means make it
+/// [`keep_visible_bindings`]' rule for `SetOpacity` (one half): the literal is the
+/// 0 [`bind_opacity_ops`] writes, and 0% typed over a bound layer means make it
 /// invisible, so excusing it would do nothing.
-///
-/// A transaction that sets the layer's binding itself is left alone.
 pub fn keep_opacity_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     let sets_var: FxHashSet<NodeId> =
         tx.0.iter()
@@ -3059,11 +2798,9 @@ pub fn keep_opacity_bindings(doc: &Document, mut tx: Transaction) -> Transaction
     tx
 }
 
-/// Bind stroke `item` of layer `id` to number variable `var` (§15 D1073): its
-/// width written 0 (D1039's canonical literal), the binding beside it in the item.
+/// Bind stroke `item` of layer `id` to number variable `var`: its width written 0.
 /// Empty when nothing would change, the layer has no such stroke, or the stroke
-/// draws `Custom` sides ([`draws_own_sides`]), which draw none of `width`
-/// (`StrokeSides::widths`), so a binding there would be bound to nothing drawn.
+/// draws `Custom` sides ([`draws_own_sides`]), which draw none of `width`.
 pub fn bind_stroke_width_ops(
     doc: &Document,
     id: NodeId,
@@ -3086,9 +2823,8 @@ pub fn bind_stroke_width_ops(
 }
 
 /// Whether `stroke` on a layer of `kind` draws `Custom` sides — its own four
-/// widths and none of `width` (§15 D1073). Through
-/// [`crate::geometry::effective_sides`], so a `Custom` stroke on an ellipse or a
-/// path, which draws its whole outline at `width`, binds like any other.
+/// widths and none of `width`. Through [`crate::geometry::effective_sides`], so a
+/// `Custom` stroke on an ellipse or path, drawn at `width`, binds like any other.
 pub fn draws_own_sides(kind: &NodeKind, stroke: &Stroke) -> bool {
     matches!(
         crate::geometry::effective_sides(kind, stroke),
@@ -3096,8 +2832,7 @@ pub fn draws_own_sides(kind: &NodeKind, stroke: &Stroke) -> bool {
     )
 }
 
-/// Detach stroke `item` of layer `id` to the width it draws (D1038's detach,
-/// §15 D1073). Empty when it is not bound.
+/// Detach stroke `item` of layer `id` to the width it draws. Empty when not bound.
 pub fn detach_stroke_width_ops(doc: &Document, id: NodeId, item: crate::ItemId) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -3114,19 +2849,14 @@ pub fn detach_stroke_width_ops(doc: &Document, id: NodeId, item: crate::ItemId) 
     vec![Operation::SetStrokes { id, strokes }]
 }
 
-/// `strokes`, a stroke list about to be written to layer `id`, with a bound width
-/// the write leaves bound kept bound and any other detached (§15 D1073). The
-/// commit's rule ([`keep_stroke_width_bindings`]) and the preview's, so they
-/// cannot disagree.
+/// `strokes`, a list about to be written to layer `id`, with a bound width the
+/// write leaves bound kept and any other detached: the commit's rule
+/// ([`keep_stroke_width_bindings`]) and the preview's.
 ///
-/// Two halves, [`keep_corner_bindings`]' not the opacity's: a stroke whose binding
-/// the write carries unchanged stays bound when its width is written what it
-/// draws or its own literal 0 (put back); any other width detaches. The literal
-/// half is load-bearing: every stroke-card edit and the Scale tool rebuild the
-/// whole list from the stored items, so a bound item arrives with its 0. A 0 typed
-/// over a bound width keeps the binding; the chip's retype is its door. A stroke
-/// whose binding the write changes is left alone, except one drawing its own sides
-/// ([`draws_own_sides`]), which is detached at the width it drew.
+/// [`keep_corner_bindings`]' rule, both halves; the literal half is load-bearing
+/// because every stroke-card edit rebuilds the whole list from the stored items. A
+/// stroke whose binding the write changes is left alone, except one drawing its
+/// own sides ([`draws_own_sides`]), which is detached at the width it drew.
 pub fn kept_stroke_widths(
     doc: &Document,
     id: NodeId,
@@ -3137,8 +2867,7 @@ pub fn kept_stroke_widths(
     };
     for s in strokes.iter_mut() {
         let Some(var) = s.width_var else { continue };
-        // A stroke drawing its own sides holds no width binding, whoever wrote it
-        // (a paste of an ellipse's bound `Custom` stroke onto a rect).
+        // Holds no width binding, whoever wrote it (e.g. a pasted `Custom` stroke).
         if draws_own_sides(node.kind(), s) {
             s.width = doc.stroke_width_drawn_in(doc.variables(), id, var);
             s.width_var = None;
@@ -3161,10 +2890,9 @@ pub fn kept_stroke_widths(
 }
 
 /// Bind number `slot` ([`crate::EffectVars`]' places) of effect `item` on layer
-/// `id` to number variable `var` (§15 D1074): its literal written 0, the binding
-/// beside it in the item. Empty when nothing would change, the layer has no such
-/// effect, or its kind has no such number (a layer blur's X, Y or spread; any
-/// filter's).
+/// `id` to number variable `var`: its literal written 0. Empty when nothing would
+/// change, the layer has no such effect, or its kind has no such number (a layer
+/// blur's X, Y or spread; any filter's).
 pub fn bind_effect_ops(
     doc: &Document,
     id: NodeId,
@@ -3189,8 +2917,8 @@ pub fn bind_effect_ops(
     vec![Operation::SetEffects { id, effects }]
 }
 
-/// Detach number `slot` of effect `item` on layer `id` to what it draws (D1038's
-/// detach, §15 D1074). Empty when it is not bound.
+/// Detach number `slot` of effect `item` on layer `id` to what it draws. Empty
+/// when it is not bound.
 pub fn detach_effect_ops(
     doc: &Document,
     id: NodeId,
@@ -3214,16 +2942,12 @@ pub fn detach_effect_ops(
 }
 
 /// `effects`, an effect list about to be written to layer `id`, with each bound
-/// number the write leaves bound kept bound and any other detached (§15 D1074).
-/// The commit's rule ([`keep_effect_bindings`]) and the preview's,
-/// [`kept_stroke_widths`]' shape.
+/// number the write leaves bound kept and any other detached: the commit's rule
+/// ([`keep_effect_bindings`]) and the preview's, [`kept_stroke_widths`]' shape.
 ///
-/// Corners' two halves: a number whose binding the write carries unchanged stays
-/// bound when written what it draws or its own literal 0 (put back); anything else
-/// detaches. The literal half is load-bearing: every effects-card edit rebuilds
-/// the whole list from the stored items. A 0 typed over a bound number keeps it.
-/// A number whose binding the write changes is left alone, except a binding on a
-/// number the effect's kind no longer has, which goes whoever wrote it.
+/// [`keep_corner_bindings`]' rule, both halves; the literal half is load-bearing
+/// because every effects-card edit rebuilds the whole list. A binding on a number
+/// the effect's kind no longer has goes whoever wrote it.
 pub fn kept_effect_vars(
     doc: &Document,
     id: NodeId,
@@ -3256,8 +2980,7 @@ pub fn kept_effect_vars(
     effects
 }
 
-/// A number written over a bound effect detaches it (D1038 (2), §15 D1074): the
-/// commit-time half of the binding, every `SetEffects` through [`kept_effect_vars`].
+/// [`keep_corner_bindings`]' rule for every `SetEffects`, through [`kept_effect_vars`].
 pub fn keep_effect_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     for op in tx.0.iter_mut() {
         if let Operation::SetEffects { id, effects } = op {
@@ -3267,8 +2990,7 @@ pub fn keep_effect_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
     tx
 }
 
-/// A width written over a bound stroke detaches it (D1038 (2), §15 D1073): the
-/// commit-time half of the binding, every `SetStrokes` through [`kept_stroke_widths`].
+/// [`keep_corner_bindings`]' rule for every `SetStrokes`, through [`kept_stroke_widths`].
 pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     for op in tx.0.iter_mut() {
         if let Operation::SetStrokes { id, strokes } = op {
@@ -3279,8 +3001,8 @@ pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transa
 }
 
 /// Which of `id`'s width and height the user sets: the axes a number variable may
-/// bind (§15 D1061, only a hand-set size is bindable). `[false; 2]` for a kind
-/// with no stored size ([`NodeKind::box_size`]), a text box among them.
+/// bind (only a hand-set size is bindable). `[false; 2]` for a kind with no stored
+/// size ([`NodeKind::box_size`]), a text box among them.
 ///
 /// An axis is computed, and so not bindable, when:
 ///
@@ -3288,13 +3010,12 @@ pub fn keep_stroke_width_bindings(doc: &Document, mut tx: Transaction) -> Transa
 /// - it is pinned at both ends by insets in a container with a box;
 /// - it is an in-flow flex item's main axis with growth or a basis, or its cross
 ///   axis drawn stretched ([`stretched_across`]);
-/// - it is an in-flow grid item stretched across its cell on that axis (a
-///   `stretch` keyword or a box under `normal`, its size `auto`).
+/// - it is an in-flow grid item stretched across its cell on that axis.
 ///
-/// Asked of a [`crate::container::LayoutView`] so the commit can ask it of the
-/// tree an edit leaves ([`keep_size_bindings`]). Not a measurement of the laid-out
-/// box: shrink and `min-`/`max-` can squeeze an authored axis, and the binding
-/// keeps its number (the CSS reading of `width`).
+/// Asked of a [`crate::container::LayoutView`] so the commit can ask it of the tree
+/// an edit leaves ([`keep_size_bindings`]). Not a measurement of the laid-out box:
+/// shrink and `min-`/`max-` can squeeze an authored axis, and the binding keeps its
+/// number (the CSS reading of `width`).
 pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -> [bool; 2] {
     use crate::container::{AlignItems, Dimension, Display};
     let Some(kind) = view.kind(id) else {
@@ -3351,16 +3072,15 @@ pub fn size_axes_authored(view: &dyn crate::container::LayoutView, id: NodeId) -
     out
 }
 
-/// [`size_axes_authored`] of `doc` as committed — the inspector's question
-/// before it offers a W or H a chip (§15 D1061).
+/// [`size_axes_authored`] of `doc` as committed — asked before offering a chip.
 pub fn bindable_size_axes(doc: &Document, id: NodeId) -> [bool; 2] {
     size_axes_authored(&crate::resolve::DocView(doc), id)
 }
 
 /// Bind layer `id`'s width and height to `vars` — `None` leaving an axis as it
-/// is (§15 D1061), [`bind_corners_ops`]' shape: a bound axis's literal is written
-/// 0 and never drawn while bound. Empty for a kind with no stored size, an axis
-/// something else sizes ([`size_axes_authored`]), or when nothing would change.
+/// is, [`bind_corners_ops`]' shape: a bound axis's literal is written 0. Empty for
+/// a kind with no stored size, an axis something else sizes
+/// ([`size_axes_authored`]), or when nothing would change.
 pub fn bind_size_ops(doc: &Document, id: NodeId, vars: crate::SizeVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -3395,8 +3115,7 @@ pub fn bind_size_ops(doc: &Document, id: NodeId, vars: crate::SizeVars) -> Vec<O
 }
 
 /// Detach the axes of layer `id` that `which` names to the sizes they are drawn
-/// at (D1038's detach, §15 D1061): each literal becomes its variable's number
-/// and the binding goes, the other axis as it is. Empty when neither is bound.
+/// at, the other axis as it is. Empty when neither is bound.
 pub fn detach_size_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -3429,12 +3148,10 @@ pub fn detach_size_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Oper
 }
 
 /// The bindings layer `id` keeps when its size is written `written` —
-/// [`keep_size_bindings`]' judgement, axis by axis (§15 D1061): a bound axis
-/// written what it draws, or its own literal, keeps its variable; any other comes
-/// back `None`. "What it draws" is its variable's number and, given `res`, the
-/// used size a layout's shrink or min/max squeezed it to (what a writer of the
-/// other axis carries forward, D874). Shared with the preview (`absorb`'s
-/// `SetGeometry` arm).
+/// [`keep_size_bindings`]' judgement, axis by axis; any axis not kept comes back
+/// `None`. "What it draws" is its variable's number and, given `res`, the used size
+/// a layout's shrink or min/max squeezed it to (what a writer of the other axis
+/// carries forward). Shared with the preview (`absorb`'s `SetGeometry` arm).
 pub fn kept_size_vars(
     doc: &Document,
     res: Option<&crate::resolve::Resolved>,
@@ -3465,26 +3182,17 @@ pub fn kept_size_vars(
     std::array::from_fn(|k| bound[k].filter(|_| w[k] == d[k] || w[k] == l[k] || w[k] == u[k]))
 }
 
-/// A size written over a bound axis detaches it (D1038 (2), §15 D1061):
 /// [`keep_corner_bindings`]' rule for a width and a height, adding the
-/// `SetSizeVars` that lets the written size be drawn. Propagation runs after it
-/// (`propagate::owed`).
-///
-/// The corners' two halves: an axis written what it draws, or its own literal 0
-/// (a writer building the size from the stored kind, D874), stays bound with the
-/// literal put back to 0; anything else detaches. A 0 typed over a bound axis
-/// keeps the binding; the chip's retype is its door.
+/// `SetSizeVars`. Propagation runs after it (`propagate::owed`).
 ///
 /// An axis an edit makes computed is detached too (only a hand-set size is
 /// bindable): a keyword set to `%`/`fit-content`, a second pin, growth, a basis or
 /// stretch, a reparent into a layout, a layer shown or unmasked into the flow, a
 /// bound layer pasted into a layout. Asked of the tree the transaction leaves
 /// ([`size_axes_authored`] on a scratch copy), and only when the transaction
-/// touches the layout of a bound layer or its parent. The literal it detaches to
-/// is the size drawn before the edit.
-///
-/// A transaction that sets a layer's size bindings itself is left alone. `res` is
-/// the layout `doc` was resolved to, for [`kept_size_vars`]' used size.
+/// touches the layout of a bound layer or its parent; the literal it detaches to
+/// is the size drawn before the edit. `res` is the layout `doc` was resolved to,
+/// for [`kept_size_vars`]' used size.
 pub fn keep_size_bindings(
     doc: &Document,
     res: Option<&crate::resolve::Resolved>,
@@ -3536,8 +3244,8 @@ pub fn keep_size_bindings(
             }
         }
     }
-    // The layout half: a bound layer whose layout fields, insets, parent, parent's
-    // layout or place in the flow the transaction writes, or that it brings in.
+    // The layout half: a bound layer whose layout, parent or place in the flow the
+    // transaction writes, or that it brings in.
     let mut touched: Vec<NodeId> = Vec::new();
     let mut arrived: FxHashMap<NodeId, crate::SizeVars> = FxHashMap::default();
     for op in &tx.0 {
@@ -3570,8 +3278,7 @@ pub fn keep_size_bindings(
     let mut extra: Vec<Operation> = Vec::new();
     if !touched.is_empty() {
         let mut after = doc.clone();
-        // Unchecked: a link the commit's later passes cut fails `component::check`
-        // until they run.
+        // Unchecked: a link the commit's later passes cut fails `component::check` until then.
         if after.apply_unchecked(&tx).is_ok() {
             let view = crate::resolve::DocView(&after);
             for id in touched {
@@ -3592,8 +3299,6 @@ pub fn keep_size_bindings(
                 if !which.iter().any(|w| *w) {
                     continue;
                 }
-                // What it drew before the edit, or, brought in, what it draws
-                // where it came from — its variables' numbers.
                 let drawn = match before {
                     Some(_) => doc.resolved_kind(id),
                     None => after.resolved_kind(id),
@@ -3635,14 +3340,12 @@ pub fn keep_size_bindings(
 }
 
 /// Bind text `id`'s content and family to `vars` — `None` leaving a field as it
-/// is (§15 D1069), [`bind_size_ops`]' shape: a bound field's literal is written
-/// empty and never drawn while bound.
+/// is, [`bind_size_ops`]' shape: a bound field's literal is written empty.
 ///
-/// Binding the content clears the text's spans and paragraph spans (a byte range
-/// cannot index a string whose length changes with the mode); binding the family
-/// clears runs with a family of their own. A family is not bound under a text
-/// style, which holds a plain family (§15 D1067). Empty for a layer that is no
-/// text, or when nothing would change.
+/// Binding the content clears the spans and paragraph spans (a byte range cannot
+/// index a string whose length changes with the mode); binding the family clears
+/// runs with a family of their own. A family is not bound under a text style,
+/// which holds a plain family. Empty for a non-text layer or when nothing changes.
 pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<Operation> {
     let Some(node) = doc.get(id) else {
         return Vec::new();
@@ -3702,9 +3405,7 @@ pub fn bind_text_ops(doc: &Document, id: NodeId, vars: crate::TextVars) -> Vec<O
 }
 
 /// Detach the fields of text `id` that `which` names to the strings they are
-/// drawn with (D1038's detach, §15 D1069): each literal becomes its variable's
-/// string and the binding goes, the other field as it is. Empty when neither is
-/// bound.
+/// drawn with, the other field as it is. Empty when neither is bound.
 pub fn detach_text_ops(doc: &Document, id: NodeId, which: [bool; 2]) -> Vec<Operation> {
     detach_text_ops_in(doc, doc.variables(), id, which)
 }
@@ -3765,25 +3466,19 @@ pub fn detach_text_ops_in(
     ops
 }
 
-/// An edit of a bound text detaches what it edits (D1038 (2), §15 D1069): the
-/// commit-time half of the binding, so every writer of the text ops is unchanged.
+/// [`keep_corner_bindings`]' rule for the text ops, per field:
 ///
-/// - The content. A `SetText` writing the drawn string with no spans and no
-///   paragraph spans stays bound, its literal put back empty (an unedited text
-///   session writes exactly that). One half, not the corners' two (D1059's
-///   reason): the empty literal is what a text emptied on purpose writes, and
-///   excusing it brought the variable's string back on release. Anything else
-///   detaches: typing changes the string, and styling a range writes spans that
-///   index the drawn string, so a `SetTextSpans` or `SetParagraphSpans` that
-///   leaves any is rewritten into a `SetText` of the drawn string carrying them.
+/// - The content. A `SetText` writing the drawn string with no spans stays bound,
+///   its literal put back empty (an unedited text session writes exactly that).
+///   One half, as [`keep_visible_bindings`]: the empty literal is what a text
+///   emptied on purpose writes. Styling a range writes spans that index the drawn
+///   string, so a `SetTextSpans` or `SetParagraphSpans` that leaves any is
+///   rewritten into a `SetText` of the drawn string carrying them.
 /// - The family. A `SetTextStyle` whose family is the drawn one or the empty
 ///   literal stays bound (every Type card row but the family writes the whole
-///   style with the family as stored); any other detaches. A run with its own
-///   family is a span, and the default stays bound under it (§15 D1067). Applying
-///   a text style detaches it: the style holds a plain family, which
-///   `crate::style::settle` then writes.
-///
-/// A transaction that sets a text's bindings itself is left alone.
+///   style); any other detaches. A run with its own family is a span, and the
+///   default stays bound under it. Applying a text style detaches it: the style
+///   holds a plain family, which `crate::style::settle` then writes.
 pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
     let sets_var: FxHashSet<NodeId> =
         tx.0.iter()
@@ -3903,8 +3598,7 @@ pub fn keep_text_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
 }
 
 /// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
-/// of the shared list, written in place so every target keeps its own item ids
-/// (§15 D980).
+/// of the shared list, written in place so every target keeps its own item ids.
 pub fn edit_brush_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -3942,16 +3636,13 @@ pub fn edit_brush_at_all(
 }
 
 /// Change every stroke of every paint target in scope, in place.
-/// [`edit_fills_all`]'s twin, over the same targets — frames included, see
-/// [`shared_strokes`].
+/// [`edit_fills_all`]'s twin, over the same targets.
 pub fn edit_strokes_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Stroke)) -> Transaction {
     edit_strokes_at_all(doc, ids, |_, s| edit(s))
 }
 
-/// [`edit_strokes_all`] with the layer each stroke is on — for an edit that
-/// reads the layer, as one resolving a bound width in the layer's mode does
-/// (the several-layer weight row sparing a binding that already draws the
-/// width typed, §15 D1073's fourth amendment).
+/// [`edit_strokes_all`] with the layer each stroke is on, for an edit that reads
+/// the layer (e.g. one resolving a bound width in the layer's mode).
 pub fn edit_strokes_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -3973,11 +3664,10 @@ pub fn edit_strokes_at_all(
 
 /// Give every paint target in scope exactly this fill list.
 ///
-/// Exactly this list, on a frame too (§15 D400). Values in, each target's own ids
-/// kept by position (§15 D980, `item::rekey_by_position`): a replacement is not an
-/// edit, so there is no anchor to say which item became which; an edit of a shared
-/// list goes through [`retarget_fills_all`]. A fill past a target's end takes one
-/// id for the whole write, shared by every target that reaches it (§15 D1003 (6)).
+/// Values in, each target's own ids kept by position (`item::rekey_by_position`):
+/// a replacement is not an edit, so there is no anchor to say which item became
+/// which; an edit of a shared list goes through [`retarget_fills_all`]. A fill past
+/// a target's end takes one id for the whole write, shared by every target.
 pub fn set_fills_all(
     doc: &Document,
     ids: &[NodeId],
@@ -4028,9 +3718,7 @@ pub fn set_strokes_all(
 }
 
 /// Change fill `index` of every paint target in scope, in place — one row of a
-/// list the targets share (their lists agree in value, so row `index` is the
-/// same fill on each). Every id stays where it is; a target with no fill there
-/// is left alone.
+/// list the targets share. A target with no fill there is left alone.
 pub fn edit_fill_at_all(
     doc: &Document,
     ids: &[NodeId],
@@ -4075,13 +3763,12 @@ pub fn edit_stroke_at_all(
 }
 
 /// An **edit** of the fill list every paint target in scope shares, written onto
-/// each target with its own ids (§15 D980, `item::retarget`).
+/// each target with its own ids (`item::retarget`).
 ///
 /// `anchor` is the list the panel showed ([`shared_fills`]' answer) and `edited` is
 /// that list after the change. Writing `edited` verbatim would give every target
 /// the anchor's ids, cutting an instance's fill from its counterpart in the main;
-/// retargeting maps each edited item through the anchor to the target's own item,
-/// and gives an added row one id on every target (§15 D1003 (6)).
+/// an added row gets one id on every target.
 pub fn retarget_fills_all(
     doc: &Document,
     ids: &[NodeId],
@@ -4125,38 +3812,33 @@ pub fn retarget_strokes_all(
 /// one: the payload behind *Copy properties* / *Paste properties*
 /// (`docs/context-menus.md` §3, `docs/shortcuts.md` §7).
 ///
-/// Position, size, rotation, name, pivot, lock and geometry are excluded: the verb
-/// is "make this look like that", and a corner radius means nothing carried from a
-/// rect to a star. A live text node's per-run colours are not here either:
-/// character spans override the node's paint, so pasting onto text whose runs carry
-/// their own colours changes nothing visible.
+/// Position, size, rotation, name, pivot, lock and geometry are excluded ("make
+/// this look like that"). A text node's per-run colours are too: character spans
+/// override the node's paint, so pasting onto them changes nothing visible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Properties {
-    /// The layer's own fill list, a frame's included, whole (§15 D400).
+    /// The layer's own fill list, a frame's included, whole.
     pub fills: Vec<Fill>,
     pub strokes: Vec<Stroke>,
     /// The opacity the layer draws, a bound one resolved: the detach a paste falls
-    /// back to (§15 D1072).
+    /// back to.
     pub opacity: f32,
     /// The variable it is bound to, landed by the paste's rule as a paint's is.
     pub opacity_var: Option<crate::VarId>,
-    /// What a bound paint needs to land in another document (§15 D1047): the name
-    /// and kind of every variable the fills and strokes bind, and each paint as it
-    /// drew in the copying document. The clipboard outlives a document switch, so a
-    /// paste cannot ask the copying document.
+    /// What a bound paint needs to land in another document: the name and kind of
+    /// every variable bound, and each paint as it drew at the copy. The clipboard
+    /// outlives a document switch, so a paste cannot ask the copying document.
     pub carried: Vec<crate::variable::CarriedVar>,
     pub drawn_fills: Vec<Brush>,
     pub drawn_strokes: Vec<Brush>,
-    /// Each stroke's width as it drew at the copy: the detach a paste falls back to
-    /// (§15 D1073).
+    /// Each stroke's width as it drew at the copy: the detach a paste falls back to.
     pub drawn_widths: Vec<f64>,
 }
 
 /// A layer's appearance, or `None` for a kind that has none to give.
 ///
-/// A group is refused rather than answered with an empty list, which would arrive
-/// at the paste as an instruction to clear whatever it landed on; one field
-/// (opacity) is not an appearance.
+/// A group is refused: an empty list would arrive at the paste as an instruction
+/// to clear whatever it landed on.
 pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
     let node = doc.get(id)?;
     if !node.kind().takes_paint() {
@@ -4211,16 +3893,13 @@ pub fn properties_of(doc: &Document, id: NodeId) -> Option<Properties> {
 
 /// Give every target in scope the appearance in `props`.
 ///
-/// Three existing bulk verbs composed: fills where a panel fill goes
-/// ([`set_fills_all`], through a group, stopping at a frame), strokes likewise
-/// ([`set_strokes_all`]), and opacity to the outermost members alone
-/// ([`set_opacity_all`], since opacity composes down the tree). Each drops the
-/// targets that already agree, so pasting a layer's own properties is empty.
+/// [`set_fills_all`], [`set_strokes_all`] and [`set_opacity_all`] (outermost
+/// members alone) composed; each drops targets that already agree, so pasting a
+/// layer's own properties is empty.
 ///
-/// A bound paint lands by a paste's rule (D1038, §15 D1047): kept where this
-/// document has the variable, else rebound to this document's variable of the
-/// same name and kind ([`crate::variable::rebind`], as [`crate::variable::land`]
-/// does), else detached to what it drew at the copy.
+/// A bound paint is kept where this document has the variable, else rebound to
+/// this document's variable of the same name and kind ([`crate::variable::rebind`]),
+/// else detached to what it drew at the copy.
 pub fn paste_properties(
     doc: &Document,
     ids: &[NodeId],
@@ -4256,8 +3935,6 @@ pub fn paste_properties(
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            // A bound width by the same rule: rebound where this document has
-            // the variable, else the width it drew.
             let (width, width_var) = match s.width_var {
                 Some(v) => match crate::variable::rebind(t, &props.carried, v) {
                     Some(v) => (s.width, Some(v)),
@@ -4275,8 +3952,6 @@ pub fn paste_properties(
         .collect();
     let mut ops = set_fills_all(doc, ids, &fills, src).0;
     ops.extend(set_strokes_all(doc, ids, &strokes, src).0);
-    // A bound opacity by the same rule: rebound on the outermost members, else
-    // the opacity it drew.
     match props
         .opacity_var
         .and_then(|v| crate::variable::rebind(t, &props.carried, v))
@@ -4299,8 +3974,7 @@ pub fn set_opacity_all(doc: &Document, ids: &[NodeId], opacity: f32) -> Transact
     Transaction(
         outermost(doc, ids)
             .into_iter()
-            // Against what each draws (§15 D1072): a bound layer holds 0, so the
-            // literal would mishandle a 0% typed over one.
+            // Against what each draws: a bound layer holds 0.
             .filter(|id| doc.get(*id).is_some() && doc.drawn_opacity(*id) != opacity)
             .map(|id| Operation::SetOpacity { id, opacity })
             .collect(),
@@ -4309,25 +3983,19 @@ pub fn set_opacity_all(doc: &Document, ids: &[NodeId], opacity: f32) -> Transact
 
 /// How near two opacities have to be for a readout to call them one value.
 ///
-/// The rule lives here, and the panel reads it (§15 D607). The field formats as
-/// `{v:.0}%`, so anything this side of a part in a million is the same number on
-/// screen and reporting *Mixed* for it would be the readout disagreeing with itself.
+/// The panel reads it. The field formats as `{v:.0}%`, so anything this side of a
+/// part in a million is the same number on screen.
 pub const OPACITY_AGREEMENT: f32 = 1e-6;
 
-/// [`OPACITY_AGREEMENT`]'s twin for a corner radius (§15 D607). Tighter because a
-/// radius is a length in document units: 1e-9 is below anything a drag or parser
-/// can author, where 1e-6 of an opacity is a rounding artefact the percentage
-/// field produces routinely.
+/// [`OPACITY_AGREEMENT`]'s twin for a corner radius. Tighter because a radius is a
+/// length in document units: 1e-9 is below anything a drag or parser can author.
 pub const RADIUS_AGREEMENT: f64 = 1e-9;
 
 /// Set the same radius on all four corners of every rect in the subtrees.
 ///
-/// Subtree rather than outermost, unlike opacity: a radius does not compose, so
-/// reaching into a selected group and rounding the rects inside it is both safe
-/// and what "round these corners" means when a group is what is selected.
+/// Subtree rather than outermost, unlike opacity: a radius does not compose.
 pub fn set_corner_radius_all(doc: &Document, ids: &[NodeId], radius: f64) -> Transaction {
-    // Rects already at this radius contribute nothing, so an unedited field that
-    // loses focus pushes no undo step.
+    // So an unedited field that loses focus pushes no undo step.
     let already = |id: NodeId| {
         matches!(
             doc.get(id).map(|n| n.kind()),
@@ -4359,7 +4027,6 @@ pub fn shared_corner_radius(doc: &Document, ids: &[NodeId]) -> Option<f64> {
         let r = crate::geometry::uniform_radius(corner_radii)?;
         match shared {
             None => shared = Some(r),
-            // [`RADIUS_AGREEMENT`], not `==`.
             Some(s) if (s - r).abs() < RADIUS_AGREEMENT => {}
             Some(_) => return None,
         }
@@ -4473,23 +4140,18 @@ fn sorted_along(
 /// Space `ids` evenly along one axis: the outermost two stay put and the gaps
 /// between every pair come out equal.
 ///
-/// Equal gaps, not equal centres. Needs three layers; fewer returns an empty
-/// transaction.
-///
-/// Equal gaps only while the layers fit in their own span (§15 D487): once they
-/// overlap more, equal gaps and left-to-right order are incompatible, and the
-/// order is kept by spacing the leading edges evenly instead.
-///
-/// No key layer here, unlike [`distribute_spacing`]: the extremes are set by where
-/// layers already sit, whereas a fixed gap leaves the run free to slide.
+/// Equal gaps, not equal centres, and only while the layers fit in their own span:
+/// once they overlap more, equal gaps and left-to-right order are incompatible and
+/// the order is kept by spacing the leading edges evenly instead. Needs three
+/// layers. No key layer, unlike [`distribute_spacing`]: the extremes are set by
+/// where layers already sit.
 pub fn distribute(doc: &Document, res: &Resolved, ids: &[NodeId], axis: Axis) -> Transaction {
     let boxes = sorted_along(doc, res, ids, axis);
     if boxes.len() < 3 {
         return Transaction(Vec::new());
     }
     let first_lead = lead(&boxes[0].1, axis);
-    // The greatest trailing edge, not the last box's: a background rect 800 wide
-    // at x=0 with two 40-wide icons at 10 and 100 would give a span of 140.
+    // The greatest trailing edge, not the last box's (a wide background rect).
     let span = boxes
         .iter()
         .map(|(_, b)| lead(b, axis) + extent(b, axis))
@@ -4508,10 +4170,8 @@ pub fn distribute(doc: &Document, res: &Resolved, ids: &[NodeId], axis: Axis) ->
         return Transaction(ops);
     }
 
-    // The layers overlap more than the span allows (§15 D487). With overlap the
-    // extremes, equal gaps and the order cannot all hold; the order is the promise
-    // to keep (equal gaps would swap two icons), so the leading edges are spaced
-    // evenly, which also leaves the first and last where they were.
+    // Overlap: the order is the promise to keep (equal gaps would swap two icons),
+    // so space the leading edges evenly, leaving the first and last in place.
     let step = (lead(&boxes[boxes.len() - 1].1, axis) - first_lead) / (boxes.len() - 1) as f64;
     for (i, (id, b)) in boxes.iter().enumerate() {
         let want = first_lead + step * i as f64;
@@ -4523,13 +4183,10 @@ pub fn distribute(doc: &Document, res: &Resolved, ids: &[NodeId], axis: Axis) ->
 /// The gap between each neighbouring pair of these boxes along `axis`, sorting
 /// them by where they sit first.
 ///
-/// One fewer number than there are boxes, empty below two. A gap is negative where
-/// the two overlap, which [`distribute_spacing`] writes back for a negative number.
-///
-/// Returned as the whole list: how close two gaps must be to read as one number is
-/// the panel's display question. Over boxes rather than ids because core only has
-/// the committed tree and a field showing this would sit still through its own
-/// drag (§15 D245); `session::preview_world_bounds` is what the panel feeds it.
+/// One fewer number than there are boxes, empty below two; negative where two
+/// overlap. Over boxes rather than ids because core only has the committed tree and
+/// a field would sit still through its own drag (the panel feeds it
+/// `session::preview_world_bounds`).
 pub fn gaps_along(boxes: &[kurbo::Rect], axis: Axis) -> Vec<f64> {
     let mut sorted = boxes.to_vec();
     sorted.sort_by(|a, b| lead(a, axis).total_cmp(&lead(b, axis)));
@@ -4542,13 +4199,10 @@ pub fn gaps_along(boxes: &[kurbo::Rect], axis: Axis) -> Vec<f64> {
 /// Put exactly `gap` between each neighbouring pair of `ids` along `axis`,
 /// holding `anchor` where it is.
 ///
-/// This is what a key layer is for (§15 D243): naming the gap frees the run to
-/// slide, so one member, `anchor`, holds still while earlier ones pack backwards
-/// from it and later ones forwards. An absent or non-member `anchor` falls back to
-/// the first (leftmost or topmost) layer.
-///
-/// Two layers is enough, unlike `distribute`: one gap is worth typing. Nothing is
-/// clamped; a negative `gap` overlaps the layers.
+/// Naming the gap frees the run to slide, so `anchor` holds still while earlier
+/// members pack backwards from it and later ones forwards; an absent or non-member
+/// `anchor` falls back to the first layer. Two layers is enough. Nothing is
+/// clamped; a negative `gap` overlaps.
 pub fn distribute_spacing(
     doc: &Document,
     res: &Resolved,
@@ -4566,8 +4220,6 @@ pub fn distribute_spacing(
         .unwrap_or(0);
 
     let mut ops = Vec::new();
-    // Forward from the anchor's trailing edge, then backward from its leading
-    // one; the anchor gets no operation at all.
     let mut cursor = lead(&boxes[at].1, axis) + extent(&boxes[at].1, axis) + gap;
     for (id, b) in &boxes[at + 1..] {
         push_offset(doc, res, *id, along(axis, cursor - lead(b, axis)), &mut ops);
@@ -4584,16 +4236,15 @@ pub fn distribute_spacing(
 
 /// Mirror `ids` across the centreline of the box they occupy.
 ///
-/// `Axis::X` is the horizontal flip: left and right swap, so the mirror line is
-/// vertical. One layer flips in place; several flip about their union, as a group.
-/// This writes a reflection into the transform, which §5.6 permits.
+/// `Axis::X` is the horizontal flip (the mirror line is vertical). One layer flips
+/// in place; several about their union. The reflection is written into the
+/// transform, which §5.6 permits.
 ///
-/// A single layer whose pivot has been moved mirrors about the pivot instead
-/// ([`crate::Pivot`]). Only when actually placed: an unset pivot resolves to the
-/// box centre, which differs from the union centre below for a rotated group.
+/// A single layer whose pivot has been moved mirrors about it instead
+/// ([`crate::Pivot`]); an unset pivot is the box centre, which differs from the
+/// union centre for a rotated group.
 pub fn flip(doc: &Document, res: &Resolved, ids: &[NodeId], axis: Axis) -> Transaction {
     let members = outermost(doc, ids);
-    // A set has no pivot to share; this is a single-selection question.
     let placed = match members.as_slice() {
         [id] if doc.get(*id).is_some_and(|n| n.pivot().is_some()) => pivot_world(doc, res, *id),
         _ => None,
@@ -4637,20 +4288,16 @@ pub enum Mirror {
 
 /// The rotation, skew and mirror a transform's 2×2 basis encodes (§5.6).
 ///
-/// Reading a rotation back as `atan2(b, a)` is wrong once a node is mirrored (a
-/// reflection has a negative determinant) or skewed, and a rebuild from angle alone
-/// drops both.
-///
-/// The two mirrors are the same reflection 180° apart (`R(θ)·FLIP_Y` is
-/// `R(θ+π)·FLIP_X`), so the decomposition reports whichever leaves the smaller
-/// angle: flip an upright layer vertically and the rotation field stays at 0°.
+/// Reading a rotation back as `atan2(b, a)` is wrong once a node is mirrored or
+/// skewed, and a rebuild from angle alone drops both. The two mirrors are the same
+/// reflection 180° apart (`R(θ)·FLIP_Y` is `R(θ+π)·FLIP_X`), so the decomposition
+/// reports whichever leaves the smaller angle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Orientation {
     /// Rotation in radians, in `(-π, π]`.
     pub angle: f64,
     /// Skew in radians, in `(-π/2, π/2)`: how far the y axis leans away from
-    /// square with the x axis. SVG/CSS `skewX` semantics (coefficient `tan(skew)`),
-    /// the convention the SVG writer emits.
+    /// square with the x axis. SVG/CSS `skewX` semantics (coefficient `tan(skew)`).
     pub skew: f64,
     pub mirror: Mirror,
 }
@@ -4662,8 +4309,7 @@ pub struct Orientation {
 ///
 /// An RQ decomposition: every invertible 2×2 factors uniquely as
 /// `R(θ)·skew·mirror · diag(sx, sy)`, the scale on the right where the node's own
-/// axes can absorb it. Exact for any matrix, so a world-space edit can be pushed
-/// onto a node whatever its parents have done (§15 D50).
+/// axes can absorb it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Basis {
     pub orientation: Orientation,
@@ -4691,9 +4337,8 @@ pub fn skew_x(radians: f64) -> Affine {
 /// The affine that skews by `radians` about the origin along the *other* axis
 /// (`skewY`) — a point displaced along +y in proportion to its +x.
 ///
-/// Not a second case in the decomposition: a y-lean comes back out as a rotation
-/// plus an x-lean plus a scale. It exists because a gesture on a vertical edge
-/// means this one.
+/// Not a second case in the decomposition (a y-lean comes back out as a rotation
+/// plus an x-lean plus a scale); a gesture on a vertical edge means this one.
 pub fn skew_y(radians: f64) -> Affine {
     Affine::new([1.0, radians.tan(), 0.0, 1.0, 0.0, 0.0])
 }
@@ -4703,8 +4348,7 @@ impl Basis {
     ///
     /// Gram–Schmidt: the first column gives the rotation and x scale, and the
     /// second is read in that frame (across the x axis is the y scale, along it
-    /// is the lean). [`Orientation::to_affine`] times [`Self::scale`] returns the
-    /// input.
+    /// is the lean).
     pub fn of(transform: Affine) -> Self {
         let [a, b, c, d, _, _] = transform.as_coeffs();
         // A reflection is peeled off first, by negating the x column.
@@ -4713,8 +4357,7 @@ impl Basis {
 
         let sx = a.hypot(b);
         if sx < DEGENERATE {
-            // Report the identity rather than a NaN so a collapsed node still
-            // round-trips and the inspector shows 0°.
+            // Identity rather than NaN, so a collapsed node still round-trips.
             return Basis {
                 orientation: Orientation {
                     angle: 0.0,
@@ -4762,21 +4405,15 @@ impl Basis {
     }
 
     /// [`Self::of`] for callers that need the split to **reproduce** the input,
-    /// `None` where no return value could (§15 D714).
+    /// `None` where no return value could.
     ///
     /// `of` is total and lossy; this is partial and exact. A rank-1 basis (such as
     /// `[1, 2, 2, 4]`) has no exact split, and `of` returns a plausible wrong
-    /// matrix for it. Both of `of`'s degenerate arms are refused, including
-    /// `Affine::scale(1e-13)`, which falls under `DEGENERATE` and would give
-    /// `sx = 0` with an identity orientation (zeroing stroke widths under
-    /// `Scaling::Photographic`).
-    ///
-    /// The thresholds are not restated: this reads the `scale` numbers `of`
-    /// computed so the guard cannot drift from the arms it guards. [`affine_is_finite`]
-    /// is spelled anyway rather than relying on `NaN` failing both comparisons.
-    ///
-    /// Anything reporting a basis rather than rewriting one (the inspector's angle
-    /// and scale fields) still uses [`Self::of`], which gives 0° for a collapsed node.
+    /// matrix for it; both of `of`'s degenerate arms are refused, including
+    /// `Affine::scale(1e-13)` (`sx = 0` would zero stroke widths under
+    /// `Scaling::Photographic`). It reads the `scale` numbers `of` computed so the
+    /// guard cannot drift from the arms it guards. Anything reporting a basis
+    /// rather than rewriting one still uses [`Self::of`].
     pub fn exact(transform: Affine) -> Option<Self> {
         let basis = Self::of(transform);
         (affine_is_finite(transform)
@@ -4818,9 +4455,8 @@ pub enum ZMove {
 
 /// Restack `ids` within each of their parents.
 ///
-/// A selection can span several parents; each is restacked independently ("to the
-/// front of wherever you are"). Members that are descendants of other members are
-/// dropped.
+/// A selection can span several parents; each is restacked independently.
+/// Members that are descendants of other members are dropped.
 pub fn z_order(doc: &Document, ids: &[NodeId], mv: ZMove) -> Transaction {
     let mut by_parent: FxHashMap<NodeId, FxHashSet<NodeId>> = FxHashMap::default();
     for id in outermost(doc, ids) {
@@ -4828,8 +4464,7 @@ pub fn z_order(doc: &Document, ids: &[NodeId], mv: ZMove) -> Transaction {
             by_parent.entry(p).or_default().insert(id);
         }
     }
-    // Sorted: an operation list has to replay identically on another replica
-    // (§12), so it cannot depend on hash iteration order.
+    // Sorted: the operation list must replay identically on another replica (§12).
     let mut parents: Vec<NodeId> = by_parent.keys().copied().collect();
     parents.sort();
 
@@ -4881,10 +4516,8 @@ fn restacked(current: &[NodeId], sel: &FxHashSet<NodeId>, mv: ZMove) -> Vec<Node
     }
 }
 
-/// The `Reorder` ops that turn `current` into `desired` (same members).
-///
-/// Each op's index is the slot after the node is lifted out of its old one, so
-/// every op is computed against the order the previous ops leave behind.
+/// The `Reorder` ops that turn `current` into `desired` (same members), each
+/// computed against the order the previous ops leave behind.
 fn reorder_ops(current: &[NodeId], desired: &[NodeId]) -> Vec<Operation> {
     let mut list = current.to_vec();
     let mut ops = Vec::new();
@@ -4922,19 +4555,18 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
 }
 
 /// `tx` with each resized flex item's properties set so the size it was resized
-/// to holds (§15 D875, "set width and stop growth").
+/// to holds ("set width and stop growth").
 ///
 /// A resize changing an in-flow item's main-axis size also writes `flex-grow: 0`,
-/// `flex-shrink: 0` and `flex-basis: auto` (§15 D935); one changing the cross size
-/// of an item drawn stretched ([`stretched_across`]) writes `align-self: start`, or
-/// `end` when it held the cross end edge (§15 D905). A kind the layout never sizes
-/// holds nothing, and a layer whose item properties the transaction sets itself is
-/// left alone. A size on a `%` or `fit-content` axis is set back to `auto` (§15
-/// D879).
+/// `flex-shrink: 0` and `flex-basis: auto`; one changing the cross size of an item
+/// drawn stretched ([`stretched_across`]) writes `align-self: start`, or `end` when
+/// it held the cross end edge. A kind the layout never sizes holds nothing, and a
+/// layer whose item properties the transaction sets itself is left alone. A size on
+/// a `%` or `fit-content` axis is set back to `auto`.
 ///
-/// The item half is [`flex_holds`], which the gesture preview applies too (§15
-/// D904); this adds [`kept_flow_translations`] (§15 D877), which the preview must
-/// not, and which can empty a transaction. Run beside [`keep_insets`].
+/// The item half is [`flex_holds`], which the gesture preview applies too; this
+/// adds [`kept_flow_translations`], which the preview must not, and which can empty
+/// a transaction. Run beside [`keep_insets`].
 pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
     let holds = flex_holds(doc, res, &tx);
     let mut out = kept_flow_translations(doc, tx);
@@ -4944,12 +4576,12 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
 
 /// The `SetLayoutItem`s that make `tx`'s resizes hold — [`keep_flex_sizes`]' rules
 /// for growth, `align-self` and size keywords, and in a grid both self-alignments
-/// ([`grid_resize_held`], §15 D916), and nothing else — in id order.
+/// ([`grid_resize_held`]), and nothing else — in id order.
 ///
 /// Split out so the gesture preview (`RenderOverrides`' `flex_relayout`) applies
-/// them (§15 D904); otherwise a stretched item dragged shorter is stretched back
-/// every frame. The preview must not take [`kept_flow_translations`] too: that
-/// drops a move's translation, and a move is what the preview draws.
+/// them, or a stretched item dragged shorter is stretched back every frame. The
+/// preview must not take [`kept_flow_translations`] too: that drops a move's
+/// translation, and a move is what the preview draws.
 pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Operation> {
     use crate::container::{self, Display, LayoutView};
     let view = crate::resolve::DocView(doc);
@@ -4987,14 +4619,12 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
             && container::in_flow(&view, *id)
             && let Some(display) = view.parent(*id).and_then(|p| view.display(p))
         {
-            // Where the box was and where the tool wants it, in the parent's
-            // space (a left- or top-handle resize shifts the origin).
+            // Where the box was and where the tool wants it, in the parent's space.
             let was = res.used_local(doc, *id).unwrap_or(Affine::IDENTITY);
             let to = written_transform(tx, *id).unwrap_or(was);
             let edges = resized_edges((was, now), (to, then));
             item = match &*display {
-                // Only a kind whose drawn size follows the layout is held (§15
-                // D935): a path is not stretched, so there is no size to take back.
+                // A path is not stretched, so there is no size to take back.
                 Display::Flex(_) if !container::can_stretch(used) => item,
                 Display::Flex(flex) => {
                     let from_start = resized_from_cross_start(flex, edges);
@@ -5031,13 +4661,12 @@ fn written_transform(tx: &Transaction, id: NodeId) -> Option<Affine> {
 }
 
 /// Whether a resize of an item laid out by `flex` kept its cross-axis end edge and
-/// moved its start (a row's item dragged by its top; reversed under `wrap-reverse`,
-/// §15 D905), read off `edges`, [`resized_edges`]' physical answer, through the flow.
+/// moved its start (a row's item dragged by its top), read off `edges`,
+/// [`resized_edges`]' physical answer, through the flow.
 ///
-/// This decides between `align-self: flex-start` and `flex-end` when a resize
-/// releases a stretch, so the item does not jump to the other side of its line.
-/// `wrap-reverse` swaps cross-start and cross-end (§15 D909). Every other resize
-/// answers `false`, including about the centre.
+/// Decides between `align-self: flex-start` and `flex-end` when a resize releases a
+/// stretch, so the item does not jump to the other side of its line. `wrap-reverse`
+/// swaps cross-start and cross-end. Every other resize answers `false`.
 fn resized_from_cross_start(flex: &crate::container::Flex, edges: [(bool, bool); 2]) -> bool {
     let [across, down] = edges;
     let (low_moved, high_moved) = if flex.direction.is_row() {
@@ -5057,7 +4686,7 @@ fn resized_from_cross_start(flex: &crate::container::Flex, edges: [(bool, bool);
 /// transform. About the centre both answers are `false`.
 ///
 /// Flex reads one axis through its flow ([`resized_from_cross_start`]); grid reads
-/// both, physically, having no reversal (§15 D913).
+/// both, physically, having no reversal.
 fn resized_edges(was: (Affine, kurbo::Rect), now: (Affine, kurbo::Rect)) -> [(bool, bool); 2] {
     let a = was.0.transform_rect_bbox(was.1);
     let b = now.0.transform_rect_bbox(now.1);
@@ -5076,13 +4705,12 @@ fn resized_edges(was: (Affine, kurbo::Rect), now: (Affine, kurbo::Rect)) -> [(bo
 }
 
 /// `item` with a released stretch aligned on whichever axes a resize from `from`
-/// to `to` changed, in a container laid out by `grid` (§15 D913), [`held`]'s for
-/// grid: a stretch that would undo the resize becomes `start`, or `end` when the
-/// resize moved the axis's low edge and held its high one (`low_moved`, across
-/// then down). The item keeps its cells.
+/// to `to` changed, in a container laid out by `grid`, [`held`]'s for grid: a
+/// stretch that would undo the resize becomes `start`, or `end` when the resize
+/// moved the axis's low edge and held its high one (`low_moved`, across then down).
 ///
 /// "Stretched" is the resolved alignment (the item's own, else the container's);
-/// under `normal` a box stretches and a replaced item does not (§15 D915).
+/// under `normal` a box stretches and a replaced item does not.
 fn grid_resize_held(
     grid: &crate::container::Grid,
     mut item: crate::container::LayoutItem,
@@ -5114,16 +4742,14 @@ fn grid_resize_held(
 }
 
 /// `tx` with every `SetTransform` on an in-flow flex item keeping the item's
-/// stored translation: its new rotation, skew and flip taken, its position not
-/// (§15 D877). A grid item too, since [`is_flex_item`] answers for any layout (§15
-/// D914).
+/// stored translation: its new rotation, skew and flip taken, its position not. A
+/// grid item too, since [`is_flex_item`] answers for any layout.
 ///
 /// Tools write where they want a layer drawn, and for an in-flow item that is not
 /// where it is drawn: a left- or top-handle resize or a pivot rotation composes on
 /// the item's used transform (its slot), so the write would land the item at the
-/// slot's translation once the layout is taken away. Every such write keeps the
-/// stored translation here, once, rather than in every tool (see
-/// `a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`).
+/// slot's translation once the layout is taken away. Kept here, once, rather than
+/// in every tool.
 ///
 /// Not when the same transaction takes the item out of the flow (a reparent,
 /// delete, insets, hiding, making it a mask, or its parent's layout changing):
@@ -5175,8 +4801,8 @@ fn kept_flow_translations(doc: &Document, tx: Transaction) -> Transaction {
 }
 
 /// `item` with `width` and `height` back at `auto` on whichever axes a resize from
-/// `from` to `to` changed — [`keep_flex_sizes`]' px rule (§15 D879), for a kind
-/// whose stored size is its CSS size, so `auto` is the size the resize wrote.
+/// `from` to `to` changed — [`keep_flex_sizes`]' px rule, for a kind whose stored
+/// size is its CSS size, so `auto` is the size the resize wrote.
 fn sized_in_px(
     mut item: crate::container::LayoutItem,
     from: kurbo::Size,
@@ -5193,12 +4819,12 @@ fn sized_in_px(
 }
 
 /// Whether a flex item with `item` and `kind` is drawn stretched across its line:
-/// the question [`held`] asks before releasing a stretch (§15 D935).
+/// the question [`held`] asks before releasing a stretch.
 ///
 /// The keyword is not enough: CSS stretches only an item whose cross size is
-/// `auto`, and a frame's `auto` is its stored size, definite and never stretched
-/// (D879). A kind with no size to stretch ([`crate::container::can_stretch`]) is
-/// never stretched, and a group is only when it has a layout of its own.
+/// `auto`, and a frame's `auto` is its stored size, definite and never stretched.
+/// A kind with no size to stretch ([`crate::container::can_stretch`]) is never
+/// stretched, and a group is only when it has a layout of its own.
 fn stretched_across(
     flex: &crate::container::Flex,
     item: &crate::container::LayoutItem,
@@ -5221,16 +4847,14 @@ fn stretched_across(
 }
 
 /// `item` with growth stopped on whichever axes a resize from `from` to `to`
-/// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule (§15
-/// D875), spelled once for it and for [`sized_flex_item`]. A released stretch
-/// aligns to the end when `from_start` (the resize moved the cross axis's start
-/// edge and held its end, [`resized_from_cross_start`]) and to the start
-/// otherwise; `stretched` is whether there was a stretch to release
-/// ([`stretched_across`], asked before the resize).
+/// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule, spelled
+/// once for it and for [`sized_flex_item`]. A released stretch aligns to the end
+/// when `from_start` ([`resized_from_cross_start`]) and to the start otherwise;
+/// `stretched` is whether there was one to release ([`stretched_across`], asked
+/// before the resize).
 ///
-/// A main-axis resize clears `flex-basis` too (§15 D935): the basis decides the
-/// main size before growth does. A px `min-` or `max-` is kept and clamps the
-/// resize, a limit somebody set that the preview shows (§15 D904).
+/// A main-axis resize clears `flex-basis` too: the basis decides the main size
+/// before growth does. A px `min-` or `max-` is kept and clamps the resize.
 fn held(
     flex: &crate::container::Flex,
     mut item: crate::container::LayoutItem,
@@ -5262,17 +4886,14 @@ fn held(
 }
 
 /// The flex-item properties that make a **group with a layout** `size` — the
-/// resize of a box that has no size field of its own (§15 D869, D875).
+/// resize of a box that has no size field of its own.
 ///
-/// A group with a layout has only its box, `width`/`height` on its
-/// [`crate::container::LayoutItem`], `auto` until set. A resize writes them in px,
-/// each only if changed (§15 D879), and stops its growth here because
-/// [`keep_flex_sizes`] leaves a transaction's own `SetLayoutItem` alone.
-///
-/// `to` is the local transform the same edit writes for the group, if any; it
-/// tells a released stretch which edge to keep (§15 D905).
-///
-/// `None` when `id` is not a group with a layout, or nothing changes.
+/// Its box is `width`/`height` on its [`crate::container::LayoutItem`], `auto`
+/// until set. A resize writes them in px, each only if changed, and stops its
+/// growth here because [`keep_flex_sizes`] leaves a transaction's own
+/// `SetLayoutItem` alone. `to` is the local transform the same edit writes, if
+/// any; it tells a released stretch which edge to keep. `None` when `id` is not a
+/// group with a layout, or nothing changes.
 pub fn sized_flex_item(
     doc: &Document,
     res: &Resolved,
@@ -5286,8 +4907,8 @@ pub fn sized_flex_item(
         return None;
     }
     let mut item = *node.item();
-    // Only the axes the resize changed (§15 D879), so a side handle on a group
-    // that hugs its height keeps it hugging. With no box to compare against, both.
+    // Only the axes the resize changed, so a side handle on a group that hugs its
+    // height keeps it hugging. With no box to compare against, both.
     let now = res.used_frame(id);
     let changed = |was: Option<f64>, to: f64| was.is_none_or(|w| (w - to).abs() > 1e-9);
     if changed(now.map(|n| n.width), size.width) {
@@ -5319,7 +4940,7 @@ pub fn sized_flex_item(
                 resized_from_cross_start(flex, edges),
                 stretched_across(flex, node.item(), node.kind(), true),
             ),
-            // A group with a layout is a box, never replaced (§15 D915).
+            // A group with a layout is a box, never replaced.
             Display::Grid(grid) => {
                 grid_resize_held(grid, item, false, (now, size), (edges[0].0, edges[1].0))
             }
@@ -5329,19 +4950,18 @@ pub fn sized_flex_item(
 }
 
 /// The `Reorder` that dragging the flex item `id` by the world-space `delta`
-/// asks for — where in its container's flow its centre now falls (§15 D877).
+/// asks for — where in its container's flow its centre now falls.
 ///
 /// A drag inside a flex container is a reorder, not a move: an in-flow item is
-/// placed by its container (§15 D875), so a dropped translation is undone by the
-/// next layout pass. The dragged box's centre is read against every other in-flow
-/// sibling's used box in reading order, by laid line then along it
-/// ([`flow_index`], §15 D934). `row-reverse` and `column-reverse` read the main
-/// axis backwards; `wrap-reverse` needs nothing of its own (§15 D883).
+/// placed by its container, so a dropped translation is undone by the next layout
+/// pass. The dragged box's centre is read against every other in-flow sibling's
+/// used box in reading order, by laid line then along it ([`flow_index`]).
+/// `row-reverse` and `column-reverse` read the main axis backwards; `wrap-reverse`
+/// needs nothing of its own.
 ///
-/// Siblings out of the flow (pinned, hidden, masks) keep their indices relative to
-/// the flow; the result is an index into the child list with `id` taken out, which
-/// is what `Reorder` means. `None` when `id` is not an in-flow flex item, or would
-/// land where it is.
+/// The result is an index into the child list with `id` taken out, which is what
+/// `Reorder` means. `None` when `id` is not an in-flow flex item, or would land
+/// where it is.
 pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
     if !is_flex_item(doc, id) {
         return None;
@@ -5356,8 +4976,8 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
         .collect();
     let at = res.world_bounds(id)?.center() + delta;
     let (index, place) = flow_index(doc, res, parent, &others, at)?;
-    // Where it lands in the flow, not in the child list, decides whether it moved
-    // (§15 D934); otherwise a pinned sibling after the item makes a nudge reorder.
+    // Where it lands in the flow, not the child list, decides whether it moved, or
+    // a pinned sibling after the item would make a nudge reorder.
     let view = crate::resolve::DocView(doc);
     let was = others
         .iter()
@@ -5367,17 +4987,14 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
     (place != was).then_some(Operation::Reorder { id, index })
 }
 
-/// [`flex_reorder`] for several items of one flex container dragged together
-/// (§15 D902): they move as a block to where the block's centre falls, keeping
-/// their order. `None` unless every one of `ids` is an in-flow item of the same
-/// container; otherwise the `Reorder`s that turn the child list into the new one,
-/// empty when the block lands where it is.
+/// [`flex_reorder`] for several items of one flex container dragged together: they
+/// move as a block to where the block's centre (the union of their drawn boxes)
+/// falls, keeping their order. `None` unless every one of `ids` is an in-flow item
+/// of the same container; otherwise the `Reorder`s that turn the child list into
+/// the new one, empty when the block lands where it is.
 ///
-/// The block's centre is the centre of the union of their drawn boxes, read against
-/// the other in-flow siblings by [`flow_index`]. The ops are derived by walking the
-/// target order and moving whatever is out of place into it; placing each dragged
-/// item at its final index in turn is wrong (`[a, d1, b, d2, c]` with `d1, d2`
-/// dropped after `c` comes out `[a, b, d1, c, d2]` only by luck of order).
+/// The ops are derived by walking the target order and moving whatever is out of
+/// place into it; placing each dragged item at its final index in turn is wrong.
 pub fn flex_reorder_many(
     doc: &Document,
     res: &Resolved,
@@ -5414,8 +5031,8 @@ pub fn flex_reorder_many(
     for (k, id) in block.iter().enumerate() {
         target.insert(index + k, *id);
     }
-    // The flow order unchanged is no reorder (§15 D934), whatever the child list
-    // would say: an out-of-flow sibling between members would be pulled out.
+    // The flow order unchanged is no reorder, whatever the child list says: an
+    // out-of-flow sibling between members would be pulled out.
     let view = crate::resolve::DocView(doc);
     let flow = |list: &[NodeId]| -> Vec<NodeId> {
         list.iter()
@@ -5445,14 +5062,13 @@ pub fn flex_reorder_many(
 /// index and the place in the flow (in-flow siblings before it), which says
 /// whether anything moved.
 ///
-/// The lines are the laid lines, read off the flow (§15 D934): a new line starts
-/// where an in-flow sibling's main-axis start runs back behind the end of the one
-/// before it, and a line's cross extent is the union of its items'. A `nowrap` row
-/// is one line, and `wrap-reverse` needs no arm (§15 D883). The dragged centre's
-/// line is the one whose band holds it, else the nearest; it lands after every
-/// earlier line and among that line's items by main-axis centre. Asking each
-/// sibling's own cross extent instead misreads items of different heights as
-/// different lines.
+/// The lines are the laid lines, read off the flow: a new line starts where an
+/// in-flow sibling's main-axis start runs back behind the end of the one before it,
+/// and a line's cross extent is the union of its items'. A `nowrap` row is one
+/// line, and `wrap-reverse` needs no arm. The dragged centre's line is the one
+/// whose band holds it, else the nearest; it lands after every earlier line and
+/// among that line's items by main-axis centre. Asking each sibling's own cross
+/// extent instead misreads items of different heights as different lines.
 fn flow_index(
     doc: &Document,
     res: &Resolved,
@@ -5462,7 +5078,7 @@ fn flow_index(
 ) -> Option<(usize, usize)> {
     use crate::container::{self, Display, FlexDirection};
     let view = crate::resolve::DocView(doc);
-    // A grid's drop writes lines rather than reordering (§15 D913); not this.
+    // A grid's drop writes lines rather than reordering.
     let Display::Flex(flex) = doc.get(parent)?.display()? else {
         return None;
     };
@@ -5474,8 +5090,7 @@ fn flow_index(
     );
     let row = flex.direction.is_row();
     let (at_main, at_cross) = main_cross(flex.direction, at);
-    // Each in-flow sibling's index in `others`, main extent and centre, and cross
-    // extent, in flow order.
+    // Each in-flow sibling's index in `others`, main extent and centre, cross extent.
     type Span = (f64, f64);
     let items: Vec<(usize, Span, f64, Span)> = (0..others.len())
         .filter(|i| container::in_flow(&view, others[*i]))
@@ -5543,9 +5158,9 @@ fn flow_index(
 
 /// The operation dragging the laid-out item `id` by the world-space `delta`
 /// commits, **whatever its container's layout** — a flex item's `Reorder`
-/// ([`flex_reorder`], §15 D877), a grid item's new lines ([`grid_drop`], §15
-/// D913). `None` where it lands where it was, or `id` is not an item of either.
-/// The app's one door, so a drag need not know which layout it is in.
+/// ([`flex_reorder`]), a grid item's new lines ([`grid_drop`]). `None` where it
+/// lands where it was, or `id` is not an item of either. The app's one door, so a
+/// drag need not know which layout it is in.
 pub fn layout_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
     use crate::container::Display;
     match doc.get(doc.get(id)?.parent()?)?.display()? {
@@ -5555,48 +5170,46 @@ pub fn layout_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> O
 }
 
 /// The committed document's grid container `id` as its pass lays it: its tracks
-/// and items' areas ([`crate::container::laid_grid`], §15 D916). The public door,
-/// for tests; the canvas reads the preview's (`RenderOverrides::laid_grid`), and a
-/// drop lays through the committed geometry ([`drop_grid`]). Laid through the
-/// stored document, so a grid pinned in a parent drawn at another size is laid at
-/// the stored size.
+/// and items' areas ([`crate::container::laid_grid`]). The public door, for tests;
+/// the canvas reads the preview's (`RenderOverrides::laid_grid`), and a drop lays
+/// through the committed geometry ([`drop_grid`]). Laid through the stored
+/// document, so a grid pinned in a parent drawn at another size is laid at the
+/// stored size.
 pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGrid> {
     crate::container::laid_grid(&crate::resolve::DocView(doc), id)
 }
 
 /// The grid container `id` as a drop into it is aimed against: laid through the
-/// committed geometry, so a pinned grid is laid at the width it is drawn at (§15
-/// D942). [`grid_drop_many`]'s grid and the one the canvas draws under a moved item
-/// (§15 D946), so the cell drawn under the pointer is the cell the drop writes.
+/// committed geometry, so a pinned grid is laid at the width it is drawn at.
+/// [`grid_drop_many`]'s grid and the one the canvas draws under a moved item, so
+/// the cell drawn under the pointer is the cell the drop writes.
 pub fn drop_grid(doc: &Document, res: &Resolved, id: NodeId) -> Option<crate::container::LaidGrid> {
     crate::container::laid_grid(&crate::resolve::CommittedView { doc, res }, id)
 }
 
 /// The `SetLayoutItem` that dragging the grid item `id` by the world-space
-/// `delta` commits: explicit lines for the cell its centre is dropped on (§15
-/// D913: every drop writes lines, so an auto-placed item becomes explicitly placed).
+/// `delta` commits: explicit lines for the cell its centre is dropped on (every
+/// drop writes lines, so an auto-placed item becomes explicitly placed).
 ///
 /// The drag moves the item's area by as many tracks as its centre crossed on each
 /// axis, read against the laid tracks ([`crate::container::laid_grid`]), so an item
-/// spanning two columns keeps both. Both axes are written. The span keeps the
-/// author's spelling: an end given as a line moves with the start, a span stays a
-/// span, and a one-track area is `start / auto`. A drop lands its whole area on
-/// tracks the grid already has (§15 D927); an area in a leading implicit track
-/// keeps the negative line that names it ([`grid_drop_many`]).
+/// spanning two columns keeps both. The span keeps the author's spelling: an end
+/// given as a line moves with the start, a span stays a span, and a one-track area
+/// is `start / auto`. A drop lands its whole area on tracks the grid already has;
+/// an area in a leading implicit track keeps the negative line that names it
+/// ([`grid_drop_many`]).
 ///
-/// `None` when the centre stays in its tracks on both axes (no undo step, as for
-/// flex), or `id` is not an in-flow item of a grid.
+/// `None` when the centre stays in its tracks on both axes, or `id` is not an
+/// in-flow item of a grid.
 pub fn grid_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
     grid_drop_many(doc, res, &[id], delta)?.into_iter().next()
 }
 
-/// [`grid_drop`] for several items of one grid, dragged as a block (§15 D918):
-/// every item's area moves by the same number of tracks, read off the centre of
-/// the block's union box, so the arrangement is kept and every item is written
-/// explicit lines. A block pushed towards the first track stops there whole (shift
-/// clamped to the leftmost or topmost item's room); towards the last track the same
-/// way (§15 D927), so a two-wide item dropped on the last column lands on the last
-/// two instead of hanging into an implicit track that `fr` sizes to nothing.
+/// [`grid_drop`] for several items of one grid, dragged as a block: every item's
+/// area moves by the same number of tracks, read off the centre of the block's
+/// union box, so the arrangement is kept. A block pushed towards either end stops
+/// there whole, so a two-wide item dropped on the last column lands on the last two
+/// instead of hanging into an implicit track that `fr` sizes to nothing.
 ///
 /// `Some` of no operations when the centre stays in its tracks; `None` when the
 /// items are not all in-flow items of one grid. A block of one is [`grid_drop`].
@@ -5614,8 +5227,6 @@ pub fn grid_drop_many(
     {
         return None;
     }
-    // Through the committed geometry, so a pinned grid is laid at the width it is
-    // drawn at, the grid the commit lays and the canvas draws.
     let grid = drop_grid(doc, res, parent)?;
     let areas: Vec<(NodeId, [i32; 4])> = ids
         .iter()
@@ -5631,8 +5242,7 @@ pub fn grid_drop_many(
     let shift = |tracks: &container::LaidTracks, a: f64, b: f64| -> Option<i32> {
         Some(tracks.index_at(b)? as i32 - tracks.index_at(a)? as i32)
     };
-    // Stopped whole at either end of the laid tracks, so the block cannot
-    // reshuffle against an edge nor hang past one.
+    // Stopped whole at either end of the laid tracks.
     let room = |by: i32, tracks: &container::LaidTracks, axis: usize| {
         let first = areas.iter().map(|(_, a)| a[axis]).min().unwrap_or(1);
         let last = areas.iter().map(|(_, a)| a[axis + 1]).max().unwrap_or(1);
@@ -5648,10 +5258,9 @@ pub fn grid_drop_many(
     if dc == 0 && dr == 0 {
         return Some(Vec::new());
     }
-    // A line before the explicit grid's first (a leading implicit track) has no
-    // positive number, so it is written as the negative one: line `p` is
-    // `p − (explicit + 2)` from the far end. Clamping to 1 would move an item on
-    // an axis the drag had not touched.
+    // A line before the explicit grid's first has no positive number, so it is
+    // written as the negative one (`p − (explicit + 2)`); clamping to 1 would move
+    // an item on an axis the drag had not touched.
     let line = |n: i32, tracks: &container::LaidTracks| {
         let n = if n >= 1 {
             n
@@ -5684,8 +5293,8 @@ pub fn grid_drop_many(
 }
 
 /// [`layout_drop`] for several items — a flex block's reorder
-/// ([`flex_reorder_many`], §15 D902) or a grid block's lines ([`grid_drop_many`],
-/// §15 D918). `None` when they are not all in-flow items of one container.
+/// ([`flex_reorder_many`]) or a grid block's lines ([`grid_drop_many`]). `None`
+/// when they are not all in-flow items of one container.
 pub fn layout_drop_many(
     doc: &Document,
     res: &Resolved,
@@ -5703,8 +5312,8 @@ pub fn layout_drop_many(
 /// is not pinned, hidden or a mask. Public for the app's drag, which has to know a
 /// reorder from a move.
 ///
-/// True of a grid item too (§15 D914); the name is flex's because flex came first.
-/// A grid's drop writes lines, and [`flex_reorder`] answers nothing there.
+/// True of a grid item too; the name is flex's because flex came first. A grid's
+/// drop writes lines, and [`flex_reorder`] answers nothing there.
 pub fn is_flex_item(doc: &Document, id: NodeId) -> bool {
     let view = crate::resolve::DocView(doc);
     crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id)
@@ -5721,12 +5330,12 @@ fn main_cross(direction: crate::container::FlexDirection, p: Point) -> (f64, f64
 
 /// The box a group with a layout is laid out to in `doc`: its own layout pass, run
 /// from its chain root so a group that is itself an item gets the size its
-/// container gives it (§15 D900). `keep_insets`' measure of a laid group after an
-/// edit, where `Resolved::used_frame` answers for the document before it.
+/// container gives it. `keep_insets`' measure of a laid group after an edit, where
+/// `Resolved::used_frame` answers for the document before it.
 ///
-/// Its own pass when the chain root's does not reach it (§15 D910): a laid group
-/// inside a plain group that is a flex item, or one hidden or made a mask, is a
-/// layout root of its own ([`crate::container::is_layout_root`]).
+/// Its own pass when the chain root's does not reach it: a laid group inside a
+/// plain group that is a flex item, or one hidden or made a mask, is a layout root
+/// of its own ([`crate::container::is_layout_root`]).
 fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
     use crate::container::{chain_root, is_layout_root, lay_out};
     let view = crate::resolve::DocView(doc);
@@ -5741,28 +5350,23 @@ fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
 }
 
 /// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,
-/// so the layer stays where the edit put it (§15 D871, D874).
+/// so the layer stays where the edit put it.
 ///
 /// The one place an edit to a pinned layer becomes an edit of its insets. Tools
-/// compute in used geometry (where a layer is drawn, §15 D868) and write ordinary
-/// `SetTransform` and `SetGeometry`; for a pinned layer the insets decide where it
-/// is drawn, so each such write is read as "draw it here" and the `SetInsets` that
-/// does is appended, each inset in its own unit (`container::inverse`). The tool's
-/// ops stay, so the stored transform and size become the placement too. Every other
-/// layer passes through, so this is a no-op on a document with no insets.
-///
-/// Run where commits enter, once, rather than at every site that writes
-/// placements. Previews do not need it.
+/// compute in used geometry and write ordinary `SetTransform` and `SetGeometry`;
+/// for a pinned layer the insets decide where it is drawn, so each such write is
+/// read as "draw it here" and the `SetInsets` that does is appended, each inset in
+/// its own unit (`container::inverse`). The tool's ops stay. Every other layer
+/// passes through. Run where commits enter, once; previews do not need it.
 ///
 /// What the layer is placed against is judged after the transaction: a `Reparent`
 /// into a frame pins it against the new frame, and an `InsertSubtree` copy is
 /// re-pinned where the edit placed it. The frame's size is its used size when the
-/// edit leaves it alone, else its size after the edit (the Scale tool's case).
-///
-/// A layer whose insets the transaction sets itself is left alone.
+/// edit leaves it alone, else its size after the edit (the Scale tool's case). A
+/// layer whose insets the transaction sets itself is left alone.
 pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
-    // The placement each node is given, if a `SetTransform` gives one, and
-    // whether it was resized; and the nodes whose insets are set outright.
+    // The placement each node is given, whether it was resized, and the nodes
+    // whose insets are set outright.
     let mut placed: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
     let mut explicit: FxHashSet<NodeId> = FxHashSet::default();
     for op in &tx.0 {
@@ -5770,8 +5374,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
             Operation::SetTransform { id, transform } => {
                 placed.entry(*id).or_insert((None, false)).0 = Some(*transform);
             }
-            // Only a patch that changes the box is a resize (`GeometryPatch::resizes`);
-            // a corner radius would re-pin a stretched layer at its stored size.
+            // A corner radius is no resize: it would re-pin a stretched layer at its stored size.
             Operation::SetGeometry { id, geometry } if geometry.resizes() => {
                 placed.entry(*id).or_insert((None, false)).1 = true;
             }
@@ -5781,8 +5384,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
             _ => {}
         }
     }
-    // The cheap refusal first: nothing placed carries an inset, so a document
-    // with no insets never pays for the scratch copy below.
+    // The cheap refusal first: a document with no insets never pays for the scratch copy.
     let carries = |id: NodeId| {
         doc.get(id).is_some_and(|n| n.insets().is_authored())
             || tx.0.iter().any(|op| match op {
@@ -5798,13 +5400,10 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     {
         return tx;
     }
-    // The document as the edit leaves it; a transaction the model refuses is
-    // returned as it came, for the commit to refuse. Sizes are read as
-    // `resolved_kind` of a document that has had the size-binding pass
-    // (`keep_size_bindings` runs later) and the text-binding pass
-    // (`keep_text_bindings`: a text's size is its string's).
+    // The document as the edit leaves it, with the size- and text-binding passes
+    // applied (they run later; a text's size is its string's). A transaction the
+    // model refuses is returned as it came, for the commit to refuse.
     let mut after = doc.clone();
-    // Unchecked, as `keep_size_bindings`' scratch is.
     let kept = keep_text_bindings(doc, keep_size_bindings(doc, Some(res), tx.clone()));
     if after.apply_unchecked(&kept).is_err() {
         return tx;
@@ -5812,14 +5411,11 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     let mut ids: Vec<(NodeId, (Option<Affine>, bool))> = placed.into_iter().collect();
     ids.sort_by_key(|(id, _)| *id);
     let resized: FxHashSet<NodeId> = ids.iter().filter(|(_, p)| p.1).map(|(id, _)| *id).collect();
-    // Pinned layers written back to exactly where they are drawn, whose
-    // `SetTransform` is dropped below.
     let mut unmoved: FxHashSet<NodeId> = FxHashSet::default();
     let mut out = tx;
     for (id, (to, geometry_changed)) in ids {
-        // Never a vault node: the vault is never resolved, so `used_local` has
-        // nothing for it and the stale stored transform would re-pin a pinned
-        // layer from the wrong place. A kit update writes a vault node as published.
+        // Never a vault node: it is never resolved, so the stale stored transform
+        // would re-pin it from the wrong place.
         if explicit.contains(&id) || after.in_vault(id) {
             continue;
         }
@@ -5830,8 +5426,6 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         let Some(parent) = node.parent().and_then(|p| after.get(p)) else {
             continue;
         };
-        // The frame's used size where the edit leaves the frame alone; its new
-        // size where the edit resizes it too.
         let parent_kind = if resized.contains(&parent.id()) {
             after
                 .resolved_kind(parent.id())
@@ -5841,13 +5435,9 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
                 .unwrap_or(parent.kind())
                 .clone()
         };
-        // A group with a layout pins too (§15 D871, D887), against its laid box
-        // (what `resolve::frame_box` places the child against). That box is the
-        // one the edit leaves, not the committed one (§15 D900): the layout is
-        // run over `after` from the group's chain root, or the group itself where
-        // that pass does not reach it (`laid_group_box`). The Scale tool resizes a
-        // laid group and moves a pinned child in one edit. A frame's size is in
-        // its kind, `parent_kind` above.
+        // A group with a layout pins too, against the laid box the edit leaves, not
+        // the committed one (the Scale tool resizes a laid group and moves a pinned
+        // child in one edit): `laid_group_box` over `after`.
         let frame = match parent_kind {
             NodeKind::Artboard { size } => size,
             NodeKind::Group if parent.display().is_some() => {
@@ -5858,8 +5448,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
             }
             _ => continue,
         };
-        // Where the edit wants it drawn: the transform it wrote, else where it is
-        // drawn now. At what size: the size it wrote, else the size drawn now.
+        // The transform and size the edit wrote, else those drawn now.
         let local = to
             .or_else(|| res.used_local(doc, id))
             .unwrap_or(node.transform());
@@ -5886,9 +5475,8 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
                 .zip(now.as_coeffs())
                 .all(|(a, b)| (a - b).abs() < 1e-9)
         {
-            // Written back to where it is drawn: a handle pressed and released
-            // without moving writes the used placement, which for a pinned layer
-            // is not its stored transform, and the no-op test would see a change.
+            // A handle pressed and released without moving writes the used placement,
+            // which for a pinned layer is not its stored transform; drop it as a no-op.
             unmoved.insert(id);
         }
     }

@@ -1,49 +1,19 @@
-//! The SVG writer and the scene walk agree about **what gets drawn** (§15 D781,
-//! `[A1-L7-07]`).
+//! The SVG writer and the scene walk agree about what gets drawn (§15 D781).
 //!
-//! `svg::emit_node` re-decides eleven things `scene::build` also decides —
-//! visibility, opacity, clip, mask and mask mode, effects, fill rule, paint order,
-//! the stroke-alignment clip, the missing-image placeholder and image framing —
-//! without going through `scene::build` or `ScenePainter`. `scene::build_of`'s own
-//! doc calls itself *"the mirror of `ondin_export::svg::svg_of` … which is why this
-//! one is written to look like it"*, and invariant 11 says document→**scene**
-//! walk, which SVG is not. So the agreement is held by convention, and it has
-//! **diverged twice on record**: §15 D179's frame background reaching the
-//! placeholder rule a step late, so *"a frame whose picture had gone drew the cross
-//! on canvas and exported a hole"*, and a `fill="none"` written on the same path.
-//! Both were found by a human reading two files against each other.
+//! `svg::emit_node` re-decides things `scene::build` also decides (visibility,
+//! opacity, clip, mask, effects, fill rule, paint order, stroke-alignment clip,
+//! image placeholder and framing) without going through `ScenePainter`, so the
+//! agreement is held by convention.
 //!
-//! # What this compares, and what it does not
+//! What this compares is the ink set: every node in the fixture gets a unique solid
+//! colour, and the colours each walk emits are compared as a set of node
+//! identities. The other decisions legitimately differ (SVG has no viewport cull,
+//! geometry is a `BezPath` versus a `d` attribute, element order is not call
+//! order), and an unscoped comparison would be turned off the first time it cried
+//! wolf.
 //!
-//! **The ink set**: for each node, did this walk decide to put paint down for it at
-//! all. Read on both sides by giving every node in the fixture a **unique solid
-//! colour** and collecting the colours each walk emits — so the comparison is a set
-//! of node identities, arrived at without either walk being asked to report on
-//! itself.
-//!
-//! That is deliberately one of the eleven and not all eleven, and the reason is the
-//! finding's own: the two walks *legitimately* differ elsewhere. SVG has no
-//! viewport cull. Geometry is a `BezPath` on one side and a `d` attribute on the
-//! other. Element ordering is not call ordering. A comparison that reached for
-//! those would need a scope argument per decision, and an unscoped one would be
-//! turned off the first time it cried wolf.
-//!
-//! **Both recorded divergences were ink-set bugs**, which is why this is the one
-//! worth having: each was a node one walk drew and the other did not.
-//!
-//! # The answer, which the finding could not give
-//!
-//! `[A1-L7-07]` is explicit that it is *"not a claim that they disagree right
-//! now"*, and says establishing it by reading was not possible. **They agree**, on
-//! this tree, today. That is the second thing this file is for: a negative result
-//! somebody can re-run, rather than a structural worry nobody can close.
-//!
-//! **Flipped.** Adding `|| node.opacity() == 0.0` to `emit_node`'s visibility
-//! guard — the plausible "optimisation", and one that changes no picture at all —
-//! fails all three tests at their predicted sites, the first naming the one colour
-//! that went missing: *only in the scene: [328708]*.
-//!
-//! (Plain backticks throughout per §15 D319.)
+//! flip: adding `|| node.opacity() == 0.0` to `emit_node`'s visibility guard →
+//! fails all three tests, the first at the set comparison (*only in the scene*).
 
 mod common;
 
@@ -57,11 +27,8 @@ use ondin_render::scene::{ClipRule, ScenePainter, StrokePaint, TextRun};
 use ondin_render::{RenderOverrides, Viewport};
 use std::collections::BTreeSet;
 
-/// Records the identity of every fill the walk asks for, by its colour.
-///
-/// **A `ScenePainter` that draws nothing.** Everything below `fill_path` is a
-/// no-op: the layer stack, strokes and text are not what this test is about, and
-/// implementing them would invite the reader to think they were checked.
+/// Records the identity of every fill the walk asks for, by its colour. Everything
+/// but `fill_path` is a no-op, so nothing implies layers, strokes or text are checked.
 #[derive(Default)]
 struct InkSet {
     seen: BTreeSet<u32>,
@@ -108,10 +75,8 @@ impl ScenePainter for InkSet {
 
 /// The colours the SVG writer put in the file, read back out of the markup.
 ///
-/// **Out of `fill="#rrggbb"` only.** A colour that reached the file some other way
-/// — a gradient stop, a `stop-color` — is not this fixture's doing: every node here
-/// is a solid fill, so anything else appearing would be a defect in the *test*, and
-/// the count assertion below is what would catch it.
+/// Reads `fill="#rrggbb"` only: every node here is a solid fill, and the count
+/// assertion below would catch anything else.
 fn svg_ink(markup: &str) -> BTreeSet<u32> {
     let mut out = BTreeSet::new();
     for (at, _) in markup.match_indices("fill=\"#") {
@@ -176,10 +141,8 @@ fn tree() -> Tree {
         ops.push(Operation::CreateNode {
             id,
             parent,
-            // **Index 0 every time, not the loop counter.** `index` is within the
-            // *parent*, and `inside` is the first child of a group that is empty at
-            // that point — the loop counter says 2 and the op is refused
-            // (`IndexOutOfRange`). Order does not matter to an ink *set*.
+            // Index 0 every time: `index` is within the parent, and the loop counter
+            // would be refused (`IndexOutOfRange`) for the group's first child.
             index: 0,
             kind: match id == group {
                 true => NodeKind::Group,
@@ -194,8 +157,7 @@ fn tree() -> Tree {
     }
 
     let mut painted = Vec::new();
-    // The frame's own background is a fill like any other since §15 D400, and it
-    // is one of the two nodes a recorded divergence was about.
+    // The frame's background is a fill like any other (§15 D400).
     for (n, id) in [frame, plain, inside, hidden, clear]
         .into_iter()
         .enumerate()
@@ -230,8 +192,8 @@ fn tree() -> Tree {
     }
 }
 
-/// A viewport far larger than the tree, so the scene walk's cull — which the SVG
-/// writer has no equivalent of — cannot be what the two disagree about.
+/// A viewport far larger than the tree, so the scene walk's cull cannot differ
+/// from the SVG writer.
 fn everything() -> Viewport {
     Viewport {
         view: Rect::new(-10_000.0, -10_000.0, 10_000.0, 10_000.0),
@@ -252,15 +214,14 @@ fn scene_ink(t: &Tree, origins: &[NodeId]) -> BTreeSet<u32> {
     ink.seen
 }
 
-/// The whole page: the two walks put paint down for the same nodes.
+/// The two walks put paint down for the same nodes.
 #[test]
 fn the_two_walks_draw_the_same_nodes() {
     let t = tree();
     let scene = scene_ink(&t, &[t.root]);
     let svg = svg_ink(&ondin_export::svg::svg_of(&t.doc, &t.res, &[t.root]));
 
-    // **The fixture is asserted before the comparison.** Two empty sets are equal,
-    // and a fixture that painted nothing would make this test green for ever.
+    // Fixture first: two empty sets are equal.
     assert!(
         scene.len() >= 3,
         "the scene walk drew almost nothing — the fixture is wrong, not the writers: {scene:?}"
@@ -276,9 +237,8 @@ fn the_two_walks_draw_the_same_nodes() {
     );
 }
 
-/// And for a **subtree** export, which is the form with two origins' worth of rules
-/// in it — `build_of` and `svg_of` are each other's mirror and this is where they
-/// were once a transform apart (§15 D258).
+/// The same for a subtree export, where `build_of` and `svg_of` once differed by a
+/// transform (§15 D258).
 #[test]
 fn the_two_walks_agree_on_a_subtree_too() {
     let t = tree();
@@ -288,15 +248,9 @@ fn the_two_walks_agree_on_a_subtree_too() {
     assert_eq!(scene, svg);
 }
 
-/// A hidden node is in neither, and a zero-opacity node is in **both**.
-///
-/// 🚨 **The second half is the one worth asserting**, and it is not obvious: zero
-/// opacity is not invisibility. The node is drawn and composited away, so both
-/// walks emit it — and a reader "fixing" either walk to skip it would make the two
-/// disagree in a way no picture would show, because the ink is invisible either
-/// way. It is exactly the shape of the two recorded divergences: a difference of
-/// *decision* with no difference of appearance, until something downstream reads
-/// the file.
+/// A hidden node is in neither walk, and a zero-opacity node is in both: it is
+/// drawn and composited away, so "fixing" one walk to skip it would diverge in a
+/// way no picture shows.
 #[test]
 fn the_agreement_is_about_decisions_and_not_about_appearance() {
     let t = tree();

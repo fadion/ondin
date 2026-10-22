@@ -1,27 +1,17 @@
 //! Which other Ondin processes are running on this machine (§15 D970).
 //!
-//! **Asked before an update is applied, and only then.** Velopack's updater,
-//! once launched, does not stop at the window that launched it: on Windows it
-//! ends **every** process running from the install folder
-//! (`force_stop_package`, a `TerminateProcess`), and on Linux and macOS it
-//! swaps the app under them and starts the new version beside them. A second
-//! window with unsaved work, or an `ondin export` a script is waiting on, would
-//! be killed or orphaned with no question asked. So the restart is refused
-//! while [`others`] counts anything, and asked again at the moment of exit.
+//! Asked before an update is applied: Velopack's updater ends every process running
+//! from the install folder on Windows and swaps the app under them elsewhere, which
+//! would kill a second window's unsaved work or an `ondin export` a script awaits. So
+//! the restart is refused while [`others`] counts anything.
 //!
-//! **A lock file per process, not a list of processes.** Each GUI or headless
-//! run takes an exclusive lock on a file of its own in
-//! `machine_dir::root()/instances` and holds it for its lifetime
-//! ([`register`]). The operating system drops the lock however the process
-//! ends — a crash and a kill included — so a file whose lock *can* be taken is
-//! a leftover, and is swept. One path on every platform, all of it compiled and
-//! tested here, where enumerating processes would have been three, two of them
-//! compiled only by CI.
+//! Each GUI or headless run holds an exclusive lock on a file of its own in
+//! `machine_dir::root()/instances` ([`register`]); the OS drops the lock however the
+//! process ends, so a file whose lock can be taken is a leftover and is swept. One
+//! path on every platform, instead of enumerating processes per platform.
 //!
-//! ⚠️ **It counts every build that registers, not only the installed one.** A
-//! `cargo run` window is outside the install folder and would survive the
-//! updater, and it still holds an update back. Erring that way costs a
-//! developer a click; the other way costs somebody's work.
+//! Every registering build counts, including `cargo run`: erring that way costs a
+//! developer a click, the other way costs somebody's work.
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -32,9 +22,9 @@ const DIR: &str = "instances";
 
 /// This process's own registration, held until the process ends.
 ///
-/// A `static` because the lock must outlive everything, and because eframe can
-/// leave the process without unwinding `main`. Its file is therefore never
-/// removed by this process; the next [`register`] or [`others`] sweeps it.
+/// A `static` because eframe can leave the process without unwinding `main`; the
+/// file is never removed by this process, and the next [`register`] or [`others`]
+/// sweeps it.
 static OWN: OnceLock<Registration> = OnceLock::new();
 
 /// One process's lock file, and the handle that holds the lock.
@@ -45,9 +35,7 @@ struct Registration {
     path: PathBuf,
 }
 
-/// Register this process, once. Failure is silent: an unregistered process
-/// can still run, and is simply not counted — the updater then behaves as it
-/// did before this module.
+/// Register this process, once. Failure is silent: the process still runs, uncounted.
 pub fn register() {
     let Some(dir) = dir() else {
         return;
@@ -65,10 +53,8 @@ pub fn others() -> usize {
     others_in(&dir, OWN.get().map(|r| r.path.as_path()))
 }
 
-/// The machine's folder, or `None` under `cfg(test)` — a count *sweeps*, so a
-/// test reaching the real folder would delete files in it. `library::cover`'s
-/// `covers_dir` seam, for the same reason (§15 D845). Tests name their own
-/// folder and call the `_in` functions.
+/// The machine's folder, or `None` under `cfg(test)`: a count sweeps, so a test
+/// must not reach the real folder (§15 D845). Tests call the `_in` functions.
 fn dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
@@ -78,15 +64,12 @@ fn dir() -> Option<PathBuf> {
 
 /// [`register`] in `dir`, as process `pid`.
 ///
-/// **Locked under a temporary name and then renamed into place**, so a counter
-/// never sees a `.lock` file before its lock is held — the instant between
-/// `create` and `try_lock` would otherwise read as a leftover, and be swept from
-/// under the process that was making it. A lock belongs to the open file, not
-/// to its name, so it survives the rename.
+/// Locked under a temporary name, then renamed into place, so a counter never sees
+/// a `.lock` file before its lock is held and sweeps it as a leftover. The lock
+/// belongs to the open file, so it survives the rename.
 fn register_in(dir: &Path, pid: u32) -> Option<Registration> {
     std::fs::create_dir_all(dir).ok()?;
-    // Leftovers from processes that have ended, so the folder holds what is
-    // running rather than every launch there has ever been.
+    // Sweep leftovers from ended processes.
     let _ = others_in(dir, None);
     let tmp = dir.join(format!("{pid}.tmp"));
     let file = File::create(&tmp).ok()?;
@@ -99,9 +82,8 @@ fn register_in(dir: &Path, pid: u32) -> Option<Registration> {
 /// Count the `.lock` files in `dir` whose lock is held, other than `own`,
 /// removing those whose lock is not.
 ///
-/// ⚠️ **A file that cannot be opened or tested counts as running.** The
-/// question is whether applying an update could kill somebody's work, and
-/// "could not tell" is not "no".
+/// A file that cannot be opened or tested counts as running: "could not tell" is
+/// not "no".
 fn others_in(dir: &Path, own: Option<&Path>) -> usize {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return 0;
@@ -144,16 +126,13 @@ mod tests {
     }
 
     /// A live registration counts, one's own does not, and a leftover is swept
-    /// rather than counted (§15 D970).
+    /// rather than counted. A lock conflicts between two handles in one process
+    /// (`flock` per open file description, `LockFileEx` per handle), so one test
+    /// stands in for two processes.
     ///
-    /// A lock conflicts between two handles inside one process — `flock` per
-    /// open file description on Unix, `LockFileEx` per handle on Windows — which
-    /// is what lets one test stand in for two processes.
-    ///
-    /// **Flip-check, run**: counting a file whose lock *was* taken (`running +=
-    /// 1` in the `Ok(())` arm) fails on *"a leftover is not running"* with 1;
-    /// skipping no file as `own` fails on *"one's own registration is not
-    /// another"* with 1.
+    /// flip: `running += 1` in the `Ok(())` arm of `others_in` → fails at "a leftover
+    /// is not running"; skipping no file as `own` → fails at "one's own registration
+    /// is not another".
     #[test]
     fn a_held_lock_counts_and_a_leftover_is_swept() {
         let dir = scratch("count");
@@ -167,8 +146,7 @@ mod tests {
         assert_eq!(others_in(&dir, Some(&a.path)), 1, "a second process counts");
         assert_eq!(others_in(&dir, None), 2);
 
-        // The second process ends: its handle closes, the OS drops the lock and
-        // the file stays behind, as it does after a crash.
+        // The second process ends: the file stays behind, as after a crash.
         let leftover = b.path.clone();
         drop(b);
         assert!(leftover.exists());

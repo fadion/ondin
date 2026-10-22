@@ -216,11 +216,21 @@ pub(crate) fn references<'a>(
     roots.into_iter().for_each(|root| {
         root.each(&mut |e| {
             if let Some(i) = &e.instance {
-                let passed = i.args.iter().filter_map(|(_, a)| match a {
-                    dom::Arg::Component(c) => Some(c),
-                    _ => None,
-                });
-                for c in std::iter::once(&i.component).chain(passed) {
+                let mut named = vec![&i.component];
+                for (_, a) in &i.args {
+                    let mut a = Some(a);
+                    while let Some(arg) = a {
+                        a = match arg {
+                            dom::Arg::Component(c) => {
+                                named.push(c);
+                                None
+                            }
+                            dom::Arg::Var { fallback, .. } => fallback.as_deref(),
+                            _ => None,
+                        };
+                    }
+                }
+                for c in named {
                     if !uses.contains(c) {
                         uses.push(c.clone());
                     }
@@ -239,9 +249,12 @@ pub(crate) fn references<'a>(
 
 /// `uses` with every component a swap property defaults to, which the file
 /// names whether or not a slot of it is drawn.
-pub(crate) fn with_defaults(mut uses: Vec<String>, props: &[(String, dom::Arg)]) -> Vec<String> {
-    for (_, d) in props {
-        if let dom::Arg::Component(c) = d
+pub(crate) fn with_defaults(
+    mut uses: Vec<String>,
+    props: &[(String, walk::Ty, Option<dom::Arg>)],
+) -> Vec<String> {
+    for (_, _, d) in props {
+        if let Some(dom::Arg::Component(c)) = d
             && !uses.contains(c)
         {
             uses.push(c.clone());

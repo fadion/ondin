@@ -45,6 +45,13 @@ pub(crate) enum Arg {
     Text(String),
     /// A component, by name: a swap property's.
     Component(String),
+    /// The user's own prop `name`, passed on; `fallback` where the prop is
+    /// left unset. A `component` prop is read through its JSX binding.
+    Var {
+        name: String,
+        component: bool,
+        fallback: Option<Box<Arg>>,
+    },
 }
 
 /// What an element holds.
@@ -208,6 +215,12 @@ impl Element {
                 }
                 (Arg::Component(c), _) => {
                     let _ = write!(out, " :{name}=\"{c}\"");
+                }
+                (Arg::Var { .. }, Syntax::Jsx) => {
+                    let _ = write!(out, " {name}={{{}}}", arg_expr(arg, syntax));
+                }
+                (Arg::Var { .. }, _) => {
+                    let _ = write!(out, " :{name}=\"{}\"", escape(&arg_expr(arg, syntax)));
                 }
             }
         }
@@ -378,6 +391,33 @@ fn text(t: &str, syntax: Syntax) -> String {
     match syntax {
         Syntax::Jsx => super::jsx::child_text(t),
         _ => escape(t),
+    }
+}
+
+/// `arg` as an expression: JSX's double-quoted strings, Vue's single-quoted ones
+/// (the template puts the expression in a double-quoted attribute).
+fn arg_expr(arg: &Arg, syntax: Syntax) -> String {
+    match arg {
+        Arg::Bool(b) => b.to_string(),
+        Arg::Text(t) => match syntax {
+            Syntax::Jsx => super::jsx::js_string(t),
+            _ => super::jsx::single_quoted(t),
+        },
+        Arg::Component(c) => c.clone(),
+        Arg::Var {
+            name,
+            component,
+            fallback,
+        } => {
+            let name = match (component, syntax) {
+                (true, Syntax::Jsx) => super::jsx::slot_binding(name),
+                _ => name.clone(),
+            };
+            match fallback {
+                Some(f) => format!("{name} ?? {}", arg_expr(f, syntax)),
+                None => name,
+            }
+        }
     }
 }
 

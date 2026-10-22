@@ -26,7 +26,9 @@ use ondin_core::{
     Stroke, StrokeAlign, StrokeSides, TextSizing, TextStyle,
 };
 use ondin_core::{component, reset};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 /// The page the walk builds, and what it saw on the way.
 pub(crate) struct Page {
@@ -48,11 +50,9 @@ pub(crate) struct Component {
     /// variant's last and drawn for any others. A main outside a set has one
     /// tree, drawn always.
     pub bodies: Vec<(Vec<(String, String)>, Element)>,
-    /// Its variant properties: the name code reads each by, its values and the
-    /// default variant's value.
-    pub choices: Vec<(String, Vec<String>, String)>,
-    /// Its properties, each with the main's own value as the default.
-    pub props: Vec<(String, Arg)>,
+    /// Its props: each one's name in code, its type and its default, which a
+    /// forwarded prop has none of — the slot it reaches supplies its own.
+    pub props: Vec<(String, Ty, Option<Arg>)>,
 }
 
 impl Component {
@@ -61,10 +61,64 @@ impl Component {
         Component {
             name: "App".into(),
             bodies: vec![(Vec::new(), root)],
-            choices: Vec::new(),
             props: Vec::new(),
         }
     }
+}
+
+/// A prop's type.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Ty {
+    Bool,
+    Text,
+    /// A variant property's values.
+    Union(Vec<String>),
+    /// A component, which a slot draws.
+    Component,
+}
+
+/// One parameter of the component made from an owner.
+#[derive(Clone)]
+struct Param {
+    /// Its name in code, unique in the component.
+    code: String,
+    kind: ParamKind,
+    ty: Ty,
+    /// Its value on the default tree; `None` for a forwarded one.
+    default: Option<PropValue>,
+}
+
+/// A layer's place below a tree's root: each layer down to it as its name and
+/// which sibling of that name it is.
+type NamePath = Vec<(String, usize)>;
+
+/// One parameter a shown slot's use passes on.
+#[derive(Clone)]
+struct Forwarded {
+    /// The slot's component's parameter.
+    inner: String,
+    /// The main's own, which it takes.
+    outer: String,
+    ty: Ty,
+    /// The slot's value where it differs from what its component draws unset,
+    /// which stands in when `outer` is left unset.
+    fallback: Option<PropValue>,
+}
+
+/// What a parameter reads on an instance.
+#[derive(Clone)]
+enum ParamKind {
+    /// The set's variant property at this index: the variant the instance shows.
+    Choice(usize),
+    /// A boolean, text or swap property, by item.
+    Prop(ItemId, PropKind),
+    /// Parameter `inner` of the component made from `owner`, read on the shown
+    /// nested instance at `key`, its name path from the instance's root.
+    Forward {
+        key: NamePath,
+        owner: NodeId,
+        inner: usize,
+    },
 }
 
 /// What [`Walk::bound`] knows of a property while its main is written.
@@ -106,6 +160,9 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
             ..Default::default()
         }),
         bound: HashMap::new(),
+        forwards: HashMap::new(),
+        params_memo: RefCell::default(),
+        inline_memo: RefCell::default(),
     };
     let mut root = Element::new("div", walk.classes.mint("page", "page"));
     root.set("position", "relative");
@@ -173,6 +230,13 @@ struct Walk<'a> {
     components: Option<Components>,
     /// The properties of the main being written as a component, by bound layer.
     bound: HashMap<NodeId, BoundProp>,
+    /// The shown slots of the main being written, each with what its use
+    /// passes on.
+    forwards: HashMap<NodeId, Vec<Forwarded>>,
+    /// [`Self::params`] by owner, and [`Self::why_inline`] by root: both read
+    /// only the document and are asked again at every level of a nesting.
+    params_memo: RefCell<HashMap<NodeId, Rc<Vec<Param>>>>,
+    inline_memo: RefCell<HashMap<NodeId, Option<String>>>,
 }
 
 /// The components made so far.
@@ -190,19 +254,7 @@ struct Components {
 #[derive(Clone)]
 struct Signature {
     name: String,
-    /// Per property item, its name in code and its default.
-    props: Vec<(ItemId, String, Arg)>,
-    /// Per variant property, in the set's order, its name in code and the
-    /// default variant's value.
-    choices: Vec<(String, String)>,
-}
-
-/// One thing an instance sets apart from its component's defaults.
-enum Difference {
-    /// The value of its set's variant property at this index.
-    Choice(usize, String),
-    /// A property's value, by item.
-    Prop(ItemId, PropValue),
+    params: Rc<Vec<Param>>,
 }
 
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
@@ -258,6 +310,15 @@ impl Walk<'_> {
     /// property's, up the chain of copies to the main, apart from its root's
     /// size, which its use sets.
     fn why_inline(&self, root: NodeId) -> Option<String> {
+        if let Some(why) = self.inline_memo.borrow().get(&root) {
+            return why.clone();
+        }
+        let why = self.why_inline_uncached(root);
+        self.inline_memo.borrow_mut().insert(root, why.clone());
+        why
+    }
+
+    fn why_inline_uncached(&self, root: NodeId) -> Option<String> {
         let doc = self.doc;
         let main = component::main_of(doc, root)?;
         if let Some(why) = self.unwritable(main) {
@@ -274,21 +335,14 @@ impl Walk<'_> {
             if drift.removed + drift.order + drift.local > 0 {
                 return Some(OVERRIDES.into());
             }
-            // The fields a use can set: a boolean's, a text's, and the swap of a
-            // swap property that is a prop, when it shows a main a use can show.
-            let props: HashSet<(NodeId, PropKind)> = variant::instance_properties(doc, at)
-                .iter()
-                .filter(|p| match p.kind {
-                    PropKind::Boolean | PropKind::Text => true,
-                    PropKind::Swap => self.swap_default(p).is_some(),
-                    PropKind::Nested => false,
-                })
-                .flat_map(|p| {
-                    variant::counterparts(doc, at, p)
-                        .into_iter()
-                        .map(move |c| (c, p.kind))
-                })
-                .collect();
+            // The fields a use can set: those its component's parameters read.
+            let mut props: HashSet<(NodeId, PropKind)> = HashSet::new();
+            for p in self.params(main).iter() {
+                match self.fields(at, &p.kind) {
+                    Some(f) => props.extend(f),
+                    None => return Some(OVERRIDES.into()),
+                }
+            }
             for id in reset::scope_nodes(doc, at) {
                 if id != at
                     && let Some(swap) = doc.get(id)?.swap()
@@ -389,39 +443,241 @@ impl Walk<'_> {
         shown
     }
 
-    /// What the instance at `root` sets apart from its component's defaults, in
-    /// what a use can say: the variant values, by index into its set's
-    /// properties, and the properties, by item.
-    fn differences(&self, root: NodeId) -> Vec<Difference> {
+    /// The parameters of the component made from `main`: its set's variant
+    /// properties, its boolean and text properties, its swap properties that a
+    /// use can set, and the parameters of each nested instance it shows,
+    /// forwarded under the slot's name.
+    fn params(&self, main: NodeId) -> Rc<Vec<Param>> {
+        let owner = variant::owner_of_main(self.doc, main).unwrap_or(main);
+        if let Some(p) = self.params_memo.borrow().get(&owner) {
+            return p.clone();
+        }
+        let p = Rc::new(self.params_uncached(main));
+        self.params_memo.borrow_mut().insert(owner, p.clone());
+        p
+    }
+
+    fn params_uncached(&self, main: NodeId) -> Vec<Param> {
         let doc = self.doc;
-        let Some(main) = component::main_of(doc, root) else {
+        let owner_id = variant::owner_of_main(doc, main).unwrap_or(main);
+        let Some(owner) = doc.get(owner_id) else {
             return Vec::new();
         };
-        let default = self.trees(main).1;
+        let (trees, default) = self.trees(main);
+        // What a component's props object already holds.
+        let mut taken: HashSet<String> = ["className", "key", "ref", "children"]
+            .map(String::from)
+            .into();
         let mut out = Vec::new();
-        if let (Some(m), Some(d)) = (doc.get(main), doc.get(default)) {
-            for (i, (v, dv)) in m.variant().iter().zip(d.variant()).enumerate() {
-                if v != dv {
-                    out.push(Difference::Choice(i, v.clone()));
-                }
+        let default_values = doc.get(default).map(Node::variant).unwrap_or_default();
+        for (i, (vp, d)) in owner
+            .set()
+            .map(|s| s.props.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .zip(default_values)
+            .enumerate()
+        {
+            out.push(Param {
+                code: unique(prop_name(&vp.name), &mut taken),
+                kind: ParamKind::Choice(i),
+                ty: Ty::Union(vp.values.clone()),
+                default: Some(PropValue::Text(d.clone())),
+            });
+        }
+        for p in owner.props() {
+            let (ty, value) = match p.kind {
+                PropKind::Boolean => (Ty::Bool, self.prop_default(p, default)),
+                PropKind::Text => (Ty::Text, self.prop_default(p, default)),
+                PropKind::Swap => (Ty::Component, self.swap_default(p).map(PropValue::Swap)),
+                PropKind::Nested => continue,
+            };
+            let Some(value) = value else { continue };
+            out.push(Param {
+                code: unique(prop_name(&p.name), &mut taken),
+                kind: ParamKind::Prop(p.id, p.kind),
+                ty,
+                default: Some(value),
+            });
+        }
+        // The shown slots, by name path, in every tree.
+        let Some(showing) = owner.props().iter().find(|p| p.kind == PropKind::Nested) else {
+            return out;
+        };
+        let mut keys: Vec<(NamePath, Vec<NodeId>)> = Vec::new();
+        for b in &showing.bound {
+            let Some(t) = trees.iter().find(|t| under(doc, *b, **t)) else {
+                continue;
+            };
+            let key = name_path(doc, *t, *b);
+            match keys.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, slots)) => slots.push(*b),
+                None => keys.push((key, vec![*b])),
             }
         }
-        for p in variant::instance_properties(doc, root).iter() {
-            let default = match p.kind {
-                PropKind::Boolean | PropKind::Text => self.prop_default(p, default),
-                PropKind::Swap => self.swap_default(p).map(PropValue::Swap),
-                PropKind::Nested => None,
+        let swapped: HashSet<NodeId> = owner
+            .props()
+            .iter()
+            .filter(|p| p.kind == PropKind::Swap)
+            .flat_map(|p| p.bound.iter().copied())
+            .collect();
+        'keys: for (key, slots) in keys {
+            // Every slot at the path a use this component can make, of one
+            // component, and none of them a swap property's, whose component
+            // the use chooses.
+            let mut inner_owner = None;
+            for s in &slots {
+                let Some(m) = component::main_of(doc, *s) else {
+                    continue 'keys;
+                };
+                let o = variant::owner_of_main(doc, m).unwrap_or(m);
+                if inner_owner.is_some_and(|i| i != o)
+                    || swapped.contains(s)
+                    || self.why_inline(*s).is_some()
+                {
+                    continue 'keys;
+                }
+                inner_owner = Some(o);
+            }
+            let (Some(inner_owner), Some(first)) = (inner_owner, slots.first()) else {
+                continue;
             };
-            let value = variant::counterparts(doc, root, p)
-                .first()
-                .and_then(|c| variant::field_value(doc, *c, p.kind));
-            if let (Some(v), Some(d)) = (value, default)
-                && v != d
-            {
-                out.push(Difference::Prop(p.id, v));
+            let slot_name = doc.get(*first).map(Node::name).unwrap_or_default();
+            let inner = component::main_of(doc, *first).map(|m| self.params(m));
+            for (j, ip) in inner.iter().flat_map(|p| p.iter()).enumerate() {
+                out.push(Param {
+                    code: unique(prop_name(&format!("{slot_name} {}", ip.code)), &mut taken),
+                    kind: ParamKind::Forward {
+                        key: key.clone(),
+                        owner: inner_owner,
+                        inner: j,
+                    },
+                    ty: ip.ty.clone(),
+                    default: None,
+                });
             }
         }
         out
+    }
+
+    /// The value parameter `kind` reads on the instance at `root`, or `None`
+    /// where it reaches nothing there.
+    fn read(&self, root: NodeId, kind: &ParamKind) -> Option<PropValue> {
+        let doc = self.doc;
+        match kind {
+            ParamKind::Choice(i) => {
+                let main = component::main_of(doc, root)?;
+                doc.get(main)?
+                    .variant()
+                    .get(*i)
+                    .map(|v| PropValue::Text(v.clone()))
+            }
+            ParamKind::Prop(item, k) => {
+                let props = variant::instance_properties(doc, root);
+                let p = props.iter().find(|p| p.id == *item)?;
+                let c = *variant::counterparts(doc, root, p).first()?;
+                variant::field_value(doc, c, *k)
+            }
+            ParamKind::Forward { key, owner, inner } => {
+                let copy = self.shown_copy(root, key)?;
+                let m = component::main_of(doc, copy)?;
+                if variant::owner_of_main(doc, m).unwrap_or(m) != *owner {
+                    return None;
+                }
+                let kind = self.params(m).get(*inner)?.kind.clone();
+                self.read(copy, &kind)
+            }
+        }
+    }
+
+    /// The value the instance at `root` draws for parameter `p` when its use
+    /// passes nothing: the default, or for a forwarded one, its slot's value in
+    /// the tree the instance shows.
+    fn expected(&self, root: NodeId, p: &Param) -> Option<PropValue> {
+        match &p.kind {
+            ParamKind::Forward { key, inner, .. } => {
+                let tree = component::main_of(self.doc, root)?;
+                let slot = at_name_path(self.doc, tree, key)?;
+                let m = component::main_of(self.doc, slot)?;
+                let kind = self.params(m).get(*inner)?.kind.clone();
+                self.read(slot, &kind)
+            }
+            _ => p.default.clone(),
+        }
+    }
+
+    /// The fields parameter `kind` reads on the instance at `root`, which its
+    /// use sets rather than overriding, or `None` when the instance holds a
+    /// value the parameter cannot say: a shown copy swapped to another
+    /// component.
+    fn fields(&self, root: NodeId, kind: &ParamKind) -> Option<Vec<(NodeId, PropKind)>> {
+        let doc = self.doc;
+        match kind {
+            // The instance's own variant is its link, never an override.
+            ParamKind::Choice(_) => Some(Vec::new()),
+            ParamKind::Prop(item, k) => {
+                let props = variant::instance_properties(doc, root);
+                let Some(p) = props.iter().find(|p| p.id == *item) else {
+                    return Some(Vec::new());
+                };
+                Some(
+                    variant::counterparts(doc, root, p)
+                        .into_iter()
+                        .map(|c| (c, *k))
+                        .collect(),
+                )
+            }
+            ParamKind::Forward { key, owner, inner } => {
+                let Some(copy) = self.shown_copy(root, key) else {
+                    return Some(Vec::new());
+                };
+                let m = component::main_of(doc, copy)?;
+                if variant::owner_of_main(doc, m).unwrap_or(m) != *owner {
+                    return None;
+                }
+                let kind = self.params(m).get(*inner)?.kind.clone();
+                let mut f = self.fields(copy, &kind)?;
+                // A shown copy's variant switch is a swap within its set.
+                if matches!(kind, ParamKind::Choice(_)) {
+                    f.push((copy, PropKind::Swap));
+                }
+                Some(f)
+            }
+        }
+    }
+
+    /// The copy of the slot at `key` that the instance at `root` shows.
+    fn shown_copy(&self, root: NodeId, key: &[(String, usize)]) -> Option<NodeId> {
+        variant::shown_nested(self.doc, root)
+            .into_iter()
+            .find(|s| s.path.len() == 1 && s.key == key)
+            .map(|s| s.copy)
+    }
+
+    /// What the instance at `root` sets apart from what its component draws by
+    /// default, by parameter index.
+    fn differences(&self, root: NodeId) -> Vec<(usize, PropValue)> {
+        let Some(main) = component::main_of(self.doc, root) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for (i, p) in self.params(main).iter().enumerate() {
+            if let Some(v) = self.read(root, &p.kind)
+                && Some(&v) != self.expected(root, p).as_ref()
+            {
+                out.push((i, v));
+            }
+        }
+        out
+    }
+
+    /// `v` as an argument, making the component a swap's value names.
+    fn arg(&mut self, v: PropValue) -> Arg {
+        match v {
+            PropValue::Boolean(b) => Arg::Bool(b),
+            PropValue::Text(t) => Arg::Text(t),
+            PropValue::Swap(m) => Arg::Component(self.component(m).name),
+        }
     }
 
     /// The instance at `node` as a use of its main's component, placed as `place`
@@ -435,23 +691,24 @@ impl Walk<'_> {
         let bx = self.box_rect(node);
         self.place(&mut el, node, &kind, bx, place);
         let mut args = Vec::new();
-        for d in self.differences(node.id()) {
-            match d {
-                Difference::Choice(i, v) => {
-                    if let Some((prop, _)) = sig.choices.get(i) {
-                        args.push((prop.clone(), Arg::Text(v)));
-                    }
+        match self.forwards.get(&node.id()).cloned() {
+            // A shown slot passes on the main's own parameters, its value where
+            // it differs standing in for one left unset.
+            Some(forwarded) => {
+                for f in forwarded {
+                    let fallback = f.fallback.map(|v| Box::new(self.arg(v)));
+                    let var = Arg::Var {
+                        name: f.outer,
+                        component: f.ty == Ty::Component,
+                        fallback,
+                    };
+                    args.push((f.inner, var));
                 }
-                Difference::Prop(item, v) => {
-                    let Some((_, prop, _)) = sig.props.iter().find(|(id, ..)| *id == item) else {
-                        continue;
-                    };
-                    let v = match v {
-                        PropValue::Boolean(b) => Arg::Bool(b),
-                        PropValue::Text(t) => Arg::Text(t),
-                        PropValue::Swap(m) => Arg::Component(self.component(m).name),
-                    };
-                    args.push((prop.clone(), v));
+            }
+            None => {
+                for (i, v) in self.differences(node.id()) {
+                    let arg = self.arg(v);
+                    args.push((sig.params[i].code.clone(), arg));
                 }
             }
         }
@@ -479,85 +736,80 @@ impl Walk<'_> {
         }
         let owner = doc.get(owner_id).expect("a main in the document");
         let name = unique(component_name(owner.name()), &mut comps.names);
-
-        // What a component's props object already holds.
-        let mut taken: HashSet<String> = ["className", "key", "ref", "children"]
-            .map(String::from)
-            .into();
-        let (trees, default) = self.trees(main);
-        let default_values = doc.get(default).map(Node::variant).unwrap_or_default();
-        let choices: Vec<(String, Vec<String>, String)> = owner
-            .set()
-            .map(|s| s.props.as_slice())
-            .unwrap_or_default()
-            .iter()
-            .zip(default_values)
-            .map(|(vp, d)| {
-                (
-                    unique(prop_name(&vp.name), &mut taken),
-                    vp.values.clone(),
-                    d.clone(),
-                )
-            })
-            .collect();
-
-        let mut bound = HashMap::new();
-        let mut props = Vec::new();
-        for p in owner.props() {
-            let value = match p.kind {
-                PropKind::Boolean | PropKind::Text => match self.prop_default(p, default) {
-                    Some(PropValue::Boolean(b)) => Arg::Bool(b),
-                    Some(PropValue::Text(t)) => Arg::Text(t),
-                    _ => continue,
-                },
-                // Made first, so it is written before the component using it.
-                PropKind::Swap => match self.swap_default(p) {
-                    Some(m) => Arg::Component(self.component(m).name),
-                    None => continue,
-                },
-                PropKind::Nested => continue,
-            };
-            let mut prop = unique(prop_name(&p.name), &mut taken);
-            if p.kind == PropKind::Swap {
-                // Its binding is a tag in JSX, so no component may be named it.
-                let names = &mut self.components.as_mut().expect("components are on").names;
-                while names.contains(&super::jsx::slot_binding(&prop)) {
-                    prop = unique(prop_name(&p.name), &mut taken);
-                }
-                names.insert(super::jsx::slot_binding(&prop));
-            }
-            for b in &p.bound {
-                let styled = match doc.get(*b).map(Node::kind) {
-                    Some(NodeKind::Text { content, spans, .. }) => {
-                        content.contains('\n') || !spans.is_empty()
-                    }
-                    _ => false,
-                };
-                bound.insert(
-                    *b,
-                    BoundProp {
-                        name: prop.clone(),
-                        kind: p.kind,
-                        styled,
-                    },
-                );
-            }
-            props.push((p.id, prop, value));
-        }
+        let params = self.params(main);
         let sig = Signature {
             name: name.clone(),
-            props,
-            choices: choices
-                .iter()
-                .map(|(p, _, d)| (p.clone(), d.clone()))
-                .collect(),
+            params: params.clone(),
         };
         let comps = self.components.as_mut().expect("components are on");
         comps.by_owner.insert(owner_id, sig.clone());
 
+        // The defaults as arguments, which makes the components they name first,
+        // so they are written before this one.
+        let mut props = Vec::new();
+        for p in params.iter() {
+            let default = p.default.clone().map(|v| self.arg(v));
+            props.push((p.code.clone(), p.ty.clone(), default));
+        }
+
+        let (trees, default) = self.trees(main);
+        let mut bound = HashMap::new();
+        let mut forwards: HashMap<NodeId, Vec<_>> = HashMap::new();
+        for p in params.iter() {
+            match &p.kind {
+                ParamKind::Prop(item, kind) => {
+                    let Some(prop) = owner.props().iter().find(|q| q.id == *item) else {
+                        continue;
+                    };
+                    for b in &prop.bound {
+                        let styled = match doc.get(*b).map(Node::kind) {
+                            Some(NodeKind::Text { content, spans, .. }) => {
+                                content.contains('\n') || !spans.is_empty()
+                            }
+                            _ => false,
+                        };
+                        bound.insert(
+                            *b,
+                            BoundProp {
+                                name: p.code.clone(),
+                                kind: *kind,
+                                styled,
+                            },
+                        );
+                    }
+                }
+                ParamKind::Forward { key, inner, .. } => {
+                    for t in &trees {
+                        let Some(slot) = at_name_path(doc, *t, key) else {
+                            continue;
+                        };
+                        let Some(m) = component::main_of(doc, slot) else {
+                            continue;
+                        };
+                        let Some(ip) = self.params(m).get(*inner).cloned() else {
+                            continue;
+                        };
+                        let fallback = self
+                            .differences(slot)
+                            .into_iter()
+                            .find(|(i, _)| i == inner)
+                            .map(|(_, v)| v);
+                        forwards.entry(slot).or_default().push(Forwarded {
+                            inner: ip.code,
+                            outer: p.code.clone(),
+                            ty: p.ty.clone(),
+                            fallback,
+                        });
+                    }
+                }
+                ParamKind::Choice(_) => {}
+            }
+        }
+
         // One file's classes across every variant's tree.
         let classes = std::mem::take(&mut self.classes);
-        let outer = std::mem::replace(&mut self.bound, bound);
+        let outer_bound = std::mem::replace(&mut self.bound, bound);
+        let outer_forwards = std::mem::replace(&mut self.forwards, forwards);
         let mut bodies = Vec::new();
         for t in trees.iter().filter(|t| **t != default).chain([&default]) {
             let Some(node) = doc.get(*t) else { continue };
@@ -565,15 +817,20 @@ impl Walk<'_> {
             root.takes_class = true;
             let when = match *t == default {
                 true => Vec::new(),
-                false => choices
+                false => params
                     .iter()
-                    .zip(node.variant())
-                    .map(|((p, ..), v)| (p.clone(), v.clone()))
+                    .filter_map(|p| match p.kind {
+                        ParamKind::Choice(i) => {
+                            Some((p.code.clone(), node.variant().get(i)?.clone()))
+                        }
+                        _ => None,
+                    })
                     .collect(),
             };
             bodies.push((when, root));
         }
-        self.bound = outer;
+        self.bound = outer_bound;
+        self.forwards = outer_forwards;
         self.classes = classes;
 
         // Pushed once finished, so after the components it uses.
@@ -581,12 +838,7 @@ impl Walk<'_> {
         comps.list.push(Component {
             name,
             bodies,
-            choices,
-            props: sig
-                .props
-                .iter()
-                .map(|(_, p, d)| (p.clone(), d.clone()))
-                .collect(),
+            props,
         });
         sig
     }
@@ -1696,6 +1948,49 @@ fn kind_word(node: &Node) -> &'static str {
     }
 }
 
+/// The layers from below `top` down to `id`, each as its name and which sibling
+/// of that name it is: how the model matches a shown slot across a set's
+/// variants and an instance's copies (`variant::ShownNested::key`).
+fn name_path(doc: &Document, top: NodeId, id: NodeId) -> Vec<(String, usize)> {
+    let mut steps = Vec::new();
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| doc.get(a)) {
+        if n.id() == top {
+            steps.reverse();
+            return steps;
+        }
+        let k = n
+            .parent()
+            .and_then(|p| doc.get(p))
+            .map(|p| {
+                p.children()
+                    .iter()
+                    .take_while(|c| **c != n.id())
+                    .filter(|c| doc.get(**c).is_some_and(|c| c.name() == n.name()))
+                    .count()
+            })
+            .unwrap_or(0);
+        steps.push((n.name().to_string(), k));
+        at = n.parent();
+    }
+    Vec::new()
+}
+
+/// The layer below `top` at `path`, [`name_path`]'s inverse.
+fn at_name_path(doc: &Document, top: NodeId, path: &[(String, usize)]) -> Option<NodeId> {
+    let mut at = top;
+    for (name, k) in path {
+        at = doc
+            .get(at)?
+            .children()
+            .iter()
+            .copied()
+            .filter(|c| doc.get(*c).is_some_and(|c| c.name() == name))
+            .nth(*k)?;
+    }
+    Some(at)
+}
+
 /// Whether `id` is `ancestor` or below it.
 fn under(doc: &Document, id: NodeId, ancestor: NodeId) -> bool {
     let mut at = Some(id);
@@ -1731,6 +2026,11 @@ fn component_name(name: &str) -> String {
         out.push_str("Component");
     } else if out.starts_with(|c: char| c.is_ascii_digit()) {
         out.insert(0, 'C');
+    }
+    // A swap prop's binding ends in `Slot` (`jsx::slot_binding`), so no
+    // component name does.
+    if out.ends_with("Slot") {
+        out.push_str("Component");
     }
     out
 }

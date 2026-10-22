@@ -9,8 +9,8 @@
 //! imports, and `tokens.css` the variables.
 
 use super::dom::{Arg, Child, Element, Syntax, escape};
-use super::jsx::js_string;
-use super::walk::{self, Component};
+use super::jsx::{js_string, single_quoted};
+use super::walk::{self, Component, Ty};
 use super::{BASE_CSS, CodeExport, CodeFile};
 use ondin_core::{Document, NodeId, Resolved};
 use std::collections::{HashMap, HashSet};
@@ -159,7 +159,7 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
     }
 
     let mut out = String::from("<script setup lang=\"ts\">\n");
-    if c.props.iter().any(|(_, d)| matches!(d, Arg::Component(_))) {
+    if c.props.iter().any(|(_, ty, _)| *ty == Ty::Component) {
         out.push_str("import type { Component } from \"vue\";\n");
     }
     let _ = writeln!(out, "import \"{up}base.css\";");
@@ -174,30 +174,30 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
         };
         let _ = writeln!(out, "import {u} from \"{from}\";");
     }
-    if !c.props.is_empty() || !c.choices.is_empty() {
+    if !c.props.is_empty() {
         out.push_str("\nwithDefaults(\n  defineProps<{\n");
-        for (p, values, _) in &c.choices {
-            let union: Vec<String> = values.iter().map(|v| js_string(v)).collect();
-            let _ = writeln!(out, "    {p}?: {};", union.join(" | "));
-        }
-        for (p, d) in &c.props {
-            let ty = match d {
-                Arg::Bool(_) => "boolean",
-                Arg::Text(_) => "string",
-                Arg::Component(_) => "Component",
+        for (p, ty, _) in &c.props {
+            let ty = match ty {
+                Ty::Bool => "boolean".to_string(),
+                Ty::Text => "string".to_string(),
+                Ty::Union(values) => {
+                    let union: Vec<String> = values.iter().map(|v| js_string(v)).collect();
+                    union.join(" | ")
+                }
+                Ty::Component => "Component".to_string(),
             };
             let _ = writeln!(out, "    {p}?: {ty};");
         }
         out.push_str("  }>(),\n  {\n");
-        for (p, _, d) in &c.choices {
-            let _ = writeln!(out, "    {p}: {},", js_string(d));
-        }
-        for (p, d) in &c.props {
+        for (p, _, d) in &c.props {
             let v = match d {
-                Arg::Bool(b) => b.to_string(),
-                Arg::Text(t) => js_string(t),
+                Some(Arg::Bool(b)) => b.to_string(),
+                Some(Arg::Text(t)) => js_string(t),
                 // An object prop's default is returned by a function.
-                Arg::Component(c) => format!("() => {c}"),
+                Some(Arg::Component(c)) => format!("() => {c}"),
+                // Left unset, so the slot's own value stands in; a boolean with
+                // no default would be cast to `false` instead.
+                Some(Arg::Var { .. }) | None => "undefined".to_string(),
             };
             let _ = writeln!(out, "    {p}: {v},");
         }
@@ -214,14 +214,6 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
     }
     out.push_str("</style>\n");
     out
-}
-
-/// A single-quoted JavaScript string, for an expression inside a double-quoted
-/// attribute (which [`escape`] then makes safe).
-fn single_quoted(s: &str) -> String {
-    let inner = js_string(s);
-    let inner = &inner[1..inner.len() - 1];
-    format!("'{}'", inner.replace("\\\"", "\"").replace('\'', "\\'"))
 }
 
 /// Renames every class in a file's trees that is also the root class of a

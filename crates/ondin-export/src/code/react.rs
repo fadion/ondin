@@ -9,7 +9,7 @@
 
 use super::dom::{Arg, Syntax};
 use super::jsx::{asset_binding, js_string};
-use super::walk::{self, Component};
+use super::walk::{self, Component, Ty};
 use super::{BASE_CSS, CodeExport, CodeFile};
 use ondin_core::{Document, NodeId, Resolved};
 use std::fmt::Write as _;
@@ -60,14 +60,13 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
     let Component {
         name,
         bodies,
-        choices,
         props,
     } = c;
     let is_app = name == "App";
     let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
     let uses = super::with_defaults(uses, props);
     let mut out = String::new();
-    if props.iter().any(|(_, d)| matches!(d, Arg::Component(_))) {
+    if props.iter().any(|(_, ty, _)| *ty == Ty::Component) {
         out.push_str("import type { ComponentType } from \"react\";\n");
     }
     let _ = writeln!(out, "import \"{up}base.css\";");
@@ -93,31 +92,34 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
     } else {
         let _ = writeln!(out, "export interface {name}Props {{");
         let _ = writeln!(out, "  className?: string;");
-        for (p, values, _) in choices {
-            let union: Vec<String> = values.iter().map(|v| js_string(v)).collect();
-            let _ = writeln!(out, "  {p}?: {};", union.join(" | "));
-        }
-        for (p, d) in props {
-            let ty = match d {
-                Arg::Bool(_) => "boolean",
-                Arg::Text(_) => "string",
+        for (p, ty, _) in props {
+            let ty = match ty {
+                Ty::Bool => "boolean".to_string(),
+                Ty::Text => "string".to_string(),
+                Ty::Union(values) => {
+                    let union: Vec<String> = values.iter().map(|v| js_string(v)).collect();
+                    union.join(" | ")
+                }
                 // What a slot gives any component it draws: the class placing it.
-                Arg::Component(_) => "ComponentType<{ className?: string }>",
+                Ty::Component => "ComponentType<{ className?: string }>".to_string(),
             };
             let _ = writeln!(out, "  {p}?: {ty};");
         }
         out.push_str("}\n\n");
         let mut params = vec!["className".to_string()];
-        params.extend(
-            choices
-                .iter()
-                .map(|(p, _, d)| format!("{p} = {}", js_string(d))),
-        );
-        params.extend(props.iter().map(|(p, d)| match d {
-            Arg::Bool(b) => format!("{p} = {b}"),
-            Arg::Text(t) => format!("{p} = {}", js_string(t)),
-            // Destructured into a capitalised binding, which JSX reads as a tag.
-            Arg::Component(c) => format!("{p}: {} = {c}", super::jsx::slot_binding(p)),
+        params.extend(props.iter().map(|(p, ty, d)| {
+            // A component is destructured into a capitalised binding, which JSX
+            // reads as a tag.
+            let bound = match ty {
+                Ty::Component => format!("{p}: {}", super::jsx::slot_binding(p)),
+                _ => p.clone(),
+            };
+            match d {
+                Some(Arg::Bool(b)) => format!("{bound} = {b}"),
+                Some(Arg::Text(t)) => format!("{bound} = {}", js_string(t)),
+                Some(Arg::Component(c)) => format!("{bound} = {c}"),
+                Some(Arg::Var { .. }) | None => bound,
+            }
         }));
         let _ = writeln!(
             out,

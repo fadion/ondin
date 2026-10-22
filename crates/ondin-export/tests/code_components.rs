@@ -663,3 +663,197 @@ fn a_swap_property_is_a_component_prop() {
         "{app}"
     );
 }
+
+/// A *Button* main with a *Label* text property, a *Card* main showing the
+/// Button slot inside it, which labels it *OK*, and two instances of Card: one
+/// labelling its Button *Buy*, one leaving it.
+fn shown_card() -> (Document, [NodeId; 2]) {
+    let mut ids = IdSource::new(0x4E);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = |w, h| NodeKind::Artboard {
+        size: Size::new(w, h),
+    };
+    let [button, button_label, card, slot, slot_label] = [(); 5].map(|_| ids.mint());
+    let [button_icon, slot_icon] = [(); 2].map(|_| ids.mint());
+    let icon = || NodeKind::Rect {
+        size: Size::new(12.0, 12.0),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    doc.apply(&Transaction(vec![
+        create(button, (root, 0), frame(80.0, 30.0), (0.0, 0.0), "Button"),
+        create(
+            button_label,
+            (button, 0),
+            text("Label"),
+            (8.0, 6.0),
+            "Label",
+        ),
+        create(card, (root, 1), frame(200.0, 80.0), (0.0, 50.0), "Card"),
+        create(slot, (card, 0), frame(80.0, 30.0), (10.0, 10.0), "Button"),
+        create(slot_label, (slot, 0), text("Label"), (8.0, 6.0), "Label"),
+        create(button_icon, (button, 1), icon(), (60.0, 9.0), "Icon"),
+        create(slot_icon, (slot, 1), icon(), (60.0, 9.0), "Icon"),
+        paint(button, BLUE),
+        paint(slot, BLUE),
+        paint(button_icon, RED),
+        paint(slot_icon, RED),
+        Operation::SetLink {
+            id: slot_icon,
+            link: Some(button_icon),
+        },
+        Operation::SetComponent {
+            id: button,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: card,
+            component: true,
+        },
+        Operation::SetLink {
+            id: slot,
+            link: Some(button),
+        },
+        Operation::SetLink {
+            id: slot_label,
+            link: Some(button_label),
+        },
+    ]))
+    .unwrap();
+    let (tx, _) = variant::define(
+        &doc,
+        &mut ids,
+        button,
+        "Label",
+        PropKind::Text,
+        vec![button_label],
+    )
+    .expect("a property");
+    doc.apply(&tx).unwrap();
+    let (tx, _) = variant::define(
+        &doc,
+        &mut ids,
+        button,
+        "Show icon",
+        PropKind::Boolean,
+        vec![button_icon],
+    )
+    .expect("a property");
+    doc.apply(&tx).unwrap();
+    let label = |doc: &Document, root| variant::instance_properties(doc, root)[0].clone();
+    let shows_icon = |doc: &Document, root| variant::instance_properties(doc, root)[1].clone();
+    let ops = variant::set_property(
+        &doc,
+        &[slot],
+        &label(&doc, slot),
+        &PropValue::Text("OK".into()),
+    );
+    doc.apply(&Transaction(ops)).unwrap();
+    let tx = variant::set_shown(&doc, &mut ids, slot, true).expect("the slot is shown");
+    doc.apply(&tx).unwrap();
+
+    let mut insts = [root; 2];
+    for (n, inst) in insts.iter_mut().enumerate() {
+        let [r, s, l, i] = [(); 4].map(|_| ids.mint());
+        let index = doc.get(root).unwrap().children().len();
+        let y = 100.0 + 90.0 * n as f64;
+        doc.apply(&Transaction(vec![
+            create(r, (root, index), frame(200.0, 80.0), (0.0, y), "Card"),
+            create(s, (r, 0), frame(80.0, 30.0), (10.0, 10.0), "Button"),
+            create(l, (s, 0), text("OK"), (8.0, 6.0), "Label"),
+            create(i, (s, 1), icon(), (60.0, 9.0), "Icon"),
+            paint(s, BLUE),
+            paint(i, RED),
+            Operation::SetLink {
+                id: i,
+                link: Some(slot_icon),
+            },
+            Operation::SetLink {
+                id: r,
+                link: Some(card),
+            },
+            Operation::SetLink {
+                id: s,
+                link: Some(slot),
+            },
+            Operation::SetLink {
+                id: l,
+                link: Some(slot_label),
+            },
+        ]))
+        .unwrap();
+        if n == 0 {
+            let ops =
+                variant::set_property(&doc, &[s], &label(&doc, s), &PropValue::Text("Buy".into()));
+            doc.apply(&Transaction(ops)).unwrap();
+            let ops =
+                variant::set_property(&doc, &[s], &shows_icon(&doc, s), &PropValue::Boolean(false));
+            doc.apply(&Transaction(ops)).unwrap();
+        }
+        *inst = r;
+    }
+    (doc, insts)
+}
+
+/// A shown nested instance's own properties are the outer component's,
+/// forwarded under the slot's name with no default of their own: the slot
+/// passes the prop on, its own value standing in when it is left unset.
+/// flip: `Walk::fields` answering nothing for a forwarded parameter → fails at
+/// "both instances are uses".
+#[test]
+fn a_shown_nested_instances_properties_are_forwarded() {
+    let (doc, [labelled, plain]) = shown_card();
+    for (inst, fields) in [(labelled, 2), (plain, 0)] {
+        let drift = ondin_core::reset::drift(&doc, inst);
+        assert_eq!(
+            (drift.fields, drift.removed, drift.order, drift.local),
+            (fields, 0, 0, 0),
+            "the fixture's instances differ only in the shown label and icon"
+        );
+    }
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &[labelled, plain]);
+    assert!(
+        out.inlined.is_empty(),
+        "both instances are uses: {:?}",
+        out.inlined
+    );
+
+    let card = file(&out, "components/Card.tsx");
+    assert!(
+        card.contains("  buttonLabel?: string;\n  buttonShowIcon?: boolean;"),
+        "{card}"
+    );
+    assert!(
+        card.contains("function Card({ className, buttonLabel, buttonShowIcon }: CardProps)"),
+        "a forwarded prop has no default: {card}"
+    );
+    assert!(
+        card.contains(
+            "<Button className={styles.button} label={buttonLabel ?? \"OK\"} \
+             showIcon={buttonShowIcon} />"
+        ),
+        "{card}"
+    );
+    let app = file(&out, "App.tsx");
+    assert!(
+        app.contains("<Card className={styles.card} buttonLabel=\"Buy\" buttonShowIcon={false} />"),
+        "{app}"
+    );
+    assert!(
+        app.contains("<Card className={styles[\"card-2\"]} />"),
+        "the plain instance passes nothing: {app}"
+    );
+
+    let out = vue_of(&doc, &res, &[labelled, plain]);
+    let card = file(&out, "components/Card.vue");
+    // Unset rather than cast to `false`, which Vue does to a boolean with no
+    // default, so the slot's own `true` stands.
+    assert!(
+        card.contains("    buttonLabel: undefined,\n    buttonShowIcon: undefined,"),
+        "{card}"
+    );
+    assert!(card.contains(":label=\"buttonLabel ?? 'OK'\""), "{card}");
+    let app = file(&out, "App.vue");
+    assert!(app.contains("buttonLabel=\"Buy\""), "{app}");
+}

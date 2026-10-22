@@ -178,6 +178,14 @@ pub(crate) fn js_string(s: &str) -> String {
     out
 }
 
+/// A single-quoted JavaScript string, for an expression inside a double-quoted
+/// attribute (which `dom::escape` then makes safe).
+pub(crate) fn single_quoted(s: &str) -> String {
+    let inner = js_string(s);
+    let inner = &inner[1..inner.len() - 1];
+    format!("'{}'", inner.replace("\\\"", "\"").replace('\'', "\\'"))
+}
+
 /// The SVG writer's escapes undone (`escape_xml`'s five).
 fn decode(s: &str) -> String {
     s.replace("&lt;", "<")

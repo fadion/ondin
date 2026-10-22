@@ -7,32 +7,27 @@
 //! Inter (upright + italic variable) is bundled as the default and fallback; the
 //! app supplies other families at runtime via [`register_fonts`].
 //!
-//! `layout()` returns, per run, the exact [`peniko::FontData`] parley resolved (a
-//! cheap blob handle), so `parley` stays inside this crate. Results are cached in
-//! [`crate::resolve::Resolved`] (§5.9); `layout()` is the uncached path that fills
-//! it, and registering a family invalidates it
-//! ([`crate::resolve::Resolved::invalidate_text`]).
+//! `layout()` returns, per run, the exact [`peniko::FontData`] parley resolved, so
+//! `parley` stays inside this crate. Results are cached in [`crate::resolve::Resolved`]
+//! (§5.9); `layout()` is the uncached path that fills it.
 //!
 //! ## What moves text after parley is done with it
 //!
-//! Paragraph spacing, box trim and vertical alignment shift the ink after the
-//! lines are broken. They are folded into one [`YMap`] — a layout-y ↔ local-y
-//! translation applied at both the scene walk and the hit test, which keeps the
-//! caret under the pointer.
+//! Paragraph spacing, box trim and vertical alignment shift the ink after the lines
+//! are broken. One [`YMap`] (layout-y ↔ local-y) applies at both the scene walk and
+//! the hit test, which keeps the caret under the pointer.
 //!
 //! ## Horizontal paragraph geometry is set before the break
 //!
-//! Indents change how wide a line may be, so [`break_lines`] sets parley's
-//! per-line `line_x` and `line_max_advance` from the paragraph the next line
-//! falls in ([`Paragraphs`]). The caret needs nothing extra: those values are the
-//! line's `inline_min_coord`/`inline_max_coord`, which `Selection::from_point`
-//! already reads. `Layout::set_text_indent` is deliberately unused (§15 D163).
+//! Indents change how wide a line may be, so [`break_lines`] sets parley's per-line
+//! `line_x` and `line_max_advance` from the paragraph the line falls in
+//! ([`Paragraphs`]); the caret reads them as the line's inline coords.
+//! `Layout::set_text_indent` is deliberately unused (§15 D163).
 //!
 //! ## The brush is a run index
 //!
 //! The brush carries the index of *our* run, so the decoration walk can recover
-//! attributes parley cannot hold (a line style, a decoration colour) from a
-//! `GlyphRun`. Glyph fills come from the node's `Paint`.
+//! attributes parley cannot hold (a line style, a decoration colour).
 //!
 //! [`TextEdit`] is the caret/selection model for in-canvas editing; it lives here
 //! because cluster boundaries and bidi-aware movement are parley's.
@@ -72,9 +67,8 @@ type RunIndex = u32;
 /// The brush the node's defaults are pushed with — a value no style-run index can
 /// take.
 ///
-/// `shape` skips pushing a style run equal to the defaults, so those bytes keep the
-/// defaults' brush; out of range therefore means "the defaults". Brush `0` would
-/// be indistinguishable from style run 0 (§15 D153).
+/// `shape` skips pushing a style run equal to the defaults, so those bytes keep this
+/// brush; brush `0` would be indistinguishable from style run 0 (§15 D153).
 const DEFAULT_RUN: RunIndex = RunIndex::MAX;
 
 /// Register font data (a `.ttf`/`.otf`) with the shaping engine on the current
@@ -105,10 +99,9 @@ pub fn register_fonts(bytes: Vec<u8>) -> Vec<String> {
 /// Un-register every face of `family` from this thread's shaping engine; returns
 /// whether anything was removed.
 ///
-/// The counterpart to [`register_fonts`]: the picker registers a family per row it
-/// draws, so without eviction scrolling leaks megabytes. The family *name*
-/// survives with an empty face list, which is why [`is_family_available`] asks
-/// about faces. Bytes are freed only once no cached [`TextLayout`] holds them.
+/// The counterpart to [`register_fonts`]: the picker registers a family per row, so
+/// without eviction scrolling leaks. The family *name* survives with an empty face
+/// list, which is why [`is_family_available`] asks about faces.
 pub fn unregister_family(family: &str) -> bool {
     ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
@@ -119,9 +112,7 @@ pub fn unregister_family(family: &str) -> bool {
         let Some(info) = collection.family(id) else {
             return false;
         };
-        // Collected first: `unregister_font` borrows the collection mutably, and
-        // it rebuilds the family's face list on each call, so iterating it live
-        // would be iterating what is being replaced.
+        // Collected first: `unregister_font` rebuilds the face list on each call.
         let faces: Vec<_> = info
             .fonts()
             .iter()
@@ -137,11 +128,9 @@ pub fn unregister_family(family: &str) -> bool {
 
 /// Whether `family` is registered with the shaping engine on this thread.
 ///
-/// A document may reference a family the machine lacks; it still renders via the
-/// Inter fallback, and the MCP snapshot and UI warn about it (§5.4a).
-///
-/// A registered *name* is not a registered *face*: `unregister_family` leaves the
-/// name behind empty, so this checks for faces.
+/// A document may reference a family the machine lacks; it renders via the Inter
+/// fallback and the UI warns (§5.4a). Checks faces, not the name, which
+/// `unregister_family` leaves behind empty.
 pub fn is_family_available(family: &str) -> bool {
     ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
@@ -174,12 +163,10 @@ pub struct FontAxis {
 }
 
 impl FontAxis {
-    /// One axis as a font's `fvar` table states it, with the range made usable
-    /// (§15 D435).
+    /// One axis as a font's `fvar` table states it, with the range made usable.
     ///
-    /// The one place a `FontAxis` is built from a file. `fvar` is validated by
-    /// nothing, so a reversed or `NaN` range would otherwise panic `f64::clamp`
-    /// (an `assert!`, also in release) on the next layout.
+    /// `fvar` is validated by nothing, so a reversed or `NaN` range would otherwise
+    /// panic `f64::clamp` (also in release) on the next layout.
     fn from_fvar(tag: Tag, min: f64, default: f64, max: f64, name: String, hidden: bool) -> Self {
         let (min, max) = ordered(min, max);
         Self {
@@ -194,8 +181,7 @@ impl FontAxis {
 
     /// `value` brought inside this axis's range.
     ///
-    /// Not `f64::clamp`, which panics on `min > max` and the fields are `pub`, so a
-    /// hand-built axis can be reversed.
+    /// Not `f64::clamp`, which panics on `min > max`; the fields are `pub`.
     pub fn clamp(&self, value: f64) -> f64 {
         value
             .max(self.min.min(self.max))
@@ -206,8 +192,8 @@ impl FontAxis {
 /// `(low, high)` from a pair a font asserted was one, with a non-finite end
 /// replaced by the other.
 ///
-/// Both halves matter: a reversed pair and a `NaN` end each panic `f64::clamp`, and
-/// `NaN` survives `f64::min`/`max`, so ordering alone would not close it.
+/// A reversed pair and a `NaN` end each panic `f64::clamp`, and `NaN` survives
+/// `f64::min`/`max`, so ordering alone would not close it.
 fn ordered(a: f64, b: f64) -> (f64, f64) {
     match (a.is_finite(), b.is_finite()) {
         (true, true) => (a.min(b), a.max(b)),
@@ -232,11 +218,9 @@ pub struct NamedInstance {
 
 /// The variation axes of `family`'s default face, in `fvar` order.
 ///
-/// Empty for a family with no variable face.
-///
-/// The default face, unlike [`family_named_instances`]: it stands in for the face
-/// that will shape the run, and a union across faces would draw rows for axes the
-/// shaping face lacks. `family_features` reads the default face for the same reason.
+/// Empty for a family with no variable face. Default face only, unlike
+/// [`family_named_instances`]: a union across faces would draw rows for axes the
+/// shaping face lacks.
 pub fn family_axes(family: &str) -> Vec<FontAxis> {
     with_family_font(family, |font| {
         use skrifa::MetadataProvider as _;
@@ -261,10 +245,8 @@ pub fn family_axes(family: &str) -> Vec<FontAxis> {
 /// The named instances of **every** face in `family`, the default face's first.
 ///
 /// Every face, because a variable family often ships upright and italic as two
-/// files and the italic file's `fvar` names the italic cuts. Each face reports its
-/// own `italic` (see [`NamedInstance::italic`]).
-///
-/// Deduplicated by name and slope, first face winning.
+/// files and the italic file's `fvar` names the italic cuts. Deduplicated by name
+/// and slope, first face winning.
 pub fn family_named_instances(family: &str) -> Vec<NamedInstance> {
     let mut out: Vec<NamedInstance> = Vec::new();
     for face in with_family_fonts(family, |font, italic| {
@@ -374,11 +356,9 @@ pub fn family_variants(family: &str) -> Vec<FontVariant> {
 
 /// A static family's cuts in the order the picker draws them, one per cut.
 ///
-/// Uprights before italics, ascending weight — the dropdown's order — with a cut
-/// registered twice offered once.
-///
-/// Lifted out of [`family_variants`]' engine closure so it can be tested: no
-/// fixture holds a static face, so the parley query above it stays untested.
+/// Uprights before italics, ascending weight, a cut registered twice offered once.
+/// Lifted out of [`family_variants`] so it can be tested: no fixture holds a static
+/// face.
 fn ordered_cuts(out: &mut Vec<FontVariant>) {
     out.sort_by_key(|v| (v.italic, v.weight));
     out.dedup_by(|a, b| a.weight == b.weight && a.italic == b.italic);
@@ -412,34 +392,29 @@ fn face_name(weight: u16, italic: bool) -> String {
 /// One OpenType feature the face offers, plus whatever the font itself says
 /// about it.
 ///
-/// Only `ss01`–`ss20` and `cv01`–`cv99` are defined by the font (via a
-/// `FeatureParams` table); every other tag's name belongs to the registry table
-/// beside the panel. So these are `Option`s: `None` means "the registry knows",
-/// not "unnamed".
+/// Only `ss01`–`ss20` and `cv01`–`cv99` are named by the font (a `FeatureParams`
+/// table); every other tag's name belongs to the registry beside the panel. So
+/// `None` means "the registry knows", not "unnamed".
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaceFeature {
     pub tag: Tag,
-    /// The font's own UI label (`ssXX`'s `UINameID`, `cvXX`'s `featUiLabelNameID`).
-    /// `None` for other tags and for faces that leave the table NULL, so the
-    /// panel's generic fallback is mandatory.
+    /// The font's own UI label (`ssXX`'s `UINameID`, `cvXX`'s `featUiLabelNameID`);
+    /// `None` for other tags and NULL tables.
     pub name: Option<String>,
     /// `cvXX`'s `featUiTooltipTextNameID`, for a row's hover.
     pub tooltip: Option<String>,
     /// One entry per named value the `cvXX` feature declares, in value order:
     /// index `k` is `value = k + 1`. Empty for a plain on/off feature.
     ///
-    /// Past one entry the feature is a 1..n choice
-    /// ([`crate::FeatureSetting::value`]). An entry is `None` where the font left
-    /// that name id NULL.
+    /// Past one entry the feature is a 1..n choice ([`crate::FeatureSetting::value`]).
     pub values: Vec<Option<String>>,
 }
 
 /// The OpenType features `family`'s default face actually offers (`GSUB` and
 /// `GPOS`), sorted by tag and de-duplicated.
 ///
-/// The Character tab's switch list is built from this. It reads the default face
-/// ([`family_axes`]), so a feature only the italic face carries is not offered. It
-/// reports both tables as the face has them; the panel curates what to show.
+/// Reads the default face ([`family_axes`]), so a feature only the italic face
+/// carries is not offered; the panel curates what to show.
 pub fn family_features(family: &str) -> Vec<FaceFeature> {
     with_family_font(family, |font| {
         use read_fonts::{TableProvider as _, tables::layout::FeatureList};
@@ -476,9 +451,8 @@ pub fn family_features(family: &str) -> Vec<FaceFeature> {
 
 /// The `FeatureParams` strings for a `ssXX` or `cvXX` tag, or `None`.
 ///
-/// Gated on the tag being in one of the two ranges, and the guard is load bearing:
-/// read-fonts picks the params table from the first two bytes of the tag, so `ssty`
-/// (no params table) would be read as a stylistic set and return garbage.
+/// The tag gate is load bearing: read-fonts picks the params table from the first
+/// two bytes of the tag, so `ssty` would be read as a stylistic set.
 fn feature_params(
     font: &skrifa::FontRef<'_>,
     tag: Tag,
@@ -502,8 +476,7 @@ fn feature_params(
                 p.num_named_parameters(),
             ),
         ),
-        // `size` is the third variant and cannot be reached: the gate above lets
-        // only the two font-defined ranges through.
+        // Unreachable past the tag gate above.
         FeatureParams::Size(_) => return None,
     };
     Some(FaceFeature {
@@ -515,10 +488,8 @@ fn feature_params(
 }
 
 /// Run `f` against the raw bytes of every face in `family`, the default face
-/// first, skipping any that will not load.
-///
-/// `f`'s second argument is whether the face is italic, read from fontique's
-/// `FontInfo::style` (see [`NamedInstance::italic`]).
+/// first, skipping any that will not load. `f`'s second argument is whether the
+/// face is italic, from fontique's `FontInfo::style`.
 fn with_family_fonts<T>(
     family: &str,
     mut f: impl FnMut(&skrifa::FontRef<'_>, bool) -> T,
@@ -568,10 +539,9 @@ fn with_family_font<T>(family: &str, f: impl FnOnce(&skrifa::FontRef<'_>) -> T) 
 
 /// The `ParamUILabelNameID` strings of a `cvXX` feature, one per named value.
 ///
-/// The spec spends the ids consecutively: `count` of them from `first`, in value
-/// order. A NULL `first` or a range past the legal id space is handled by
-/// [`feature_string`]'s range check. An entry is `None` independently of its
-/// neighbours, and the length still says how many values there are.
+/// The ids run consecutively: `count` of them from `first`, in value order. An
+/// entry is `None` independently of its neighbours; the length still says how many
+/// values there are.
 fn named_values(
     font: &skrifa::FontRef<'_>,
     first: skrifa::string::StringId,
@@ -589,9 +559,8 @@ fn named_values(
 
 /// A `FeatureParams` string, or `None` when the font left the id NULL.
 ///
-/// A NULL id is `0`, which is the copyright notice, so a plain [`localized_name`]
-/// would put the foundry's copyright in a tooltip. Feature `name` ids are
-/// 256..=32767; anything outside is the font declining to name it.
+/// A NULL id is `0`, the copyright notice, so a plain [`localized_name`] would put
+/// it in a tooltip. Feature name ids are 256..=32767.
 fn feature_string(font: &skrifa::FontRef<'_>, id: skrifa::string::StringId) -> Option<String> {
     if !(256..=32767).contains(&id.to_u16()) {
         return None;
@@ -622,14 +591,9 @@ pub struct Glyph {
     pub id: u32,
     pub x: f32,
     pub y: f32,
-    /// Rotation about this glyph's own origin `(x, y)` in radians, clockwise
-    /// (text-local space is y-down).
-    ///
-    /// `0.0` for ordinary horizontal type, which keeps the backends' fast path: a
-    /// run of zero-rotation glyphs is one `draw_glyphs` call, and only type on a
-    /// path pays for the split ([`bend`]). On a path `y` is the curve's tangent
-    /// line at this glyph, so distinct `y`s do not recover a shared baseline
-    /// ([`TextLayout::baselines`]).
+    /// Rotation about this glyph's own origin in radians, clockwise (y-down).
+    /// `0.0` for ordinary type, which keeps the backends' one-call fast path; only
+    /// type on a path pays for the split ([`bend`]).
     pub rot: f32,
 }
 
@@ -652,9 +616,8 @@ pub struct GlyphRun {
 /// One band of underline or strikethrough ink, in text-local space.
 ///
 /// Geometry here, drawing at the render boundary: dashed and dotted styles reuse
-/// the stroke dash machinery (§6.3), resolved where width and path are both to
-/// hand. [`Self::gaps`] is an interval, not a path, so it can be computed once per
-/// relayout ([`skip_ink`]).
+/// the stroke dash machinery (§6.3). [`Self::gaps`] is an interval, not a path, so
+/// it is computed once per relayout ([`skip_ink`]).
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecorationInk {
     /// The band: `x0..x1` along the run, `y0..y1` its thickness.
@@ -665,9 +628,8 @@ pub struct DecorationInk {
     pub color: Option<Color>,
     /// Where the band is interrupted by the glyph ink it would otherwise cross:
     /// `x0..x1` pairs in the space of [`Self::band`], clamped to it, sorted and
-    /// non-overlapping (skip-ink, §5.4, [`skip_ink`]).
-    ///
-    /// Empty means the band is continuous — always so for a strikethrough.
+    /// non-overlapping (skip-ink, §5.4, [`skip_ink`]). Empty means continuous —
+    /// always so for a strikethrough.
     pub gaps: Vec<(f64, f64)>,
 }
 
@@ -690,38 +652,27 @@ pub struct TextLayout {
     /// say so and the ellipsis has somewhere to be.
     pub truncated: bool,
     /// The first line's box height as parley resolved it — what `LineHeight::Auto`
-    /// is worth, which the style alone cannot say (§15 D162).
-    ///
-    /// Read from `LineMetrics::line_height`, not the block coordinates, which
-    /// measure ink and come out smaller (§15 D147). The first line only: a node
-    /// whose runs differ in size has a height per line.
+    /// is worth. From `LineMetrics::line_height`, not the block coordinates, which
+    /// measure ink and come out smaller (§15 D147).
     pub line_height: f64,
     /// The face's own underline and strikethrough thicknesses on the first run, in
     /// px — `(underline, strikethrough)`, `None` for a node with nothing shaped.
     ///
-    /// Exists for `Decoration::thickness`'s absent state ("the font decides"),
-    /// which the panel must be able to report and seed from; a zero seed would
-    /// erase the underline, since `decoration_path` and [`crossings`] refuse a
-    /// zero-height band (§15 D570). Straight off `run.metrics()`, before clamp and
-    /// override.
+    /// Seeds `Decoration::thickness`'s absent state ("the font decides"); a zero
+    /// seed would erase the underline, since `decoration_path` and [`crossings`]
+    /// refuse a zero-height band. Straight off `run.metrics()`, before clamp.
     pub decoration_sizes: Option<(f64, f64)>,
-    /// Every line's baseline in text-local space, top to bottom (§15 D355).
+    /// Every line's baseline in text-local space, top to bottom.
     ///
     /// Stored because [`Self::runs`] cannot give it back: a shifted run's glyphs sit
-    /// off the line's baseline (`baseline_shift` is a draw offset), so collecting
-    /// distinct [`Glyph::y`]s invents a baseline per superscript. One entry per
-    /// line, whatever the runs do.
-    ///
-    /// Empty for type on a rail ([`Self::warp`]): a bent baseline is not a *y*, and
-    /// consumers want a horizontal line to snap to. Not [`export_lines`], which
-    /// re-shapes through parley and allocates per call.
+    /// off the baseline, so collecting distinct [`Glyph::y`]s invents one per
+    /// superscript. Empty for type on a rail ([`Self::warp`]), where a bent baseline
+    /// is not a *y*.
     pub baselines: Vec<f64>,
-    /// The rail this layout was bent onto, or `None` for ordinary horizontal type
-    /// (§15 D405).
+    /// The rail this layout was bent onto, or `None` for ordinary horizontal type.
     ///
     /// The glyphs are already bent ([`Glyph::rot`]); this is for geometry that must
-    /// follow the curve rather than be carried along it, which is
-    /// [`DecorationInk`], built at the render boundary (§6.3).
+    /// follow the curve, i.e. [`DecorationInk`], built at the render boundary (§6.3).
     pub warp: Option<PathWarp>,
 }
 
@@ -732,12 +683,9 @@ impl TextLayout {
         Rect::from_origin_size(self.origin.to_point(), self.size)
     }
 
-    /// The node's box before trim — the full line box, at the local origin.
-    ///
-    /// Only drawn (the canvas outlines it faintly beside the trimmed box); every
-    /// measurement reads [`Self::bounds`]. Equal to it when trim changed nothing.
-    /// On a rail it is always equal: a bent box has no looser second rectangle, and
-    /// the two are anchored at different origins, so equality needs enforcing here.
+    /// The node's box before trim — the full line box, at the local origin. Only
+    /// drawn; every measurement reads [`Self::bounds`]. On a rail it is always equal
+    /// to it: a bent box has no looser second rectangle.
     pub fn untrimmed_bounds(&self) -> Rect {
         if self.warp.is_some() {
             return self.bounds();
@@ -752,15 +700,13 @@ impl TextLayout {
 
 /// The accuracy asked of kurbo's arc length and its inverse, in document units.
 ///
-/// Both are iterative; a hundredth of a unit is far below a pixel at any zoom. Paid
-/// per glyph on a relayout, not per frame (§5.9).
+/// Both are iterative; a hundredth of a unit is far below a pixel at any zoom.
 const RAIL_ACCURACY: f64 = 0.01;
 
 /// How finely a warped edge is resampled before it is mapped, in flat units.
 ///
-/// A decoration band's long edges are straight, so a curvature-driven flattener
-/// would return each as one `LineTo` and the underline would cut across a curved
-/// rail; [`PathWarp::warp`] resamples by length instead.
+/// A curvature-driven flattener would return a band's straight edge as one `LineTo`
+/// and the underline would cut across a curved rail.
 const RAIL_STEP: f64 = 2.0;
 
 /// How far inside the true swept ribbon [`bend`]'s box may fall, in document units.
@@ -783,11 +729,11 @@ fn curvature_at(seg: &PathSeg, t: f64) -> f64 {
 }
 
 /// The map from flat text-local space onto a rail: `x` becomes distance **along**
-/// the curve, `y` distance **across** it (§15 D405).
+/// the curve, `y` distance **across** it.
 ///
-/// A glyph is carried rigidly (placed and rotated, never distorted — hence
-/// [`Glyph::rot`]); continuous geometry running along the line, today only
-/// [`DecorationInk`], is warped point by point.
+/// A glyph is carried rigidly (placed and rotated, never distorted); continuous
+/// geometry running along the line, today only [`DecorationInk`], is warped point
+/// by point.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PathWarp {
     /// Each segment with the arc length at its start and its own length;
@@ -798,15 +744,14 @@ pub struct PathWarp {
     start: f64,
     /// The text-local `y` that maps onto the rail itself: the first line's
     /// baseline. Subtracted inside [`Self::place`] so callers hand it ordinary
-    /// text-local coordinates (§15 D407).
+    /// text-local coordinates.
     baseline: f64,
-    /// Whether the rail closes on itself (§15 D409). An open rail drops text past
-    /// its end; a closed one wraps arc length so type carries on round.
+    /// Whether the rail closes on itself. An open rail drops text past its end; a
+    /// closed one wraps arc length.
     closed: bool,
-    /// Traverse the rail backwards ([`TextRef::on_path_flip`], §15 D406).
-    ///
-    /// Reversing negates the tangent and so the normal: text reverses and changes
-    /// sides from this one bool, and every consumer follows.
+    /// Traverse the rail backwards ([`TextRef::on_path_flip`]). Reversing negates
+    /// the tangent and so the normal: text reverses and changes sides from this one
+    /// bool.
     flip: bool,
 }
 
@@ -814,8 +759,8 @@ impl PathWarp {
     /// The rail, measured. `None` for a path with no length, which is not a rail.
     ///
     /// The whole warp is built here, alignment included, so the live edit session
-    /// and the layout agree where along the rail the text starts (§15 D407).
-    /// `width` is the shaped content width — see [`bend`].
+    /// and the layout agree where along the rail the text starts. `width` is the
+    /// shaped content width — see [`bend`].
     fn of(
         path: &BezPath,
         flip: bool,
@@ -834,8 +779,7 @@ impl PathWarp {
                 len += l;
             }
         }
-        // Alignment is applied along the rail because `shape` skips it on a rail;
-        // `Justify` acts as `Start`. The offset composes with it (§15 D409).
+        // `shape` skips alignment on a rail, so it is applied here; `Justify` acts as `Start`.
         let start = offset * len
             + match align {
                 TextAlign::Center => (len - width) * 0.5,
@@ -856,15 +800,15 @@ impl PathWarp {
 
     /// The rail measured and nothing on it — no text, alignment or baseline.
     ///
-    /// For purely geometric questions (§15 D409), such as the Text tool's click
-    /// asking how far along a point is before any text exists.
+    /// For purely geometric questions, such as the Text tool's click asking how far
+    /// along a point is before any text exists.
     pub fn bare(path: &BezPath) -> Option<Self> {
         Self::of(path, false, 0.0, 0.0, TextAlign::Start, 0.0)
     }
 
-    /// The point on the rail where the type starts (§15 D410) — where a canvas puts
-    /// the slide handle: the curve itself at flat `x = 0`, not the first glyph's
-    /// origin. `None` when the text begins off the end of an open rail.
+    /// The point on the rail where the type starts — where a canvas puts the slide
+    /// handle: the curve at flat `x = 0`, not the first glyph's origin. `None` when
+    /// the text begins off the end of an open rail.
     pub fn start_point(&self) -> Option<Point> {
         self.place(0.0, self.baseline).map(|(p, _)| p)
     }
@@ -892,32 +836,25 @@ impl PathWarp {
 
     /// Where flat `(x, y)` lands, and the rail's direction there in radians.
     ///
-    /// `(x, y)` is ordinary text-local space — the coordinates a glyph, a
-    /// decoration band and a caret rectangle already use (§15 D407), not
-    /// baseline-relative.
-    ///
-    /// `None` when `x` runs off either end, so text longer than its path is absent;
-    /// the caller turns that into [`TextLayout::truncated`].
+    /// `(x, y)` is ordinary text-local space, not baseline-relative. `None` when `x`
+    /// runs off either end; the caller turns that into [`TextLayout::truncated`].
     pub fn place(&self, x: f64, y: f64) -> Option<(Point, f64)> {
         if !self.fits(x) {
             return None;
         }
         let (seg, t) = self.at(self.start + x);
         let d = self.direction(&seg, t);
-        // The normal keeps flat `+y` below the line: in y-down space the quarter turn
-        // taking `(1, 0)` to `(0, 1)` is `(-dy, dx)`; the wrong sign mirrors the text.
+        // y-down: the quarter turn taking `(1, 0)` to `(0, 1)`; the wrong sign mirrors the text.
         let n = Vec2::new(-d.y, d.x);
         Some((seg.eval(t) + n * (y - self.baseline), d.atan2()))
     }
 
-    /// Whether flat `x` is somewhere the text may go (§15 D409).
+    /// Whether flat `x` is somewhere the text may go.
     ///
     /// An open rail drops a glyph whose arc length `start + x` leaves it; a closed
-    /// rail wraps, so only text longer than the whole loop (a question about `x`
-    /// alone) outruns it.
-    ///
-    /// The closed bound is `|x|`, not `0..=len`: the box sweep hands `s − start`,
-    /// negative before the text begins, and must cover the whole rail.
+    /// rail wraps, so only text longer than the whole loop outruns it. The closed
+    /// bound is `|x|`, not `0..=len`: the box sweep hands `s − start`, negative
+    /// before the text begins.
     fn fits(&self, x: f64) -> bool {
         match self.closed {
             true => x.abs() <= self.len,
@@ -951,17 +888,8 @@ impl PathWarp {
     }
 
     /// The inverse of [`Self::place`]: the text-local `(x, y)` that lands nearest
-    /// to `p` (§15 D407).
-    ///
-    /// Every pointer question on a railed node comes through here: pointer
-    /// positions are in the node's local space, which on a rail is bent, so the
-    /// caret needs the inverse of the bend.
-    ///
-    /// The arc length is the nearest segment's start plus `subsegment(0..t).arclen()`,
-    /// not `t × len`, since a Bézier's parameter is not its arc length.
-    ///
-    /// Unclamped in `x` on purpose: a point past the end answers with an `x` past
-    /// the text, which `Cursor::from_point` clamps to the last cluster, as on a flat line.
+    /// to `p`. The arc length is `subsegment(0..t).arclen()`, not `t × len`.
+    /// Unclamped in `x` on purpose; `Cursor::from_point` clamps to the last cluster.
     pub fn nearest(&self, p: Point) -> (f64, f64) {
         let mut best = (f64::MAX, 0.0, self.segs[0].0, 0.0);
         for (seg, at, _) in &self.segs {
@@ -980,12 +908,11 @@ impl PathWarp {
     }
 
     /// `x` moved by whole laps of a closed rail into the half-turn nearest the
-    /// text's own start (§15 D409).
+    /// text's own start.
     ///
-    /// [`Self::nearest`] deliberately does not do this: a caret wants the answer
-    /// near the text it is placed in (on a loop `−0.9 × len` clamps to the string's
-    /// start), while an offset measured for a fresh node wants the plain distance
-    /// round the rail, or a half-way click would write `−50%`.
+    /// [`Self::nearest`] deliberately does not: a caret wants the answer near the
+    /// text it is placed in, while an offset for a fresh node wants the plain
+    /// distance round the rail, or a half-way click would write `−50%`.
     pub fn shortest_way_round(&self, x: f64) -> f64 {
         match self.closed {
             true => x - (x / self.len).round() * self.len,
@@ -993,12 +920,11 @@ impl PathWarp {
         }
     }
 
-    /// A text-local rectangle as **convex quads** following the rail (§15 D407).
+    /// A text-local rectangle as **convex quads** following the rail.
     ///
     /// Several quads, because a band on a curve is concave and
-    /// `egui::Shape::convex_polygon` (selection, caret) misrenders a concave
-    /// polygon. `RAIL_STEP` slices are convex by construction; a caret is one.
-    /// Empty where the rectangle is entirely off the end of the rail.
+    /// `egui::Shape::convex_polygon` misrenders a concave polygon. Empty where the
+    /// rectangle is entirely off the end of the rail.
     pub fn warp_rect(&self, r: Rect) -> Vec<[Point; 4]> {
         let steps = (r.width() / RAIL_STEP).ceil().clamp(1.0, 512.0);
         let mut out = Vec::new();
@@ -1109,10 +1035,8 @@ fn tangent(seg: &PathSeg, t: f64) -> Vec2 {
 
 /// The warp a node's parts and its shaping ask for, or `None` for flat type.
 ///
-/// The one construction shared by [`extract`], which bends a finished layout, and
-/// [`TextEdit`], which answers pointers against the same bend without building a
-/// `TextLayout` (§15 D407). The baseline is the first line's, as in
-/// `TextLayout::baselines[0]`.
+/// Shared by [`extract`] and [`TextEdit`], which answers pointers against the same
+/// bend without building a `TextLayout`. The baseline is the first line's.
 fn warp_for(parts: TextRef<'_>, shaped: &Shaped) -> Option<PathWarp> {
     let line = shaped.layout.lines().next()?;
     PathWarp::of(
@@ -1125,26 +1049,18 @@ fn warp_for(parts: TextRef<'_>, shaped: &Shaped) -> Option<PathWarp> {
     )
 }
 
-/// Bend a finished flat layout onto its rail (§15 D405).
+/// Bend a finished flat layout onto its rail.
 ///
-/// A pass over the output rather than a mode inside the shaper: parley shapes and
-/// breaks as usual, `decoration_ink` and [`skip_ink`] compute in flat space, and
-/// then the whole plane is mapped (flat `y` is distance across the rail, so later
-/// lines need no special case).
-///
-/// The `width` passed to [`PathWarp::of`] is the shaped content width, not
-/// `layout.size` (the authored box, see [`box_of`]) and not a sum of the glyph
-/// advances below, which are estimates for each run's last glyph.
+/// A pass over the output rather than a mode inside the shaper: everything computes
+/// in flat space, then the whole plane is mapped. The `width` passed to
+/// [`PathWarp::of`] is the shaped content width, not `layout.size`.
 fn bend(layout: &mut TextLayout, warp: PathWarp) {
     // Each glyph is placed by its own midpoint (SVG's rule): rotating about the left
-    // edge fans wide glyphs outward on a tight curve.
-    //
-    // An advance is read from the next glyph on the same line, across run
-    // boundaries, because `GlyphRun` carries no advances (§15 D489). A run of one
-    // glyph would otherwise get `adv = 0` and sit at its left edge. Only the last
-    // glyph of a line borrows its predecessor's advance. The same-line test matters:
-    // under right or centre alignment the next line's first `x` can exceed this
-    // line's last, so comparing `x` alone would accept an absurd advance.
+    // edge fans wide glyphs outward on a tight curve. `GlyphRun` carries no advances
+    // (§15 D489), so one is read from the next glyph on the same line, across run
+    // boundaries; the last glyph of a line borrows its predecessor's. The same-line
+    // test matters: under right or centre alignment the next line's first `x` can
+    // exceed this line's last.
     let flat: Vec<(usize, usize, Glyph)> = layout
         .runs
         .iter()
@@ -1193,14 +1109,11 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
     // Text that outran the rail is truncated, reported by the same field.
     layout.truncated |= after < before;
 
-    // The box is the rail's bent line box, not the text's: the whole rail swept end
-    // to end with the flat box's two verticals carried along it. A box over the
-    // glyphs would move as the string is typed and give a resize handle almost
-    // nothing to say, since the rail is usually longer than the words on it.
+    // The box is the whole rail swept end to end with the flat box's two verticals
+    // carried along it; a box over the glyphs would move as the string is typed.
     let top = layout.origin.y;
     let bottom = layout.origin.y + layout.size.height;
-    // Swept in arc length so `warp.start` (alignment, not extent) stays out of the
-    // box; `place` takes flat `x`, hence the subtraction.
+    // Swept in arc length so `warp.start` (alignment) stays out of the box.
     let mut bbox: Option<Rect> = None;
     let sample = |s: f64, bbox: &mut Option<Rect>| {
         for v in [top, bottom] {
@@ -1213,9 +1126,8 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
         }
     };
     // Behind [`SKETCH`]: every segment is sampled at both ends (cusps), nudged inward
-    // because `place` resolves a corner to one segment, and inside a segment the step
-    // follows curvature, `h = sqrt(8·BOX_SAG/κ)`. `reach` is measured from the
-    // baseline, the frame `place` offsets in.
+    // because `place` resolves a corner to one segment; inside a segment the step
+    // follows curvature, `h = sqrt(8·BOX_SAG/κ)`.
     let reach = (top - warp.baseline)
         .abs()
         .max((bottom - warp.baseline).abs());
@@ -1227,8 +1139,7 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
                 .into_iter()
                 .map(|t| curvature_at(seg, t).abs())
                 .fold(0.0_f64, f64::max);
-            // The ribbon curves harder than the rail: offsetting toward the centre of
-            // curvature takes a radius `ρ` to `ρ − v`.
+            // Offsetting toward the centre of curvature takes a radius `ρ` to `ρ − v`.
             let kappa = kappa / (1.0 - (kappa * reach).min(0.5));
             let h = match kappa > 0.0 {
                 true => (8.0 * BOX_SAG / kappa).sqrt(),
@@ -1245,10 +1156,9 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
     if SKETCH {
         for ((_, s0, slen), want) in warp.segs.iter().zip(&want) {
             let n = (want * budget).ceil().max(1.0);
-            // A segment's `along` interval is mirrored under the flip (`PathWarp::at`
-            // maps `along` to `len - along`), so `s0` is its end there (§15 D792);
-            // read the wrong way, the nudges land in the next segment.
-            // `a_flipped_rails_box_clears_the_rail_on_every_side` is the test.
+            // Mirrored under the flip (`PathWarp::at`), so `s0` is the segment's end
+            // there; read the wrong way, the nudges land in the next segment
+            // (`a_flipped_rails_box_clears_the_rail_on_every_side`).
             let a0 = match warp.flip {
                 true => warp.len - s0 - slen,
                 false => *s0,
@@ -1280,17 +1190,9 @@ fn bend(layout: &mut TextLayout, warp: PathWarp) {
 /// The filled outline of a laid-out text node's glyphs, in the node's own
 /// text-local space — the path a text stroke is drawn along and clipped against.
 ///
-/// Glyph ids and positions come from the cached [`TextLayout`], so nothing re-runs
-/// parley (§5.9). Built at the render boundary and only for a node with a visible
-/// stroke, since a cache would pay on every relayout. [`skip_ink`] shares the
-/// per-run machinery through [`RunFace`].
-///
-/// Font outlines are y-up and text-local space is y-down, so each point is
-/// mirrored about the glyph's baseline: `(g.x + x, g.y − y)`.
-///
-/// Every contour comes back closed, forced if the face did not say so:
-/// `geometry::stroke_align_applies` leans on it, since inside and outside alignment
-/// need a clip with an interior (§15 D145).
+/// Built from the cached [`TextLayout`] at the render boundary, only for a node with
+/// a visible stroke. Every contour comes back closed, forced if the face did not say so:
+/// `geometry::stroke_align_applies` needs a clip with an interior (§15 D145).
 pub fn outline(layout: &TextLayout) -> BezPath {
     let mut out = BezPath::new();
     for run in &layout.runs {
@@ -1301,10 +1203,9 @@ pub fn outline(layout: &TextLayout) -> BezPath {
 
 /// One run's glyphs as an outline — [`outline`] for a single run.
 ///
-/// For a bent run under a brush that has a position (§15 D405): a gradient or
-/// image is authored in node-local space, and a bent glyph is drawn under its own
-/// transform, which would restart the gradient at every letter. A solid brush keeps
-/// the cheaper glyph path.
+/// For a bent run under a positional brush: a gradient or image is authored in
+/// node-local space, and a bent glyph drawn under its own transform would restart
+/// the gradient at every letter. A solid brush keeps the cheaper glyph path.
 pub fn run_outline(run: &GlyphRun) -> BezPath {
     let mut out = BezPath::new();
     append_run_outline(run, &mut out);
@@ -1322,8 +1223,7 @@ fn append_run_outline(run: &GlyphRun, out: &mut BezPath) {
 }
 
 /// Collects one glyph's outline into a shared [`BezPath`], baseline-mirrored and
-/// translated to wherever its caller wants the glyph's origin — its place in the
-/// run for [`append_run_outline`], `(0, 0)` for [`skip_ink`].
+/// translated to the caller's glyph origin.
 ///
 /// `down` guards kurbo's assertion that a path starts with a `MoveTo`, and tells
 /// [`RunFace::draw`] whether a contour is left to close.
@@ -1331,9 +1231,8 @@ struct Pen<'a> {
     out: &'a mut BezPath,
     dx: f64,
     dy: f64,
-    /// `(cos, sin)` of the glyph's rotation ([`Glyph::rot`]), precomputed because
-    /// [`Self::at`] runs per control point. `(1.0, 0.0)` is upright and keeps flat
-    /// type on plain arithmetic.
+    /// `(cos, sin)` of the glyph's rotation, precomputed because [`Self::at`] runs
+    /// per control point; `(1.0, 0.0)` keeps flat type on plain arithmetic.
     rot: (f64, f64),
     down: bool,
 }
@@ -1396,23 +1295,15 @@ impl skrifa::outline::OutlinePen for Pen<'_> {
 }
 
 /// How far paragraph spacing, box trim and vertical alignment move each line —
-/// layout y **to** the node's local y.
-///
-/// See the module docs: bundling the three here keeps the draw and hit-test
-/// boundaries from disagreeing about the amount.
-///
-/// One direction only (§15 D166): a paragraph gap exists in local y and not in
-/// layout y, so a subtraction cannot invert it. The way back is the private
-/// `Shaped::layout_y`, which resolves the point's line first.
+/// layout y **to** the node's local y. One direction only (§15 D166): a paragraph
+/// gap has no layout y, so a subtraction cannot invert it; see `Shaped::layout_y`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct YMap {
     /// Constant shift — box trim and vertical alignment, which move everything.
     base: f64,
     /// `(layout y of a paragraph's first line, that line's index, extra space
-    /// inserted before it)`, ascending and cumulative.
-    ///
-    /// [`Self::to_local`] decides from the y and [`Self::shift_for_line`] from the
-    /// index: a baseline arrives as a coordinate, a rectangle's edges with a line.
+    /// inserted before it)`, ascending and cumulative. [`Self::to_local`] decides
+    /// from the y, [`Self::shift_for_line`] from the index.
     breaks: Vec<(f64, usize, f64)>,
 }
 
@@ -1420,9 +1311,8 @@ impl YMap {
     /// The node's local y for a point in parley's layout space, deciding from the
     /// coordinate.
     ///
-    /// Right for a baseline, wrong for an ink coordinate: a baseline sits below its
-    /// line-box top so it cannot fall on the wrong side of its break, but ink
-    /// extents can. Use [`Self::to_local_on_line`] when the line is known.
+    /// Right for a baseline, wrong for an ink coordinate, which can fall on the wrong
+    /// side of its break. Use [`Self::to_local_on_line`] when the line is known.
     pub fn to_local(&self, layout_y: f64) -> f64 {
         let mut shift = 0.0;
         for (at, _, s) in &self.breaks {
@@ -1442,12 +1332,9 @@ impl YMap {
 
     /// The extra space inserted above line `index`.
     ///
-    /// A shift belongs to a line, not to a y. `breaks` is keyed on line-box tops,
-    /// but `block_min_coord` is an ink top, which sits above the box top when the
-    /// leading is negative (the ordinary case), so a caret or selection rectangle
-    /// would come out one gap too high. Consecutive lines' ink ranges overlap, so no
-    /// scalar boundary separates them either (see [`TextEdit::caret_line_index`]);
-    /// `parley::Selection::geometry` supplies the line index.
+    /// A shift belongs to a line, not to a y: `breaks` is keyed on line-box tops, but
+    /// `block_min_coord` is an ink top, above the box top under negative leading, so
+    /// a caret rectangle would come out one gap too high.
     pub fn shift_for_line(&self, index: usize) -> f64 {
         self.breaks
             .iter()
@@ -1478,8 +1365,7 @@ struct Engine {
 
 impl Engine {
     fn new() -> Self {
-        // `system_fonts: false` backs up the disabled `system` feature. Both bundled
-        // faces share the "Inter" family.
+        // `system_fonts: false` backs up the disabled `system` feature.
         let mut collection = Collection::new(CollectionOptions {
             shared: false,
             system_fonts: false,
@@ -1512,9 +1398,8 @@ thread_local! {
 
 /// The concrete alignment a paragraph style asks for.
 ///
-/// `Start`/`End` are resolved here under an explicit direction, because parley
-/// infers the base direction from content and an empty RTL paragraph (or one of
-/// digits) would align the wrong way. On `Auto` they pass through.
+/// `Start`/`End` are resolved here under an explicit direction: parley infers the
+/// base direction from content, so an empty RTL paragraph would align the wrong way.
 fn parley_alignment(align: TextAlign, direction: TextDirection) -> Alignment {
     match (align, direction) {
         (TextAlign::Left, _) => Alignment::Left,
@@ -1569,17 +1454,9 @@ fn parley_tag(tag: Tag) -> parley::setting::Tag {
 /// The axis settings to shape a run with — the stored list, plus `opsz` when
 /// that axis is on Auto.
 ///
-/// The `opsz` synthesis is ours: neither parley nor fontique tracks optical size
-/// from the font size (CSS `font-optical-sizing: auto`), and the axis default
-/// makes a 96pt heading look like blown-up body text. This is the only
-/// implementation of the rule (§15 D571).
-///
-/// A stored coordinate reaches the shaper raw, `opsz` included: the panel does not
-/// rewrite out-of-range stored values (§15 D425), the shaper clamps anyway, and
-/// clamping one axis only would be a divergence. The synthesized value is clamped,
-/// since it is the font size and routinely outside the axis range.
-///
-/// `axis.clamp`, not `f64::clamp`, which panics on a bad range from a file (§15 D435).
+/// The `opsz` synthesis is ours (CSS `font-optical-sizing: auto`; §15 D571). A
+/// stored coordinate reaches the shaper raw (§15 D425); the synthesized value is
+/// clamped with `axis.clamp`, not `f64::clamp`, which panics on a bad range.
 fn axis_settings(style: &TextStyle, axes: &[FontAxis]) -> Vec<FontVariation> {
     let mut out: Vec<FontVariation> = style
         .variations
@@ -1596,9 +1473,7 @@ fn axis_settings(style: &TextStyle, axes: &[FontAxis]) -> Vec<FontVariation> {
 }
 
 /// Push one style's properties onto the builder — as defaults when `range` is
-/// `None`, otherwise over that byte range.
-///
-/// One function for both so the default set and a span's set cannot drift.
+/// `None`, otherwise over that byte range — so the two sets cannot drift.
 fn push_style(
     builder: &mut parley::RangedBuilder<'_, RunIndex>,
     style: &TextStyle,
@@ -1703,9 +1578,9 @@ fn push_style(
 
 /// The string to hand the shaper, when a case transform is in force.
 ///
-/// Length-preserving only: byte indices are the currency of the span list, the
-/// caret and every hit test. A character whose cased form changes the UTF-8 byte
-/// count (`ß`→`SS`, `İ`→`i̇`) is left alone.
+/// Length-preserving only: byte indices are the currency of the span list, caret
+/// and hit tests. A character whose cased form changes the byte count (`ß`→`SS`)
+/// is left alone.
 fn cased_text(content: &str, runs: &[(Range<usize>, TextStyle)]) -> Option<String> {
     if runs.iter().all(|(_, s)| s.case == TextCase::Original) {
         return None;
@@ -1770,15 +1645,11 @@ impl Shaped {
     /// The layout y to hit-test a text-local y with: the middle of the line whose
     /// local box is nearest to it.
     ///
-    /// Not a subtracted shift (§15 D166): a paragraph gap exists only in local
-    /// space, so a point inside one has no layout y and the subtraction walks into
-    /// the next paragraph. Line boxes tile local space (the running sum of
-    /// `line_height`, the key `YMap::breaks` uses), so the nearest box is exact; a
-    /// point in a gap takes the nearer bounding line, ties to the line above.
-    ///
-    /// The returned y stays approximate: `Layout::line_for_offset` searches
-    /// `block_min_coord..block_max_coord`, which overlap under negative leading. The
-    /// box centre is the furthest a y can sit from both neighbours' ink.
+    /// Not a subtracted shift (§15 D166): a point in a paragraph gap has no layout y
+    /// and the subtraction walks into the next paragraph. A point in a gap takes the
+    /// nearer bounding line, ties to the line above. The box centre is returned
+    /// because `Layout::line_for_offset` searches ink ranges that overlap under
+    /// negative leading.
     fn layout_y(&self, local_y: f64) -> f64 {
         let mut best: Option<(f64, f64)> = None;
         let mut top = 0.0;
@@ -1812,24 +1683,21 @@ fn shape(parts: TextRef<'_>) -> Shaped {
     let mut layout = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
         let default_family = engine.default_family.clone();
-        // Axis metadata is per family; gather it for every distinct family before
-        // the builder exists, since the builder borrows the whole engine.
+        // Axis metadata is gathered before the builder exists; it borrows the whole engine.
         let mut families: Vec<&str> = vec![parts.style.font_family.as_str()];
         for (_, style) in &runs {
             if !families.contains(&style.font_family.as_str()) {
                 families.push(&style.font_family);
             }
         }
-        // The fallback family's axes are gathered too: an unknown family shapes with
-        // the fallback face, so it must inherit that face's axes (`opsz`) or the same
-        // text measures differently once the family becomes available (§15 D711).
+        // An unknown family shapes with the fallback face, so it needs that face's
+        // axes (`opsz`) or the text measures differently once the family appears (§15 D711).
         if !families.contains(&default_family.as_str()) {
             families.push(default_family.as_str());
         }
-        // `known` is not `!axes.is_empty()`: `family_axes_locked` answers empty both
-        // for an unknown family (which inherits) and for a known static face (which
-        // must not be asked for a variation it does not carry). `known` means
-        // listed, not readable.
+        // `known` is not `!axes.is_empty()`: empty axes mean either an unknown family
+        // (which inherits the fallback's) or a known static face (which must not be
+        // asked for a variation it lacks).
         let axes: Vec<(String, Vec<FontAxis>, bool)> = families
             .iter()
             .map(|f| {
@@ -1844,7 +1712,6 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         let axes_for = |family: &str| -> &[FontAxis] {
             match axes.iter().find(|(f, _, _)| f == family) {
                 Some((_, a, true)) => a.as_slice(),
-                // Unknown: parley shapes with the fallback face, so use its axes.
                 _ => fallback_axes,
             }
         };
@@ -1879,13 +1746,11 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         builder.build(text)
     });
 
-    // Not `Layout::set_text_indent`: it and a per-line `line_x` are two mechanisms
-    // on one edge, and using both shrinks the measure twice.
+    // Not `Layout::set_text_indent`: with a per-line `line_x` it shrinks the measure twice.
     let paras = Paragraphs::new(parts);
 
-    // On a rail the box is inert (§15 D405): the path's length is the measure, and
-    // [`bend`] aligns along the rail, so parley must not centre inside the box too.
-    // `TextSizing` and `paragraph.align` keep their stored values.
+    // On a rail the box is inert: the path's length is the measure and [`bend`]
+    // aligns along it, so parley must not centre inside the box too.
     let on_rail = parts.on_path.is_some();
     let wrap_width = if on_rail {
         None
@@ -1906,24 +1771,13 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         height_limit,
         None,
     );
-    // The second break pass optical margin alignment needs (§15 D830), run only for
-    // a node that asked for it. It re-breaks already-shaped clusters on the same
-    // `Layout`.
-    //
-    // A pass can break somewhere the first did not (every measure grows by its two
-    // bearings), and offsets are read per line index, so it repeats until every line
-    // is corrected by its own bearings (§15 D855). Settled a line at a time from the
-    // top: the first line whose bearings differ from its guess starts where it did,
-    // so its left bearing is exact and only the right was a guess; lines below take
-    // this pass's readings. The first mismatch only moves down, which bounds the loop.
-    //
-    // A line can cycle (guess `a` ends on bearing `b`, guess `b` on `a`), so a line
-    // that revisits a guess is pinned: exact left bearing, right bearing zero, which
-    // ends its ink inside the nominal edge. The cap is a belt; past it the node is
-    // laid out uncorrected.
-    //
-    // The auto-width box keeps the uncorrected width, so the node's box does not move
-    // when the setting is on (§15 D855).
+    // Optical margin alignment (§15 D830, D855): a second break pass, only for a node
+    // that asked. Every measure grows by its two bearings, so a pass can break
+    // somewhere the first did not, and offsets are read per line index; it repeats
+    // until every line is corrected by its own bearings, settled from the top (the
+    // first mismatch only moves down, which bounds the loop). A line that revisits a
+    // guess is pinned (exact left bearing, right zero) to end a cycle; past the cap
+    // the node is laid out uncorrected. The auto-width box keeps the uncorrected width.
     let mut natural_width = None;
     if paras.any_optical_margins() {
         natural_width = Some(layout.width());
@@ -1952,8 +1806,7 @@ fn shape(parts: TextRef<'_>) -> Shaped {
                 settled = true;
                 break;
             };
-            // Above `j` keep what those lines were given (a pinned line stays pinned);
-            // from `j` down, this pass's readings.
+            // Above `j` keep what those lines were given; from `j` down, this pass's readings.
             let mut next = found.clone();
             for (i, slot) in next.iter_mut().enumerate().take(j) {
                 if let Some(&u) = used.get(i) {
@@ -1985,17 +1838,15 @@ fn shape(parts: TextRef<'_>) -> Shaped {
     }
 
     layout.align(
-        // Redundant today (the wrap gate above leaves no measure to align within),
-        // kept because both gates are one decision, "the box is inert on a rail";
-        // removing both double-counts the alignment.
+        // Redundant with the wrap gate above, but both are one decision, "the box is
+        // inert on a rail"; removing one double-counts the alignment.
         if on_rail {
             Alignment::Start
         } else {
             parley_alignment(parts.paragraph.align, parts.paragraph.direction)
         },
         AlignmentOptions {
-            // Deliberately true: `false` start-aligns a line wider than its box, so a
-            // centred label that outgrew its frame jumps to the left edge.
+            // `false` start-aligns a line wider than its box: a centred label that outgrew its frame jumps left.
             align_when_overflowing: true,
         },
     );
@@ -2051,15 +1902,13 @@ fn family_axes_locked(engine: &mut Engine, family: &str) -> Vec<FontAxis> {
 
 /// The paragraph style in force in each paragraph of one text node.
 ///
-/// A paragraph is the text between hard breaks — what parley reports as
-/// [`BreakReason::Explicit`]. [`ParaSpans`] is keyed by byte range, and
-/// `BreakLines` does not hand back a line's `text_range` while breaking, so this
-/// table is built by scanning the text; [`break_lines`] and [`y_map`] then count
-/// `Explicit` breaks into it by paragraph index.
-/// `paragraph_starts_agree_with_parleys_hard_breaks` stops the two drifting.
+/// A paragraph is the text between hard breaks ([`BreakReason::Explicit`]). The
+/// table is built by scanning the text, since `BreakLines` does not hand back a
+/// line's `text_range`; `paragraph_starts_agree_with_parleys_hard_breaks` stops the
+/// two drifting.
 struct Paragraphs<'a> {
-    /// One resolved style per paragraph, or empty when nothing is overridden (the
-    /// ordinary case, kept allocation-free for the per-keystroke path).
+    /// One resolved style per paragraph, or empty when nothing is overridden
+    /// (allocation-free for the per-keystroke path).
     styles: Vec<ParagraphStyle>,
     default: &'a ParagraphStyle,
 }
@@ -2072,9 +1921,8 @@ impl<'a> Paragraphs<'a> {
             let last_byte = parts.content.len().saturating_sub(1);
             paragraph_starts(parts.content)
                 .into_iter()
-                // Clamped so a trailing hard break's empty paragraph (`"a\n"` has two,
-                // the second owning no bytes) inherits from the left; this is what
-                // makes Enter at a paragraph's end carry its indent on.
+                // Clamped so a trailing hard break's empty paragraph (no bytes of its
+                // own) inherits from the left: Enter at a paragraph's end carries its indent.
                 .map(|start| {
                     parts
                         .para_spans
@@ -2094,12 +1942,9 @@ impl<'a> Paragraphs<'a> {
     }
 
     /// Whether any paragraph asks for optical margin alignment — the gate on the
-    /// second break pass (§15 D830).
-    ///
-    /// The node default is asked separately because `styles` is empty when nothing
-    /// is overridden. The second clause is inert today (no `ParaAttr` reaches
-    /// `optical_margins`); `no_paragraph_attribute_reaches_optical_margins` makes
-    /// the day one does a compile error.
+    /// second break pass. The second clause is inert today;
+    /// `no_paragraph_attribute_reaches_optical_margins` makes the day it is not a
+    /// compile error.
     fn any_optical_margins(&self) -> bool {
         self.default.optical_margins || self.styles.iter().any(|s| s.optical_margins)
     }
@@ -2108,10 +1953,8 @@ impl<'a> Paragraphs<'a> {
 /// The byte each paragraph starts at, in content order. Never empty — an empty
 /// node is one empty paragraph.
 ///
-/// The break set is parley's: `\n`, `\r`, U+2028 and U+2029 become
-/// `Whitespace::Newline`, and a newline cluster raises `BreakReason::Explicit`.
-/// `\r\n` is two breaks with an empty paragraph between, because parley clusters
-/// the CR and LF separately (`paragraph_starts_agree_with_parleys_hard_breaks`).
+/// The break set is parley's: `\n`, `\r`, U+2028 and U+2029. `\r\n` is two breaks
+/// with an empty paragraph between, because parley clusters the CR and LF separately.
 fn paragraph_starts(text: &str) -> Vec<usize> {
     let mut starts = vec![0_usize];
     for (at, c) in text.char_indices() {
@@ -2123,17 +1966,14 @@ fn paragraph_starts(text: &str) -> Vec<usize> {
 }
 
 /// The byte range of every paragraph that `range` touches, snapped outward to
-/// hard breaks — what a paragraph-scoped write acts on.
-///
-/// A selection grows to whole paragraphs before it can key a [`ParaSpans`] entry,
-/// and a bare caret names one. `pub` so the panel and [`TextEdit`] share the
-/// hard-break set ([`paragraph_starts`]).
+/// hard breaks — what a paragraph-scoped write acts on. `pub` so the panel and
+/// [`TextEdit`] share the hard-break set.
 ///
 /// - A selection ending exactly on a boundary does not reach the paragraph after
-///   it; a bare caret in the same position does, hence the separate empty case.
+///   it; a bare caret in the same position does.
 /// - A paragraph with no bytes of its own (after a trailing newline) reaches back
 ///   over its own break, or [`crate::typography::Spans::set`] would no-op and the
-///   control would be dead. That byte is the one [`Paragraphs`] clamps its lookup to.
+///   control would be dead.
 pub fn paragraph_bounds(content: &str, range: Range<usize>) -> Range<usize> {
     let len = content.len();
     let starts = paragraph_starts(content);
@@ -2143,8 +1983,7 @@ pub fn paragraph_bounds(content: &str, range: Range<usize>) -> Range<usize> {
         .find(|s| **s <= range.start.min(len))
         .copied()
         .unwrap_or(0);
-    // The last byte the range covers: a caret covers none and belongs to its
-    // paragraph; a selection stops short of the byte at its end.
+    // The last byte covered: a caret covers none and belongs to its paragraph.
     let last = if range.is_empty() {
         range.start.min(len)
     } else {
@@ -2166,10 +2005,9 @@ pub fn paragraph_bounds(content: &str, range: Range<usize>) -> Range<usize> {
 
 /// Which paragraphs `range` touches, as indices into [`paragraph_starts`].
 ///
-/// [`paragraph_bounds`]' rule read in index space, for callers that write to
-/// paragraphs one at a time: an empty trailing paragraph shares its break byte with
-/// the paragraph above, so a loop intersecting byte ranges would touch both.
-/// `the_paragraphs_touched_are_the_ones_paragraph_bounds_spans` pins the agreement.
+/// [`paragraph_bounds`]' rule in index space: an empty trailing paragraph shares its
+/// break byte with the one above, so a loop intersecting byte ranges would touch
+/// both. `the_paragraphs_touched_are_the_ones_paragraph_bounds_spans` pins the agreement.
 fn paragraphs_touched(content: &str, range: Range<usize>) -> Range<usize> {
     let starts = paragraph_starts(content);
     let len = content.len();
@@ -2184,12 +2022,9 @@ fn paragraphs_touched(content: &str, range: Range<usize>) -> Range<usize> {
     index_of(range.start.min(len))..index_of(last) + 1
 }
 
-/// Where one line starts and how much measure it gets: `(line_x,
-/// line_max_advance)` in parley's terms, which become the line's
-/// `inline_min_coord` and `inline_max_coord`.
-///
-/// Per *line* rather than per paragraph because the first-line indent lands on
-/// one line of the paragraph and [`ParagraphStyle::hanging`] chooses which.
+/// Where one line starts and how much measure it gets: `(line_x, line_max_advance)`.
+/// Per *line* because the first-line indent lands on one line of the paragraph and
+/// [`ParagraphStyle::hanging`] chooses which.
 fn line_geometry(
     style: &ParagraphStyle,
     font_size: f64,
@@ -2206,26 +2041,17 @@ fn line_geometry(
         0.0
     };
     let x = (start + extra) as f32;
-    // The right edge stays at `max_advance - end` whatever the start edge does, so a
-    // negative first-line indent hangs into the margin; hence `break_lines` hands
-    // parley an infinite `layout_max_advance`. Clamped at zero for indents wider
-    // than the box.
+    // The right edge stays at `max_advance - end`, so a negative first-line indent
+    // hangs into the margin. Clamped at zero for indents wider than the box.
     let measure = (max_advance - end as f32 - x).max(0.0);
     (x, measure)
 }
 
-/// Each line's left and right side bearings, in layout px — the gap between where
-/// a line's ink starts and its advance origin, and the same at the far end
-/// (§15 D830).
+/// Each line's left and right side bearings, in layout px (§15 D830).
 ///
-/// Read off an already-broken layout, which is why optical margins cost a second
-/// break pass. A glyph with no ink contributes nothing: a line ending in a space
-/// would otherwise hang a whole advance past the measure. Blank lines give zero.
-///
-/// The font borrow never leaves the call that draws one glyph: a `RunFace`
-/// borrows its blob, and keeping one past the run would need a `transmute` to
-/// `'static`. Only runs and glyph positions are collected, and the walk outlines
-/// the first and last inked glyph per line, not every glyph (§15 D855).
+/// Read off an already-broken layout, hence the second break pass. A glyph with no
+/// ink contributes nothing: a line ending in a space would hang a whole advance past
+/// the measure. Blank lines give zero.
 fn optical_offsets(layout: &Layout<RunIndex>) -> Vec<(f32, f32)> {
     use skrifa::MetadataProvider as _;
     /// A glyph's ink extent at its own position, or `None` for an empty one.
@@ -2284,14 +2110,10 @@ fn optical_offsets(layout: &Layout<RunIndex>) -> Vec<(f32, f32)> {
 /// early at a line limit or a box height.
 ///
 /// Returns whether anything was left unplaced. Incremental rather than
-/// `break_all_lines`: a limit is honoured by asking for one line at a time and
-/// [`parley::BreakLines::revert`]ing the one that went too far, and per-paragraph
-/// geometry must be set before each `break_next`.
-///
-/// This loop is where hyphenation, widow/orphan control, tab stops and columns
-/// would live; they are declined on cost, not possibility (§15 D399, §15 D825,
-/// `roadmap.md` §0). Justify-all is different: it is blocked upstream by parley's
-/// `align_impl` skipping `BreakReason::None | Explicit`.
+/// `break_all_lines`: a limit is honoured by [`parley::BreakLines::revert`]ing the
+/// line that went too far, and per-paragraph geometry must be set before each
+/// `break_next`. Hyphenation, widow/orphan control, tab stops and columns would live
+/// here (declined on cost, §15 D399, §15 D825).
 fn break_lines(
     layout: &mut Layout<RunIndex>,
     paras: &Paragraphs<'_>,
@@ -2303,21 +2125,18 @@ fn break_lines(
 ) -> bool {
     let max_advance = wrap_width.map(|w| w as f32).unwrap_or(f32::MAX);
     let mut breaker = layout.break_lines();
-    // `INFINITY`, not the wrap width: `break_next` asserts
-    // `layout_max_advance == f32::INFINITY || line_max_advance - layout_max_advance < 1.0`,
-    // so a line wider than the box (an outdented first line) would panic.
+    // `INFINITY`, not the wrap width: `break_next` asserts the measure is within 1.0
+    // of it, so an outdented first line would panic.
     breaker.state_mut().set_layout_max_advance(f32::INFINITY);
     let mut lines = 0_u32;
     let mut truncated = false;
-    // The paragraph the line about to be broken belongs to, and whether it opens it.
     let mut paragraph = 0_usize;
     let mut first_line = true;
     loop {
         let (mut x, mut measure) =
             line_geometry(paras.style(paragraph), font_size, max_advance, first_line);
-        // Optical margin alignment (§15 D830): start the line a left bearing earlier
-        // and widen its measure by both bearings, so every alignment (start, end,
-        // centre, justify) puts the ink on the nominal edges without reading `align`.
+        // Optical margins: start the line a left bearing earlier and widen its
+        // measure by both bearings, so every alignment puts the ink on the nominal edges.
         if let Some(offs) = optical
             && paras.style(paragraph).optical_margins
             && let Some(&(lsb, rsb)) = offs.get(lines as usize)
@@ -2332,8 +2151,7 @@ fn break_lines(
         };
         let reason = match yielded {
             parley::YieldData::LineBreak(data) => data.reason,
-            // The other yields cannot arise (no `line_max_height`, no inline boxes);
-            // stopping is safe, since resuming would ask for the same line forever.
+            // Cannot arise (no `line_max_height`, no inline boxes); resuming would loop forever.
             _ => break,
         };
         lines += 1;
@@ -2348,8 +2166,6 @@ fn break_lines(
             truncated = !breaker.is_done();
             break;
         }
-        // The next line opens a paragraph exactly when this one ended at a hard
-        // break, the key `y_map` also uses.
         if reason == BreakReason::Explicit {
             paragraph += 1;
             first_line = true;
@@ -2364,14 +2180,12 @@ fn break_lines(
 /// The whole layout-y ↔ local-y translation: the paragraph-spacing table plus the
 /// constant shift box trim and vertical alignment ask for.
 ///
-/// Computed once and stored on the shaped layout, because the draw and hit-test
-/// boundaries both read it
+/// Stored on the shaped layout because the draw and hit-test boundaries both read it
 /// (`a_click_in_a_bottom_aligned_box_lands_on_the_line_under_the_pointer`).
 fn y_map(layout: &Layout<RunIndex>, parts: TextRef<'_>, paras: &Paragraphs<'_>) -> YMap {
     let mut breaks = Vec::new();
     let mut cumulative = 0.0;
-    // A running sum of line heights, not `block_min_coord`, which is the line's ink
-    // extent and would key each paragraph's shift a baseline early.
+    // A running sum of line heights, not `block_min_coord` (ink extent), which would key the shift early.
     let mut top = 0.0_f64;
     let mut previous_was_hard_break = false;
     let mut paragraph = 0_usize;
@@ -2397,8 +2211,7 @@ fn y_map(layout: &Layout<RunIndex>, parts: TextRef<'_>, paras: &Paragraphs<'_>) 
     let content_height = f64::from(layout.height()) + total_spacing;
     let visible_height = (content_height - trim_top - trim_bottom).max(0.0);
     let base = match *parts.sizing {
-        // An emergent box already is the visible extent and `TextLayout::origin`
-        // carries the inset, so trim moves no ink.
+        // `TextLayout::origin` carries the inset, so trim moves no ink.
         TextSizing::Auto | TextSizing::AutoHeight(_) => 0.0,
         TextSizing::Fixed(size) => vertical_shift(
             parts.block.vertical_align,
@@ -2414,19 +2227,16 @@ fn y_map(layout: &Layout<RunIndex>, parts: TextRef<'_>, paras: &Paragraphs<'_>) 
 struct NodeBox {
     origin: Vec2,
     size: Size,
-    /// The box before trim, always at the local origin.
-    ///
-    /// Equal to `size` exactly when trim did nothing: every untrimmed node and
-    /// every `Fixed` one, since `Fixed` is the box the user typed (§15 D78). The
-    /// canvas tests that equality before drawing the line box as a second outline.
+    /// The box before trim, always at the local origin. Equal to `size` exactly when
+    /// trim did nothing, including every `Fixed` box (§15 D78); the canvas tests
+    /// that equality before drawing a second outline.
     untrimmed: Size,
 }
 
 /// The node's box and its offset from the local origin.
 ///
 /// `natural_width` is the layout's width before optical margin alignment shifted
-/// any line (§15 D855): an auto-width box is sized by it, so the setting moves ink
-/// inside the box and never the box.
+/// any line: an auto-width box is sized by it, so the box never moves.
 fn box_of(
     layout: &Layout<RunIndex>,
     parts: TextRef<'_>,
@@ -2439,8 +2249,7 @@ fn box_of(
     let visible_height = (content_height - trim_top - trim_bottom).max(0.0);
 
     match *parts.sizing {
-        // An emergent box is the visible extent, so trimming tightens it around ink
-        // that does not move; the origin carries the top inset.
+        // Trimming tightens an emergent box around ink that does not move.
         TextSizing::Auto => NodeBox {
             origin: Vec2::new(0.0, trim_top),
             size: Size::new(content_width, visible_height),
@@ -2451,8 +2260,7 @@ fn box_of(
             size: Size::new(w, visible_height),
             untrimmed: Size::new(w, content_height),
         },
-        // An authored box: trim only changes the datum vertical alignment measures,
-        // so there is nothing untrimmed about it.
+        // Trim only changes the datum vertical alignment measures.
         TextSizing::Fixed(size) => NodeBox {
             origin: Vec2::ZERO,
             size,
@@ -2479,8 +2287,7 @@ fn vertical_shift(
 
 /// How far the trimmed box is inset from the top and bottom of the line box.
 ///
-/// Reads the first line's rise and the last line's drop only; interior leading is
-/// untouched.
+/// Reads the first line's rise and the last line's drop only.
 fn trim_insets(layout: &Layout<RunIndex>, trim: BoxTrim) -> (f64, f64) {
     if trim == BoxTrim::None {
         return (0.0, 0.0);
@@ -2519,11 +2326,10 @@ fn trim_insets(layout: &Layout<RunIndex>, trim: BoxTrim) -> (f64, f64) {
 
 /// One run of a text node as an exporter needs it: the characters and their style.
 ///
-/// It owns its substring because the characters are already case-transformed;
-/// slicing `content` would give the text as typed, not as drawn.
+/// It owns its substring because the characters are already case-transformed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExportRun {
-    /// The characters, already case-transformed exactly as the canvas drew them.
+    /// The characters, case-transformed as the canvas drew them.
     pub text: String,
     /// The style these characters carry.
     pub style: TextStyle,
@@ -2544,14 +2350,10 @@ pub struct ExportLine {
 /// A text node's content as the shaper broke it: one [`ExportLine`] per line, each
 /// carrying its runs.
 ///
-/// For the exporters, deliberately not on the render path: SVG needs one `<text>`
-/// per line with one `<tspan>` per run (§15 D81), which the cached [`TextLayout`]
-/// cannot give (glyph ids do not map back to characters), and widening it would
-/// cost a `String` per run on every relayout. Export is not a hot path (§5.9).
-///
-/// The runs intersect the style runs with `Line::text_range`; parley has no
-/// per-`GlyphRun` byte range. [`cased_text`] preserves byte length, so the cased
-/// text and `content` share one index space.
+/// For the exporters, not the render path: SVG needs one `<text>` per line with one
+/// `<tspan>` per run (§15 D81), which the cached [`TextLayout`] cannot give (glyph
+/// ids do not map back to characters). [`cased_text`] preserves byte length, so the
+/// cased text and `content` share one index space.
 pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
     let shaped = shape(parts);
     // Recomputed rather than carried in `Shaped`, keeping the allocation off the cached path.
@@ -2569,9 +2371,8 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
     let mut first_line = true;
     let mut lines: Vec<ExportLine> = Vec::new();
     for (index, line) in shaped.layout.lines().enumerate() {
-        // A marker is a line of its own: tspans flow, so a marker inside the line
-        // would sit against the first word. Its x is the left edge, as `<text x>`
-        // means (`ListMarkers::at` gives the right edge).
+        // A marker is a line of its own: tspans flow, so one inside the line would
+        // sit against the first word. Its x is the left edge (`ListMarkers::at` gives the right).
         if let Some(markers) = markers.as_ref().filter(|_| first_line)
             && let Some((text, style, right)) = markers.at(paragraph)
         {
@@ -2628,10 +2429,8 @@ pub fn export_lines(parts: TextRef<'_>) -> Vec<ExportLine> {
             runs,
         });
     }
-    // The truncation ellipsis (§15 D506), appended to the last line's runs rather
-    // than placed: tspans flow, so no `x` or wrap-width clamp is needed. Its style is
-    // the one at the last visible byte, as in `extract`; `rev().find(start < end)`
-    // because that byte can fall in a gap between spans.
+    // The truncation ellipsis is appended to the last line's runs, not placed: tspans
+    // flow. Its style is the one at the last visible byte, as in `extract`.
     if shaped.truncated
         && parts.block.overflow == TextOverflow::Ellipsis
         && let Some(last) = lines.last_mut()
@@ -2668,15 +2467,12 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
     let mut last_line_end: Option<(f64, f64, usize)> = None;
     // Where the last line's ink starts in `runs` and `decorations`, and how far left
     // it reaches: the ellipsis makes room by moving that line (§15 D610).
-    // `usize::MAX` means no last line yet.
     let mut last_line_from = (usize::MAX, usize::MAX, f64::INFINITY);
-    // The first run's decoration metrics (`TextLayout::decoration_sizes`), taken here
-    // because the `decoration_ink` calls below run only for decorations that exist.
+    // Taken here because the `decoration_ink` calls below run only for decorations that exist.
     let mut decoration_sizes: Option<(f64, f64)> = None;
 
-    // List markers ride this walk: a marker goes on its paragraph's first line, and
-    // a third counter of `BreakReason::Explicit` would be a third thing to keep in
-    // agreement (§15 D163). Shaping happens afterwards, once the engine borrow is over.
+    // List markers ride this walk (a third `Explicit` counter would be a third thing
+    // to keep in agreement, §15 D163); shaping happens afterwards.
     let markers = ListMarkers::of(parts);
     let mut paragraph_heads: Vec<(usize, f64)> = Vec::new();
     let mut paragraph = 0_usize;
@@ -2685,8 +2481,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
     let line_count = shaped.layout.len();
     let mut baselines: Vec<f64> = Vec::with_capacity(line_count);
     for (index, line) in shaped.layout.lines().enumerate() {
-        // Every line's baseline (§15 D355): markers want one per paragraph, snap
-        // targets one per line. A baseline is the one y `to_local` may be handed (§15 D166).
+        // A baseline is the one y `to_local` may be handed (§15 D166).
         let baseline = ymap.to_local(f64::from(line.metrics().baseline));
         baselines.push(baseline);
         if markers.is_some() && first_line {
@@ -2714,8 +2509,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
                 let m = run.metrics();
                 (f64::from(m.underline_size), f64::from(m.strikethrough_size))
             });
-            // The brush is the style-run index; `DEFAULT_RUN` is out of range on
-            // purpose, so an inheriting run resolves to the defaults.
+            // `DEFAULT_RUN` is out of range on purpose: it resolves to the defaults.
             let style = shaped
                 .runs
                 .get(glyph_run.style().brush as usize)
@@ -2747,8 +2541,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
                 x1,
                 style.color,
             ) {
-                // The skip-ink toggle is applied by not listing the band: `skip_ink`
-                // gets only the skipping bands' indices (§15 D357).
+                // Skip-ink off means not listing the band (§15 D357).
                 if style.underline.as_ref().is_some_and(|d| d.skip_ink) {
                     underlines.push(decorations.len());
                 }
@@ -2767,9 +2560,9 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
                 decorations.push(ink);
             }
             if index + 1 == line_count {
-                // The third field is the last visible byte, which tells the ellipsis
-                // whose type it is set in (§15 D490). `line.text_range()`, not
-                // `run.text_range()`: a parley run spans every line it was broken over.
+                // The third field is the last visible byte, which says whose type the
+                // ellipsis is set in. `line.text_range()`, not `run.text_range()`: a
+                // parley run spans every line it was broken over.
                 last_line_end = Some((x1, baseline, line.text_range().end));
                 last_line_from.2 = last_line_from.2.min(x0);
             }
@@ -2783,8 +2576,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
         }
     }
 
-    // The end of the last line's ink, taken before the markers are appended: a marker
-    // does not follow alignment ([`marker_run`]), so the ellipsis shift must not move one.
+    // Taken before the markers are appended: the ellipsis shift must not move one.
     let last_line_to = runs.len();
 
     if let Some(markers) = &markers {
@@ -2802,10 +2594,9 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
         && parts.block.overflow == TextOverflow::Ellipsis
         && let Some((x, baseline, visible_end)) = last_line_end
     {
-        // The style at the last drawn byte, not at the end of the content (§15
-        // D490): a span in the invisible tail must not restyle the ellipsis.
-        // `rev().find(start < visible_end)` rather than containment, since that byte
-        // can fall in a gap between spans.
+        // The style at the last drawn byte (§15 D490): a span in the invisible tail
+        // must not restyle the ellipsis. Not containment: that byte can fall in a gap
+        // between spans.
         let style = shaped
             .runs
             .iter()
@@ -2813,17 +2604,14 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
             .find(|(r, _)| r.start < visible_end)
             .map(|(_, s)| s.clone())
             .unwrap_or_else(|| parts.style.clone());
-        // The line makes room for the ellipsis (§15 D610): clamping the glyph's x
-        // alone pushed the `…` back over the last characters under `Center` and
-        // `End`, where the line already reaches the box edge. Shifting the whole last
-        // line left, as a browser does, drops no visible text and is right for bidi.
-        // `Start` ends short of the box, so `over` is negative and nothing moves.
-        // Not fixed: the ellipsis goes at the right edge even for an RTL line.
+        // The line makes room for the ellipsis (§15 D610): clamping the glyph's x alone
+        // pushed the `…` over the last characters under `Center` and `End`. `Start`
+        // ends short of the box, so nothing moves. The ellipsis goes at the right
+        // edge even for an RTL line (not fixed).
         let mut at = x;
         if let Some(w) = parts.sizing.wrap_width() {
             let advance = marker_advance(&style, ELLIPSIS);
-            // Never past the line's own left edge: a box narrower than the ellipsis
-            // would drag the ink out of the node.
+            // Never past the line's own left edge, or a narrow box drags the ink out of the node.
             let over = (x + advance - w).min(last_line_from.2).max(0.0);
             if over > 0.0 {
                 let (from_run, from_decor, _) = last_line_from;
@@ -2832,8 +2620,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
                         g.x -= over as f32;
                     }
                 }
-                // The bands move and their `gaps` need not, because `skip_ink` runs
-                // below this block; moving it above would leave the gaps stale by `over`.
+                // `skip_ink` runs below this block; above it the gaps would be stale by `over`.
                 for ink in &mut decorations[from_decor..] {
                     let b = ink.band;
                     ink.band = Rect::new(b.x0 - over, b.y0, b.x1 - over, b.y1);
@@ -2846,8 +2633,7 @@ fn extract(shaped: &Shaped, parts: TextRef<'_>) -> TextLayout {
         }
     }
 
-    // After the markers and the ellipsis, which are ink too (a band clamps its gaps
-    // to its own `x` range anyway).
+    // After the markers and the ellipsis, which are ink too.
     skip_ink(&runs, &mut decorations, &underlines);
 
     let mut out = TextLayout {
@@ -2892,11 +2678,8 @@ fn justify_shift(line: &parley::Line<'_, RunIndex>, j: JustifyLast) -> f64 {
 
 /// One decoration band, or `None` where the run carries no decoration.
 ///
-/// `parley` supplies the geometry (offset and size, already folding in font metrics
-/// and our overrides); our own attribute supplies the line style and colour.
-///
-/// Colour resolves here in three levels: the decoration's own, else `run_color`
-/// (the run's ink), else `None` for the node's fill stack.
+/// `parley` supplies the geometry; our own attribute supplies the line style and
+/// colour: the decoration's own, else `run_color`, else `None` for the fill stack.
 #[allow(clippy::too_many_arguments)]
 fn decoration_ink(
     resolved: Option<&parley::Decoration<RunIndex>>,
@@ -2910,8 +2693,7 @@ fn decoration_ink(
 ) -> Option<DecorationInk> {
     let resolved = resolved?;
     let ours = ours?;
-    // Offsets are measured from the baseline upwards (parley's convention), so an
-    // underline's offset is negative and the band's top is `baseline - offset`.
+    // Offsets are measured from the baseline upwards (parley's convention).
     let offset = f64::from(resolved.offset.unwrap_or(metric_offset));
     let size = f64::from(resolved.size.unwrap_or(metric_size)).max(0.0);
     let top = baseline - offset;
@@ -2925,8 +2707,7 @@ fn decoration_ink(
 }
 
 /// The clearance a broken band leaves either side of the ink it steps around, as a
-/// multiple of the band's thickness (see [`skip_ink`]). A multiple rather than a
-/// length so it holds at every zoom and type size.
+/// multiple of the band's thickness (see [`skip_ink`]).
 const SKIP_CLEARANCE: f64 = 1.0;
 
 /// How short a fragment of rule has to be to count as dirt rather than underline,
@@ -2935,21 +2716,18 @@ const SKIP_SPECK: f64 = 0.5;
 
 /// Flattening tolerance for the glyph outlines [`skip_ink`] measures, in
 /// text-local units. Coarser than the render boundary's `TOLERANCE`: the result is
-/// an x-interval widened by a thickness each side, and flattening is the part whose
-/// cost scales with glyph count.
+/// an x-interval widened by a thickness each side.
 const SKIP_TOLERANCE: f64 = 0.125;
 
 /// Break each underline band around the glyph ink it would otherwise cross, like
 /// CSS `text-decoration-skip-ink: auto`. Underlines only: [`extract`] passes the
-/// indices of the bands that skip, so a line-through or a run with
-/// `Decoration::skip_ink` off keeps empty [`DecorationInk::gaps`]. The gaps are
-/// x-intervals cached in the layout, since the render boundary builds the line
-/// styles and a boolean subtract there would run uncached on the frame path.
+/// indices of the bands that skip. The gaps are x-intervals cached in the layout, so
+/// no boolean subtract runs uncached on the frame path.
 fn skip_ink(runs: &[GlyphRun], decorations: &mut [DecorationInk], underlines: &[usize]) {
     if underlines.is_empty() {
         return;
     }
-    // The union of the bands' vertical reach, so a whole run can be rejected without outlining it.
+    // The bands' vertical reach, so a whole run can be rejected without outlining it.
     let mut reach = (f64::INFINITY, f64::NEG_INFINITY);
     for &i in underlines {
         let (top, bottom) = ink_extent(&decorations[i]);
@@ -2957,8 +2735,7 @@ fn skip_ink(runs: &[GlyphRun], decorations: &mut [DecorationInk], underlines: &[
     }
 
     // The distinct glyph inks, and one entry per drawn glyph pointing into them.
-    // `sigs` is the (face, instance, size) per run, found by linear scan; an index
-    // keeps the memo key exact, where a hash could collide.
+    // `sigs` is the (face, instance, size) per run; an index keeps the memo key exact.
     let mut inks: Vec<GlyphInk> = Vec::new();
     let mut sigs: Vec<(*const u8, u32, u32, &[i16])> = Vec::new();
     let mut memo: rustc_hash::FxHashMap<(usize, u32), usize> = Default::default();
@@ -2968,8 +2745,7 @@ fn skip_ink(runs: &[GlyphRun], decorations: &mut [DecorationInk], underlines: &[
         let Some(first) = run.glyphs.first() else {
             continue;
         };
-        // A glyph's ink stays within two ems of its baseline in any face worth shaping
-        // with, so this rejects lines no band can touch; a face past that loses a gap.
+        // Ink stays within two ems of the baseline in any sane face; past that a gap is lost.
         let span = f64::from(run.font_size) * 2.0;
         let y = f64::from(first.y);
         if y + span <= reach.0 || y - span >= reach.1 {
@@ -3045,8 +2821,7 @@ impl GlyphInk {
 }
 
 /// The skrifa side of one [`GlyphRun`] — the face, instance and size, resolved once
-/// per run, since a `DrawSettings` is consumed per glyph. Shared by
-/// [`append_run_outline`] and [`skip_ink`], which differ in pen position.
+/// per run. Shared by [`append_run_outline`] and [`skip_ink`].
 struct RunFace<'a> {
     glyphs: skrifa::outline::OutlineGlyphCollection<'a>,
     coords: Vec<skrifa::instance::NormalizedCoord>,
@@ -3059,8 +2834,7 @@ impl<'a> RunFace<'a> {
         let font = skrifa::FontRef::from_index(run.font.data.as_ref(), run.font.index).ok()?;
         Some(Self {
             glyphs: font.outline_glyphs(),
-            // The instance parley shaped with: `coords` is already normalized F2Dot14
-            // bits, so this is a re-wrap, not a conversion.
+            // Already normalized F2Dot14 bits: a re-wrap, not a conversion.
             coords: run
                 .coords
                 .iter()
@@ -3102,12 +2876,8 @@ impl<'a> RunFace<'a> {
 }
 
 /// The band's true vertical extent — what the render boundary paints: the band
-/// itself for three styles and taller for the fourth.
-///
-/// A wavy ribbon is three thicknesses tall: `scene::wave` swings one thickness
-/// either side of the middle with half a thickness of stroke, so its ink reaches
-/// `1.5t` from the centre. This is the one number core borrows from the render
-/// boundary;
+/// itself, except a wavy ribbon, whose ink reaches `1.5t` from the centre. The one
+/// number core borrows from the render boundary;
 /// `scene::tests::a_wavy_ribbon_stays_inside_the_reach_core_assumes` pins the pair.
 fn ink_extent(ink: &DecorationInk) -> (f64, f64) {
     let t = ink.band.height();
@@ -3122,9 +2892,8 @@ fn ink_extent(ink: &DecorationInk) -> (f64, f64) {
 
 /// Every flattened edge of `path` as `[x0, y0, x1, y1]`, appended to `out`.
 ///
-/// The closing edge is emitted by hand: `kurbo::flatten` passes `ClosePath`
-/// through, so the segment back to the subpath's start never arrives as a `LineTo`,
-/// and in a glyph that is often a stem's flat side.
+/// The closing edge is emitted by hand: `kurbo::flatten` passes `ClosePath` through,
+/// and in a glyph that edge is often a stem's flat side.
 fn flatten_edges(path: &BezPath, out: &mut Vec<[f64; 4]>) {
     let mut start = Point::ZERO;
     let mut last = Point::ZERO;
@@ -3147,12 +2916,10 @@ fn flatten_edges(path: &BezPath, out: &mut Vec<[f64; 4]>) {
 }
 
 /// Where the band is interrupted, clearance included, so `scene::kept_spans` is a
-/// plain complement. Structure is decided first with no clearance (ink crossings,
-/// then [`absorb_specks`]), and only then does [`give_air`] widen gaps, because
-/// widening first makes the drawing pop between shapes at some size. A band with no
-/// qualifying fragment keeps its widest one. Clearance is horizontal only: vertical
-/// padding would spend the air above round letters' overshoot and break the rule
-/// under every `o`.
+/// plain complement. Structure is decided first with no clearance, and only then
+/// does [`give_air`] widen gaps, or the drawing pops at some size. A band with no
+/// qualifying fragment keeps its widest. Clearance is horizontal only: vertical
+/// padding would break the rule under every `o`.
 fn crossings(
     inks: &[GlyphInk],
     placed: &[(usize, f64, f64)],
@@ -3162,12 +2929,10 @@ fn crossings(
     if t <= 0.0 || ink.band.width() <= 0.0 {
         return Vec::new();
     }
-    // The structure first, without clearance, so no bar's existence depends on its air.
     let (bare, letters) = raw_crossings(inks, placed, ink, 0.0);
     let structure = absorb_specks(&bare, ink.band, t, &letters);
     if fragments(&structure, ink.band).is_empty() {
-        // Nothing left is a rule: keep the widest raw fragment, or nothing if the
-        // ink covers the band end to end.
+        // Keep the widest raw fragment, or nothing if the ink covers the band end to end.
         return match fragments(&bare, ink.band)
             .into_iter()
             .max_by(|a, b| (a.1 - a.0).total_cmp(&(b.1 - b.0)))
@@ -3176,23 +2941,19 @@ fn crossings(
             None => bare,
         };
     }
-    // Then the air, which can only narrow a bar, not past a square of ink.
     give_air(&structure, ink.band, t * SKIP_CLEARANCE, t)
 }
 
 /// Grow every gap by up to `clear` on each side, taking only what the bar it eats
 /// into can spare above `floor`.
 ///
-/// Deciding the structure first and giving air second makes the drawing continuous:
-/// a marginal bar stops getting air instead of ceasing to exist. A bar with two gaps
-/// beside it gives each at most half of its spare; a bar against the band's edge
-/// has one gap and spends it all there. An ordinary bar spares far more than
-/// `2 · clear`, so ordinary copy gets full clearance.
+/// Air second makes the drawing continuous: a marginal bar stops getting air instead
+/// of ceasing to exist. A bar with two gaps beside it gives each at most half of its
+/// spare; a bar against the band's edge spends it all on its one gap.
 fn give_air(gaps: &[(f64, f64)], band: Rect, clear: f64, floor: f64) -> Vec<(f64, f64)> {
     if clear <= 0.0 || gaps.is_empty() {
         return gaps.to_vec();
     }
-    // The band as alternating bars and gaps, so each gap can see its neighbours.
     let mut segs: Vec<(bool, f64, f64)> = Vec::with_capacity(gaps.len() * 2 + 1);
     let mut x = band.x0;
     for &(a, b) in gaps {
@@ -3205,7 +2966,6 @@ fn give_air(gaps: &[(f64, f64)], band: Rect, clear: f64, floor: f64) -> Vec<(f64
     if x < band.x1 {
         segs.push((false, x, band.x1));
     }
-    // What each bar can give up, per gap beside it.
     let eat: Vec<f64> = segs
         .iter()
         .map(|&(is_gap, a, b)| {
@@ -3245,16 +3005,13 @@ fn widened(x0: f64, x1: f64, band: Rect, clear: f64) -> Option<(f64, f64)> {
 /// The clearance-widened, merged x-spans of `ink`'s band that glyph ink crosses,
 /// and the placed x-box of every letter that contributed one.
 ///
-/// [`crossings`] calls this with and without clearance. The boxes tell a fragment
-/// of rule showing through a hole inside a letter from one in the bearing beside it
-/// ([`absorb_specks`]).
+/// The boxes tell a fragment of rule showing through a hole inside a letter from one
+/// in the bearing beside it ([`absorb_specks`]).
 ///
-/// Two measurements are combined. Three scanlines give the filled ink (pairs of
-/// crossings, so the span between a stem's two sides is covered), and every edge's
-/// own x-extent inside the band is added to catch thin features that slip between
-/// the rows. Edge extents alone are wrong: a vertical edge has zero x-extent, so a
-/// stem's interior was only covered by clearance dilation, and a stem wider than
-/// `2 · clear` would be struck through (`tests::a_bold_stem_is_one_gap_and_not_two`).
+/// Three scanlines give the filled ink and every edge's x-extent catches thin
+/// features between the rows. Edge extents alone are wrong: a vertical edge has zero
+/// x-extent, so a stem wider than `2 · clear` would be struck through
+/// (`tests::a_bold_stem_is_one_gap_and_not_two`).
 fn raw_crossings(
     inks: &[GlyphInk],
     placed: &[(usize, f64, f64)],
@@ -3268,14 +3025,12 @@ fn raw_crossings(
     let mut hits: Vec<f64> = Vec::new();
     for &(i, dx, dy) in placed {
         let glyph = &inks[i];
-        // Reject the whole glyph on its box, in placed space, before reading any edge.
         let (gx0, gy0) = (glyph.bounds.x0 + dx, glyph.bounds.y0 + dy);
         let (gx1, gy1) = (glyph.bounds.x1 + dx, glyph.bounds.y1 + dy);
         if gy1 <= top || gy0 >= bottom || gx1 + clear <= band.x0 || gx0 - clear >= band.x1 {
             continue;
         }
         let before = spans.len();
-        // The filled ink, three scanlines of it.
         for row in [top, (top + bottom) * 0.5, bottom] {
             hits.clear();
             for &[ex, ey, fx, fy] in &glyph.edges {
@@ -3300,8 +3055,7 @@ fn raw_crossings(
             if ymax <= top || ymin >= bottom {
                 continue;
             }
-            // The x extent of the part of this edge inside the band's rows; the clamp
-            // keeps an edge wholly inside them to its own endpoints.
+            // The x extent of the part of this edge inside the band's rows.
             let (x0, x1) = if (by - ay).abs() <= f64::EPSILON {
                 (ax.min(bx), ax.max(bx))
             } else {
@@ -3366,16 +3120,13 @@ fn complement(keep: &[(f64, f64)], band: Rect) -> Vec<(f64, f64)> {
 /// `gaps`, grown to swallow every fragment of rule that is not a rule:
 ///
 /// 1. A fragment inside one letter's ink box is a hole in the letter (the band
-///    showing through a `g`'s loop), whatever its width. `letters` is the box of
-///    every glyph that broke this band.
+///    showing through a `g`'s loop), whatever its width.
 /// 2. A fragment shorter than [`SKIP_SPECK`] of the band's thickness is too short to
 ///    read, such as what a clamp leaves when a word opens with a descender.
 ///
-/// Absorbing a fragment is merging the gaps on both sides of it. The share is a
-/// half because the commonest real bearing (an underlined `g` in Inter) sits at
-/// 1.02 to 1.06 thicknesses, so a whole thickness flipped it in and out; real
-/// bearings run `0.75t` to `1.23t` and dirt sits at `0.07t` to `0.19t`. No threshold
-/// stops the pop by itself; applying this before clearance does (see [`give_air`]).
+/// The share is a half because real bearings run `0.75t` to `1.23t` and dirt sits at
+/// `0.07t` to `0.19t`; a whole thickness flipped an underlined Inter `g` in and out.
+/// Applying this before clearance is what stops the pop (see [`give_air`]).
 fn absorb_specks(
     gaps: &[(f64, f64)],
     band: Rect,
@@ -3390,10 +3141,8 @@ fn absorb_specks(
 
 /// The list markers a text node draws, answered per paragraph.
 ///
-/// Built once and asked by paragraph index, because two passes walk these lines:
-/// `extract` makes a [`GlyphRun`], `export_lines` an [`ExportLine`] of its own (SVG
-/// needs a separate `<text>`, §15 D81). One decision here keeps them agreeing on
-/// which paragraph is an item, its number and its gutter.
+/// Two passes walk these lines (`extract`, `export_lines`, §15 D81); one decision
+/// here keeps them agreeing on which paragraph is an item, its number and gutter.
 struct ListMarkers<'a> {
     parts: TextRef<'a>,
     paras: Paragraphs<'a>,
@@ -3429,23 +3178,17 @@ impl<'a> ListMarkers<'a> {
     /// What each paragraph's marker draws, or `None` where it has no marker.
     ///
     /// Consecutive paragraphs belong to one list only if they ask for the same marker
-    /// at the same level; a paragraph with no marker, or a different one, ends the
-    /// run. Each run counts from one, so a bullet between two numbered items makes
-    /// three lists. Unordered markers are counted too and ignore the number.
-    ///
+    /// at the same level; anything else ends the run, and each run counts from one.
     /// One counter per open level ([`ParagraphStyle::level`]); going back out
-    /// truncates the deeper ones, so `1, (a, b), 2, (a, b)` restarts each sublist
-    /// while the outer run counts through.
+    /// truncates the deeper ones, so `1, (a, b), 2, (a, b)` restarts each sublist.
     fn ordinals(paras: &Paragraphs<'_>, count: usize) -> Vec<Option<(ListMarker, usize)>> {
         let mut out = Vec::with_capacity(count);
-        // The marker each open level is counting, and its count. `None` is a level
-        // skipped on the way in, which must not lend a count to a later item.
+        // `None` is a level skipped on the way in, which must not lend a count to a later item.
         let mut open: Vec<Option<(ListMarker, usize)>> = Vec::new();
         for index in 0..count {
             let style = paras.style(index);
             let Some(marker) = style.marker else {
-                // A paragraph that is not an item ends every list at every level (a
-                // limitation stated in `ParagraphStyle::level`).
+                // A non-item ends every list at every level (see `ParagraphStyle::level`).
                 open.clear();
                 out.push(None);
                 continue;
@@ -3470,13 +3213,11 @@ impl<'a> ListMarkers<'a> {
     /// in, and the x its right edge lands on.
     fn at(&self, index: usize) -> Option<(String, TextStyle, f64)> {
         let (marker, n) = self.ordinals.get(index).copied().flatten()?;
-        // The item's own type, resolved at its first byte, so restyling an item takes
-        // its marker along. Clamped like `Paragraphs::new` for a trailing empty paragraph.
+        // Resolved at the item's first byte, so restyling an item takes its marker along.
         let last_byte = self.parts.content.len().saturating_sub(1);
         let start = self.starts.get(index).copied().unwrap_or(0).min(last_byte);
         let style = self.parts.spans.resolve(self.parts.style, start);
-        // The gutter is the paragraph's start edge, resolved against the node's font
-        // size as `line_geometry` does; the item's own size would split the gutters.
+        // Against the node's font size, as `line_geometry` does; the item's own would split the gutters.
         let right = self
             .paras
             .style(index)
@@ -3511,11 +3252,9 @@ fn marker_advance(style: &TextStyle, text: &str) -> f64 {
 
 /// A shaped list marker, right-aligned so its right edge lands on `right`.
 ///
-/// Right-aligned so `1.` and `10.` start their text in the same column (see
-/// [`ParagraphStyle::marker`]). There is no gap constant: the sidebearings are the
-/// gap and the user sizes the gutter with `indent_start`. The marker is pinned to
-/// the block indent and follows neither the paragraph's alignment nor its
-/// first-line indent, so a hanging indent and a marker do not fight over one edge.
+/// Right-aligned so `1.` and `10.` start their text in the same column. No gap
+/// constant: the user sizes the gutter with `indent_start`. The marker follows
+/// neither the paragraph's alignment nor its first-line indent.
 fn marker_run(style: &TextStyle, text: &str, right: f64, baseline: f64) -> Option<GlyphRun> {
     let spans = CharSpans::default();
     let para_spans = ParaSpans::default();
@@ -3547,15 +3286,13 @@ fn marker_run(style: &TextStyle, text: &str, right: f64, baseline: f64) -> Optio
     Some(run)
 }
 
-/// The truncation mark, named once because `extract` measures it with
-/// [`marker_advance`] and [`ellipsis_run`] shapes it; two spellings would open a gap
-/// silently (§15 D610).
+/// The truncation mark, named once because `extract` measures it and
+/// [`ellipsis_run`] shapes it; two spellings would open a gap silently.
 const ELLIPSIS: &str = "…";
 
 /// A shaped `…` placed at `at`, the end of a truncated line.
 ///
-/// Shaped on its own so it never enters the byte space of the caret and spans. The
-/// caller decides where it goes and makes room by moving the line (§15 D610).
+/// Shaped on its own so it never enters the byte space of the caret and spans.
 fn ellipsis_run(style: &TextStyle, at: f64, baseline: f64) -> Option<GlyphRun> {
     let parts_style = style.clone();
     let spans = CharSpans::default();
@@ -3633,15 +3370,10 @@ thread_local! {
     static SHAPES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// How many text layouts this thread has shaped since it started. Never
-/// decreases (§15 D590).
+/// How many text layouts this thread has shaped since it started. Never decreases.
 ///
-/// Counted in `shape`, not [`layout`]: `TextEdit::reshape` shapes without going
-/// through `layout`. This is how a test asserts that a commit did no shaping it had
-/// no reason to (§15 D590); read it either side of the commit.
-///
-/// A count rather than a flag, so brackets nest, and thread-local like the engine
-/// (see [`crate::boolean::failures`]). Cheap enough for release builds.
+/// Counted in `shape`, not [`layout`], which `TextEdit::reshape` bypasses. A test
+/// reads it either side of a commit to assert no needless shaping (§15 D590).
 pub fn shapes() -> u64 {
     SHAPES.with(std::cell::Cell::get)
 }
@@ -3655,23 +3387,15 @@ pub fn measure(parts: TextRef<'_>) -> Rect {
 /// The narrowest and the widest a text node's lines can be laid out — CSS's
 /// **min-content** width (every soft break taken: the widest word) and
 /// **max-content** width (none taken) — for container layout's measure (§15 D872).
+/// Shaped through the same seam as [`layout`], so [`shapes`] counts it.
 ///
-/// A flex container asks each item for its min-content width, and a box such as
-/// `AutoHeight(1)` cannot answer with the widest word (§15 D872). parley computes
-/// both from the shaped layout, through the same seam as [`layout`], so [`shapes`]
-/// counts it.
-///
-/// Plus the paragraph's own edges (§15 D931): the start edge
-/// ([`ParagraphStyle::start_edge`]), a positive first-line or hanging indent and the
-/// end indent, the widest such sum over the paragraphs. parley knows none of them,
-/// since this module places every line ([`line_geometry`]); without them a
-/// bulleted item shrunk to min-content drew over its neighbour. The sum is never
-/// narrower than the truth, and wider only when the widest word and the widest
-/// edges are in different paragraphs.
+/// Plus the paragraph's own edges (§15 D931): start edge, a positive first-line or
+/// hanging indent and the end indent, the widest sum over the paragraphs. parley
+/// knows none of them ([`line_geometry`] places every line); without them a
+/// bulleted item at min-content drew over its neighbour.
 pub fn content_widths(parts: TextRef<'_>) -> (f64, f64) {
     let shaped = shape(parts);
-    // Whitespace-only text: parley counts the spaces, while the auto box is
-    // `layout.width()`, which leaves trailing whitespace out. The box is the truth.
+    // Whitespace-only: parley counts the spaces, the auto box (`layout.width()`) does not.
     if parts.content.trim().is_empty() {
         let w = f64::from(shaped.layout.width());
         return (w, w);
@@ -3692,8 +3416,7 @@ pub fn content_widths(parts: TextRef<'_>) -> (f64, f64) {
 
 /// A family name shaped in the family it names — one row of the font picker.
 ///
-/// Positions are in strip-local space: `x` along the run from 0, `baseline` down
-/// from the top of the line box.
+/// Positions are strip-local: `x` from 0, `baseline` down from the line box top.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FamilyPreview {
     pub run: GlyphRun,
@@ -3707,17 +3430,10 @@ pub struct FamilyPreview {
 /// Shape `label` in `family` for a picker row, or `None` when the result would
 /// not be a truthful preview of that family.
 ///
-/// All-or-nothing, since a row that silently falls back to Inter misrepresents the
-/// font being chosen. It declines when:
-///
-/// - the family has no registered faces yet;
-/// - the name needed more than one face, or was drawn by a blob that is not this
-///   family's (parley's fallback);
-/// - a glyph came back as `.notdef`, as an icon font does with a Latin name.
-///
-/// The caller then draws the name in the UI font.
+/// All-or-nothing, since a silent fallback to Inter misrepresents the font. It
+/// declines when the family has no faces, the name needed another face or blob, or
+/// a glyph came back `.notdef`; the caller then draws the name in the UI font.
 pub fn family_preview(family: &str, label: &str, size: f64) -> Option<FamilyPreview> {
-    // The blob this family's default face is made of, taken before shaping so the borrow is over.
     let expected = ENGINE.with(|engine| {
         let engine = &mut *engine.borrow_mut();
         let id = engine.font_cx.collection.family_id(family)?;
@@ -3761,13 +3477,9 @@ pub fn family_preview(family: &str, label: &str, size: f64) -> Option<FamilyPrev
 /// An in-progress text-editing session: content plus a caret/selection over the
 /// shaped layout, driven entirely by byte indices and text-local points.
 ///
-/// The model behind in-canvas text editing (§9.3). It lives in core because
-/// shaping, cluster boundaries and bidi caret movement are parley's. The app owns
-/// when a session starts and ends and commits one transaction; this type owns the
-/// text in between and never touches the `Document`.
-///
-/// Coordinates are text-local (y down), matching [`Glyph`], and every point goes
-/// through the session's [`YMap`] so a click lands on the character the eye sees.
+/// The model behind in-canvas text editing (§9.3). The app owns when a session
+/// starts and ends; this type owns the text in between and never touches the
+/// `Document`. Every point goes through the session's [`YMap`].
 pub struct TextEdit {
     content: String,
     style: TextStyle,
@@ -3776,22 +3488,18 @@ pub struct TextEdit {
     paragraph: ParagraphStyle,
     block: BlockStyle,
     sizing: TextSizing,
-    /// The rail, carried for the whole session: the caret, selection highlight and
-    /// hit test are measured against the layout it produces, so a session on bent
-    /// type must shape bent.
+    /// The rail, carried for the whole session: the caret and hit test are measured
+    /// against the layout it produces, so a session on bent type must shape bent.
     on_path: Option<BezPath>,
     /// Which way round the rail runs.
     on_path_flip: bool,
     /// Where along the rail the type starts.
     on_path_offset: f64,
     shaped: Shaped,
-    /// The bend, rebuilt beside [`Self::shaped`] (§15 D407).
+    /// The bend, rebuilt beside [`Self::shaped`].
     ///
-    /// Cached because this type never builds a `TextLayout`: the caret, selection
-    /// quads and pointer questions ([`Self::to_layout`]) are computed against
-    /// parley's flat layout and need the warp to map in and out of the bent space.
-    /// `TextLayout::warp` is the wrong source: it needs `extract`, which allocates
-    /// every glyph run, and a caret is asked for every blink frame.
+    /// Cached because `TextLayout::warp` would need `extract`, which allocates every
+    /// glyph run, on every blink frame.
     warp: Option<PathWarp>,
     selection: Selection,
     /// Attributes set on an empty caret, waiting for the next character typed.
@@ -3799,8 +3507,7 @@ pub struct TextEdit {
     pending: Vec<crate::typography::CharAttr>,
     /// The x a vertical move aims at, in parley's layout space and corrected as
     /// [`Self::caret_rect`] corrects it, kept across consecutive Up/Downs so a short
-    /// line does not pull the caret in. parley's own `Selection::h_pos` is private
-    /// and seeded in a frame that omits the start edge (see [`Self::move_line`]).
+    /// line does not pull the caret in (see [`Self::move_line`]).
     sticky_x: Option<f64>,
 }
 
@@ -3832,9 +3539,8 @@ impl TextEdit {
         }
     }
 
-    /// Rebuild the bend beside the shaping. Every writer of [`Self::shaped`] calls
-    /// it: the warp reads the shaped width and first baseline, so a stale one drifts
-    /// the caret off the ink with each character typed on a centred rail.
+    /// Rebuild the bend beside the shaping. Every writer of [`Self::shaped`] calls it:
+    /// a stale warp drifts the caret off the ink on a centred rail.
     fn rewarp(&mut self) {
         self.warp = warp_for(self.parts(), &self.shaped);
     }
@@ -3891,19 +3597,15 @@ impl TextEdit {
     }
 
     /// The bytes a paragraph-scoped write from this session acts on: the selection
-    /// snapped outward to hard breaks ([`paragraph_bounds`]).
-    ///
-    /// Read by the panel rather than recomputed, since the session's content is a
-    /// commit ahead of the document's. Empty only for an empty node, where the panel
-    /// writes the defaults instead.
+    /// snapped outward to hard breaks ([`paragraph_bounds`]). Read by the panel
+    /// because the session's content is a commit ahead of the document's.
     pub fn paragraph_range(&self) -> Range<usize> {
         paragraph_bounds(&self.content, self.selected_range())
     }
 
-    /// Apply one paragraph attribute to the paragraph(s) the selection touches.
-    ///
-    /// The paragraph twin of [`Self::style_selection`], with no `pending`
-    /// counterpart: a caret is always in a paragraph.
+    /// Apply one paragraph attribute to the paragraph(s) the selection touches; the
+    /// twin of [`Self::style_selection`] with no `pending`, since a caret is always
+    /// in a paragraph.
     pub fn style_paragraph(&mut self, attr: crate::typography::ParaAttr) {
         let range = self.paragraph_range();
         self.para_spans.set(range, attr, &self.paragraph);
@@ -3913,12 +3615,9 @@ impl TextEdit {
     /// Nest or un-nest the list items the selection touches: `+1` for `Tab`, `-1`
     /// for `Shift`+`Tab`. Returns whether anything moved.
     ///
-    /// Per paragraph and relative, where [`Self::style_paragraph`] writes one
-    /// absolute value: an item and its sublist must become levels 1 and 2, not both
-    /// 1. Each paragraph is clamped to `0..=MAX_LIST_LEVEL` separately.
-    ///
-    /// Only paragraphs with a marker move: nesting a plain paragraph would usually
-    /// show nothing, and the panel's Level field is reachable only through an item.
+    /// Relative per paragraph, where [`Self::style_paragraph`] writes one absolute
+    /// value: an item and its sublist must become levels 1 and 2. Only paragraphs
+    /// with a marker move.
     ///
     /// [`ParagraphStyle::level`]: crate::typography::ParagraphStyle::level
     pub fn step_list_level(&mut self, delta: i32) -> bool {
@@ -3929,7 +3628,6 @@ impl TextEdit {
             let Some(start) = starts.get(index).copied() else {
                 continue;
             };
-            // The same clamped byte `Paragraphs::new` uses, so this is the level in the layout.
             let style = self
                 .para_spans
                 .resolve(&self.paragraph, start.min(last_byte));
@@ -3955,11 +3653,9 @@ impl TextEdit {
     /// Apply one character attribute to the selection, or — with a bare caret —
     /// hold it for the next character typed.
     ///
-    /// The bare-caret half has no caller in the app today (§15 D733): its only
-    /// production caller, `panels::typography::apply_char_attrs`'s `subject.partial`
-    /// arm, is reached only for a non-empty selection. The feature stays as designed
-    /// in `architecture.md` §5.4's boundary rule, pinned by the tests below, and
-    /// `insert` consumes `pending` where a `cut` must not (§15 D217).
+    /// The bare-caret half has no caller in the app today (§15 D733); it stays as
+    /// designed in `architecture.md` §5.4, pinned by the tests below, and `insert`
+    /// consumes `pending` where a `cut` must not (§15 D217).
     pub fn style_selection(&mut self, attr: crate::typography::CharAttr) {
         let range = self.selected_range();
         if range.is_empty() {
@@ -3975,13 +3671,8 @@ impl TextEdit {
     /// computed from its own old one (§15 D752).
     ///
     /// [`Self::style_selection`] writes one value over everything, which flattens a
-    /// list-valued attribute (`CharAttr::Features`, `CharAttr::Variations`): toggling
-    /// `liga` over runs that differ would put the first run's other settings on all
-    /// of them. `f` sees each run's own value, so the merge is the caller's and the
-    /// boundaries are ours. An unchanged run is still written; `Spans::set` collapses
-    /// a value equal to the node default, so the span list does not grow.
-    ///
-    /// A bare caret does nothing here, deliberately: there is no run to compute from.
+    /// list-valued attribute: toggling `liga` over differing runs would put the first
+    /// run's other settings on all of them. A bare caret does nothing.
     pub fn style_selection_per_run(
         &mut self,
         kind: crate::typography::CharAttrKind,
@@ -4003,11 +3694,10 @@ impl TextEdit {
 
     /// Replace the selection (or insert at the caret) with `s`.
     ///
-    /// Newlines are normalized on the way in: parley maps `\r` and `\n` to separate
-    /// newlines, so a `\r\n` pair would raise two breaks and double-space pasted
-    /// Windows text (`a_crlf_pair_is_one_line_break_not_two`). It is done here, the
-    /// input door, and not in [`Self::new`], which is handed the document's content
-    /// and must not put editor and document out of step.
+    /// Newlines are normalized on the way in: a `\r\n` pair would raise two breaks
+    /// and double-space pasted Windows text (`a_crlf_pair_is_one_line_break_not_two`).
+    /// Not in [`Self::new`], which is handed the document's content and must not put
+    /// editor and document out of step.
     pub fn insert(&mut self, s: &str) {
         let owned = normalized_newlines(s);
         let s = owned.as_deref().unwrap_or(s);
@@ -4019,7 +3709,6 @@ impl TextEdit {
         self.para_spans = self
             .para_spans
             .edited(at, removed, s.len(), &self.paragraph);
-        // A caret restyled while empty applies to exactly what was typed next.
         let pending = std::mem::take(&mut self.pending);
         if !s.is_empty() {
             for attr in pending {
@@ -4084,9 +3773,8 @@ impl TextEdit {
 
     // --- caret movement ---------------------------------------------------
 
-    /// Everything a caret move invalidates: the pending style (see
-    /// [`Self::pending`]) and the sticky vertical column. [`Self::move_line`] is the
-    /// one mover that must not call this.
+    /// Everything a caret move invalidates: the pending style and the sticky
+    /// vertical column. [`Self::move_line`] is the one mover that must not call this.
     ///
     /// [`Self::pending`]: TextEdit::pending
     fn caret_moved(&mut self) {
@@ -4126,12 +3814,10 @@ impl TextEdit {
     ///
     /// Not `Selection::previous_line`/`next_line`: parley seeds its sticky column
     /// from `Cursor::geometry`, which omits the line's start edge, then lands with
-    /// `Cursor::from_point`, which reads it, so the caret lands one indent too far
-    /// left (see [`Self::caret_rect`]). The sticky column is ours because
-    /// `Selection::h_pos` is private and seeded in the wrong frame.
+    /// `Cursor::from_point`, which reads it, so the caret lands an indent too far
+    /// left (see [`Self::caret_rect`]).
     fn move_line(&mut self, delta: isize, extend: bool) {
-        // `pending` alone, not `caret_moved`: a vertical move must carry the sticky
-        // column so a short line does not pull the caret in.
+        // `pending` alone, not `caret_moved`: the sticky column must survive.
         self.pending.clear();
         let index = self.caret_line_index();
         let last = self.shaped.layout.len().saturating_sub(1);
@@ -4139,8 +3825,7 @@ impl TextEdit {
         self.sticky_x = Some(x);
         let target = index.checked_add_signed(delta).filter(|t| *t <= last);
         let Some(line) = target.and_then(|t| self.shaped.layout.get(t)) else {
-            // Past either end, move to the far end as parley does; the column rides
-            // along, so coming back lands where it left.
+            // Past either end, move to the far end as parley does; the column rides along.
             self.selection = if delta < 0 {
                 self.selection.line_start(&self.shaped.layout, extend)
             } else {
@@ -4149,7 +3834,6 @@ impl TextEdit {
             return;
         };
         let m = line.metrics();
-        // parley's own probe point for "inside this line", from `move_to_line`.
         let y = m.block_max_coord - m.ascent * 0.5;
         let focus = Cursor::from_point(&self.shaped.layout, x as f32, y);
         self.selection = if extend {
@@ -4183,18 +3867,13 @@ impl TextEdit {
     /// A text-local point in parley's own layout space.
     ///
     /// The inverse half of the one translation (see [`YMap`]): every pointer
-    /// question comes through here, so ink and hit test agree about where a spaced,
-    /// trimmed or vertically-aligned line is. It resolves the line first and asks
-    /// `YMap` for that line's shift ([`Shaped::layout_y`], §15 D166).
-    ///
-    /// The rail is un-bent first (§15 D407): `PathWarp::nearest` maps the pointer
-    /// back to the flat plane, and only then does `YMap`'s inverse run, since the
+    /// question comes through here, so ink and hit test agree. It resolves the line
+    /// first ([`Shaped::layout_y`], §15 D166). The rail is un-bent first, since the
     /// bend was applied on top of the flat offsets.
     fn to_layout(&self, p: Point) -> (f32, f32) {
         let p = match &self.warp {
             Some(w) => {
                 let (x, y) = w.nearest(p);
-                // Into the lap the text is on (`shortest_way_round`).
                 Point::new(w.shortest_way_round(x), y)
             }
             None => p,
@@ -4227,11 +3906,9 @@ impl TextEdit {
 
     /// The caret's rectangle in text-local space, `width` units wide.
     ///
-    /// Shifted by the line's own start edge, which parley's caret geometry leaves
-    /// out: `Cursor::geometry` measures from `Cluster::visual_offset`, which never
-    /// reads `inline_min_coord`, the per-line start edge a paragraph indent lives in
-    /// (§15 D163). `Selection::geometry`, `Cursor::from_point` and the glyph runs
-    /// all include it, so only the caret needs the correction.
+    /// Shifted by the line's own start edge, which `Cursor::geometry` leaves out (it
+    /// never reads `inline_min_coord`, where a paragraph indent lives, §15 D163).
+    /// `Selection::geometry`, `Cursor::from_point` and the glyph runs include it.
     pub fn caret_rect(&self, width: f64) -> Rect {
         let b = self
             .selection
@@ -4245,13 +3922,8 @@ impl TextEdit {
 
     /// The index of the line the caret is on.
     ///
-    /// By the caret's own `y0`, which is that line's `block_min_coord`
-    /// (`Layout::line_for_offset` is `pub(crate)`).
-    ///
-    /// The last line at or above the caret, not the first containing it:
-    /// `block_min_coord..block_max_coord` spans ascent to descent, so line boxes
-    /// overlap whenever the line height is tighter, and a containment search picks
-    /// the line above. One monotonic edge has no such ambiguity.
+    /// The last line at or above the caret's `y0` (that line's `block_min_coord`),
+    /// not the first containing it: the ranges overlap under tight line height.
     fn caret_line_index(&self) -> usize {
         let y = self.selection.focus().geometry(&self.shaped.layout, 0.0).y0;
         let last = self.shaped.layout.len().saturating_sub(1);
@@ -4279,11 +3951,8 @@ impl TextEdit {
     }
 
     /// The caret as convex quads in text-local space, `width` units wide — what a
-    /// canvas draws (§15 D407).
-    ///
-    /// The bent counterpart of [`Self::caret_rect`], which callers should prefer: a
-    /// caret on a rail is a short segment across the curve, not an axis-aligned
-    /// rectangle. Ordinary type comes back as exactly one quad.
+    /// canvas draws. The bent counterpart of [`Self::caret_rect`]: on a rail a caret
+    /// is a short segment across the curve. Ordinary type comes back as one quad.
     pub fn caret_quads(&self, width: f64) -> Vec<[Point; 4]> {
         self.warped(self.caret_rect(width))
     }
@@ -4312,8 +3981,7 @@ impl TextEdit {
     }
 
     /// Highlight rectangles for the selected range, in text-local space; empty for
-    /// a bare caret. Always flat: [`Self::selection_quads`] follows a rail, and a
-    /// canvas wants that one.
+    /// a bare caret. Always flat; [`Self::selection_quads`] follows a rail.
     pub fn selection_rects(&self) -> Vec<Rect> {
         self.selection
             .geometry(&self.shaped.layout)
@@ -4324,8 +3992,7 @@ impl TextEdit {
 
     /// A parley rectangle in text-local space.
     ///
-    /// The line is named, not inferred from the y: a rectangle's edges are ink
-    /// coordinates (see [`YMap::shift_for_line`]).
+    /// The line is named, not inferred from the y (see [`YMap::shift_for_line`]).
     fn to_local_rect(&self, b: BoundingBox, line: usize) -> Rect {
         Rect::new(
             b.x0,
@@ -4352,11 +4019,8 @@ impl TextEdit {
 
     /// Remove the selection and hand it back — the model half of a cut.
     ///
-    /// `None` for a bare caret, so a caller can dim *Cut* and avoid putting an empty
-    /// string on the clipboard.
-    ///
-    /// [`Self::replace`], not `insert("")`: `insert` consumes [`Self::pending`],
-    /// and a cut must leave a pending bold in place.
+    /// `None` for a bare caret. [`Self::replace`], not `insert("")`: `insert`
+    /// consumes [`Self::pending`], and a cut must leave a pending bold in place.
     pub fn cut(&mut self) -> Option<String> {
         let range = self.selected_range();
         if range.is_empty() {
@@ -4373,16 +4037,13 @@ impl TextEdit {
         self.rewarp();
         let at = at.min(self.content.len());
         self.selection = Selection::from_byte_index(&self.shaped.layout, at, Affinity::Downstream);
-        // The sticky column described a layout that no longer exists.
         self.sticky_x = None;
     }
 
     /// Re-shape after a change that moved no text, keeping the selection.
     ///
     /// [`Self::reshape`]'s counterpart: `from_byte_index` builds a collapsed caret,
-    /// right after an edit but wrong after a restyle, where every byte is still
-    /// there. Both callers are restyles ([`Self::style_selection`] and
-    /// [`Self::restyle`]).
+    /// wrong after a restyle, where every byte is still there.
     fn reshape_keeping_selection(&mut self) {
         let (anchor, focus) = (
             self.selection.anchor().index(),
@@ -4403,9 +4064,7 @@ impl TextEdit {
 }
 
 /// `s` with every `\r\n` pair and lone `\r` collapsed to a single `\n`, or `None`
-/// when it holds no `\r`; [`TextEdit::insert`] runs once per keystroke, so that case
-/// stays allocation-free. A lone `\r` is a break (parley treats it as one), not
-/// dropped.
+/// when it holds no `\r`, which keeps the per-keystroke case allocation-free.
 fn normalized_newlines(s: &str) -> Option<String> {
     if !s.contains('\r') {
         return None;
@@ -4414,7 +4073,6 @@ fn normalized_newlines(s: &str) -> Option<String> {
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\r' {
-            // The `\n` of a `\r\n` pair is consumed, so the pair is one break.
             if chars.peek() == Some(&'\n') {
                 chars.next();
             }
@@ -4428,9 +4086,8 @@ fn normalized_newlines(s: &str) -> Option<String> {
 
 /// An owned copy of everything a text node's layout depends on.
 ///
-/// The owned twin of [`TextRef`], for the two callers that cannot borrow from a
-/// `NodeKind`: [`TextEdit`], which outlives the document read that produced it,
-/// and the app's default-style factory.
+/// The owned twin of [`TextRef`], for callers that cannot borrow from a `NodeKind`:
+/// [`TextEdit`] and the app's default-style factory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextParts {
     pub style: TextStyle,
@@ -4439,9 +4096,7 @@ pub struct TextParts {
     pub paragraph: ParagraphStyle,
     pub block: BlockStyle,
     pub sizing: TextSizing,
-    /// The rail, owned (see [`TextRef::on_path`]). A `TextEdit` session shapes
-    /// through these parts, so dropping it would measure the caret against flat
-    /// geometry.
+    /// The rail, owned (see [`TextRef::on_path`]).
     pub on_path: Option<BezPath>,
     /// Which way round it runs. See [`TextRef::on_path_flip`].
     pub on_path_flip: bool,
@@ -5122,9 +4777,8 @@ mod tests {
     }
 
     /// The band breaks under the descenders of "gypsy" and nowhere else; the `p`
-    /// keeps most of its rule (only its stem crosses), which rules out a per-glyph
-    /// or per-contour gap. Thresholds are loose because `SKIP_CLEARANCE` is tuned
-    /// by eye. No bundled font can exercise `flatten_edges`' `ClosePath` arm.
+    /// keeps most of its rule, which rules out a per-glyph gap. Thresholds are loose
+    /// because `SKIP_CLEARANCE` is tuned by eye.
     ///
     /// flip: `skip_ink` returning early → fails at the `g` assertion
     #[test]
@@ -5255,10 +4909,9 @@ mod tests {
         );
     }
 
-    /// A word with nothing below the baseline keeps one unbroken rule, because round
-    /// overshoot must not break it. The test pins the margin (1.31 thicknesses for
-    /// Inter) rather than proving the clearance must be horizontal-only: padding the
-    /// band by a whole thickness in `crossings` stays green.
+    /// A word with nothing below the baseline keeps one unbroken rule: round overshoot
+    /// must not break it. Pins the margin, not that clearance is horizontal-only:
+    /// padding the band by a whole thickness in `crossings` stays green.
     #[test]
     fn an_underline_with_nothing_in_its_way_is_one_unbroken_bar() {
         let mut s = style(40.0);
@@ -5291,8 +4944,8 @@ mod tests {
     }
 
     /// A wavy underline skips what its crests reach: its gaps total more than the
-    /// solid band's and each solid gap is mostly covered. Containment is not asserted
-    /// because `give_air` spares less air on the narrower bars of a wavy band.
+    /// solid band's and each solid gap is mostly covered (not contained: `give_air`
+    /// spares less on a wavy band's narrower bars).
     ///
     /// flip: the `Wavy` arm of `ink_extent` using the band's own reach → fails at the total assertion
     #[test]
@@ -5345,8 +4998,8 @@ mod tests {
     }
 
     /// Air narrows a bar and never removes one (`give_air`): long bars keep full
-    /// clearance, a bar the clearance would erase is held at one thickness, and a bar
-    /// already narrower than that gets no air. Widths are in thicknesses at 40px.
+    /// clearance, a bar the clearance would erase is held at one thickness, a
+    /// narrower one gets no air.
     ///
     /// flip: `give_air` called with a floor of `0.0` → fails at the `page` assertion
     #[test]
@@ -5399,8 +5052,7 @@ mod tests {
     }
 
     /// The rule never vanishes at any size, and a lone `j`'s mark stays about one
-    /// thickness wide: the floor holds the width, not scale invariance (bearings drift
-    /// with size through rounding and the `opsz` axis).
+    /// thickness wide: the floor holds the width, not scale invariance.
     #[test]
     fn a_narrow_bands_rule_never_vanishes_and_keeps_its_width_at_every_size() {
         for size in [
@@ -6716,10 +6368,8 @@ mod tests {
         assert!(wght.min <= 400.0 && 400.0 <= wght.max);
     }
 
-    /// A font can contain a reversed or `NaN` axis range, and `f64::clamp` panics on
-    /// both, so the opsz clamp must tolerate them; `f64::min`/`max` swallow `NaN`,
-    /// hence two assertions. Built through `from_fvar`, which also pulls the default
-    /// inside the range.
+    /// A reversed or `NaN` axis range must not panic the opsz clamp; `f64::min`/`max`
+    /// swallow `NaN`, hence two assertions. Built through `from_fvar`.
     ///
     /// flip: returning `(a, b)` unordered → fails inside `from_fvar` with the clamp panic
     #[test]
@@ -6921,9 +6571,7 @@ mod tests {
     }
 
     // --- paragraph layout -------------------------------------------------
-    //
-    // These assert on parley's line metrics (`inline_min_coord`/`inline_max_coord`),
-    // which the caret and word selection read too, rather than on glyph ink.
+    // These assert on parley's line metrics, which the caret reads too, not glyph ink.
 
     /// Every line's `(left, right)` edge, grouped by paragraph.
     fn paragraph_line_edges(content: &str, p: &TextParts) -> Vec<Vec<(f64, f64)>> {
@@ -7273,9 +6921,8 @@ mod tests {
         layout(p.as_ref(content))
     }
 
-    /// A one-character span recolours a glyph on a rail without moving it. Colour is
-    /// metric-neutral, and the rail is curved because a straight one hides the
-    /// rotation about the left edge.
+    /// A one-character span recolours a glyph on a rail without moving it; the rail
+    /// is curved because a straight one hides the rotation about the left edge.
     ///
     /// flip: the advance scan confined to its own run → fails at the rotation assertion
     #[test]
@@ -7391,8 +7038,8 @@ mod tests {
     }
 
     /// A second line runs parallel to the first, one line height to the side a
-    /// descender goes: larger `y` on a straight rail, the concave side (toward the
-    /// centre) on `quarter_rail`. The straight rail fixes the normal's sign.
+    /// descender goes: larger `y` on a straight rail, toward the centre on
+    /// `quarter_rail`.
     ///
     /// flip: negating the normal in `PathWarp::place` → fails at the straight-rail line-height assertion
     #[test]
@@ -7477,11 +7124,10 @@ mod tests {
         );
     }
 
-    /// Alignment is applied along the rail, once: `shape` lays a railed node out
-    /// `Start`-aligned so `bend` can offset it, and without that gate parley would
-    /// centre inside the box first. `AutoHeight(300)` gives the node an authored
-    /// width (under `Auto` the gate is unreachable), unlike the rail's 600, and the
-    /// assertion reads the leftmost glyph rather than `origin.x`.
+    /// Alignment is applied along the rail, once: without the `Start` gate in `shape`
+    /// parley would centre inside the box first. `AutoHeight(300)` gives an authored
+    /// width (under `Auto` the gate is unreachable); the assertion reads the
+    /// leftmost glyph, not `origin.x`.
     #[test]
     fn alignment_offsets_along_the_rail() {
         let len = 600.0;
@@ -7555,10 +7201,9 @@ mod tests {
     }
 
     /// The reported box holds the rail, re-walked at 200,001 points, so a cheaper
-    /// sweep that steps over an extremum fails. A sharp corner loses first order in
-    /// the step where a smooth arch loses second order, so the corners are the
-    /// fixtures with teeth. The spike's legs are unequal so the apex is never
-    /// sampled exactly.
+    /// sweep that steps over an extremum fails. Sharp corners are the fixtures with
+    /// teeth (first order in the step, against second for a smooth arch); the
+    /// spike's legs are unequal so the apex is never sampled exactly.
     ///
     /// flip: `bend`'s box sweep coarsened (or `BOX_SAG` raised) → fails at "a sharp corner"
     #[test]
@@ -7581,11 +7226,8 @@ mod tests {
             };
             let b = bent.bounds();
 
-            // The ink, not only the centreline, which cannot see a lost offset side.
-            // This guards the class, not one bug: whether a lost offset strands ink
-            // depends on the font, string and corners, so green is not "ribbon whole".
-            // One point of slack, because a trimmed box legitimately lets overshoot
-            // poke out by a fraction; a whole edge is not that.
+            // The ink, not only the centreline, which cannot see a lost offset side;
+            // green is not "ribbon whole". One point of slack for trimmed-box overshoot.
             let ink = outline(&bent).bounding_box();
             // The type must have gone round the rail, or there is no ink to strand.
             if let Some(w) = bent.warp.as_ref().filter(|_| wraps) {
@@ -7638,11 +7280,9 @@ mod tests {
     }
 
     /// A railed box clears its rail on all four sides, equally, whichever way the rail
-    /// is traversed. It asserts the ribbon rather than the ink, so a lost edge is a
-    /// margin of exactly zero. `PathWarp::at` maps `along` to `len - along` under
-    /// `flip`, so a sampler walking `segs` in rail order reads each interval backwards.
-    /// The fixtures do not separate the mirroring from the end nudges, so a green run
-    /// is not a licence to delete the mirroring.
+    /// is traversed; a lost edge is a margin of exactly zero. The fixtures do not
+    /// separate the flip mirroring from the end nudges, so green is not a licence to
+    /// delete the mirroring.
     ///
     /// flip: `bend` sampling `let a0 = *s0;` and without the `a0 + slen * 1e-9` sample → fails at the right clearance for `flip=true`
     #[test]
@@ -7764,8 +7404,7 @@ mod tests {
     }
 
     /// The flip reverses both the direction and the side; doing only one gives
-    /// upside-down or backwards letters. The straight rail leaves only a sign of `x`
-    /// and of `y` to check.
+    /// upside-down or backwards letters.
     ///
     /// flip: negating the tangent without the normal → direction assertions stay green, the side assertion fails
     #[test]
@@ -8241,8 +7880,7 @@ mod edit_tests {
         );
     }
 
-    /// A `\r\n` pair is one line break, not two: parley raises `Explicit` per newline
-    /// cluster, so an unnormalised pair double-spaces pasted text.
+    /// A `\r\n` pair is one line break, not two.
     ///
     /// flip: `insert` as a plain copy → only the CRLF case fails; the lone-CR case shows the `\r` is not swallowed
     #[test]
@@ -8292,9 +7930,8 @@ mod edit_tests {
         assert_eq!(e.selected_text(), "", "and nothing to copy either");
     }
 
-    /// A cut must not eat a pending style, which is why it is `replace` and not
-    /// `insert("")`. `drag_to` is the only mover that does not call `caret_moved`,
-    /// so it is the only route to a selection with a pending style.
+    /// A cut must not eat a pending style. `drag_to` is the only mover that does not
+    /// call `caret_moved`, so it is the only route to a selection with a pending style.
     ///
     /// flip: `cut` as `insert("")` → fails at the last assertion (0 spans)
     #[test]
@@ -8319,9 +7956,8 @@ mod edit_tests {
         );
     }
 
-    /// The caret sits under the ink inside a paragraph indent: parley's
-    /// `Cursor::geometry` omits the line's start edge, so `caret_rect` corrects for
-    /// it. Block and first-line indents are both covered.
+    /// The caret sits under the ink inside a paragraph indent (block and first-line):
+    /// `caret_rect` corrects for the start edge `Cursor::geometry` omits.
     ///
     /// flip: removing the correction in `caret_rect` → the caret moves 0 instead of +60
     #[test]
@@ -8766,9 +8402,8 @@ mod rail_session_tests {
     }
 
     /// A click past the wrap point of a closed rail lands under the pointer, not at
-    /// character 0: `PathWarp::nearest` answers a negative arc length there and
-    /// `shortest_way_round` normalises it. The non-zero `on_path_offset` moves the
-    /// wrap point into the middle of the text.
+    /// character 0 (`shortest_way_round` normalises the negative arc length). The
+    /// non-zero `on_path_offset` moves the wrap point into the middle of the text.
     ///
     /// flip: `shortest_way_round` reduced to `x` → fails at the `"D"` click (caret 0 against 3)
     #[test]
@@ -8910,10 +8545,9 @@ mod optical_margin_tests {
         }
     }
 
-    /// A justified block spans its measure by ink at both ends: the correction is
-    /// applied to the line's measure before parley justifies into it, because
-    /// shifting a justified line cannot work. Every width from 120 to 300 is swept to
-    /// reach the lines the second break pass re-breaks.
+    /// A justified block spans its measure by ink at both ends: the correction goes
+    /// into the measure before parley justifies, since shifting a justified line
+    /// cannot work. Every width from 120 to 300 is swept to reach the re-broken lines.
     ///
     /// flip: shifting the line (`x -= lsb`) without `measure += lsb + rsb` → fails at the right-edge assertion (199.023 against 200)
     /// flip: one correcting pass with offsets read by line index → fails at width 123
@@ -9019,8 +8653,7 @@ mod optical_margin_tests {
 
     /// `optical_offsets`' documented edges: a trailing space hangs nothing, a blank
     /// paragraph costs neither neighbour its correction, right-to-left text is
-    /// corrected at its right edge, and empty content lays out. The RTL case relies
-    /// on `Run::visual_clusters` walking in visual order.
+    /// corrected at its right edge, and empty content lays out.
     ///
     /// flip: `optical_offsets` taking the last glyph whatever its ink → fails at "a trailing space hangs nothing"
     #[test]
@@ -9076,10 +8709,9 @@ mod optical_margin_tests {
         );
     }
 
-    /// Optical margins are the node's setting and no paragraph attribute reaches
-    /// them, so the per-paragraph clauses in `Paragraphs::any_optical_margins` and
-    /// `break_lines` are inert. The exhaustive `match` fails to compile when a new
-    /// `ParaAttrKind` appears, which is when they might stop being inert.
+    /// No paragraph attribute reaches optical margins, so the per-paragraph clauses in
+    /// `Paragraphs::any_optical_margins` and `break_lines` are inert; the exhaustive
+    /// `match` fails to compile when a new `ParaAttrKind` might change that.
     #[test]
     fn no_paragraph_attribute_reaches_optical_margins() {
         use crate::typography::{Length, ParaAttr, ParaAttrKind, ParaSpans};

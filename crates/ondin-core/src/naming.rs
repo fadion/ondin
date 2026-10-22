@@ -1,58 +1,30 @@
 //! Layer names the app generates, and how they get their numbers (§15 D127).
 //!
 //! Every create site passes `name: None` and `Document::op_create` turns that
-//! into a name. Without numbering that made ten rectangles all literally
-//! "Rectangle" — which matters more here than in Figma, because `snapshot.rs`
-//! emits `node.name()` into the AI-handoff projection and Command Mode (§13)
-//! addresses layers by name as a fallback. Ten identical names leave both
-//! ambiguous.
+//! into a name. Uniqueness is never load-bearing: nothing resolves a node by
+//! name (lookups are by `NodeId`), so the numbering is a courtesy and every
+//! collision it declines to prevent is legal.
 //!
-//! **Uniqueness is never load-bearing, and this module is written so it cannot
-//! become so.** Nothing resolves a node *by* name — every lookup in the
-//! workspace is by `NodeId`, §13 states outright that "lookup by layer name is a
-//! disambiguated fallback, never the primary mechanism (names aren't unique)",
-//! and the snapshot carries `id`, `parent` and `children` beside the name so a
-//! consumer can disambiguate by path or ignore names entirely. So the numbering
-//! here is a *courtesy*: it makes the common case readable, and every collision
-//! it declines to prevent is legal.
+//! Creating numbers within the parent from the kind's stem, starting at 1
+//! ([`free_name`]); copying keeps the name unless it looks numbered, in which
+//! case it increments ([`copy_name`]). Neither runs again afterwards:
+//! reparenting may collide, because renaming on move would change names behind
+//! the user's back.
 //!
-//! **Two rules, and they answer different questions.** The app owns the names it
-//! generated; the user owns the ones they typed. So:
-//!
-//! - creating numbers within the parent, from the generated stem for that kind,
-//!   starting at 1 — so it is "Rectangle 1", "Rectangle 2", and never a bare
-//!   "Rectangle" beside a numbered one ([`free_name`]);
-//! - copying keeps the name **unless** it looks numbered, in which case it
-//!   increments ([`copy_name`]).
-//!
-//! Neither ever runs again afterwards. Reparenting a layer into a frame that
-//! already holds a "Rectangle 2" is allowed to collide, because recomputing
-//! names on move would rename things behind the user's back — which is worse
-//! than a repeated name in a panel that shows the tree anyway.
-//!
-//! There is no stored "this name is auto" flag, and no persisted per-kind
-//! counter. Both facts are read back out of the names currently present, which
-//! is what makes freed numbers reusable and what stops the numbering silently
-//! resetting on reload (a counter would have to be saved, and a counter that is
-//! not saved is worse than none).
+//! There is no stored "auto name" flag and no persisted counter; both are read
+//! back out of the names present, which makes freed numbers reusable and keeps
+//! numbering from resetting on reload.
 
 use crate::node::{BoolOp, NodeKind};
 use rustc_hash::FxHashSet;
 
 /// Every name [`NodeKind::default_name`] can produce.
 ///
-/// **A list rather than a walk over the variants**, because the question asked of
-/// it is the inverse one — "would we have written this string" — and a `match` on
-/// a `NodeKind` cannot answer that from a name alone. It is checked against
-/// `default_name` by [`every_default_name_is_listed_as_generated`], so a new kind
-/// cannot slip past: adding one without adding it here fails that test rather than
-/// quietly making its name un-numberable.
-///
-/// [`every_default_name_is_listed_as_generated`]: self
+/// A list, because "would we have written this string" is the inverse question a
+/// `match` on a kind cannot answer from a name. The test
+/// `every_default_name_is_listed_as_generated` keeps it in step with `default_name`.
 pub const GENERATED_NAMES: &[&str] = &[
     "Root",
-    // "Frame", not "Artboard" — §15 D21: the type is `Artboard` and every word
-    // the user reads is frame.
     "Frame",
     "Group",
     "Rectangle",
@@ -62,8 +34,6 @@ pub const GENERATED_NAMES: &[&str] = &[
     "Line",
     "Path",
     "Text",
-    // The four boolean labels, which are `default_name`'s output for
-    // `NodeKind::Boolean` — named for the operation, as Figma does.
     "Union",
     "Subtract",
     "Intersect",
@@ -73,60 +43,21 @@ pub const GENERATED_NAMES: &[&str] = &[
 /// Whether `name` is a **stem** this app numbers from, as opposed to a word a
 /// person typed.
 ///
-/// The stem alone is not a name the app writes any more — every generated name
-/// carries its number ([`free_name`]) — so this is asked about the part in front
-/// of one, and about a bare name only where a document saved before the numbering
-/// might still carry it.
-///
-/// Exact, and deliberately so: "Rectangle" is our stem and "Rectangles" is not.
+/// Asked about the part in front of a number, and about a bare name only where an
+/// older document might carry one. Exact: "Rectangle" is a stem, "Rectangles" is not.
 pub fn is_generated(name: &str) -> bool {
     GENERATED_NAMES.contains(&name)
 }
 
 /// A caller-supplied name reduced to one this app can show, or `None` when there
-/// is nothing usable in it (§15 D644, `[S2.2-L1-07]`).
+/// is nothing usable in it (§15 D644).
 ///
-/// **The rule already existed on two surfaces and there was a third that agreed
-/// with neither.** `layers::layer_rename_field` and `inspector`'s name field both
-/// do `buf.trim()` and refuse an empty result, the second with its reason
-/// written beside it: *"selecting all and pressing Delete here left a row with
-/// no label at all, where doing the same thing in the tree two panels away did
-/// nothing. Two surfaces for one edit have to agree on what a name is."* SVG
-/// import was the third, and it installed `""` and `"   "` verbatim — measured
-/// end to end, a blank row in the layers panel with no label at all.
-///
-/// ⚠️ **That quotation is §15 D127's and this doc credited it to D54**, which
-/// `arch-scribe` caught by reading the citation against the entry. Both numbers
-/// resolve, so no gate in this project could ever have seen it. D54 is the
-/// layers panel's entry and says only *"a name typed empty is discarded too"*;
-/// the sentence above is the inspector field's and cites D127 on its own line.
-///
-/// ⚠️ **One home and two copies, not a unification.** Both fields still
-/// hand-roll their `trim`/`is_empty`, and nothing stops them calling this —
-/// `naming` is a `pub mod`. Until they do, the three surfaces still differ in
-/// the small: only import normalises interior whitespace, so a name holding a
-/// tab survives a rename field and would not survive a round trip through SVG.
-///
-/// ⚠️ **Returning `None` rather than a repaired string is the whole point at the
-/// import site**: `op_create` turns `None` into a generated name, which is
-/// exactly what an element with no `id` already gets, so an unusable name falls
-/// through to the answer the document already has for "unnamed".
-///
-/// **Every interior whitespace character becomes one ordinary space** — a no-op
-/// for a space itself, and what turns `"a\nb"` into `"a b"` — because the layers
-/// panel lays out one line and a newline in it is not a name, it is a break. An
-/// SVG `id` cannot contain whitespace at all (XML forbids it in a `Name`), so
-/// this only ever fires on `data-name` or on a file no validator would pass.
-///
-/// ⚠️ **Runs are not collapsed.** `"Hello   World"` keeps its three spaces:
-/// somebody typed that, and squeezing it would be inventing an intent the way
-/// [`numbered`] declines to read `"Layer 007"` as a number.
-///
-/// ⚠️ **This is not a uniqueness rule and must not become one.** §15 D127's
-/// recorded non-goal is that uniqueness must never become load-bearing; this is
-/// about whether a name is *displayable*, which is the question D54 and D127
-/// answered for the two fields. Nothing in the record ever said a name may be
-/// empty — §15 D644 is the first entry to state that it may not.
+/// Trimmed; every interior whitespace character becomes one ordinary space, since
+/// the layers panel is one line. Runs are not collapsed (`"Hello   World"` stays),
+/// the way [`numbered`] declines to read `"Layer 007"` as a number. `None` rather
+/// than a repaired string lets `op_create` fall back to a generated name, as for
+/// an element with no `id`. This is about whether a name is displayable, not
+/// unique.
 #[must_use]
 pub fn usable(raw: &str) -> Option<String> {
     let name = raw.trim();
@@ -142,13 +73,9 @@ pub fn usable(raw: &str) -> Option<String> {
 
 /// The stem and number of a numbered name — `"Rectangle 3"` → `("Rectangle", 3)`.
 ///
-/// **The tail has to be the canonical decimal it parses back to**, which is what
-/// rejects `"Layer 007"`, `"Layer +3"` and `"Layer 3 "`. A name we did not write
-/// is the user's, and `"007"` is not a number this module has ever produced, so
-/// reading it as one would be inventing an intent.
-///
-/// Zero is rejected for the same reason: the sequence starts at 1, so
-/// `"Rectangle 0"` was typed by hand.
+/// The tail must be the canonical decimal it parses back to, which rejects
+/// `"Layer 007"`, `"Layer +3"` and `"Layer 3 "`: a name we did not write is the
+/// user's. Zero is rejected too, since the sequence starts at 1.
 pub fn numbered(name: &str) -> Option<(&str, u32)> {
     let (stem, tail) = name.rsplit_once(' ')?;
     if stem.is_empty() {
@@ -161,13 +88,10 @@ pub fn numbered(name: &str) -> Option<(&str, u32)> {
 /// The generated stem behind `name`, if the app is the one that wrote it —
 /// `"Union"` and `"Union 2"` both give `"Union"`, and `"Badge 2"` gives nothing.
 ///
-/// **Narrower than [`copy_name`]'s test, and the difference is the point.**
-/// Copying increments anything that *looks* numbered, because someone who typed
-/// "Badge 2" and duplicated it wanted "Badge 3" — a benign false positive. This
-/// asks the strict question instead: is this string one we would have generated,
-/// so may we overwrite it? `build::set_boolean_op` needs that one, because
-/// getting it wrong means silently renaming a layer the user named. The two must
-/// not be unified.
+/// Narrower than [`copy_name`]'s test on purpose: copying increments anything that
+/// looks numbered (a benign false positive), while this asks whether we would have
+/// generated the string, so `build::set_boolean_op` never renames a user's layer.
+/// The two must not be unified.
 pub fn generated_stem(name: &str) -> Option<&str> {
     let stem = numbered(name).map_or(name, |(stem, _)| stem);
     is_generated(stem).then_some(stem)
@@ -176,8 +100,7 @@ pub fn generated_stem(name: &str) -> Option<&str> {
 /// Whether `name` is the app's own name for a boolean of some operation —
 /// `build::set_boolean_op`'s "may I rename this" test.
 ///
-/// Here rather than in `build` so it reads against [`generated_stem`], whose doc
-/// has why this is the strict question and `copy_name`'s is the loose one.
+/// Uses the strict [`generated_stem`] test.
 pub fn is_boolean_label(name: &str) -> bool {
     generated_stem(name).is_some_and(|stem| BoolOp::ALL.iter().any(|op| op.label() == stem))
 }
@@ -185,44 +108,16 @@ pub fn is_boolean_label(name: &str) -> bool {
 /// The first name in the sequence `stem <from>`, `stem <from+1>`, … that `taken`
 /// does not already hold.
 ///
-/// **Every generated name carries a number, the first one included.** A first
-/// rectangle called "Rectangle" beside a second called "Rectangle 2" reads as
-/// though the first one were somehow special — reported exactly that way — and it
-/// costs the layers panel its symmetry for nothing. So the series starts at
-/// "Rectangle 1" and `from` is always at least 1.
+/// Every generated name carries a number, the first included, and `from` is at
+/// least 1. It is the first free number, not one past the highest, so deleting
+/// "Rectangle 2" frees it with no stored state. `from` is what separates copying
+/// from creating: a copy of "Rectangle 3" starts at 4.
 ///
-/// **The first free number, not the next one after the highest**, which is
-/// Figma's reset-on-delete and needs no stored state: delete "Rectangle 2" and
-/// the next rectangle is called "Rectangle 2" again. The objection that a reused
-/// name now refers to a different object is mild here, because the file's
-/// identity is the string node id — a diff shows a new id carrying a reused name
-/// and reads correctly.
-///
-/// **`from` is what makes copying different from creating.** A create starts at 1
-/// and takes the lowest gap. A copy of "Rectangle 3" starts at 4, so it lands
-/// above its original rather than in whatever gap is lowest — "Badge 2" duplicated
-/// is "Badge 3", which is what was asked for.
-///
-/// ⚠️ **The search wraps to 1 at `u32::MAX`, and that is not belt-and-braces**
-/// (§15 D433).
-/// This doc used to argue the bound away — *"a parent would need four billion
-/// children to exhaust it"* — which is true of [`created_name`], whose `from` is
-/// always 1, and **false of [`copy_name`]**, whose `from` is parsed out of a
-/// string the user typed. Rename a layer to `Rectangle 4294967295` and duplicate
-/// it and the loop needs *one* iteration to overflow: a debug panic out of core
-/// on the UI thread mid-gesture, and in release a `Rectangle 0` — a name
-/// [`numbered`] documents as impossible and refuses to parse, so the copy is
-/// mis-read as hand-typed from then on.
-///
-/// **Wrapping to the lowest gap rather than failing**, because that is
-/// `created_name`'s own rule and it produces a name in the series. A copy would
-/// rather sit just above its original, but at `u32::MAX` there is no "just
-/// above" to have, and the next best answer is the one a fresh layer would get.
-///
-/// The final line is reached only if all four billion names are taken, which no
-/// `taken` that fits in memory can be; it answers a duplicate, which is legal
-/// here (nothing requires sibling names to differ) rather than a name the parser
-/// rejects.
+/// The search wraps to 1 at `u32::MAX` and that is load-bearing (§15 D433):
+/// `copy_name`'s `from` is parsed from a user-typed string, so duplicating
+/// `Rectangle 4294967295` would overflow (debug panic) or yield `Rectangle 0`,
+/// which `numbered` refuses. The final line is unreachable in memory; it answers a
+/// legal duplicate rather than an unparseable name.
 pub fn free_name(taken: &FxHashSet<&str>, stem: &str, from: u32) -> String {
     for start in [from.max(1), 1] {
         for n in start..=u32::MAX {
@@ -238,23 +133,11 @@ pub fn free_name(taken: &FxHashSet<&str>, stem: &str, from: u32) -> String {
 /// The name a copy of a layer called `current` should carry among siblings called
 /// `taken`, or `None` to keep the name it has.
 ///
-/// **A duplicate keeps its name, as Figma's does, except when the name is
-/// numbered.** "Badge" duplicated is "Badge" — ten layers called "Dot" in a chart
-/// is correct, and renaming them would be hostile. But "Rectangle 2" duplicated
-/// is "Rectangle 3", because a name carrying a number is a name in a series and
-/// the copy belongs after it.
-///
-/// **Pattern-matched rather than flagged.** An "is auto" bit would have to live in
-/// the *model* to survive being saved, and the false positive it would buy is
-/// benign: someone who typed "Badge 2" by hand and duplicates it gets "Badge 3",
-/// which is what they wanted. The same argument that rejected a stored
-/// point-type flag on `PenAnchor` (§15 D114), reached from the other end.
-///
-/// **An *unnumbered* generated name joins the series from the bottom.** Nothing
-/// writes one any more — every generated name is numbered now — so a bare
-/// "Rectangle" is either a name from a document saved before that or one somebody
-/// typed to look like ours, and either way its copy belongs in the series rather
-/// than beside it as a second bare "Rectangle".
+/// A duplicate keeps its name unless it is numbered: "Badge" stays "Badge", but
+/// "Rectangle 2" becomes "Rectangle 3". Pattern-matched rather than flagged, since
+/// an "is auto" bit would have to live in the model and the false positive is
+/// benign. A bare generated name ("Rectangle", from an older document or typed)
+/// joins the series from 1.
 pub fn copy_name(taken: &FxHashSet<&str>, current: &str) -> Option<String> {
     match numbered(current) {
         Some((stem, n)) => Some(free_name(taken, stem, n.saturating_add(1))),
@@ -281,17 +164,9 @@ mod tests {
         names.iter().copied().collect()
     }
 
-    /// **No wildcard, deliberately.** A new `NodeKind` stops compiling *here*, and
-    /// that is the whole value of this function: the arm it needs is one line, and
-    /// arriving at it is what sends the author to `GENERATED_NAMES`.
-    ///
-    /// Without it the list drifts in silence. `GENERATED_NAMES` is the *inverse* of
-    /// `default_name` — "would we have written this string" cannot be answered by a
-    /// `match` on a kind — so a kind missing from it compiles, saves and loads
-    /// perfectly, and the only symptom is that one kind's layers never get numbered
-    /// and its duplicates never increment. That is the `matches!`-over-a-list trap
-    /// the boolean kind was caught by four times over (§15 D87–D88), in the one
-    /// shape it can still take.
+    /// No wildcard, deliberately: a new `NodeKind` stops compiling here, which
+    /// sends the author to `GENERATED_NAMES`; otherwise a missing kind silently
+    /// never gets numbered.
     fn listed(kind: &NodeKind) -> bool {
         match kind {
             NodeKind::Root
@@ -361,18 +236,16 @@ mod tests {
         }
     }
 
-    /// A name for the assertion above that is not the one under test.
+    /// A label for the assertion message.
     fn kind_label(kind: &NodeKind) -> String {
         format!("{:?}", std::mem::discriminant(kind))
     }
 
-    /// The parser has to reject everything it did not write, because anything else
-    /// is the user's and incrementing it would be inventing an intent.
+    /// `numbered` rejects everything but a canonical decimal tail.
     #[test]
     fn only_a_canonical_decimal_tail_reads_as_a_number() {
         assert_eq!(numbered("Rectangle 3"), Some(("Rectangle", 3)));
         assert_eq!(numbered("Badge 12"), Some(("Badge", 12)));
-        // A stem with a space of its own is still a stem.
         assert_eq!(numbered("Nav bar 2"), Some(("Nav bar", 2)));
         for odd in [
             "Rectangle",   // no number at all
@@ -389,29 +262,12 @@ mod tests {
         }
     }
 
-    /// **`[S2.2-L1-01]`'s loss: `Ctrl+D` on a layer called `Rectangle 4294967295`.**
+    /// Duplicating `Rectangle 4294967295` wraps to a parseable name instead of
+    /// overflowing; the parser assertion is what catches the release-mode
+    /// `Rectangle 0`.
     ///
-    /// `copy_name` starts the search at `n.saturating_add(1)`, which at
-    /// `u32::MAX` saturates to a number that is *already taken* — the original's
-    /// own name, which `CopyNames::rename` puts in `taken` because
-    /// `child_names(parent, &[])` excludes nothing. So `free_name` found it and
-    /// added one: **an overflow panic out of core on the UI thread during an
-    /// ordinary duplicate**, taking whatever was unsaved with it. Release did not
-    /// panic and answered `"Rectangle 0"`, a name `numbered` refuses to parse,
-    /// so the copy was mis-classified as hand-typed for the rest of its life.
-    ///
-    /// ⚠️ **The panic is debug-only and therefore invisible to the release gate**,
-    /// and the release answer is invisible to everything — it is a plausible
-    /// string. This test asserts *both*: that the call returns, and that what it
-    /// returns is a name the parser accepts.
-    ///
-    /// The second fixture is the reachable spelling that needs no `u32::MAX` in
-    /// the *typed* name: a sibling one above it.
-    ///
-    /// Flip-check, run: taking the wrap out of `free_name` — back to `n += 1` —
-    /// fails here in debug with *"attempt to add with overflow"* at
-    /// `naming.rs`, and in release at *"a name the parser can read back"*, which
-    /// is why the parser assertion is not decoration.
+    /// flip: `free_name` back to `n += 1` → debug overflow panic, release fails at
+    /// "a name the parser can read back".
     #[test]
     fn duplicating_the_last_number_in_the_series_wraps_rather_than_overflowing() {
         let last = format!("Rectangle {}", u32::MAX);
@@ -426,33 +282,27 @@ mod tests {
             "the lowest gap, which is what a fresh layer gets"
         );
 
-        // One below the top, with the top already taken: the walk reaches
-        // `u32::MAX`, finds it taken, and wraps.
+        // One below the top, top taken: the walk reaches `u32::MAX` and wraps.
         let below = format!("Rectangle {}", u32::MAX - 1);
         let copy = copy_name(&taken(&[below.as_str(), last.as_str()]), &below).expect("numbered");
         assert!(numbered(&copy).is_some(), "{copy:?}");
         assert_eq!(copy, "Rectangle 1");
     }
 
-    /// Creating fills the lowest gap; copying starts above the original. Both
-    /// halves matter and they are one argument apart.
+    /// Creating fills the lowest gap; copying starts above the original.
     #[test]
     fn a_new_layer_fills_the_lowest_gap_and_a_copy_lands_above_its_original() {
-        // **The first of a kind is numbered too.** A bare "Rectangle" beside a
-        // "Rectangle 2" reads as though the first were special, and it was reported
-        // that way — so nothing generated is ever unnumbered.
         assert_eq!(free_name(&taken(&[]), "Rectangle", 1), "Rectangle 1");
         assert_eq!(
             free_name(&taken(&["Rectangle 1"]), "Rectangle", 1),
             "Rectangle 2"
         );
-        // The freed number comes back, which is what needs no stored counter.
+        // The freed number comes back.
         assert_eq!(
             free_name(&taken(&["Rectangle 1", "Rectangle 3"]), "Rectangle", 1),
             "Rectangle 2"
         );
-        // A copy of 3 goes to 4 even though 2 is free — it belongs after the thing
-        // it was copied from.
+        // A copy of 3 goes to 4 even though 2 is free.
         assert_eq!(
             copy_name(&taken(&["Rectangle 1", "Rectangle 3"]), "Rectangle 3").as_deref(),
             Some("Rectangle 4")
@@ -466,9 +316,7 @@ mod tests {
             .as_deref(),
             Some("Rectangle 5")
         );
-        // An *unnumbered* generated name can only come from a document saved before
-        // the numbering, or from someone typing one of our stems. Its copy joins the
-        // series from the bottom rather than sitting beside it as a second bare one.
+        // A bare generated name's copy joins the series from the bottom.
         assert_eq!(
             copy_name(&taken(&["Rectangle"]), "Rectangle").as_deref(),
             Some("Rectangle 1")
@@ -479,22 +327,17 @@ mod tests {
         );
     }
 
-    /// **The name the user typed survives being copied**, which is the half of the
-    /// rule that has to hold or the feature is hostile: ten layers called "Dot" in
-    /// a chart is correct.
+    /// A typed name survives a copy; a numbered one increments.
     #[test]
     fn a_typed_name_is_kept_on_a_copy_and_a_numbered_one_increments() {
         let names = taken(&["Badge", "Badge 2", "Dot", "Dot"]);
         assert_eq!(copy_name(&names, "Badge"), None, "a typed name is kept");
         assert_eq!(copy_name(&names, "Dot"), None);
         assert_eq!(copy_name(&names, "Nav bar"), None);
-        // Numbered, so it is in a series and the copy goes after it — the benign
-        // false positive the pattern-match buys.
         assert_eq!(copy_name(&names, "Badge 2").as_deref(), Some("Badge 3"));
     }
 
-    /// The strict test and the loose one, told apart. `set_boolean_op` may only
-    /// overwrite a name the app wrote; a duplicate may increment anything numbered.
+    /// The strict test (overwrite) and the loose one (copy) are told apart.
     #[test]
     fn only_our_own_boolean_names_may_be_overwritten() {
         assert!(is_boolean_label("Union"));
@@ -505,7 +348,6 @@ mod tests {
                 "{theirs:?} would be renamed out from under the user"
             );
         }
-        // The loose test is loose on exactly the case the strict one refuses.
         assert_eq!(
             copy_name(&taken(&["Badge 2"]), "Badge 2").as_deref(),
             Some("Badge 3")
@@ -513,14 +355,8 @@ mod tests {
         assert!(generated_stem("Badge 2").is_none());
     }
 
-    /// The predicate the two rename fields have always applied, now written down
-    /// once (§15 D644, `[S2.2-L1-07]`).
-    ///
-    /// ⚠️ **The last two rows are the ones that keep this from becoming a
-    /// cleaner-upper.** A run of spaces inside a name survives, and so does a
-    /// name that is nothing but punctuation: this answers *"is there anything to
-    /// show"*, not *"is this a good name"*, and the second question is not one
-    /// this crate is entitled to.
+    /// `usable` answers "is there anything to show", not "is this a good name": a
+    /// run of spaces and a punctuation-only name survive.
     #[test]
     fn a_name_is_usable_when_something_is_left_after_trimming() {
         for (raw, want) in [

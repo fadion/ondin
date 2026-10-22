@@ -1,31 +1,24 @@
 //! The **Component** card — what the selection is to the components machinery
-//! (`architecture.md` §5.3d), drawn from §15 D981's accepted chrome
-//! (`design/Components.dc.html`, sections 3A–3H): a main's instance count and its
-//! two verbs, an instance's link to its main, its drift and the reset family, and
-//! the summaries several selected instances get. A layer *inside* an instance gets
-//! one line instead of a card — D981's *"one line, not a card"* — drawn as a row of
-//! the identity card since §15 D995 (`ComponentPart::Identity`), as are a mixed
-//! selection's line and the binding line.
-//!
-//! **Directly under the identity card** (3H), because it says what the layer *is*.
+//! (`architecture.md` §5.3d): a main's instance count and its two verbs, an
+//! instance's link to its main, its drift and the reset family, and the summaries
+//! several selected instances get. A layer *inside* an instance gets one line, not
+//! a card, drawn as a row of the identity card (`ComponentPart::Identity`), as are
+//! a mixed selection's line and the binding line.
 //!
 //! **Counts tell you what each reset will do; a reset with nothing to do is
-//! disabled, not hidden** (D981). The counts are `reset::Drift`, cached per
-//! session revision (`OndinApp::drift_cache`), since the card is read every frame
-//! and a drift is a walk of the instance — and the property readings beside them
-//! on the same key ([`PropCache`], `OndinApp::prop_cache`, `[X8.1-L4-02]`).
+//! disabled, not hidden.** The counts are `reset::Drift`, cached per session
+//! revision (`OndinApp::drift_cache`), since the card is read every frame and a
+//! drift is a walk of the instance; the property readings sit beside them on the
+//! same key ([`PropCache`], `OndinApp::prop_cache`).
 //!
 //! ⚠️ **The drift summary counts every difference a *Reset all* would undo** —
-//! fields, removed children and order — where the mockup's *3 overrides* sat over a
-//! *Reset fields 3* and a *Restore removed children 1*. Read literally that hides a
-//! removed child from the summary, and an instance whose only drift is a deleted
-//! layer then reads as untouched; the session's choice, accepted in the blanket
-//! ruling of 2026-10-06 (§15's header).
+//! fields, removed children and order. Counting fields alone would hide a removed
+//! child, and an instance whose only drift is a deleted layer would read as
+//! untouched.
 //!
-//! **The main's glyph is the filled hexagon** (D981), drawn by
-//! `ui::paint_hexagon_filled` since the bundled Phosphor Regular has none (§15 D10,
-//! D985); a main's and a variant's face carry it, an instance's the outline one.
-//! Until 2026-10-06 every face drew the outline, the filled one owed.
+//! **The main's glyph is the filled hexagon**, drawn by `ui::paint_hexagon_filled`
+//! since the bundled Phosphor Regular has none; a main's and a variant's face carry
+//! it, an instance's the outline one.
 
 use crate::app::OndinApp;
 use crate::theme::{self, icon};
@@ -35,8 +28,8 @@ use ondin_core::component;
 use ondin_core::reset::{Drift, Kind};
 use ondin_core::{NodeId, Operation, Transaction};
 
-/// One overridden field's mark (§15 D981): its tooltip, *Reset to main · 168*,
-/// and the transaction that writes the main's value back into that field alone.
+/// One overridden field's mark: its tooltip, *Reset to main · 168*, and the
+/// transaction that writes the main's value back into that field alone.
 pub(super) struct OverrideMark {
     pub(super) tip: String,
     pub(super) tx: Transaction,
@@ -61,24 +54,24 @@ impl OverrideMark {
     }
 }
 
-/// The card's faces, one per kind of selection D981 draws.
+/// The card's faces, one per kind of selection.
 enum Face {
     /// A main component, and how many instances it has.
     Main { name: String, instances: usize },
-    /// A component set — its own card, *Variants* (§15 D982).
+    /// A component set — its own card, *Variants*.
     Set { set: NodeId },
-    /// A variant: a main inside a set, named by its values (§15 D982).
+    /// A variant: a main inside a set, named by its values.
     Variant {
         main: NodeId,
         set: NodeId,
         set_name: String,
         instances: usize,
     },
-    /// A layer inside a main, which can be bound to its properties (§15 D982).
+    /// A layer inside a main, which can be bound to its properties.
     InMain { node: NodeId },
     /// One instance root — `root`, which the face was decided on: the card's
     /// rows read it rather than the raw selection, which may hold a layer inside
-    /// it too, in either order (`[X8.1-L1-03]`).
+    /// it too, in either order.
     Instance {
         root: NodeId,
         main: NodeId,
@@ -106,17 +99,17 @@ enum Face {
     Mixed { roots: Vec<NodeId>, others: usize },
 }
 
-/// An instance's **properties** apart from its other overrides (§15 D982, 4A's
-/// *2 properties · 1 override*): how many of its component properties differ from
-/// the main, and how many of `Drift::fields`' units are those properties' fields —
-/// counted once, as properties, and not again as overrides.
+/// An instance's **properties** apart from its other overrides (*2 properties ·
+/// 1 override*): how many of its component properties differ from the main, and
+/// how many of `Drift::fields`' units are those properties' fields — counted once,
+/// as properties, and not again as overrides.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct PropDrift {
     pub(crate) props: usize,
     pub(crate) units: usize,
     /// Whether the main defines any property at all — what puts *Reset
-    /// properties* in the overflow, disabled at zero by D981's rule for the
-    /// card's counted resets, and leaves it out for a component with none.
+    /// properties* in the overflow (disabled at zero), and leaves it out for a
+    /// component with none.
     pub(crate) defined: bool,
 }
 
@@ -127,7 +120,7 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
     count(|r| r.drift += 1);
     let defined = !variant::instance_properties(doc, root).is_empty();
     // The instance's own properties, then the shown rows of the nested instances
-    // its card shows (§15 D988, 4N: *"it counts as a property"*).
+    // its card shows, each counting as a property.
     let props = variant::instance_properties(doc, root)
         .iter()
         .filter(|p| variant::property_state(doc, root, p).is_some_and(|(_, o)| o))
@@ -143,9 +136,9 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
                         o.reset,
                         Operation::SetVisible { .. } | Operation::SetVisibleVar { .. }
                     ),
-                    // And the content's binding (§15 D1069), as the visibility's
-                    // above: a copy bound apart from its main differs by it
-                    // alone. Not the family's, which rides in the same op.
+                    // The content's binding counts as the visibility's does: a copy
+                    // bound apart from its main differs by it alone. Not the
+                    // family's, which rides in the same op.
                     PropKind::Text => match &o.reset {
                         Operation::SetText { .. } => true,
                         Operation::SetTextVars { vars, .. } => {
@@ -167,9 +160,8 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
 
 /// What the Component card computed on this thread: `prop_drift`, and the
 /// property rows' `variant::property_state` and `variant::reset_property` —
-/// counted so a test can say an idle frame computes none of them
-/// (`[X8.1-L4-02]`, `[X10-L4-01]`). A count and not a clock, the shape
-/// `svg::def_count_tests` took when a timing assertion would not hold.
+/// counted so a test can say an idle frame computes none of them. A count and not
+/// a clock, which would not hold as a timing assertion.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Reads {
@@ -199,17 +191,9 @@ pub(crate) fn count(f: impl FnOnce(&mut Reads)) {
 pub(super) type PropChip = Option<(String, String)>;
 
 /// The Component card's **property readings**, as of the session revision they
-/// were read at — the twin of `OndinApp::drift_cache`, and for the same reason:
-/// the card is drawn every frame it is up and each reading is a walk of an
-/// instance (`[X8.1-L4-02]`, `[X10-L4-01]`).
-///
-/// Uncached, a selection of many instances paid for every one of them every
-/// frame, idle or not — `prop_drift` twice, since the card draws in two halves
-/// (§15 D995) and each starts from `OndinApp::component_face`, and every
-/// property's `variant::property_state` and `variant::reset_property` per root
-/// in `OndinApp::own_rows`: measured at 200 instances, a 33–49 ms inspector
-/// frame. Keyed on the revision, so an edit, undo or redo empties it — a preview
-/// never writes the document, so nothing else can make a reading stale.
+/// were read at — the twin of `OndinApp::drift_cache`: each reading is a walk of
+/// an instance and the card is drawn every frame. Keyed on the revision, so an
+/// edit, undo or redo empties it; a preview never writes the document.
 #[derive(Default)]
 pub(crate) struct PropCache {
     /// The revision the readings below are of; `None` before the first.
@@ -227,8 +211,8 @@ pub(crate) struct PropCache {
         std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), (String, Vec<Operation>)>,
     /// A boolean or text property row's chip — its label (the variable's name,
     /// or *Mixed* over several) and its tooltip, or `None` unless every layer it
-    /// views is bound — per set of roots and property (§15 D1060, D1070's
-    /// amendment): a walk of every root, as the states are.
+    /// views is bound — per set of roots and property: a walk of every root, as
+    /// the states are.
     pub(super) chips: std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), PropChip>,
 }
 
@@ -245,7 +229,7 @@ impl PropCache {
     }
 }
 
-/// Which half of the components inspector a call draws (§15 D995): the rows that
+/// Which half of the components inspector a call draws: the rows that
 /// sit **inside the identity card** — a child's *In Card instance* or *Local to
 /// this instance*, a mixed selection's line, and the binding line — or the
 /// **cards** under it, *Component*, *Variants* and *Properties*.
@@ -269,9 +253,9 @@ enum Act {
     Detach,
     SelectAllInstances,
     DuplicateAsComponent,
-    /// A kit instance's ⋯ rows (§5.3e, 4D; §15 D1016): open the kit at its main,
-    /// accept the waiting update of the instance's own kit, and reveal the
-    /// vendored main as a local one, after a confirmation.
+    /// A kit instance's ⋯ rows (§5.3e): open the kit at its main, accept the
+    /// waiting update of the instance's own kit, and reveal the vendored main as a
+    /// local one, after a confirmation.
     GoToKitMain,
     AcceptKitUpdate(String),
     MakeLocal(NodeId),
@@ -294,7 +278,7 @@ impl OndinApp {
     }
 
     /// [`prop_drift`] at instance `root`, from [`PropCache`] while the document
-    /// is unchanged (`[X8.1-L4-02]`).
+    /// is unchanged.
     pub(crate) fn prop_drift_of(&mut self, root: NodeId) -> PropDrift {
         let rev = self.session.revision();
         let doc = &self.session.doc;
@@ -308,8 +292,7 @@ impl OndinApp {
 
     /// Gather [`OndinApp::card_overrides`] for this frame: every selected linked
     /// layer's overrides (`reset::overrides`), grouped by the card that shows them.
-    /// Over several instances a card counts and resets every one of them — D981's
-    /// *"the dot shows, and a reset resets every one of them"*.
+    /// Over several instances a card counts and resets every one of them.
     pub(super) fn gather_card_overrides(&mut self) {
         let doc = &self.session.doc;
         let mut cards: Vec<(&'static str, usize, Vec<Operation>)> = Vec::new();
@@ -331,18 +314,11 @@ impl OndinApp {
             }
         }
         // **Reset transform carries the main's insets**, as a field's reset does
-        // (`OndinApp::transform_marks`): on a pinned layer the insets are the
-        // placement, and a transform or size written without them is re-pinned
-        // where it lands by `keep_insets`. Counted under Position, not here.
-        //
-        // ⚠️ **Not an instance root's**: its insets are its own placement in its
-        // own parent (`propagate::is_placement`), so it keeps them — written back
-        // unchanged, which still keeps `keep_insets` off the edit. `c292b50` gave a
-        // root the main's and unpinned a pinned instance
-        // (`a_transform_reset_keeps_an_instance_roots_own_pin`, `arch-scribe`'s).
-        // And only a node whose ops **place** it: a pivot alone moves nothing.
-        // The append is `placement_stated`'s, which the context menu's and the
-        // Component card's resets take too (`[X4-L1-01]`).
+        // (`OndinApp::transform_marks`), or `keep_insets` re-pins the write where it
+        // lands. ⚠️ **Not an instance root's**: its insets are its own placement
+        // (`propagate::is_placement`), written back unchanged. And only a node whose
+        // ops **place** it: a pivot alone moves nothing. The append is
+        // `placement_stated`'s.
         if let Some((_, _, ops)) = cards.iter_mut().find(|(t, ..)| *t == "Transform") {
             *ops = placement_stated(doc, Transaction(std::mem::take(ops))).0;
         }
@@ -350,7 +326,7 @@ impl OndinApp {
         self.field_overrides = fields;
     }
 
-    /// An overridden field put back (§15 D981): `mark`'s reset, committed when its
+    /// An overridden field put back: `mark`'s reset, committed when its
     /// ↺ was clicked (`hit`), through [`OndinApp::commit_reset`].
     pub(super) fn reset_marked(&mut self, hit: bool, mark: &Option<OverrideMark>) {
         if let (true, Some(m)) = (hit, mark) {
@@ -360,9 +336,9 @@ impl OndinApp {
 
     /// `tx`, a reset, with the item of every layer it resizes stated beside the
     /// size — the reset's own where it resets the item, else the layer's unchanged
-    /// — so the commit door's `build::flex_holds` does not take the reset for the
-    /// hand's resize ([`OndinApp::commit_reset`]'s first point). The context menu's
-    /// reset (`OndinApp::reset_tx`) takes it too.
+    /// — so `build::flex_holds` does not take the reset for the hand's resize
+    /// ([`OndinApp::commit_reset`]'s first point). The context menu's reset
+    /// (`OndinApp::reset_tx`) takes it too.
     pub(crate) fn items_stated(&self, mut tx: Transaction) -> Transaction {
         let doc = &self.session.doc;
         let mut stated: Vec<Operation> = Vec::new();
@@ -388,37 +364,20 @@ impl OndinApp {
 
     /// `tx`, a reset, with every placed copy's insets stated beside it — the
     /// module's `placement_stated`, which says why. The context menu's and the
-    /// Component card's resets take it (`OndinApp::reset_tx`, `[X4-L1-01]`), as
-    /// the Transform header's does.
+    /// Component card's resets take it (`OndinApp::reset_tx`), as the Transform
+    /// header's does.
     pub(crate) fn placement_stated(&self, tx: Transaction) -> Transaction {
         placement_stated(&self.session.doc, tx)
     }
 
-    /// Commit an instance's reset from the inspector (§15 D981) — a field's ↺, a
-    /// card header's chip, the Component card's resets. Through `commit_edit`, as
-    /// every inspector edit that changes ink is, and two things more. (The context
-    /// menu's commits through `reset_selection`, as the menu's verbs do: it gets the
-    /// first through `reset_tx`, and not the second — a live text session owns the
-    /// pointer, so that menu does not open over one.)
-    ///
-    /// - **A reset is not a resize.** `build::flex_holds` reads a size written with
-    ///   no item beside it as the hand's resize and holds it — growth to 0, a
-    ///   percentage or `fit-content` back to px — so a W reset on an instance root
-    ///   growing in a flex row stopped its growth, its placement being its own
-    ///   (§5.3d), and on a nested copy made an item override that was not there.
-    ///   Each layer the reset resizes has its item stated in the same transaction:
-    ///   the reset's own where it resets the item, else the layer's unchanged.
-    ///   `6210953`'s insets, for the other door's other rewrite.
+    /// Commit an instance's reset from the inspector (a field's ↺, a card header's
+    /// chip, the Component card's resets) through `commit_edit`, plus two things:
+    /// - **A reset is not a resize.** `build::flex_holds` holds a size written with
+    ///   no item beside it, so the item is stated in the same transaction
+    ///   ([`OndinApp::items_stated`]).
     /// - **A live text session on a layer the reset restyles adopts it**
-    ///   (`text_session_restyled_after`), as every other Type card write does —
-    ///   or the editor went on laying its text out in the style the reset took
-    ///   away. **Not on a content reset** (`SetText`): the editor holds content a
-    ///   commit ahead of the document's, and spans keyed to the reset's string are
-    ///   not keyed to its.
-    ///
-    /// Both found by `arch-scribe` reading the batch; the restyle is tested since
-    /// 2026-10-06 (`a_type_reset_restyles_a_live_text_session`, on the editor's
-    /// layout — the node's style cannot see it).
+    ///   (`text_session_restyled_after`), **but not on a content reset**
+    ///   (`SetText`): the editor holds content a commit ahead of the document's.
     pub(crate) fn commit_reset(&mut self, tx: Transaction) {
         let tx = self.items_stated(tx);
         let editing = self.text.as_ref().map(|s| s.id);
@@ -457,21 +416,12 @@ impl OndinApp {
         }
     }
 
-    /// A **sub-field's** override mark over `subjects` (§15 D981): one number or
-    /// choice inside a struct payload — a layout item's grow, a container's gap, a
-    /// text style's size, one inset — which `reset::overrides` compares and resets
-    /// only as a whole value.
-    ///
-    /// `theirs` reads the source's whole value out of one of this frame's field
-    /// resets ([`OndinApp::field_overrides`]), so a field the comparison skips — an
-    /// instance root's own placement, a kind its source does not share — is never
-    /// marked, by the same rule that never counts it. `mine` is the copy's whole
-    /// value, `get` the sub-field, `put` writes a sub-field into a whole value,
-    /// `write` makes the operation and `say` the tooltip's value.
-    ///
-    /// Over several subjects the mark shows if any of them differs, and its reset
-    /// writes each one that does — D981's *"the dot shows, and a reset resets every
-    /// one of them"*. The tooltip names the first one's main value.
+    /// A **sub-field's** override mark over `subjects`: one number or choice inside
+    /// a struct payload, which `reset::overrides` compares only as a whole value.
+    /// `theirs` reads the source's whole value out of this frame's field resets
+    /// ([`OndinApp::field_overrides`]), so a field the comparison skips is never
+    /// marked. Over several subjects the mark shows if any differs and its reset
+    /// writes each that does; the tooltip names the first one's main value.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn sub_mark<T: Clone + PartialEq, V: PartialEq + Clone>(
         &self,
@@ -498,9 +448,8 @@ impl OndinApp {
                 continue;
             }
             // A reset that would write nothing marks nothing: a sub-field the
-            // source's value has no place for — a flex field where the main is a
-            // grid — differs, and `put` has nowhere to take it from. The layout's
-            // own mark is the one that says so.
+            // source has no place for (a flex field where the main is a grid)
+            // differs, and `put` has nowhere to take it from.
             let before = cur.clone();
             let shown = say(&want);
             put(&mut cur, want);
@@ -598,7 +547,7 @@ impl OndinApp {
             _ => None,
         };
         let count = roots.len();
-        // One owner — one main, or variants of one set — is one component (4F).
+        // One owner — one main, or variants of one set — is one component.
         let mut owners: Vec<NodeId> = mains
             .iter()
             .filter_map(|m| ondin_core::variant::owner_of_main(doc, *m))
@@ -606,7 +555,7 @@ impl OndinApp {
         owners.sort();
         owners.dedup();
         let shared = (owners.len() == 1).then(|| roots.clone());
-        // Variants of one set read as instances of the set (4E), named for it.
+        // Variants of one set read as instances of the set, named for it.
         let main = main.or_else(|| {
             let o = *owners.first().filter(|_| owners.len() == 1)?;
             doc.get(o)?.set()?;
@@ -633,17 +582,15 @@ impl OndinApp {
         })
     }
 
-    /// The Component card (§15 D981) — see the module doc.
+    /// The Component card — see the module doc.
     pub(super) fn inspector_component(&mut self, ui: &mut egui::Ui, part: ComponentPart) {
         let Some(face) = self.component_face() else {
             return;
         };
         let mut act = None;
         if part == ComponentPart::Identity {
-            // **Inside the identity card, under its second row** (§15 D995): the
-            // one-line faces and the binding line were cards of their own with no
-            // title — the maintainer's look found them orphaned, and each is a
-            // fact about what the layer *is*, which is that card's subject.
+            // **Inside the identity card, under its second row**: each of these
+            // is a fact about what the layer *is*, which is that card's subject.
             match &face {
                 Face::Child { main_name, linked } => {
                     child_line(ui, main_name, *linked, &mut act);
@@ -654,8 +601,7 @@ impl OndinApp {
             }
             // A nested instance inside a main is an instance root, so it takes the
             // instance's face — and its binding line too, which is where a swap
-            // property is made (§15 D983 (iii)) and which that face had never
-            // drawn (§15 D989).
+            // property is made.
             if let Face::Instance { .. } = &face
                 && let Some(root) = self.session.selection.single()
                 && ondin_core::variant::owner_above(&self.session.doc, root).is_some()
@@ -669,8 +615,7 @@ impl OndinApp {
             Face::Child { .. } | Face::Mixed { .. } | Face::InMain { .. } => {}
             Face::Set { set } => {
                 let set = *set;
-                // The set's variant count in the card's title, *Variants 4* (§15
-                // D1007, the maintainer's look): its row under the name went.
+                // The set's variant count sits in the card's title, *Variants 4*.
                 let n = ondin_core::variant::variants(&self.session.doc, set).len();
                 self.panel_head(ui, "Variants", Some(n), None, None, |app, ui| {
                     app.set_body(ui, set)
@@ -682,9 +627,9 @@ impl OndinApp {
             | Face::Instances { .. } => {
                 self.panel(ui, "Component", None, |app, ui| match &face {
                     Face::Main { name, instances } => main_body(ui, name, *instances, &mut act),
-                    // 3D: *Variant in Button* over the derived, read-only name, a
+                    // *Variant in Button* over the derived, read-only name, a
                     // dropdown per property, then *Duplicate*; the name carries
-                    // its instance count (§15 D1007).
+                    // its instance count.
                     Face::Variant {
                         main,
                         set,
@@ -714,18 +659,15 @@ impl OndinApp {
                     } => {
                         let summary = drift_summary(*drift, *props);
                         let link = Some((*main, main_name.as_str()));
-                        // One line, the main's name alone: the mockup's *Instance
-                        // of* caption over it is gone, the outline hexagon saying
-                        // it (§15 D993, as the main's face).
+                        // One line, the main's name alone; the outline hexagon says
+                        // it is an instance.
                         heading(ui, false, "", link, None, &summary, &mut act);
-                        // A kit instance names where its main lives (4A, 4B).
+                        // A kit instance names where its main lives.
                         let kit = app.kit_line(*main);
                         if let Some(k) = &kit {
                             crate::kits::card::source_line(ui, k);
                         }
-                        // The root the face was decided on, not the selection: a
-                        // layer of the instance selected first drew no rows, and
-                        // selected after it was asked to switch (`[X8.1-L1-03]`).
+                        // The root the face was decided on, not the selection.
                         app.chosen_by_note(ui, *root);
                         app.instance_rows(ui, &[*root]);
                         app.show_switch(ui, *root);
@@ -761,7 +703,7 @@ impl OndinApp {
                                 }
                                 reset_row(ui, *drift, *props, true, None, &mut act);
                             }
-                            // 3F: no single main to go to, so no name link and no
+                            // No single main to go to, so no name link and no
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
@@ -777,7 +719,7 @@ impl OndinApp {
                 });
             }
         }
-        // A main's or a set's own properties, under its card (3G).
+        // A main's or a set's own properties, under its card.
         self.inspector_properties(ui);
         self.component_act(act);
     }
@@ -793,7 +735,7 @@ impl OndinApp {
                         .into_iter()
                         .filter(|id| component::instance_root(doc, *id) == Some(*id))
                         .collect();
-                // Shown rows included (§15 D988, 4N).
+                // Shown rows included.
                 let ops: Vec<Operation> = roots
                     .iter()
                     .flat_map(|r| ondin_core::variant::reset_all_properties(doc, *r))
@@ -802,18 +744,15 @@ impl OndinApp {
                     self.commit_reset(Transaction(ops));
                 }
             }
-            // *Reset fields* leaves the properties alone (4C): their fields are
+            // *Reset fields* leaves the properties alone: their fields are
             // counted, and reset, as properties.
             Some(Act::Reset(Kind::Fields)) => {
                 if let Some(tx) = self.reset_tx(Kind::Fields) {
                     let doc = &self.session.doc;
                     use ondin_core::variant::PropKind;
-                    // The roots `reset_tx` scoped — the outermost selected, as the
-                    // face and its count were read — not every selected layer's
-                    // nearest instance: a nested copy selected inside its outer
-                    // instance put its own properties' fields here, filtered out
-                    // the very reset the row counted, and the click did nothing
-                    // (`[X8.1-L1-03]`).
+                    // The roots `reset_tx` scoped (the outermost selected), not every
+                    // layer's nearest instance, or a nested copy filters out the
+                    // very reset the row counted.
                     let bound: std::collections::HashSet<(NodeId, PropKind)> =
                         ondin_core::build::outermost(doc, self.session.selection.ids())
                             .into_iter()
@@ -837,8 +776,7 @@ impl OndinApp {
                             .collect();
                     if kept.is_empty() {
                         // Every difference was a property's, which *Reset fields*
-                        // leaves alone: said, as `reset_tx` says its own nothing,
-                        // rather than a click that silently does nothing.
+                        // leaves alone: said, not a click that does nothing.
                         self.session.info("Only component properties differ here");
                     } else {
                         self.commit_reset(Transaction(kept));
@@ -848,10 +786,8 @@ impl OndinApp {
             Some(Act::Select(ids)) => self.session.selection.set(ids),
             Some(Act::GoToMain(main)) => self.select_main(main),
             Some(Act::GoToSource) => self.go_to_main(),
-            // Through `commit_reset`, which is `commit_edit` as every inspector edit
-            // that changes ink is (`OndinApp::reset_tx`), restyling a live text
-            // session too. *Detach* below changes no pixel and commits as its verb
-            // does — *Group*'s case in `commit_edit`'s doc.
+            // Through `commit_reset`, which restyles a live text session too.
+            // *Detach* below changes no pixel and commits as its verb does.
             Some(Act::Reset(kind)) => {
                 if let Some(tx) = self.reset_tx(kind) {
                     self.commit_reset(tx);
@@ -862,9 +798,8 @@ impl OndinApp {
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
             Some(Act::GoToKitMain) => self.go_to_kit_main(),
             Some(Act::AcceptKitUpdate(kit)) => {
-                // The instance's own kit, not every kit waiting — the question
-                // D1011 left to the build, answered by the row's place: it is
-                // on one instance's card (§15 D1016).
+                // The instance's own kit, not every kit waiting: the row is on
+                // one instance's card.
                 for w in self.kits_waiting(false) {
                     if w.kit.id == kit {
                         self.kit_shelf.ask(&w.kit);
@@ -877,8 +812,8 @@ impl OndinApp {
     }
 
     /// Whether the instance layer `id` removed any of its source's items from the
-    /// list `read` takes — the ghost rows (§15 D981, 4D) that keep a list card with
-    /// no item of its own from reading, and closing, as empty. `false` for `None`
+    /// list `read` takes — the ghost rows that keep a list card with no item of
+    /// its own from reading, and closing, as empty. `false` for `None`
     /// and outside an instance.
     pub(super) fn has_ghosts<T: Clone>(
         &self,
@@ -896,7 +831,7 @@ impl OndinApp {
 
     /// The list `read` takes from the node `id` is compared with — its source's
     /// (`reset::source_of`) — or `None` outside an instance. What a list card
-    /// reads its rows' trailing slots and its ghost rows against (§15 D981, 4D).
+    /// reads its rows' trailing slots and its ghost rows against.
     pub(super) fn source_list<T: Clone>(
         &self,
         id: NodeId,
@@ -909,16 +844,11 @@ impl OndinApp {
     }
 }
 
-/// A list item's reserved 14-pt trailing slot (§15 D981, 4D), laid out by a
-/// right-to-left row: empty while the item follows its main, the dot when it
-/// differs, `+` when it is the instance's own. On an overridden item whose row is
-/// `hot` — the pointer anywhere on it — the dot becomes ↺; answers whether that
-/// was clicked.
-///
-/// ⚠️ **`hot` comes from the caller**, because this sits in a right-to-left run
-/// whose own box begins past the row's label: asked of that box, a pointer on the
-/// label was not on the row, and the ↺ never showed (measured by
-/// `a_fill_list_marks_restores_and_resets_item_by_item`).
+/// A list item's reserved 14-pt trailing slot: empty while the item follows its
+/// main, the dot when it differs, `+` when it is the instance's own, ↺ on an
+/// overridden item whose row is `hot`; answers whether that was clicked.
+/// ⚠️ **`hot` comes from the caller**: this right-to-left run's own box begins
+/// past the row's label.
 pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, hot: bool) -> bool {
     use ondin_core::reset::ItemState;
     let (rect, resp) = ui.allocate_exact_size(
@@ -970,20 +900,11 @@ pub(super) enum GhostLead<'a> {
 }
 
 /// A **ghost row**: an item the instance removed while its main still has it,
-/// drawn dashed and dim with a restore button (§15 D981, 4D) — the list half of
-/// the reset family. `label` is the item's own words (a hex, *Linear*, *Drop
-/// shadow*). Answers whether the restore button was clicked.
-///
-/// **Laid out as the live row is** (§15 D993, the maintainer's look): the dashed
-/// box is the field's box, its corners rounded 3px — the maintainer's number,
-/// where the live field's own are 5 (`ui::field_frame`) — and its chip or
-/// glyph and label stand where the live row's do; *restore* is an icon-only
-/// button in the column the live row's eye takes, rather than a worded button
-/// inside the field. A row with no eye column ([`GhostLead::Plain`]) still gets
-/// one, so every list's restore is in the same place.
-///
-/// ⚠️ **Lists only.** A deleted child *layer* gets no ghost row in the layers
-/// panel — D981's asymmetry, ruled: only the card's *Restore removed children*.
+/// drawn dashed and dim with a restore button in the eye's column (a
+/// [`GhostLead::Plain`] row gets one too), laid out as the live row is with 3px
+/// corners (the live field's are 5). Answers whether restore was clicked.
+/// ⚠️ **Lists only**: a deleted child *layer* has only the card's *Restore
+/// removed children*.
 pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> bool {
     let h = ui::CONTROL_H;
     let gap = ui::CARD_COL_GAP;
@@ -1060,31 +981,13 @@ fn rounded_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
 }
 
 /// `tx`, a reset, with the **placement stated** beside every write that places a
-/// copy — a `SetTransform`, or a `SetGeometry` that resizes — and has no
-/// `SetInsets` of its own in `tx`: the insets of its **slot source**
-/// (`reset::slot_source_of`), or its own where its placement is its own
-/// (`reset::placement_is_own`, an instance root).
-///
-/// **Both of the commit door's tool-intent rewrites read a bare placement as the
-/// hand's**, and a reset is not the hand. `keep_insets` reads a transform on a
-/// pinned layer as *"draw it here"* and re-pins it where it lands — in an
-/// instance wider than its main, the main's stored point is another inset
-/// (`c292b50`'s defect, measured as `right 172` against `12`); and
-/// `kept_flow_translations` keeps an in-flow layout item's stored translation and
-/// drops the write as changing nothing, so an item's *Reset all* committed
-/// nothing at all. A `SetInsets` for the node stands both down. Where `tx` writes
-/// no insets the node's equal its source's — `reset::overrides` would have reset
-/// them otherwise — so this states the value the node already has, except on the
-/// Transform header's reset, which takes the card's ops alone and so resets the
-/// insets with it (counted under Position).
-///
-/// ⚠️ **The slot, not `source_of`, for a swapped copy** (§15 D983 (3)): its
-/// placement is its link's, and the swap target's insets unpinned the slot
-/// (`[X9.1-L1-01]`). ⚠️ **One helper for every reset door** (`[X4-L1-01]`):
-/// `c292b50` wrote this append in `OndinApp::gather_card_overrides` alone, and
-/// the context menu's and the Component card's resets (`OndinApp::reset_tx`) went
-/// on sending the bare transform. A field's own reset (`OndinApp::transform_marks`)
-/// states its insets per axis, and is left to them.
+/// copy (a `SetTransform`, or a `SetGeometry` that resizes) and has no `SetInsets`
+/// in `tx`: the insets of its **slot source** (`reset::slot_source_of`), or its
+/// own for an instance root. The commit door reads a bare placement as the hand's
+/// (`keep_insets` re-pins it, `kept_flow_translations` drops it); a `SetInsets`
+/// stands both down. ⚠️ **The slot, not `source_of`, for a swapped copy.**
+/// ⚠️ **One helper for every reset door** (`reset_tx`, `gather_card_overrides`);
+/// a field's own reset (`transform_marks`) states its insets per axis.
 fn placement_stated(doc: &ondin_core::Document, mut tx: Transaction) -> Transaction {
     let mut placed: Vec<NodeId> =
         tx.0.iter()
@@ -1117,21 +1020,19 @@ fn placement_stated(doc: &ondin_core::Document, mut tx: Transaction) -> Transact
     tx
 }
 
-/// The inspector card that shows the field `op` writes — its title, as `panel`
-/// takes it — or `None` for a field no card header owns: the name and visibility
-/// (the identity card), a path's or a boolean's shape, the text's content and its
-/// rail, the mask flag and the fill rule (identity-row toggles).
-///
+/// The inspector card that shows the field `op` writes, by title, or `None` for a
+/// field no card header owns (the identity card's name and visibility, a path's
+/// or boolean's shape, the text's content and rail, the mask flag, the fill rule).
 /// Wildcard-free on the operation, so a new field operation is placed here by
 /// whoever adds it.
 fn card_of(op: &Operation) -> Option<&'static str> {
     use Operation as O;
     use ondin_core::GeometryPatch as G;
     match op {
-        // A width's or a height's binding is the W or H field's (§15 D1061).
+        // A width's or a height's binding is the W or H field's.
         O::SetTransform { .. } | O::SetPivot { .. } | O::SetSizeVars { .. } => Some("Transform"),
         // A content's or a family's binding is the Type card's Content or family
-        // row (§15 D1069).
+        // row.
         O::SetTextVars { .. } => Some("Type"),
         O::SetGeometry { geometry, .. } => match geometry {
             G::Size(_) | G::LineEnd(_) => Some("Transform"),
@@ -1145,15 +1046,14 @@ fn card_of(op: &Operation) -> Option<&'static str> {
             | G::TextPathOffset(_)
             | G::BoolOp(_) => None,
         },
-        // A corner's binding is the radius field's (§15 D1039).
-        // An opacity's binding is the opacity field's (§15 D1072).
+        // A corner's binding is the radius field's, an opacity's the opacity field's.
         O::SetOpacity { .. }
         | O::SetOpacityVar { .. }
         | O::SetClip { .. }
         | O::SetCornerVars { .. } => Some("Appearance"),
         O::SetMaskMode { .. } => Some("Mask"),
-        // A card's style is that card's (§15 D1062, D1038 F9): *Reset fill*
-        // restores the main's style with the main's list.
+        // A card's style is that card's: *Reset fill* restores the main's style
+        // with the main's list.
         O::SetFills { .. } | O::SetFillStyle { .. } => Some("Fill"),
         O::SetStrokes { .. } | O::SetStrokeStyle { .. } => Some("Stroke"),
         O::SetEffects { .. } | O::SetEffectsStyle { .. } => Some("Effects"),
@@ -1161,8 +1061,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         O::SetLayoutGrids { .. } => Some("Layout grid"),
         O::SetInsets { .. } => Some("Position"),
         O::SetLayoutItem { .. } => Some("Item"),
-        // A gap's or a padding's binding is the Container card's field (§15 D1058).
-        // And its style (§15 D1075).
+        // A gap's or a padding's binding, and the style, are the Container card's.
         O::SetDisplay { .. } | O::SetSpacingVars { .. } | O::SetLayoutStyle { .. } => {
             Some("Container")
         }
@@ -1202,7 +1101,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::OpenVault { .. }
         | O::CloseVault { .. }
         | O::SetOrigin { .. }
-        // A frame's mode is a row of the identity card, under its name (D1038).
+        // A frame's mode is a row of the identity card, under its name.
         | O::SetMode { .. }
         | O::AddVariable { .. }
         | O::RemoveVariable { .. }
@@ -1221,11 +1120,10 @@ fn card_of(op: &Operation) -> Option<&'static str> {
     }
 }
 
-/// An overridden dropdown's reset (§15 D981), as the open list's first row —
-/// ↺ *Reset to main · Alpha*, then a rule. The mockup's ↺ takes the label's slot,
-/// and a dropdown's face is one press target that opens the list, with no label
-/// slot of its own to give, so the reset is the first thing the press shows
-/// instead. Answers whether it was clicked.
+/// An overridden dropdown's reset, as the open list's first row — ↺ *Reset to
+/// main · Alpha*, then a rule. A dropdown's face is one press target that opens
+/// the list, with no label slot to give the ↺, so the reset is the first thing
+/// the press shows. Answers whether it was clicked.
 pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
     let hit = ui
         .selectable_label(
@@ -1237,14 +1135,11 @@ pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
     hit
 }
 
-/// A row's label carrying an override mark (§15 D981, 4C — *"row-labelled
-/// controls carry the dot after the label"*): at full brightness with the dot
-/// after it, and with the pointer on the label ↺ in the dot's place, the mark's
-/// tooltip, and a click that is the reset. Unmarked, the label as it was, in
-/// `ink`. Answers whether the reset was clicked.
-///
-/// `size` is the label's slot, its text centred in it as `add_sized` centred the
-/// plain label this replaces; `None` is the text's own width.
+/// A row's label carrying an override mark: at full brightness with the dot after
+/// it, and with the pointer on the label ↺ in the dot's place, the mark's
+/// tooltip, and a click that is the reset. Unmarked, the label in `ink`. `size`
+/// is the label's slot, its text centred in it; `None` is the text's own width.
+/// Answers whether the reset was clicked.
 pub(super) fn label_mark(
     ui: &mut egui::Ui,
     size: Option<egui::Vec2>,
@@ -1265,8 +1160,7 @@ pub(super) const MARK_ROOM: f32 = 12.0;
 /// [`egui::Align::Max`] — **right-aligned against the control it labels**, with
 /// [`MARK_ROOM`] kept for the mark and a label too long for the slot cut with an
 /// ellipsis, its whole name in the tooltip. The Component card's label column
-/// (§15 D996): centred, a short label sat far from its field and a long one beside
-/// it, so *Size* read as further left than *Body text* in the column below it.
+/// uses it.
 pub(super) fn label_mark_in(
     ui: &mut egui::Ui,
     size: Option<egui::Vec2>,
@@ -1322,9 +1216,7 @@ pub(super) fn label_mark_in(
     } else {
         ui::override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
     }
-    // A cut label names itself in the tooltip too, over the mark's reset — or a
-    // long overridden name could not be read whole anywhere (`arch-scribe`'s
-    // find, §15 D996).
+    // A cut label names itself in the tooltip too, over the mark's reset.
     match cut {
         true => resp.on_hover_text(format!("{text}\n{}", m.tip)),
         false => resp.on_hover_text(&m.tip),
@@ -1334,13 +1226,8 @@ pub(super) fn label_mark_in(
 
 /// `text` laid out on one line no wider than `max_w`, cut with an ellipsis, and
 /// whether it was cut — what decides that a label names itself in a tooltip.
-///
-/// 🚨 **Asked of `Galley::elided`, never of the text** (§15 D1006, the
-/// maintainer's look: a cut property name on an instance's card had no tooltip).
-/// `Galley::text()` is the *job's* text — the whole name, ellipsis or not — so
-/// the comparison this replaced, `galley.text() != text`, was false for every
-/// label and the tooltip D996 promised was never attached. `ui::menu_row` already
-/// asked `elided`.
+/// 🚨 **Asked of `Galley::elided`, never of the text**: `Galley::text()` is the
+/// *job's* whole text, so comparing it with `text` is false for every label.
 fn fitted_label(
     ui: &egui::Ui,
     text: &str,
@@ -1364,7 +1251,7 @@ fn fitted_label(
 }
 
 /// An overridden dropdown's dot, where it has no label to sit after: beside its
-/// chevron, at the height a field's dot sits beside its label (§15 D981).
+/// chevron, at the height a field's dot sits beside its label.
 pub(super) fn combo_dot(p: &egui::Painter, face: egui::Rect) {
     ui::override_dot(p, egui::pos2(face.right() - 26.0, face.center().y - 4.0));
 }
@@ -1389,9 +1276,8 @@ fn sum(a: Drift, b: Drift) -> Drift {
 }
 
 /// *2 properties · 3 overrides · 1 local layer* — empty at zero, which is how it
-/// disappears. A property's fields count once, as the property (§15 D982, 4A:
-/// *"properties are the knobs you're meant to turn, so they shouldn't read as
-/// drift"*).
+/// disappears. A property's fields count once, as the property: properties are
+/// the knobs meant to be turned, so they do not read as drift.
 fn drift_summary(d: Drift, p: PropDrift) -> String {
     let overrides = d.fields.saturating_sub(p.units) + d.removed + d.order;
     let mut parts = Vec::new();
@@ -1418,11 +1304,10 @@ fn plural(n: usize, what: &str) -> String {
 }
 
 /// The face of an instance card — or a variant's, with `main` — the hexagon
-/// (outline for an instance, filled for a `main`, `paint_hexagon`), an optional
-/// small caption over the main's name as a link (or over a plain `title`), and
-/// the grey drift summary on the right. One line when `caption` is empty — a
-/// single instance's face since §15 D993; several instances keep their count as
-/// the caption, and a variant its set.
+/// (outline for an instance, filled for a `main`), an optional small caption over
+/// the main's name as a link (or over a plain `title`), and the grey drift
+/// summary on the right. One line when `caption` is empty; several instances
+/// keep their count as the caption, and a variant its set.
 fn heading(
     ui: &mut egui::Ui,
     main: bool,
@@ -1435,16 +1320,10 @@ fn heading(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
-        // **The name is cut to the room the row leaves it** (`[X8.1-L1-01]`): a
-        // plain label in a horizontal row never wraps, and a main's name past
-        // ~50 characters ran the row — and egui grows the parent to its widest
-        // row, so every card below — off the screen, *Detach* half drawn and the
-        // summary not at all. (A variant's derived name, `values.join(", ")`,
-        // long with three properties, is not drawn here: it was a plain label
-        // under this row, never cut, and is `name_and_count`'s since §15 D1007,
-        // cut there.) Cut with `…`, the whole
-        // name in the tooltip, as the card's own label column already was (§15
-        // D996).
+        // **The name is cut to the room the row leaves it**: a plain label in a
+        // horizontal row never wraps, and egui grows the parent to its widest row,
+        // so a long name pushes every card below off the screen. The whole name in
+        // the tooltip. (A variant's derived name is `name_and_count`'s.)
         let summary_w = if summary.is_empty() {
             0.0
         } else {
@@ -1476,12 +1355,9 @@ fn heading(
                 );
             }
             if let Some((main, name)) = link {
-                // The name, then the ↗ — one target, so a click on either goes.
-                // **As tall as the name, not as a control** (§15 D996): a
-                // horizontal row opens at `interact_size.y`, 24, and centred the
-                // name in it — so an instance's name and hexagon sat 4pt below a
-                // main's, whose name is a plain label in its block. The
-                // maintainer's look. Nothing in this block is a control.
+                // The name, then the ↗ — one target. **As tall as the name, not as
+                // a control**: a horizontal row opens at `interact_size.y` and
+                // would centre the name 4pt below a main's.
                 ui.spacing_mut().interact_size.y = 0.0;
                 let name_room = (room - arrow_w).max(12.0);
                 let cut = ui
@@ -1562,7 +1438,7 @@ fn heading(
 }
 
 /// **Reset all**, **Detach**, and — where there is one main to count against —
-/// the overflow of counted resets (3B, 3C).
+/// the overflow of counted resets.
 fn reset_row(
     ui: &mut egui::Ui,
     d: Drift,
@@ -1571,7 +1447,7 @@ fn reset_row(
     kit: Option<&crate::kits::card::KitLine>,
     act: &mut Option<Act>,
 ) {
-    // A kit instance always has the ⋯, for its kit rows (§15 D1011 (6)).
+    // A kit instance always has the ⋯, for its kit rows.
     let overflow = overflow || kit.is_some();
     let gap = ui::CARD_COL_GAP;
     let h = ui::CONTROL_H;
@@ -1614,8 +1490,6 @@ fn reset_row(
             *act = Some(Act::Detach);
         }
         if overflow {
-            // *More*, not *More resets*, since the kit rows joined (§15 D1011
-            // (6)).
             let more = ui::field_button(ui, icon::DOTS_THREE, h, 15.0, FieldButton::Off)
                 .on_hover_text("More");
             egui::Popup::menu(&more)
@@ -1623,11 +1497,9 @@ fn reset_row(
                 .gap(ui::MENU_GAP)
                 .show(|ui| {
                     ui::menu_rows(ui);
-                    // **As wide as its longest row, not as the screen** (§15 D993):
-                    // `menu_row` takes the available width, which in a popup's
-                    // `Area` is however far the screen goes, so the menu ran most
-                    // of the way across the canvas. The rows have no glyph column
-                    // (`menu_row`'s bare form) and a count of at most a few digits.
+                    // **As wide as its longest row, not as the screen**: `menu_row`
+                    // takes the available width, which in a popup's `Area` is the
+                    // whole screen.
                     let ctx = ui.ctx().clone();
                     let label_w = |t: &str| {
                         ctx.fonts_mut(|f| {
@@ -1652,9 +1524,7 @@ fn reset_row(
                         (Kind::Children, "Restore removed children", d.removed),
                         (Kind::Order, "Reset order", d.order),
                     ];
-                    // The kit rows too, with their glyph's room: sized from the
-                    // resets alone, a long *Go to main in <kit>* overflowed the
-                    // menu (`arch-scribe`'s reading of D1016).
+                    // The kit rows count too, with their glyph's room.
                     let kit_labels: Vec<String> = kit
                         .map(|k| {
                             vec![
@@ -1671,14 +1541,12 @@ fn reset_row(
                         .chain(kit_labels.iter().map(|l| label_w(l) + GLYPH_ROOM))
                         .fold(0.0, f32::max);
                     ui.set_width((8.0 + widest + 24.0 + 16.0 + 8.0).ceil());
-                    // A count only where there is something to reset: the `—` a
-                    // zero row carried read as a stray mark, and the dimmed row
-                    // already says there is nothing (§15 D993).
+                    // A count only where there is something to reset; the dimmed
+                    // row already says there is nothing.
                     let count_of = |n: usize| (n > 0).then(|| n.to_string());
-                    // 4C: properties and fields count, and reset, separately.
-                    // Present wherever the component has properties, and
-                    // disabled at zero like its neighbours (D981) — `arch-scribe`
-                    // read the first cut hiding it.
+                    // Properties and fields count, and reset, separately. Present
+                    // wherever the component has properties, and disabled at zero
+                    // like its neighbours.
                     if p.defined {
                         let count = count_of(p.props);
                         let row = ui::MenuRow::new("", PROPS)
@@ -1697,8 +1565,8 @@ fn reset_row(
                             *act = Some(Act::Reset(kind));
                         }
                     }
-                    // The kit rows, after the resets (4D): where the main lives,
-                    // the update when one waits, and the way out.
+                    // The kit rows, after the resets: where the main lives, the
+                    // update when one waits, and the way out.
                     if let Some(k) = kit {
                         ui::menu_sep(ui);
                         let go = format!("Go to main in {}", k.kit_name);
@@ -1728,31 +1596,23 @@ fn reset_row(
     });
 }
 
-/// 3A: the filled hexagon, the name and its instance count on **one line**, and
-/// *Duplicate*. The mockup's *Main component* caption over the name is gone (§15
-/// D993): the filled hexagon already says it.
+/// A main's face: the filled hexagon, the name and its instance count on **one
+/// line**, and *Duplicate*.
 fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
     if name_line(ui, None, name, Some(instances)) {
         *act = Some(Act::SelectAllInstances);
     }
-    // *Duplicate* 4pt closer under the one-line face, the gap an instance's face
-    // leaves above its *Reset all* (§15 D995, the maintainer's look). Here and not
-    // in `main_tail`, which a variant's face shares under its property rows.
+    // *Duplicate* 4pt closer under the one-line face. Here and not in
+    // `main_tail`, which a variant's face shares under its property rows.
     ui.add_space(-4.0);
     main_tail(ui, act);
 }
 
-/// A card's one-line face: the glyph in its slot, the name beside it, and — with
-/// `instances` — the count after the name, which selects them ([`count_link`]).
-/// A main's face, `None` for the filled hexagon, and a set's on the Variants card
-/// (§15 D1000), one layout so the two names sit at one height. Answers whether
-/// the count was clicked.
-///
-/// **The count is on the name's line, not a row of its own** (§15 D1007, the
-/// maintainer's look): a muted line and a 28pt *Select all* beside it made a
-/// stepped row between the name and the card's content, and a second line under
-/// the name is what the faces had shed (D993). The name is cut first, with its
-/// whole text in a tooltip, so the count always shows.
+/// A card's one-line face: the glyph in its slot (`None` for the filled hexagon),
+/// the name beside it, and — with `instances` — the count after the name
+/// ([`count_link`]). A main's face and a set's on the Variants card share this
+/// layout. The name is cut first, whole in a tooltip, so the count always shows.
+/// Answers whether the count was clicked.
 pub(super) fn name_line(
     ui: &mut egui::Ui,
     glyph: Option<&str>,
@@ -1783,12 +1643,11 @@ struct NameCount {
 
 /// A face's name at 13pt and, with `instances`, its count after it at the same
 /// size ([`count_link`]) — the name cut to leave the count its room. A variant's
-/// derived name on its face draws this bare (§15 D1007).
+/// derived name on its face draws this bare.
 fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> NameCount {
-    // **No interact height**: a horizontal row opens `interact_size.y` tall and
-    // centres in it, which put the name 4pt below where a main's had sat — the
-    // heading's own fix (§15 D996). Scoped, or every row under a variant's name
-    // would lose it too.
+    // **No interact height**, as `heading`'s name: a horizontal row opens
+    // `interact_size.y` tall and centres in it. Scoped, or every row under a
+    // variant's name would lose it too.
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = 0.0;
         ui.horizontal(|ui| {
@@ -1832,11 +1691,10 @@ const NAME_PT: f32 = 13.0;
 /// The air between a face's name and its count.
 const COUNT_GAP: f32 = 6.0;
 
-/// *4 instances* after a face's name (§15 D1007, the maintainer's design): the
-/// name's size, dimmer, **underlined as a link**, brightening under the pointer,
-/// and a click selects them all — *Select all*, which it replaced, folded into the
-/// count it sat beside. At zero there is nothing to select: plain, dimmer still,
-/// no underline and no tooltip. Answers whether it was clicked.
+/// *4 instances* after a face's name: the name's size, dimmer, **underlined as a
+/// link**, brightening under the pointer, and a click selects them all. At zero
+/// there is nothing to select: plain, dimmer still, no underline and no tooltip.
+/// Answers whether it was clicked.
 fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
     let text = plural(instances, "instance");
     if instances == 0 {
@@ -1872,11 +1730,9 @@ fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
     resp.on_hover_text("Click to select all").clicked()
 }
 
-/// *Duplicate* — 3A's lower half, which a variant's face shares (3D); the count
-/// and *Select all* that stood over it are the count after the name since §15
-/// D1007. The mockup's *Duplicate as component*, shortened on the card that
-/// already says what it is (§15 D993); the context menu keeps the long name, where
-/// nothing around it does.
+/// *Duplicate*, which a variant's face shares. Shortened from *Duplicate as
+/// component* on the card that already says what it is; the context menu keeps
+/// the long name, where nothing around it does.
 fn main_tail(ui: &mut egui::Ui, act: &mut Option<Act>) {
     let h = ui::CONTROL_H;
     let w = ui.available_width();
@@ -1894,12 +1750,9 @@ fn main_tail(ui: &mut egui::Ui, act: &mut Option<Act>) {
     }
 }
 
-/// 3D: *In Button instance · Go to main*, or *Local to this instance · no
-/// counterpart* — a row of the identity card since §15 D995.
-///
-/// A local layer leads with the **broken link**, where the mockup had `+`: a `+`
-/// at the head of a row reads as a button that adds something, and this one is a
-/// statement that the layer has no counterpart (§15 D995, the maintainer's look).
+/// *In Button instance · Go to main*, or *Local to this instance · no
+/// counterpart* — a row of the identity card. A local layer leads with the
+/// **broken link**, not `+`, which at the head of a row reads as a button.
 fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option<Act>) {
     let (glyph, text) = if linked {
         (icon::HEXAGON, format!("In {main_name} instance"))
@@ -1910,11 +1763,8 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         slot = glyph_slot(ui);
-        // **Cut to what *Go to main* leaves** (`[X8.1-L1-01]`): measured, a
-        // 16-character main name already ran under the button and a 53-character
-        // one pushed it — and every card below, egui growing the parent to the
-        // row — off the screen. The whole line in the tooltip when cut (the
-        // label's own, `show_tooltip_when_elided`).
+        // **Cut to what *Go to main* leaves**, or a long main name pushes the
+        // button and every card below off the screen.
         let button = if linked {
             ui::action_button_w(ui.ctx(), "Go to main") + ui.spacing().item_spacing.x
         } else {
@@ -1957,8 +1807,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
             }
         });
     });
-    // The hexagon a point above the row's centre, where it sat low against the
-    // words beside it (§15 D995, the maintainer's look).
+    // The hexagon a point above the row's centre, or it sits low against the words.
     let lift = if linked { 1.0 } else { 0.0 };
     paint_glyph(
         ui,
@@ -1968,7 +1817,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
     );
 }
 
-/// 3G: *2 instances · 3 other layers*, and *Select instances* to narrow to them.
+/// *2 instances · 3 other layers*, and *Select instances* to narrow to them.
 fn mixed_line(ui: &mut egui::Ui, roots: &[NodeId], others: usize, act: &mut Option<Act>) {
     let mut slot = egui::Rect::NOTHING;
     let row = ui.horizontal(|ui| {
@@ -2003,11 +1852,9 @@ fn mixed_line(ui: &mut egui::Ui, roots: &[NodeId], others: usize, act: &mut Opti
 }
 
 /// The leading glyph's column, reserved before the row's other content exists.
-///
-/// ⚠️ **Painted afterwards ([`paint_glyph`]) rather than laid out as a label**:
-/// a horizontal row centres each item against the height the row has *so far*,
-/// so a glyph placed first sat centred on its own line and read as top-aligned
-/// beside a two-line block — measured at y≈151 against the block's ≈158.
+/// ⚠️ **Painted afterwards ([`paint_glyph`]) rather than laid out as a label**: a
+/// horizontal row centres each item against the height the row has *so far*, so a
+/// glyph placed first would sit top-aligned beside a two-line block.
 fn glyph_slot(ui: &mut egui::Ui) -> egui::Rect {
     ui.allocate_exact_size(egui::vec2(16.0, 0.0), egui::Sense::hover())
         .0
@@ -2024,8 +1871,8 @@ fn paint_glyph(ui: &egui::Ui, glyph: &str, slot: egui::Rect, beside: egui::Rect)
     );
 }
 
-/// The hexagon in a face's glyph slot (§15 D981): **filled** for a main or a
-/// variant (`ui::paint_hexagon_filled`, §15 D985), outline for an instance.
+/// The hexagon in a face's glyph slot: **filled** for a main or a variant
+/// (`ui::paint_hexagon_filled`), outline for an instance.
 fn paint_hexagon(ui: &egui::Ui, filled: bool, slot: egui::Rect, beside: egui::Rect) {
     if filled {
         crate::ui::paint_hexagon_filled(
@@ -2098,10 +1945,8 @@ mod tests {
                 parent: root,
                 index: None,
             }],
-            // **Off its main** (`[X8.2-L6-01]`): placed over the main, world and
-            // local readings agree for every node here, and a Transform mark
-            // compared on the card's world numbers — the one implementation
-            // `OndinApp::transform_marks`' doc forbids — passed every test.
+            // **Off its main**: over the main, world and local readings agree, and
+            // a Transform mark compared on world numbers would pass every test.
             ondin_core::kurbo::Vec2::new(200.0, 40.0),
         );
         doc.apply(&tx).expect("an instance");
@@ -2122,9 +1967,8 @@ mod tests {
         app.component_face()
     }
 
-    /// Each selection gets D981's face for it: a main, an instance, a child, two
-    /// instances of one main, instances among other layers, and nothing for a
-    /// plain layer.
+    /// Each selection gets its face: a main, an instance, a child, two instances
+    /// of one main, instances among other layers, and nothing for a plain layer.
     #[test]
     fn each_selection_gets_its_face() {
         let ctx = egui::Context::default();
@@ -2172,9 +2016,7 @@ mod tests {
     }
 
     /// The drift cache follows the document: an edit moves the revision and the
-    /// count with it. Flip: never clearing the cache leaves the stale zero — and
-    /// fails `reset_all_on_the_card_puts_the_instance_back` too, whose *1 override*
-    /// is read through it.
+    /// count with it. Flip: never clearing the cache leaves the stale zero.
     #[test]
     fn the_drift_cache_follows_an_edit() {
         let ctx = egui::Context::default();
@@ -2206,7 +2048,7 @@ mod tests {
     }
 
     /// The restore button of the ghost row labelled `label` — the ↺ on the
-    /// label's line, to its right (§15 D993: an icon in the eye's column).
+    /// label's line, to its right.
     fn ghost_restore(painted: &[(String, egui::Rect)], label: &str) -> Option<egui::Pos2> {
         let row = painted.iter().find(|(t, _)| t == label)?.1;
         painted
@@ -2240,10 +2082,8 @@ mod tests {
     }
 
     /// **The card, drawn and clicked.** An instance with a renamed child shows its
-    /// main's name on one line — no *Instance of* caption since §15 D993 — and
-    /// *1 override*; a press and release on *Reset all* puts the name back and the
-    /// summary goes. Driven through `RawInput`, so the button's `Response` is the
-    /// one the card reads.
+    /// main's name on one line and *1 override*; a click on *Reset all* puts the
+    /// name back and the summary goes.
     #[test]
     fn reset_all_on_the_card_puts_the_instance_back() {
         let ctx = egui::Context::default();
@@ -2257,8 +2097,6 @@ mod tests {
         let painted = texts(&out);
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
         assert!(!has("Instance of"), "the caption is gone: {painted:?}");
-        // The hexagon is centred on the name's line (`glyph_slot`, `paint_glyph`),
-        // the block being the name alone now.
         let hex = painted
             .iter()
             .find(|(t, _)| t == icon::HEXAGON)
@@ -2276,9 +2114,7 @@ mod tests {
             })
             .expect("the main's name");
         // Against the name's **cap band**, not its box: the link's underline
-        // hangs 3.5pt below the baseline and drags the box's centre down with it
-        // (measured 2.25 off where the cap band is 0.3). Inter's cap height is
-        // 0.727em, the name 13pt.
+        // drags the box's centre down. Inter's cap height is 0.727em, the name 13pt.
         let cap_mid = name.top() + 13.0 * 0.727 / 2.0;
         assert!(
             (hex.center().y - cap_mid).abs() <= 1.0,
@@ -2320,20 +2156,10 @@ mod tests {
         v
     }
 
-    /// **A field's mark** (§15 D981, 4A–4B). The instance's rect is moved along
-    /// x only: its X label is painted bright, its Y dim — compared on the stored
-    /// local translation, since the card's numbers are world ones and the copy sits
-    /// elsewhere than its main with nothing overridden. A click on X's label slot
-    /// writes the main's x back and leaves y alone. Flip: comparing the whole
-    /// transform rather than one coefficient in `transform_marks` fails *"Y
-    /// follows"* — Y painted bright.
-    ///
-    /// ⚠️ **The world-reading flip bites only because `fixture` places the
-    /// instance off its main** (`[X8.2-L6-01]`). Over its main, world and local
-    /// agreed for every node, and X/Y compared as `world[axis]` against the main's
-    /// `world_transform` left the whole suite green. Flip, run, with the instance
-    /// at (200, 40): that comparison fails *"Y follows"* here and *"an unmarked
-    /// label still scrubs"* in `a_marked_fields_reset_shows_an_arrow_and_a_tooltip`.
+    /// **A field's mark.** Moved along x only, the copy's X label is bright and Y
+    /// dim; a click on X's label writes the main's x back. Flip: comparing the
+    /// whole transform in `transform_marks` fails *"Y follows"*. ⚠️ **A world
+    /// reading bites only because `fixture` places the instance off its main.**
     #[test]
     fn an_overridden_field_is_bright_and_its_label_resets_it() {
         let ctx = egui::Context::default();
@@ -2371,15 +2197,11 @@ mod tests {
         );
     }
 
-    /// **A marked field's ↺ reads as a button, not as a scrub handle** (§15 D995):
-    /// with the pointer resting on X's label slot the cursor is the plain arrow
-    /// (§9.2's rule, §15 D371), where an unmarked label shows the scrub's
-    /// horizontal arrows, and a tooltip
-    /// opens naming the reset. Flips, both run: the strip's cursor left at the
-    /// arrows fails *"the marked label's cursor"*; dropping the strip's
-    /// `on_hover_text` fails *"a tooltip is open"* — which says the tooltip was
-    /// there before this entry (*Reset to main ·* the main's value, after egui's
-    /// 0.5s delay), and only the cursor was wrong.
+    /// **A marked field's ↺ reads as a button, not as a scrub handle**: the cursor
+    /// over X's label is the plain arrow (an unmarked label shows the scrub's
+    /// arrows) and a tooltip opens naming the reset. Flips, run: the strip's cursor
+    /// left at the arrows fails *"the marked label's cursor"*; dropping its
+    /// `on_hover_text` fails *"a tooltip is open"*.
     #[test]
     fn a_marked_fields_reset_shows_an_arrow_and_a_tooltip() {
         let ctx = egui::Context::default();
@@ -2432,26 +2254,16 @@ mod tests {
         );
     }
 
-    /// **The Appearance card's marks** (§15 D981): the instance's rect has its
-    /// opacity and one corner's radius overridden. Opacity's drop glyph is bright
-    /// and the radius field marked — the whole radius differs — while each corner
-    /// is marked alone: the top left and no other, its reset writing that corner
-    /// and leaving the other three as the copy holds them. A click on opacity's
-    /// glyph puts the main's 100% back.
+    /// **The Appearance card's marks**: opacity's glyph is bright, the radius field
+    /// marked, and only the overridden top-left corner marked, its reset writing
+    /// that corner alone.
     ///
-    /// ⚠️ **The corner is held by two guards in `sub_mark`, and either alone keeps
-    /// it unmarked**: the equality skip (`get(&cur) == want`), and *"a reset that
-    /// would write nothing marks nothing"* (`cur == before`), since for an
-    /// untouched corner `put` writes the value it already holds. Flips, run
-    /// (`[X8.2-L6-05]`, re-run 2026-10-07): the equality skip dropped leaves this
-    /// test green, and is caught where `put` is lossy — by
-    /// `layout::tests::an_instance_marks_its_own_layout_fields_and_no_others`
-    /// (*"the mode follows"*), `typography::instance_mark_tests::the_sizing_mark_compares_the_mode_and_not_the_width`
-    /// (*"the width is W's"*) and, since its copy carries a vertical pin of its
-    /// own, `a_centre_button_marks_a_centring_the_main_does_not_share` (*"one
-    /// dot"*, two). The write-nothing guard dropped alone fails only the layout
-    /// test (*"no layout, no gap to reset"*). Both dropped fail here at *"the top
-    /// right follows"*.
+    /// ⚠️ **Two guards in `sub_mark` each keep an untouched corner unmarked**: the
+    /// equality skip and *"a reset that would write nothing marks nothing"*. Flips,
+    /// run: the equality skip dropped leaves this test green and fails where `put`
+    /// is lossy (`layout::tests::an_instance_marks_its_own_layout_fields_and_no_others`);
+    /// the write-nothing guard dropped alone fails only that layout test; both
+    /// dropped fail here at *"the top right follows"*.
     #[test]
     fn appearance_marks_each_field_and_each_corner() {
         let ctx = egui::Context::default();
@@ -2494,15 +2306,11 @@ mod tests {
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
 
-    /// **A copy's corner binding is a radius override** (D1038 A6, §15 D1048,
-    /// D1041's *Fix*): the main's rect bound to *radius/md*, the copy's rebound to
-    /// *radius/lg* — both literals 0 — marks the radius field, its tip naming the
-    /// main's variable and its ↺ putting that binding back. One corner rebound
-    /// marks that corner alone, the bottom right and not the bottom left.
-    ///
-    /// Flip, run: `Corner::var_slot` as the variant's cast (`self as usize`, the
-    /// reading order) fails *"the bottom right is the corner rebound"* — the two
-    /// bottom corners swap.
+    /// **A copy's corner binding is a radius override**: the main's rect bound to
+    /// *radius/md*, the copy's rebound to *radius/lg* marks the radius field, its
+    /// tip naming the main's variable and its ↺ putting that binding back; one
+    /// corner rebound marks that corner alone. Flip, run: `Corner::var_slot` as
+    /// `self as usize` fails *"the bottom right is the corner rebound"*.
     #[test]
     fn a_copys_corner_binding_marks_the_radius_and_its_reset_rebinds() {
         let ctx = egui::Context::default();
@@ -2564,8 +2372,7 @@ mod tests {
         assert!(f.app.session.commit(Transaction(one)));
         f.app.gather_card_overrides();
         let marks = f.app.appearance_marks(f.ir);
-        // `marks.corners` is in the inspector's reading order, TL TR BL BR,
-        // while the binding above is `CornerVars`' TL TR BR BL.
+        // `marks.corners` is in reading order, TL TR BL BR; `CornerVars` is TL TR BR BL.
         let (bl, br) = (2, 3);
         assert!(
             marks.corners[br].is_some(),
@@ -2575,15 +2382,10 @@ mod tests {
     }
 
     /// **A copy's width bound as its main's draws the chip; resized, it detaches
-    /// and W is marked; the ↺ binds it back** (§15 D1061). The main's rect bound
-    /// to *size/w* (30): the copy follows the binding and draws 30 wide, its W a
-    /// chip naming the variable. A width written on the copy through the commit
-    /// door detaches it — `keep_size_bindings` — and W is then marked, its tip the
-    /// main's variable; clicking the prefix puts the binding back, 30 wide again.
-    ///
+    /// and W is marked; the ↺ binds it back.** The main's rect is bound to *size/w*
+    /// (30); a width written on the copy detaches it (`keep_size_bindings`).
     /// Flip, run: `transform_marks`' reset without its `SetSizeVars` fails *"the
-    /// reset puts the main's binding back"* — the copy's literal 0 written alone,
-    /// unbound, drawn 0 wide.
+    /// reset puts the main's binding back"*.
     #[test]
     fn a_copys_detached_width_marks_w_and_its_reset_rebinds() {
         let ctx = egui::Context::default();
@@ -2663,14 +2465,10 @@ mod tests {
         assert_eq!(drawn(&f).width, 30.0, "and the copy draws its number again");
     }
 
-    /// **A copy's own mode is an override, marked on its *Mode* row** (D1038 (a),
-    /// §15 D1048, D1042's *Fix*): the instance sets *Dark* where its main
-    /// inherits, so the row's label is bright with a dot beside it and its tip
-    /// says *Reset to main · Inherit*; a click on the label puts the copy back to
-    /// inheriting.
-    ///
-    /// Flip, run: `frame_mode_row` without its `reset_marked` fails *"the reset
-    /// puts the copy back to inheriting"*.
+    /// **A copy's own mode is an override, marked on its *Mode* row**: the label is
+    /// bright with a dot, and a click puts the copy back to inheriting. Flip, run:
+    /// `frame_mode_row` without its `reset_marked` fails *"the reset puts the copy
+    /// back to inheriting"*.
     #[test]
     fn a_copys_own_mode_is_marked_on_its_mode_row() {
         let ctx = egui::Context::default();
@@ -2715,15 +2513,13 @@ mod tests {
         );
     }
 
-    /// The centre of every override dot the frame painted — the tests' one
-    /// detector, `ui::painted_override_dots` (`[X8.2-L3-01]`).
+    /// The centre of every override dot the frame painted.
     fn dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
         ui::painted_override_dots(out)
     }
 
     /// The inspector drawn, then three more frames for it to settle — a widget's
-    /// state is last frame's (CLAUDE.md, the egui measuring traps). The module's
-    /// one copy (`[X8.2-L3-01]`: it was written out twenty-five times).
+    /// state is last frame's.
     fn settle(app: &mut OndinApp, ctx: &egui::Context) -> egui::FullOutput {
         let mut out = frame(app, ctx, Vec::new());
         for _ in 0..3 {
@@ -2732,9 +2528,7 @@ mod tests {
         out
     }
 
-    /// Press and release the primary button at `at`, the pointer moved there
-    /// first — the precondition a click here has (§15 D986), in one place
-    /// (`[X8.2-L3-01]`: it was written out nine times, twice as named helpers).
+    /// Press and release the primary button at `at`, the pointer moved there first.
     fn click(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
         let press = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -2747,18 +2541,11 @@ mod tests {
         frame(app, ctx, vec![press(false)]);
     }
 
-    /// **The Position card's centre buttons carry a mark** (§15 D981 (e), closed
-    /// 2026-10-06). The main's rect is centred horizontally, between 30 and 60;
-    /// the instance's copy is pinned left at 5 alone. The horizontal button draws
-    /// the dot at its own top right, between the two glyphs, and the vertical
-    /// button none, both centred nowhere. A click on the marked button is its
-    /// reset: the main's whole horizontal axis comes back — both insets and the
-    /// auto margins — and the vertical axis is not written. Flip: `centred`
-    /// reading the margins of the wrong axis (top and bottom) leaves the
-    /// horizontal button unmarked and fails *"one dot"* with none. Flip, run:
-    /// `centre_mark`'s `put` copying the main's whole insets (`*i = from`) fails
-    /// *"the vertical axis untouched"* — the copy's own `top 20` gone — which it
-    /// passed while the copy's vertical axis was the main's (`[X8.2-L6-06]`).
+    /// **The Position card's centre buttons carry a mark**: only the horizontal one
+    /// draws the dot, and its click resets the main's whole horizontal axis
+    /// without writing the vertical. Flips: `centred` reading the wrong axis'
+    /// margins fails *"one dot"*; `centre_mark`'s `put` copying the main's whole
+    /// insets fails *"the vertical axis untouched"*.
     #[test]
     fn a_centre_button_marks_a_centring_the_main_does_not_share() {
         use ondin_core::container::AutoMargins;
@@ -2785,10 +2572,8 @@ mod tests {
             centred,
             "the fixture's copy follows its main"
         );
-        // And pinned top 20 of its own, against the main's unset top: the
-        // vertical axis has to *differ* for "untouched" to say anything — with
-        // both `None`, a reset writing the main's whole insets left the same pair
-        // (`[X8.2-L6-06]`).
+        // Pinned top 20 of its own, against the main's unset top: the vertical
+        // axis has to *differ* for "untouched" to say anything.
         let pinned = Insets {
             left: Some(LengthPct::Px(5.0)),
             top: Some(LengthPct::Px(20.0)),
@@ -2801,8 +2586,7 @@ mod tests {
         f.app.session.selection.set_one(f.ir);
         let out = settle(&mut f.app, &ctx);
         let painted = inks(&out);
-        // The last of each: the align row above the Position card draws the same
-        // two glyphs.
+        // The last of each: the align row above draws the same two glyphs.
         let glyph = |g: &str| {
             painted
                 .iter()
@@ -2835,14 +2619,11 @@ mod tests {
         );
     }
 
-    /// **The shared radius over several layers carries a mark** (§15 D981 (e),
-    /// closed 2026-10-06). The instance and a plain rect are selected; the copy's
-    /// radius is 6 where its main's is 0, the plain rect's 6 with no main. The
-    /// field's glyph is bright — any rect in the selection's subtree that overrides
-    /// it marks it — and a click on the glyph writes the main's radius into the
-    /// copy alone, the plain rect keeping its 6. Flip: subjects taken as the
-    /// selection rather than its subtree reach only the instance's frame, which
-    /// has no radius, and fail *"the radius is overridden"* with the glyph dim.
+    /// **The shared radius over several layers carries a mark.** The instance and a
+    /// plain rect are selected; the copy's radius is 6 where its main's is 0. The
+    /// glyph is bright and a click writes the main's radius into the copy alone.
+    /// Flip: subjects taken as the selection, not its subtree, reach only the
+    /// instance's frame and fail *"the radius is overridden"*.
     #[test]
     fn the_shared_radius_marks_an_override_in_the_selections_subtree() {
         let ctx = egui::Context::default();
@@ -2878,14 +2659,11 @@ mod tests {
         );
     }
 
-    /// **An instance that removed every item still shows its ghost rows** (§15
-    /// D981, 4D). The main's rect has a fill and an export; the instance removes
-    /// both, leaving each list empty. Both cards stay open and each draws its
-    /// ghost row — *Restore* twice — and each *Restore* puts the main's item back
-    /// by its id. Flips, both run: `has_ghosts` answering `false` collapses both
-    /// cards as empty and fails *"two ghost rows"* with none; the Fill card's
-    /// empty-list check put back to `fills.is_empty()` alone draws *No fill* in
-    /// the open card and fails the same assertion with one, the export's.
+    /// **An instance that removed every item still shows its ghost rows**, and
+    /// each *Restore* puts the main's item back by its id. Flips, run:
+    /// `has_ghosts` answering `false` fails *"two ghost rows"* with none; the Fill
+    /// card's empty-list check put back to `fills.is_empty()` alone fails it with
+    /// one.
     #[test]
     fn an_emptied_list_still_draws_its_ghost_rows() {
         use ondin_core::{ExportSpec, Fill, keyed_by_position};
@@ -2946,12 +2724,10 @@ mod tests {
         );
     }
 
-    /// **A list reads item by item against the main's** (§15 D981, 4D). The main's
-    /// rect has two fills; the instance recolours the first, removes the second and
-    /// adds one of its own. The removed one draws as a ghost row; the own one shows
-    /// `+`; the recoloured one's slot, under the pointer, is ↺, whose click takes
-    /// that item's colour back and nothing else; and the ghost row's restore puts
-    /// the whole list back as the main has it, the own fill gone (§15 D994).
+    /// **A list reads item by item against the main's.** The instance recolours the
+    /// main's first fill, removes the second and adds its own: a ghost row, a `+`,
+    /// a ↺ that takes the recoloured item back alone, and a restore that puts the
+    /// whole list back as the main has it.
     #[test]
     fn a_fill_list_marks_restores_and_resets_item_by_item() {
         use ondin_core::{Fill, Keyed, keyed_by_position};
@@ -2980,11 +2756,9 @@ mod tests {
         assert!(painted.iter().any(|(t, _)| *t == gone_hex), "a ghost row");
         let own_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 3, 30));
         let rect_of = |s: &str| painted.iter().find(|(t, _)| t == s).map(|(_, r)| *r);
-        // **The own fill's `+` is on its own row** (`[X8.2-L6-08]`): this counted
-        // `+`s at two or more, which the Fill and Stroke headers' own `+`s already
-        // satisfy with no mark on the row at all. Flip, run: `item_slot`'s `Local`
-        // arm painting `""` for `icon::PLUS` fails *"a + on the own fill's row"*,
-        // and left the count green.
+        // **The own fill's `+` is on its own row**, not counted among the Fill and
+        // Stroke headers' own `+`s. Flip, run: `item_slot`'s `Local` arm painting
+        // `""` for `icon::PLUS` fails *"a + on the own fill's row"*.
         let own_row = rect_of(&own_hex).expect("the own fill's row");
         assert!(
             painted.iter().any(|(t, r)| {
@@ -2994,13 +2768,11 @@ mod tests {
             }),
             "a + on the own fill's row: {painted:?}"
         );
-        // *Restore* on the ghost row.
         let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
-        // **The ghost row is laid out as the live one** (§15 D993): its hex
-        // starts where a live row's hex does, and its restore stands in the eye's
-        // column. Flips, both run: the label at the old lead (a 12pt chip at the
-        // field's inset) fails *"the hex's x"*; the restore back inside the field
-        // fails *"the eye's column"*.
+        // **The ghost row is laid out as the live one**: its hex starts where a
+        // live row's hex does, and its restore stands in the eye's column. Flips,
+        // both run: the label at a 12pt chip at the field's inset fails *"the
+        // hex's x"*; the restore inside the field fails *"the eye's column"*.
         let (ghost, live) = (rect_of(&gone_hex).unwrap(), rect_of(&own_hex).unwrap());
         assert!(
             (ghost.left() - live.left()).abs() <= 1.0,
@@ -3016,8 +2788,7 @@ mod tests {
             (ghost_at.x - eye.x).abs() <= 1.0,
             "the eye's column: restore {ghost_at:?}, eye {eye:?}"
         );
-        // ↺ on the recoloured row first: that item alone, the ghost and the own
-        // fill left as they are.
+        // ↺ on the recoloured row first: that item alone.
         let changed_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 9, 30));
         let row = rect_of(&changed_hex).expect("the recoloured row");
         frame(
@@ -3037,8 +2808,8 @@ mod tests {
         let now = fills_of(&f.app, f.ir);
         assert_eq!(now, vec![main[0].clone(), own.clone()], "that item alone");
         // Then the ghost row's restore: **the whole list as the main has it**, the
-        // own fill gone with the rest (§15 D994). Flip, run: restoring the one
-        // item (`reset_item`, the rule before) fails *"the main's list"*.
+        // own fill gone with the rest. Flip, run: restoring the one item
+        // (`reset_item`) fails *"the main's list"*.
         let mut out = frame(&mut f.app, &ctx, Vec::new());
         for _ in 0..2 {
             out = frame(&mut f.app, &ctx, Vec::new());
@@ -3049,10 +2820,10 @@ mod tests {
         assert_eq!(fills_of(&f.app, f.ir), main, "the main's list");
     }
 
-    /// The Effects card reads its stack the same way (§15 D981, 4D–4E's *Inner
-    /// shadow ↺*): the instance hides the main's first effect and removes the
-    /// second; the first's ↺ under the pointer takes the main's back alone, and the
-    /// second is a ghost row whose restore brings the whole stack back (§15 D994).
+    /// The Effects card reads its stack the same way: the instance hides the main's
+    /// first effect and removes the second; the first's ↺ under the pointer takes
+    /// the main's back alone, and the second is a ghost row whose restore brings the
+    /// whole stack back.
     #[test]
     fn an_effect_stack_restores_and_resets_item_by_item() {
         use ondin_core::{Effect, EffectKind, keyed_by_position};
@@ -3072,8 +2843,7 @@ mod tests {
         let mut hidden = main[0].clone();
         hidden.visible = false;
         // An effect of the instance's own besides, or a restore of the one missing
-        // item would read as the whole stack and the test could not tell the two
-        // rules apart (`arch-scribe`'s find).
+        // item would read as the whole stack.
         let own = ondin_core::Keyed::new(f.app.session.ids.mint_item(), Effect::new(c));
         assert!(
             f.app
@@ -3088,7 +2858,7 @@ mod tests {
         let effects_of = |app: &OndinApp| app.session.doc.get(f.ir).unwrap().effects().to_vec();
         let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
         let settle = |app: &mut OndinApp| texts(&settle(app, &ctx));
-        // The hidden effect's ↺ first: that item alone, the ghost row still there.
+        // The hidden effect's ↺ first: that item alone.
         let row = settle(&mut f.app)
             .into_iter()
             .find(|(t, _)| t == a.label())
@@ -3113,8 +2883,7 @@ mod tests {
             vec![main[0].clone(), own],
             "that item alone"
         );
-        // Then the ghost row's restore: the whole stack as the main has it (§15
-        // D994).
+        // Then the ghost row's restore: the whole stack as the main has it.
         let painted = settle(&mut f.app);
         let restore = ghost_restore(&painted, b.label())
             .unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
@@ -3155,15 +2924,10 @@ mod tests {
             .map(|(_, r)| r.center())
     }
 
-    /// **The Stroke card reads its list as the Fill card does** (`[X8.2-L6-02]`;
-    /// §15 D981, 4D; D994): the instance recolours the main's first stroke, removes
-    /// the second and adds one of its own. The recoloured row's ↺ takes that item
-    /// back alone; the ghost row's *Restore* puts the whole list back as the main
-    /// has it, the own stroke gone with it.
-    ///
-    /// Flips, run: the restore arm handed `reset_item(src, strokes, gone)` (the
-    /// rule before D994) fails *"the main's list"*; the ↺ arm writing nothing
-    /// fails *"that item alone"*. Both were green before this test.
+    /// **The Stroke card reads its list as the Fill card does** (↺ one item,
+    /// *Restore* the whole list). Flips, run: the restore arm handed
+    /// `reset_item(src, strokes, gone)` fails *"the main's list"*; the ↺ arm
+    /// writing nothing fails *"that item alone"*.
     #[test]
     fn a_stroke_list_restores_and_resets_item_by_item() {
         use ondin_core::{Keyed, Stroke, keyed_by_position};
@@ -3220,15 +2984,10 @@ mod tests {
         assert_eq!(strokes_of(&f.app), main, "the main's list");
     }
 
-    /// **The Layout grid card, on an instance's root frame** (`[X8.2-L6-02]`; §15
-    /// D981, 4D; D994): the instance changes the main's first grid's count, removes
-    /// the second and adds one of its own. The changed grid's ↺ takes it back
-    /// alone; the ghost row's *Restore* puts the main's whole list back.
-    ///
-    /// Flips, run: the card's `list` match answering `None` for a restore fails
-    /// *"the main's list"*, and for a ↺ fails *"that item alone"*; the restore
-    /// handed `reset_item` (the rule before D994) fails *"the main's list"*. All
-    /// three were green before this test.
+    /// **The Layout grid card, on an instance's root frame**, reads its list as the
+    /// Fill card does. Flips, run: the card's `list` match answering `None` for a
+    /// restore fails *"the main's list"*, and for a ↺ fails *"that item alone"*;
+    /// the restore handed `reset_item` fails *"the main's list"*.
     #[test]
     fn a_layout_grid_list_restores_and_resets_item_by_item() {
         use ondin_core::{GridAxis, Keyed, LayoutGrid, keyed_by_position};
@@ -3274,17 +3033,11 @@ mod tests {
         assert_eq!(grids_of(&f.app), main, "the main's list");
     }
 
-    /// **The Export card, on two items** (`[X8.2-L6-02]`, `[X9.2-L6-06]`; §15 D981,
-    /// D994): the instance turns the main's 2× PNG into 3× SVG, removes its 1× SVG
-    /// and adds one of its own. The changed row's ↺ takes the main's export back by
-    /// its id and value; the ghost row's *Restore* is the main's whole list, the own
-    /// export gone. `an_emptied_list_still_draws_its_ghost_rows` drives this
-    /// restore on a list of one, where the whole list and the one item are the same
-    /// write.
-    ///
-    /// Flips, run: the ↺ arm answering `None` fails *"that item alone"*; the
-    /// restore handed `reset_item(src, &specs, …)` (the rule before D994) fails
-    /// *"the main's list"*. Both were green before this test.
+    /// **The Export card, on two items**, reads its list as the Fill card does;
+    /// `an_emptied_list_still_draws_its_ghost_rows` drives the restore on a list of
+    /// one, where the whole list and the one item are the same write. Flips, run:
+    /// the ↺ arm answering `None` fails *"that item alone"*; the restore handed
+    /// `reset_item(src, &specs, …)` fails *"the main's list"*.
     #[test]
     fn an_export_list_restores_and_resets_item_by_item() {
         use ondin_core::{ExportFormat, ExportScale, ExportSpec, Keyed, keyed_by_position};
@@ -3343,13 +3096,8 @@ mod tests {
             top: Some(ondin_core::LengthPct::Px(8.0)),
             ..Default::default()
         };
-        // Pinned with the placement written beside the insets, as the app's own
-        // pin does (`toggle_pin` writes `baked_placement` with the `SetInsets`):
-        // right 12 and top 8 in a 100-wide frame put
-        // the 10-wide rect at (78, 8). Pinned by insets alone the stored transform
-        // stays (0, 0), the copy's moved transform then differs from it on y as
-        // well, and the X reset leaves that one unit behind — a fixture the app
-        // cannot make, measured the first time this test ran.
+        // Pinned with the placement beside the insets, as `toggle_pin` writes it:
+        // right 12 and top 8 in a 100-wide frame put the rect at (78, 8).
         assert!(f.app.session.commit(Transaction(vec![
             Operation::SetInsets { id: r, insets: pin },
             Operation::SetTransform {
@@ -3357,11 +3105,9 @@ mod tests {
                 transform: ondin_core::kurbo::Affine::translate((78.0, 8.0)),
             },
         ])));
-        // **The instance wider than its main** — the case that needs the insets
-        // in a reset. At the main's size, the main's stored transform is where
-        // the main draws the rect, and `keep_insets` re-derives the main's insets
-        // from it with or without them; at 260 wide the same point is `right
-        // 172`, and only an explicit `SetInsets` keeps the pin at 12.
+        // **The instance wider than its main**, the case that needs the insets in
+        // a reset: the same point is `right 172` at 260 wide, and only an explicit
+        // `SetInsets` keeps the pin at 12.
         assert!(
             f.app
                 .session
@@ -3395,20 +3141,11 @@ mod tests {
         pin
     }
 
-    /// **A field reset on a pinned layer comes back exact** — the exact-equality
-    /// risk asked of the field marks (§5.3d). X's reset writes the main's x **and
-    /// the main's horizontal insets**, so `keep_insets` leaves the layer to it.
-    /// Flip: drop the `SetInsets` from `transform_marks`' resets and *"the insets
-    /// came back"* fails — the bare transform re-pinned where it lands in the
-    /// wider instance.
-    ///
-    /// ⚠️ **Two first readings, both of the fixture.** Pinned by insets alone (the
-    /// main's stored transform left at the origin, which the app's pin never does)
-    /// the bare reset came back `right 90, top 0`; pinned honestly but at the
-    /// main's own size, it came back exact *without* the insets, because the
-    /// main's stored transform is then where the main draws it — so the flip
-    /// stayed green. The instance has to be a different size for the insets to
-    /// matter, which is why `pinned_and_moved` widens it.
+    /// **A field reset on a pinned layer comes back exact**: X's reset writes the
+    /// main's x **and horizontal insets**. Flip: drop the `SetInsets` from
+    /// `transform_marks`' resets and *"the insets came back"* fails. ⚠️ **The
+    /// instance has to be a different size from its main** (`pinned_and_moved`
+    /// widens it) or the flip stays green.
     #[test]
     fn an_x_reset_on_a_pinned_layer_leaves_no_drift() {
         let ctx = egui::Context::default();
@@ -3432,12 +3169,9 @@ mod tests {
         assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
     }
 
-    /// **X's reset writes the horizontal insets and keeps the copy's own
-    /// vertical ones** (`[X8.2-L6-06]`). `pinned_and_moved`'s copy keeps the
-    /// main's `top 8`, so a reset copying the main's whole insets passed
-    /// `an_x_reset_on_a_pinned_layer_leaves_no_drift` too; here the copy is pinned
-    /// `top 20` of its own first, and X's ↺ must leave it — a vertical pin is an
-    /// override of its own, not X's. Flip, run: `transform_marks`' X and Y resets
+    /// **X's reset writes the horizontal insets and keeps the copy's own vertical
+    /// ones.** The copy is pinned `top 20` of its own first, and X's ↺ must leave
+    /// it — a vertical pin is an override of its own, not X's. Flip, run: `transform_marks`' X and Y resets
     /// built with `insets(true, true)` fails *"the copy's own top stays"* with
     /// `top 8`.
     #[test]
@@ -3473,10 +3207,8 @@ mod tests {
     }
 
     /// **And the Transform card's header reset**, which `gather_card_overrides`
-    /// gives the main's insets for the same reason (through `placement_stated`,
-    /// since `[X4-L1-01]` the reset doors' one helper). Flip: dropping that append
-    /// fails *"the insets came back"* with `right 172` — the main's point, pinned
-    /// against the wider instance.
+    /// gives the main's insets for the same reason (through `placement_stated`).
+    /// Flip: dropping that append fails *"the insets came back"* with `right 172`.
     #[test]
     fn a_transform_header_reset_on_a_pinned_layer_leaves_no_drift() {
         let ctx = egui::Context::default();
@@ -3506,13 +3238,10 @@ mod tests {
         assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
     }
 
-    /// **An instance root's insets are its own** — where it sits in its own
-    /// parent (`propagate::is_placement`). The instance is pinned inside a frame
-    /// and resized wider than its main; *Reset transform* puts the main's size back
-    /// and must leave the instance's pin alone. Found by `arch-scribe` reading
-    /// `c292b50`: that commit gave every Transform-card reset the **main's**
-    /// insets, which for a root describe where the main sits in *its* parent — the
-    /// instance was unpinned. Failed first with the main's (unset) insets written.
+    /// **An instance root's insets are its own** — where it sits in its own parent
+    /// (`propagate::is_placement`). The instance is pinned inside a frame and
+    /// resized wider than its main; *Reset transform* puts the main's size back and
+    /// must leave the instance's pin alone.
     #[test]
     fn a_transform_reset_keeps_an_instance_roots_own_pin() {
         let ctx = egui::Context::default();
@@ -3576,12 +3305,9 @@ mod tests {
             "the main's size is back"
         );
         assert_eq!(node.insets(), &pin, "and the instance's own pin stays");
-        // **And through W's own ↺** (`[X8.2-L6-07]`): `6210953` fixed the root's
-        // insets at the header and in `transform_marks` both, and only the header
-        // was driven. Widened again, as above, and W's bright label clicked. Flip,
-        // run: `transform_marks`' `main_in` read from the source for a root too
-        // fails *"W keeps the instance's own pin"* — `right: None`, the instance
-        // unpinned, the shipped defect.
+        // **And through W's own ↺**: widened again, as above, and W's bright label
+        // clicked. Flip, run: `transform_marks`' `main_in` read from the source for
+        // a root too fails *"W keeps the instance's own pin"*.
         assert!(f.app.session.commit(Transaction(vec![
             Operation::SetInsets {
                 id: f.i,
@@ -3611,19 +3337,11 @@ mod tests {
         assert_eq!(node.insets(), &pin, "W keeps the instance's own pin");
     }
 
-    /// **The menu's and the card's *Reset all* state the placement too**
-    /// (`[X4-L1-01]`). The main's rect pinned `right 12` alone, stored at (78, 8)
-    /// as the app's pin writes it; the instance 260 wide, so the copy draws at
-    /// x 238; the copy moved straight down 20 from where it is drawn — its insets
-    /// still the main's, its stored transform (238, 28), one override: the
-    /// transform. `reset_tx` sent that `SetTransform` bare, and `keep_insets` read
-    /// it as *"draw it here"*: measured, the copy came back `right 172` — 160 px
-    /// left of where it was, with an insets override it never had. Through
-    /// `reset_selection` (*Reset ‹Label›*, the menu's door) and then through the
-    /// Component card's *Reset all* on the instance (`Act::Reset(Kind::All)`), the
-    /// two doors `reset_tx` serves. Flip, run: `reset_tx` without
-    /// `placement_stated` fails *"the menu's reset keeps the pin"* with
-    /// `right: Some(Px(172.0))`.
+    /// **The menu's and the card's *Reset all* state the placement too**: a bare
+    /// `SetTransform` on the pinned copy of a wider instance would come back
+    /// `right 172`. Driven through `reset_selection` and `Act::Reset(Kind::All)`.
+    /// Flip, run: `reset_tx` without `placement_stated` fails *"the menu's reset
+    /// keeps the pin"*.
     #[test]
     fn a_reset_all_on_a_pinned_copy_keeps_its_pin() {
         use ondin_core::reset::Kind;
@@ -3702,23 +3420,16 @@ mod tests {
             &pin,
             "the card's reset keeps the pin"
         );
-        // The instance's own width is reset with it — the root's size is no
-        // placement — so the copy, still `right 12`, draws where the main's does.
+        // The root's size is no placement, so it is reset too and the copy, still
+        // `right 12`, draws where the main's does.
         assert_eq!(drawn_x(&f), 78.0, "pinned in the main's width");
         assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
     }
 
-    /// **An in-flow flex item's *Reset all* lands** (`[X4-L1-01]`'s second
-    /// case). The main laid out as a flex row; the copy pinned (`left 40, top
-    /// 30`, out of the flow), placed there, then unpinned — back in the flow with
-    /// the main's insets and a stored translation of (40, 30) where the main's
-    /// rect stores (0, 0). One override, and *Reset all* offered for it; but
-    /// `kept_flow_translations` keeps an in-flow item's stored translation and
-    /// dropped the write as changing nothing, so the commit was empty — measured:
-    /// nothing committed, the override and the enabled reset there for good.
-    /// With the insets stated beside the transform the door leaves the write to
-    /// the transaction. Flip, run: `reset_tx` without `placement_stated` fails
-    /// *"the override is gone"*.
+    /// **An in-flow flex item's *Reset all* lands**: `kept_flow_translations`
+    /// would drop a bare write as changing nothing; with the insets stated beside
+    /// the transform it stands. Flip, run: `reset_tx` without `placement_stated`
+    /// fails *"the override is gone"*.
     #[test]
     fn a_reset_all_on_an_in_flow_item_commits() {
         use ondin_core::container::{Display, Flex};
@@ -3836,17 +3547,11 @@ mod tests {
         tag
     }
 
-    /// **A swapped slot's Transform marks compare with the slot, not the swap**
-    /// (`[X9.1-L1-01]`, §15 D983 (3)). The slot keeps its placement and size, so
-    /// nothing in Transform differs and X, Y, W and H are drawn dim. Read from
-    /// `reset::source_of` — the Tag — all four were marked, their tips naming the
-    /// Tag's page position and size, and X's ↺ moved the slot out of its button.
-    /// Then the copy is resized to 40 × 40, pin kept: *Reset transform* puts the
-    /// slot's 30 × 30 back and keeps its `right 8` — with the Tag's insets stated
-    /// beside it, the reset unpinned the slot, measured. Flips, run:
-    /// `transform_marks` reading its source from `source_of` again fails *"X
-    /// follows the slot"*; `placement_stated` reading `source_of` fails *"the
-    /// slot's pin stays"* with `right: None`.
+    /// **A swapped slot's Transform marks compare with the slot, not the swap**:
+    /// X, Y, W and H are dim, and after a resize *Reset transform* puts the slot's
+    /// 30 × 30 back and keeps its `right 8`. Flips, run: `transform_marks` reading
+    /// `source_of` fails *"X follows the slot"*; `placement_stated` reading it
+    /// fails *"the slot's pin stays"*.
     #[test]
     fn a_swapped_slots_transform_compares_with_the_slot() {
         let ctx = egui::Context::default();
@@ -3947,13 +3652,10 @@ mod tests {
             .unwrap_or_else(|| panic!("no {label} painted"))
     }
 
-    /// **A text's box width is marked on W** (`[X9.1-L1-02]`, `[X9.2-L1-02]`).
-    /// The main's text wraps at 100 and the copy's at 180, both auto-height: the
-    /// Type header counted one override and no field showed it — the Sizing mark
-    /// compares the mode, which agrees, and `transform_marks` had no text arm. W is
-    /// bright now, H dim, and W's ↺ writes `AutoHeight(100)`, the copy's mode kept.
-    /// Flip, run: the text arm's `AutoHeight` case removed fails *"W is
-    /// overridden"*.
+    /// **A text's box width is marked on W.** The main's text wraps at 100 and the
+    /// copy's at 180, both auto-height: W is bright, H dim, and W's ↺ writes
+    /// `AutoHeight(100)`, the copy's mode kept. Flip, run: the text arm's
+    /// `AutoHeight` case removed fails *"W is overridden"*.
     #[test]
     fn a_text_boxs_width_is_marked_on_w() {
         let ctx = egui::Context::default();
@@ -3985,14 +3687,11 @@ mod tests {
         );
     }
 
-    /// **A line's length is marked on `L`, and its direction on R**
-    /// (`[X9.1-L1-02]`). The main's line ends at (50, 0). The copy's at (30, 0):
-    /// `L` is bright and its ↺ writes (50, 0). Then the copy's at (0, 50), the
-    /// same length turned: `L` dim, R bright, and R's ↺ writes (50, 0). Before,
-    /// the Transform header counted the `LineEnd` override and neither field was
-    /// marked. Flips, run: `L` drawn through the unmarked `value_field` again
-    /// fails *"L is overridden"*; the direction's mark removed fails *"R is
-    /// overridden"*.
+    /// **A line's length is marked on `L`, and its direction on R.** The main's
+    /// line ends at (50, 0); a copy ending at (30, 0) marks `L`, one at (0, 50)
+    /// marks R, and each ↺ writes (50, 0). Flips, run: `L` drawn through the
+    /// unmarked `value_field` fails *"L is overridden"*; the direction's mark
+    /// removed fails *"R is overridden"*.
     #[test]
     fn a_lines_length_and_direction_are_marked() {
         let ctx = egui::Context::default();
@@ -4019,8 +3718,8 @@ mod tests {
             NodeKind::Line { end } => *end,
             _ => panic!("a line"),
         };
-        // The rotation field's glyph — the first one in X's column; the quarter
-        // turn buttons below draw arrows too.
+        // The rotation field's glyph: the first in X's column (the quarter-turn
+        // buttons below draw arrows too).
         let rotation = |out: &egui::FullOutput| {
             let x = ink_of(out, "X").0;
             inks(out)
@@ -4050,14 +3749,11 @@ mod tests {
         );
     }
 
-    /// **Rotation's ↺ turns back about the pivot** (§15 D1003 (8),
-    /// `[X9.1-L1-03]`). The copy's 10 × 10 rect turned 90° about its centre, as
-    /// the field and the handle turn it — stored translation (10, 0), its box
-    /// where it was. R's ↺ writes the main's basis with the centre held, so the
-    /// rect is back exactly as the main has it, X and Y following. Keeping the
-    /// copy's translation instead left it at (10, 0) — 10 px off its own place and
-    /// the main's. Flip, run: R's reset built with `cur[4], cur[5]` fails *"back
-    /// in place"*.
+    /// **Rotation's ↺ turns back about the pivot.** The copy's 10 × 10 rect is
+    /// turned 90° about its centre, as the field and the handle turn it — stored
+    /// translation (10, 0), its box where it was. R's ↺ writes the main's basis
+    /// with the centre held, so the rect is back exactly as the main has it. Flip,
+    /// run: R's reset built with `cur[4], cur[5]` fails *"back in place"*.
     #[test]
     fn rotations_reset_turns_back_about_the_pivot() {
         let ctx = egui::Context::default();
@@ -4096,9 +3792,7 @@ mod tests {
 
     /// **A collapsed card keeps its count and offers no chip.** A collapsed card is
     /// one whole-card target registered after its header, which would cover the
-    /// chip — hovered, it drew *Reset appearance* and a click expanded the card
-    /// and reset nothing (`arch-scribe`, reading `panel_badged`). Flip: dropping
-    /// `sense &&` in `section_head_full` draws the chip again.
+    /// chip. Flip: dropping `sense &&` in `section_head_full` draws the chip again.
     #[test]
     fn a_collapsed_card_counts_but_offers_no_reset() {
         let ctx = egui::Context::default();
@@ -4136,16 +3830,11 @@ mod tests {
         app.session.doc.get(id).unwrap().paint().fills.clone()
     }
 
-    /// **A card header counts its overrides and resets them** (§15 D981, 4E). The
-    /// instance's rect has its opacity overridden: the Appearance header shows `1`
-    /// at rest; with the pointer on the header the count becomes *Reset
-    /// appearance*, and a click there puts the main's opacity back — and leaves the
-    /// card open, the header's own toggle lying under the chip. Flip: `card_of`
-    /// mapping opacity nowhere fails *"the count after the label"* (the header has
-    /// none, and the next text is the field's `50`). ⚠️ Dropping
-    /// `section_head_full`'s `clicks.toggled = false` stays **green**: egui gives
-    /// the press to the topmost target only, the chip registered after the header,
-    /// so that line is a belt and the registration order is what holds it.
+    /// **A card header counts its overrides and resets them**: `1` at rest, *Reset
+    /// appearance* under the pointer, and a click resets and leaves the card open.
+    /// Flip: `card_of` mapping opacity nowhere fails *"the count after the label"*.
+    /// ⚠️ Dropping `section_head_full`'s `clicks.toggled = false` stays **green**:
+    /// egui gives the press to the topmost target only.
     #[test]
     fn a_card_header_counts_and_resets_its_overrides() {
         let ctx = egui::Context::default();
@@ -4184,7 +3873,7 @@ mod tests {
 
     /// A set `Button` (`Size: Small, Large`) of two variants, each a frame holding
     /// a text `Label` bound to the set's text property *Label text*, and an
-    /// instance of Small — adopted into a headless app (§15 D982).
+    /// instance of Small — adopted into a headless app.
     struct V {
         app: OndinApp,
         set: NodeId,
@@ -4310,8 +3999,8 @@ mod tests {
         }
     }
 
-    /// Step 7's faces (§15 D982): a set, a variant, a layer inside a variant, and
-    /// an instance of a variant.
+    /// The variant faces: a set, a variant, a layer inside a variant, and an
+    /// instance of a variant.
     #[test]
     fn each_variant_selection_gets_its_face() {
         let ctx = egui::Context::default();
@@ -4331,11 +4020,11 @@ mod tests {
         ));
     }
 
-    /// **A property counts as a property, not as an override** (4A): the
-    /// instance's label text set through the property reads *1 property* in the
-    /// summary and nothing as an override; dimming the label as well (opacity
-    /// 0.5) adds *1 override*. Flip, run: dropping `PropDrift::units` from `drift_summary`'s
-    /// subtraction paints *1 property · 1 override* in the first case.
+    /// **A property counts as a property, not as an override**: the instance's
+    /// label text set through the property reads *1 property* in the summary and
+    /// nothing as an override; dimming the label as well adds *1 override*. Flip,
+    /// run: dropping `PropDrift::units` from `drift_summary`'s subtraction paints
+    /// *1 property · 1 override* in the first case.
     #[test]
     fn the_summary_counts_a_property_apart_from_the_overrides() {
         let ctx = egui::Context::default();
@@ -4397,12 +4086,8 @@ mod tests {
     }
 
     /// ***Reset fields* leaves a property's value alone, *Reset properties* takes
-    /// it back** (4C: *"properties and fields count, and reset, separately"*;
-    /// `[X8.2-L6-03]`). The label's text is set through *Label text* and its
-    /// opacity overridden. The card's *Reset fields* puts the opacity back and
-    /// keeps "Sign up"; *Reset properties* puts "Go" back. The filter is the app's
-    /// alone — no core test reaches it. Flips, run: the filter made `true || …`
-    /// (nothing kept out) fails *"the property's value stays"* with "Go";
+    /// it back.** The filter is the app's alone; no core test reaches it. Flips,
+    /// run: the filter made `true || …` fails *"the property's value stays"*;
     /// `Act::ResetProperties` made a no-op fails *"the main's text"*.
     #[test]
     fn reset_fields_spares_a_property_and_reset_properties_takes_it() {
@@ -4431,13 +4116,10 @@ mod tests {
         assert_eq!(content(&v.app, v.ilabel), "Go", "the main's text");
     }
 
-    /// ***Reset fields* with only a property differing says so** rather than
-    /// doing nothing silently (`1e77a22`): the filtered transaction is empty, so
-    /// nothing commits and the status line reads *"Only component properties
-    /// differ here"*. Flip, run: the `kept.is_empty()` arm removed (the empty
-    /// transaction committed through `commit_reset`) fails *"says why"* with an
-    /// empty status — *"nothing committed"* holding under it too, an empty
-    /// commit changing nothing, so the words are the whole of what it adds.
+    /// ***Reset fields* with only a property differing says so** rather than doing
+    /// nothing silently: the filtered transaction is empty, so nothing commits and
+    /// the status line reads *"Only component properties differ here"*. Flip, run:
+    /// the `kept.is_empty()` arm removed fails *"says why"* with an empty status.
     #[test]
     fn reset_fields_with_only_a_property_says_so() {
         use ondin_core::reset::Kind;
@@ -4455,16 +4137,10 @@ mod tests {
         );
     }
 
-    /// **A long main name is cut, and the card keeps its width** (`[X8.1-L1-01]`).
-    /// Measured in the inspector's layout: with a child selected, *In … instance*
-    /// ran under *Go to main* from ~16 characters, and at 53 pushed the button —
-    /// and every card below, egui growing the parent to its widest row — off the
-    /// screen; with the instance selected, the heading's name cut *Detach* in half
-    /// and hid the summary. Here the main is renamed to 53 characters and each
-    /// control is where it is with the short name: *Go to main*, the Transform
-    /// header's title, *Detach* and the drift summary. Flips, run: the child
-    /// line's label without `.truncate()` fails *"Go to main stays put"*; the
-    /// heading's name without it fails *"Detach stays put"*.
+    /// **A long main name is cut, and the card keeps its width**: *Go to main*,
+    /// the Transform header, *Detach* and the summary stay put. Flips, run: the
+    /// child line's label without `.truncate()` fails *"Go to main stays put"*;
+    /// the heading's name without it fails *"Detach stays put"*.
     #[test]
     fn a_long_main_name_is_cut_and_the_card_keeps_its_width() {
         let ctx = egui::Context::default();
@@ -4513,7 +4189,7 @@ mod tests {
         );
     }
 
-    /// The layers panel's two marks (§15 D982, 2A and 2C): a collapsed set's row
+    /// The layers panel's two marks: a collapsed set's row
     /// carries its variant count where a frame's carries its size, and a layer
     /// bound to a property carries `{}`. Flip, run: answering `false` for `bound`
     /// fails the second assertion.
@@ -4544,21 +4220,11 @@ mod tests {
         );
     }
 
-    /// **A Type reset restyles a live text session** (§15 D981's amendment —
-    /// `commit_reset`'s second point, fixed in session 49 and owed a test since):
-    /// a copy's overridden size reset while its text is being edited reaches the
-    /// **editor**, so its next keystroke draws in the main's size and not the one
-    /// the reset took away.
-    ///
-    /// ⚠️ **Two cuts of this test whose flips did not bite**, both reading the
-    /// node's *style*: straight after the reset (a session that has not drawn has
-    /// no preview, so the canvas read the document), and after `preview_session`
-    /// (whose `SetText` writes content and spans, the style staying the
-    /// document's). The stale thing is the **editor's own layout** — what
-    /// `preview_session` installs as the shaped text, and what the caret moves
-    /// through — so that is what this reads. Flip, run: `commit_reset` without its
-    /// `text_session_restyled_after` fails at the last assertion, the height
-    /// unchanged at 30pt's.
+    /// **A Type reset restyles a live text session** (`commit_reset`'s second
+    /// point): the reset reaches the **editor**, so its next keystroke draws in the
+    /// main's size. ⚠️ **It reads the editor's own layout, not the node's style**,
+    /// which stays the document's. Flip, run: `commit_reset` without its
+    /// `text_session_restyled_after` fails at the last assertion.
     #[test]
     fn a_type_reset_restyles_a_live_text_session() {
         let ctx = egui::Context::default();
@@ -4598,8 +4264,6 @@ mod tests {
         let before = height(&v.app);
         v.app.commit_reset(Transaction(reset));
         assert_eq!(size_of(&v.app), 12.0, "the document took the main's size");
-        // What the editor lays out — and so what its next keystroke draws
-        // (`preview_session` installs the editor's own shaped layout).
         assert!(
             height(&v.app) < before,
             "the editor laid out at 12, not 30: {} against {before}",
@@ -4607,21 +4271,16 @@ mod tests {
         );
     }
 
-    /// **The layers panel's component marks** (§15 D981): an instance's row wears
-    /// the outline hexagon (a main's is the filled one, painted rather than set,
-    /// so it is not text); an override puts a dot on the row that holds it, and
-    /// on a **collapsed** instance the dot bubbles up to it; a layer of the
-    /// instance's own wears `+`; and an untouched instance wears neither.
-    ///
-    /// Flip: the collapsed arm reading only the row's own overrides leaves the
-    /// collapsed instance without its dot.
+    /// **The layers panel's component marks**: an instance's row wears the outline
+    /// hexagon; an override puts a dot on its row, bubbling up to a **collapsed**
+    /// instance; a layer of the instance's own wears `+`; an untouched instance
+    /// wears neither. Flip: the collapsed arm reading only the row's own overrides
+    /// leaves the collapsed instance without its dot.
     #[test]
     fn the_layers_panel_marks_overrides_and_local_layers() {
         let ctx = egui::Context::default();
         let mut v = variants_fixture(&ctx);
-        // Each mark's shapes: a dot is the override dot (the tests' one detector,
-        // `ui::painted_override_dots` — this copy counted any 2pt circle,
-        // `[X8.2-L3-01]`), a `+` two 1.2pt strokes.
+        // Each mark's shapes: a dot is the override dot, a `+` two 1.2pt strokes.
         let marks = |app: &mut OndinApp| {
             let mut out = None;
             for _ in 0..3 {
@@ -4686,9 +4345,7 @@ mod tests {
         v.app.session.selection.set_one(v.set);
         let out = settle(&mut v.app, &ctx);
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
-        // The *Component set* caption went with §15 D1000; its absence is
-        // `the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates`'.
-        // The counts are the title's and the name line's since §15 D1007.
+        // The counts are the title's and the name line's.
         for want in ["VARIANTS 2", "1 instance"] {
             assert!(painted.contains(&want.to_string()), "{want}: {painted:?}");
         }
@@ -4751,7 +4408,7 @@ mod tests {
 
     /// A **Badge** main with a text *Count* bound to a Text property, nested as
     /// `slot` inside a **Button** main, and `b1` an instance of Button whose copy
-    /// of the slot is `r` (§15 D988's fixture).
+    /// of the slot is `r`.
     struct N {
         app: OndinApp,
         button: NodeId,
@@ -4851,15 +4508,12 @@ mod tests {
         }
     }
 
-    /// **The opt-in, from the nested instance's own card, and the main's list**
-    /// (§15 D988, 4K, 4L). Selected inside the Button main, the Badge's card
-    /// draws the binding line — which an instance root inside a main never drew
-    /// before (§15 D989) — and *Show properties on instances*, captioned with
-    /// what it would show; a click on it shows the slot. The Button main's
-    /// Properties card then lists it under *Shown from nested*, with its *Count*.
-    /// Flips, both run: the switch's call taken out of the instance face fails
-    /// *"the switch is drawn"*; the binding line's condition made never true
-    /// fails *"the binding line"*.
+    /// **The opt-in, from the nested instance's own card, and the main's list**:
+    /// the Badge's card inside the Button main draws the binding line and *Show
+    /// properties on instances*; a click shows the slot, and the main's Properties
+    /// card lists it under *Shown from nested*. Flips, run: the switch's call
+    /// taken out of the instance face fails *"the switch is drawn"*; the binding
+    /// line's condition made never true fails *"the binding line"*.
     #[test]
     fn a_nested_instance_in_a_main_opts_in_from_its_card() {
         let ctx = egui::Context::default();
@@ -4891,14 +4545,12 @@ mod tests {
         assert!(has("· Count"), "{painted:?}");
     }
 
-    /// **A shown nested instance's rows on the outer instance's card** (§15
-    /// D988, 4M–4N): `b1`'s card draws the Badge's group — its name, the main it
-    /// shows, and its *Count* row — and the copy's count set to 3 reads as one
-    /// **property**, not an override. Flips, both run: `instance_rows` not
-    /// drawing the groups fails *"the group's row"*; `prop_drift` without the
-    /// shown rows fails *"1 property"* with **no summary at all** — not the
-    /// *1 override* first predicted, since `property_fields` still subtracts the
-    /// count's field from the overrides.
+    /// **A shown nested instance's rows on the outer instance's card**: `b1`'s
+    /// card draws the Badge's group, and the copy's count set to 3 reads as one
+    /// **property**, not an override. Flips, run: `instance_rows` not drawing the
+    /// groups fails *"the group's row"*; `prop_drift` without the shown rows fails
+    /// *"1 property"* with **no summary at all**, since `property_fields` still
+    /// subtracts the count's field from the overrides.
     #[test]
     fn a_shown_nested_instance_draws_its_rows_on_the_outer_card() {
         use ondin_core::variant::{self, PropValue};
@@ -4931,12 +4583,9 @@ mod tests {
         );
     }
 
-    /// **A group whose copy shows a variant names its set** (4M's *Icon · Arrow
-    /// right*): Badge made the variant *Dot* of a set *Badges*, the group reads
-    /// *· Badges*, not the variant's derived name.
-    ///
-    /// Flip: `shown_groups`' `shown_as` naming the main itself → fails at
-    /// *"the group names the set"*.
+    /// **A group whose copy shows a variant names its set** (*· Badges*, not the
+    /// variant's derived name). Flip: `shown_groups`' `shown_as` naming the main
+    /// itself → fails at *"the group names the set"*.
     #[test]
     fn a_shown_variant_is_named_by_its_set() {
         use ondin_core::variant::{self, VariantProp, VariantSet};
@@ -5017,8 +4666,7 @@ mod tests {
     }
 
     /// The variants fixture with a boolean property, *Interesante*, bound to the
-    /// small variant's label — the maintainer's own name for the row in the look
-    /// that asked for this (§15 D996).
+    /// small variant's label.
     fn with_a_toggle(v: &mut V) {
         use ondin_core::variant::{PropKind, Property};
         let mut props = v.app.session.doc.get(v.set).unwrap().props().to_vec();
@@ -5043,17 +4691,9 @@ mod tests {
     }
 
     /// **A text typed into an instance's property field survives a click on the
-    /// toggle below it** (§15 D1008, the maintainer's report: *"If I update a text
-    /// property on an instance, then while still having the focus on the field, I
-    /// click on the toggle. The text field reverts to its old value."*). On the
-    /// instance: a click into *Label text*, *!* typed, and — the field still
-    /// focused — a click on *Interesante*'s switch. Both writes land: the label's
-    /// text ends in *!* and the toggle is off.
-    ///
-    /// **Flip run** — the shipped code, `own_rows` keeping one `Option` of the
-    /// rows' writes: the toggle lands and *"the typed text survived the toggle's
-    /// click"* fails, the label still *Go* — the reported symptom, and evidence the
-    /// two commits fall on one frame.
+    /// toggle below it**: both writes land on the one frame. Flip run: `own_rows`
+    /// keeping one `Option` of the rows' writes fails *"the typed text survived the
+    /// toggle's click"*, the label still *Go*.
     #[test]
     fn a_typed_property_survives_a_click_on_the_toggle_below_it() {
         use ondin_core::variant::{PropValue, property_state};
@@ -5133,14 +4773,10 @@ mod tests {
         );
     }
 
-    /// **A boolean property over a bound layer shows the chip** (§15 D1060,
-    /// D1038 (d)): *Interesante*'s counterpart on the instance bound to a true
-    /// boolean, the row's switch sits in a 38×22 capsule; unbound, it does not;
-    /// and the switch's click writes past the binding — the layer hidden and
-    /// detached, as the identity card's eye does.
-    ///
-    /// Flip, run: `toggle_row` handed `false` for `bound` fails *"bound: the
-    /// capsule"* at 0.
+    /// **A boolean property over a bound layer shows the chip**: the switch sits in
+    /// a 38×22 capsule when bound, not when unbound, and its click writes past the
+    /// binding (hidden and detached, as the identity card's eye does). Flip, run:
+    /// `toggle_row` handed `false` for `bound` fails *"bound: the capsule"*.
     #[test]
     fn a_boolean_property_over_a_bound_layer_shows_the_chip() {
         use ondin_core::variable::{Cell, Mode, VarKind, Variable};
@@ -5206,8 +4842,8 @@ mod tests {
         let doc = &v.app.session.doc;
         assert!(!doc.shown(c), "the switch's click hid the layer");
         assert_eq!(doc.get(c).unwrap().visible_var(), None, "and detached it");
-        // Asked for — the tooltip says so — so said nothing (§15 D1071's
-        // amendment): left to `keep_visible_bindings`, *Detached state/on*.
+        // Asked for — the tooltip says so — so said nothing: not
+        // `keep_visible_bindings`' *Detached state/on*.
         assert_eq!(
             v.app.session.status().text,
             "",
@@ -5215,16 +4851,12 @@ mod tests {
         );
     }
 
-    /// **A Text property over a bound content shows the chip** (D1038 (d), §15
-    /// D1070's amendment): *Label text*'s counterpart on the instance bound to a
-    /// string variable, the row draws the chip — the variable's name — where the
-    /// field was; unbound, no name. `Backspace` on the focused chip detaches the
-    /// copy to the string it draws, and a key typed starts the text that
-    /// replaces it, committed on `Enter` as an override that detaches.
-    ///
-    /// Flip, run: `bound_chip`'s Text getter answering `None` fails *"bound: the
-    /// chip"* with no name drawn; the chip's typed key dropped instead of held
-    /// under `retype` fails *"the typed text"* at `""`, the bound literal.
+    /// **A Text property over a bound content shows the chip** (the variable's
+    /// name) where the field was. `Backspace` on the focused chip detaches the copy
+    /// to the string it draws; a typed key starts the replacement text, committed
+    /// on `Enter` as an override that detaches. Flips, run: `bound_chip`'s Text
+    /// getter answering `None` fails *"bound: the chip"*; the chip's typed key
+    /// dropped instead of held under `retype` fails *"the typed text"* at `""`.
     #[test]
     fn a_text_property_over_a_bound_content_shows_the_chip() {
         use ondin_core::variable::{Cell, Mode, VarKind, Variable};
@@ -5308,7 +4940,7 @@ mod tests {
             "and detached"
         );
         // Detached in the edit itself, as the Content chip's retype is, so the
-        // status says nothing (§15 D1071's amendment).
+        // status says nothing.
         assert_eq!(
             v.app.session.status().text,
             "",
@@ -5316,13 +4948,9 @@ mod tests {
         );
     }
 
-    /// **Over several layers, A4's rule** (§15 D1060, D1045): *Interesante*
-    /// viewing the label and a dot beside it, one bound and one not draws no
-    /// capsule; both bound, to **two** variables, draws it.
-    ///
-    /// Flip, run: the chip read as the first counterpart's variable shared by
-    /// all — the first cut, which drew the plain switch over two variables —
-    /// fails *"two variables: the capsule"* at 0.
+    /// **Over several layers**, one bound and one not draws no capsule; both
+    /// bound, to **two** variables, draws it. Flip, run: the chip read as the first
+    /// counterpart's variable shared by all fails *"two variables: the capsule"*.
     #[test]
     fn a_boolean_property_over_layers_bound_apart_follows_a4() {
         use ondin_core::variable::{Cell, Mode, VarKind, Variable};
@@ -5405,7 +5033,7 @@ mod tests {
 
     /// Click into the field showing `text`, send End and type `typed`, leaving it
     /// focused; then click the × on the row showing `other` — the two commits
-    /// falling on one frame (§15 D1008's door). For the D1009 tests.
+    /// falling on one frame.
     fn rename_then_delete(
         app: &mut OndinApp,
         ctx: &egui::Context,
@@ -5448,14 +5076,10 @@ mod tests {
     }
 
     /// **A variant property renamed and left focused survives a click on another
-    /// property's ×** (§15 D1009, D1008's *Fix* on the Variants card). The set's
-    /// *Size* typed to *Size2*, then *Style*'s × clicked: *Style* is gone and the
-    /// rename landed. Both writes rewrite the whole `VariantSet`, so the second has
-    /// to be built against the document the first left.
-    ///
-    /// **Run against the shipped code** (one `Option` of writes, built while
-    /// drawing) before the fix: *Style* deleted and the rename lost — `["Size"]` —
-    /// the reproduction of D1008's *Fix* that had been read and not run.
+    /// property's × on the Variants card.** The set's *Size* typed to *Size2*, then
+    /// *Style*'s × clicked: *Style* is gone and the rename landed. Both writes
+    /// rewrite the whole `VariantSet`, so the second has to be built against the
+    /// document the first left.
     #[test]
     fn a_variant_property_rename_survives_a_click_on_another_delete() {
         let ctx = egui::Context::default();
@@ -5482,18 +5106,11 @@ mod tests {
     }
 
     /// **A rename and then a click on its own row's control act on the renamed
-    /// thing** (§15 D1009's `Renames`). A set property's *Size* typed to *Size2*
-    /// and its own × clicked: deleted, not left renamed. A value's *Small* typed to
-    /// *Small2* in its chip's menu and *Move later* clicked in the same menu: the
-    /// renamed value moves. A set's properties and values have no ids, so the
-    /// deferred delete and move find theirs by the name they were drawn with,
-    /// followed through the frame's renames.
-    ///
-    /// **Flips run**, each alone: `Renames::prop` answering the name it is given
-    /// fails *"Size2 deleted by its own ×"* with `["Size2", "Style"]` — the delete
-    /// found nothing; `Renames::value` the same fails *"Small2 moved later by its
-    /// own menu"* with `["Small2", "Large"]`. Each bites, so the rename and the
-    /// click do fall on one frame here.
+    /// thing** (a property's ×, a value's *Move later*). A set's properties and
+    /// values have no ids, so the deferred delete and move find theirs by the name
+    /// they were drawn with, followed through the frame's renames. Flips, run, each
+    /// alone: `Renames::prop` answering the name it is given fails *"Size2 deleted
+    /// by its own ×"*; `Renames::value` fails *"Small2 moved later by its own menu"*.
     #[test]
     fn a_rename_then_its_own_rows_control_acts_on_the_renamed_thing() {
         let ctx = egui::Context::default();
@@ -5568,14 +5185,8 @@ mod tests {
     }
 
     /// **A used value renamed in its menu and then *Delete value* clicked asks
-    /// about the renamed value** (the v0.5.0 release review's `[X6-L1-01]`,
-    /// D1009's ⚠️, run). *Small* typed to *Small2*, *Delete value* clicked with
-    /// the field focused: the confirmation was built from the name as drawn, so
-    /// it named *Small*, and its *Delete* found no value of that name and deleted
-    /// nothing, silently.
-    ///
-    /// Flip, run: the confirmation stored as drawn fails *"the modal names
-    /// Small2"* with *Small*.
+    /// about the renamed value**, not the name as drawn. Flip, run: the
+    /// confirmation stored as drawn fails *"the modal names Small2"* with *Small*.
     #[test]
     fn a_used_value_renamed_then_deleted_is_asked_about_by_its_new_name() {
         let ctx = egui::Context::default();
@@ -5632,14 +5243,9 @@ mod tests {
         assert_eq!((asked.prop, asked.value), (0, 0), "and points at it");
     }
 
-    /// **A text property's ↺ clicked with text typed into its field resets
-    /// it** (the v0.5.0 release review's `[X6-L1-02]`). The instance's *Label
-    /// text* overridden to *Hi*; *!* typed into the field; the row's label — its
-    /// ↺ — clicked. The field committed on the same frame, after the reset, and
-    /// the property ended *Hi!*: the click the user made last was lost.
-    ///
-    /// Flip, run: the field's commit kept on a reset frame fails *"the reset
-    /// wins"* with *Hi!*.
+    /// **A text property's ↺ clicked with text typed into its field resets it**;
+    /// the field must not commit after the reset on the same frame. Flip, run: the
+    /// field's commit kept on a reset frame fails *"the reset wins"* with *Hi!*.
     #[test]
     fn a_text_rows_reset_wins_over_its_own_typed_field() {
         use ondin_core::variant::{PropValue, property_state, set_property};
@@ -5707,12 +5313,9 @@ mod tests {
     }
 
     /// **A component property renamed and left focused survives a click on another
-    /// property's ×** (§15 D1009, D1008's *Fix* on the Properties card). The
-    /// Button's *Shown* typed to *Shown2*, then *Words*' × clicked: *Words* is gone
-    /// and the rename landed — both writes are the owner's whole list.
-    ///
-    /// **Run against the shipped code** before the fix: *Words* deleted and the
-    /// rename lost — `["Shown"]`.
+    /// property's × on the Properties card.** The Button's *Shown* typed to
+    /// *Shown2*, then *Words*' × clicked: *Words* is gone and the rename landed —
+    /// both writes are the owner's whole list.
     #[test]
     fn a_component_property_rename_survives_a_click_on_another_delete() {
         use ondin_core::variant::{PropKind, define};
@@ -5752,28 +5355,14 @@ mod tests {
         settle(app, ctx)
     }
 
-    /// **The Component card's rows are the other cards' rows** (§15 D996, the
-    /// maintainer's look: *"make things consistent in the inspector cards"*). On
-    /// an instance with a variant dropdown, a text property and a boolean one:
-    ///
-    /// - every field and dropdown in the label column is `CONTROL_H` tall and ends
-    ///   at the card's content edge — where the ⋯ button under them ends, as every
-    ///   other card's last control does;
-    /// - the labels *Size*, *Label text* and *Interesante* end at one x, right
-    ///   against their controls;
-    /// - the boolean's switch starts where the fields do;
-    /// - and the instance's name sits at the height a main's does in its card.
-    ///
-    /// Measured before the change: dropdowns 24 tall ending 8 short of the edge,
-    /// the labels centred (ending at 65, 81 and — the toggle's, at the content
-    /// edge in 11.5pt — 76), the switch against the right margin, and the
-    /// instance's name 4pt below the main's.
-    ///
-    /// **Flips run**, each alone: `control_height` not called fails *"28 tall"*
-    /// at 24; the `- 8.0` back on the variant dropdown fails *"at the content
-    /// edge"* at 257; `row_label` back on `label_mark` (centred) fails *"one right
-    /// edge"*; and the heading's `interact_size.y = 0.0` removed fails the name's
-    /// height at 4 off.
+    /// **The Component card's rows are the other cards' rows**: fields and
+    /// dropdowns are `CONTROL_H` tall and end at the content edge where the ⋯
+    /// ends, the labels end at one x against their controls, the switch starts
+    /// where the fields do, and the instance's name sits at the height a main's
+    /// does. Flips, run, each alone: `control_height` not called fails *"28 tall"*;
+    /// the `- 8.0` back on the variant dropdown fails *"at the content edge"*;
+    /// `row_label` back on `label_mark` fails *"one right edge"*; the heading's
+    /// `interact_size.y = 0.0` removed fails the name's height.
     #[test]
     fn the_component_cards_rows_line_up_with_the_other_cards() {
         let ctx = egui::Context::default();
@@ -5790,7 +5379,6 @@ mod tests {
                 .1
         };
         let rects = fills(&out);
-        // The ⋯ under the rows: the last control of the card, at its content edge.
         let more = at(icon::DOTS_THREE);
         let edge = rects
             .iter()
@@ -5854,16 +5442,10 @@ mod tests {
         );
     }
 
-    /// **Deleting a value variants use asks first, in a modal** (§15 D996, the
-    /// maintainer's look — it was a sentence inside the chip's menu over a row
-    /// that did it). With *Small* used by one variant that has one instance: the
-    /// chip's *Delete value* row deletes nothing and raises the modal, which
-    /// counts both; `Escape` cancels and keeps the value; a second ask answered
-    /// *Delete* deletes the value and its variant.
-    ///
-    /// **Flip run**: the row deleting straight away again (the `using.is_empty()`
-    /// arm taken for every value) fails *"nothing deleted yet"*, the predicted
-    /// site.
+    /// **Deleting a value variants use asks first, in a modal** that counts the
+    /// variants and instances; `Escape` cancels and keeps the value; *Delete*
+    /// deletes the value and its variant. Flip, run: the `using.is_empty()` arm
+    /// taken for every value fails *"nothing deleted yet"*.
     #[test]
     fn deleting_a_used_value_asks_in_a_modal() {
         let ctx = egui::Context::default();
@@ -5962,21 +5544,11 @@ mod tests {
     }
 
     /// **A typed edit commits when a click on the canvas takes the selection
-    /// away** (§15 D999, the maintainer's report: *"Here I have to press enter to
-    /// change the value. If I just blur it doesn't persist."*). The whole app,
-    /// through `eframe::App::ui`: an instance's text property typed into, then a
-    /// click on empty canvas, which deselects — the text is the property's; and
-    /// the same for the layer's name in the identity card, which had the same
-    /// fault. The selection the click made is the one left afterwards, so the
-    /// hold lets go.
-    ///
-    /// Before: `Go` stayed `Go` and `Small` stayed `Small`. A click inside the
-    /// inspector always committed — measured — because the field was still drawn;
-    /// the canvas runs before the inspector, and the click that deselected had the
-    /// inspector draw no field to report its blur.
-    ///
-    /// **Flip run**: `inspector_panel`'s hold never applied (`held` always
-    /// `None`) fails *"the property's text"* with `Go`, the predicted site.
+    /// away** (a text property, and the identity card's name), through
+    /// `eframe::App::ui`. The canvas runs before the inspector, so the click that
+    /// deselects has the inspector draw no field to report its blur. Flip, run:
+    /// `inspector_panel`'s hold never applied (`held` always `None`) fails *"the
+    /// property's text"* with `Go`.
     #[test]
     fn a_typed_edit_commits_when_a_canvas_click_takes_the_selection() {
         let ctx = egui::Context::default();
@@ -6062,8 +5634,8 @@ mod tests {
         );
     }
 
-    /// `owner` selected and its Properties card's header `+` clicked (§15 D1005):
-    /// the text the next settled frame paints, the menu open in it.
+    /// `owner` selected and its Properties card's header `+` clicked: the text the
+    /// next settled frame paints, the menu open in it.
     fn open_props_menu(
         app: &mut OndinApp,
         ctx: &egui::Context,
@@ -6090,13 +5662,10 @@ mod tests {
         texts(&settle(app, ctx))
     }
 
-    /// The `+` menu's row labelled `label`, and the text on its line to its
-    /// right — what it binds, in the accelerator column.
-    ///
-    /// **Only what the menu paints**, which is the tail of the frame: its popup is
-    /// drawn last, from its first row's accelerator (`menu_row` paints a row's
-    /// accelerator before its label). Over a collapsed card the menu lies across
-    /// the cards below it, whose glyphs share a row's line.
+    /// The `+` menu's row labelled `label`, and the text on its line to its right
+    /// (what it binds). **Only what the menu paints**, the tail of the frame,
+    /// found from its first row's accelerator (`menu_row` paints that before its
+    /// label): the cards below the menu have glyphs on the same lines.
     fn menu_row_named(painted: &[(String, egui::Rect)], label: &str) -> (egui::Rect, Vec<String>) {
         let start = painted
             .iter()
@@ -6117,18 +5686,13 @@ mod tests {
         (row, named)
     }
 
-    /// **Boolean, Text and Variant come from the header's `+` menu** (§15 D1005,
-    /// 3H), not from a row of buttons on the card (D995's *Bool* / *Text* /
-    /// *Var*). On the Button, a lone main: the card is collapsed while it has no
-    /// property (Fill's rule, `sync_paint_collapse`); the menu offers *Boolean ·
-    /// visibility*, *Text · text content* and *Variant · makes a set*, and
+    /// **Boolean, Text and Variant come from the header's `+` menu.** On a lone
+    /// main the card is collapsed while it has no property (`sync_paint_collapse`);
     /// *Boolean* makes an unbound boolean property named in full and opens the
-    /// card. On a set, whose card it also is, there is no *Variant*.
-    ///
-    /// **Flips run**: the *Variant* row's `lone_main` guard dropped fails *"no
-    /// Variant on a set"*, the predicted site; the card's `sync_paint_collapse`
-    /// call removed fails *"collapsed while empty"*; and the add's
-    /// `open_paint_panel` removed fails *"opened by the add"*.
+    /// card; on a set there is no *Variant*. Flips, run: the *Variant* row's
+    /// `lone_main` guard dropped fails *"no Variant on a set"*; the
+    /// `sync_paint_collapse` call removed fails *"collapsed while empty"*; the
+    /// add's `open_paint_panel` removed fails *"opened by the add"*.
     #[test]
     fn the_properties_card_adds_from_its_header_menu() {
         let ctx = egui::Context::default();
@@ -6173,20 +5737,12 @@ mod tests {
         );
     }
 
-    /// **The instance count is on the name's line and selects them** (§15 D1007,
-    /// the maintainer's design). On a main and on a set: *1 instance* on the line
-    /// of the name it follows, no *Select all* anywhere, and a click on the count
-    /// selects the instances — the main's one, and every variant's on the set.
-    /// The set's variant count is its card's title, *VARIANTS 2*. And on a
-    /// variant, *Small*'s face: the count after its derived name selects *Small*'s
-    /// instance (the v0.5.0 release review's `[X6-L6-01]` — the third face had no
-    /// assertion, and its click could go with every test green).
-    ///
-    /// **Flip run**: `count_link` answering `false` (its `.clicked()` dropped)
-    /// fails *"the main's count selects its instance"*. Flip, run: the
-    /// `Face::Variant` arm's `act = Some(Act::SelectAllInstances)` made a no-op
-    /// fails *"the variant's count selects its instances"*, the selection left on
-    /// *Small* itself.
+    /// **The instance count is on the name's line and selects them**, on a main,
+    /// a set (every variant's instances; its variant count is the title, *VARIANTS
+    /// 2*) and a variant. Flips, run: `count_link` answering `false` fails *"the
+    /// main's count selects its instance"*; the `Face::Variant` arm's
+    /// `act = Some(Act::SelectAllInstances)` made a no-op fails *"the variant's
+    /// count selects its instances"*.
     #[test]
     fn the_count_after_a_faces_name_selects_its_instances() {
         let ctx = egui::Context::default();
@@ -6234,8 +5790,7 @@ mod tests {
             &[v.i],
             "the set's count selects every variant's instances"
         );
-        // The variant's face, the third the count went on (the v0.5.0 release
-        // review's `[X6-L6-01]`): its derived name, then the count.
+        // The variant's face: its derived name, then the count.
         let painted = texts(&settled(&mut v.app, &ctx, v.small));
         let count = on_one_line(&painted, "Small", "COMPONENT");
         click(&mut v.app, &ctx, count);
@@ -6246,14 +5801,9 @@ mod tests {
         );
     }
 
-    /// **The Variants card rules off one property from the next** (§15 D1006, the
-    /// maintainer's look: which chips were whose took reading). A set with *Size*
-    /// and *Style*: one `card_rule` hairline between *Size*'s name and *Style*'s,
-    /// and none between the name line and *Size* — a rule *between* properties,
-    /// not above each.
-    ///
-    /// **Flip run**: the rule drawn above every property (`pi > 0` dropped) fails
-    /// *"none above the first"*.
+    /// **The Variants card rules off one property from the next**: one `card_rule`
+    /// hairline between *Size* and *Style*, none above *Size*. Flip, run: the rule
+    /// drawn above every property (`pi > 0` dropped) fails *"none above the first"*.
     #[test]
     fn the_variants_card_rules_between_its_properties() {
         let ctx = egui::Context::default();
@@ -6286,8 +5836,7 @@ mod tests {
             walk(&s.shape, rule, &mut rules);
         }
         let (size, style) = (at("Size"), at("Style"));
-        // The name line's count, the last thing over the first property since
-        // §15 D1007 took the counts row away.
+        // The name line's count, the last thing over the first property.
         let counts = at("1 instance");
         let between = |a: f32, b: f32| rules.iter().filter(|y| **y > a && **y < b).count();
         assert_eq!(
@@ -6302,16 +5851,10 @@ mod tests {
         );
     }
 
-    /// **A label cut to its slot says so, and one that fits does not** (§15 D1006,
-    /// the maintainer's look: *Initials ka…* on an instance's card, no tooltip).
-    /// In the Component card's label column — `LABEL_W` less `MARK_ROOM` at 12pt —
-    /// a long property name is cut and a short one is not; and the galley's own
-    /// text is the whole name either way, the premise that made the old check
-    /// blind. The tooltip itself never reaches `FullOutput::shapes` (CLAUDE.md), so
-    /// the answer it hangs from is what is asserted.
-    ///
-    /// **Flip run**: `cut` back to `galley.text() != text` fails *"a long name is
-    /// cut"* — the shipped defect.
+    /// **A label cut to its slot says so, and one that fits does not.** A tooltip
+    /// never reaches `FullOutput::shapes`, so the answer it hangs from is what is
+    /// asserted. Flip, run: `cut` back to `galley.text() != text` fails *"a long
+    /// name is cut"*.
     #[test]
     fn a_label_cut_to_its_slot_names_itself_and_one_that_fits_does_not() {
         let ctx = egui::Context::default();
@@ -6330,15 +5873,10 @@ mod tests {
     }
 
     /// **A property bound from a layer inside the main opens the card when the main
-    /// is selected again** (§15 D1005's 2026-10-08 amendment, `arch-scribe`'s
-    /// find). The Button's card rests collapsed while empty; with the Badge inside
-    /// it selected — where the binding line is — a swap property is made; and back
-    /// on the Button the card is open. The card is not drawn for the Badge, so its
-    /// edge has to move on a selection it skips, or the Button reads as the same
-    /// subject it was and the card stays shut over the property just made.
-    ///
-    /// **Flip run**: `subject_changed("Properties")` asked below the early returns,
-    /// where it was, fails *"open over the property bound from inside"*.
+    /// is selected again.** The card is not drawn for the Badge, so its edge has to
+    /// move on a selection it skips, or the Button reads as the same subject and
+    /// the card stays shut. Flip, run: `subject_changed("Properties")` asked below
+    /// the early returns fails *"open over the property bound from inside"*.
     #[test]
     fn a_property_bound_from_inside_the_main_opens_its_card() {
         let ctx = egui::Context::default();
@@ -6368,28 +5906,18 @@ mod tests {
         );
     }
 
-    /// **The `+` menu hangs from the `+` as the ⋯ reset menu hangs from the ⋯, and
-    /// is wide enough for its rows** (§15 D1005, the maintainer's look: it sat too
-    /// far below its button, and *Instance swap* touched *nested instance*). The
-    /// menu's frame starts `MENU_GAP` under the box the `+` paints — not under its
-    /// padded hit target, 6pt lower and 14pt further right — and ends at its right
-    /// edge; and on every row the label and what it binds keep `ADD_MENU_GAP`
-    /// between them, within the 2pt the rounded width and the glyphs' ink allow.
-    ///
-    /// Measured before the change: the frame 12 below the box (its hit target's
-    /// 6pt pad added), its right edge 14 past it, and *Instance swap* to *nested
-    /// instance* 3pt apart in a 200pt menu.
-    ///
-    /// **Flips run**, each alone: `action_rect` back to the padded response rect
-    /// fails *"MENU_GAP under the + box"* at 12; the width back to a fixed 200
-    /// fails *"the label and what it binds apart"*.
+    /// **The `+` menu hangs from the `+` as the ⋯ menu hangs from the ⋯, and is
+    /// wide enough for its rows**: its frame starts `MENU_GAP` under the box the
+    /// `+` paints (not its padded hit target), ends at its right edge, and each
+    /// row's label and what it binds keep `ADD_MENU_GAP`, within 2pt. Flips, run:
+    /// `action_rect` back to the padded rect fails *"MENU_GAP under the + box"*; a
+    /// fixed 200 width fails *"the label and what it binds apart"*.
     #[test]
     fn the_properties_menu_hangs_from_its_plus_and_fits_its_rows() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut n = nested_fixture(&ctx);
-        // No nested instance to offer, so *Instance swap* reads *nested
-        // instance* — the row the maintainer saw crowded.
+        // No nested instance to offer, so *Instance swap* reads *nested instance*.
         let (tx, _) = ondin_core::variant::define(
             &n.app.session.doc,
             &mut n.app.session.ids,
@@ -6427,9 +5955,8 @@ mod tests {
             .iter()
             .find(|r| r.contains(plus) && r.size() == egui::Vec2::splat(ui::HEAD_ACTION_W))
             .expect("the + box's hover ground");
-        // The smallest rect holding the first row and the last — the cards under
-        // the menu hold them too — and of the frame and its shadow, the same size,
-        // the higher: the shadow is offset down.
+        // The smallest rect holding the first row and the last (the cards under
+        // the menu hold them too); the frame, not its shadow, which is offset down.
         let (first, last) = (at("Boolean").center(), at("Variant").center());
         let frame = *rects
             .iter()
@@ -6466,18 +5993,12 @@ mod tests {
     }
 
     /// **A nested instance no swap property drives is offered as one, from the
-    /// header's `+` menu, and a swap property's filter is a row of its own** (§15
-    /// D1000, the maintainer's look: *"If I remove the icon property … I have no
-    /// idea how to bring it back"*; §15 D1005 moved the offer into the menu). A
-    /// Button main holding a Badge instance and no properties: no *Shown from
-    /// nested* heading while nothing is shown, and the card's own `+` opens a menu
-    /// whose *Instance swap* row names the Badge; that row makes a swap property
-    /// bound to the Badge, after which the card draws its funnel row and the line
-    /// under it, and the menu's *Instance swap* names the Badge no more; showing the
-    /// Badge's properties brings the heading.
-    ///
-    /// **Flip run**: the menu's dormant list keeping nothing fails *"the Badge is
-    /// named on Instance swap"*, the predicted site.
+    /// header's `+` menu, and a swap property's filter is a row of its own**: the
+    /// *Instance swap* row names the Badge and makes the property, after which the
+    /// card draws its funnel row and the menu names the Badge no more; showing the
+    /// Badge's properties brings the *Shown from nested* heading. Flip, run: the
+    /// menu's dormant list keeping nothing fails *"the Badge is named on Instance
+    /// swap"*.
     #[test]
     fn a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row() {
         let ctx = egui::Context::default();
@@ -6534,17 +6055,11 @@ mod tests {
         );
     }
 
-    /// **The set's card, the clash and the templates** (§15 D1000, the
-    /// maintainer's look). The Variants card's face is the set's name on one line
-    /// — no *Component set* caption — at the height a main's name sits under its
-    /// card's eyebrow; a variant whose combination another has says *Variant
-    /// clash* and not the sentence that ran under *Select it*; and no component —
-    /// a set, a variant, an instance — gets the Frame templates card.
-    ///
-    /// **Flip run**: the templates' component guard removed fails *"not on a
-    /// set"* — at the set, the first selection asked, where the prediction had
-    /// been the variant. The caption's flip was not run; *"no caption"* asserts
-    /// its absence directly.
+    /// **The set's card, the clash and the templates**: the set's name on one line,
+    /// at a main's height, no caption; *Variant clash* for a repeated combination;
+    /// no Frame templates card on any component. Flip, run: the templates'
+    /// component guard removed fails *"not on a set"*. The caption's flip was not
+    /// run; *"no caption"* asserts its absence directly.
     #[test]
     fn the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates() {
         let ctx = egui::Context::default();
@@ -6574,7 +6089,7 @@ mod tests {
             !words.iter().any(|t| t == "FRAME TEMPLATES"),
             "not on a set"
         );
-        // The title carries the set's variant count since §15 D1007.
+        // The title carries the set's variant count.
         let set = under(&out, "VARIANTS 2", "Button");
         let mut f = fixture(&ctx);
         let main = under(&settled(&mut f.app, &ctx, f.m), "COMPONENT", "Button");
@@ -6605,7 +6120,7 @@ mod tests {
         }
     }
 
-    // ── The variants panel's writes (`v0.4.1..7d0c666` release review) ─────────
+    // ── The variants panel's writes ────────────────────────────────────────────
 
     /// A second instance of Small beside `v.i`, its label set to `text`.
     fn second_instance(v: &mut V, text: &str) -> NodeId {
@@ -6647,13 +6162,9 @@ mod tests {
         }
     }
 
-    /// **Typing over a mixed Text property writes what was typed** (`[X10-L1-01]`):
-    /// the field's buffer was seeded with the word *Mixed*, so typing *OK* wrote
-    /// "MixOKed" into every selected instance. *Mixed* is the hint now, and the
-    /// field starts empty.
-    ///
-    /// Flip, run: seeding the buffer from a literal "Mixed" again fails both
-    /// instances' text, `MixedOK`.
+    /// **Typing over a mixed Text property writes what was typed.** *Mixed* is the
+    /// hint, and the field starts empty. Flip, run: seeding the buffer from a
+    /// literal "Mixed" fails both instances' text, `MixedOK`.
     #[test]
     fn typing_over_a_mixed_text_property_writes_what_was_typed() {
         let ctx = egui::Context::default();
@@ -6677,9 +6188,9 @@ mod tests {
         assert_eq!(content(&v.app, jlabel), "OK");
     }
 
-    /// **A Text property's content commits as typed** (§15 D1003 (10),
-    /// `[X10-L1-04]`): trailing spaces kept, and an emptied field empties the
-    /// label. Flip, run: content under name rules again fails "spaces kept", `Go!`.
+    /// **A Text property's content commits as typed**: trailing spaces kept, and an
+    /// emptied field empties the label. Flip, run: content under name rules fails
+    /// "spaces kept", `Go!`.
     #[test]
     fn a_text_propertys_content_keeps_its_spaces_and_may_be_emptied() {
         let ctx = egui::Context::default();
@@ -6711,10 +6222,9 @@ mod tests {
         assert_eq!(content(&v.app, v.ilabel), "", "emptied");
     }
 
-    /// **A *Mixed* boolean property turns on** (`[X10-L6-01]`): one click on the
-    /// toggle over two instances that differ sets both on, rather than flipping
-    /// each. Flip, run: the arm's `if mixed { true } else { !on }` made `!on`
-    /// fails "both on".
+    /// **A *Mixed* boolean property turns on**: one click on the toggle over two
+    /// instances that differ sets both on, rather than flipping each. Flip, run:
+    /// the arm's `if mixed { true } else { !on }` made `!on` fails "both on".
     #[test]
     fn a_mixed_boolean_property_turns_on() {
         let ctx = egui::Context::default();
@@ -6771,12 +6281,9 @@ mod tests {
             .clone()
     }
 
-    /// **A value chip's menu closes on a move** (`[X10-L1-02]`): it is keyed by
-    /// place, so left open after *Move later* it belonged to the neighbour — a
-    /// second *Move later* moved that one back, and *Delete* deleted it. And a
-    /// rename to a value the property has is refused, saying so (`[X10-L6-01]`).
-    ///
-    /// Flip, run: dropping the `ui.close()` beside *Move later* fails "the menu
+    /// **A value chip's menu closes on a move** (it is keyed by place, so it would
+    /// belong to the neighbour), and a rename to a taken value is refused, saying
+    /// so. Flip, run: dropping the `ui.close()` beside *Move later* fails "the menu
     /// closed".
     #[test]
     fn a_value_chips_menu_closes_on_a_move_and_refuses_a_taken_name() {
@@ -6821,17 +6328,12 @@ mod tests {
         assert_eq!(v.app.session.status().text, "That value is taken");
     }
 
-    /// **A value renamed in its chip's menu and left by a canvas click commits**
-    /// (§15 D1003 (11), `[X10-L1-03]`) — D999's promise for a popover field that
-    /// commits. The click deselected the set, so the card — and the menu with it —
-    /// was not drawn again and its field never saw its focus go; the menu's field
-    /// now asks the inspector to hold. Through `eframe::App::ui`, as D999's own
-    /// test.
-    ///
-    /// Flips, run: no `hold_inspector` fails "renamed". ⚠️ **Dropping the closed
-    /// menu's `pending` commit stays green**: held, the field is drawn on the
-    /// click's own frame and commits by its blur. `pending` is the second defence,
-    /// for a menu that closes before its field is drawn.
+    /// **A value renamed in its chip's menu and left by a canvas click commits**:
+    /// the menu's field asks the inspector to hold, as in
+    /// `a_typed_edit_commits_when_a_canvas_click_takes_the_selection`. Flip, run:
+    /// no `hold_inspector` fails "renamed". ⚠️ **Dropping the closed menu's
+    /// `pending` commit stays green**: held, the field commits by its blur;
+    /// `pending` is the second defence, for a menu closed before its field is drawn.
     #[test]
     fn a_chip_rename_commits_when_a_canvas_click_closes_the_menu() {
         let ctx = egui::Context::default();
@@ -6910,7 +6412,7 @@ mod tests {
         assert!(v.app.inspector_hold.is_none(), "and the hold let go");
     }
 
-    // --- the card's cost and the roots it reads (K17) ------------------------
+    // --- the card's cost and the roots it reads ------------------------------
 
     /// This thread's `Reads`, zeroed.
     fn reads_taken() -> Reads {
@@ -6918,15 +6420,10 @@ mod tests {
     }
 
     /// **An idle frame computes no property reading, and a filling one computes
-    /// one drift per root** (`[X8.1-L4-02]`, `[X10-L4-01]`). Two instances of
-    /// *Small*, one with its *Label text* overridden, both selected: the first
-    /// frame reads `prop_drift` once per root — not once per root per half of the
-    /// card (§15 D995) — and the next two frames, the document unchanged, read
-    /// nothing at all: no drift, no `property_state`, no `reset_property`.
-    /// Counted, never timed (the `svg::def_count_tests` shape). Flips, run:
-    /// `prop_drift_of` computing every time fails *"one per root"* with 4; the
-    /// rows' states read uncached fails *"an idle frame reads nothing"* with
-    /// `state: 4`.
+    /// one drift per root** (not per half of the card). Counted, never timed.
+    /// Flips, run: `prop_drift_of` computing every time fails *"one per root"*
+    /// with 4; the rows' states read uncached fails *"an idle frame reads
+    /// nothing"* with `state: 4`.
     #[test]
     fn an_idle_frame_computes_no_property_reading() {
         let ctx = egui::Context::default();
@@ -6950,11 +6447,10 @@ mod tests {
         );
     }
 
-    /// **A property row builds its reset only when it is overridden**
-    /// (`[X10-L4-01]`): an instance following its main draws the *Label text*
-    /// row and builds no reset for it; overridden, it builds one, once. Flip,
-    /// run: the reset built unconditionally and uncached, as it was, fails
-    /// *"nothing to reset"* with `reset: 4` — one a frame over `settle`'s four.
+    /// **A property row builds its reset only when it is overridden**: an instance
+    /// following its main draws the *Label text* row and builds no reset for it;
+    /// overridden, it builds one, once. Flip, run: the reset built unconditionally
+    /// and uncached fails *"nothing to reset"* with `reset: 4`.
     #[test]
     fn a_property_rows_reset_is_built_only_when_it_is_overridden() {
         let ctx = egui::Context::default();
@@ -7003,12 +6499,9 @@ mod tests {
         assert!(painted.contains(&"Sign up".to_string()), "{painted:?}");
     }
 
-    /// **The one-instance card reads the root it was drawn for, whatever else
-    /// the selection holds** (`[X8.1-L1-03]`). The instance selected with its own
-    /// label, the label first — Ctrl-clicking in the layers panel gives that
-    /// order — draws the variant dropdown and the property row; the other order
-    /// draws them too, and is not refused the switch. Flip, run: the rows given
-    /// `selection.ids()` again fails *"label first"*.
+    /// **The one-instance card reads the root it was drawn for, whatever else the
+    /// selection holds**, in either order of the instance and its label. Flip, run:
+    /// the rows given `selection.ids()` fails *"label first"*.
     #[test]
     fn the_one_instance_card_reads_its_root_and_not_the_selection() {
         let ctx = egui::Context::default();
@@ -7037,13 +6530,9 @@ mod tests {
     }
 
     /// **The card's *Reset fields* resets what its count counted, with a nested
-    /// copy selected inside its instance** (`[X8.1-L1-03]`). The Badge copy's
-    /// *Count* text is set to 3 — a field of the Button instance, since the
-    /// Button does not show the Badge's properties. With the Button instance
-    /// *and* the copy selected, the face is the Button's and *Reset fields*
-    /// puts the 1 back. Flip, run: `bound` read from every selected layer's
-    /// nearest instance again fails *"the count's reset is made"*, the click
-    /// committing nothing.
+    /// copy selected inside its instance** (the Button instance and the Badge copy,
+    /// whose *Count* is a field of the Button). Flip, run: `bound` read from every
+    /// selected layer's nearest instance fails *"the count's reset is made"*.
     #[test]
     fn reset_fields_resets_what_it_counted_with_a_nested_copy_selected() {
         let ctx = egui::Context::default();
@@ -7064,10 +6553,9 @@ mod tests {
         assert_eq!(content(&n.app, count), "1", "the count's reset is made");
     }
 
-    /// **Several instances, reset as one** (`[X8.2-L6-04]`, D981's *"a reset
-    /// resets every one of them"*). Two instances of *Button*, each dimmed to 0.5:
-    /// the Appearance header counts two and its reset puts both back; and the
-    /// opacity field's own mark writes both. Flip, run:
+    /// **Several instances, reset as one.** Two instances of *Button*, each dimmed
+    /// to 0.5: the Appearance header counts two and its reset puts both back; and
+    /// the opacity field's own mark writes both. Flip, run:
     /// `gather_card_overrides` reading the first selected layer alone fails
     /// *"both counted"* with 1.
     #[test]
@@ -7125,14 +6613,11 @@ mod tests {
         );
     }
 
-    /// **Several instances' faces** (`[X8.2-L6-04]`): instances of two variants
-    /// of one set read as instances of the set — named for it, with its rows —
-    /// and instances of two unrelated mains read as *Instances of 2
-    /// components*. Flip, run: `shared` never `Some` fails the face's own
-    /// `shared: Some(_)` match, before *"the set's rows"* is reached — and fails
+    /// **Several instances' faces**: variants of one set read as instances of the
+    /// set, with its rows; unrelated mains as *Instances of 2 components*. Flip,
+    /// run: `shared` never `Some` fails the face's own `shared: Some(_)` match, and
     /// `a_mixed_boolean_property_turns_on` and
-    /// `typing_over_a_mixed_text_property_writes_what_was_typed` beside it, whose
-    /// rows are drawn through `shared` too.
+    /// `typing_over_a_mixed_text_property_writes_what_was_typed` beside it.
     #[test]
     fn several_instances_are_named_for_their_set_or_counted() {
         let ctx = egui::Context::default();

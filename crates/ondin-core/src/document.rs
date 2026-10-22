@@ -34,81 +34,63 @@ pub struct Document {
     nodes: FxHashMap<NodeId, Node>,
     root: NodeId,
     /// The **vault** — a second, parentless `Root` holding the kit mains this
-    /// document has vendored, when it has any (§5.3e, §15 D1012, `crate::kit`).
+    /// document has vendored (§5.3e, `crate::kit`).
     ///
-    /// Its nodes are in [`Self::nodes`] like any other, so every pass that asks by
-    /// id sees them, and outside the tree under [`Self::root`], so every walk from
-    /// the root skips them. Opened and closed by operations
-    /// ([`Operation::OpenVault`], [`Operation::CloseVault`]), so the first kit
-    /// insert and its undo bring it and take it away with the rest of the edit.
+    /// Its nodes are in [`Self::nodes`], so passes that ask by id see them, but
+    /// outside the tree under [`Self::root`], so every walk from the root skips
+    /// them. Opened and closed by [`Operation::OpenVault`] and
+    /// [`Operation::CloseVault`], so undo takes it away with the first kit insert.
     vault: Option<NodeId>,
-    /// The ground behind and around the frames (§15 D18).
+    /// The ground behind and around the frames.
     ///
-    /// The one piece of document state that is not a node. It sat on
-    /// `EditorSession` at first, as a working-surface preference like the
-    /// camera, and that turned out to be the wrong side of the line: people set
-    /// it for the artwork, not for the sitting, so it has to survive reopening
-    /// the file. It is opaque by construction — there is nothing behind the
-    /// canvas for it to be transparent against.
+    /// The one piece of document state that is not a node: it is set for the
+    /// artwork, not the sitting, so it survives reopening the file. Opaque by
+    /// construction — nothing behind the canvas could show through.
     canvas_background: Color,
     /// The ruler guides placed on this document (`crate::guide`).
     ///
-    /// Unordered — guides have no z, nothing stacks against them, and no
-    /// operation refers to one by position — so `apply` appends and IO sorts by
-    /// id for byte-stable output (invariant 9). A `Vec` rather than a map
-    /// because every reader wants all of them (drawing, hit-testing, "remove
-    /// all") and a document has a handful, not thousands.
+    /// Unordered — guides have no z and no operation refers to one by position —
+    /// so `apply` appends and IO sorts by id for byte-stable output (invariant 9).
+    /// A `Vec` because every reader wants all of them and a document has a handful.
     guides: Vec<Guide>,
     /// The images this document carries, keyed by the id a fill refers to
     /// (`crate::image`).
     ///
-    /// **A map, where guides are a `Vec`, because the readers differ**: every
-    /// reader of guides wants all of them, and every reader of this wants exactly
-    /// one — the render walk resolves a fill's reference per frame. IO sorts by id
-    /// for byte-stable output (invariant 9), as it does for nodes.
+    /// A map, where guides are a `Vec`, because every reader wants exactly one
+    /// (the render walk resolves a fill's reference per frame). IO sorts by id.
     ///
-    /// **Nothing collects it.** An entry is added and removed by explicit
-    /// operations only, never garbage-collected when its last fill goes: deleting
-    /// the one layer showing a photograph and undoing has to bring the bytes back,
-    /// which is only true if the bytes were never thrown away. The cost is a
-    /// document that can carry an image nothing shows, which is a *Purge unused*
-    /// command rather than a bug.
+    /// **Nothing collects it.** Entries are added and removed by explicit
+    /// operations only: deleting the one layer showing a photograph and undoing
+    /// has to bring the bytes back. A document can therefore carry an image
+    /// nothing shows, which is a *Purge unused* command rather than a bug.
     images: FxHashMap<ImageId, ImageEntry>,
     /// The document's variables and its one mode list (§5.3f, `crate::variable`)
-    /// — the third piece of state that is not a node, changed by the operations
-    /// that name a variable or a mode and checked after every transaction.
+    /// — state that is not a node, checked after every transaction.
     variables: crate::variable::Variables,
-    /// The document's styles (§5.3f, `crate::style`) — the fourth such piece,
-    /// changed by the operations that name a style and checked after every
+    /// The document's styles (§5.3f, `crate::style`), checked after every
     /// transaction. Its values are copied onto the layers bound to it, so nothing
-    /// that draws reads it (§15 D1062).
+    /// that draws reads it.
     styles: crate::style::Styles,
     /// The document's library identity — typed name, project, creation stamp
     /// (`crate::meta`).
     ///
-    /// **The one field here that no `Operation` can reach**, and the only one
-    /// that is not about drawing. It is written by the library rather than by
-    /// the editor, so it is outside undo on purpose: a rename typed into the
-    /// dashboard, possibly while this document is not open, must not turn up as
-    /// a step in its editing history. `crate::meta` records the rest of that
-    /// reasoning and the invariant-9 rule that constrains what may go in it.
+    /// **The one field here that no `Operation` can reach.** The library writes
+    /// it, so it is outside undo on purpose: a rename typed into the dashboard,
+    /// possibly while this document is not open, must not turn up in its editing
+    /// history.
     meta: DocumentMeta,
-    /// What this document last **published** as a kit (§5.3e, §15 D1012) — a
-    /// frozen copy of its mains and sets, which consumers vendor from and never
-    /// from the working document (§15 D1011 (2)).
+    /// What this document last **published** as a kit (§5.3e) — a frozen copy of
+    /// its mains and sets, which consumers vendor from instead of the working
+    /// document.
     ///
-    /// **Outside undo for `meta`'s reason**: publishing is an outward act, as a
-    /// save is, and an undo cannot take it back from documents that already
-    /// read it. Behind an `Arc` because `apply` clones the document per
-    /// transaction and this copy only changes at a publish. Not derived state
-    /// under invariant 4 either, though it is computed from the tree: it is
-    /// the tree *as it was at the publish*, which the working document no longer
-    /// holds once it is edited.
+    /// Outside undo for `meta`'s reason: an undo cannot take a publish back from
+    /// documents that already read it. Behind an `Arc` because `apply` clones the
+    /// document per transaction. Not derived state under invariant 4: it is the
+    /// tree as it was at the publish.
     published: Option<std::sync::Arc<crate::kit::Published>>,
     /// **True only while [`Self::apply_restoring`] runs** — a history step putting
     /// back values this document already held, which the layout operations then
-    /// take whether or not CSS accepts them (§15 D937). Never true between calls,
-    /// so equality and every reader outside `apply` see `false`.
+    /// take whether or not CSS accepts them. Never true between calls.
     restoring: bool,
 }
 
@@ -183,45 +165,23 @@ impl Document {
     /// The mask `id` is clipped by, if any: the **nearest preceding sibling**
     /// carrying [`Node::mask`] (§5.3).
     ///
-    /// "Nearest preceding" is the whole rule, and it is what makes a second mask
-    /// end the first one's run rather than nest inside it: scanning backwards
-    /// stops at the first one found, so the layers between two masks belong to
-    /// the lower of the two and nothing belongs to both.
+    /// "Nearest preceding" makes a second mask end the first one's run rather
+    /// than nest inside it: the layers between two masks belong to the lower.
     ///
-    /// **A mask is never masked.** It answers `None` for itself even with a mask
-    /// below it, for the same reason — a mask *begins* a run, and a run cannot
-    /// begin inside itself. Without this a stack of two masks would clip the
-    /// second by the first and then everything above by both.
+    /// **A mask is never masked** — it answers `None` for itself, since a mask
+    /// begins a run and cannot begin inside one.
     ///
-    /// **Nothing masks inside a boolean.** Its children are operands rather than
-    /// artwork — the scene walk stops at the container and draws the result — so
-    /// there is no run there for a mask to clip, and the flag on one of them is
-    /// inert.
+    /// **Nothing masks inside a boolean.** Its children are operands, not artwork,
+    /// so the flag on one is inert. The walk never reaches them but the hit test
+    /// does (through the spatial index), so this arm keeps a mask pasted into a
+    /// boolean from making part of it unclickable while changing nothing it draws.
     ///
-    /// Stated here rather than left to fall out, because it does not: the walk
-    /// never reaches those children and so never notices, while the hit test
-    /// reaches them through the spatial index (an operand is `is_indexed`, and a
-    /// click on one selects the boolean above it). Without this arm a mask
-    /// pasted or reordered into a boolean would make part of that boolean
-    /// unclickable while changing nothing about how it draws.
-    ///
-    /// **One production caller — [`crate::hit_test`], through `masked_away` — and
-    /// that is worth stating, because the run rule has four readers and only this
-    /// one asks it backwards.**
-    ///
-    /// The other three are already walking the child list in order and carry the
-    /// current mask forward as they go: `scene::paint_node`, the SVG writer's
-    /// child loop, and the two bounds passes in `resolve`. That is the natural
-    /// spelling when you are mid-iteration — the backwards scan would be one per
-    /// child, of a list you are already holding — so unifying them onto this
-    /// function would make the walk worse, not better. **Fix a disagreement by
-    /// correcting the forward reader, not by routing it through here.**
-    ///
-    /// What keeps the two spellings honest is that they are asserted against the
-    /// *same fixtures*: `ops::a_mask_governs_up_to_the_next_one_and_is_never_masked_itself`
-    /// pins this one, and `render::a_second_mask_ends_the_first_ones_run_instead_of_nesting`
-    /// pins the forward one on the same arrangement of siblings. A change to the
-    /// rule that touches one and not the other fails the other.
+    /// The one production caller is [`crate::hit_test`], through `masked_away`.
+    /// The other readers (`scene::paint_node`, the SVG writer's child loop, the
+    /// bounds passes in `resolve`) walk the child list in order and carry the
+    /// current mask forward; **fix a disagreement by correcting the forward
+    /// reader, not by routing it through here.** Both spellings are asserted on
+    /// the same sibling fixtures, in `ops` and `render`.
     pub fn governing_mask(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
         if node.mask() {
@@ -243,20 +203,14 @@ impl Document {
     /// The names `parent`'s children carry, skipping `except` — everything a new
     /// or renamed child has to avoid to get a number of its own (`crate::naming`).
     ///
-    /// **`except` is a list, and both of its uses are a name that is on its way
-    /// out.** A node being *renamed* is its own sibling, so without it `free_name`
-    /// sees the name it is replacing as taken and walks one past —
-    /// `build::set_boolean_op` turning "Union 2" into "Subtract 3" for no reason
-    /// anybody could name. And a builder that creates a node *and deletes others in
-    /// the same transaction* has the same problem several times over:
-    /// `build::flatten_union` emits its `CreateNode` before the deletes, so
-    /// flattening a path called "Path" produced "Path 2" and then took the "Path"
-    /// away, leaving a lone number-2 with nothing above it.
+    /// **`except` is a list of names on their way out.** A node being renamed is
+    /// its own sibling, so without it `free_name` sees the name it is replacing as
+    /// taken and walks one past. A builder that creates a node and deletes others
+    /// in the same transaction (`build::flatten_union` emits its `CreateNode`
+    /// before the deletes) has the same problem several times over.
     ///
-    /// Only the direct children. Numbering is per-parent (§15 D127): document-wide
-    /// numbering yields "Rectangle 137" in a large file for no benefit, and names
-    /// repeating across parents is already an accepted state — the layers panel
-    /// shows ancestor rows for a search hit precisely so one can be located.
+    /// Only the direct children: numbering is per-parent (§15 D127), and names
+    /// repeating across parents is an accepted state.
     pub fn child_names(&self, parent: NodeId, except: &[NodeId]) -> FxHashSet<&str> {
         self.nodes
             .get(&parent)
@@ -281,10 +235,8 @@ impl Document {
     /// Replace the library identity.
     ///
     /// **Not an `Operation`, so it does not go through `apply` and cannot be
-    /// undone** — see [`crate::meta`] for why a rename belongs outside the
-    /// document's history. It follows that this does not report a `DirtySet`
-    /// either: nothing about the drawing changed, so no render invalidation is
-    /// owed and the caller's only obligation is to write the file.
+    /// undone** — see [`crate::meta`]. It reports no `DirtySet` either: nothing
+    /// drawn changed, so the caller's only obligation is to write the file.
     pub fn set_meta(&mut self, meta: DocumentMeta) {
         self.meta = meta;
     }
@@ -312,17 +264,12 @@ impl Document {
 
     /// The guides scoped to `owner`, in no particular order.
     ///
-    /// The reverse of [`Guide::owner`], spelled here so that a caller cannot
-    /// accidentally read a `None` owner as "owned by nothing in particular" when it
-    /// means "owned by the canvas".
+    /// The reverse of [`Guide::owner`], so a caller cannot read a `None` owner as
+    /// "owned by nothing in particular" when it means "owned by the canvas".
     ///
-    /// **One caller today** — the Scale tool, multiplying a frame's own guides
-    /// (§5.6) — and the two that look as though they should are worth naming,
-    /// because both were expected to and neither can. `build::guides_of` tests
-    /// membership of a whole doomed *subtree* rather than one owner, so it filters
-    /// `guides()` directly; and the canvas draws every guide in one pass rather than
-    /// asking frame by frame, which is what keeps the draw one loop over a handful
-    /// of guides instead of one per frame in the document.
+    /// The one caller is the Scale tool (§5.6). `build::guides_of` tests a whole
+    /// doomed subtree, so it filters `guides()` directly; the canvas draws every
+    /// guide in one pass rather than asking frame by frame.
     ///
     /// [`Guide::owner`]: crate::guide::Guide::owner
     pub fn guides_owned_by(&self, owner: NodeId) -> impl Iterator<Item = &Guide> {
@@ -332,14 +279,9 @@ impl Document {
     /// One image's entry, or `None` for a reference to something this document
     /// does not carry.
     ///
-    /// **A missing entry is a state to draw, not an error.** A linked image whose
-    /// file has moved is the case v1 has to handle anyway, so a dangling reference
-    /// takes the same path rather than a panic — and `None` here is what puts it
-    /// on that path.
-    ///
-    /// The drawing at the end of it is the **placeholder**: both backends and the
-    /// SVG writer paint the grey cross [`crate::missing_placeholder`] describes
-    /// rather than leaving a blank, and the layers panel tints the row (§15 D179).
+    /// **A missing entry is a state to draw, not an error**: both backends and the
+    /// SVG writer paint the grey cross [`crate::missing_placeholder`] describes,
+    /// and the layers panel tints the row (§15 D179).
     pub fn image(&self, id: &ImageId) -> Option<&ImageEntry> {
         self.images.get(id)
     }
@@ -371,13 +313,10 @@ impl Document {
     /// it sets, else the document's default. `None` only in a document with no
     /// modes.
     ///
-    /// **The node itself counts**: a frame's own fill reads in the mode it sets,
-    /// as its children do.
+    /// **The node itself counts**: a frame's own fill reads in the mode it sets.
     ///
-    /// **One of the document's modes**: a frame set to a kit's mode — a kit
-    /// main's, copied onto its instances (§15 D1064) — governs that kit's
-    /// variables alone, and is passed over here. [`Self::resolve_var_in`] reads
-    /// it for those.
+    /// Only the document's own modes count: a frame set to a kit's mode (§15 D1064)
+    /// governs that kit's variables alone, which [`Self::resolve_var_in`] reads.
     pub fn mode_at(&self, id: NodeId) -> Option<crate::variable::ModeId> {
         self.mode_for_in(&self.variables, id, None)
     }
@@ -440,12 +379,10 @@ impl Document {
     /// variable's colour in the mode in force at `id` when bound (§5.3f).
     ///
     /// **The one door a bound paint is drawn through** — the scene walk, the SVG
-    /// writer, the snapshot and the inspector all ask it. A binding that cannot
-    /// resolve is refused at the commit (`crate::variable::check`), so the
-    /// transparent fallback is for a document that broke the rules anyway.
-    ///
-    /// Borrowed when literal, so the scene walk pays nothing per frame for the
-    /// paints that bind nothing.
+    /// writer, the snapshot and the inspector. A binding that cannot resolve is
+    /// refused at the commit (`crate::variable::check`), so the transparent
+    /// fallback is for a document that broke the rules anyway. Borrowed when
+    /// literal.
     pub fn resolve_brush<'a>(
         &self,
         id: NodeId,
@@ -454,7 +391,7 @@ impl Document {
         self.resolve_brush_in(&self.variables, id, brush)
     }
 
-    /// [`Self::resolve_brush`] against table `t` (§15 D1056).
+    /// [`Self::resolve_brush`] against table `t`.
     pub fn resolve_brush_in<'a>(
         &self,
         t: &crate::variable::Variables,
@@ -478,17 +415,16 @@ impl Document {
     /// [`Self::resolve_brush`]'s literal — borrowed untouched when nothing in it
     /// is bound, which is nearly always.
     ///
-    /// **The scene walk's and the SVG writer's one call** (§15 D1039): taken where
-    /// a node's paint is read, so the code below it handles literal brushes only
-    /// and reads them with [`crate::BrushSource::drawn`]. `id` is the node whose
-    /// mode the paint reads in — for a ghost not yet in the document the scene
-    /// passes the ghost's own id, which `mode_at` finds no node for, so a ghost
-    /// reads in the **default** mode (`scene::paint_ghost`).
+    /// **The scene walk's and the SVG writer's one call**: taken where a node's
+    /// paint is read, so the code below it handles literal brushes only
+    /// ([`crate::BrushSource::drawn`]). `id` is the node whose mode the paint
+    /// reads in; a ghost not yet in the document has none, so it reads in the
+    /// **default** mode (`scene::paint_ghost`).
     pub fn resolved_paint<'a>(&self, id: NodeId, paint: &'a Paint) -> std::borrow::Cow<'a, Paint> {
         self.resolved_paint_in(&self.variables, id, paint)
     }
 
-    /// [`Self::resolved_paint`] against table `t` (§15 D1056).
+    /// [`Self::resolved_paint`] against table `t`.
     pub fn resolved_paint_in<'a>(
         &self,
         t: &crate::variable::Variables,
@@ -514,15 +450,11 @@ impl Document {
             if s.brush.is_bound() {
                 s.brush = self.resolve_brush_in(t, id, &s.brush).into_owned().into();
             }
-            // **And a bound width its number** (§15 D1073), floored at 0 as a
-            // width field floors a literal, a missing or non-number value 0 —
-            // and **unbound in what comes out**, as a resolved brush comes out
-            // literal: the cell preview hands this door's output to the scene as
-            // an override, and the scene resolves it again against the committed
-            // table, so a binding left on the item drew the committed number over
-            // the previewed one. Measured by
-            // `ondin-render`'s
-            // `a_stroke_width_binding_previews_as_the_width_it_will_draw`.
+            // A bound width resolves to its number (floored at 0; missing or
+            // non-number is 0) and comes out **unbound**: the cell preview hands
+            // this output to the scene as an override, which resolves again against
+            // the committed table, so a surviving binding would draw the committed
+            // number over the previewed one.
             if let Some(v) = s.width_var.take() {
                 s.width = self.stroke_width_drawn_in(t, id, v);
             }
@@ -530,15 +462,12 @@ impl Document {
         Cow::Owned(out)
     }
 
-    /// `effects` as they draw at `id`: every bound number its variable's
-    /// number in the mode in force (§15 D1074) — a blur floored at 0, an offset
-    /// or a spread as it comes, a missing or non-number value 0 — **and unbound
-    /// in what comes out**, `resolved_paint`'s rule, so a preview's override
-    /// resolved here is not resolved again against the committed table. Borrowed
-    /// untouched when nothing in it is bound, which is nearly always.
+    /// `effects` as they draw at `id`: every bound number its variable's number in
+    /// the mode in force (§15 D1074; a blur floored at 0, a missing or non-number
+    /// value 0), **unbound in what comes out** as in `resolved_paint`. Borrowed
+    /// when nothing is bound.
     ///
-    /// **What every reader that draws, measures or exports asks** — the scene
-    /// walk, `Resolved`'s ink, the SVG writer, the snapshot — never
+    /// **What every reader that draws, measures or exports asks** — never
     /// `Node::effects`, whose bound numbers are their literal 0.
     pub fn resolved_effects<'a>(
         &self,
@@ -548,8 +477,7 @@ impl Document {
         self.resolved_effects_in(&self.variables, id, effects)
     }
 
-    /// [`Self::resolved_effects`] against table `t` (§15 D1056's preview of a
-    /// cell).
+    /// [`Self::resolved_effects`] against table `t`.
     pub fn resolved_effects_in<'a>(
         &self,
         t: &crate::variable::Variables,
@@ -611,7 +539,7 @@ impl Document {
         self.resolve_corners_in(&self.variables, id, radii)
     }
 
-    /// [`Self::resolve_corners`] against table `t` (§15 D1056).
+    /// [`Self::resolve_corners`] against table `t`.
     pub fn resolve_corners_in(
         &self,
         t: &crate::variable::Variables,
@@ -653,10 +581,9 @@ impl Document {
     }
 
     /// `display` with the slots `vars` binds read from table `t`, in the mode in
-    /// force at `id` (§15 D1058) — each a variable's number, never below 0 (the
-    /// floor the layout engine puts on a literal), the other slots as they are.
-    /// `vars` is named rather than read off the node so a preview can resolve a
-    /// binding it has not committed (`SetSpacingVars`' absorb).
+    /// force at `id` — each a variable's number, never below 0 (the layout
+    /// engine's floor on a literal), the other slots as they are. `vars` is named
+    /// so a preview can resolve a binding it has not committed.
     pub fn spacing_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -704,17 +631,17 @@ impl Document {
     }
 
     /// Whether `id` is shown — its own visibility, **its boolean variable's
-    /// value in the mode in force there where it is bound** (§15 D1059), else its
-    /// literal. Not whether an ancestor hides it: this is the layer's own eye.
-    /// False for a node not in the document.
+    /// value in the mode in force there where it is bound**, else its literal. Not
+    /// whether an ancestor hides it: this is the layer's own eye. False for a node
+    /// not in the document.
     ///
     /// **What every reader that draws, picks, lays out or exports asks**, never
-    /// `Node::visible`, which is the literal a binding stands in for.
+    /// `Node::visible`.
     pub fn shown(&self, id: NodeId) -> bool {
         self.shown_in(&self.variables, id)
     }
 
-    /// [`Self::shown`] against table `t` (§15 D1056's preview of a cell).
+    /// [`Self::shown`] against table `t`.
     pub fn shown_in(&self, t: &crate::variable::Variables, id: NodeId) -> bool {
         let Some(n) = self.nodes.get(&id) else {
             return false;
@@ -729,14 +656,13 @@ impl Document {
     }
 
     /// The opacity `id` is drawn at: **its bound variable's number in the mode in
-    /// force there, read as a percentage** — the Appearance field's own unit, so
-    /// a variable *opacity/disabled* of 40 draws 0.4 — clamped to 0–100, a missing
-    /// or non-number value 0 (§15 D1072); unbound, its literal. 1 for a node not
-    /// in the document, which draws nothing anyway.
+    /// force there, read as a percentage** (a variable of 40 draws 0.4), clamped
+    /// to 0–100, a missing or non-number value 0; unbound, its literal. 1 for a
+    /// node not in the document.
     ///
     /// **What every reader that draws or exports asks**, never `Node::opacity`,
-    /// which is the literal a binding stands in for — 0 while bound, so a reader
-    /// that skips this draws the layer invisible (D1039's 0, chosen to be seen).
+    /// which is 0 while bound, so a reader that skips this draws the layer
+    /// invisible — chosen to be seen.
     pub fn drawn_opacity(&self, id: NodeId) -> f32 {
         match self.nodes.get(&id) {
             Some(n) => self.opacity_drawn_in(&self.variables, id, n.opacity, n.opacity_var),
@@ -762,10 +688,9 @@ impl Document {
     }
 
     /// `kind` with the axes `vars` binds read from table `t`, in the mode in
-    /// force at `id` (§15 D1061) — each its variable's number, never below 0, the
-    /// other axis as it is; `kind` unchanged when nothing is bound or it has no
-    /// stored size. `vars` is named rather than read off the node so a preview
-    /// can resolve a binding it has not committed.
+    /// force at `id` — each its variable's number, never below 0, the other axis
+    /// as it is; `kind` unchanged when nothing is bound or it has no stored size.
+    /// `vars` is named so a preview can resolve a binding it has not committed.
     pub fn size_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -800,12 +725,8 @@ impl Document {
     /// resolved ([`Self::size_drawn_in`] against this document's table),
     /// borrowed when neither is bound. **What every layout view answers `kind`
     /// with, and what `Resolved`'s used kind starts from**, so a bound size is
-    /// laid out and drawn at its variable's number and never at the 0 its
-    /// literal holds (§15 D1061).
-    ///
-    /// **And a bound text's content and family** (§15 D1069,
-    /// [`Self::text_drawn_in`]), so a text reads its string variable wherever it
-    /// is shaped, drawn or exported, and never the empty literal.
+    /// never read as the 0 its literal holds. A bound text's content and family
+    /// resolve too ([`Self::text_drawn_in`]).
     pub fn resolved_kind(&self, id: NodeId) -> Option<std::borrow::Cow<'_, NodeKind>> {
         let n = self.nodes.get(&id)?;
         let sized = n.size_vars.iter().any(Option::is_some);
@@ -824,15 +745,14 @@ impl Document {
     }
 
     /// `kind` with the content and family `vars` binds read from table `t`, in
-    /// the mode in force at `id` (§15 D1069) — each its variable's string, the
-    /// other field as it is; `kind` unchanged when nothing is bound or it is no
-    /// `Text`. `vars` is named rather than read off the node so a preview can
-    /// resolve a binding it has not committed, as [`Self::size_drawn_in`]'s is.
+    /// the mode in force at `id` — each its variable's string, the other field as
+    /// it is; `kind` unchanged when nothing is bound or it is no `Text`. `vars` is
+    /// named so a preview can resolve a binding it has not committed.
     ///
     /// A bound content draws with no spans: a byte range cannot index a string
-    /// whose length is the mode's, and one that lands inside a character panics
-    /// the shaper. The binding verb and the commit's passes keep spans off a
-    /// bound content; this is the second defence, for a door they miss.
+    /// whose length is the mode's, and one inside a character panics the shaper.
+    /// The binding verb and the commit's passes keep spans off a bound content;
+    /// this is the second defence, for a door they miss.
     pub fn text_drawn_in(
         &self,
         t: &crate::variable::Variables,
@@ -976,16 +896,12 @@ impl Document {
     /// values this document held before — with the layout operations' CSS
     /// validity check stood down (§15 D937).
     ///
-    /// A file may carry a layout value CSS refuses: D914 opens it, keeps it as
-    /// written and lays around it. An edit then replaces it with a valid value,
-    /// and that edit's inverse writes the refused value back — which
-    /// `SetDisplay` and `SetLayoutItem` refused with `BadLayout`, so the undo
-    /// failed and `History::undo`, having popped the step, dropped it: the file's
-    /// value could never be returned to. Every value a history step writes was
-    /// in this document already, so it is not the operations' to refuse. Every
-    /// other check stands — a non-finite number is still refused, the tree rules
-    /// still hold — because nothing that passed them once can fail them on the
-    /// way back, and a broken one is worth hearing about.
+    /// A file may carry a layout value CSS refuses, which the loader keeps as
+    /// written. An edit replaces it, and that edit's inverse writes the refused
+    /// value back, which `SetDisplay` and `SetLayoutItem` would refuse with
+    /// `BadLayout`, so the undo would fail and the file's value could never be
+    /// returned to. Every value a history step writes was in this document
+    /// already, so it is not the operations' to refuse. Every other check stands.
     pub fn apply_restoring(&mut self, tx: &Transaction) -> Result<ApplyOutcome, OpError> {
         self.restoring = true;
         let outcome = self.apply(tx);
@@ -1014,39 +930,17 @@ impl Document {
             inverse_ops.push(inverse);
         }
 
-        // ⚠️ **Every guide's owner, once, after the whole transaction** (§15 D491,
-        // `[S2.2-L2-05]`). `check_guide_owner` is enforced on `AddGuide` and
-        // `SetGuideScope` — the operations that *name* an owner — and there is a
-        // second way to break the same rule, which is to remove the frame. A
-        // `DeleteNode` on a guide-owning frame was accepted, `doc.guides()` kept
-        // the orphan, and `io::load(io::save(&doc))` then refused the file
-        // **forever**: *"guide 51:4 is scoped to 51:2, which is not a frame in this
-        // document"*. Autosave writes that file, and the in-memory session that
-        // could still undo it is the only copy of the user's work.
+        // Every guide's owner, once, after the whole transaction (§15 D491).
+        // `check_guide_owner` guards the operations that name an owner, but
+        // deleting the owning frame breaks the same rule and would leave a file
+        // `io::load` refuses forever. It is a post-condition rather than an arm in
+        // `op_delete` so the next op that breaks it is caught too; `build::guides_of`
+        // is still how the Delete verb carries its guides and orders the inverse.
         //
-        // **A post-condition rather than a guide arm inside `op_delete`**, and
-        // deliberately: the rule is about the document, not about one operation, so
-        // checking it where the document becomes real catches the *next* op that
-        // breaks it too. `build::guides_of` stays the thing that makes a delete
-        // succeed — it is not an optimisation, it is how the Delete verb carries
-        // its guides and how the inverse gets the order right — but a fourth delete
-        // site that has not heard of it now gets a refused edit instead of an
-        // unopenable document.
-        //
-        // ⚠️ **After the loop and before `*self = working`, so a transaction is
-        // still all-or-nothing.** Checking per op would refuse a transaction that
-        // ends up *correct*: `guides_of` puts the `RemoveGuide`s first and the
-        // frame is still there when they run, so that order never holds an orphan
-        // at all — but the **reverse** order, frame then guides, is legal, is what
-        // a caller might write, and passes *through* a state with an orphan in it
-        // on its way to a valid document.
-        //
-        // ⚠️ That is not hypothetical: `undoing_a_frame_delete_restores_its_guides`
-        // commits exactly that transaction as its "wrong" order — wrong only for
-        // the undo — so a per-op check would have turned an existing green test red
-        // for a reason that has nothing to do with it. (This comment said "would
-        // refuse the *correct* spelling", which is the sentence inverted; the
-        // argument was always about the reverse one.)
+        // It runs after the loop and before `*self = working`, so a transaction is
+        // still all-or-nothing. A per-op check would refuse the legal order
+        // frame-then-guides, which passes through an orphan on its way to a valid
+        // document (`undoing_a_frame_delete_restores_its_guides` commits it).
         for guide in &working.guides {
             working.check_guide_owner(guide.owner)?;
         }
@@ -1054,8 +948,7 @@ impl Document {
         // Item ids unique within each of a node's five lists (§15 D980), over the
         // nodes this transaction wrote: a duplicate would match two of an
         // instance's items to one of its main's. After the last op, for the guide
-        // owners' reason above — and `dirty` covers every node an op wrote,
-        // including each node an `InsertSubtree` brought in.
+        // owners' reason; `dirty` covers every node an op wrote.
         for id in &dirty.0 {
             if let Some(n) = working.nodes.get(id) {
                 n.check_item_ids()?;
@@ -1065,9 +958,8 @@ impl Document {
         // The component rules (§15 D978): every link resolves, a main is a frame
         // or a group outside any main or instance, an instance's nodes belong to
         // it, no main holds an instance of itself. Over the whole document rather
-        // than `dirty`, because a link breaks when its *target* goes — a delete
-        // dirties the deleted node, not the instance pointing at it — and free
-        // when nothing is a main or linked (`component::check`).
+        // than `dirty`, because a delete dirties the deleted node, not the
+        // instance pointing at it (`component::check`).
         crate::component::check(&working.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
 
         // The vault's rules (§15 D1012): an origin on every vault node and on
@@ -1076,11 +968,9 @@ impl Document {
         crate::kit::check(&working.nodes, working.root, working.vault)
             .map_err(|(id, rule)| OpError::Vault(id, rule))?;
 
-        // The variables rules (§5.3f, §15 D1039): every binding resolves to a
-        // variable of its kind, every variable has a cell in every mode, no alias
-        // loops, a mode set only on a frame. Over the whole document, for
-        // `component::check`'s reason — removing a variable breaks a binding on a
-        // node the removal never dirtied.
+        // The variables rules (§5.3f): every binding resolves to a variable of its
+        // kind, every variable has a cell in every mode, no alias loops, a mode set
+        // only on a frame. Over the whole document, for `component::check`'s reason.
         crate::variable::check(&working.variables, working.nodes.values(), |id| {
             working.in_vault(id)
         })
@@ -1088,8 +978,8 @@ impl Document {
 
         // The style rules (§15 D1062): every binding names a style of its slot,
         // names unique within a slot, a style's paints bound to colour variables,
-        // and no vault node bound to one of the document's own (§15 D1064) — the
-        // same whole-document reach, for the same reason.
+        // and no vault node bound to one of the document's own — the same
+        // whole-document reach.
         crate::style::check(
             &working.styles,
             &working.variables,
@@ -1128,27 +1018,18 @@ impl Document {
     /// field any operation can write without a reader per field.
     ///
     /// **Applied to a scratch document holding the one node `op` names**, because
-    /// every operation `overwrites` names a node for writes that node alone. The
-    /// scratch carries `root`, `schema_version` and `restoring` across — the last
-    /// read by `op_set_display`'s and `op_set_layout_item`'s history exemption (§15
-    /// D937); no handler of these operations reads `root` (read 2026-10-07).
-    /// **One handler reads past its node, and its scratch holds the subtree**:
-    /// `op_set_mask` refuses to make a mask of a group holding a frame
-    /// (`holds_a_frame`, §15 D876), so with the node alone a peek of a mask turned
-    /// on over a copy whose group holds a frame of the instance's own answered
-    /// `Some`, `propagate` followed, and `apply` refused the whole edit — where the
-    /// copy should keep its value (`arch-scribe`'s reading of the first build). Two
-    /// things came of the one-node scratch, both found by the `v0.4.1..7d0c666`
-    /// release review:
+    /// every operation `overwrites` writes that node alone. The scratch carries
+    /// `root`, `schema_version` and `restoring` across — the last read by the
+    /// history exemption of `op_set_display` and `op_set_layout_item`.
+    /// **`op_set_mask` reads past its node** (`holds_a_frame`, §15 D876), so its
+    /// scratch holds the subtree; with the node alone a peek would answer `Some`
+    /// and `apply` would refuse the whole edit.
     ///
-    /// - **Nothing is restored**, so nothing can fail to be. This applied the op
-    ///   to the document and then re-applied its inverse, asserting that the
-    ///   inverse took — and an old value the loader admits and an op refuses (a
-    ///   gradient's opacity of 5, §15 D767) panicked every commit and every
-    ///   preview frame of an edit to that field on a main (`[R1-L2-01]`).
-    /// - **The pass clones one node per read, not the document.** It cloned the
-    ///   whole document once per call, and the live preview calls it every frame:
-    ///   13.6 ms at 25,000 nodes with a single instance (`[X3-L4-03]`).
+    /// - **Nothing is restored**, so nothing can fail to be: re-applying the
+    ///   inverse would panic on an old value the loader admits and an op refuses
+    ///   (a gradient's opacity of 5, §15 D767).
+    /// - **The pass clones one node per read, not the document**; the live
+    ///   preview calls it every frame.
     pub(crate) fn peek(&self, op: &Operation) -> Option<Operation> {
         let id = op.overwrites()?;
         let mut nodes = FxHashMap::default();
@@ -1527,13 +1408,11 @@ impl Document {
     // ── The variables table (§5.3f, §15 D1039) ────────────────────────────────
     //
     // **Every edit that can change what a bound field reads dirties every node
-    // that reads a variable** (`bound_nodes`): no node changed, and a bound
-    // corner's used kind lives in `Resolved`, whose `update` returns early on an
-    // empty set — premise (ii)'s gap. A scan, not a reverse index: a commit
-    // already clones the whole document, and the scan is the same order of work
-    // with nothing to keep in step. The rules the table keeps are checked after
-    // the last op (`variable::check`), so these handlers refuse only what no
-    // transaction could end well from — a missing id, a duplicate one.
+    // that reads a variable** (`bound_nodes`): no node changed, and `Resolved`'s
+    // `update` returns early on an empty set. A scan, not a reverse index: a
+    // commit already clones the whole document. The table's rules are checked
+    // after the last op (`variable::check`), so these handlers refuse only a
+    // missing id or a duplicate one.
 
     fn op_add_variable(
         &mut self,
@@ -1684,10 +1563,9 @@ impl Document {
         if matches!(kind, NodeKind::Root) {
             return Err(OpError::WrongKindForOp);
         }
-        // ⚠️ **The check has to be here and not only at the loader**, which is
-        // where invariant 8 puts it: past this line the value is in the document
-        // and the next autosave writes a file that will never open again. See
-        // [`OpError::NonFinite`] and `NodeKind::geometry_is_finite`.
+        // The check has to be here and not only at the loader: past this line the
+        // value is in the document and the next autosave writes a file that never
+        // opens again. See [`OpError::NonFinite`] and `NodeKind::geometry_is_finite`.
         if !kind.geometry_is_finite() || transform.is_some_and(|t| !affine_is_finite(t)) {
             return Err(OpError::NonFinite);
         }
@@ -1700,22 +1578,14 @@ impl Document {
             return Err(OpError::ArtboardPlacement);
         }
 
-        // **`None` means "number me among my new siblings"**, and it is resolved
-        // here rather than at the eleven of fifteen production create sites that
-        // pass it (§15 D127; §5.7b names the four that pass `Some`). Here because
-        // this is the chokepoint: a tool added later passes `None` like every other
-        // and is numbered without knowing that numbering exists, where a name
-        // computed by each builder would be a rule every future create site has to
-        // remember — and the failure of forgetting is silent, a layer called
-        // "Rectangle" among three others.
+        // **`None` means "number me among my new siblings"**, resolved here
+        // (§15 D127; §5.7b names the sites that pass `Some`) because this is the
+        // chokepoint: a tool added later is numbered without knowing numbering
+        // exists, where a name computed per builder would be silent to forget.
         //
-        // The cost is that the op's *result* depends on the document it lands in, so
-        // two clients replaying it from diverged states would name the node
-        // differently. Invariant 3's determinism is about **ids**, which still ride
-        // inside the op; a name is not structural, and a rename conflict is
-        // something multiplayer (§12) has to resolve for typed names anyway. That is
-        // an inference about invariant 3's spirit rather than something §4 states,
-        // and §15 D127 marks it as one.
+        // The op's result thus depends on the document it lands in. Invariant 3's
+        // determinism is about ids, which still ride inside the op; a name is not
+        // structural, and multiplayer (§12) must resolve rename conflicts anyway.
         let name = name
             .clone()
             .unwrap_or_else(|| crate::naming::created_name(&self.child_names(parent, &[]), kind));
@@ -1880,24 +1750,12 @@ impl Document {
             if !(0.0..=1.0).contains(&n.opacity) {
                 return Err(OpError::BadOpacity);
             }
-            // The same field invariant `op_create` upholds one door over. This
-            // is the door an MCP write tool or an importer would come through,
-            // which is precisely the traffic the model cannot vouch for.
-            // ⚠️ **The pivot is the third coordinate a node carries and it was
-            // not in this list** (§15 D639). `[S2.2-L1-06]` names `SetPivot`;
-            // this is the other door the same value arrives by, and the comment
-            // above says which traffic that is. A guard at one of two doors
-            // leaves the enforcement test's *"at every door that writes one"*
-            // false, which is the defect rather than a tidiness.
-            // ⚠️ **Paint was the fourth coordinate a node carries and it was not
-            // in this list either** (§15 D831). The loop checked geometry, the
-            // transform, the pivot and the effects, and never asked
-            // `brush_is_finite` — which `op_set_fills` and `op_set_strokes` both
-            // ask one door over, for invariant 8's paint half (§15 D451). The
-            // comment above says which traffic this door carries, and since
-            // `io::clip` that traffic is *OS-clipboard text*: a pasted gradient
-            // stop with a `NaN` offset reached the document, and the next
-            // autosave wrote a `.ondin` that never opened again.
+            // The same field invariant `op_create` upholds one door over. This is
+            // the door an MCP write tool, an importer or a paste (`io::clip`, OS
+            // clipboard text) comes through — traffic the model cannot vouch for.
+            // Every coordinate a node carries (geometry, transform, pivot, effects,
+            // paint) must be checked at every door that writes it (§15 D639, D831);
+            // `op_set_fills` and `op_set_strokes` hold the paint half (§15 D451).
             if !n.kind.geometry_is_finite()
                 || !affine_is_finite(n.transform)
                 || n.pivot.is_some_and(|p| !p.is_finite())
@@ -1929,56 +1787,21 @@ impl Document {
             }
         }
 
-        // ⚠️ **The converse of the loop above, and `claimed` was built and then
-        // thrown away without it** (§15 D423). That loop walks *from each node to its listed
-        // children*; nothing asked whether every non-root node **is** somebody's
-        // child. A node whose `parent` is in the set is not a root by the test at
-        // the top, passes the single-root check, gets inserted, and is listed by
-        // nobody — an orphan.
+        // The converse of the loop above, which walks from each node to its listed
+        // children: every non-root node must also **be** somebody's child, or it is
+        // an orphan that panics `DeleteNode`, `Reparent` and `Reorder` and saves a
+        // file whose load fails (§15 D423). Reachable from the public API alone
+        // (two `capture_subtree` snapshots composed), and the loader's check (5)
+        // already enforces it; the two doors into the tree must hold the same
+        // standard (§5.11).
         //
-        // **Reachable from the public API alone**, which is what makes this worth
-        // a line: two `capture_subtree` snapshots of the same node taken at
-        // different moments — one before a child existed, one of the child —
-        // compose into exactly that set. The result then panics `DeleteNode`,
-        // `Reparent` and `Reorder` at their three
-        // `expect("child must be listed in its parent")` sites, and saves a file
-        // whose load fails with *"node(s) are not reachable from the root"*.
+        // A count is not a reachability check: a cycle among the nodes balances it
+        // (§15 D832). So walk it, as the loader does. The depth rides along (the
+        // loader's check (6)): a 300-deep payload arrives in one paste.
         //
-        // The loader has enforced this since it was written — check (5), the
-        // reachability walk — so the two doors into the tree were held to
-        // different standards, which §5.11 says they must not be. ⚠️ **D423's
-        // own closing sentence read *"Every production caller already satisfies
-        // it: both feed `remap_subtree` output from a single fresh capture"*,
-        // and `io::clip` made it false** — but not by adding a site, which is
-        // the easy way to misread it: there are still exactly two,
-        // `build::insert_subtrees` and `canvas::clone_tx`. What changed is the
-        // **template** the first of them is handed, which is now OS-clipboard
-        // text rather than a capture out of this process's own vetted document.
-        // The false word in that sentence is *capture*, not *both* (§15 D832).
-        //
-        // 🚨 **And a count is not a reachability check: a cycle balances it**
-        // (§15 D832). With `nodes = [R, A, B]`, `A.parent = B`, `B.parent = A`,
-        // `A.children = [B]` and `B.children = [A]`, `R` is the single root, the
-        // loop above claims `A` and `B` exactly once each, and `2 + 1 == 3`
-        // balances — so an `A`/`B` component reachable from nothing was inserted,
-        // committed and saved, and the file then failed `io::load` with *"2
-        // node(s) are not reachable from the root"*. The arithmetic was standing
-        // in for the walk, and the two agree on every input except the one that
-        // matters.
-        //
-        // **So walk it, which is what the loader's check (5) does** — and the
-        // depth rides along, which is check (6) and `[R1-L2-02]`: until
-        // `io::clip` there was no way to nest without a user click per level, so
-        // §15 D416's own conditional (*"fix if a builder, an importer or the MCP
-        // write surface ever nests without one"*) had not fired. A 300-deep
-        // payload now arrives in one paste.
-        //
-        // ⚠️ **The bound is absolute, so the parent's own depth is part of it.**
-        // A 200-deep subtree pasted into a 200-deep parent reloads no better
-        // than a 400-deep one pasted at the root, and a subtree-relative check
-        // would have passed it. The upward walk is bounded too: a cycle among
-        // the *existing* nodes is an invariant violation rather than an input,
-        // but hanging on one would be a worse answer than refusing it.
+        // The bound is absolute, so the parent's own depth is part of it. The
+        // upward walk is bounded too: a cycle among existing nodes is an invariant
+        // violation, but hanging on one is worse than refusing it.
         let mut parent_depth = 0usize;
         let mut up = self.nodes[&parent].parent;
         while let Some(id) = up {
@@ -2044,13 +1867,9 @@ impl Document {
         transform: Affine,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // ⚠️ **The reachable route into this one is `build::local_for_world`**,
-        // which is `parent_world.inverse() * world` with no guard: on a singular
-        // parent — `<g transform="matrix(0,0,0,0,0,0)">`, which `svg_in` accepts
-        // because it filters for *finite* and not for *invertible* — kurbo
-        // divides by a zero determinant and every coefficient comes back `NaN`.
-        // Moving the child then wrote that here, and the document was gone. See
-        // [`OpError::NonFinite`].
+        // `build::local_for_world` inverts the parent's world transform unguarded,
+        // and `svg_in` accepts a singular parent (finite, not invertible), so a
+        // `NaN` transform can arrive here. See [`OpError::NonFinite`].
         if !affine_is_finite(transform) {
             return Err(OpError::NonFinite);
         }
@@ -2060,19 +1879,11 @@ impl Document {
             node.transform = transform;
             old
         };
-        // 🚨 **This node alone, and `Resolved::update` expands it** (§15 D590,
-        // `[A4-L4-03]`). A transform change does move everything under this node,
-        // and `update`'s `collect_subtree` says so — it walks the subtree of every
-        // dirty id for exactly that reason, so listing the descendants here was
-        // the same expansion done twice.
-        //
-        // What the duplication cost is that `update` could no longer tell *why* a
-        // node was dirty. Its text pass runs over the dirty ids, and a text
-        // layout depends on nothing outside its own node — so a group of twenty
-        // 4,000-character blocks nudged with an arrow key re-shaped all twenty
-        // per keypress, about 23 ms of parley for a change that cannot move a
-        // glyph. `DirtySet` is `Resolved::update`'s only consumer, and the
-        // expansion it needs it already performs.
+        // **This node alone**: `Resolved::update` expands the subtree itself
+        // (`collect_subtree`, §15 D590). Listing descendants here would repeat that
+        // and stop `update` telling why a node was dirty, so its text pass would
+        // re-shape every text under a nudged group, though a text layout depends on
+        // nothing outside its own node.
         dirty.0.insert(id);
         Ok(Operation::SetTransform { id, transform: old })
     }
@@ -2379,10 +2190,9 @@ impl Document {
         fills: &[Keyed<Fill>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // Invariant 8's paint half (§15 D451). `OpError::NonFinite` used to cover
-        // coordinates only, so a `NaN` gradient stop offset — or colour channel —
-        // was stored here, written to the file as `null`, and killed the document
-        // on the way back in. Refused where the user still has their work.
+        // Invariant 8's paint half (§15 D451): a `NaN` gradient stop offset or
+        // colour channel is written to the file as `null` and kills the document
+        // on the way back in, so it is refused here.
         if !fills.iter().all(|f| f.brush.is_finite()) {
             return Err(OpError::NonFinite);
         }
@@ -2401,20 +2211,15 @@ impl Document {
         strokes: &[Keyed<Stroke>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // The same refusal `op_set_fills` makes, and for the same reason (§15
-        // D451) — plus a stroke's own numbers, which a fill has no equivalent of:
-        // `stroke-dasharray="1e999 5"` was one of `[S7.2-L5-01]`'s five sinks and
-        // the width is written to the same file.
+        // The same refusal `op_set_fills` makes (§15 D451), plus a stroke's own
+        // numbers: the width and dash lengths are written to the same file.
         if !strokes.iter().all(|s| {
             s.brush.is_finite() && s.width.is_finite() && s.dashes.iter().all(|d| d.is_finite())
         }) {
             return Err(OpError::NonFinite);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        // `is_paintable`, the same gate `op_set_fills` uses. This asked
-        // `takes_stroke` while a frame could be stroked and not filled; giving a
-        // frame a fill list closed that gap and the second predicate with it
-        // (§15 D400).
+        // `is_paintable`, the same gate `op_set_fills` uses (§15 D400).
         if !is_paintable(&node.kind) {
             return Err(OpError::WrongKindForOp);
         }
@@ -2425,25 +2230,21 @@ impl Document {
 
     /// The effect stack (§5.3a).
     ///
-    /// **No `is_paintable` gate, and that is the point of the field.** Every
-    /// other `op_set_*` on paint guards a list the kind does not carry; effects
-    /// are carried by anything that *composites*, which is every kind but the
-    /// root — a group has no fill and a blur over one is still the ordinary
-    /// thing to want. The root is excluded because it is the document rather
-    /// than a layer in it, the same line `op_create` and `op_delete` draw.
+    /// **No `is_paintable` gate**: effects are carried by anything that
+    /// composites, which is every kind but the root (the document, not a layer —
+    /// the line `op_create` and `op_delete` draw). A blur over a group is ordinary.
     ///
-    /// The stack is written whole rather than per entry, so this is also the
-    /// reorder, the removal and the visibility toggle. See
-    /// [`Operation::SetEffects`].
+    /// The stack is written whole, so this is also the reorder, the removal and
+    /// the visibility toggle. See [`Operation::SetEffects`].
     fn op_set_effects(
         &mut self,
         id: NodeId,
         effects: &[Keyed<Effect>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // Invariant 8's third family (§15 D641, `[S10.1-L1-05]`). Checked before
-        // the node is looked up so the *reported* error is the interesting one,
-        // the same order `op_insert_subtree` uses.
+        // Invariant 8's third family (§15 D641). Checked before the node is looked
+        // up so the reported error is the interesting one, as in
+        // `op_insert_subtree`.
         if !effects.iter().all(|e| effect_is_finite(e)) {
             return Err(OpError::NonFinite);
         }
@@ -2461,35 +2262,22 @@ impl Document {
 
     /// The list of files this layer produces (§7).
     ///
-    /// **No kind gate.** Every other `op_set_*` that has one is guarding a field
-    /// the kind does not carry; this one is on the `Node`, and "can this be
-    /// exported" is answered by whether it has bounds rather than by what it is
-    /// — a group, a frame and a line are all perfectly ordinary subjects.
+    /// **No kind gate**: the field is on the `Node`, and "can this be exported"
+    /// is answered by whether it has bounds, not by what it is.
     ///
-    /// **The node is dirtied even though nothing drawn changes**, which is the
-    /// same call `op_set_pivot` makes and for a weaker reason: the canvas does
-    /// not read this at all. It is here so the layers panel can mark an
-    /// exportable layer without a second notification path, and it costs one
-    /// entry in a set on an edit nobody makes in a loop.
+    /// The node is dirtied though nothing drawn changes, so the layers panel can
+    /// mark an exportable layer without a second notification path.
     fn op_set_exports(
         &mut self,
         id: NodeId,
         exports: &[Keyed<ExportSpec>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // Invariant 8's export half (§15 D492, `[S8.2-L1-03]`). This was six lines
-        // with no bound on anything, and a `.ondin` carrying
-        // `"scale": {"Width": 0}` loaded and made `ondin export --all` write
-        // **`Button@0w.png` at 1 × 1**: exit 0, no warning, `clamped == false`. The
-        // filename asserts a 0-pixel width and the asset is junk a build script
-        // will happily copy. `Times(-2.0)` is the same shape — `factor` floors it
-        // to `1e-4` and the file is named `@-2x`.
-        //
-        // **Neither value can come from this app's own UI**, and that is the
-        // argument for putting the check here rather than shrugging: both other
-        // entry points already refuse exactly this set and say why. So the model
-        // was the only door without the guard, which is where a hand-edited file
-        // or another tool comes in.
+        // Invariant 8's export half (§15 D492): a zero width or a negative
+        // multiplier would export a junk file named for a size it does not have.
+        // The app's own UI and the parser already refuse these, so the model was
+        // the only door without the guard, where a hand-edited file or another
+        // tool comes in.
         if !exports.iter().all(|k| export_spec_is_usable(k)) {
             return Err(OpError::BadExportSpec);
         }
@@ -2501,12 +2289,10 @@ impl Document {
 
     /// Replace a layer's layout grids (`crate::layout`), returning the inverse.
     ///
-    /// **`op_set_exports`' twin**, down to the dirty mark: nothing drawn changes
-    /// — a grid is chrome over the frame — and the node is marked anyway so a
-    /// panel reading the tree sees the edit without a second notification path.
-    /// ⚠️ **No kind gate.** The list is inert on a layer the app does not offer
-    /// grids for, exactly as `exports` is inert on one nobody exports, and
-    /// refusing here would make the model's answer depend on which panel asked.
+    /// **`op_set_exports`' twin**, down to the dirty mark: a grid is chrome over
+    /// the frame, and the node is marked anyway so a panel sees the edit.
+    /// **No kind gate**: the list is inert on a layer the app offers no grids for,
+    /// and refusing would make the model's answer depend on which panel asked.
     fn op_set_grids(
         &mut self,
         id: NodeId,
@@ -2521,15 +2307,12 @@ impl Document {
 
     /// Replace a layer's insets (`crate::container`, §15 D871).
     ///
-    /// **Refused when any length is not finite**, [`OpError::NonFinite`] as
-    /// `SetTransform` refuses a non-finite matrix: an inset is a position, and a
-    /// `NaN` one would put the layer — and its world box, and the spatial index's
-    /// entry — nowhere.
+    /// **Refused when any length is not finite** ([`OpError::NonFinite`]): an
+    /// inset is a position, and a `NaN` one would put the layer nowhere.
     ///
-    /// ⚠️ **No kind or parent gate**, on `op_set_grids`' terms: the insets are
-    /// stored on any layer and the layout pass decides whether they place it. The
-    /// node is dirtied, and its subtree follows through `Resolved::update`'s
-    /// expansion, so a stretched frame's own children are re-placed too.
+    /// **No kind or parent gate**, on `op_set_grids`' terms: the layout pass
+    /// decides whether insets place a layer. The subtree follows the node through
+    /// `Resolved::update`'s expansion.
     fn op_set_insets(
         &mut self,
         id: NodeId,
@@ -2551,10 +2334,9 @@ impl Document {
     /// it carries a value CSS refuses — a grid track (§15 D914), a negative
     /// padding or gap (§15 D937) — that the node does not already hold; a history
     /// step putting back what the node held is not checked at all
-    /// ([`Self::apply_restoring`]). No
-    /// kind gate: stored on any layer and read on a frame or a group. The node is
-    /// dirtied; its subtree follows through `Resolved::update`'s expansion, which
-    /// is every child the layout moves.
+    /// ([`Self::apply_restoring`]). No kind gate: stored on any layer and read on
+    /// a frame or a group. The subtree follows the node through
+    /// `Resolved::update`'s expansion.
     fn op_set_display(
         &mut self,
         id: NodeId,
@@ -2624,18 +2406,17 @@ impl Document {
 
     // --- guides -----------------------------------------------------------
     //
-    // None of the five touch `dirty`. A guide is not drawn by the renderer at
-    // all — it is egui chrome over the canvas, like the selection box — so
-    // there is no cached bound or scene fragment for one to invalidate.
+    // None of these touch `dirty`: a guide is egui chrome over the canvas, not
+    // drawn by the renderer, so there is nothing cached to invalidate.
 
     fn op_add_guide(&mut self, guide: Guide) -> Result<Operation, OpError> {
         if self.guides.iter().any(|g| g.id == guide.id) {
             return Err(OpError::DuplicateGuide(guide.id));
         }
-        // All three writers of a guide's position, not just the one the finding
-        // named: this, `op_set_guide_position` and `op_set_guide_scope`. The
-        // loader refuses a non-finite one, so any door that does not is a file
-        // that saves and will not reopen.
+        // All three writers of a guide's position check it (this,
+        // `op_set_guide_position`, `op_set_guide_scope`): the loader refuses a
+        // non-finite one, so any door that does not saves a file that will not
+        // reopen.
         if !guide.position.is_finite() {
             return Err(OpError::NonFinite);
         }
@@ -2646,25 +2427,21 @@ impl Document {
 
     /// A guide may only be scoped to a frame that is in the document.
     ///
-    /// **The check is what makes op order inside a delete transaction
-    /// load-bearing.** `apply` inverts `[a, b]` to `[b⁻¹, a⁻¹}`, so a transaction
-    /// that deletes a frame *before* removing its guides would invert to
-    /// `[AddGuide, InsertSubtree]` — the guide restored while its owner is still
-    /// missing, which this refuses, taking the whole undo with it. Removing the
-    /// guides first makes the inverse put the frame back first.
-    /// [`crate::build::guides_of`] is where that order is established, and
-    /// `undoing_a_frame_delete_restores_its_guides` is what holds it.
+    /// **The check makes op order inside a delete transaction load-bearing.**
+    /// `apply` inverts `[a, b]` to `[b⁻¹, a⁻¹]`, so deleting a frame *before*
+    /// removing its guides would invert to `[AddGuide, InsertSubtree]`, which this
+    /// refuses and takes the whole undo with it. [`crate::build::guides_of`]
+    /// establishes the order, and `undoing_a_frame_delete_restores_its_guides`
+    /// holds it.
     fn check_guide_owner(&self, owner: Option<NodeId>) -> Result<(), OpError> {
         let Some(owner) = owner else { return Ok(()) };
         let node = self
             .nodes
             .get(&owner)
             .ok_or(OpError::BadGuideOwner(owner))?;
-        // A frame, not any container: the scope is a *box* to clip the line to
-        // and to measure the offset from, and a group has neither. The root is
-        // excluded for the same reason it is not a frame — a guide on the canvas
-        // is spelled `None`, which is the state this is distinguishing itself
-        // from.
+        // A frame, not any container: the scope is a box to clip the line to and
+        // measure the offset from, and a group has neither. A guide on the canvas
+        // is spelled `None`, so the root is excluded too.
         match node.kind() {
             NodeKind::Artboard { .. } => Ok(()),
             _ => Err(OpError::BadGuideOwner(owner)),
@@ -2687,12 +2464,9 @@ impl Document {
 
     // --- images -------------------------------------------------------------
     //
-    // Neither touches `dirty`, for the guides' reason turned around: a guide is
-    // not drawn by the renderer, and an image is drawn but changes nothing
-    // `Resolved` caches. Bounds come from the shape, not from the picture in it —
-    // an image fill cannot move an edge — so there is no transform or box to
-    // invalidate. What a new entry does change is what the scene walk *paints*,
-    // and the scene is walked afresh every frame.
+    // Neither touches `dirty`: an image is drawn but changes nothing `Resolved`
+    // caches, since bounds come from the shape and the scene is walked afresh
+    // every frame.
 
     fn op_add_image(&mut self, id: ImageId, entry: ImageEntry) -> Result<Operation, OpError> {
         if self.images.contains_key(&id) {
@@ -2714,11 +2488,8 @@ impl Document {
     }
 
     fn op_set_guide_position(&mut self, id: GuideId, position: f64) -> Result<Operation, OpError> {
-        // The loader has refused a non-finite guide position since it was
-        // written (`io::schema`); the operation that writes one checked nothing,
-        // so the asymmetry was a file that saves and will not reopen. §5.5 says
-        // the *owner* is enforced "on both `AddGuide` and `SetGuideScope` … and
-        // by the loader"; the position half was enforced by the loader alone.
+        // The loader refuses a non-finite guide position (`io::schema`), so the
+        // operation must too.
         if !position.is_finite() {
             return Err(OpError::NonFinite);
         }
@@ -2828,9 +2599,7 @@ impl Document {
     }
 
     /// Like the proportion lock, nothing already drawn depends on it: the pivot is
-    /// read by the *next* rotate or mirror and baked into the transform that
-    /// gesture produces. No bounds move, no paint changes, and the renderer has
-    /// never heard of it — only the node itself is dirtied, and only so the canvas
+    /// read by the next rotate or mirror. Only the node is dirtied, so the canvas
     /// redraws the marker.
     fn op_set_pivot(
         &mut self,
@@ -2838,8 +2607,7 @@ impl Document {
         pivot: Option<Pivot>,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        // Invariant 8, and the arm `[S2.2-L1-06]` found missing (§15 D639): a
-        // pivot is a coordinate, `serde_json` writes a non-finite one as `null`,
+        // Invariant 8 (§15 D639): `serde_json` writes a non-finite pivot as `null`
         // and the file will not load. See [`Pivot::is_finite`] for why the
         // producers' own extent floors are not this check.
         if pivot.is_some_and(|p| !p.is_finite()) {
@@ -2887,16 +2655,12 @@ impl Document {
     }
 
     /// **Refused on a kind that cannot be one**, unlike [`Self::op_set_clip`],
-    /// which lets the flag sit inert. The difference is what the flag does: an
-    /// inert `clip` is a switch nothing reads, while a mask that "cannot be one"
-    /// would still have to be *drawn* somehow — the walk has to decide whether
-    /// the layer paints — so a state with no answer must not get into the tree
-    /// in the first place.
+    /// whose flag sits inert: the walk has to decide whether a mask paints, so a
+    /// state with no answer must not get into the tree.
     ///
     /// Only `id` and its subtree are dirtied. Being masked is a fact about where
-    /// a sibling *sits*, so nothing is written to the layers above; what changes
-    /// for them is the parent's box, and `Resolved::update` already walks up from
-    /// here to recompute it.
+    /// a sibling sits; the parent's box is recomputed by `Resolved::update`'s
+    /// walk up from here.
     fn op_set_mask(
         &mut self,
         id: NodeId,
@@ -2922,11 +2686,9 @@ impl Document {
         Ok(Operation::SetMask { id, mask: old })
     }
 
-    /// **No kind gate and no mask gate.** The mode is inert on a layer that is
-    /// not a mask and is *kept* there on purpose — see [`Node::mask_mode`] — so
-    /// there is no invalid state for this to refuse. The subtree is dirtied like
-    /// `op_set_mask`'s, because switching between a clip and an alpha composite
-    /// changes how everything above the mask is drawn.
+    /// **No kind gate and no mask gate**: the mode is inert and kept on a layer
+    /// that is not a mask — see [`Node::mask_mode`]. The subtree is dirtied like
+    /// `op_set_mask`'s, since the mode changes how everything above is drawn.
     fn op_set_mask_mode(
         &mut self,
         id: NodeId,
@@ -2944,15 +2706,11 @@ impl Document {
 
     /// Set how `id`'s geometry decides its interior (§15 D239).
     ///
-    /// **The node alone, not the subtree**, which is where this parts company with
-    /// `op_set_mask_mode` above: a mask changes how everything above it composites,
-    /// while a fill rule changes only the shape it is on. A container's children are
-    /// unaffected — the rule is not inherited, because a group has no geometry for it
-    /// to mean anything about.
+    /// **The node alone, not the subtree**, unlike `op_set_mask_mode`: a fill rule
+    /// changes only the shape it is on and is not inherited.
     ///
-    /// Accepts any kind for the same reason `op_set_mask_mode` does: there is no
-    /// invalid state to refuse. On a kind with no outline it is inert and remembered,
-    /// exactly as `clip` is on a kind with no frame.
+    /// Accepts any kind, as `op_set_mask_mode` does: on a kind with no outline it
+    /// is inert and remembered, as `clip` is on a kind with no frame.
     fn op_set_fill_rule(
         &mut self,
         id: NodeId,
@@ -3047,14 +2805,11 @@ impl Document {
 pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
     let actor = ids.actor();
     // Guides are minted from the same stream (`crate::guide::GuideId`), so they
-    // have to be reserved past as well — otherwise a file whose highest id
-    // belongs to a guide hands the next `AddGuide` a duplicate.
+    // are reserved past as well.
     //
-    // Item ids too (§15 D980): they come from the same stream (`IdSource::mint_item`),
-    // and the positional ids a migration writes are actor 0 — improbable for a
-    // live session, not impossible, `session::random_actor` being an unguarded
-    // hash. A session that drew 0 would otherwise mint `0:1` onto a list already
-    // holding the migrated `0:1`.
+    // Item ids too (§15 D980), from the same stream (`IdSource::mint_item`): the
+    // positional ids a migration writes are actor 0, and `session::random_actor`
+    // is an unguarded hash, so a session could draw 0.
     let items = doc.nodes.values().flat_map(|n| {
         let p = &n.paint;
         p.fills
@@ -3064,8 +2819,7 @@ pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
             .chain(n.effects.iter().map(|k| k.id.0))
             .chain(n.exports.iter().map(|k| k.id.0))
             .chain(n.grids.iter().map(|k| k.id.0))
-            // The component properties' too — the sixth keyed list, minted from
-            // the same stream and missing here until `[R1-L2-02]`.
+            // The component properties' too — the sixth keyed list.
             .chain(n.props.iter().map(|k| k.id.0))
     });
     let highest = doc
@@ -3129,55 +2883,40 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             proportions_locked: n.proportions_locked,
             opacity: n.opacity,
             clip: n.clip,
-            // A copy of a mask is a mask. It lands beside its original in the
-            // same parent, so the duplicate starts a second run at the index it
-            // was inserted at — which is the rule doing exactly what it says
-            // rather than a case needing special handling.
+            // A copy of a mask is a mask; the duplicate starts a second run at the
+            // index it was inserted at.
             mask: n.mask,
             mask_mode: n.mask_mode,
             fill_rule: n.fill_rule,
             paint: n.paint.clone(),
             pivot: n.pivot,
-            // A copy exports the way its original did — duplicating an icon that
-            // is set up to write 1× and 2× PNGs and getting one that writes
-            // nothing would be the copy quietly dropping the part that made it
-            // worth duplicating. The two then name the same files, which is
-            // `plan`'s problem and is why nothing there overwrites silently.
+            // A copy exports the way its original did; the two then name the same
+            // files, which `plan` does not overwrite silently.
             exports: n.exports.clone(),
-            // Same reasoning one field up, and with none of its caveat: a copy
-            // keeps the shadow it was drawn with, and two layers carrying the
-            // same effect stack collide over nothing.
             effects: n.effects.clone(),
-            // And a copy of a frame is drawn against the same columns. The grid
-            // is measured against the *copy's* size, so a duplicate that is then
-            // resized re-flows its own tracks and does not inherit the original's
-            // (`crate::layout::tracks` takes the size and stores nothing).
+            // The grid is measured against the copy's size (`crate::layout::tracks`
+            // stores nothing), so a resized duplicate re-flows its own tracks.
             grids: n.grids.clone(),
-            // And pinned the same way. A copy placed somewhere else is re-pinned
-            // there by the `SetTransform` that places it, through
-            // `build::keep_insets`, so what carries over is *which* edges are
-            // pinned and in what unit.
+            // A copy placed elsewhere is re-pinned by the `SetTransform` that
+            // places it (`build::keep_insets`); what carries over is which edges
+            // are pinned and in what unit.
             insets: n.insets,
-            // A copy lays out its children the way the original does, and sits in
-            // a flex row the way it did.
             display: n.display.clone(),
             item: n.item,
-            // A copy of a main component is a main component, and a copy of a
-            // linked node keeps its link (§15 D978) — **remapped when it points
-            // inside this template**, so a copied main and a copied instance of it
-            // stay linked to each other rather than the copy pointing at the
-            // original main (§5.3d, D979's ruling (e)). Whether a copy of a main
-            // should *be* an instance instead is the verb's decision, not this
-            // function's.
+            // A copy of a main is a main, and a copy of a linked node keeps its
+            // link (§15 D978) — **remapped when it points inside this template**,
+            // so a copied main and a copied instance stay linked to each other
+            // (§5.3d). Whether a copy of a main should be an instance instead is
+            // the verb's decision.
             component: n.component,
             link: n.link.map(|l| map.get(&l).copied().unwrap_or(l)),
-            // A swap names a main, which a copy keeps naming, remapped only when
-            // the main came along — the link's rule (§15 D983).
+            // A swap is remapped only when the main came along — the link's rule
+            // (§15 D983).
             swap: n.swap.map(|s| map.get(&s).copied().unwrap_or(s)),
             // A copied set is a set and a copied variant keeps its values (§15
-            // D982); a property's bound layers are remapped with the ids, so a copy
-            // of a main drives its own layers — one bound outside the template is
-            // kept as it is, and `variant::settle` unbinds it where it lands.
+            // D982); a property's bound layers are remapped with the ids, and one
+            // bound outside the template is kept for `variant::settle` to unbind
+            // where it lands.
             set: n.set.clone(),
             variant: n.variant.clone(),
             props: n
@@ -3194,15 +2933,12 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                     })
                 })
                 .collect(),
-            // ⚠️ **Never carried, unlike every field above** (§15 D1012). A copy of
-            // a vendored node is a duplicate, an instance or a pasted layer — none
-            // of them lives in the vault, and `kit::check` refuses an origin
-            // outside it. The kit verbs mint their copies here too and write the
-            // origin afterwards, so this is the one place a copy can lose it.
+            // **Never carried** (§15 D1012): a copy of a vendored node does not live
+            // in the vault, and `kit::check` refuses an origin outside it. The kit
+            // verbs write the origin after minting their copies here.
             origin: None,
-            // A copy reads the variables its source reads, in the mode its source
-            // sets (§5.3f) — the bindings are ids into the document's table, not
-            // into the template, so nothing is remapped.
+            // Bindings are ids into the document's table, not the template, so
+            // nothing is remapped (§5.3f).
             mode: n.mode,
             corner_vars: n.corner_vars,
             spacing_vars: n.spacing_vars,
@@ -3210,8 +2946,6 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             size_vars: n.size_vars,
             text_vars: n.text_vars,
             opacity_var: n.opacity_var,
-            // And the styles its source's cards are bound to, the same way: ids
-            // into the document's table (§15 D1062).
             styles: n.styles,
         });
     }
@@ -3222,14 +2956,11 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
 /// mask (§15 D876, the maintainer's ruling).
 ///
 /// **An ancestor rule, which is why it is not [`crate::build::can_parent`]'s.**
-/// Once a frame may sit in a group (§15 D870), a group can carry one into a
-/// boolean operand or a mask at any depth — and neither can use it. A boolean's
-/// operands are outlines, and a frame is a clipping page whose box is not its
-/// outline; a mask's outline is its contents unioned, and a page inside that
-/// union would make every page it holds part of somebody else's clip. So the
-/// rule is about the whole chain above a frame, and every door into the tree
-/// asks it: `op_create_node`, `op_insert_subtree`, `op_reparent`, `op_set_mask`
-/// and the loader's `verify_integrity`.
+/// A frame may sit in a group (§15 D870), which can sit in a boolean or under a
+/// mask at any depth; a boolean's operands are outlines and a frame's box is not
+/// its outline, and a page inside a mask's union would clip other pages. Every
+/// door into the tree asks it: `op_create_node`, `op_insert_subtree`,
+/// `op_reparent`, `op_set_mask` and the loader's `verify_integrity`.
 pub(crate) fn bars_frames(node: &Node) -> bool {
     matches!(node.kind, NodeKind::Boolean { .. }) || node.mask
 }
@@ -3237,8 +2968,8 @@ pub(crate) fn bars_frames(node: &Node) -> bool {
 /// Enforce the Root/Artboard structural rules (§5.3): an Artboard hangs off the
 /// root, another Artboard or a group, and nothing may parent a second Root.
 ///
-/// ⚠️ **A parent rule only.** Whether a frame may sit under a boolean or a mask
-/// further up is [`bars_frames`]'s question, asked over the chain.
+/// A parent rule only: whether a frame may sit under a boolean or a mask further
+/// up is [`bars_frames`]'s question, asked over the chain.
 ///
 /// Shared with `io::schema` so a loaded file is held to exactly the same
 /// structural rules as one built through operations.
@@ -3261,19 +2992,8 @@ pub(crate) fn check_child_kind(
 /// Whether a paint op may target this kind — [`NodeKind::takes_paint`], and
 /// nothing else.
 ///
-/// ⚠️ **A second summary line used to sit above this one**, left behind by an
-/// earlier rewrite and describing the opposite of what the function does now:
-/// "Root/Group/Artboard are not (§5.3 — Artboard uses its own background)". Both
-/// halves of that had gone stale — a frame is paintable (§15 D400) and there is
-/// no background field to use — and rustdoc rendered it as the summary, so the
-/// item's own first line was never what a reader saw.
-///
-/// **It used to be a second copy of that list, and the two drifted the first time
-/// a kind was added** — which is what `takes_paint`'s own doc comment predicted
-/// would happen. Adding `Boolean` to one of them left `SetFills` rejecting the very
-/// transaction `build::boolean` emits, with `WrongKindForOp` and nothing to say
-/// where the disagreement was. One list now, so a new kind cannot be paintable to
-/// the panels and unpaintable to the op layer (§15).
+/// One list, so a new kind cannot be paintable to the panels and unpaintable to
+/// the op layer (§15 D400).
 fn is_paintable(kind: &NodeKind) -> bool {
     kind.takes_paint()
 }
@@ -3281,15 +3001,11 @@ fn is_paintable(kind: &NodeKind) -> bool {
 /// Whether an export spec carries values that can be a size and a quality
 /// (§15 D492).
 ///
-/// **Deliberately the same predicate `ExportScale::from_label` applies**, which is
-/// the parser the panel's own field goes through: `> 0` for a pixel count, finite
-/// and positive for a multiplier. Written here rather than reached for because
-/// `from_label` answers `Option<ExportScale>` from a *string* and this asks about a
-/// value that is already one — the same rule, two questions — and duplicating three
-/// comparisons is cheaper than a conversion that would have to invent a label.
+/// **Deliberately the same predicate `ExportScale::from_label` applies** (`> 0`
+/// for a pixel count, finite and positive for a multiplier); it is restated
+/// because `from_label` parses a string and this asks about a value.
 ///
-/// `quality` is `1..=100` because that is what its own doc says it is and what the
-/// JPEG encoder takes. `0` is not "worst quality", it is out of range.
+/// `quality` is `1..=100`, what the JPEG encoder takes; `0` is out of range.
 pub(crate) fn export_spec_is_usable(spec: &ExportSpec) -> bool {
     let scale = match spec.scale {
         crate::export::ExportScale::Times(n) => n.is_finite() && n > 0.0,
@@ -3305,11 +3021,9 @@ pub(crate) fn apply_geometry_patch(
     patch: &GeometryPatch,
 ) -> Result<GeometryPatch, OpError> {
     use GeometryPatch as G;
-    // ⚠️ **Before the fourteen `mem::replace` arms, not inside them.** Not one of
-    // those arms looked at the value it was writing, so `SetGeometry` was the
-    // widest door of the three onto the unopenable-document failure — and the
-    // widest because `svg_in`'s `numbers()` and `BezPath::from_svg` do not filter
-    // for finite the way `parse_len` does. See [`OpError::NonFinite`].
+    // Before the `mem::replace` arms, none of which looks at its value:
+    // `svg_in`'s `numbers()` and `BezPath::from_svg` do not filter for finite.
+    // See [`OpError::NonFinite`].
     if !patch.is_finite() {
         return Err(OpError::NonFinite);
     }
@@ -3375,11 +3089,10 @@ pub(crate) fn apply_geometry_patch(
 
 #[cfg(test)]
 mod tests {
-    //! `InsertSubtree` validation. These live in-crate because they build a
-    //! `Node` by struct literal — `pub(crate)` fields, no constructor — to
-    //! synthesize the malformed subtrees that the public API (capture + remap)
-    //! can never produce, which is exactly the shape an MCP write tool or an
-    //! importer could hand us.
+    //! `InsertSubtree` validation. In-crate because the tests build a `Node` by
+    //! struct literal (`pub(crate)` fields) to synthesize malformed subtrees that
+    //! capture + remap can never produce but an MCP write tool, an importer or a
+    //! paste could.
 
     use super::*;
     use kurbo::{Point, Size, Vec2};
@@ -3470,19 +3183,13 @@ mod tests {
         )
     }
 
-    /// **A frame may sit in a group, and never under a boolean or a mask — and the
-    /// check has to reach *inside* an inserted subtree, and *above* it** (§15
-    /// D870, D876). Every parent–child pair in the refused cases is legal on its
-    /// own (boolean → group, group → frame), so a pairwise check passes all three;
-    /// only the chain says no.
+    /// A frame may sit in a group, and never under a boolean or a mask, inside an
+    /// inserted subtree or above it (§15 D870, D876). Each parent–child pair in
+    /// the refused cases is legal alone, so only the chain says no.
     ///
-    /// It asserted the opposite half until D870: a group → frame subtree refused.
-    /// That case is now the control, and the first assertion.
-    ///
-    /// **Flip run**, the `barred` seed forced to `false` (the chain above the
-    /// subtree unasked): fails on the third assertion, the one whose barrier is
-    /// above the paste — the predicted site. With `bars_frames` not carried down
-    /// the walk instead, fails on the second.
+    /// flip: the `barred` seed forced to `false` → fails at "a mask above the
+    /// paste"; `bars_frames` not carried down the walk → fails at "a boolean
+    /// inside the paste".
     #[test]
     fn a_frame_in_an_inserted_subtree_is_refused_under_a_boolean_or_a_mask_only() {
         let (mut doc, _root, ab) = base();
@@ -3531,17 +3238,14 @@ mod tests {
         );
     }
 
-    /// **The other three doors hold the same rule** (§15 D876): creating a frame
-    /// under a mask, reparenting a group that holds a frame into a boolean, and
-    /// turning a group that holds a frame into a mask. The controls beside each —
-    /// the same frame created in a plain group, a frame-free group reparented into
-    /// the boolean — are what say the refusals are about the frame.
+    /// The other three doors hold the same rule (§15 D876): creating a frame under
+    /// a mask, reparenting a group that holds a frame into a boolean, and turning
+    /// such a group into a mask. The controls beside each say the refusals are
+    /// about the frame.
     ///
-    /// **Flip run**, all three doors' new checks disabled and then restored one at
-    /// a time, so each assertion is reached with only its own door open:
-    /// `op_create_node`'s fails on *"create under a mask"*, `op_reparent`'s on
-    /// *"reparent into a boolean"* and `op_set_mask`'s on *"mask a group with a
-    /// card in it"* — each at `Ok`, the predicted sites.
+    /// flip: each door's check disabled alone → fails at its own assertion
+    /// ("create under a mask", "reparent into a boolean", "mask a group with a
+    /// card in it").
     #[test]
     fn create_reparent_and_set_mask_refuse_a_frame_under_a_boolean_or_a_mask() {
         let (mut doc, _root, ab) = base();
@@ -3671,35 +3375,17 @@ mod tests {
         ));
     }
 
-    /// The pivot is a coordinate and this door checked the other two (§15 D639).
+    /// This door refuses a non-finite pivot as it does the other coordinates
+    /// (§15 D639); the value saves as `null` and kills the file on reload. The
+    /// route is a paste (`io::clip`, OS-clipboard text no operation guard has
+    /// seen), not only in-crate construction.
     ///
-    /// `[S2.2-L1-06]` names `SetPivot`, where the same value saves as `null` and
-    /// kills the file on reload. This is the second door it arrives by, and the
-    /// reason the arm is here rather than in `tests/io.rs` is the module doc
-    /// above: outside the crate a `Vec<Node>` can only come from
-    /// `capture_subtree`, i.e. from a document the operation guards have already
-    /// vetted.
+    /// Both variants, because `Normalized` holds a `Vec2` and `Local` a `Point`,
+    /// and a guard written against one misses the other.
     ///
-    /// 🚨 **This doc used to end *"so no external route reaches this check"*, and
-    /// §15 D639 carried the same sentence. `io::clip` is that route** (§15 D832)
-    /// — a paste is OS-clipboard text, which no operation guard has seen and
-    /// which any web page's *Copy* button can write. The guard is no longer
-    /// *"kept for the traffic the model cannot vouch for"*; it is load-bearing on
-    /// a route that exists, and the three arms beside it (paint, reachability,
-    /// depth) are there because the same premise had excused their absence.
-    ///
-    /// Both variants, because they are different types: `Normalized` holds a
-    /// `Vec2` and `Local` a `Point`, and a guard written against one compiles
-    /// happily while missing the other. That is why the predicate lives on
-    /// `Pivot` and not at the call site.
-    ///
-    /// Two flips, both run. Blinding the clause in `op_insert_subtree`'s field
-    /// loop fails at *"Normalized(Vec2 { x: 0.5, y: NaN }) was inserted"*, the
-    /// predicted site. And blinding only `Pivot::is_finite`'s `Local` arm —
-    /// the predicate somebody writes if they read the enum as one shape — leaves
-    /// that first assertion **green** and fails at *"Local((inf, 0.0)) was
-    /// inserted"*, which is what says the second half of this loop is carrying
-    /// its own weight rather than restating the first.
+    /// flip: the clause in `op_insert_subtree`'s field loop → fails at
+    /// "Normalized(…) was inserted"; only `Pivot::is_finite`'s `Local` arm →
+    /// fails at "Local(…) was inserted".
     #[test]
     fn insert_subtree_refuses_a_non_finite_pivot() {
         for bad in [
@@ -3719,15 +3405,11 @@ mod tests {
         }
     }
 
-    /// The pivot arm's twin for effects (§15 D641, `[S10.1-L1-05]`).
+    /// The pivot arm's twin for effects (§15 D641): an infinite blur radius makes
+    /// `effect::escaped` report no escape at all, before any file is written.
     ///
-    /// Same door, same reason it is in-crate, and the value is the one that does
-    /// damage before the file is ever written: an infinite blur radius makes
-    /// `effect::escaped` report **no** escape at all.
-    ///
-    /// Flip: the `|| !n.effects.iter().all(effect_is_finite)` clause removed.
-    /// Red here, and **green across the rest of the workspace** — which is what
-    /// says `op_set_effects`' own guard does not cover this door.
+    /// flip: the `effect_is_finite` clause in the field loop → fails at the
+    /// `NonFinite` assertion; `op_set_effects`' own guard does not cover this door.
     #[test]
     fn insert_subtree_refuses_a_non_finite_effect() {
         let (mut doc, _root, ab) = base();
@@ -3789,28 +3471,18 @@ mod tests {
         assert!(!doc.contains(h));
     }
 
-    /// The pivot arm's twin for **paint**, the fourth family (§15 D831).
+    /// The pivot arm's twin for **paint** (§15 D831): `op_set_fills` and
+    /// `op_set_strokes` ask `build::brush_is_finite` (§15 D451), and so must this
+    /// door, which a paste reaches.
     ///
-    /// `op_set_fills` and `op_set_strokes` have asked `build::brush_is_finite`
-    /// since §15 D451; this door never did, so the one field family the loader
-    /// writes as `null` could still arrive through it. Until `io::clip` that was
-    /// a guard against traffic nobody could produce; a paste is OS-clipboard
-    /// text, and any web page's *Copy* button can write it.
+    /// Five values, one per clause: a fill's colour, a stroke's brush, a stroke's
+    /// `width`, a dash length, and a gradient's `opacity` (finite for
+    /// `valid_opacity`, so refused only here, §15 D767). The stroke clauses are
+    /// why this arm restates `op_set_strokes`' predicate.
     ///
-    /// **Four values, because they are four different clauses**, and a guard
-    /// written by reading the word "colour" covers only the first: a fill's
-    /// solid colour, a stroke's brush, a stroke's `width`, and a dash length.
-    /// The stroke trio is why this arm restates `op_set_strokes`' predicate
-    /// rather than calling `brush_is_finite` alone — a stroke carries numbers a
-    /// fill has no equivalent of.
-    ///
-    /// Flips, all four run against the clause that catches them. Removing the
-    /// fills clause fails at *"fill was inserted"* and leaves the other three
-    /// green; removing the strokes clause fails at the remaining three. ⚠️ The
-    /// interesting one is `width`: deleting `s.width.is_finite()` alone leaves
-    /// *both* brush assertions green, which is what says the three stroke
-    /// sub-clauses are carrying their own weight rather than restating each
-    /// other.
+    /// flip: the fills clause → fails at "fill was inserted"; the strokes clause
+    /// → fails at the stroke cases; `s.width.is_finite()` alone → fails at
+    /// "stroke width was inserted" with both brush cases green.
     #[test]
     fn insert_subtree_refuses_non_finite_paint() {
         let bad = peniko::Color::new([f32::NAN, 0.0, 0.0, 1.0]);
@@ -3856,22 +3528,11 @@ mod tests {
                 },
             ),
             (
-                // 🚨 **The only one of the five a clipboard payload can actually
-                // carry**, and the reason it is here rather than left to the
-                // four above. `io::schema`'s own note says no JSON input can
-                // produce a non-finite `f64` — `serde_json` writes `NaN` as
-                // `null`, refuses `null` where an `f64` is wanted and refuses
-                // `1e999` outright — so every `NaN` case above dies at
-                // `from_str` one function before this door. A gradient's
-                // `opacity` is checked with `valid_opacity` and not
-                // `is_finite` (§15 D767), which makes `1e30` finite, writable,
-                // readable, and refused only here.
-                //
-                // ⚠️ **`1e30` and not the `1e39` the finding's headline used**:
-                // the field is an `f32`, whose maximum is ~`3.4e38`, so `1e39`
-                // is a compile error here and would arrive from JSON as `inf` —
-                // caught, but by the finiteness half rather than by the range
-                // half, which is the clause this case exists to pin.
+                // The only case a clipboard payload can actually carry: JSON cannot
+                // produce a non-finite `f64`, so the `NaN` cases above die at
+                // `from_str`. `1e30` is finite and readable and refused only here
+                // (§15 D767). Not `1e39`: the field is an `f32`, and `inf` would
+                // be caught by the finiteness half, not the range half pinned here.
                 "gradient opacity",
                 Paint {
                     fills: crate::keyed_by_position([Fill {
@@ -3910,29 +3571,16 @@ mod tests {
         }
     }
 
-    /// A cycle balances the count this door used to make (§15 D832).
+    /// A cycle balances the child count (§15 D832): `[R, A, B]` with `A` and `B`
+    /// each other's parent and child has a single root, claims each once, and
+    /// `2 + 1 == 3`, yet is reachable from nothing.
     ///
-    /// `[R, A, B]` with `A.parent = B`, `B.parent = A`, `A.children = [B]` and
-    /// `B.children = [A]`: `R` is the single root, the child loop claims `A` and
-    /// `B` exactly once each, and `claimed.len() + 1 == nodes.len()` — `2 + 1 ==
-    /// 3` — balanced. So the `A`/`B` component went in reachable from nothing,
-    /// committed, and saved a file that `io::load` refused with *"2 node(s) are
-    /// not reachable from the root"*. The arithmetic agreed with the walk on
-    /// every input except this one.
+    /// The fixture passes every other check in the function (single root, unique
+    /// ids, children listed once, consistent back-pointers, legal kinds), so
+    /// `MalformedSubtree` can only come from the reachability walk.
     ///
-    /// ⚠️ **The fixture is built to pass every other check in the function**,
-    /// which is the point: single root, unique ids, every child listed once,
-    /// every parent back-pointer consistent, every kind legal. Weaken any of
-    /// those and the test passes for the wrong reason — it would be measuring
-    /// `MalformedSubtree` arriving from a different arm.
-    ///
-    /// Flip: the walk replaced by the old `claimed.len() + 1 != nodes.len()`.
-    /// Red here at the predicted site, and — measured with `--no-fail-fast`
-    /// rather than assumed — **green across every other target in
-    /// `ondin-core`**: 459 lib tests, `build`, `bulk`, `io`, `ops`, `resolve`
-    /// and `spine` all pass while a cycle goes into the document. That is what
-    /// says nothing else was covering this, and it is the reason the arm is
-    /// here rather than left to the loader, which catches it one save too late.
+    /// flip: the walk replaced by `claimed.len() + 1 != nodes.len()` → fails at
+    /// "a cycle was inserted"; no other `ondin-core` target covers it.
     #[test]
     fn insert_subtree_refuses_a_cycle_that_balances_the_count() {
         let (mut doc, _root, ab) = base();
@@ -3952,26 +3600,15 @@ mod tests {
         }
     }
 
-    /// The depth bound §15 D416's own conditional asked for (§15 D832).
+    /// The depth bound on an inserted subtree (§15 D832): a 300-deep chain
+    /// arrives in one paste and would fail the loader's check (6) on reload.
     ///
-    /// D416 left this door unbounded on the argument that *"nothing nests
-    /// without a user click per level"*, and named the condition that would end
-    /// it: *"fix if a builder, an importer or the MCP write surface ever nests
-    /// without one"*. `io::clip` is that importer — a 300-deep chain arrives in
-    /// one paste — and the saved document then failed the loader's check (6)
-    /// forever, which is the shape where the user's in-memory session is the
-    /// only copy of their work.
+    /// The second case is the one a subtree-relative check gets wrong: two chains
+    /// each inside `MAX_TREE_DEPTH` compose to a document that is not, so the
+    /// bound reads the parent's depth.
     ///
-    /// 🚨 **The second case is the one a subtree-relative check gets wrong**, and
-    /// it is why the bound reads the parent's depth. Two chains, each
-    /// comfortably inside `MAX_TREE_DEPTH` on its own, compose to a document
-    /// that is not: the first goes in and the second is refused *because of
-    /// where it lands*. A guard measuring only the incoming subtree passes both
-    /// and writes the same unreloadable file.
-    ///
-    /// Flip: `parent_depth` pinned to `0`. The first two assertions stay green
-    /// and the third fails — the predicted site, and the reason the third case
-    /// is here at all.
+    /// flip: `parent_depth` pinned to `0` → fails at "two halves composed past
+    /// the bound".
     #[test]
     fn insert_subtree_refuses_a_subtree_that_would_nest_too_deep() {
         // A flat chain of `len` groups: the first is the subtree root.
@@ -3991,12 +3628,8 @@ mod tests {
         }
 
         let (mut doc, _root, ab) = base();
-        // ⚠️ A hex seed of `D` followed by digits alone is read by the D-number
-        // census as a dangling citation — its sieve is `D[0-9]{1,3}` with a word
-        // boundary, which a bare one satisfies and which the `…C`-suffixed seeds
-        // elsewhere in the tree do not. This one is a letter pair for that
-        // reason. (Naming the offending literal here would reintroduce it: the
-        // census greps source, and a comment is source.)
+        // The seed is a letter pair because the D-number census reads a bare
+        // hex `D` plus digits as a dangling citation.
         let mut ids = IdSource::new(0xDA);
         assert!(
             matches!(

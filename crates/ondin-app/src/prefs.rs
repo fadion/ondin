@@ -234,13 +234,19 @@ impl Prefs {
     /// Write them, ignoring failure. Called after each change rather than at
     /// shutdown, which the app cannot rely on.
     pub fn save(&self) {
+        self.save_located(path);
+    }
+
+    /// [`Self::save`] with the real location supplied by `locate`, so a test can
+    /// check the `ephemeral` guard against a temp path instead of the real file.
+    fn save_located(&self, locate: impl FnOnce() -> Option<PathBuf>) {
         // First, before anything touches the filesystem; a return rather than a
         // debug assertion because the damage of a headless write is silent and
         // permanent. See [`Prefs::ephemeral`].
         if self.ephemeral {
             return;
         }
-        let Some(path) = path() else { return };
+        let Some(path) = locate() else { return };
         self.save_to(&path);
     }
 
@@ -300,6 +306,38 @@ mod tests {
             !back.ephemeral,
             "and a loaded one always persists, whatever the file said"
         );
+    }
+
+    /// An ephemeral `save` writes nothing and never asks where the file lives;
+    /// an ordinary one writes.
+    /// flip: removing the `if self.ephemeral { return; }` from `save_located` →
+    /// fails at "an ephemeral save never asks where the file lives".
+    #[test]
+    fn an_ephemeral_save_writes_nothing() {
+        let dir = std::env::temp_dir().join(format!("ondin-prefs-eph-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("prefs.json");
+
+        let asked = std::cell::Cell::new(false);
+        let headless = Prefs {
+            ephemeral: true,
+            ..Default::default()
+        };
+        headless.save_located(|| {
+            asked.set(true);
+            Some(path.clone())
+        });
+        assert!(
+            !asked.get(),
+            "an ephemeral save never asks where the file lives"
+        );
+        assert!(!path.exists(), "and writes nothing");
+
+        // Control: the same call without the flag writes, so the closure is the
+        // path a real save takes.
+        Prefs::default().save_located(|| Some(path.clone()));
+        assert!(path.exists(), "an ordinary save writes the file");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A `prefs.json` that does not parse is not replaced by the defaults it

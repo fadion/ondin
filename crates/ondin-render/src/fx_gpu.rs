@@ -1,27 +1,16 @@
 //! The GPU effect passes (§6.4) — `crate::effects` as compute shaders.
 //!
-//! **The CPU module is the specification and this is the port, not the other way
-//! round.** Every dispatch here has a named counterpart in `effects.rs`, in the
-//! same order, over the same premultiplied 8-bit values; where the two could
-//! differ they are made to agree deliberately (see the quantisation note below)
-//! rather than left to whichever rounding the driver happens to do. What keeps
-//! that honest is `tests/fx_gpu.rs`, which runs both over the same input and
-//! compares the bytes.
+//! The CPU module is the specification and this is the port: every dispatch has a
+//! named counterpart in `effects.rs`, in the same order, over the same
+//! premultiplied 8-bit values. `tests/fx_gpu.rs` runs both over the same input
+//! and compares the bytes.
 //!
-//! **Straight alpha at the two ends, premultiplied in the middle.** This is the
-//! one place the two backends genuinely differ at the seam and it is worth
-//! stating rather than discovering: `vello_cpu`'s `Pixmap` is *premultiplied*, so
-//! the CPU backend hands its buffer to `effects::run` untouched — while
-//! **vello's GPU output is straight**, measured on-device rather than assumed
-//! (a 50%-alpha white fill reads back `255,255,255,128`, not `128,…`). Its image
-//! atlas takes straight alpha too (`Renderer::register_texture`: *"the texture is
-//! assumed to have unpremultiplied alpha"*, and vello 0.9 carries a `TODO` for
-//! the premultiplied variant it does not yet support). So the stack is bracketed
-//! by `premul`/`unpremul`, and everything between them matches the reference.
-//!
-//! The round trip through straight 8-bit costs at most one level per channel on
-//! a partly transparent pixel, which is why the on-device comparison allows one
-//! and asserts on the *shape* of the difference rather than only its size.
+//! Straight alpha at the two ends, premultiplied in the middle: `vello_cpu`'s
+//! `Pixmap` is premultiplied, so the CPU backend hands its buffer to
+//! `effects::run` untouched, while vello's GPU output and image atlas are straight
+//! alpha. The stack is bracketed by `premul`/`unpremul`. That round trip costs at
+//! most one level per channel on a partly transparent pixel, which the on-device
+//! comparison allows.
 
 use crate::effects;
 use ondin_core::effect::{Effect, EffectKind};
@@ -32,13 +21,10 @@ const TILE: u32 = 8;
 
 /// Bytes of the `Params` uniform — see the struct at the top of `fx.wgsl`.
 ///
-/// Written out by hand rather than through `bytemuck`, which this crate does not
-/// depend on: the layout is a contract with a shader in another language, and
-/// spelling the offsets here is the only place the two can be read against each
-/// other.
-///
-/// 160 since §15 D1003 (7): `dst_origin` and `k_off` were appended, which took the
-/// struct past 144 and onto WGSL's next 16-byte boundary.
+/// Written out by hand (this crate has no `bytemuck`): the layout is a contract
+/// with a shader in another language, and the offsets spelled in `Params::bytes`
+/// are where the two are read against each other. 160 is the struct's size
+/// rounded to WGSL's 16-byte boundary.
 const PARAMS_BYTES: usize = 160;
 
 /// Which pass a dispatch runs. One per entry point in `fx.wgsl`.
@@ -95,8 +81,8 @@ impl Pass {
 
 /// Everything a dispatch needs beyond its two source textures.
 ///
-/// Defaulted and then overridden field by field at each call site, so a pass that
-/// does not care about the offset cannot accidentally depend on a stale one.
+/// Defaulted and overridden field by field at each call site, so a pass cannot
+/// depend on a field it does not set.
 #[derive(Clone, Copy, Default)]
 struct Params {
     off: (i32, i32),
@@ -162,8 +148,7 @@ impl Params {
 
 /// The compute pipelines, built once per device.
 ///
-/// Held by [`crate::VelloGpuRenderer`] rather than rebuilt per frame: shader
-/// compilation is the expensive part and there is exactly one device.
+/// Held by [`crate::VelloGpuRenderer`]: shader compilation is the expensive part.
 pub struct FxPipelines {
     layout: wgpu::BindGroupLayout,
     pipelines: Vec<(Pass, wgpu::ComputePipeline)>,
@@ -175,11 +160,9 @@ impl FxPipelines {
             label: Some("ondin-fx"),
             source: wgpu::ShaderSource::Wgsl(include_str!("fx.wgsl").into()),
         });
-        // **One layout for every pass**, with the unused bindings filled in by the
-        // caller rather than a layout per shape. Ten pipelines that differ only in
-        // entry point are ten places a binding index could drift; one layout means
-        // a wrong index is a validation error on the first dispatch instead of a
-        // wrong picture on one pass.
+        // One layout for every pass, unused bindings filled in by the caller: a
+        // wrong index is then a validation error on the first dispatch rather
+        // than a wrong picture on one pass.
         let entry = |binding: u32, ty: wgpu::BindingType| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -204,9 +187,8 @@ impl FxPipelines {
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                 ),
-                // **A dynamic offset**, so one bind group serves every dispatch
-                // over the same three textures and each names its own `Params`
-                // in the batch's one uniform buffer (§15 D1003 (7)).
+                // A dynamic offset, so one bind group serves every dispatch over
+                // the same three textures, each naming its own `Params`.
                 entry(
                     3,
                     wgpu::BindingType::Buffer {
@@ -286,9 +268,8 @@ pub fn fx_texture(device: &Device, w: u32, h: u32, label: &str) -> Texture {
 
 /// Where one effect layer sits inside the texture it is read from.
 ///
-/// A pair rather than two arguments because it is one fact — sibling layers share
-/// a packed texture and one vello pass (§15 D344), so "which rectangle is mine"
-/// travels as a unit. A layer rendered on its own passes `at: (0, 0)` and the
+/// Sibling layers share a packed texture and one vello pass, so "which rectangle
+/// is mine" travels as a unit. A layer rendered alone passes `at: (0, 0)` and the
 /// texture's own size.
 #[derive(Clone, Copy, Debug)]
 pub struct Slice {
@@ -311,12 +292,9 @@ const KEEP_FRAMES: u64 = 8;
 /// next of 16, 24, 32, 48, 64, 96 … — a power of two or one and a half times
 /// one — capped at the device's `limit` but never below `n`.
 ///
-/// **Two steps per octave rather than one**, because a pooled texture is held
-/// across frames and the rounding is paid in memory for as long as it is: a
-/// power of two alone rounds a side up by as much as 2× (1025 → 2048), 4× in
-/// area, and this by at most about 1.5× (1025 → 1536), 2.25× in area. A layer's
-/// size moves by a pixel or two as the view pans, which is why there are classes
-/// at all — an exact-size pool would miss on nearly every frame of a pan.
+/// Two steps per octave rather than one, because the rounding is held in memory
+/// across frames: a power of two alone wastes up to 4× in area, this up to 2.25×.
+/// Classes exist because a layer's size moves by a pixel or two as the view pans.
 pub fn size_class(n: u32, limit: u32) -> u32 {
     let n = n.max(MIN_CLASS);
     let pow = n.next_power_of_two();
@@ -328,11 +306,10 @@ pub fn size_class(n: u32, limit: u32) -> u32 {
 /// A texture taken from an [`FxPool`] — the handle, its whole-texture view, and
 /// the identity the pool caches bind groups under.
 ///
-/// **At least the size asked for, and usually larger** ([`size_class`]). Every
-/// pass bounds itself by `Params::size` rather than by the texture's dimensions,
-/// and vello's fine stage stops at `RenderParams::width`/`height`, so the margin
-/// is never read — and it holds whatever the texture's last user left there,
-/// which is why nothing may read it.
+/// At least the size asked for, and usually larger ([`size_class`]). Every pass
+/// bounds itself by `Params::size` and vello's fine stage stops at
+/// `RenderParams::width`/`height`; the margin holds whatever the last user left,
+/// so nothing may read it.
 #[derive(Clone)]
 pub struct Pooled {
     id: u64,
@@ -358,7 +335,7 @@ impl Slot {
     }
 }
 
-/// What the effect passes did in one frame — the counts `[X7-L4-01]` is about.
+/// What the effect passes did in one frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FxStats {
     /// Textures the pool had to allocate because no idle one of the class was
@@ -376,62 +353,36 @@ pub struct FxStats {
     pub pooled_bytes: u64,
 }
 
-/// The effect passes' textures and buffers, **kept across layers and frames**
-/// (§15 D1003 (7), `[X7-L4-01]`).
+/// The effect passes' textures and buffers, kept across layers and frames so a
+/// steady frame allocates nothing.
 ///
-/// 🚨 **Until 2026-10-07 every on-screen effect layer allocated five scratch
-/// textures, a result texture, two buffers and a bind group per dispatch, and
-/// submitted its own encoder, on every frame** — about 0.11 ms of host time per
-/// layer, linear in the count, so a component page of a few hundred shadowed cards
-/// drew at 12–24 fps with the GPU nearly idle. §15 D339 had called the
-/// allocation *"not worth pooling yet"* on single-layer figures taken before
-/// sibling batching; the release review measured the premise drifting and the
-/// maintainer overturned it. It was also the leading suspect for §15 D992's lost
-/// device: with frames in flight unpolled, the fresh textures of every frame
-/// reached 5.7 GB allocated.
+/// It holds:
 ///
-/// **What it holds:**
+/// - **Textures, keyed by size class** ([`size_class`]): a pass's packed source,
+///   its packed result and the five scratch slots. Taken with [`Self::take`];
+///   given back mid-frame with [`Self::release`] once nothing later in the frame
+///   reads it, or all at once by [`Self::end_frame`].
+/// - **One uniform buffer and one kernel buffer**, grown and never shrunk; a
+///   dispatch names its `Params` by dynamic offset and its kernel by
+///   `Params::k_off`.
+/// - **Bind groups, keyed by the three textures they bind**; with the buffers
+///   shared, a bind group is a function of its textures alone.
 ///
-/// - **Textures, keyed by size class** ([`size_class`]) — every texture the GPU
-///   effect path uses: a pass's packed source, its packed result, and the five
-///   scratch slots. Taken with [`Self::take`]; given back either mid-frame with
-///   [`Self::release`], once nothing *later in the frame* will read it, or all at
-///   once by [`Self::end_frame`].
-/// - **One uniform buffer and one kernel buffer**, grown and never shrunk, which
-///   a batch's `Params` and blur kernels are written into with one
-///   `queue.write_buffer` each; a dispatch names its `Params` by dynamic offset
-///   and its kernel by `Params::k_off`.
-/// - **Bind groups, keyed by the three textures they bind.** With the two
-///   buffers shared, a bind group is a function of its textures alone, and those
-///   persist — so a steady frame makes none.
+/// **Lifetimes.** A result is read by vello's atlas copy in the consuming pass,
+/// and `render` unregisters every slot after the page's render is submitted, so a
+/// result is held to the end of the frame and given back by [`Self::end_frame`]
+/// after that. A packed source and the scratch are read only by their own batch's
+/// submit, so they go back as soon as it is made. Reuse is then safe by queue
+/// order: every later write is in a later submission on the one queue. No fence,
+/// no `poll`.
 ///
-/// **Why a texture can be reused at all, and the one lifetime that matters.** A
-/// result is read by vello's atlas copy in the *consuming* pass — the page's
-/// render, or a level-above effect pass — through the `override_image` slot
-/// `VelloGpuRenderer::resolve_effects` points at it, and `render` unregisters every
-/// slot after the page's render is submitted (§15 D344, D404). So a result is
-/// held to the end of the frame and given back by [`Self::end_frame`], which
-/// `render` calls after the unregistering. A packed source and the scratch are
-/// read only by their own batch's submit, so they go back as soon as it is
-/// submitted. Reuse after that is safe by **queue order**: every later write is in
-/// a later submission on the one queue, which wgpu orders after the reads before
-/// it. No fence, and no `poll`.
-///
-/// **How it is bounded.** [`Self::end_frame`] drops any idle texture not taken
-/// for [`KEEP_FRAMES`] frames, and then, oldest first, enough idle textures that
-/// the pool holds no more than the largest **working set** of the last
-/// [`KEEP_FRAMES`] frames — the bytes of the distinct textures one frame took.
-/// That is memory the frame needed anyway: without the pool it allocated at least
-/// as much, fresh, every frame. A pan through sizes that keep changing class
-/// therefore costs reallocation, never accumulation, and an app that has stopped
-/// drawing holds at most one recent frame's worth.
-///
-/// ⚠️ **The working set, not the most bytes taken at one moment.** The first cut
-/// bounded the pool by the latter, and a steady frame then allocated **one
-/// texture every frame**: a packed source given back mid-frame and not retaken
-/// (the next pass's source was another class) made the frame's distinct textures
-/// outnumber its peak, so the trim dropped one the next frame needed again.
-/// `a_steady_frame_makes_nothing_and_submits_once_per_pass` caught it.
+/// **Bound.** [`Self::end_frame`] drops any idle texture not taken for
+/// [`KEEP_FRAMES`] frames, then, oldest first, enough idle textures that the pool
+/// holds no more than the largest working set of the last [`KEEP_FRAMES`] frames
+/// (the bytes of the distinct textures one frame took). The bound must be the
+/// working set, not the peak bytes taken at one moment: a packed source released
+/// mid-frame and not retaken makes the distinct textures outnumber the peak, and
+/// the trim then drops one the next frame needs, allocating every frame.
 #[derive(Default)]
 pub struct FxPool {
     idle: Vec<Slot>,
@@ -463,12 +414,10 @@ impl FxPool {
     pub fn take(&mut self, device: &Device, w: u32, h: u32) -> Pooled {
         let limit = device.limits().max_texture_dimension_2d;
         let class = (size_class(w, limit), size_class(h, limit));
-        // **The oldest idle texture of the class, not the first found.** The
-        // bind groups are cached by which textures they bind, so a steady frame
-        // makes none only if its takes land on the same textures as the frame
-        // before — and `swap_remove` reorders `idle`, so "first found" put scratch
-        // slot `A` on a different texture every frame and made 14 bind groups a
-        // frame for a cache that never hit.
+        // The oldest idle texture of the class, not the first found: bind groups
+        // are cached by texture, and `swap_remove` reorders `idle`, so "first
+        // found" moves each scratch slot to a different texture every frame and
+        // the cache never hits.
         let found = self
             .idle
             .iter()
@@ -679,13 +628,10 @@ pub struct Item<'a> {
 
 /// Slots in the scratch, named so the sequence below reads as the reference does.
 ///
-/// Five rather than one per step: `a`/`b` carry the layer through the appearance
-/// passes and then serve as the shadow's scratch, `graphic` holds the layer as the
-/// shadows see it, and `o0`/`o1` accumulate the result. At a viewport-sized layer
-/// that is five times 8 MB, which is why they are taken only for a batch with ink
-/// to filter (`effects::any_ink`) — and since §15 D1003 (7) **once per batch, not
-/// per layer**: the layers of a batch run one after another through the same five,
-/// taken at the batch's largest size.
+/// `a`/`b` carry the layer through the appearance passes and then serve as the
+/// shadow's scratch, `graphic` holds the layer as the shadows see it, and
+/// `o0`/`o1` accumulate the result. They are taken only for a batch with ink
+/// (`effects::any_ink`), once per batch at its largest size.
 const A: usize = 0;
 const B: usize = 1;
 const GRAPHIC: usize = 2;
@@ -705,12 +651,9 @@ const SCRATCH: usize = 5;
 /// directly rather than paying for a copy that changes nothing. The result sits
 /// at the top-left of a texture **at least** `slice.size` ([`size_class`]).
 ///
-/// **A one-off: [`run_batch`] over a pool of its own, dropped on return.** The
-/// canvas does not call this — `VelloGpuRenderer::resolve_effects` runs a whole
-/// pass's layers through [`run_batch`] against the renderer's [`FxPool`] (§15
-/// D1003 (7)). It stays for `tests/fx_gpu.rs`, which compares one stack's bytes
-/// against the CPU reference and so exercises exactly the dispatch sequence the
-/// canvas runs.
+/// A one-off: [`run_batch`] over a pool of its own, dropped on return. The canvas
+/// goes through `VelloGpuRenderer::resolve_effects` instead; this is for
+/// `tests/fx_gpu.rs`, which compares one stack's bytes against the CPU reference.
 pub fn run(
     device: &Device,
     queue: &Queue,
@@ -736,24 +679,18 @@ pub fn run(
     Some(dst.texture)
 }
 
-/// Filter every layer of one packed batch from `src` into `dst`, through **one
-/// encoder and one submit** (§15 D1003 (7), `[X7-L4-01]`).
+/// Filter every layer of one packed batch from `src` into `dst`, through one
+/// encoder and one submit.
 ///
 /// A layer with ink runs its stack through the batch's five scratch slots, taken
-/// from `pool` at the batch's largest layer size and given back once the submit
-/// is made; its last pass writes straight into its rectangle of `dst`. A layer
-/// whose stack has nothing to draw — all hidden or neutral, which the walk should
-/// not have opened a layer for — is copied across unchanged.
+/// from `pool` at the batch's largest layer size and given back after the submit;
+/// its last pass writes into its rectangle of `dst`. A layer with nothing to draw
+/// is copied across unchanged.
 ///
-/// **Planned, then encoded.** The dispatches are worked out first, on the host,
-/// so the batch's `Params` and kernels can be written into the pool's two shared
-/// buffers with one `queue.write_buffer` each before anything is encoded; a
-/// dispatch then names its own by dynamic offset and `Params::k_off`.
-///
-/// **One compute pass for the whole batch.** In WebGPU a compute pass's usage
-/// scope is per *dispatch*, so a texture written by one and read by the next is
-/// legal and ordered — which is what lets a ping-pong sequence run without a pass
-/// boundary between every step, and the next layer reuse the same slots after it.
+/// The dispatches are planned first so the batch's `Params` and kernels go into
+/// the pool's two shared buffers with one `queue.write_buffer` each. One compute
+/// pass serves the whole batch: a compute pass's usage scope is per dispatch, so
+/// a texture written by one dispatch and read by the next is legal and ordered.
 pub fn run_batch(
     device: &Device,
     queue: &Queue,
@@ -961,11 +898,9 @@ impl Runner<'_> {
                 (sh.offset.x * scale.0).round() as i32,
                 (sh.offset.y * scale.1).round() as i32,
             );
-            // **`inner` does not reach this pass** (§15 D742, `[S10.2-L1-01]`):
-            // the silhouette is the graphic's alpha for both kinds of shadow and
-            // the complement happens at `Pass::Tint`, so every pass between the
-            // two reads outside the buffer as transparent and means the same
-            // thing by it. `effects::shadow_layer` carries the argument.
+            // `inner` does not reach this pass: the silhouette is the graphic's
+            // alpha for both kinds and the complement happens at `Pass::Tint`, so
+            // every pass between reads outside the buffer as transparent.
             run.slot(
                 Pass::Silhouette,
                 GRAPHIC,
@@ -979,30 +914,15 @@ impl Runner<'_> {
             let mut s = A;
             let mut s_alt = B;
             if sh.spread != 0.0 {
-                // **One radius per axis**, which is `effects::spread_alpha`'s pair
-                // and the same argument as `device_sigma`'s two deviations: this
-                // was `scale.0.max(scale.1)` on both passes, so a spread on a
-                // non-uniformly scaled layer came out scale-ratio times too thick
-                // on the short axis and outside the box `EffectKind::escape` had
-                // allocated for it (§15 D601, `[S10.2-L1-05]`). Both backends did
-                // it, which is why `tests/fx_gpu.rs` — every fixture of which is
-                // at `SCALE = (1.0, 1.0)` — agreed and stayed green.
+                // One radius per axis, as `effects::spread_alpha` takes it, so a
+                // non-uniformly scaled layer stays inside its escape box.
                 let r = (sh.spread * scale.0, sh.spread * scale.1);
-                // **Bounded by the buffer, through the CPU backend's own helper**
-                // (§15 D615, `[S10.2-L4-04]`). `n` is device pixels and the only
-                // cap on the authored number is in document units, so the zoom
-                // multiplied it without limit: 1 092.7 ms for one shadow at
-                // `spread: 10_000` and zoom 256, measured on a real adapter. The
-                // cap is lossless — this shader reads outside the buffer as empty
-                // too, so a window that already covers the line cannot find
-                // anything by growing.
-                //
-                // ⚠️ **`effects::spread_steps` and not a second copy of the
-                // arithmetic**, which is the mistake §15 D601 records at this very
-                // pair of sites: both backends computed the radius from
-                // `scale.0.max(scale.1)`, both were wrong the same way, and every
-                // fixture in `tests/fx_gpu.rs` is at `SCALE = (1.0, 1.0)` so the
-                // comparison harness agreed with itself and stayed green.
+                // Bounded by the buffer through `effects::spread_steps`, the CPU
+                // backend's own helper: the zoom multiplies the authored spread
+                // without limit, and the cap is lossless because the shader
+                // reads outside the buffer as empty. Keep one copy of the
+                // arithmetic; `tests/fx_gpu.rs` runs at scale 1 and would not
+                // catch a divergent one.
                 let n = effects::spread_steps(r, w as usize, h as usize);
                 if n.0 > 0 || n.1 > 0 {
                     // `(r > 0) != inner`: a positive spread grows a drop shadow
@@ -1032,9 +952,8 @@ impl Runner<'_> {
             }
             if sh.blur > 0.0 {
                 let (sx, sy) = effects::device_sigma(sh.blur, scale.0, scale.1);
-                // The same choice `effects::shadow_layer` makes, from the same
-                // function, so the two backends resample on the same grid or not
-                // at all (§15 D403).
+                // The same choice `effects::shadow_layer` makes, so the backends
+                // resample on the same grid or not at all.
                 let k = ondin_core::effect::shadow_downscale(sx.max(sy) as f64);
                 if k > 1 {
                     run.blur_coarse(&mut s, &mut s_alt, sx / k as f32, sy / k as f32, k);
@@ -1099,10 +1018,9 @@ impl Runner<'_> {
         self.slot_in(pass, a, b, dst, p, dom);
     }
 
-    /// [`Self::slot`] over a **smaller grid than the buffer** — the coarse region
-    /// a resampled shadow is blurred in, which lives in the scratch texture's
-    /// top-left corner. Everything outside `dom` is left as it was, and nothing
-    /// reads it.
+    /// [`Self::slot`] over a smaller grid than the buffer — the coarse region of a
+    /// resampled shadow, in the scratch texture's top-left corner. Nothing reads
+    /// outside `dom`.
     fn slot_in(&mut self, pass: Pass, a: usize, b: usize, dst: usize, p: Params, dom: (u32, u32)) {
         self.step(
             pass,
@@ -1135,10 +1053,8 @@ impl Runner<'_> {
     /// `effects::blur_coarse`: box-average the silhouette into `k`×`k` blocks,
     /// blur *that* at the coarse deviations, and read it back bilinearly.
     ///
-    /// The three dispatches are the reference's three steps in the same order and
-    /// over the same numbers; what is different is only that the coarse grid lives
-    /// in the corner of a full-size scratch texture rather than in a buffer of its
-    /// own, which keeps every slot here one size (§15 D403).
+    /// The three dispatches are the reference's three steps; the coarse grid lives
+    /// in the corner of a full-size scratch texture, which keeps every slot one size.
     fn blur_coarse(
         &mut self,
         cur: &mut usize,
@@ -1155,13 +1071,8 @@ impl Runner<'_> {
             *cur,
             *cur,
             *alt,
-            // ⚠️ **`k as i32` is safe because `shadow_downscale` caps at
-            // `MAX_SHADOW_BLOCK`** (§15 D454). It was not: above `i32::MAX`
-            // (σ ≈ 5.2e10) this wrapped **negative**, `fx.wgsl`'s `coarsen` ran
-            // neither of its loops, and the store was `acc / f32(radius * radius)`
-            // — so the GPU drew **no shadow at all** where the CPU drew a wrong
-            // one. `[S10.2-L1-03]`, and the one arm of it that is silent rather
-            // than slow.
+            // `k as i32` is safe only because `shadow_downscale` caps at
+            // `MAX_SHADOW_BLOCK`; a wrapped negative radius draws no shadow.
             Params {
                 radius: k as i32,
                 src_size: (fw, fh),
@@ -1199,9 +1110,8 @@ impl Runner<'_> {
             if sigma <= 0.0 {
                 continue;
             }
-            // The host builds the kernel, from the same function the CPU
-            // convolves with — so the weights are identical numbers rather than
-            // two implementations of the same formula.
+            // The kernel comes from the function the CPU convolves with, so the
+            // weights are identical numbers.
             let k = effects::kernel(sigma);
             let radius = ((k.len() - 1) / 2) as i32;
             let k_off = self.plan.kernels.len() as u32;
@@ -1229,18 +1139,10 @@ mod tests {
     use super::size_class;
 
     /// The pool's size classes: two per octave, never below the request, and never
-    /// past the device limit unless the request itself is (§15 D1003 (7)).
+    /// past the device limit unless the request itself is.
     ///
-    /// The cases are the ones the canvas meets: a card's buffer (70 → 96), a
-    /// 1080-pixel side (→ 1536, not 2048, which is the half-octave step paying
-    /// for itself — a power-of-two class would hold a third more memory there),
-    /// a 1920 side (→ 2048), and the floor. **Flip-checked**: `class` taken as
-    /// `pow` alone (powers of two only) fails at the first half-octave case, 17
-    /// (32 against 24) — the prediction named 70, which the loop never reaches.
-    /// Dropping the `.max(n)` leaves every case of the loop green, because
-    /// `pack` keeps every request inside the limit (§15 D744) and the floor can
-    /// only bite on a request past it; it fails at the last assertion (6000 for
-    /// a request of 7000), which is the one that pins it.
+    /// flip: `class` as `pow` alone → fails at 17 (32 against 24). Dropping the
+    /// `.max(n)` → fails only at the last assertion (6000 for 7000).
     #[test]
     fn a_size_class_is_two_steps_per_octave_and_never_smaller_than_asked() {
         let limit = 8192;

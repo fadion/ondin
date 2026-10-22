@@ -30,15 +30,22 @@ code before picking an item up — an item's premise can go stale while its ask 
 
 ## Later · Code export (HTML/CSS, React, Vue)
 
-Designed in §15 D1098. Plain HTML/CSS and `ondin export --html` are built (`export.md`, *Code
-export*).
+Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
+(`export.md`, *Code export*).
 
 - **The GUI door** — Exports panel if per-framework options fit, else a menu; no new context-menu
   rows.
-- **React and Vue emitters, with components** (D1098 (1), (2), (9)).
+- **The components still written out as layers** (D1098 (9)):
+  - a component set as one component with union props: trees merged by name path with
+    conditional classes, else a switch;
+  - swap properties as child props;
+  - nested (*shown from nested*) properties;
+  - kit components, under a folder named for the kit;
+  - instances whose root sets a mode.
 - **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
-  has not run on CI's Linux and macOS legs; unverified until it does.
+  has not run on CI's Linux and macOS legs; unverified until it does. It covers only the HTML
+  output; React and Vue have no browser test (no bundler in the test run).
 - **Text styles as classes** — revisit once real exports exist (D1098 (7)).
 - **A per-layer HTML tag field** — parked, new model (D1098 (3)).
 

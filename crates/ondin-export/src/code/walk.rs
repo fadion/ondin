@@ -8,7 +8,7 @@
 
 use super::Report;
 use super::css::{self, px};
-use super::dom::{Child, Classes, Element};
+use super::dom::{Arg, Child, Classes, Element, Instance};
 use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
@@ -20,10 +20,13 @@ use ondin_core::effect::{EFFECT_BLUR, EFFECT_X, EFFECT_Y};
 use ondin_core::kurbo::{Affine, Rect, Size};
 use ondin_core::peniko::ImageQuality;
 use ondin_core::variable::VarId;
+use ondin_core::variant::{self, PropKind, PropValue};
 use ondin_core::{
-    Brush, BrushSource, Document, EffectKind, Fill, Node, NodeId, NodeKind, Resolved, Stroke,
-    StrokeAlign, StrokeSides, TextSizing, TextStyle,
+    Brush, BrushSource, Document, EffectKind, Fill, ItemId, Node, NodeId, NodeKind, Resolved,
+    Stroke, StrokeAlign, StrokeSides, TextSizing, TextStyle,
 };
+use ondin_core::{component, reset};
+use std::collections::{HashMap, HashSet};
 
 /// The page the walk builds, and what it saw on the way.
 pub(crate) struct Page {
@@ -33,6 +36,26 @@ pub(crate) struct Page {
     pub assets: Vec<(String, Vec<u8>)>,
     /// `tokens.css`, when the page reads a variable.
     pub tokens: Option<String>,
+    /// The components the page uses, at any depth, each after those it uses.
+    pub components: Vec<Component>,
+}
+
+/// A main written as a component.
+pub(crate) struct Component {
+    /// Its name as code reads it, unique in the export.
+    pub name: String,
+    pub root: Element,
+    /// Its properties, each with the main's own value as the default.
+    pub props: Vec<(String, Arg)>,
+}
+
+/// What [`Walk::bound`] knows of a property while its main is written.
+#[derive(Clone)]
+struct BoundProp {
+    name: String,
+    kind: PropKind,
+    /// Whether the main's text under it has runs or paragraphs one value cannot keep.
+    styled: bool,
 }
 
 /// How a layer sits in its parent's element.
@@ -44,9 +67,14 @@ enum Place {
     /// transform to it (with `outer` folded in for an export's origins). `boxed`
     /// when the parent has edges for insets to measure from.
     Free { local: Affine, boxed: bool },
+    /// A component's root: sized as its main is, placed by whoever uses it.
+    Root,
 }
 
-pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Page {
+/// `origins` as a page. With `components`, an instance of a main is written as a
+/// use of a component made from the main, where it can be; without, every
+/// instance is written out as its layers.
+pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], components: bool) -> Page {
     let view = crate::extent(res, origins).unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
     let mut walk = Walk {
         doc,
@@ -55,6 +83,11 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Page {
         report: Report::default(),
         assets: Vec::new(),
         tokens: Tokens::new(doc),
+        components: components.then(|| Components {
+            names: HashSet::from(["App".to_string()]),
+            ..Default::default()
+        }),
+        bound: HashMap::new(),
     };
     let mut root = Element::new("div", walk.classes.mint("page", "page"));
     root.set("position", "relative");
@@ -85,28 +118,57 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Page {
             if node.mode().is_none()
                 && let Some(mode) = inherited.and_then(|m| walk.tokens.mode(m))
             {
-                el.attrs.push(("data-mode", mode.to_string()));
+                if el.instance.is_some() {
+                    // A component use writes no attributes of its own, so the mode
+                    // goes on an element around it that draws no box.
+                    let mut around = Element::new("div", walk.classes.mint("mode", "mode"));
+                    around.set("display", "contents");
+                    around.attrs.push(("data-mode", mode.to_string()));
+                    around.children.push(Child::Element(el));
+                    el = around;
+                } else {
+                    el.attrs.push(("data-mode", mode.to_string()));
+                }
             }
             root.children.push(Child::Element(el));
         }
     }
     let tokens = walk.tokens.css(doc);
+    let components = walk.components.map(|c| c.list).unwrap_or_default();
     Page {
         root,
         report: walk.report,
         assets: walk.assets,
         tokens,
+        components,
     }
 }
 
 struct Walk<'a> {
     doc: &'a Document,
     res: &'a Resolved,
+    /// The classes of the file being written: the page's, or a component's.
     classes: Classes,
     report: Report,
     assets: Vec<(String, Vec<u8>)>,
     tokens: Tokens,
+    components: Option<Components>,
+    /// The properties of the main being written as a component, by bound layer.
+    bound: HashMap<NodeId, BoundProp>,
 }
+
+/// The components made so far.
+#[derive(Default)]
+struct Components {
+    by_main: HashMap<NodeId, Signature>,
+    /// In the order finished, so a component comes after those it uses.
+    list: Vec<Component>,
+    /// Component names taken; `App` is the page's.
+    names: HashSet<String>,
+}
+
+/// A component's name and, per property item, its name in code and its default.
+type Signature = (String, Vec<(ItemId, String, Arg)>);
 
 /// What a layer's name reads as in the report: its name in quotes, or its kind.
 fn label(node: &Node) -> String {
@@ -120,16 +182,205 @@ fn label(node: &Node) -> String {
 impl Walk<'_> {
     /// The element for `id` placed by `place`, or `None` for a layer that draws
     /// nothing here (hidden, or a mask, which its parent's picture carries).
+    ///
+    /// A layer a boolean property shows is written hidden or not, and shown by it.
     fn node(&mut self, id: NodeId, place: Place) -> Option<Element> {
         let doc = self.doc;
         let node = doc.get(id)?;
-        if !doc.shown(id) || node.mask() {
+        let shown_by = self
+            .bound
+            .get(&id)
+            .filter(|b| b.kind == PropKind::Boolean)
+            .map(|b| b.name.clone());
+        if node.mask() || (shown_by.is_none() && !doc.shown(id)) {
             return None;
         }
-        match self.css_blocker(node) {
-            None => Some(self.css_element(node, place)),
-            Some(why) => self.picture(node, place, &why),
+        let mut used = None;
+        if self.components.is_some()
+            && node.link().is_some()
+            && component::instance_root(doc, id) == Some(id)
+        {
+            match self.why_inline(id) {
+                None => used = Some(self.instance(node, place)),
+                Some(why) => self
+                    .report
+                    .inline(format!("instance {}: {why}", label(node))),
+            }
         }
+        let mut el = match used {
+            Some(el) => el,
+            None => match self.css_blocker(node) {
+                None => self.css_element(node, place),
+                Some(why) => self.picture(node, place, &why)?,
+            },
+        };
+        el.shown_by = shown_by;
+        Some(el)
+    }
+
+    /// Why the instance at `root` cannot be a use of its main's component, or
+    /// `None` when it can: when every value it differs from its main in is a
+    /// property's, up the chain of copies to the main, apart from its root's
+    /// size, which its use sets.
+    fn why_inline(&self, root: NodeId) -> Option<String> {
+        let doc = self.doc;
+        let main = component::main_of(doc, root)?;
+        if doc.in_vault(main) {
+            return Some("its main is from a kit, which is written out as layers".into());
+        }
+        if variant::set_of(doc, main).is_some() {
+            return Some("a variant, which is written out as layers".into());
+        }
+        if self.css_blocker(doc.get(main)?).is_some() {
+            return Some("its main is drawn as a picture".into());
+        }
+        const OVERRIDES: &str = "inlined because of overrides; make it a property to keep the link";
+        let mut at = root;
+        loop {
+            let n = doc.get(at)?;
+            if n.swap().is_some() || n.mode() != doc.get(main)?.mode() {
+                return Some(OVERRIDES.into());
+            }
+            let drift = reset::drift(doc, at);
+            if drift.removed + drift.order + drift.local > 0 {
+                return Some(OVERRIDES.into());
+            }
+            let props: HashSet<(NodeId, PropKind)> = variant::instance_properties(doc, at)
+                .iter()
+                .filter(|p| matches!(p.kind, PropKind::Boolean | PropKind::Text))
+                .flat_map(|p| {
+                    variant::counterparts(doc, at, p)
+                        .into_iter()
+                        .map(move |c| (c, p.kind))
+                })
+                .collect();
+            for id in reset::scope_nodes(doc, at) {
+                if id != at && doc.get(id)?.swap().is_some() {
+                    return Some(OVERRIDES.into());
+                }
+                for o in reset::overrides(doc, id) {
+                    use ondin_core::Operation as O;
+                    let allowed = match o.reset {
+                        O::SetVisible { .. } | O::SetVisibleVar { .. } => {
+                            id == at || props.contains(&(id, PropKind::Boolean))
+                        }
+                        O::SetText { .. } => props.contains(&(id, PropKind::Text)),
+                        O::SetGeometry { .. } => id == at,
+                        _ => false,
+                    };
+                    if !allowed {
+                        return Some(OVERRIDES.into());
+                    }
+                }
+            }
+            let src = reset::source_of(doc, at)?;
+            if src == main {
+                return None;
+            }
+            at = src;
+        }
+    }
+
+    /// The instance at `node` as a use of its main's component, placed as `place`
+    /// says, with the properties it sets apart from the main.
+    fn instance(&mut self, node: &Node, place: Place) -> Element {
+        let doc = self.doc;
+        let main = component::main_of(doc, node.id()).expect("checked by why_inline");
+        let (name, defaults) = self.component(main);
+        let kind = self.res.used_kind_of(node).clone();
+        let mut el = Element::new("div", self.classes.mint(node.name(), kind.default_name()));
+        let bx = self.box_rect(node);
+        self.place(&mut el, node, &kind, bx, place);
+        let mut args = Vec::new();
+        for p in variant::instance_properties(doc, node.id()).iter() {
+            let Some((_, prop, default)) = defaults.iter().find(|(id, ..)| *id == p.id) else {
+                continue;
+            };
+            let value = variant::counterparts(doc, node.id(), p)
+                .first()
+                .and_then(|c| variant::field_value(doc, *c, p.kind))
+                .and_then(arg);
+            if let Some(v) = value.filter(|v| v != default) {
+                args.push((prop.clone(), v));
+            }
+        }
+        el.instance = Some(Instance {
+            component: name,
+            args,
+        });
+        el
+    }
+
+    /// The component written from `main`, made the first time it is asked for:
+    /// its name and, by property, the name code reads it by and its default.
+    fn component(&mut self, main: NodeId) -> Signature {
+        let doc = self.doc;
+        let comps = self.components.as_mut().expect("components are on");
+        if let Some(sig) = comps.by_main.get(&main) {
+            return sig.clone();
+        }
+        let node = doc.get(main).expect("a main in the document");
+        let name = unique(component_name(node.name()), &mut comps.names);
+
+        let mut bound = HashMap::new();
+        let mut props = Vec::new();
+        // What a component's props object already holds.
+        let mut taken: HashSet<String> = ["className", "key", "ref", "children"]
+            .map(String::from)
+            .into();
+        for p in node.props() {
+            if !matches!(p.kind, PropKind::Boolean | PropKind::Text) {
+                continue;
+            }
+            let Some(default) = p
+                .bound
+                .first()
+                .and_then(|b| variant::field_value(doc, *b, p.kind))
+                .and_then(arg)
+            else {
+                continue;
+            };
+            let prop = unique(prop_name(&p.name), &mut taken);
+            for b in &p.bound {
+                let styled = match doc.get(*b).map(Node::kind) {
+                    Some(NodeKind::Text { content, spans, .. }) => {
+                        content.contains('\n') || !spans.is_empty()
+                    }
+                    _ => false,
+                };
+                bound.insert(
+                    *b,
+                    BoundProp {
+                        name: prop.clone(),
+                        kind: p.kind,
+                        styled,
+                    },
+                );
+            }
+            props.push((p.id, prop, default));
+        }
+        let sig = (name.clone(), props);
+        comps.by_main.insert(main, sig.clone());
+
+        let classes = std::mem::take(&mut self.classes);
+        let outer = std::mem::replace(&mut self.bound, bound);
+        let mut root = self.css_element(node, Place::Root);
+        root.takes_class = true;
+        self.bound = outer;
+        self.classes = classes;
+
+        // Pushed once finished, so after the components it uses.
+        let comps = self.components.as_mut().expect("components are on");
+        comps.list.push(Component {
+            name,
+            root,
+            props: sig
+                .1
+                .iter()
+                .map(|(_, p, d)| (p.clone(), d.clone()))
+                .collect(),
+        });
+        sig
     }
 
     /// Why `node` cannot be a CSS element, or `None` when it can. Only the
@@ -370,7 +621,24 @@ impl Walk<'_> {
                 }
                 self.paint(&mut el, node, *size);
             }
-            NodeKind::Text { .. } => self.text(&mut el, node),
+            NodeKind::Text { .. } => {
+                self.text(&mut el, node);
+                if let Some(b) = self.bound.get(&id).filter(|b| b.kind == PropKind::Text) {
+                    // One value in the first paragraph's style, which is what the
+                    // canvas does with a value that is not the main's.
+                    if b.styled {
+                        self.report.approximate(format!(
+                            "text {}: its property is written in one style, which the \
+                             main's own text has more than",
+                            label(node)
+                        ));
+                    }
+                    el.children.truncate(1);
+                    if let Some(Child::Element(p)) = el.children.first_mut() {
+                        p.children = vec![Child::Prop(b.name.clone())];
+                    }
+                }
+            }
             _ => {}
         }
 
@@ -513,6 +781,13 @@ impl Walk<'_> {
                 }
                 if let Some(m) = css::matrix(css::linear(local)) {
                     el.set("transform", m);
+                }
+            }
+            Place::Root => {
+                el.set("position", "relative");
+                self.sizes(el, node, kind, bx, (false, false));
+                if bx.is_none() {
+                    el.set("transform-origin", "0 0");
                 }
             }
         }
@@ -983,7 +1258,7 @@ impl Walk<'_> {
             }
             // An empty paragraph still takes a line.
             if p.children.is_empty() {
-                p.children.push(Child::Markup("<br>".into()));
+                p.children.push(Child::Break);
             }
             el.children.push(Child::Element(p));
             start = end + 1;
@@ -1042,7 +1317,12 @@ impl Walk<'_> {
         pic.set("transform-origin", "0 0");
         let at_ink = Affine::translate(ink.origin().to_vec2());
         match place {
-            Place::Free { local, .. } => {
+            // A component's root is only ever a CSS element (`Walk::why_inline`).
+            Place::Free { .. } | Place::Root => {
+                let local = match place {
+                    Place::Free { local, .. } => local,
+                    _ => Affine::IDENTITY,
+                };
                 // The picture is in world space; `local` maps this layer into the
                 // parent element, `world` into the world.
                 let to_parent = local * world.inverse() * at_ink;
@@ -1206,6 +1486,124 @@ fn kind_word(node: &Node) -> &'static str {
         NodeKind::Group => "group",
         _ => "layer",
     }
+}
+
+/// A property value as an argument; a swap is not one.
+fn arg(v: PropValue) -> Option<Arg> {
+    match v {
+        PropValue::Boolean(b) => Some(Arg::Bool(b)),
+        PropValue::Text(t) => Some(Arg::Text(t)),
+        PropValue::Swap(_) => None,
+    }
+}
+
+/// The runs of ASCII letters and digits in `name`.
+fn words(name: &str) -> Vec<String> {
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// `"primary button / hover"` → `PrimaryButtonHover`.
+fn component_name(name: &str) -> String {
+    let mut out: String = words(name)
+        .iter()
+        .map(|w| {
+            let mut c = w.chars();
+            c.next()
+                .map(|f| f.to_ascii_uppercase().to_string() + c.as_str())
+                .unwrap_or_default()
+        })
+        .collect();
+    if out.is_empty() {
+        out.push_str("Component");
+    } else if out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, 'C');
+    }
+    out
+}
+
+/// `"Show icon"` → `showIcon`; a reserved word gets `Prop` after it.
+fn prop_name(name: &str) -> String {
+    let mut out = String::new();
+    for (i, w) in words(name).iter().enumerate() {
+        let mut c = w.chars();
+        let Some(f) = c.next() else { continue };
+        if i == 0 {
+            out.push(f.to_ascii_lowercase());
+            out.push_str(c.as_str());
+        } else {
+            out.push(f.to_ascii_uppercase());
+            out.push_str(c.as_str());
+        }
+    }
+    if out.is_empty() {
+        out.push_str("prop");
+    } else if out.starts_with(|c: char| c.is_ascii_digit()) {
+        out.insert(0, 'p');
+    }
+    const RESERVED: &[&str] = &[
+        "break",
+        "case",
+        "catch",
+        "class",
+        "const",
+        "continue",
+        "debugger",
+        "default",
+        "delete",
+        "do",
+        "else",
+        "enum",
+        "export",
+        "extends",
+        "false",
+        "finally",
+        "for",
+        "function",
+        "if",
+        "import",
+        "in",
+        "instanceof",
+        "new",
+        "null",
+        "return",
+        "super",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "var",
+        "void",
+        "while",
+        "with",
+        "yield",
+        "let",
+        "static",
+        "await",
+        "style",
+        "is",
+        "slot",
+    ];
+    if RESERVED.contains(&out.as_str()) {
+        out.push_str("Prop");
+    }
+    out
+}
+
+/// `base`, or `base2`, `base3`… for the first not in `taken`, which it joins.
+fn unique(base: String, taken: &mut HashSet<String>) -> String {
+    let mut candidate = base.clone();
+    let mut n = 1;
+    while taken.contains(&candidate) {
+        n += 1;
+        candidate = format!("{base}{n}");
+    }
+    taken.insert(candidate.clone());
+    candidate
 }
 
 /// A face as declarations: all of it, or with `base` only what differs from it.

@@ -5,11 +5,12 @@
 //!
 //! ```text
 //! ondin [gui]                    launch the GUI shell (default)
-//! ondin export <file> [--svg|--png|--json|--html] [-o out]
+//! ondin export <file> [--svg|--png|--json|--html|--react|--vue] [-o out]
 //!            [--scale <n> | --width <px> | --height <px>]
 //!                                render a document with no GPU and no window
 //!                                the three sizes are --png only, and one at a time;
-//!                                --html writes a zip of HTML and CSS
+//!                                --html writes a zip of HTML and CSS,
+//!                                --react and --vue a zip of components
 //! ondin export <file> --all [--scale-override <2x|512w|512h>] [--folders] [-o dir]
 //!                                run the document's own export settings (§7),
 //!                                optionally forcing every row to one size
@@ -109,6 +110,10 @@ enum ExportFormat {
     Json,
     /// Code export's plain HTML/CSS, zipped.
     Html,
+    /// Code export's React components, zipped.
+    React,
+    /// Code export's Vue components, zipped.
+    Vue,
 }
 
 impl ExportFormat {
@@ -117,7 +122,7 @@ impl ExportFormat {
             ExportFormat::Svg => "svg",
             ExportFormat::Png => "png",
             ExportFormat::Json => "json",
-            ExportFormat::Html => "zip",
+            ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => "zip",
         }
     }
 }
@@ -167,7 +172,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_export(args: &[String]) -> Result<Command, String> {
-    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json|--html] \
+    const USAGE: &str = "usage: ondin export <file.ondin> [--svg|--png|--json|--html|--react|--vue] \
          [--scale <n>|--width <px>|--height <px>] [-o <out>]\n       \
          ondin export <file.ondin> --all [--scale-override <2x|512w|512h>] [--folders] [-o <dir>]";
     let mut file = None;
@@ -184,6 +189,8 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
             "--png" => format = Some(ExportFormat::Png),
             "--json" => format = Some(ExportFormat::Json),
             "--html" => format = Some(ExportFormat::Html),
+            "--react" => format = Some(ExportFormat::React),
+            "--vue" => format = Some(ExportFormat::Vue),
             "--all" => all = true,
             "--folders" => folders = true,
             // One value each and mutually exclusive: three ways of answering one
@@ -419,18 +426,28 @@ fn run_export(
 
     let data = match format {
         ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, None).into_bytes(),
-        ExportFormat::Html => {
+        ExportFormat::Html | ExportFormat::React | ExportFormat::Vue => {
+            use ondin_export::code;
             // The page holds the top-level layers, laid out as on the canvas.
             let origins = doc
                 .get(doc.root())
                 .map(|r| r.children().to_vec())
                 .unwrap_or_default();
-            let export = ondin_export::code::html::html_of(&doc, &res, &origins);
-            if !export.approximated.is_empty() || !export.positioned.is_empty() {
+            let export = match format {
+                ExportFormat::React => code::react::react_of(&doc, &res, &origins),
+                ExportFormat::Vue => code::vue::vue_of(&doc, &res, &origins),
+                _ => code::html::html_of(&doc, &res, &origins),
+            };
+            if !export.approximated.is_empty()
+                || !export.positioned.is_empty()
+                || !export.inlined.is_empty()
+            {
                 eprintln!(
-                    "{} drawn differently, {} with fixed positions or as pictures — see report.txt",
+                    "{} drawn differently, {} with fixed positions or as pictures, \
+                     {} instances written out as layers — see report.txt",
                     export.approximated.len(),
-                    export.positioned.len()
+                    export.positioned.len(),
+                    export.inlined.len()
                 );
             }
             export
@@ -776,6 +793,20 @@ mod tests {
                 scale: ExportScale::Times(1.0),
             }
         );
+        for (flag, format) in [
+            ("--react", ExportFormat::React),
+            ("--vue", ExportFormat::Vue),
+        ] {
+            assert_eq!(
+                export(&["a.ondin", flag]).unwrap(),
+                Command::Export {
+                    file: "a.ondin".into(),
+                    format,
+                    out: None,
+                    scale: ExportScale::Times(1.0),
+                }
+            );
+        }
     }
 
     /// `--scale` is a PNG argument and is refused wherever it cannot apply rather
@@ -997,6 +1028,8 @@ mod tests {
             (ExportFormat::Png, "png"),
             (ExportFormat::Json, "json"),
             (ExportFormat::Html, "zip"),
+            (ExportFormat::React, "zip"),
+            (ExportFormat::Vue, "zip"),
         ] {
             let out = dir.join(format!("out.{ext}"));
             run_export(

@@ -41,7 +41,7 @@ Read the file for the exact wording before relying on one.
 | `io.md` | 5.11, 5.11a | Save format, schema migration, clipboard envelope, the library block |
 | **Render, export, MCP** | | |
 | `render.md` | 6.1–6.3 | The render boundary, `RenderOverrides`, backends |
-| `export.md` | 7 | SVG, PNG, code export (HTML/CSS), JSON snapshot, the CLI, export doors |
+| `export.md` | 7 | SVG, PNG, code export (HTML/CSS, React, Vue), JSON snapshot, the CLI, export doors |
 | `mcp.md` | 8 | MCP topology, headless mode, concurrency, the tool list (a test parses §8.4) |
 | **App** | | |
 | `app-chrome.md` | 9.1, 9.2 | UI chrome and panel layout |

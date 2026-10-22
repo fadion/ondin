@@ -1,39 +1,18 @@
 //! Golden files (§11): one fixture document, its SVG and its JSON snapshot,
-//! compared **byte for byte** against files checked into `tests/goldens/`.
+//! compared byte for byte against files checked into `tests/goldens/`.
 //!
-//! §11 has specified these since the design was written and none existed until
-//! 2026-08-22 — every other export test asserts on substrings and in-process
-//! measurements, which catch a value that is wrong and miss a value that merely
-//! *changed*. That is the gap these close: a golden has no opinion about what
-//! matters, so it notices the gradient that stopped being emitted, the transform
-//! that moved up a level, the field that quietly left the snapshot schema.
+//! Other export tests assert on substrings and measurements, which catch a wrong
+//! value and miss a changed one; a golden notices the gradient that stopped being
+//! emitted or the field that left the snapshot schema.
 //!
-//! **SVG and JSON only.** The raster half needs its SIMD level pinned before a
-//! byte comparison means anything, and although that pin now exists
-//! (`ondin_render::cpu`'s `export_settings`, §15 D304) it is `Level::baseline()`
-//! — a *per-architecture* answer, with aarch64 still unmeasured. A checked-in PNG
-//! would therefore be a golden for x86 that fails on Apple silicon for reasons
-//! having nothing to do with the change under review. It is one measurement away
-//! and deliberately not taken here.
+//! SVG and JSON only: a raster golden is pinned to the architecture (the CPU
+//! backend's SIMD level, aarch64 unmeasured) and to the `vello_cpu` version, whose
+//! last bump moved only the mitered outside stroke by one channel step. A raster
+//! golden would be regenerated after checking the residual is confined to strokes.
 //!
-//! ⚠️ **And the architecture is not the only axis — a raster golden is per
-//! `vello_cpu` version too, measured at the 0.0.9 → 0.2.0 bump** (§15 D414).
-//! Rendering the fixture below under both and comparing the raw buffers: 162
-//! bytes over 78 pixels differ, worst channel delta 1, alpha unmoved, **and every
-//! one of them belongs to the hexagon's mitered outside stroke** — confirmed by
-//! hiding that stroke and getting byte-identical output. So a raster golden is
-//! pinned to an architecture *and* to a dependency version. **That is a weaker
-//! constraint than it sounds and does not block this**: a pinned dependency is a
-//! decision in `Cargo.toml`, where a detected CPU is not. What it does mean is
-//! that whoever bumps `vello_cpu` next will see a diff on every stroked shape,
-//! and **must not read it as a regression** — regenerate, then check the residual
-//! is confined to strokes and its worst delta is 1, which is what the two runs
-//! above measured. A residual anywhere else is the finding.
-//!
-//! **When one of these fails, the diff is the review.** Regenerate with
+//! When one fails, the diff is the review. Regenerate with
 //! `ONDIN_UPDATE_GOLDENS=1 cargo test -p ondin-export --test goldens`, then read
-//! what moved before committing it. A regenerated golden that nobody read is
-//! worse than no golden at all, because it converts a question into a record.
+//! what moved before committing it.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -47,47 +26,25 @@ use ondin_core::{
 use ondin_export::snapshot::snapshot;
 use ondin_export::svg::svg;
 
-/// Every `NodeKind` the model has, one name per variant.
-///
-/// **These are this file's own spelling, not the snapshot's.** They coincide for
-/// ten of the eleven; the snapshot bakes the operator into the name and writes
-/// `boolean-subtract`. Deriving this list from the projection instead would make
-/// the coverage check agree with whatever the projection currently does, which is
-/// the one thing it must not do — the projection is under test.
-///
-/// Beside `kind_name`, whose `match` is exhaustive and is the tripwire: **adding
-/// a variant to `NodeKind` breaks this file's compile**, and a `NodeKind` sweep is
-/// precisely the kind the compiler only half-finds.
-///
-/// 🚨 **This was a hand-written list, and the tripwire could not reach it** (§15
-/// D858, `[X8-L6-04]`). The doc said the list was *"what forces the fixture to
-/// grow the new node"* — but the minimum edit that repairs the compile is one new
-/// arm in `kind_name`, and with the list and the fixture both untouched the
-/// coverage test compared two things that had both stood still, and passed. **The
-/// list is read off `kind_name`'s own arms now** (`arm_names`), so the edit the
-/// compiler forces is the edit that grows what the fixture has to hold.
+/// Every `NodeKind` the model has, one name per variant, read off `kind_name`'s
+/// arms (`arm_names`) so the arm the compiler forces for a new variant also grows
+/// what the fixture must hold. The names are this file's own, not the snapshot's
+/// (which writes `boolean-subtract`): the projection is under test.
 fn every_kind() -> BTreeSet<&'static str> {
     arm_names("kind_name")
 }
 
-/// The names a `*_name` function's `match` gives, read out of **this file's own
-/// source** — the arms are the list (§15 D858).
-///
-/// A source scan, the shape `ondin-core`'s `deps_forbidden` takes, because the
-/// question is what a `match` *says*, which nothing at run time can enumerate.
-/// It reads the function's body up to its first column-zero `}` and takes every
-/// `=> "…"` in it; the scanner's own source spells that pattern with a backslash,
-/// so it cannot read itself.
+/// The names a `*_name` function's `match` gives, read out of this file's own
+/// source, since nothing at run time can enumerate a `match`'s arms. It takes every
+/// `=> "…"` up to the function's first column-zero `}`; the scanner spells that
+/// pattern with a backslash so it cannot read itself.
 fn arm_names(function: &str) -> BTreeSet<&'static str> {
     const SRC: &str = include_str!("goldens.rs");
     let start = SRC
         .find(&format!("fn {function}("))
         .unwrap_or_else(|| panic!("`{function}` is in this file"));
     let body = &SRC[start..];
-    // `"\n}"` and not `"\n}\n"`: on a checkout with `core.autocrlf=true` the
-    // line ends in `\r\n`, and the longer pattern never matches (§15 D858's
-    // *Fix*, found by `arch-scribe` reading the pattern against `.gitattributes`,
-    // which does not exempt this file).
+    // `"\n}"` and not `"\n}\n"`: under `core.autocrlf=true` lines end in `\r\n`.
     let end = body
         .find("\n}")
         .expect("and ends at a closing brace in column 0");
@@ -98,35 +55,10 @@ fn arm_names(function: &str) -> BTreeSet<&'static str> {
         .collect()
 }
 
-/// Every `EffectKind` the model has, one name per variant — `every_kind`'s
-/// shape for the **second** enum in the model with the same sweep hazard (§15
-/// D658, `[S8.3-L6-07]`).
-///
-/// (Plain backticks throughout: nothing checks an intra-doc link in a
-/// `crates/*/tests/` file — a separate crate root with no `deny` — so a `[link]`
-/// here is decoration. §15 D319's convention, and §15 D622 for the third blind
-/// target it turned out to have.)
-///
-/// 🚨 **The JSON golden's stated purpose named a case it could not answer.** This
-/// file's header says a golden *"notices … the field that quietly left the
-/// snapshot schema"*; measured against `tests/goldens/every-kind.json`, the
-/// `effects` field and the whole of `EffectSummary` — `blur`, `spread`,
-/// `brightness`, `contrast`, `saturation`, `hue` — appeared in **none** of its 51
-/// keys, and neither did `pivot`. Both are `skip_serializing_if`-elided, so their
-/// absence was correct *output* for a fixture that carried no `SetEffects` and no
-/// pivot on any node. **Deleting the `effects` field from `NodeSnapshot` entirely
-/// would have left both goldens byte-identical.**
-///
-/// `EffectKind` is covered elsewhere — `snapshot.rs`, `svg.rs`'s shadow and filter
-/// tests, `svg_roundtrip.rs` — so nothing was uncovered outright. What was missing
-/// is the **change-detector**, which is a different thing and is what a golden is
-/// for.
-///
-/// Read off `effect_name`'s arms, exactly as `every_kind` is off `kind_name`'s:
-/// a fifth variant breaks this file's compile, and the arm that repairs it is
-/// what grows this set (§15 D858, `[X8-L6-04]` — it was a hand-written list the
-/// compile error could not reach, so a fifth `EffectKind` shipped uncovered with
-/// the coverage test green).
+/// Every `EffectKind` the model has, one name per variant, read off
+/// `effect_name`'s arms as `every_kind` is off `kind_name`'s. The effect stack and
+/// pivot are `skip_serializing_if`-elided, so the goldens only watch them while
+/// the fixture carries them.
 fn every_effect() -> BTreeSet<&'static str> {
     arm_names("effect_name")
 }
@@ -157,16 +89,11 @@ fn kind_name(k: &NodeKind) -> &'static str {
     }
 }
 
-/// The document both goldens are taken from: one artboard holding **one node of
-/// every kind**, painted so the writers have something to say about each.
-///
-/// Deliberately not `common::fixture()`, which is missing three kinds and is the
-/// subject of two dozen substring assertions that would have to move with it. A
-/// golden's fixture wants to be free to grow.
-///
-/// Everything here is fixed: the id seed, the geometry, the colours, and a font
-/// (`Inter`) that ships in the binary — so nothing in the output depends on the
-/// machine, the clock, or what fonts happen to be installed.
+/// The document both goldens are taken from: one artboard holding one node of
+/// every kind, painted so the writers have something to say about each. It is not
+/// `common::fixture()`, whose substring assertions would have to move with it.
+/// Everything is fixed — id seed, geometry, colours, and the bundled `Inter` — so
+/// the output does not depend on the machine.
 fn golden_document() -> (Document, Resolved) {
     let mut ids = IdSource::new(0x601D);
     let root = ids.mint();
@@ -275,9 +202,8 @@ fn golden_document() -> (Document, Resolved) {
             transform: Some(Affine::translate((160.0, 100.0))),
             name: Some("Triangle".into()),
         },
-        // A group with a real transform and a child, so group opacity has
-        // somewhere to be wrong: on a `<g>` it fades the pair together, on the
-        // child it fades each separately.
+        // A group with a transform and a child, so group opacity has somewhere to
+        // be wrong (on a `<g>` it fades the pair together).
         Operation::CreateNode {
             id: group,
             parent: artboard,
@@ -297,8 +223,7 @@ fn golden_document() -> (Document, Resolved) {
             transform: None,
             name: None,
         },
-        // A boolean writes its *result*, never its operands — the one kind whose
-        // markup is not a transcription of the node.
+        // A boolean writes its result, never its operands.
         Operation::CreateNode {
             id: boolean,
             parent: artboard,
@@ -416,10 +341,8 @@ fn golden_document() -> (Document, Resolved) {
                 visible: true,
             }]),
         },
-        // Centred, because `geometry::stroke_align_applies` is false for a `Line`
-        // — it has no interior, so "outside" is not a side. The outside stroke
-        // that exercises `align_clip` is on the polygon below; putting it here
-        // was the first draft and the golden showed it doing nothing.
+        // Centred, because `geometry::stroke_align_applies` is false for a `Line`;
+        // the outside stroke that exercises `align_clip` is on the polygon below.
         Operation::SetStrokes {
             id: line,
             strokes: keyed_by_position([Stroke {
@@ -437,8 +360,7 @@ fn golden_document() -> (Document, Resolved) {
                 visible: true,
             }]),
         },
-        // An *outside* stroke on a closed shape — not a `stroke` attribute but a
-        // `<clipPath>` plus a doubled width (§7.1, §15 D97).
+        // An outside stroke on a closed shape: a `<clipPath>` plus a doubled width.
         Operation::SetStrokes {
             id: polygon,
             strokes: keyed_by_position([Stroke {
@@ -477,11 +399,8 @@ fn golden_document() -> (Document, Resolved) {
                 visible: true,
             }]),
         },
-        // **On the boolean itself, not on its operands.** The container carries
-        // the paint; an operand's fill is not inherited by the result. The first
-        // draft painted only `operand_a` and the golden came back with the
-        // notched path at `fill="none"` — a boolean that draws nothing, which is
-        // a golden of the wrong document.
+        // On the boolean itself: an operand's fill is not inherited by the result,
+        // and an unpainted boolean draws nothing.
         Operation::SetFills {
             id: boolean,
             fills: keyed_by_position([Fill {
@@ -493,17 +412,10 @@ fn golden_document() -> (Document, Resolved) {
             id: group,
             opacity: 0.6,
         },
-        // **All four effect kinds on one node** (§15 D658, `[S8.3-L6-07]`), so
-        // `effects` and every field of `EffectSummary` reach the JSON golden and
-        // a `<filter>` reaches the SVG one. Neither had a single occurrence
-        // before, which made the goldens silent about a whole schema branch.
-        //
-        // On the rect rather than spread about, because the point here is
-        // *presence in the output* rather than a rendering claim — the rendering
-        // ones live in `svg.rs` and `gpu_effects.rs` — and one node carrying four
-        // keeps the diff readable. Every number is a literal for the same reason
-        // everything else in this fixture is: the golden must not move because a
-        // default did.
+        // All four effect kinds on one node, so `effects` reaches the JSON golden
+        // and a `<filter>` the SVG one; presence in the output is the point, and
+        // one node keeps the diff readable. Every number is a literal so no default
+        // can move the golden.
         Operation::SetEffects {
             id: rect,
             effects: keyed_by_position([
@@ -528,11 +440,8 @@ fn golden_document() -> (Document, Resolved) {
                 })),
             ]),
         },
-        // **A pivot, on a different node** — the other field with no occurrence
-        // in either golden (§15 D658). `Normalized` rather than `Local`, because
-        // the snapshot *derives* this one against the node's box and the fraction
-        // is the arm where that derivation can be wrong; a local point would
-        // round-trip through a constant projection.
+        // A pivot on a different node, `Normalized` rather than `Local` because the
+        // snapshot derives it against the node's box, which is where it can be wrong.
         Operation::SetPivot {
             id: ellipse,
             pivot: Some(ondin_core::Pivot::Normalized(ondin_core::kurbo::Vec2::new(
@@ -562,12 +471,9 @@ fn regenerate_hint() -> String {
 /// Compare `actual` against the golden `name`, or rewrite it when
 /// `ONDIN_UPDATE_GOLDENS=1`.
 ///
-/// The failure message carries the first differing line from **both** sides and
-/// the line and byte counts, because "the bytes differ" on a 300-line file is a
-/// message that sends the reader to a diff tool rather than telling them
-/// anything. Written with `\n` and read without translation; `.gitattributes`
-/// marks this directory `-text` so a checkout on a machine with
-/// `core.autocrlf=true` cannot turn a line ending into a test failure.
+/// The failure message carries the first differing lines from both sides and the
+/// line and byte counts. Written with `\n` and read untranslated; `.gitattributes`
+/// marks this directory `-text` so `core.autocrlf=true` cannot fail the test.
 fn check_golden(name: &str, actual: &str) {
     let path = golden_path(name);
 
@@ -627,18 +533,13 @@ fn check_golden(name: &str, actual: &str) {
     );
 }
 
-/// The fixture is only worth comparing if it still holds one of everything.
-///
-/// This runs before the two comparisons are worth reading: a golden that lost a
-/// node kind goes on matching itself forever, and the failure it should have
-/// produced never happens.
+/// The fixture still holds one node of every kind; a golden that lost a kind
+/// would go on matching itself.
 #[test]
 fn the_fixture_holds_one_node_of_every_kind() {
     let (doc, _) = golden_document();
 
-    // Walked from the root rather than read off the snapshot: the snapshot is one
-    // of the things under test, and a kind it had stopped projecting would make
-    // this assertion agree with the bug.
+    // Walked from the root, not read off the snapshot, which is under test.
     fn walk(doc: &Document, id: ondin_core::NodeId, out: &mut BTreeSet<&'static str>) {
         let Some(node) = doc.get(id) else { return };
         out.insert(kind_name(node.kind()));
@@ -649,7 +550,7 @@ fn the_fixture_holds_one_node_of_every_kind() {
     let mut present = BTreeSet::new();
     walk(&doc, doc.root(), &mut present);
     let expected = every_kind();
-    // At least, not exactly: an exact count would be a hand-kept number again.
+    // At least, not exactly: an exact count would be hand-kept.
     assert!(
         expected.len() >= 11,
         "the fixture: the scan read `kind_name`'s arms, got {expected:?}"
@@ -668,90 +569,18 @@ fn the_fixture_holds_one_node_of_every_kind() {
     );
 }
 
-/// And the fixture holds one of every **effect** kind, which is the second enum
-/// with the same sweep hazard — §15 D658, `[S8.3-L6-07]`.
+/// The fixture holds one node of every effect kind and a pivot, the fields the
+/// goldens only watch while the fixture carries them. The expected set is read off
+/// the model's `effect_name` arms, not the snapshot, which is under test.
 ///
-/// (*The fixture* rather than *it*: the antecedent was in
-/// `the_fixture_holds_one_node_of_every_kind`'s doc, one item up, so anything
-/// inserted between the two would have orphaned this sentence — §15 D790, which
-/// is that failure happening to `architecture.md` §5.6. Found by reading the
-/// `///`-run ranking's head, where a first line opening *"And it…"* is what a
-/// stolen doc also looks like.)
+/// flip: a guarded arm `E::Filters(_) if false => "halftone"` in `effect_name` →
+/// fails at "the golden fixture no longer covers every EffectKind".
 ///
-/// 🚨 **Both goldens were silent about a whole schema branch.** `effects` and
-/// every field of `EffectSummary` appeared in none of `every-kind.json`'s keys,
-/// and neither did `pivot`; the SVG golden had no `<filter>` for the same reason.
-/// Both fields are `skip_serializing_if`-elided, so that was correct output for a
-/// fixture carrying neither — which means **deleting `NodeSnapshot::effects`
-/// would have left both goldens byte-identical**, against a header that claims
-/// this file notices *"the field that quietly left the snapshot schema"*.
-///
-/// The tripwire is `effect_name`'s exhaustive `match`: a fifth `EffectKind`
-/// breaks this file's compile, and the arm that repairs it grows `every_effect`,
-/// which is what then forces the *fixture* to grow. ⚠️ **This said the
-/// assertion did that forcing, and it could not** (§15 D858): the expected set
-/// was a hand-written list, so one new arm and nothing else left both sides still
-/// and the assertion green. **Flip-check, run**: a guarded arm
-/// `E::Filters(_) if false => "halftone"` in `effect_name` — a fifth name the
-/// fixture does not hold, which is what a new variant looks like to this test —
-/// fails at *"the golden fixture no longer covers every EffectKind"*, naming
-/// `halftone`.
-///
-/// ⚠️ **Read off the model, not off the snapshot**, for the reason the kind sweep
-/// gives one function up: the projection is under test, and an effect it had
-/// stopped projecting would make this assertion agree with the bug.
-///
-/// ⚠️ **What this still does not cover is a `<mask>`**, which both goldens also
-/// lack, along with `<radialGradient>`, `<image>`, `<textPath>` and `<use>` on the
-/// SVG side. One masked node in `golden_document` would close most of that on both
-/// sides at once; it is left because a mask restructures the markup around the run
-/// it covers and that diff wants reading on its own.
-///
-/// **The regeneration diff, read** — this file's header asks for that and *"a
-/// regenerated golden that nobody read is worse than no golden at all"*. SVG: one
-/// `<filter id="fx-601d_3">` in `<defs>` and a `<g filter=…>` around the rect,
-/// 28 lines. Every number checks out by hand — `stdDeviation` is half the typed
-/// blur at all three of 6/4/2, `spread: 1` is `feMorphology dilate radius="1"`,
-/// the offsets are verbatim, `flood-opacity` is `90/255 = 0.3529` and
-/// `120/255 = 0.4706`, and the filter matrix's `0.05` column is contrast 0.9's
-/// intercept, `(1 − 0.9) / 2`.
-///
-/// ⚠️ **The second regeneration was one line and it is the `<filter>`'s own
-/// region** (§15 D742, `[S10.2-L1-01]`): `x="8.75" y="9.75" width="118.5"
-/// height="78.5"` became `x="0.5139" y="1.5139" width="134.9721"
-/// height="94.9721"`, which is 8.2361 outward on all four sides — the fixture's
-/// inner shadow at `reach(2) + |spread 0| + |offset (−2, −1)|`. **Nothing else in
-/// the file moved**, and nothing about the picture did either: on this node, a
-/// rounded rect with a non-zero offset, the padded and unpadded regions sample
-/// identically in a browser. That is worth knowing rather than reassuring — the
-/// shapes the bug is *visible* on are the ones with no corners to spare, and this
-/// golden holds one of the others, so **this diff is not evidence the repair
-/// works and the two render tests are.** JSON: the four effect objects and
-/// `"pivot": [17.5, 33.75]` on the ellipse, which is `70 × 0.25` and `45 × 0.75`
-/// against a 70 × 45 box — the derivation, not the stored fraction, which is the
-/// whole reason a `Normalized` pivot is the one worth putting here.
-///
-/// ⚠️ **The pivot produced no SVG change at all, and that is correct**:
-/// `Operation::SetPivot`'s own doc says the render boundary, `Resolved`,
-/// hit-testing and the SVG writer never see it. A diff on the SVG side would have
-/// been the finding.
-///
-/// ⚠️ **One thing in the diff that looks like a leak of list order and is the
-/// design.** The stack is written `[DropShadow, InnerShadow, LayerBlur, Filters]`
-/// and the filter emits the blur and the colour matrix **first**, casting both
-/// shadows off the result (`fxa0` derives from `fx3`). §6.4 decides that: *"`run`
-/// is two stages, not one fold, and the SVG writer is arranged the same way for
-/// the same reason. `Filters` and `LayerBlur` transform the layer's own appearance
-/// in list order; every shadow is then cast from **that** result"* — the one-fold
-/// spelling is rejected there because an inner shadow after a drop shadow would
-/// take its silhouette from the layer *plus* the shadow. §5.3a's `stack_escape`
-/// computes the escape per stage on the same basis (§15 D473).
-///
-/// 🚨 **This paragraph said it was "§5.3a's question and not this file's" until
-/// `arch-scribe` read the citation** — a resolving reference pointing at the
-/// opposite of what it says, which is the shape session 16 wrote down and this is
-/// the next instance of. **Ask what the cited section decides, not whether it is
-/// the right neighbourhood.**
+/// Not covered by either golden: `<mask>`, `<radialGradient>`, `<image>`,
+/// `<textPath>` and `<use>`. The SVG filter emits the blur and colour matrix
+/// first and casts both shadows off that result (§6.4), which is why the stack's
+/// list order is not the markup order. A pivot changes no SVG, since the writer
+/// never sees it.
 #[test]
 fn the_fixture_holds_one_node_of_every_effect_kind() {
     let (doc, _) = golden_document();
@@ -768,7 +597,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
     let mut present = BTreeSet::new();
     walk(&doc, doc.root(), &mut present);
     let expected = every_effect();
-    // At least, not exactly: an exact count would be a hand-kept number again.
+    // At least, not exactly: an exact count would be hand-kept.
     assert!(
         expected.len() >= 4,
         "the fixture: the scan read `effect_name`'s arms, got {expected:?}"
@@ -782,9 +611,7 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
         regenerate_hint()
     );
 
-    // And a pivot, the other field that had no occurrence in either golden. Not a
-    // separate test: it is the same claim — that the fixture reaches the states
-    // the goldens are supposed to be watching.
+    // A pivot too: the same claim, that the fixture reaches the watched states.
     fn any_pivot(doc: &Document, id: ondin_core::NodeId) -> bool {
         let Some(node) = doc.get(id) else {
             return false;
@@ -805,9 +632,7 @@ fn svg_matches_its_golden() {
     check_golden("every-kind.svg", &svg(&doc, &res, None));
 }
 
-/// The JSON snapshot, byte for byte — and produced exactly the way
-/// `ondin export --json` produces it, so the golden is of the *command's* output
-/// and not of a spelling only this test uses.
+/// The JSON snapshot, byte for byte, produced the way `ondin export --json` does.
 #[test]
 fn json_snapshot_matches_its_golden() {
     let (doc, res) = golden_document();
@@ -819,13 +644,8 @@ fn json_snapshot_matches_its_golden() {
     );
 }
 
-/// The property the two goldens above rest on: exporting the same document twice
-/// in one process gives the same bytes.
-///
-/// Cheap, and it separates two failures that look identical from the outside — a
-/// golden that no longer matches because the writer *changed* from one that no
-/// longer matches because the writer is not deterministic. Without this, the
-/// first suspicion on a red golden is the wrong one.
+/// Exporting the same document twice gives the same bytes, which separates a
+/// changed writer from a non-deterministic one when a golden goes red.
 #[test]
 fn exporting_the_same_document_twice_gives_the_same_bytes() {
     let (doc, res) = golden_document();
@@ -839,8 +659,7 @@ fn exporting_the_same_document_twice_gives_the_same_bytes() {
     let b = serde_json::to_vec_pretty(&snapshot(&doc, &res)).unwrap();
     assert_eq!(a, b, "the snapshot is stable");
 
-    // And a second *resolve* of the same document, which is where an iteration
-    // order could leak in that one `Resolved` cannot show.
+    // A second resolve, where an iteration order could leak in.
     let again = Resolved::rebuild(&doc);
     assert_eq!(
         svg(&doc, &res, None),

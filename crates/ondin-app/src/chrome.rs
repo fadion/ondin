@@ -1,38 +1,26 @@
-//! **The window's own chrome** (§15 D952): the caption buttons, the strip a
-//! window is dragged by, and the edges it is resized from — drawn by the app on
-//! the hosts where the system's are turned off.
+//! **The window's own chrome**: the caption buttons, the strip a window is
+//! dragged by, and the edges it is resized from — drawn by the app on the hosts
+//! where the system's are turned off.
 //!
-//! **One question, asked of one value.** Which host draws what is decided once,
-//! in [`Host::current`], and everything else asks a [`Chrome`] a capability —
-//! *does the app draw its own buttons?*, *how far must the bar's content stay
-//! from the left edge?* — rather than testing the target at the use site. The
-//! rule is Schemaic's (`schemaic-core`'s `window_chrome`), and it is worth more
-//! here than there: the four decision functions CLAUDE.md lists as never compiled
-//! on this machine are each `cfg`-gated at their item, and a capability keeps
-//! every branch compiled on every host. `cfg!` appears in this file once.
+//! Which host draws what is decided once, in [`Host::current`]; everything else
+//! asks a [`Chrome`] a capability, so every branch compiles on every host and
+//! `cfg!` appears in this file once.
 //!
-//! **What each host keeps:**
-//!
-//! - **Windows** — no decorations. winit then drops the caption *and* the sizing
-//!   frame, so without [`resize_zones`] the window could not be resized at all;
-//!   egui-winit keeps the DWM drop shadow on an undecorated window by itself.
-//!   Aero Snap still works, because a drag begun by [`egui::ViewportCommand::StartDrag`]
-//!   is the system's own caption drag.
-//! - **Linux** — the same, X11 and Wayland alike. Wayland has no server-side
-//!   shadow to ask for, and the app id is set so the window matches its desktop
-//!   entry.
-//! - **macOS** — decorations kept and the title bar made transparent over a
-//!   full-size content view, so the **native traffic lights and resize border
-//!   stay** and the app's own bar runs underneath them. The app draws no buttons
-//!   and no resize zones there, and keeps its content clear of the lights.
+//! - **Windows, Linux** — no decorations, so winit drops the caption and the
+//!   sizing frame and [`resize_zones`] stands in for the latter. A drag begun by
+//!   [`egui::ViewportCommand::StartDrag`] is the system's own caption drag, so
+//!   Aero Snap works.
+//! - **macOS** — decorations kept, the title bar transparent over a full-size
+//!   content view: the native traffic lights and resize border stay, and the
+//!   app's bar keeps clear of the lights.
 
 use egui::{Color32, CursorIcon, Id, Order, Pos2, Rect, ResizeDirection, Sense, Stroke, Vec2};
 
 use crate::theme::color;
 
-/// The reverse-DNS id the app carries everywhere it needs one: the Wayland app
-/// id and X11 `WM_CLASS` here, the desktop entry and AppStream metadata in
-/// `packaging/linux/`, the macOS bundle id. One identity on every platform.
+/// The reverse-DNS id the app carries everywhere: Wayland app id, X11
+/// `WM_CLASS`, the desktop entry and AppStream metadata in `packaging/linux/`,
+/// the macOS bundle id. Permanent identity — it must never change.
 pub(crate) const APP_ID: &str = "io.github.fadion.Ondin";
 
 /// A caption button's width — Windows 11's caption metric. Its height is the
@@ -43,36 +31,29 @@ pub(crate) const CONTROL_W: f32 = 46.0;
 /// width of the system frame it stands in for.
 const EDGE: f32 = 5.0;
 
-/// A corner zone's side. Larger than an edge, so a corner is easy to hit, and
-/// each edge stops this short of the corner so the two never contest a point.
+/// A corner zone's side. Larger than an edge, so a corner is easy to hit; each
+/// edge stops this short of the corner so the two never contest a point.
 const CORNER: f32 = 14.0;
 
-/// The traffic lights' room on macOS: three lights from the window's left edge,
-/// about 52 points wide at the system's offset, plus a gap.
+/// The traffic lights' room on macOS: the lights' width plus a gap.
 const MAC_LIGHTS: f32 = 72.0;
 
-/// What the chrome senses: the pointer, and **never the keyboard focus**. The
-/// system's caption, buttons and frame are not in a window's Tab order, and
-/// these stand in for them; `Sense::click_and_drag` would add `FOCUSABLE`, and
-/// then the first `Tab` in the app landed on the drag strip — which both top
-/// bars draw under one id, so the focus outlived a switch of screen and
-/// `chrome_focus` reported a field nobody could see (caught by
-/// `chrome_focus_write_tests`).
+/// What the chrome senses: the pointer, **never the keyboard focus**. The
+/// system's caption and frame are not in the Tab order, and
+/// `Sense::click_and_drag` would add `FOCUSABLE`, letting Tab land on the drag
+/// strip that both top bars draw under one id.
 const POINTER_ONLY: Sense = Sense::CLICK.union(Sense::DRAG);
 
-/// The close button's hover fill — Windows' own caption red, under a white
-/// glyph, which is what every Windows user reads as "this closes the window".
+/// The close button's hover fill — Windows' caption red, under a white glyph.
 const CLOSE_HOVER: Color32 = Color32::from_rgb(0xC4, 0x2B, 0x1C);
 
-/// The height of present mode's strip ([`present_strip`]) — Windows 11's own
-/// caption height, so its buttons are the system's shape rather than the top
-/// bar's taller one.
+/// The height of present mode's strip ([`present_strip`]) — Windows 11's caption
+/// height.
 const STRIP_H: f32 = 32.0;
 
 /// How close to the window's top edge the pointer must come to bring present
-/// mode's strip out. A band, not the single top row: a pointer thrown at the
-/// top of a maximized window lands on row 0, but one moved there by hand on a
-/// window that is not maximized stops wherever the hand does.
+/// mode's strip out. A band, not the top row: a hand-moved pointer on a
+/// non-maximized window stops wherever the hand does.
 const REVEAL: f32 = 6.0;
 
 /// Which kind of window manager the app is running under. BSDs and anything
@@ -147,12 +128,10 @@ impl Chrome {
     }
 }
 
-/// **A top bar's frame**: `fill`, `margin` points of padding on the left plus
-/// whatever the host draws there ([`Chrome::leading_inset`]), and **none on the
-/// right** — the caption buttons sit flush against the window's edge, and the
-/// bar's own right margin is put back after them by [`after_buttons`].
+/// A top bar's frame: `fill`, `margin` points of padding on the left plus
+/// [`Chrome::leading_inset`], and none on the right — the caption buttons sit
+/// flush against the edge and [`after_buttons`] puts the right margin back.
 pub(crate) fn bar_frame(fill: Color32, margin: f32, chrome: Chrome) -> egui::Frame {
-    // Points, as `i8`: a 14-point margin and a 72-point inset are well inside it.
     let left = (margin + chrome.leading_inset()).round() as i8;
     egui::Frame::NONE.fill(fill).inner_margin(egui::Margin {
         left,
@@ -162,8 +141,7 @@ pub(crate) fn bar_frame(fill: Color32, margin: f32, chrome: Chrome) -> egui::Fra
     })
 }
 
-/// The whole of a top bar's rectangle, from inside the [`bar_frame`] it was
-/// shown in — its content rectangle widened back over the left padding — for
+/// The whole of a top bar's rectangle, from inside its [`bar_frame`], for
 /// [`drag_strip`].
 pub(crate) fn bar_rect(ui: &egui::Ui, margin: f32, chrome: Chrome) -> Rect {
     let inner = ui.max_rect();
@@ -173,62 +151,51 @@ pub(crate) fn bar_rect(ui: &egui::Ui, margin: f32, chrome: Chrome) -> Rect {
     )
 }
 
-/// The bar's right margin, put back between the caption buttons and the bar's
-/// own content in a `right_to_left` row: `margin` in all, of which the row's
-/// `item_spacing` already supplies `gap`.
+/// The bar's right margin, put back after the caption buttons in a
+/// `right_to_left` row: `margin` in all, of which `item_spacing` supplies `gap`.
 pub(crate) fn after_buttons(ui: &mut egui::Ui, margin: f32, gap: f32) {
     ui.add_space((margin - gap).max(0.0));
 }
 
-/// Whether the window is maximized now, as the last frame's viewport reported
-/// it. **Read, not remembered**: a snap, Win+↑ or a drag off a maximized
-/// window all change it without passing through a button here.
+/// Whether the window is maximized, as the last frame's viewport reported it.
+/// Read, not remembered: a snap or Win+↑ changes it without passing a button here.
 fn maximized(ctx: &egui::Context) -> bool {
     ctx.input(|i| i.viewport().maximized.unwrap_or(false))
 }
 
-/// **The strip a top bar is dragged by**, laid behind the bar's own widgets:
-/// call it first in the bar, with the bar's whole rectangle. A press-drag on
-/// any part of the bar that no widget answers starts the system's move loop,
-/// and a double-click maximizes or restores — on every host, macOS included,
-/// where the bar runs under the transparent title bar.
+/// **The strip a top bar is dragged by**, laid behind the bar's widgets: call it
+/// first in the bar, with the bar's whole rectangle. A press-drag on any part no
+/// widget answers starts the system's move loop; a double-click maximizes or
+/// restores, on every host.
 ///
-/// **First, so it is underneath.** egui gives a press to the last widget
-/// registered under the pointer, so everything the bar adds after this —
-/// buttons, the breadcrumb, menus — keeps its own clicks, and only the empty
-/// parts and plain labels (which sense hover, not clicks, since labels are not
-/// selectable here) fall through to the strip.
+/// It goes first so it is underneath: egui gives a press to the last widget
+/// registered under the pointer, so only empty parts and plain labels fall
+/// through to it.
 ///
-/// ⚠️ **Underneath is not enough for a drag, and the strip arms itself on the
-/// press.** egui's hit test hands a *click*-only widget the click and the large
-/// drag-sensing thing beneath it the drag — the shape of a button over a scroll
-/// area — so a press on a bar button that then moved dragged the window, which
-/// no system caption does. So the press arms the strip only when nothing else
-/// interactive is under the pointer (`armed`), and a drag starts the window's
-/// move only from an armed press.
+/// Underneath is not enough for a drag: egui hands a click-only widget the click
+/// and the drag-sensing widget beneath it the drag, so a press on a bar button
+/// that then moved would drag the window. The press therefore arms the strip
+/// only when nothing else interactive is under the pointer (`armed`), and a drag
+/// starts the move only from an armed press.
 ///
-/// **`act` false makes it inert for the frame** — sensing, so it still stands
-/// under the bar's widgets, and sending nothing. The library passes
-/// `!menu_was_up`: a click that dismisses one of its menus is spent doing so
-/// (§15 D558, D973), and a double-click that closed a menu with its first half
-/// would otherwise maximize the window with its second.
+/// `act` false makes it inert for the frame (still sensing, sending nothing): a
+/// click that dismisses a menu is spent doing so, and a double-click that closed
+/// a menu with its first half must not maximize with its second.
 pub(crate) fn drag_strip(ui: &mut egui::Ui, rect: Rect, act: bool) {
     strip(ui, rect, act, Id::new("window-drag-strip"));
 }
 
-/// [`drag_strip`] under `id` — its own, or [`above_modal`]'s, which lays a
-/// second strip in the same pass and must not clash with the first.
+/// [`drag_strip`] under `id`; [`above_modal`] lays a second strip in the same
+/// pass under its own id.
 fn strip(ui: &mut egui::Ui, rect: Rect, act: bool, id: Id) {
     let strip = ui.interact(rect, id, POINTER_ONLY);
     let ctx = ui.ctx().clone();
-    // Where this pass's bar is, for `above_modal`, which lays the same strip
-    // and buttons again over a card's backdrop. Read into a local first: two
-    // `Context` accessors nested deadlock (CLAUDE.md).
+    // Notes this pass's bar for `above_modal`. The pass is read into a local
+    // first: nested `Context` accessors deadlock.
     let pass = ctx.cumulative_pass_nr();
     ctx.data_mut(|d| d.insert_temp(bar_key(), (rect, pass)));
-    // The last press, as `(armed, spent, the press before it was spent)`:
-    // armed when it was on the strip over nothing else that answers a press,
-    // spent when `act` was false.
+    // The last press as `(armed, spent, the press before it was spent)`: armed
+    // when over nothing else that answers a press, spent when `act` was false.
     let press_key = id.with("press");
     let pressed = ctx.input(|i| i.pointer.primary_pressed());
     if pressed && (strip.contains_pointer() || !act) {
@@ -252,11 +219,9 @@ fn strip(ui: &mut egui::Ui, rect: Rect, act: bool, id: Id) {
         d.get_temp::<(bool, bool, bool)>(press_key)
             .unwrap_or_default()
     });
-    // ⚠️ **Neither press of a double-click spent**, not only the second: the
-    // first may be the one a menu was dismissed by, and then the pair is not a
-    // double-click on the bar but a dismissal and a click. Counted by
-    // `ui::double_clicked` rather than egui, so a click somewhere else just
-    // before does not turn the pair into a triple (§15 D986).
+    // Neither press of a double-click may be spent: if the first dismissed a
+    // menu, the pair is a dismissal and a click. `ui::double_clicked` counts
+    // them, so a click elsewhere just before does not make a triple.
     if crate::ui::double_clicked(ui, &strip) {
         if !spent && !spent_before {
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized(&ctx)));
@@ -266,8 +231,7 @@ fn strip(ui: &mut egui::Ui, rect: Rect, act: bool, id: Id) {
     }
 }
 
-/// The key `drag_strip` notes its rectangle under, with the pass it was laid
-/// in.
+/// The key `drag_strip` notes its rectangle and pass under.
 fn bar_key() -> Id {
     Id::new("window-drag-strip").with("rect")
 }
@@ -284,22 +248,17 @@ pub(crate) fn note_card(ctx: &egui::Context, rect: Rect) {
     ctx.data_mut(|d| d.insert_temp(card_key(), (rect, pass)));
 }
 
-/// **The window's own controls, over a modal card's backdrop** (§15 D973,
-/// `[X2-L1-02]`). Call once a frame, after every card.
+/// **The window's own controls, over a modal card's backdrop.** Call once a
+/// frame, after every card.
 ///
-/// `egui::Modal` refuses interaction to every layer below its own, and the
-/// top bar is a panel and the resize zones older areas — so while any card
-/// was up, the caption buttons, the drag strip and the resize edges were dead,
-/// and the mouse could not move, resize, minimize, maximize or close the
-/// window. The system's frame, which these stand in for, is never blocked by an
-/// app's own dialog. So with a card drawn this pass the zones are raised above
-/// it, and the bar's strip and buttons are laid again in an area of their own
-/// on top — **unless the card reaches into the bar**, on a window short enough
-/// for a tall card to, where the card's own top edge wins.
+/// `egui::Modal` blocks every layer below its own, which would kill the caption
+/// buttons, drag strip and resize edges while a card is up; the system's frame
+/// is never blocked by an app dialog. So with a card drawn this pass the zones
+/// are raised above it and the bar's strip and buttons are laid again in an area
+/// on top — unless the card reaches into the bar, where the card's edge wins.
 ///
-/// **Close is still a close request**, so with *Unsaved changes* up a click on
-/// ✕ re-arms that same card rather than closing anything
-/// (`OndinApp::handle_close_request`).
+/// Close is still a close request, so with *Unsaved changes* up a click on ✕
+/// re-arms that card (`OndinApp::handle_close_request`).
 pub(crate) fn above_modal(ctx: &egui::Context, chrome: Chrome) {
     let pass = ctx.cumulative_pass_nr();
     let card = ctx.data(|d| d.get_temp::<(Rect, u64)>(card_key()));
@@ -324,17 +283,11 @@ pub(crate) fn above_modal(ctx: &egui::Context, chrome: Chrome) {
                         caption_buttons(ui, chrome, true);
                     },
                 );
-                // ⚠️ **The zones' share of the bar, again, in this area and
-                // after the strip and buttons**, so they win there as they do
-                // with no card. Laid only in the separate zone areas, the
-                // lifted strip covered the top edge, both top corners and the
-                // sides down to the bar's height, and a press there moved the
-                // window instead of resizing it (found by `arch-scribe` reading
-                // this, §15 D973). Raising the zone areas *after* this one does
-                // not fix it: egui keeps the layers asking to be on top in a
-                // hash set and sorts stably, so among them the order is their
-                // age, never the order of the `move_to_top` calls — measured,
-                // the first repair of this was green in no test.
+                // The zones' share of the bar is laid again here, after the
+                // strip and buttons, so they win as they do with no card.
+                // Raising the zone areas after this one would not do: egui
+                // orders layers asking to be on top by age, not by the order
+                // of the `move_to_top` calls.
                 if chrome.draws_own_resize_border() && !maximized(ctx) {
                     for (i, (direction, rect)) in zones(ctx.content_rect()).into_iter().enumerate()
                     {
@@ -347,8 +300,7 @@ pub(crate) fn above_modal(ctx: &egui::Context, chrome: Chrome) {
             });
         ctx.move_to_top(egui::LayerId::new(Order::Foreground, id));
     }
-    // And every zone above the card, which is what lets the edges below the
-    // bar resize the window at all with a card up.
+    // Every zone above the card, so the edges below the bar still resize.
     if chrome.draws_own_resize_border() && !maximized(ctx) {
         for (i, (direction, _)) in zones(ctx.content_rect()).iter().enumerate() {
             ctx.move_to_top(egui::LayerId::new(
@@ -359,26 +311,22 @@ pub(crate) fn above_modal(ctx: &egui::Context, chrome: Chrome) {
     }
 }
 
-/// **Minimize, maximize or restore, and close**, for the right end of a top
-/// bar laid out `right_to_left` — so they are added close-first, and read
-/// minimize, maximize, close on screen. Each is the bar's full height and
-/// [`CONTROL_W`] wide, flush against the window's right edge, with no margin
-/// beyond it: the corner is where a pointer thrown at "close" lands.
+/// **Minimize, maximize or restore, and close**, for the right end of a
+/// `right_to_left` top bar, so added close-first. Each is the bar's full height
+/// and [`CONTROL_W`] wide, flush against the window's right edge: the corner is
+/// where a pointer thrown at "close" lands. Nothing on a host that keeps its own
+/// ([`Chrome::draws_own_controls`]).
 ///
-/// Nothing on a host that keeps its own ([`Chrome::draws_own_controls`]).
+/// Close sends [`egui::ViewportCommand::Close`], the system button's request, so
+/// unsaved work is asked about via `handle_close_request` as for Alt+F4.
 ///
-/// **Close sends [`egui::ViewportCommand::Close`]**, which is the same request
-/// the system's button makes, so it passes through `handle_close_request` and
-/// unsaved work is asked about exactly as it is for Alt+F4.
-///
-/// **`act` false draws them and sends nothing** — [`drag_strip`]'s `act`, for
-/// the same click that dismisses a menu (§15 D973, `[R1-L2-02]`).
+/// `act` false draws them and sends nothing, as [`drag_strip`]'s `act`.
 pub(crate) fn caption_buttons(ui: &mut egui::Ui, chrome: Chrome, act: bool) {
     if !chrome.draws_own_controls() {
         return;
     }
-    // Touching, as the system's are: in a scope of their own, so the bar's item
-    // spacing neither separates them nor is changed for what follows.
+    // Touching, as the system's are: in a scope, so the bar's item spacing is
+    // neither applied to them nor changed for what follows.
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         three_buttons(ui, act);
@@ -454,30 +402,22 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
     }
 }
 
-/// **Present mode's way to the window's buttons** (§15 D958): a slim strip
-/// across the top of the window — the drag strip and the three caption buttons
-/// over the top bar's fill — shown while the pointer is at the window's top
-/// edge and for as long as it stays on the strip. Call once a frame while
-/// present mode is on.
+/// **Present mode's way to the window's buttons**: a slim strip across the top —
+/// the drag strip and caption buttons over the top bar's fill — shown while the
+/// pointer is at the top edge and for as long as it stays on the strip. Call
+/// once a frame while present mode is on.
 ///
-/// Present mode hides the top bar, and on a host that draws its own controls
-/// the top bar *is* the title bar: without this the window could not be
-/// closed, moved, maximized or minimized with the mouse until Escape. Nothing
-/// on macOS ([`Chrome::draws_own_controls`]), whose traffic lights are the
-/// system's and stay on screen.
+/// Present mode hides the top bar, which on a host that draws its own controls
+/// is the title bar. Nothing on macOS ([`Chrome::draws_own_controls`]).
 ///
-/// **Revealed only from the edge, and only with no button held.** Coming back
-/// down to the strip's height from below shows nothing — the canvas under it
-/// is artwork somebody is working on — and a drag that carries a shape up to
-/// the top of the screen must not open a strip over it. Once out, a held
-/// button keeps it out, so a press on a caption button that strays off the
-/// strip before the release does not take the button away from under it.
+/// Revealed only from the edge, and only with no button held: a drag carrying a
+/// shape to the top of the screen must not open a strip over it. Once out, a
+/// held button keeps it out, so a press that strays off the strip keeps its
+/// button.
 ///
-/// ⚠️ **[`Order::Middle`], not [`Order::Foreground`]**, which is the layer the
-/// resize zones are on ([`resize_zones`]). The strip is above the canvas and
-/// below the zones, as the top bar is: with the strip on top, the edge that
-/// reveals it would have been the edge the window could no longer be resized
-/// from, since reaching it is what puts the strip there.
+/// Its layer is [`Order::Middle`], not [`Order::Foreground`] where the resize
+/// zones are ([`resize_zones`]): on top, the edge that reveals the strip could
+/// no longer resize the window.
 pub(crate) fn present_strip(ctx: &egui::Context, chrome: Chrome) {
     if !chrome.draws_own_controls() {
         return;
@@ -501,8 +441,7 @@ pub(crate) fn present_strip(ctx: &egui::Context, chrome: Chrome) {
         .fixed_pos(strip.min)
         .constrain(false)
         .show(ctx, |ui| {
-            // The whole strip is the area's, so the canvas never sees a pointer
-            // that is over any part of it.
+            // The whole strip is the area's, so the canvas never sees the pointer.
             ui.set_min_size(strip.size());
             ui.painter().rect_filled(strip, 0.0, color::TOPBAR);
             ui.painter().hline(
@@ -528,26 +467,19 @@ fn snap(p: Pos2) -> Pos2 {
     Pos2::new(p.x.floor() + 0.5, p.y.floor() + 0.5)
 }
 
-/// The zones a window is resized from, as `(direction, rect)` within the
-/// window's `screen`: four edges [`EDGE`] deep, each stopping [`CORNER`] short of
-/// its ends, and four corners, each an **L** of two [`EDGE`]-deep arms
-/// [`CORNER`] long.
+/// The zones a window is resized from, as `(direction, rect)` within `screen`:
+/// four edges [`EDGE`] deep, each stopping [`CORNER`] short of its ends, and four
+/// corners, each an **L** of two [`EDGE`]-deep arms [`CORNER`] long.
 ///
-/// ⚠️ **Two rectangles per corner, because an L is not a rectangle** (§15 D973,
-/// `[X2-L3-01]`). Each corner was written `a.union(b)` — read as an L, and the
-/// tests' prose said so — but `Rect::union` is the bounding box, so every
-/// corner was a full 14-point square and its inner 9×9 resized the window: a
-/// press 7 points in from the top-right corner, on the close button, began a
-/// north-east resize. Ruled an L under the maintainer's delegation: the corner
-/// a thrown pointer lands on is the close button's, and the thickness of the
-/// frame it stands in for is [`EDGE`], not [`CORNER`].
+/// Two rectangles per corner, because `Rect::union` is a bounding box, not an L:
+/// a full square would let a press on the close button begin a resize.
 fn zones(screen: Rect) -> [(ResizeDirection, Rect); 12] {
     let (l, t, r, b) = (screen.min.x, screen.min.y, screen.max.x, screen.max.y);
     let rect = |x0: f32, y0: f32, x1: f32, y1: f32| {
         Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1))
     };
-    // Each corner's horizontal arm takes the square where the arms meet, and
-    // its vertical arm starts below it, so no point is in both.
+    // Each corner's horizontal arm takes the square where the arms meet; the
+    // vertical arm starts below it, so no point is in both.
     use ResizeDirection::{NorthEast, NorthWest, SouthEast, SouthWest};
     [
         (
@@ -577,8 +509,7 @@ fn zones(screen: Rect) -> [(ResizeDirection, Rect); 12] {
     ]
 }
 
-/// The area id of the `i`th of [`zones`] — by index as well as direction,
-/// since each corner direction names two areas.
+/// The area id of the `i`th of [`zones`]; each corner direction names two areas.
 fn zone_id(i: usize, direction: ResizeDirection) -> Id {
     Id::new(("window-resize", i, format!("{direction:?}")))
 }
@@ -596,21 +527,16 @@ fn cursor(direction: ResizeDirection) -> CursorIcon {
     }
 }
 
-/// **The edges and corners the window is resized from**, on a host whose
-/// window has no sizing frame of its own ([`Chrome::draws_own_resize_border`]).
-/// Call once a frame, from either screen.
+/// **The edges and corners the window is resized from**, on a host whose window
+/// has no sizing frame ([`Chrome::draws_own_resize_border`]). Call once a frame.
 ///
-/// Each zone is an [`egui::Area`] of its own on [`Order::Foreground`], so it is
-/// above every panel and the canvas and takes the press there; and only the
-/// zone's own rectangle — **never one area over the whole window**, which would
-/// take every press in the app. A press starts the system's resize loop
-/// ([`egui::ViewportCommand::BeginResize`]), which needs the button still down,
-/// so it is sent on the press and not on a drag that egui recognises later.
+/// Each zone is an [`egui::Area`] on [`Order::Foreground`], above every panel
+/// and the canvas; never one area over the whole window, which would take every
+/// press. A press sends [`egui::ViewportCommand::BeginResize`], which needs the
+/// button still down, so it goes on the press, not on a later recognised drag.
 ///
-/// ⚠️ **None while the window is maximized.** There is nothing to resize from
-/// then — the system ignores the request — and a zone left standing would take
-/// the top five points of the caption buttons and the close button's corner,
-/// the one place in the window a thrown pointer is meant to land.
+/// None while maximized: the system ignores the request, and a standing zone
+/// would take the top of the caption buttons and the close button's corner.
 pub(crate) fn resize_zones(ctx: &egui::Context, chrome: Chrome) {
     if !chrome.draws_own_resize_border() || maximized(ctx) {
         return;
@@ -628,9 +554,8 @@ pub(crate) fn resize_zones(ctx: &egui::Context, chrome: Chrome) {
     }
 }
 
-/// One resize zone's behaviour, on the response of whatever senses it: the
-/// direction's cursor on hover, and the system's resize loop on the press —
-/// sent on the press, because `BeginResize` needs the button still down.
+/// One resize zone's behaviour: the direction's cursor on hover, and the
+/// system's resize loop on the press.
 fn zone_acts(ui: &egui::Ui, resp: egui::Response, direction: ResizeDirection) {
     let resp = resp.on_hover_cursor(cursor(direction));
     if resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
@@ -642,12 +567,11 @@ fn zone_acts(ui: &egui::Ui, resp: egui::Response, direction: ResizeDirection) {
 #[cfg(test)]
 mod tests {
     //! Plain backticks in this module's prose: `cargo doc` cannot see a
-    //! `cfg(test)` module, so a link here is checked by nothing (§15 D319).
+    //! `cfg(test)` module, so a link here is checked by nothing.
     use super::*;
 
-    /// **Each host asks for its own window**: macOS keeps its decorations and
-    /// traffic lights under a transparent title bar; Windows and Linux open
-    /// undecorated. Every host carries the app id.
+    /// Each host opens its own window: macOS keeps decorations under a
+    /// transparent title bar, Windows and Linux open undecorated, all with the app id.
     #[test]
     fn each_host_opens_the_window_it_draws_around() {
         let mac = Chrome::of(Host::MacOs).viewport(egui::ViewportBuilder::default());
@@ -662,9 +586,8 @@ mod tests {
         }
     }
 
-    /// **The capabilities agree with each other**: a host that draws its own
-    /// buttons draws its own resize border and needs no leading inset; macOS
-    /// the reverse.
+    /// A host that draws its own buttons also draws its resize border and needs
+    /// no leading inset; macOS the reverse.
     #[test]
     fn the_capabilities_agree_per_host() {
         for host in [Host::Windows, Host::Linux] {
@@ -677,18 +600,10 @@ mod tests {
         assert!(mac.leading_inset() > 50.0, "clear of the traffic lights");
     }
 
-    /// **The zones cover the frame and contest no point**: every edge is
-    /// `EDGE` deep, each corner an L of two `EDGE`-deep arms `CORNER` long, and
-    /// no two zones overlap — so a press has one answer — while every point of
-    /// the window's border belongs to one of them.
-    ///
-    /// **And the L is an L** (§15 D973, `[X2-L3-01]`): the inside of the
-    /// corner, 8 points in from both edges, is nobody's — on the top right that
-    /// is the close button. The corners were `Rect::union`s, which are bounding
-    /// boxes, and this test sampled only the border, so a square passed it.
-    /// **Flip-check, run**: each corner back to the square
-    /// `rect(r - CORNER, t, r, t + CORNER)` and its vertical arm dropped fails
-    /// on *"the inside of the top-right corner"*.
+    /// The zones overlap nowhere, cover every point of the window's border, and
+    /// each corner is an L: its inside, 8 points in from both edges, is nobody's.
+    /// flip: a corner back to the square `rect(r - CORNER, t, r, t + CORNER)`
+    /// with its vertical arm dropped → fails at "the inside of the top-right corner".
     #[test]
     fn the_resize_zones_tile_the_border() {
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
@@ -737,11 +652,9 @@ mod tests {
     const SCREEN: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(800.0, 600.0));
     const BAR: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(800.0, 46.0));
 
-    /// One frame of a bar laid as the app lays one — the drag strip first, the
-    /// caption buttons at the right end of a `right_to_left` row with the app's
-    /// own 5-point spacing — and the resize zones, with `events` delivered and
-    /// the window reported `maximized` or not. Returns the viewport commands
-    /// the frame sent.
+    /// One frame of a bar laid as the app lays one (drag strip first, caption
+    /// buttons in a `right_to_left` row with 5-point spacing) plus the resize
+    /// zones, with `events` delivered. Returns the viewport commands sent.
     fn frame(
         ctx: &egui::Context,
         events: Vec<egui::Event>,
@@ -750,9 +663,8 @@ mod tests {
         frame_with(ctx, events, maximized, true, None)
     }
 
-    /// `frame` with the bar's `act`, and with `card` — `Some(lifted)` puts a
-    /// modal card up after the bar, through `settings::card` as every card in
-    /// the app goes, and then calls `above_modal` when `lifted`.
+    /// `frame` with the bar's `act` and `card`: `Some(lifted)` puts a modal card
+    /// up through `settings::card`, then calls `above_modal` when `lifted`.
     fn frame_with(
         ctx: &egui::Context,
         events: Vec<egui::Event>,
@@ -813,8 +725,7 @@ mod tests {
         }
     }
 
-    /// A click at `at`, over the frames egui needs to see one; every command
-    /// those frames sent.
+    /// A click at `at` over the frames egui needs; every command sent.
     fn click(ctx: &egui::Context, at: Pos2, maximized: bool) -> Vec<egui::ViewportCommand> {
         let mut sent = frame(ctx, vec![egui::Event::PointerMoved(at)], maximized);
         sent.extend(frame(ctx, vec![press(at, true)], maximized));
@@ -830,17 +741,12 @@ mod tests {
         ctx
     }
 
-    /// **The three buttons sit flush right, touching, and each sends its own
-    /// command**: close at 754–800 sends `Close` — the system's request, which
-    /// the app's close interception answers — maximize at 708–754 sends
-    /// `Maximized(true)`, or `Maximized(false)` once the window reports itself
-    /// maximized, and minimize at 662–708 sends `Minimized(true)`.
-    ///
-    /// **Flip run**, the buttons left in the bar's 5-point spacing (the scope
-    /// in `caption_buttons` removed): fails on *"minimize"*, the press at 705
-    /// sending `Maximized(true)`. A first draft pressed at 663, inside minimize
-    /// either way, and that flip passed — the press has to sit where the two
-    /// layouts disagree.
+    /// The three buttons sit flush right, touching, each sending its own command:
+    /// close (754–800) `Close`, maximize (708–754) `Maximized(true)` or
+    /// `Maximized(false)` when maximized, minimize (662–708) `Minimized(true)`.
+    /// flip: the buttons left in the bar's 5-point spacing (the scope in
+    /// `caption_buttons` removed) → fails at "minimize"; the press at 705 must
+    /// sit where the two layouts disagree.
     #[test]
     fn each_caption_button_sends_its_command() {
         use egui::ViewportCommand as C;
@@ -877,16 +783,11 @@ mod tests {
         );
     }
 
-    /// **The empty bar drags the window and a double-click on it maximizes**,
-    /// while a press on a widget in the bar does neither.
-    ///
-    /// **Flip run**, the strip's arming ignored (a drag starts the move from any
-    /// press): fails on *"a press-drag on a button is the button's"* with
-    /// `[StartDrag]` — the predicted site, and the defect the first draft had:
-    /// egui gives a click-only button the click and the strip beneath it the
-    /// drag. And the strip reading egui's `Response::double_clicked` again fails
-    /// *"a double-click just after a click elsewhere"* with nothing sent — §15
-    /// D986's case, on the bar.
+    /// The empty bar drags the window and a double-click on it maximizes; a press
+    /// on a widget in the bar does neither.
+    /// flip: the strip's arming ignored → fails at "a press-drag on a button is
+    /// the button's"; the strip reading egui's `Response::double_clicked` → fails
+    /// at "a double-click just after a click elsewhere".
     #[test]
     fn the_empty_bar_drags_and_double_clicks_maximize() {
         use egui::ViewportCommand as C;
@@ -906,11 +807,8 @@ mod tests {
             "drags: {sent:?}"
         );
 
-        // ⚠️ **The pointer arrives first.** egui gives a press to the widgets it
-        // knew last pass, so a press with no move before it is nobody's click; its
-        // own count is global and never cared, but `ui::double_clicked` counts the
-        // clicks a widget asked about (§15 D986), and a hand is always over the
-        // bar before it clicks.
+        // The pointer arrives first: egui gives a press to the widgets it knew
+        // last pass, and `ui::double_clicked` counts only clicks a widget asked about.
         let ctx = fresh();
         let mut sent = frame(&ctx, vec![egui::Event::PointerMoved(at)], false);
         for _ in 0..2 {
@@ -919,8 +817,7 @@ mod tests {
         }
         assert!(sent.contains(&C::Maximized(true)), "double-click: {sent:?}");
 
-        // **A click elsewhere on the bar, then a fast double-click** (§15 D986):
-        // egui 0.35 counts the pair's second release a triple off the first click
+        // A click elsewhere, then a fast double-click: egui 0.35 counts a triple
         // and answers `double_clicked()` false; the app's own count does not.
         let ctx = fresh();
         let elsewhere = Pos2::new(100.0, 23.0);
@@ -958,13 +855,9 @@ mod tests {
         );
     }
 
-    /// **A press on the window's edge starts the system's resize, in the edge's
-    /// direction — and only while the window is not maximized**, when the zone
-    /// would otherwise sit over the close button's corner.
-    ///
-    /// **Flip run**, the zones kept while maximized: fails on *"none while
-    /// maximized"*, the corner's press a `BeginResize(NorthEast)` — the
-    /// predicted site.
+    /// A press on the window's edge starts the system's resize in the edge's
+    /// direction, only while not maximized.
+    /// flip: the zones kept while maximized → fails at "none while maximized".
     #[test]
     fn a_press_on_the_edge_resizes_unless_maximized() {
         use egui::ViewportCommand as C;
@@ -990,9 +883,8 @@ mod tests {
         assert!(sent.contains(&C::Close), "and the corner is close's again");
     }
 
-    /// One frame of present mode as the app draws it: a canvas over the whole
-    /// window, the resize zones and the strip, with `events` delivered. Returns
-    /// the viewport commands the frame sent and whether the canvas was clicked.
+    /// One frame of present mode: a canvas over the whole window, the resize
+    /// zones and the strip. Returns the commands sent and whether the canvas was clicked.
     fn present_frame(
         ctx: &egui::Context,
         events: Vec<egui::Event>,
@@ -1028,8 +920,7 @@ mod tests {
         (sent, canvas)
     }
 
-    /// The pointer moved through `path`, then a click at its last point;
-    /// every command sent, and whether the canvas took a click.
+    /// The pointer moved through `path`, then a click at its last point.
     fn present_click(
         ctx: &egui::Context,
         path: &[Pos2],
@@ -1056,17 +947,12 @@ mod tests {
         ctx
     }
 
-    /// **Present mode's strip comes out at the top edge, and its close button
-    /// closes** — and only from the edge: a pointer that arrives at the
-    /// strip's height from the canvas below finds the canvas there, and one
-    /// that has left the strip has hidden it.
-    ///
-    /// **Flip run**, revealed from anywhere on the strip (`strip.contains(p)`
-    /// for the edge band in the unrevealed arm): fails on *"the canvas keeps
-    /// its click there"*. Predicted on *"not from below"* and wrong — the strip
-    /// came out under the pointer and took the press from the canvas, but no
-    /// `Close` arrived in the frames this test pumps. So it is the canvas
-    /// assertion that has the teeth for this case, not the command one.
+    /// Present mode's strip comes out only at the top edge and its close button
+    /// closes; a pointer arriving from the canvas below finds the canvas, and one
+    /// that left the strip has hidden it.
+    /// flip: revealed from anywhere on the strip (`strip.contains(p)` in the
+    /// unrevealed arm) → fails at "the canvas keeps its click there", not at
+    /// "not from below".
     #[test]
     fn the_present_strip_comes_out_at_the_top_edge_and_closes() {
         use egui::ViewportCommand as C;
@@ -1088,12 +974,8 @@ mod tests {
         assert!(!sent.contains(&C::Close), "left, and hidden: {sent:?}");
     }
 
-    /// **A drag carried to the top of the window brings nothing out**: the
-    /// strip is for a pointer at rest, and a shape dragged up to the edge must
-    /// not have a strip opened over it.
-    ///
-    /// **Flip run**, the `!down` dropped from the reveal: fails at the
-    /// assertion, the strip out under the held button — the predicted site.
+    /// A drag carried to the top of the window brings no strip out.
+    /// flip: the `!down` dropped from the reveal → fails at the assertion.
     #[test]
     fn a_held_button_does_not_bring_the_strip_out() {
         let ctx = fresh_present();
@@ -1111,13 +993,9 @@ mod tests {
         assert_eq!(out, Some(false), "a held button reveals nothing");
     }
 
-    /// **The edge that reveals the strip still resizes the window**, because
-    /// the strip is on a layer beneath the resize zones — and a maximized
-    /// window, which has no zones, gives the edge to the strip.
-    ///
-    /// **Flip run**, the strip on `Order::Foreground` beside the zones: fails
-    /// on *"the top edge resizes"*, the strip newer on that layer and so on top
-    /// of the zone — the predicted site.
+    /// The edge that reveals the strip still resizes the window, the strip being
+    /// beneath the zones; a maximized window gives the edge to the strip.
+    /// flip: the strip on `Order::Foreground` → fails at "the top edge resizes".
     #[test]
     fn the_top_edge_still_resizes_under_the_strip() {
         use egui::ViewportCommand as C;
@@ -1138,8 +1016,7 @@ mod tests {
         assert!(!canvas);
     }
 
-    /// A click at `at` over the frames egui needs, with the bar's `act` and a
-    /// `card` as `frame_with` takes them.
+    /// A click at `at` with the bar's `act` and a `card` as `frame_with` takes them.
     fn click_with(
         ctx: &egui::Context,
         at: Pos2,
@@ -1153,25 +1030,16 @@ mod tests {
         sent
     }
 
-    /// **A modal card leaves the window's controls working** (§15 D973,
-    /// `[X2-L1-02]`): close, maximize and the west edge each send their command
-    /// with a card up, where `egui::Modal`'s refusal of every layer beneath it
-    /// had left all three dead.
-    ///
-    /// **Flip-check, run**: the card without `above_modal` (`Some(false)`) is
-    /// the control, and it sends nothing — asserted below, so a harness that
-    /// stopped putting a card up would fail here rather than pass vacuously.
-    /// And without the zones laid again inside the lifted area (the `zone`
-    /// widgets in `above_modal`), it fails on the top edge, `[400.0 1.0]`
-    /// sending nothing — the strip takes the press. That is also how the
-    /// first draft failed, which raised the zone areas after the lifted one
-    /// and could not order them by doing so.
+    /// With a card up, close, maximize and the edges still send their commands.
+    /// The card without `above_modal` (`Some(false)`) is the control and sends
+    /// nothing, so a harness that stopped raising a card fails rather than passes.
+    /// flip: the zones not laid again inside the lifted area of `above_modal` →
+    /// fails at the top edge `[400.0 1.0]`, which sends nothing.
     #[test]
     fn a_modal_card_leaves_the_windows_controls_working() {
         use egui::ViewportCommand as C;
-        // The top edge, a top corner and a side within the bar's height are
-        // where the lifted strip and buttons overlap the zones, and the zones
-        // must win there as they do with no card.
+        // The top edge, a top corner and a side within the bar's height are where
+        // the lifted strip overlaps the zones; the zones must win.
         let cases = [
             (Pos2::new(790.0, 23.0), C::Close),
             (Pos2::new(731.0, 23.0), C::Maximized(true)),
@@ -1202,13 +1070,10 @@ mod tests {
         }
     }
 
-    /// **A click that dismisses a menu is spent doing so** (§15 D558, D973,
-    /// `[R1-L2-02]`): with `act` false the caption buttons send nothing, and a
-    /// double-click whose first press was spent maximizes nothing.
-    ///
-    /// **Flip-check, run**: `three_buttons` ignoring `act` fails on *"close"*;
-    /// `strip` ignoring the earlier spent press fails on *"a dismissal and a
-    /// click"* with `[Maximized(true)]`.
+    /// With `act` false the caption buttons send nothing, and a double-click
+    /// whose first press was spent maximizes nothing.
+    /// flip: `three_buttons` ignoring `act` → fails at "close"; `strip` ignoring
+    /// the earlier spent press → fails at "a dismissal and a click".
     #[test]
     fn a_spent_click_moves_no_window() {
         use egui::ViewportCommand as C;
@@ -1218,8 +1083,7 @@ mod tests {
         let sent = click_with(&ctx, Pos2::new(731.0, 23.0), false, None);
         assert!(!sent.contains(&C::Maximized(true)), "maximize: {sent:?}");
 
-        // A press that dismissed a menu, then one that did not, quickly enough
-        // to be a double-click on the empty bar.
+        // A press that dismissed a menu, then one that did not, fast enough for a double-click.
         let ctx = fresh();
         let at = Pos2::new(300.0, 23.0);
         let mut sent = frame_with(

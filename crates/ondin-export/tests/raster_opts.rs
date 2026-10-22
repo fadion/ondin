@@ -184,23 +184,10 @@ fn a_trim_of_an_empty_subject_is_a_no_op() {
 }
 
 /// Pad squares the result on its longer side, centred, and the padding takes the
-/// background like everything else — one composite pass covers both.
-///
-/// 🚨 **Both orientations, and only one of them was here** (§15 D655,
-/// `[S8.3-L6-11]`). The fixture is 100 × 50, so `side == r.width` and
-/// `padded_square`'s `dx` is **0 in every run** — the three samples are one column
-/// at three rows, which pins `dy` and says nothing whatever about `dx`. Replacing
-/// `let dx = ((side - r.width) / 2) as usize` with `let dx = 0` left this test
-/// green, and `trim_runs_before_pad` too, since that one asserts only the size. A
-/// **tall** subject then pads left-aligned instead of centred, which is exactly
-/// the property `padded_square`'s own doc claims: *"an icon set padded this way is
-/// consistent with itself, which is the point"*. CLAUDE.md's first vacuity shape —
-/// *it asserted one of two boundaries* — the two boundaries here being the two
-/// orientations a pad can have.
-///
-/// ⚠️ **Flip run**, `dx = 0`, and the predicted site was right: the tall case's
-/// *padding to the left*, red where grey was wanted — the first sample the
-/// mutation moves ink into. The eight other tests in the file stay green.
+/// background — one composite pass covers both. Both orientations: a wide subject
+/// pins `padded_square`'s `dy` only, a tall one its `dx`.
+/// flip: `let dx = 0` in `padded_square` → fails at the tall case's padding to the
+/// left.
 #[test]
 fn a_pad_squares_the_result_and_takes_the_background() {
     let (doc, res, _, rect) = frame_with_a_small_rect();

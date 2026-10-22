@@ -126,7 +126,7 @@ pub fn raster_of_with(
         r = trimmed(r);
     }
     if opts.pad_square {
-        r = padded_square(r, opts.background);
+        r = padded_square(r);
     }
     if let Some(bg) = opts.background {
         composite_under(&mut r, bg);
@@ -176,7 +176,7 @@ fn trimmed(r: Raster) -> Raster {
 /// Centre the raster in a square of its longer side.
 ///
 /// Biased to the left/top on an odd remainder.
-fn padded_square(r: Raster, _fill: Option<ondin_core::peniko::Color>) -> Raster {
+fn padded_square(r: Raster) -> Raster {
     let side = r.width.max(r.height);
     if side == r.width && side == r.height {
         return r;

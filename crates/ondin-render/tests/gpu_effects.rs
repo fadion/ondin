@@ -3,10 +3,8 @@
 //!
 //! `tests/fx_gpu.rs` proves the passes match the CPU reference over a buffer this
 //! file never builds; `tests/effects.rs` proves the CPU path draws the right
-//! picture. Neither says the two are *wired together* — that the walk opens a
-//! layer, that the sub-scene rasterizes into it, that the filtered texture lands
-//! back in the page at the right place. That wiring is what drew nothing at all
-//! until 2026-08-25, and this is what says it draws now.
+//! picture. This file proves the wiring: the walk opens a layer, the sub-scene
+//! rasterizes into it, and the filtered texture lands back in the page.
 //!
 //! `#[ignore]` like the rest of the on-device suite: CI has no adapter. Run with
 //! `cargo test -p ondin-render --test gpu_effects -- --ignored`.
@@ -71,9 +69,8 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: VelloGpuRenderer,
-    /// Held for the test's life: the tests take the adapter one at a time.
-    /// Run in parallel, devices made side by side hung the suite intermittently
-    /// (two runs in five), and the gate's spelling is the plain `--ignored`.
+    /// Held for the test's life: devices made side by side hung the suite
+    /// intermittently, so the tests take the adapter one at a time.
     _one_at_a_time: Serial,
 }
 
@@ -252,13 +249,9 @@ fn red_shadow(dy: f64, blur: f64) -> Effect {
     }))
 }
 
-/// **The canvas draws the shadow.** Until 2026-08-25 it drew the layer plainly —
-/// `ScenePainter::push_effect_layer`'s default — so the whole of what this asserts
-/// is that a stack authored in the panel reaches the screen.
-///
-/// The three claims are the CPU test's, re-asked of the other backend: the shadow
-/// exists, it is its own colour rather than the layer's, and it is on the side the
-/// offset points at.
+/// The canvas draws the shadow: it exists, is its own colour rather than the
+/// layer's, and is on the side the offset points at (the CPU test's claims, asked
+/// of this backend).
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_canvas_draws_a_drop_shadow() {
@@ -288,7 +281,7 @@ fn the_canvas_draws_a_drop_shadow() {
 }
 
 /// `n` photographs of `w`×`h`, each on its own 25 × 25 rect, laid out along the
-/// top of the page — the finding's own fixture for `[S9.2-L1-01]`.
+/// top of the page.
 fn photographs(n: usize, w: u32, h: u32) -> (Document, Resolved, ImageStore) {
     use ondin_core::{ImageEntry, ImageFormat, ImageId, ImageSource, image_brush};
     let mut store = ImageStore::new();
@@ -297,10 +290,9 @@ fn photographs(n: usize, w: u32, h: u32) -> (Document, Resolved, ImageStore) {
     let mut doc = Document::new(root);
     let mut ops = Vec::new();
     for i in 0..n {
-        // **A distinct id per picture, which is the whole fixture.** vello keys
-        // atlas residency on the blob's id, so `n` copies of one photograph are
-        // one atlas entry and fit trivially — a test that reused the bytes would
-        // be green against every version of this code.
+        // A distinct id per picture is the whole fixture: vello keys atlas
+        // residency on the blob's id, so copies of one photograph are one atlas
+        // entry and fit trivially.
         let iid = ImageId(format!("sha256:photo-{i}"));
         let bytes = photo_png(w, h, i as u8);
         store
@@ -358,39 +350,20 @@ fn photo_png(w: u32, h: u32, tint: u8) -> Vec<u8> {
     out
 }
 
-/// **Three ordinary photographs on one page all draw** — `[S9.2-L1-01]`, §15
-/// D745, and the case a moodboard is.
+/// Three ordinary photographs on one page all draw (§15 D745).
 ///
-/// vello keeps every picture a scene draws in one 8192-pixel sheet and, when the
-/// next will not fit, sets its position to `None` and carries on — *"there's
-/// nothing we can do"*, in `resolve_pending_images`' own words. No error, no log.
-/// Three 4500 × 3000 photographs need three shelves of 3000 and the third has
-/// nowhere to go, so the canvas drew **1 250 opaque pixels of 1 875** while the
-/// layers row and the Fill swatch showed all three — they read the store, and only
-/// the canvas reads the atlas.
+/// vello keeps every picture in one 8192-pixel sheet and silently leaves the one
+/// that will not fit undrawn. Three 4500 × 3000 photographs need three shelves of
+/// 3000, so the page's pictures are shrunk by one integer factor (2 here) until the
+/// set fits, and full resolution is kept while it fits.
 ///
-/// The page's pictures are now shrunk by one integer factor until the set fits,
-/// full resolution until it stops fitting. At three photographs the factor is 2
-/// and every one of them draws.
+/// The two-photograph row is the anti-vacuity control and the more important
+/// assertion: a budget that shrank two photographs would pass the three-photograph
+/// one and be wrong, so the factor must be exactly 1 there.
 ///
-/// ⚠️ **Distinct bytes per picture, and the doc comment on the fixture says why**:
-/// vello keys residency on the blob id, so three copies of one photograph are one
-/// atlas entry and would fit however this code behaved.
-///
-/// ⚠️ **The two-photograph row is the anti-vacuity control and the more important
-/// assertion of the two.** The maintainer's decision was *full resolution until it
-/// stops fitting* — a budget that shrank two photographs would pass the
-/// three-photograph assertion and be wrong. This asserts the factor is exactly 1
-/// there.
-///
-/// ⚠️ **Flipped twice, because the first flip never reached the assertion the
-/// test is for.** Making `atlas_downscale` return 1 unconditionally fails on the
-/// *factor* assertion four lines above the pixels, so it says nothing about the
-/// drawing. The flip that reaches the picture is `atlas_pixels` returning
-/// `pixels` unchanged — the budget still computed, the reduction not applied —
-/// and it comes back **`left: 1250, right: 1875`**, which is the finding's own
-/// measurement to the pixel. **Two flips, because a test with a cheap assertion in
-/// front of an expensive one is only as good as the flip that gets past it.**
+/// flip: `atlas_pixels` returning `pixels` unchanged → fails at the opaque-pixel
+/// count (`left: 1250, right: 1875`). Making `atlas_downscale` return 1 fails
+/// earlier, at the factor assertion, and says nothing about the drawing.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn three_photographs_on_one_page_all_draw() {
@@ -427,7 +400,7 @@ fn three_photographs_on_one_page_all_draw() {
 }
 
 /// A long thin banner, the shape whose effect buffer goes past the texture limit
-/// first. `[S11.2-L1-01]`.
+/// first.
 fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
     let mut ids = IdSource::new(1);
     let root = ids.mint();
@@ -462,42 +435,19 @@ fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
     (doc, res)
 }
 
-/// **A layer whose effect buffer needs more than the texture limit still draws**
-/// — `[S11.2-L1-01]`, §15 D744, and the case that used to take the canvas down
-/// while the CPU backend and the export both drew the same document.
+/// A layer whose effect buffer needs more than the texture limit still draws
+/// (§15 D744).
 ///
-/// ⚠️ **Finding the fixture was most of the work and is the part worth reading**,
-/// because the finding's own case — *"a drop shadow at `offset = 1000`, 8× zoom"*
-/// — **does not reproduce**, and a test written from it passes against the
-/// unfixed code. Two things bound the buffer before the cap ever sees it, and
-/// both had to be measured rather than read:
+/// The fixture must be wide and thin: `effect::grow_to_escape` grows nothing on
+/// the side a large offset points at, and `buffer_box_within` trims a big square
+/// layer by area long before a side reaches 8192. A 1600 × 12 banner at 6× yields
+/// a 9672 × 144 buffer, 1480 past the limit and inside the area budget.
 ///
-/// - `effect::grow_to_escape` intersects with the layer's **own ink**, and grows
-///   the target on each side by the escape from the *opposite* side (a shadow
-///   thrown right lets ink from off-screen *left* reach in). So a large **offset**
-///   grows nothing on the side it points at: at `offset = 1000` and 8× the buffer
-///   came back exactly 8192 — the viewport, to the pixel.
-/// - `buffer_box_within` then bisects the escape down until the box's **area**
-///   fits the page's pixel count, so a big square layer is trimmed by area long
-///   before either side reaches 8192.
+/// It asserts a frame that completes with ink in it, not exact pixels (the layer
+/// is resampled at this size). A panic allocating the scratch is no frame at all.
 ///
-/// What clears both is a layer that is **wide and thin**: a 1600 × 12 banner —
-/// a rule, a divider, a hero strip — at 6×. Measured: the buffer comes out
-/// **9672 × 144**, which is 1480 past the limit on an area of 1.39 M against a
-/// 2.3 M budget, so nothing else trims it. Against the old cap this aborts with
-/// `wgpu error: Validation Error`. **This is an ordinary drawing, not a hostile
-/// one.**
-///
-/// ⚠️ **It asserts a render that completes and ink that lands, not a picture.**
-/// The layer is resampled at this size, so the exact pixels are `blur_coarse`'s
-/// business; what is pinned is that the frame *happens*. A panic allocating the
-/// scratch (`Scratch::new` then, `FxPool::take` since §15 D1003 (7)) is not a wrong
-/// colour, it is no frame at all.
-///
-/// ⚠️ **Flipped by restoring `.min(u16::MAX as f64)` in `push_effect_layer`, and
-/// the failure does not look like a test failure** — the process aborts inside
-/// wgpu's validation, so the suite reports a crash rather than a red test. Worth
-/// knowing before somebody reads a broken run as a broken harness.
+/// flip: restoring `.min(u16::MAX as f64)` in `push_effect_layer` → the process
+/// aborts in wgpu validation, so the suite reports a crash rather than a red test.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_layer_needing_more_than_the_texture_limit_still_draws() {
@@ -525,26 +475,18 @@ fn a_layer_needing_more_than_the_texture_limit_still_draws() {
     );
 }
 
-/// **An inner shadow on a rect reaches all four edges here too** — the on-device
-/// half of `[S10.2-L1-01]`, and the reason it needs asserting on this side at all.
+/// An inner shadow on a rect reaches all four edges.
 ///
-/// `tests/fx_gpu.rs` compares each GPU pass against the CPU reference and stayed
-/// green through the whole life of the bug, because *both* backends inverted the
-/// silhouette before the passes that read past the buffer's edge. A differential
-/// test cannot see an error the two implementations share, so this asserts the
-/// picture **absolutely** first and the agreement second. The fixture is the one
-/// the bug needs: a rect, whose ink is exactly its own bounding box, at the offset
-/// the panel starts every shadow on.
+/// `tests/fx_gpu.rs` compares each pass against the CPU reference, which cannot
+/// see an error both implementations share (both once inverted the silhouette
+/// before the passes that read past the buffer's edge), so the picture is asserted
+/// absolutely first and the agreement second. The fixture is a rect, whose ink is
+/// exactly its bounding box, at the offset the panel starts every shadow on.
 ///
-/// ⚠️ **The flip is three edits, and one of them alone is a no-op** — which is
-/// the thing to write down rather than the result. Restoring `silhouette`'s
-/// inversion in `fx.wgsl` on its own changes nothing at all, because `INNER` no
-/// longer reaches that pass: `fx_gpu::run` sets it on `Pass::Tint`. The flip that
-/// bites is the shipped spelling entire — the shader, plus `inner` back on the
-/// silhouette's `Params`, minus it from the tint's. Run: this test fails on the
-/// **first** edge assertion at `(255, 255, 255, 255)`, and the backend comparison
-/// at the end is never reached, so it is the absolute half that carries the test
-/// and the differential half that is the control.
+/// flip: `silhouette`'s inversion back in `fx.wgsl`, plus `inner` back on the
+/// silhouette's `Params` and off the tint's (the shader edit alone is a no-op,
+/// since `fx_gpu::run` sets `INNER` on `Pass::Tint`) → fails at the first edge
+/// assertion; the backend comparison is the control.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_canvas_draws_an_inner_shadow_on_a_rect() {
@@ -587,21 +529,12 @@ fn the_canvas_draws_an_inner_shadow_on_a_rect() {
     );
 }
 
-/// **The same document through both backends agrees, byte for byte.** This is
-/// §3's promise — one scene walk, two backends — asked of the one feature that
-/// has a *separate implementation* on each side of it.
+/// The same document through both backends agrees byte for byte (§3: one walk,
+/// two backends), asked of the feature with a separate implementation on each.
 ///
-/// **Exact, and the fixture is what earns that.** A GPU rasterizer and a CPU one
-/// do not generally agree on an antialiased edge, so a rotated or fractionally
-/// placed shape would differ along every outline and this would have to be a
-/// tolerance. Here the square sits at (30, 30) at 40×40 in a 1:1 viewport, so
-/// every edge lands on a pixel boundary and neither rasterizer has anything to
-/// antialias — which leaves the effect arithmetic as the only thing that *can*
-/// differ, and that is the thing being tested. Measured: mean 0.000, worst 0.
-///
-/// What it does not claim is that the two backends agree on any document. It
-/// claims that where the rasterizers have nothing to disagree about, the effect
-/// passes have nothing either.
+/// Exact because of the fixture: the square sits on pixel boundaries in a 1:1
+/// viewport, so neither rasterizer antialiases and the effect arithmetic is the
+/// only thing that can differ. It does not claim agreement on any document.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn both_backends_draw_the_same_shadow() {
@@ -612,8 +545,7 @@ fn both_backends_draw_the_same_shadow() {
     let gpu_px = render_gpu(&mut g, &doc, &res);
     let cpu_px = render_cpu(&doc, &res);
 
-    // The fixture is asserted before the claim is: a blurred shadow has to be
-    // *there*, or two empty buffers would agree perfectly and prove nothing.
+    // The shadow must be there, or two empty buffers would agree and prove nothing.
     let body = at(&gpu_px, 50, 78);
     assert!(
         body.0 > 100 && body.3 > 100,
@@ -643,9 +575,8 @@ fn both_backends_draw_the_same_shadow() {
     }
 }
 
-/// **A shadow and an opacity together** — the pairing that panicked the CPU
-/// backend (§15 D338). The GPU painter counts ordinary layers for the same
-/// reason, and nothing but a render says the counting is right.
+/// A shadow and an opacity together: the pairing that panicked the CPU backend
+/// (§15 D338). The GPU painter counts ordinary layers for the same reason.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_faded_layer_still_casts_its_shadow() {
@@ -666,9 +597,8 @@ fn a_faded_layer_still_casts_its_shadow() {
     );
 }
 
-/// **A stack with nothing to draw leaves the picture alone.** The walk opens no
-/// layer for it (`effects::any_ink`), so this is really asking that the *absence*
-/// of a job is handled — no atlas slot, no texture, no blit.
+/// A stack with nothing to draw leaves the picture alone: the walk opens no layer
+/// for it (`effects::any_ink`), so no atlas slot, texture or blit is made.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_hidden_shadow_draws_nothing_extra() {
@@ -692,14 +622,9 @@ fn a_hidden_shadow_draws_nothing_extra() {
     assert_eq!(a, b, "a hidden effect changes no pixel");
 }
 
-/// **The canvas half of `effects::a_layer_scrolled_off_the_top_still_casts_into_view`**
-/// (§15 D342).
-///
-/// The clamp that lost the silhouette lives in `effect::buffer_box` and both
-/// backends call it, so the CPU test is the one that would fail first — but the
-/// canvas is the surface this was reported on, and the GPU path reaches
-/// `buffer_box` through its own `push_effect_layer`. A fix applied to one backend
-/// and not the other would pass there and fail here.
+/// The canvas half of `effects::a_layer_scrolled_off_the_top_still_casts_into_view`
+/// (§15 D342). Both backends reach `effect::buffer_box` through their own
+/// `push_effect_layer`, so a fix applied to one only would pass there and fail here.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_layer_scrolled_off_the_top_still_casts_into_view() {
@@ -733,22 +658,19 @@ fn a_layer_scrolled_off_the_top_still_casts_into_view() {
     assert_eq!(deep.3, 0, "with nothing further down: {deep:?}");
 }
 
-/// **A sibling cut by the view's edge draws nothing into the slot packed beside
-/// it** (§15 D990).
+/// A sibling cut by the view's edge draws nothing into the slot packed beside it
+/// (§15 D990).
 ///
-/// Sibling effect layers share one batch texture, each in its own slot, and each
-/// layer's buffer is trimmed to the part of it in view — but its sub-scene is not:
-/// a fill draws wherever its path goes. So a layer hanging off the view's left
-/// edge drew its off-screen part at negative x, straight into the slot packed
-/// before it, and that sibling came back with it baked in. Reported from the
-/// canvas as a white rectangle over a card, and as frames *"moving out of
-/// position"* as the view panned and the trim moved with it. The CPU backend
-/// gives every layer a buffer of its own, which is why only the canvas showed it.
+/// Sibling effect layers share one batch texture, one slot each; a layer's buffer
+/// is trimmed to the part in view but its sub-scene is not, so a layer hanging off
+/// the left edge drew at negative x into the slot packed before it. The CPU backend
+/// gives every layer its own buffer, so only the canvas showed it.
 ///
-/// Here a white square `a` (packed first) sits in full view and a red bar `b`
-/// hangs 40 units off the left edge; both carry a small shadow, so both are
-/// effect layers on one level. Flip, run: appending the sub-scenes without the
-/// slot clip paints `a` red at its centre.
+/// A white square `a` (packed first) sits in view and a red bar `b` hangs 40 units
+/// off the left edge; both carry a small shadow.
+///
+/// flip: appending the sub-scenes without the slot clip → paints `a` red at its
+/// centre.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
@@ -808,21 +730,15 @@ fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
     );
 }
 
-/// **An image fill keeps its pixels while effect layers are on the page**
-/// (§15 D344).
+/// An image fill keeps its pixels while effect layers are on the page (§15 D344).
 ///
 /// Every effect layer costs the page renderer an extra `render_to_texture`, and
-/// vello's image atlas evicts a resident image that has not been *drawn* for two
-/// of those passes (`EVICT_AFTER_GENERATIONS`). With the sub-scenes rendered on
-/// the page's own renderer, a picture drawn once per frame fell behind that
-/// rhythm and came back empty on the second frame onwards — reported from the
-/// machine as *"pasting an image into the canvas while there's an effect on a
-/// layer makes the image empty"*, with the bounding box and both thumbnails still
-/// showing because they read the store rather than the atlas.
+/// vello's image atlas evicts a resident image not drawn for two of those passes
+/// (`EVICT_AFTER_GENERATIONS`); a picture drawn once per frame came back empty
+/// from the second frame on.
 ///
-/// **Six frames, not one.** The first frame is always right: the picture is new
-/// to the atlas, so it is uploaded whatever else is going on. Everything this
-/// test is about happens from the second.
+/// Six frames, not one: the first is always right because the picture is new to
+/// the atlas.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn an_image_survives_effect_layers_on_the_page() {
@@ -843,9 +759,8 @@ fn an_image_survives_effect_layers_on_the_page() {
     }
 }
 
-/// **A picture *inside* an effected layer keeps its pixels too**, which is the
-/// same question one level down: those sub-scenes are rendered on their own
-/// renderer, so its atlas has the rhythm the page's does.
+/// A picture inside an effected layer keeps its pixels too: those sub-scenes are
+/// rendered on their own renderer, whose atlas has the same eviction rhythm.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn an_image_inside_an_effect_layer_survives() {
@@ -866,38 +781,21 @@ fn an_image_inside_an_effect_layer_survives() {
     let _ = picture_inside_an_effect;
 }
 
-/// **An effect layer inside an effect layer**, which panicked vello outright
-/// until 2026-09-01 (§15 D404): *"Tried to draw an invalid empty image (id: 2).
-/// Maybe it was registered to a different renderer"* — which is exactly what had
-/// happened. A nested layer's result is drawn by its **parent's** sub-scene, and
-/// that scene is rasterized by a layer renderer with an atlas of its own, while
-/// `override_image` was only ever called on the page's.
+/// An effect layer inside an effect layer reaches the page (§15 D404). A nested
+/// layer's result is drawn by its parent's sub-scene, rasterized by a layer
+/// renderer with an atlas of its own, so `override_image` must reach that renderer
+/// and not only the page's.
 ///
-/// ⚠️ **Three fixtures, and the first two are the control.** A shadow alone and a
-/// blur alone both worked the whole time — the bug needs one layer to *contain*
-/// another — so a test that only asserted the nested case would not say which of
-/// the three broke if this ever regresses.
+/// The shadow-only and blur-only fixtures are controls: the bug needs one layer to
+/// contain another. The comparison is against the CPU backend, which has no atlas,
+/// and is exact for the reason `both_backends_draw_the_same_shadow` gives, except
+/// three deep, which allows 1: every GPU effect layer is bracketed by a
+/// straight→premultiplied→straight round trip (`fx_gpu`'s module docs) that is not
+/// the identity at eight bits, the same ±1 `tests/fx_gpu.rs` allows.
 ///
-/// The comparison is against the CPU backend, which composites layers directly and
-/// has no atlas at all, so it cannot share the failure. Exact rather than
-/// tolerant, for the reason `both_backends_draw_the_same_shadow` gives: the square
-/// is on pixel boundaries, so the rasterizers have nothing to disagree about and
-/// the effect wiring is all that is left.
-///
-/// ⚠️ **Except three deep, which allows one level, and finding that out is what
-/// the third fixture is for.** Every effect layer the GPU path opens is bracketed
-/// by a straight→premultiplied→straight round trip (`fx_gpu`'s module docs), and
-/// at eight bits that is not the identity on a partly transparent pixel. Two
-/// layers happen to move nothing in this fixture and three move one channel by 1,
-/// which is the same ±1 `tests/fx_gpu.rs` allows for the same reason. The CPU
-/// backend stays premultiplied throughout and so has no such boundary.
-///
-/// ⚠️ **The flip's failure site was not the one predicted.** Registering every
-/// slot on the page renderer — the state before D404 — was expected to fail the
-/// comparison; it panics inside `render` instead, before any pixel is compared,
-/// because vello refuses to draw an atlas slot it has no pixels for. The
-/// comparison is what would catch a slot registered on the *wrong* renderer rather
-/// than on none.
+/// flip: registering every slot on the page renderer → panics inside `render`
+/// (vello refuses to draw a slot it has no pixels for) before any comparison; the
+/// comparison would catch a slot registered on the wrong renderer.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn an_effect_layer_inside_an_effect_layer_reaches_the_page() {
@@ -924,7 +822,7 @@ fn an_effect_layer_inside_an_effect_layer_reaches_the_page() {
         let (doc, res) = nested(stacks);
         let gpu_px = render_gpu(&mut g, &doc, &res);
         let cpu_px = render_cpu(&doc, &res);
-        // The fixture before the claim: two empty buffers agree perfectly.
+        // Two empty buffers would agree perfectly.
         let body = at(&gpu_px, 50, 50);
         assert!(
             body.3 > 200,
@@ -946,10 +844,9 @@ fn an_effect_layer_inside_an_effect_layer_reaches_the_page() {
 /// A white 40×40 square at (30, 30) wrapped in one group per entry of `stacks`,
 /// outermost first, each carrying that entry's effects.
 ///
-/// **Nesting depth is the parameter** rather than two fixed groups, because the
-/// rule D404 restored — a layer's slot goes to the renderers of the level *above*
-/// — is only exercised at one depth by a two-level fixture, and "the level above"
-/// and "the page" are the same thing there.
+/// Nesting depth is the parameter because the rule that a layer's slot goes to the
+/// renderers of the level above (§15 D404) is indistinguishable from "the page"
+/// in a two-level fixture.
 fn nested(stacks: Vec<Vec<Effect>>) -> (Document, Resolved) {
     let mut ids = IdSource::new(1);
     let root = ids.mint();
@@ -1009,14 +906,9 @@ fn nested(stacks: Vec<Vec<Effect>>) -> (Document, Resolved) {
 /// `n` effect layers at **one** level, each a blurred square of `size`, all of
 /// them on the page.
 ///
-/// The counterpart to `nested`, and the case `pack`'s page-area budget is
-/// actually about: depth is bounded by how deeply a designer nests groups, and
-/// total area is not. The squares overlap on purpose — what the packer weighs is
-/// the sum of the layers' buffer areas against the page's pixel count, not how
-/// much of the page they cover between them.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// The counterpart to `nested`, and the case `pack`'s page-area budget is about.
+/// The squares overlap on purpose: the packer weighs the sum of the layers' buffer
+/// areas against the page's pixel count, not how much of the page they cover.
 fn siblings(n: usize, size: f64) -> (Document, Resolved) {
     let mut ids = IdSource::new(1);
     let root = ids.mint();
@@ -1042,9 +934,7 @@ fn siblings(n: usize, size: f64) -> (Document, Resolved) {
                 size: Size::new(size, size),
                 corner_radii: Default::default(),
             },
-            // Staggered by a couple of points so no two layers resolve to the
-            // identical box — a packer that deduplicated would otherwise read as
-            // a packer that packed.
+            // Staggered so no two layers resolve to the identical box.
             transform: Some(Affine::translate((
                 4.0 + (i % 4) as f64 * 2.0,
                 4.0 + (i / 4) as f64 * 2.0,
@@ -1084,8 +974,8 @@ fn picture_inside_an_effect() -> (Document, Resolved, ImageStore) {
     build_picture_doc(0, true)
 }
 
-/// The picture inside its own effect layer **and** other effect layers beside it,
-/// so the layers renderer does more than one pass a frame.
+/// The picture inside its own effect layer and other effect layers beside it, so
+/// the layers renderer does more than one pass a frame.
 fn picture_inside_an_effect_among_others(n: usize) -> (Document, Resolved, ImageStore) {
     build_picture_doc(n, true)
 }
@@ -1168,8 +1058,8 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
     (doc, res, store)
 }
 
-/// The picture's side. **Large enough to matter to the atlas** — vello's starts at
-/// 1024 square — so this exercises the packing rather than a corner of it.
+/// The picture's side, large enough to matter to the atlas (vello's starts at 1024
+/// square).
 const PICTURE: u32 = 512;
 
 fn solid_png(side: u32) -> Vec<u8> {
@@ -1185,52 +1075,20 @@ fn solid_png(side: u32) -> Vec<u8> {
     out
 }
 
-/// How many effect passes a document actually demands — the `K` in
-/// `[S11.2-L4-05]`'s `K x ~5.7 ms`, measured rather than reasoned (§15 D763).
-/// The other half of that product is measured too, and it is a **6-8 ms** band on
-/// an otherwise-idle adapter rather than a figure — seven times that under suite
-/// contention: see `a_vello_renderer_costs_about_six_milliseconds_to_build` below,
-/// and §15 D777 for why D344's competing *"84 ms"* does not reproduce.
+/// How many effect passes a nested document demands (§15 D763): prints
+/// `VelloGpuRenderer::pass_high_water` for each fixture. Each pass holds one vello
+/// renderer, whose build cost is measured by
+/// `a_vello_renderer_costs_about_six_milliseconds_to_build`. It asserts only the
+/// floor: a document with effect layers demands at least one pass.
 ///
-/// That finding is open because its own confidence line says the per-renderer
-/// cost is measured and `K` is not: it is derived from `pack`'s budget rule and
-/// was never observed. Nothing else in the suite answers it — `tests/render.rs`'s
-/// `layers.len()` assertions are the `RecordingPainter`'s CPU-side layer stack, a
-/// different quantity with the same name, and `zoom_sweep.rs` prints frame times
-/// without touching the pass count.
-///
-/// This reports `VelloGpuRenderer::pass_high_water` for the deepest fixture this
-/// file builds, so the number in the finding stops being a guess. It asserts only
-/// the floor that must hold if the plumbing works at all — a document with effect
-/// layers demands at least one pass — because the interesting figure is the
-/// printed one and a hard upper bound here would be asserting `pack`'s arithmetic
-/// against itself.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// For a nested document the pass count is the nesting depth, one per level. That
+/// is not the unbounded case: many effect layers at one level whose combined area
+/// exceeds the page make `pack` start further chunks (see
+/// `how_many_effect_passes_a_level_of_siblings_demands`), so do not read the depth
+/// figure as the bound.
 ///
 /// Run with `cargo test -p ondin-render --test gpu_effects --release -- --ignored
 /// --nocapture` to see the number.
-///
-/// 🚨 **Measured 2026-09-15 on an RTX 4070 Ti, and for a *nested* document `K` is
-/// the nesting *depth* — one pass per level.** One blur → **1**
-/// pass; a blur inside a shadow → **2**; three deep → **3**. So a realistically
-/// nested drawing pays `3 x ~5.7 ms` ≈ 17 ms of pipeline build **once in the life
-/// of the process** — about **21 ms** at the 6-8 ms idle-adapter band D777
-/// measured, which does not change the reading — and holds three renderers. ⚠️ **That de-ranks the finding only
-/// for this case** — the unbounded `K` it feared is driven by `pack`'s area
-/// budget, and the area is the sibling count.
-///
-/// ⚠️ **The sibling case is the one the budget rule is actually about** — many
-/// effect layers at *one* level whose combined area exceeds the page, which is
-/// where `pack` starts a second chunk. Depth is bounded by how deeply a designer
-/// nests groups; area is not. **A number measured for the wrong case reads
-/// exactly like a number measured for the right one**, so this says which case it
-/// is. 🚨 **It was unmeasured until 2026-09-15 and is not any more** — see
-/// `how_many_effect_passes_a_level_of_siblings_demands` below, which finds
-/// **11** passes for 32 siblings on a 100×100 page. **Do not read the depth
-/// figure above as the answer to the finding**: the two measure different things
-/// and only one of them is bounded.
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn how_many_effect_passes_a_nested_document_demands() {
@@ -1263,66 +1121,21 @@ fn how_many_effect_passes_a_nested_document_demands() {
     );
 }
 
-/// The **sibling** half of the question above, which `[S11.2-L4-05]` is really
-/// about and which §15 D763 left unmeasured: many effect layers at *one* level,
-/// where `pack`'s page-area budget starts a second chunk.
+/// The sibling half of the question above: many effect layers at one level, where
+/// `pack`'s page-area budget starts further chunks (§15 D776).
 ///
-/// 🚨 **Measured 2026-09-15 on an RTX 4070 Ti, and it partly re-ranks what D763
-/// de-ranked** (§15 D776). The same blurred 45×45 squares, one level, counted
-/// against three page sizes:
+/// The pass count is not bounded by nesting depth. At a fixed page it grows with
+/// the number of effect layers, as the ratio `total effect-buffer area ÷ page
+/// area` taken to a ceiling (32 blurred 45×45 squares: many passes on a 100×100
+/// page, one on 400×400). A real document needs many overlapping on-screen effect
+/// layers to demand a second pass, and at full-page size the binding constraint is
+/// the shelf row (it wraps at the 8192 device limit and `pack` weighs the packed
+/// texture's bounding box), not the ink ratio. This is a measurement, not a licence
+/// to bound the pool: one renderer per pass is a correctness rule (§15 D344).
 ///
-/// ```text
-///                n=1   n=4   n=8   n=16   n=32
-///   100×100       1     2     3      6     11   passes
-///   200×200       1     1     1      2      3
-///   400×400       1     1     1      1      1
-/// ```
-///
-/// So `K` is **not** bounded by nesting depth: at a fixed page it grows roughly
-/// linearly with how many effect layers sit on that page, and nothing caps it.
-/// What the table also shows is the divisor — four times the page area is four
-/// times the per-chunk capacity, and the counts are that ratio taken to a ceiling
-/// — so the quantity is a **ratio**, `total effect-buffer area ÷ page area`, and
-/// the tiny fixture page is not what makes the number look bad. **D763's depth
-/// figure and this are both true and they answer different questions**; a reader
-/// who has only the first will conclude `K ≤ 3`.
-///
-/// The table is exactly what `pack` computes, which is what says the number is
-/// the budget rule rather than something else about the device: `effect::reach`
-/// of radius 3 is 4.5, so each buffer is about 54 px square, three fit inside the
-/// 100×100 page's 10,000-pixel budget and four do not, and ceil(32/3) is 11.
-///
-/// ⚠️ **What this does not say is that a real document reaches those numbers, and
-/// the arithmetic for one is reasoned from `pack` rather than measured at that
-/// size.** At 1920×1080 the budget is 2,073,600 pixels and a 200×200 square
-/// blurred at radius 3 has a 209×209 buffer, about 44k, so it takes forty-odd
-/// *overlapping* on-screen effect layers to demand a second pass. That is a busy
-/// file rather than a casual one, and it is the arithmetic the severity should be
-/// argued from — not this fixture's 100×100.
-///
-/// 🚨 **But at that size the binding constraint is the shelf *row* and not the
-/// ink, so re-deriving the figure from the ratio alone gets the right order for
-/// the wrong reason.** `pack` weighs the packed texture's *bounding box*, and the
-/// shelf wraps at the 8192 device limit: thirty-nine 209-pixel layers fill one row
-/// at 8151x209 = 1.70M, inside the budget, and the fortieth wraps the box to
-/// 8151x418 = 3.4M, over it at a stroke. The break is at 39 where the ink ratio
-/// says 47. **This fixture's break is area-driven and a full-page document's is
-/// row-driven** — worth knowing before anybody widens the fixture or its page and
-/// concludes the rule changed.
-///
-/// ⚠️ **And it is a measurement, not a licence to bound the pool.** §15 D344 is
-/// why there is one renderer per pass; it is a correctness rule and the symptom
-/// it was written for was a pasted image going blank from the second frame on.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
-///
-/// **Flip-checked** against the plausible wrong version rather than against
-/// nothing — `budget` set to `u64::MAX` in `resolve_effects`, i.e. the pre-D402
-/// packer that had no page rule. Predicted to fail on the first assertion, and
-/// it does: 32 siblings come back as **1** pass. The second assertion is what
-/// the first cannot say — that the divisor is the *page* and not a constant —
-/// and a budget pinned to any fixed number leaves it red.
+/// flip: `budget` set to `u64::MAX` in `resolve_effects` (the packer with no page
+/// rule) → fails at the first assertion (32 siblings give 1 pass). The second
+/// assertion shows the divisor is the page and not a constant.
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn how_many_effect_passes_a_level_of_siblings_demands() {
@@ -1340,8 +1153,7 @@ fn how_many_effect_passes_a_level_of_siblings_demands() {
     let crowded = small.renderer.pass_high_water();
     println!("[S11.2-L4-05] 32 sibling effect layers on a 100×100 page: {crowded} pass(es)");
 
-    // A *fresh* renderer, because the count is a high-water mark: reusing the
-    // one above would report the crowded page's number for the roomy one.
+    // A fresh renderer: the count is a high-water mark.
     let Some(mut large) = gpu() else {
         return;
     };
@@ -1364,78 +1176,17 @@ fn how_many_effect_passes_a_level_of_siblings_demands() {
     );
 }
 
-/// What a vello `Renderer` actually costs to build, because the record gives two
-/// answers fifteen-fold apart for the one quantity `[S11.2-L4-05]`'s severity is
-/// computed from (§15 D777).
+/// What a vello `Renderer` costs to build (§15 D777): on an otherwise-idle adapter
+/// the marginal build is about 6–8 ms and the first in the process about 15 ms;
+/// the same calls under the parallel on-device suite take about seven times as
+/// long. Quote the band with its condition. `VelloGpuRenderer` builds one
+/// `Renderer` up front and one more per effect pass, so a document that first
+/// demands `K` passes pays about `(K − high-water) × 7 ms` on that frame only.
 ///
-/// 🚨 **§15 D344 says *"a vello `Renderer` costs 84 ms to build (49 with
-/// area-only antialiasing)"*; `[S11.2-L4-05]`, D763 and D776 all say
-/// *"~5.7 ms"*.** Both are in `decisions.md`, both are live, neither cites the
-/// other, and the finding that is still open is ranked on `K × the smaller one`.
-/// **A record that disagrees with itself about a number is worse than one that is
-/// silent**, because each half reads as settled on its own.
-///
-/// 🚨 **Measured 2026-09-15 on an RTX 4070 Ti, vello 0.9.0, `--release`, six
-/// consecutive builds against one device:**
-///
-/// ```text
-///          run 1      run 2
-///   #0   15.05 ms   15.04 ms   <- first in the process
-///   #1    6.46 ms    7.49 ms
-///   #2    6.24 ms    7.33 ms
-///   #3    5.99 ms    7.65 ms
-///   #4    5.96 ms    7.86 ms
-///   #5    5.62 ms    7.51 ms
-/// ```
-///
-/// ⚠️ **Two runs, minutes apart, because one would have read as a precision this
-/// has not got**: the marginal build is **6–8 ms**, and the cold one is 15 ms to
-/// within a hundredth both times. Quote the band, not a figure.
-///
-/// 🚨 **And quote the *condition* with it, because both runs above are of an
-/// otherwise-idle adapter and that is not the only case.** Run as part of the
-/// whole on-device suite, which the harness runs in parallel, the same six calls
-/// come back **121.72 / 65.27 / 49.25 / 49.69 / 49.88 / 48.31 ms** — about seven
-/// times the idle figure. `--test-threads=1` over the same suite gives
-/// **15.50 / 7.19 / 7.48 / 6.86 / 6.89 / 7.26**, reproducing the isolated numbers
-/// exactly, which is the control that makes it **contention and not drift**.
-/// ⚠️ **The app does not build renderers from thirteen threads**, so 6–8 ms is
-/// the figure the finding wants — but a reader who measures this the easy way
-/// will get the other one.
-///
-/// **So ~5.7 ms is the right order and D344's 84 ms does not reproduce** — not
-/// even as the cold case, which is 15 ms. ⚠️ **And it is the same option set**:
-/// `RendererOptions::default()` is `AaSupport::all()`, which is precisely the
-/// arm D344 priced at 84 rather than the area-only one it priced at 49.
-///
-/// 🚨 **What this cannot say is *why*, and "vello has moved" is not the answer.**
-/// D337 and D339 both name vello 0.9 — on 2026-08-24 and 2026-08-25, D337 in the
-/// same breath as the `vello_cpu` 0.0.9 that D414 later replaced — and the
-/// workspace has pinned `=0.9.0` ever since, while D344 is 2026-08-25. **The
-/// renderer that entry timed is this renderer.** What D344 does not record is the
-/// profile, the machine or the version, and this measurement is `--release`: that
-/// is the one difference still visible, and it is a candidate rather than a
-/// finding. So D777 says the figure **does not reproduce**, which is weaker than
-/// calling it stale and is as far as the evidence goes.
-///
-/// ⚠️ **The marginal renderer is what the finding needs, and it is the 6–8 ms
-/// one.** `VelloGpuRenderer` builds one `Renderer` up front and one more per
-/// effect pass, so a document that first demands `K` passes pays about
-/// `(K − high-water) × 7 ms` on that frame and nothing on any frame after it.
-/// **At D776's worst measured `K` of 11 that is about 77 ms on one frame** — a
-/// visible hitch, once, and then nothing.
-///
-/// 🚨 **This carried a drift guard at 40 ms and it had to come out — see the
-/// comment at the assertion.** It was chosen as *"about seven times the
-/// measurement"*, which is exactly the factor contention turns out to be worth,
-/// so it passed every run alone and failed the first time the suite ran. **A
-/// wall-clock bound cannot be a gate in a parallel harness.** What is left is the
-/// numbers, their conditions, and an assertion that the loop timed what it says
-/// it timed. **There is nothing of ours to flip here** — this times a dependency
-/// — so the six figures above are the deliverable rather than the pass.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// There is no wall-clock assertion and nothing of ours to flip (this times a
+/// dependency): a bound is either too loose to catch anything or red on a busy
+/// harness. The printed figures are the deliverable; the assertion is only that the
+/// loop timed what it says.
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
@@ -1458,32 +1209,14 @@ fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         println!("[S11.2-L4-05] Renderer::new #{i}: {ms:.2} ms (ok={built})");
         assert!(built, "vello refused to build a Renderer on build #{i}");
-        // The first is the cold one and is a different question; the rest are
-        // what an extra effect pass actually costs.
+        // The first is the cold one; the rest are what an extra effect pass costs.
         if i > 0 {
             marginal.push(ms);
         }
     }
 
-    // 🚨 **There is deliberately no wall-clock assertion here, and the first
-    // version of this test had one at 40 ms.** It passed every time it was run
-    // alone and went red the first time the whole on-device suite ran, because
-    // the harness runs tests in parallel and thirteen other tests were on the
-    // same adapter. Measured both ways, same session, minutes apart:
-    //
-    //   whole suite, default (parallel):  121.72  65.27  49.25  49.69  49.88  48.31
-    //   whole suite, --test-threads=1:     15.50   7.19   7.48   6.86   6.89   7.26
-    //
-    // The second reproduces the isolated figure exactly, which is the control:
-    // the cost is **contention-sensitive by about seven times**, not drifting.
-    // ⚠️ **So the 6–8 ms band is a measurement of an otherwise-idle adapter**,
-    // and the first version of this test asserted it under contention — *a
-    // number measured for the wrong case reads exactly like one measured for the
-    // right case*, which is the trap D776 was written about, committed into the
-    // test that cites it. **A wall-clock bound cannot be a gate in a parallel
-    // harness**: it is either loose enough to catch nothing or tight enough to
-    // fail on a busy machine. The six numbers are the deliverable; the assertion
-    // below is only that the thing being timed happened at all.
+    // Deliberately no wall-clock assertion: the cost is contention-sensitive by
+    // about seven times under the parallel suite, so a bound is a flaky gate.
     let worst = marginal.iter().copied().fold(f64::MIN, f64::max);
     let best = marginal.iter().copied().fold(f64::MAX, f64::min);
     println!(
@@ -1502,8 +1235,8 @@ fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
 /// An `n`×`n` grid of cards, each a group holding a 70×40 white rect, the group
 /// carrying one zero-blur drop shadow — and every third group a second, smaller
 /// rect with a shadow of its own, so a third of the cards are a nested effect
-/// layer. The shape of a component page since every instance copies its main's
-/// shadow (§15 D978), and `[X7-L4-01]`'s probe, rebuilt.
+/// layer. The shape of a component page, since every instance copies its main's
+/// shadow (§15 D978).
 ///
 /// The pitch is 80×50, so a 30×30 grid overruns a 1920×1080 view on both axes and
 /// a 20×20 one does not.
@@ -1592,7 +1325,7 @@ fn median(xs: &mut [f64]) -> f64 {
     xs[xs.len() / 2]
 }
 
-/// The probes' page: 1920×1080, the size `[X7-L4-01]` measured at.
+/// The probes' page: 1920×1080.
 const PAGE_W: u32 = 1920;
 const PAGE_H: u32 = 1080;
 
@@ -1656,36 +1389,14 @@ fn job_count(doc: &Document, res: &Resolved, vp: &Viewport) -> usize {
     .len()
 }
 
-/// **What an on-screen effect layer costs per frame**, as `[X7-L4-01]` measured
-/// it: a card grid at 1920×1080, panned 3.7 px a frame for 60 frames, the median
-/// of the last 50 — once for the whole frame (`render` and a `poll(Wait)`), once
-/// for the time `render` takes to return, which is the host side. Release build,
-/// RTX 4070 Ti, this test alone:
-///
-/// | grid  | effect jobs | before: frame / `render` returned | after: frame / `render` returned | after: textures made, 50 panned frames / pool |
-/// |-------|-------------|-----------------------------------|----------------------------------|-----------------------------------------------|
-/// | 10×10 | 104         | 15.1–17.3 ms / 14.5–16.7 ms       | 2.7–3.1 ms / 1.9–2.2 ms          | 4 / 2.5 MB                                    |
-/// | 20×20 | 474         | 62.8–71.6 ms / 61.0–69.4 ms       | 9.1–9.8 ms / 6.2–6.8 ms          | 0 / 13.1 MB                                   |
-/// | 30×30 | 726         | 89.9–97.1 ms / 87.5–94.2 ms       | 12.8–13.9 ms / 8.9–9.7 ms        | 0 / 17.4 MB                                   |
-///
-/// *Before* is `fx_gpu::run` once per layer — five fresh scratch textures, a fresh
-/// result, a buffer pair and a bind group per dispatch, and a submit each — three
-/// runs; *after* is the pooled, batched path of §15 D1003 (7), five runs. About
-/// 0.13 ms of host time per layer became about 0.012, and the pass count is 2
-/// throughout, so none of this is D776/D779's renderer count. The four textures
-/// the small grid makes over the pan are a layer's size crossing a class
-/// boundary as the view moves; the larger grids already hold every class they
-/// cross.
-///
-/// ⚠️ **Wall-clock, so no bound is asserted** — a timing gate in a parallel
-/// harness is either too loose to catch anything or red on a busy machine (§15
-/// D777). The property is pinned by **counting** instead:
-/// `a_steady_frame_makes_nothing_and_submits_once_per_pass` below. The figures
-/// were measured with this test run alone; under the whole suite they are
+/// What an on-screen effect layer costs per frame: a card grid at 1920×1080,
+/// panned 3.7 px a frame for 60 frames, the median of the last 50, once for the
+/// whole frame (`render` and a `poll(Wait)`) and once for the time `render` takes
+/// to return (the host side). Run it alone; under the whole suite the figures are
 /// several times higher.
 ///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// Wall-clock, so no bound is asserted (§15 D777). The property is pinned by
+/// counting instead, in `a_steady_frame_makes_nothing_and_submits_once_per_pass`.
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn what_an_on_screen_effect_layer_costs_per_frame() {
@@ -1731,49 +1442,27 @@ fn what_an_on_screen_effect_layer_costs_per_frame() {
     }
 }
 
-/// **A steady frame makes no texture and no bind group, and submits once per
-/// effect pass rather than once per layer** (§15 D1003 (7), `[X7-L4-01]`) — the
-/// countable form of the probe above, which is wall-clock and asserts nothing.
+/// A steady frame makes no texture and no bind group, and submits once per effect
+/// pass rather than once per layer (§15 D1003 (7)): the countable form of the
+/// probe above.
 ///
-/// The same 20×20 card grid drawn three times at one viewport. The first frame
-/// fills the pool; the second must take no texture; the third must make nothing at
-/// all. ⚠️ **The second frame may still make bind groups, and that is not a
-/// leak**: the first frame starts with an empty pool, so its takes land on
-/// textures in a different order from any frame after it — a packed source given
-/// back by one pass is taken by the next as something else — while every later
-/// frame starts from the same idle set and takes the same textures in the same
-/// order. Measured: 14, then 7, then 0.
+/// The same 20×20 card grid is drawn three times at one viewport. The first frame
+/// fills the pool; the second must take no texture; the third must make nothing.
+/// The second frame may still make bind groups, which is not a leak: the first
+/// frame's empty pool hands out textures in a different order from every later
+/// frame, which all start from the same idle set.
 ///
-/// **Flip-checked, three ways, each against the version that was there or the one
-/// someone would write:**
-///
-/// - `FxPool::take` never reusing an idle texture (its lookup's `Option` made
-///   `None` by a trailing `.filter(|_| false)` — allocate on every take, the old
-///   behaviour) fails at `second.textures_made`, the predicted site: **14** made
-///   on every frame. It also fails `a_pooled_texture_carries_nothing_from_the_frame_before`'s
-///   fixture assertion, as that test's own guard should.
-/// - The bind-group cache never hit (`binds.get(&key).filter(|_| false)`) fails
-///   at `bind_groups_made`, the predicted site: **3,738** made, one per dispatch —
-///   seven dispatches for each of 534 layers.
-/// - `run_batch` called once per layer in `resolve_effects`, as `fx_gpu::run`
-///   was — `for item in &items { run_batch(…, std::slice::from_ref(item)) }` —
-///   fails at `submits`, the predicted site: **534** submits for 2 passes. It
-///   leaves `textures_made` and `bind_groups_made` at 0 — the pool absorbs
-///   per-layer batching, which is why the submit count needs its own assertion.
-///   ⚠️ **And every picture test in this file stays green under it**, which is
-///   a measurement of the queue-order argument `FxPool`'s doc rests on: the one
-///   uniform buffer was rewritten by `queue.write_buffer` between 534 submits a
-///   frame and no dispatch read another's `Params`.
-///
-/// ⚠️ **It found two defects in the pool before it passed.** The first cut bounded
-/// the pool by the most bytes taken at one moment rather than by the frame's
-/// working set, and a steady frame allocated one texture every frame; then idle
-/// textures were taken in whatever order `swap_remove` had left them, and a
-/// steady frame made 14 bind groups for a cache that never hit. `FxPool`'s doc and
-/// `FxPool::take` each say which.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// flips, each failing at the predicted assertion:
+/// - `FxPool::take` never reusing an idle texture (`.filter(|_| false)` on its
+///   lookup) → `second.textures_made`; it also fails the fixture assertion of
+///   `a_pooled_texture_carries_nothing_from_the_frame_before`.
+/// - the bind-group cache never hitting (`binds.get(&key).filter(|_| false)`) →
+///   `bind_groups_made`.
+/// - `run_batch` called once per layer in `resolve_effects` → `submits`, leaving
+///   `textures_made` and `bind_groups_made` at 0 (the pool absorbs per-layer
+///   batching, so the submit count needs its own assertion). Every picture test in
+///   this file stays green under it, since no dispatch reads another's `Params`
+///   (the queue-order argument `FxPool`'s doc rests on).
 #[test]
 #[ignore = "needs a GPU adapter"]
 fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
@@ -1795,8 +1484,8 @@ fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
         "[X7-L4-01] first {first:?}\n[X7-L4-01] second {second:?}\n[X7-L4-01] steady {steady:?}"
     );
 
-    // The fixture is in the state the test is about: a crowd of layers, more than
-    // one pass, and a first frame that really did have to allocate.
+    // The fixture reached the state the test is about: a crowd of layers and a
+    // first frame that had to allocate.
     assert!(
         jobs > 100,
         "the grid records {jobs} effect jobs, not a crowd"
@@ -1835,28 +1524,21 @@ fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
     );
 }
 
-/// **A texture back from the pool carries nothing of its last user into the
-/// picture** (§15 D1003 (7)).
+/// A texture back from the pool carries nothing of its last user into the picture
+/// (§15 D1003 (7)).
 ///
 /// The pool hands out textures larger than asked (`fx_gpu::size_class`) and never
-/// clears them, so what keeps the margin harmless is that no pass reads past
-/// `Params::size`. This sets that up to be visible: a first frame of the 40×40
-/// square with a shadow cast **upward** (a 40×46 buffer, class 48×48) leaves the
-/// square's ink in rows 40–46 of every texture it used; the second frame, an inner
-/// shadow offset up and left on the same square (40×40, the same class), runs
-/// through those very textures — and its silhouette reads six rows *below* each
-/// pixel, which along the bottom edge is exactly that margin. Correct, the margin
-/// reads as outside the buffer and the inner shadow lies along the bottom edge;
-/// read through, it finds the stale square and the band is gone.
+/// clears them, so the margin is harmless only because no pass reads past
+/// `Params::size`. A first frame of the 40×40 square with an upward shadow (a
+/// 40×46 buffer, class 48×48) leaves ink in rows 40–46 of every texture it used;
+/// the second frame, an inner shadow offset up and left (40×40, the same class),
+/// runs through those textures and its silhouette reads six rows below each pixel,
+/// which along the bottom edge is exactly that margin.
 ///
-/// ⚠️ **Flip-checked against the plausible wrong version** — `silhouette`'s
-/// bound taken from the texture (`all(s < vec2<i32>(textureDimensions(src_a)))`)
-/// rather than from `inside` — which fails at the CPU comparison, the predicted
-/// site, and only through reuse: the fresh renderer's control assertion stays
-/// green under the same flip, because a fresh texture's margin is zero.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// flip: `silhouette`'s bound taken from the texture
+/// (`all(s < vec2<i32>(textureDimensions(src_a)))`) rather than from `inside` →
+/// fails at the CPU comparison, and only through reuse (the fresh renderer's
+/// control stays green, as a fresh margin is zero).
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn a_pooled_texture_carries_nothing_from_the_frame_before() {
@@ -1901,34 +1583,20 @@ fn a_pooled_texture_carries_nothing_from_the_frame_before() {
     );
 }
 
-/// **The pool lets go of what recent frames did not need** (§15 D1003 (7)) —
-/// the bound that keeps it from being §15 D992's 5.7 GB in another shape.
+/// The pool lets go of what recent frames did not need (§15 D1003 (7)), the bound
+/// that keeps it from growing without limit.
 ///
-/// A 20×20 card grid fills the pool; then the plain square with one shadow is
-/// drawn, frame after frame. For `fx_gpu::KEEP_FRAMES` (8) frames the pool may keep the
-/// grid's textures — they are within the window of a frame that needed them —
-/// and after that it must hold exactly what the square alone needs, which a fresh
-/// renderer that has only ever drawn the square measures.
+/// A 20×20 card grid fills the pool; then the plain square with one shadow is drawn
+/// frame after frame. For `fx_gpu::KEEP_FRAMES` frames the pool may keep the grid's
+/// textures, and after that it must hold exactly what the square alone needs, which
+/// a fresh renderer that has only drawn the square measures.
 ///
-/// The bytes, measured: the grid's frame leaves 13,075,968 in the pool, the square
-/// alone 64,512; frame by frame after the grid the pool holds 6,849,024 for seven
-/// frames and 64,512 from the eighth.
-///
-/// ⚠️ **Flip-checked, and the trims are two defences.** `FxPool::end_frame` has
-/// two — idle textures older than `KEEP_FRAMES` dropped, and the pool held to the
-/// largest working set in that window — and over this fixture **each alone is
-/// enough for the final equality**: with the age `retain` made to keep everything
-/// the byte bound still lands on 64,512 at the eighth frame, and with the byte bound
-/// removed the age trim does (13,140,480 for seven frames, then 64,512). Both
-/// removed, it fails at the final equality, the predicted site, holding 13,140,480 —
-/// the grid's textures beside the square's — on every frame. **The first assertion
-/// is what pins the byte bound on its own**: without it the first square frame
-/// holds 13,140,480, more than the grid's 13,075,968. Nothing here pins the age trim
-/// on its own, because in every sequence tried it fires on the same frame the byte
-/// bound's window lets go — so either looks removable, and neither is.
-///
-/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
-/// gate reads a doc link there (D319, D622).
+/// `FxPool::end_frame` has two trims, idle textures older than `KEEP_FRAMES` and
+/// the pool held to the largest working set in that window. Over this fixture each
+/// alone is enough for the final equality, so either looks removable and neither
+/// is; both removed → fails at the final equality. The first assertion pins the
+/// byte bound on its own (without it the first square frame holds more than the
+/// grid's frame did); nothing pins the age trim on its own.
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn the_pool_lets_go_of_what_recent_frames_did_not_need() {

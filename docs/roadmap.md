@@ -38,8 +38,10 @@ pointer when the archived reasoning matters; otherwise drop it.
   `ondin-render` and `ondin-export`. Done (20–31% comments now): in `ondin-app`,
   `inspector.rs`, `canvas.rs`, `app.rs`, `dashboard.rs`, `typography.rs`, `ui.rs`,
   `tools/mod.rs`, `layers.rs`, `menu.rs`, `input.rs`, `rulers.rs`, `panels/export.rs`,
-  `fonts/mod.rs`, `session.rs` and `panels/picker.rs`; in `ondin-core`, `text.rs`,
-  `svg_in.rs`, `build.rs`, `image.rs`, `typography.rs` and `boolean.rs`.
+  `fonts/mod.rs`, `session.rs`, `panels/picker.rs` and `panels/paint.rs`; in `ondin-core`,
+  `text.rs`, `svg_in.rs`, `build.rs`, `image.rs`, `typography.rs`, `boolean.rs` and
+  `resolve.rs`. Trimmed but still 34–41%, being mostly one-line docs on constants,
+  variants and fields: `theme.rs`, `preview.rs` and core `node.rs`.
 - One agent per file at a time: two in one file break each other's exact-match edits. A range
   of ~6,000 lines is one agent; the next starts at the item the last one names.
 - rustfmt pulls a one-line `//` between array elements onto the element above; keep such a

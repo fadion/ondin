@@ -8007,9 +8007,7 @@ mod size_step_tests {
         (app, rect)
     }
 
-    /// Two 20×20 rects, at (0, 0) and (80, 40), both selected — a union box of
-    /// 100×60. Several layers resize through `resize_selection` over the world union,
-    /// a different path from one layer's `resize_box_to`.
+    /// Two 20×20 rects, at (0, 0) and (80, 40), both selected: a 100×60 union box.
     fn app_with_two_rects(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0x52E);
@@ -8054,9 +8052,8 @@ mod size_step_tests {
             .expect("the rect has bounds")
     }
 
-    /// Bigger and smaller on both axes, with the top-left corner held still so a held
-    /// key does not wander. flip: `local.width()` in place of
-    /// `want(local.width(), delta.x)` → fails at the first width assertion
+    /// Bigger and smaller on both axes, top-left held still. flip: `local.width()` in
+    /// place of `want(local.width(), delta.x)` → fails at the first width assertion
     #[test]
     fn ctrl_arrows_size_the_box_from_its_top_left_corner() {
         let ctx = egui::Context::default();
@@ -8080,8 +8077,6 @@ mod size_step_tests {
         assert_eq!(narrower.width(), 71.0, "Ctrl+Shift+Left takes ten off");
         assert_eq!(narrower.min_x(), before.min_x(), "from the same edge");
 
-        // The other axis: `↓` is taller and `↑` is shorter, as the top-left anchor
-        // forces.
         let mid = world(&app, rect);
         app.size_step(tall(6.0));
         let taller = world(&app, rect);
@@ -8099,9 +8094,9 @@ mod size_step_tests {
         assert_eq!(shorter.min_y(), before.min_y(), "from the same edge");
     }
 
-    /// A width cannot be pressed away: the floor is 1, as in the W field, so a layer
-    /// can be pressed back out. flip: drop the `.max(1.0)` → fails at the `min_x`
-    /// assertion (the width lands on 1 by coincidence after reflecting across the edge)
+    /// A width cannot be pressed away: the floor is 1, as in the W field. flip: drop
+    /// the `.max(1.0)` → fails at the `min_x` assertion (the width lands on 1 by
+    /// coincidence after reflecting across the edge)
     #[test]
     fn narrowing_stops_at_a_point_rather_than_passing_through_zero() {
         let ctx = egui::Context::default();
@@ -8112,11 +8107,9 @@ mod size_step_tests {
         let floored = world(&app, rect);
         assert_eq!(floored.width(), 1.0, "ten coarse presses stop at a point");
         assert_eq!(floored.min_x(), 10.0, "still anchored where it started");
-        // And it can be pressed back out, which is the whole reason for the floor.
         app.size_step(wide(10.0));
         assert_eq!(world(&app, rect).width(), 11.0, "and it comes back");
 
-        // The height: the floor is per axis, and both go through one `want` closure.
         for _ in 0..10 {
             app.size_step(tall(-10.0));
         }
@@ -8126,8 +8119,7 @@ mod size_step_tests {
     }
 
     /// A rotated shape grows along its own axes: `tools::resize_box_to` works on the
-    /// local box, so a point of width shows up as world height. Asserting on the
-    /// world box is where a world-union resize would diverge.
+    /// local box, so a world-union resize would diverge on the world box.
     #[test]
     fn a_rotated_layer_grows_along_its_own_axes() {
         let ctx = egui::Context::default();
@@ -8151,7 +8143,6 @@ mod size_step_tests {
             "and the world width is untouched: {after:?}"
         );
 
-        // The other axis crosses the same way.
         app.size_step(tall(5.0));
         let both = world(&app, rect);
         assert!(
@@ -8178,7 +8169,6 @@ mod size_step_tests {
             id: line,
             parent: root,
             index: 0,
-            // Straight down: zero wide, forty tall.
             kind: NodeKind::Line {
                 end: ondin_core::kurbo::Point::new(0.0, 40.0),
             },
@@ -8204,8 +8194,7 @@ mod size_step_tests {
     }
 
     /// A locked layer scales both axes whichever arrow drives, keeping the 0.75
-    /// aspect and the top-left corner (80×60, not a square, so swapped axes show).
-    /// flip: drop the `locked` test → fails at the `w_driven.height()` assertion
+    /// aspect and the top-left corner. flip: drop the `locked` test → fails at the `w_driven.height()` assertion
     #[test]
     fn a_locked_layer_keeps_its_proportions_under_either_arrow() {
         let ctx = egui::Context::default();
@@ -8222,7 +8211,6 @@ mod size_step_tests {
             "the fixture"
         );
 
-        // Width drives: 80 → 84, and the height follows at 0.75 of it.
         app.size_step(wide(4.0));
         let w_driven = world(&app, rect);
         assert_eq!(
@@ -8234,7 +8222,6 @@ mod size_step_tests {
         assert_eq!(w_driven.min_x(), 10.0, "still held at the top-left");
         assert_eq!(w_driven.min_y(), 20.0);
 
-        // Height drives: 63 → 66, and the width follows back through the same ratio.
         app.size_step(tall(3.0));
         let h_driven = world(&app, rect);
         assert_eq!(
@@ -8246,7 +8233,6 @@ mod size_step_tests {
         assert_eq!(h_driven.min_x(), 10.0, "from the same corner");
         assert_eq!(h_driven.min_y(), 20.0);
 
-        // ...and the ratio is the one it started with, after two presses on two axes.
         assert!(
             (h_driven.height() / h_driven.width() - 0.75).abs() < 1e-9,
             "the aspect survived the pair of presses: {h_driven:?}"
@@ -8305,7 +8291,6 @@ mod size_step_tests {
         assert_eq!(both.height(), 90.0, "and the union's height follows at 0.6");
         assert_eq!((both.min_x(), both.min_y()), (0.0, 0.0), "same corner held");
 
-        // Now a mixed set: `a` locked, `b` not.
         let (mut app, a, b) = app_with_two_rects(&ctx);
         lock(&mut app, &[a]);
         app.size_step(wide(50.0));
@@ -8333,7 +8318,6 @@ mod size_step_tests {
             "the fixture"
         );
 
-        // Half as wide again: 100 → 150.
         app.size_step(wide(50.0));
         let (near, far) = (world(&app, a), world(&app, b));
         assert_eq!(
@@ -8380,15 +8364,13 @@ mod size_step_tests {
 #[cfg(test)]
 mod layers_width_tests {
     //! When a dragged layers-panel width is worth storing, and the egui behaviour the
-    //! panel is built on. `Prefs::save` writes into `dirs::config_dir()`, so the
-    //! decision lives in `width_to_store` and the wiring around it is not tested.
+    //! panel is built on. The wiring around `width_to_store` is not tested: `Prefs::save`
+    //! writes into `dirs::config_dir()`.
 
     use super::*;
 
     /// A dragged width is stored only with the pointer up, when the panel is not just
-    /// filling its room, and when it differs from the stored one — one case per term:
-    /// `!down` → `mid-drag`, `width < room - 0.5` → `window shrank`, the deadband →
-    /// `a hair of rounding`.
+    /// filling its room, and when it differs from the stored one; one case per term.
     #[test]
     fn a_dragged_width_is_stored_once_the_drag_ends_and_the_window_is_not_the_cause() {
         // (width, room, stored, pointer down) -> what should be stored
@@ -8397,10 +8379,9 @@ mod layers_width_tests {
             ("released", (360.0, 1200.0, 300.0, false), Some(360.0)),
             ("unchanged", (300.0, 1200.0, 300.0, false), None),
             ("a hair of rounding", (300.4, 1200.0, 300.0, false), None),
-            // The panel is as wide as everything it was given, so egui's clamp is
-            // what set it, not a hand.
+            // Full width: egui's clamp set it, not a hand.
             ("window shrank", (400.0, 400.0, 300.0, false), None),
-            // Same width, but with room to spare — so this one *is* a drag.
+            // Same width with room to spare: a drag.
             ("dragged wide", (400.0, 1200.0, 300.0, false), Some(400.0)),
         ] {
             let (width, room, stored, down) = args;
@@ -8414,8 +8395,7 @@ mod layers_width_tests {
     }
 
     /// A resizable egui `Panel` whose content does not fill it collapses to
-    /// `size_range`'s minimum; `layers_panel` calls `ui.set_min_width` for this reason.
-    /// Pinned as a fact about egui, with a bare label for content.
+    /// `size_range`'s minimum, which is why `layers_panel` calls `ui.set_min_width`.
     #[test]
     fn a_resizable_panel_collapses_to_its_minimum_unless_the_content_fills_it() {
         let ctx = egui::Context::default();
@@ -8424,7 +8404,6 @@ mod layers_width_tests {
 
         let width = |fills: bool| {
             let mut w = 0.0;
-            // Two passes: the first stores `PanelState`, the second reads it back.
             for _ in 0..2 {
                 let _ = ctx.run_ui(
                     egui::RawInput {
@@ -8505,7 +8484,6 @@ mod layers_width_tests {
             w
         };
 
-        // A 6000pt window, so only `size_range` can answer.
         assert_eq!(
             opened_at(5000.0, "clamp-hi"),
             crate::panels::layers::MAX_W,
@@ -8518,10 +8496,8 @@ mod layers_width_tests {
         );
     }
 
-    /// Two egui facts decide who owns the cursor: it does not survive a frame
-    /// (`Context::end_pass` takes the whole `PlatformOutput`, so no reset is needed),
-    /// and within a frame the last writer wins (so a canvas reset erases the panel's
-    /// drag-edge claim).
+    /// Two egui facts decide who owns the cursor: it does not survive a frame, and
+    /// within a frame the last writer wins (a canvas reset erases the panel's claim).
     #[test]
     fn a_cursor_does_not_survive_a_frame_and_the_last_writer_wins() {
         let ctx = egui::Context::default();
@@ -8529,7 +8505,6 @@ mod layers_width_tests {
 
         let icon_of = |out: egui::FullOutput| out.platform_output.cursor_icon;
 
-        // (1) Not sticky: claimed in one frame, gone in the next.
         let claimed = ctx.run_ui(Default::default(), |ui| {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         });
@@ -8546,7 +8521,6 @@ mod layers_width_tests {
              `canvas_cursor`'s deleted reset has to come back somewhere earlier"
         );
 
-        // (2) Last writer wins.
         assert_eq!(
             icon_of(ctx.run_ui(Default::default(), |ui| {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
@@ -8559,9 +8533,8 @@ mod layers_width_tests {
     }
 
     /// `layers_panel` retunes two fg strokes on the shared central `ui` and must
-    /// restore them, or every hovered label drawn after it goes accent-blue. Calls the
-    /// real method so an early return is caught. flip: delete `ui.set_style(style)` →
-    /// fails at the `hovered.fg_stroke` assertion
+    /// restore them. flip: delete `ui.set_style(style)` → fails at the
+    /// `hovered.fg_stroke` assertion
     #[test]
     fn the_panel_puts_the_style_back_after_retuning_the_drag_edge() {
         let ctx = egui::Context::default();
@@ -8594,7 +8567,6 @@ mod layers_width_tests {
             after.active.fg_stroke, before.active.fg_stroke,
             "the active text stroke was left retuned"
         );
-        // States the retune does not touch, so an overreaching restore is caught.
         assert_eq!(after.hovered.bg_stroke, before.hovered.bg_stroke);
         assert_eq!(
             after.noninteractive.bg_stroke,
@@ -8605,19 +8577,16 @@ mod layers_width_tests {
 
 #[cfg(test)]
 mod edge_dwell_tests {
-    //! The layers panel's drag edge waits before it lights. Driven through the
-    //! machine's own states, since two transitions need a pointer history one
-    //! `run_ui` cannot express.
+    //! The layers panel's drag edge waits before it lights, driven through the
+    //! machine's own states.
 
     use super::*;
 
-    /// The highlight waits: a pointer that crosses the band inside the dwell never
-    /// lights it, one that stays lights at the deadline and not before (sampled a
-    /// hair either side). flip: return `Lit` from the `Off if in_band` arm → fails at
-    /// the first crossing assertion
+    /// A pointer that crosses the band inside the dwell never lights it; one that
+    /// stays lights at the deadline and not before. flip: return `Lit` from the
+    /// `Off if in_band` arm → fails at the first crossing assertion
     #[test]
     fn the_edge_waits_out_the_dwell_before_it_lights() {
-        // A pointer passing through: in the band for two frames, then gone.
         let mut d = EdgeDwell::default();
         d = d.advance(0.0, true, false, false);
         assert!(!d.lit(), "lit on the frame the pointer arrived");
@@ -8630,7 +8599,6 @@ mod edge_dwell_tests {
             "the pointer left and the wait did not reset"
         );
 
-        // A pointer that stays, sampled either side of the deadline.
         let arrive = EdgeDwell::default().advance(1.0, true, false, false);
         assert!(
             !arrive
@@ -8647,10 +8615,8 @@ mod edge_dwell_tests {
     }
 
     /// A press lights the edge at once; a drag begun elsewhere never does, however
-    /// long it stays (`advance` takes the press edge for the shortcut and `down` to
-    /// block the dwell). The last sample is past the deadline. flip: drop `!down`
-    /// from the dwell arm → fails at the fourth sample; `down` for `pressed` in the
-    /// shortcut arm → fails at the first
+    /// long it stays. flip: drop `!down` from the dwell arm → fails at the fourth
+    /// sample; `down` for `pressed` in the shortcut arm → fails at the first
     #[test]
     fn a_press_skips_the_dwell_but_a_drag_that_only_arrives_never_lights_it() {
         let pressed_on_it = EdgeDwell::default().advance(0.0, true, true, true);
@@ -8660,8 +8626,6 @@ mod edge_dwell_tests {
              resize drag has no feedback at all"
         );
 
-        // A drag that began elsewhere and rests on the band: `down` throughout,
-        // `pressed` never.
         let mut lingering = EdgeDwell::default();
         for t in [0.0, 0.05, 0.10, EDGE_DWELL + 0.05] {
             lingering = lingering.advance(t, true, false, true);
@@ -8694,7 +8658,6 @@ mod edge_dwell_tests {
             "the edge went dark as the drag ran past its clamp, which is where the \
              pointer leaves the band on every drag that reaches a limit"
         );
-        // And it does let go, on the frame the button comes up.
         assert_eq!(
             past.advance(0.3, false, false, false),
             EdgeDwell::Off,
@@ -8703,10 +8666,8 @@ mod edge_dwell_tests {
         );
     }
 
-    /// The fold reads the primary button, not any button, driven through the real
-    /// `OndinApp::layers_panel` (the machine tests call `advance` directly). A
-    /// middle-button pan resting on the band past the dwell must still light the edge;
-    /// `any_down` would block it.
+    /// The fold reads the primary button, not any: a middle-button pan resting on the
+    /// band past the dwell must still light the edge, through the real `layers_panel`.
     #[test]
     fn the_fold_blocks_the_dwell_on_the_primary_button_only() {
         let ctx = egui::Context::default();
@@ -8727,7 +8688,6 @@ mod edge_dwell_tests {
             );
         };
 
-        // One frame to store the panel's rect; the band is read from `PanelState`.
         frame(0.0, vec![]);
         let edge = egui::PanelState::load(&ctx, egui::Id::new("layers"))
             .expect("the panel stored a rect")
@@ -8739,7 +8699,6 @@ mod edge_dwell_tests {
             crate::panels::layers::DEFAULT_W
         );
 
-        // Middle button down, pointer resting on the edge, well past the dwell.
         let on_edge = egui::pos2(edge, 400.0);
         frame(
             1.0,
@@ -8954,7 +8913,6 @@ mod edit_valve_report_tests {
 
     /// The valve reports `true` on exactly the frame it commits and never on a
     /// keystroke frame, so a caller can act after a commit without predicting one.
-    /// The count is asserted before the frame's identity.
     #[test]
     fn the_valve_reports_true_on_one_frame_and_it_is_not_a_keystroke() {
         let ctx = egui::Context::default();
@@ -9000,9 +8958,8 @@ mod edit_valve_report_tests {
         );
     }
 
-    // The bare `DragValue` probe writes the typed number back a frame late and its
-    // committing transaction is a no-op, so there is no `undo_depth` assertion: the
-    // valve reports the frame, not a document change.
+    // No `undo_depth` assertion: the probe's committing transaction is a no-op, and
+    // the valve reports the frame, not a document change.
 
     /// An abandoned edit reports `false` on every frame, though `lost_focus()` is
     /// just as true when `Escape` was the way out.
@@ -9061,8 +9018,7 @@ mod image_drop_tests {
     use ondin_core::kurbo::{Point, Size};
     use ondin_core::{Document, IdSource, ImageEntry, ImageFormat, ImageSource, NodeId};
 
-    /// One picture, distinct from every other `n`, without a decoder: the bytes need
-    /// not be a real PNG, and hashing them makes the ids distinct for the dedupe arm.
+    /// One picture, distinct from every other `n`; the bytes need not be a real PNG.
     fn loaded(n: u8, name: Option<&str>) -> LoadedImage {
         let bytes: Vec<u8> = vec![n; 8];
         LoadedImage {
@@ -9153,10 +9109,9 @@ mod image_drop_tests {
         assert_eq!(unique.len(), 3, "three distinct names, not {names:?}");
     }
 
-    /// The same file dropped twice embeds its bytes once (`has_image` reads the
-    /// tree, which the first placement must already have changed). flip: the same
-    /// `image_tx(None, …)` → fails at the layer count, since the second transaction
-    /// is refused
+    /// The same file dropped twice embeds its bytes once. flip: the same
+    /// `image_tx(None, …)` → fails at the layer count (the second transaction is
+    /// refused)
     #[test]
     fn one_blob_dropped_twice_is_embedded_once() {
         let ctx = egui::Context::default();
@@ -9404,13 +9359,11 @@ mod paste_properties_report_tests {
         );
     }
 
-    /// A paste into another document says what it rebound (*brand/primary* found
-    /// again by name) and what it detached (a stroke with no namesake, a cut fill
-    /// style, an overwritten bound fill). flip: `properties_landing` or
-    /// `paints_overwritten` answering empty → fails at the status assertion
+    /// A paste into another document says what it rebound (found again by name) and
+    /// what it detached. flip: `properties_landing` or `paints_overwritten`
+    /// answering empty → fails at the status assertion
     #[test]
     fn a_paste_into_another_document_says_what_it_rebound_and_detached() {
-        // The copying document: a fill on brand/primary, a stroke on only/there.
         let mut ids = IdSource::new(0xA1A);
         let mut there = Document::new(ids.mint());
         let mode = ids.mint_mode();
@@ -9449,8 +9402,6 @@ mod paste_properties_report_tests {
             .expect("the copying document");
         let props = ondin_core::build::properties_of(&there, src).expect("a rect's properties");
 
-        // The pasting document: its own brand/primary, a styled target and a
-        // target bound to local/x.
         let ctx = egui::Context::default();
         let mut app = OndinApp::headless(&ctx);
         let mut ids = IdSource::new(0xB2B);
@@ -9530,15 +9481,13 @@ mod paste_properties_report_tests {
 mod popover_lane_tests {
     use super::{OndinApp, POPOVER_W, TopMenu};
 
-    /// Every popover in the lane reserves it, driven as a table so a forgotten entry
-    /// is caught; the clean row is the control against reserving unconditionally.
-    /// flip: drop `export_menu` and `export_row_open` from `a_popover_is_open` →
+    /// Every popover in the lane reserves it; the clean row is the control against
+    /// reserving unconditionally. flip: drop `export_menu` and `export_row_open` from `a_popover_is_open` →
     /// fails on those two rows
     #[test]
     fn every_popover_in_the_lane_reserves_it() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // One pass so `content_rect` is the screen rather than nothing.
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -9550,8 +9499,6 @@ mod popover_lane_tests {
             |_| {},
         );
         let lane = OndinApp::popover_left(&ctx, POPOVER_W);
-        // A chip well to the right of the lane, so "reserved" and "untouched"
-        // cannot be the same number.
         let anchor = lane + 300.0;
 
         type Arm = (&'static str, fn(&mut OndinApp));
@@ -9578,7 +9525,6 @@ mod popover_lane_tests {
             );
         }
 
-        // The control: nothing open.
         let clean = OndinApp::headless(&ctx);
         assert_eq!(
             clean.picker_lane_right(&ctx, anchor),
@@ -9663,9 +9609,7 @@ mod ungroup_tests {
     }
 
     /// One press of `Ctrl+Shift+G` is one undo step however many containers it
-    /// dissolves. `commit_run` cannot merge structural ops (`Reparent` and
-    /// `DeleteNode` never `overwrites()`), so `build::ungroup_all` accumulates.
-    /// flip: commit inside a per-container loop → fails at the first assertion
+    /// dissolves (`build::ungroup_all` accumulates). flip: commit inside a per-container loop → fails at the first assertion
     #[test]
     fn one_ungroup_of_two_groups_is_one_undo_step() {
         let ctx = egui::Context::default();
@@ -9704,10 +9648,8 @@ mod ungroup_tests {
         );
     }
 
-    /// Ungrouping selects the freed layer and says "Ungrouped"; the inspector's
-    /// identity row calls the same code, so the button itself is not tested. One group
-    /// of one rect, where an empty selection afterwards would read as an ordinary
-    /// deselect. flip: drop `session.info("Ungrouped")` → fails at the status assertion
+    /// Ungrouping selects the freed layer and says "Ungrouped". One group of one rect,
+    /// so an empty selection afterwards would read as an ordinary deselect. flip: drop `session.info("Ungrouped")` → fails at the status assertion
     #[test]
     fn ungrouping_selects_the_freed_layer_and_says_so() {
         let ctx = egui::Context::default();
@@ -9756,15 +9698,12 @@ mod ungroup_tests {
         );
     }
 
-    // No test for a half-applied failure: `ungroup_selection` filters to live
-    // `Group`/`Boolean` nodes, which rules out every `build::ungroup` error;
-    // `build::ungroup_all` builds nothing on `Err` (`one_bad_container_builds_no_ops_at_all`
-    // in `ondin-core/tests/build.rs`).
+    // No half-applied-failure test: `ungroup_selection` filters out every
+    // `build::ungroup` error, and `ungroup_all` builds nothing on `Err`.
 }
 
 /// The library wiring: what happens to the file when the app saves, autosaves,
-/// renames or deletes. Every assertion is about the filesystem, via
-/// `OndinApp::headless`.
+/// renames or deletes. Every assertion is about the filesystem.
 #[cfg(test)]
 mod library_wiring_tests {
     use super::{OndinApp, TopMenu, View};
@@ -9796,8 +9735,7 @@ mod library_wiring_tests {
     }
 
     /// Opening a document drops the per-corner-radius disclosure, whose `NodeId`s
-    /// belong to the document being left (a stale id dangles, so the set only grows).
-    /// flip: remove `self.per_corner_radius.clear()` from `reset_transient_state` →
+    /// belong to the document being left. flip: remove `self.per_corner_radius.clear()` from `reset_transient_state` →
     /// fails at the emptiness assertion
     #[test]
     fn opening_a_document_drops_the_previous_ones_corner_disclosures() {
@@ -9805,7 +9743,6 @@ mod library_wiring_tests {
         let root = temp_root("corner-disclosure");
         let mut app = app_at(&ctx, root.clone());
 
-        // A node of the outgoing document, disclosed.
         let id = app.session.ids.mint();
         app.per_corner_radius.insert(id);
         assert_eq!(app.per_corner_radius.len(), 1, "fixture");
@@ -9827,13 +9764,11 @@ mod library_wiring_tests {
     fn the_app_opens_on_the_dashboard() {
         let ctx = egui::Context::default();
         let app = OndinApp::headless(&ctx);
-        // `with` defaults to the editor; the real launch path calls `open_at_launch`.
         assert_eq!(app.view, View::Editor);
     }
 
-    /// No test may write the developer's preferences file: `OndinApp::headless` sets
-    /// `ephemeral`, and `app_at` is included because it rewrites `base_folder` after
-    /// construction. flip: remove `ephemeral: true` from `headless` → fails at the
+    /// No test may write the developer's preferences file: `headless` and `app_at`
+    /// both stay `ephemeral`. flip: remove `ephemeral: true` from `headless` → fails at the
     /// first assertion
     #[test]
     fn a_headless_app_can_never_write_the_preferences_file() {
@@ -9896,13 +9831,10 @@ mod library_wiring_tests {
         app.save_file(true);
         assert_eq!(crate::library::store::versions(&root, &id).len(), 1);
 
-        // The autosave path, driven the way the frame drives it: dirty, armed,
-        // and past the interval.
         app.session.mark_unsaved();
         arm_autosave(&mut app);
         app.autosave_tick(&ctx);
-        // The tick only queues, so the anti-vacuity control below must wait for the
-        // worker.
+        // The tick only queues; wait for the worker.
         app.disk_settle();
         assert!(
             !app.session.is_dirty(),
@@ -9931,7 +9863,6 @@ mod library_wiring_tests {
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
         arm_autosave(&mut app);
         app.autosave_tick(&ctx);
-        // A clean document produces no job, so this settles an empty queue.
         app.disk_settle();
         let after = std::fs::metadata(&path).unwrap().modified().unwrap();
         assert_eq!(before, after, "a clean document must not be rewritten");
@@ -9948,18 +9879,16 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The frame decides to autosave and does not pay for one, over the same 20 MB
-    /// fixture as the snapshot test. The `is_saving`, `is_dirty` and post-settle
-    /// assertions bracket the duration one, since a tick returning on a gate is fast
-    /// too. flip: `self.save_file(false)` as the body after the gates → fails at
-    /// `is_saving`
+    /// The frame decides to autosave and does not pay for one (a 20 MB fixture). The
+    /// `is_saving` and `is_dirty` assertions bracket the duration one, since a tick
+    /// returning on a gate is fast too. flip: `self.save_file(false)` as the body
+    /// after the gates → fails at `is_saving`
     #[test]
     fn an_autosave_of_a_photo_document_does_not_serialise_on_the_frame() {
         let ctx = egui::Context::default();
         let root = temp_root("autosave-photo");
         let mut app = app_with_a_photo(&ctx, root.clone());
-        // Filed first (autosave declines a pathless document), synchronously as
-        // `Ctrl+S` does.
+        // Filed first: autosave declines a pathless document.
         app.save_file(false);
         app.session.mark_unsaved();
         arm_autosave(&mut app);
@@ -9994,8 +9923,7 @@ mod library_wiring_tests {
     }
 
     /// An edit made while the save is in flight leaves the session dirty: the worker
-    /// serialises a clone taken at queue time, so the file is behind. Reading the
-    /// file back shows the write succeeded and is old. flip: drop the
+    /// serialises a clone taken at queue time, so the file is behind. flip: drop the
     /// `self.revision == at` guard in `EditorSession::finish_save` → fails at
     /// `is_dirty`
     #[test]
@@ -10013,8 +9941,7 @@ mod library_wiring_tests {
 
         let before = app.session.revision();
         app.autosave_tick(&ctx);
-        // The edit the worker's clone will not contain; 20 MB of picture keeps the
-        // serialise running when this commits.
+        // 20 MB of picture keeps the serialise running when this commits.
         let parent = app.session.doc.root();
         let id = app.session.ids.mint();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
@@ -10056,9 +9983,8 @@ mod library_wiring_tests {
 
     /// An undo or redo made while the save is in flight leaves the session dirty and
     /// the crash snapshot standing: `undo`/`redo` must move `revision`, or
-    /// `finish_save` marks the session clean and the next `recovery_tick` deletes the
-    /// only copy. The snapshot falls due between the undo and the save landing.
-    /// flip: drop the bump from `EditorSession::undo` → fails at the revision
+    /// `finish_save` marks the session clean and `recovery_tick` deletes the only
+    /// copy. flip: drop the bump from `EditorSession::undo` → fails at the revision
     /// assertion
     #[test]
     fn an_undo_during_a_save_leaves_the_session_dirty_and_the_snapshot_standing() {
@@ -10090,8 +10016,6 @@ mod library_wiring_tests {
             .join(format!("{key}.ondin"));
 
         for redo in [false, true] {
-            // The queued save holds the document as it is now: with the rect on the
-            // undo pass, without it on the redo pass.
             arm_autosave(&mut app);
             app.autosave_tick(&ctx);
             assert!(app.session.is_saving(), "the fixture must be mid-save");
@@ -10107,7 +10031,6 @@ mod library_wiring_tests {
                 "an undo or a redo is a new document as far as every cache is \
                  concerned"
             );
-            // The snapshot falls due inside the write's window.
             app.recovery.last = None;
             app.recovery_tick(&ctx);
             app.disk_settle();
@@ -10134,10 +10057,9 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A failed save ends the *Saving…* and leaves autosave running: `begin_save`
-    /// sets `saving` and the failure path must clear it, or the `is_saving` gate
-    /// switches autosave off. The failure is real: the session's path is a directory,
-    /// so the rename fails. flip: remove `session.save_failed()` from `apply_disk`'s
+    /// A failed save ends the *Saving…* and leaves autosave running: the failure path
+    /// must clear `saving`, or the `is_saving` gate switches autosave off. The
+    /// session's path is a directory, so the rename really fails. flip: remove `session.save_failed()` from `apply_disk`'s
     /// `SaveFailed` arm → fails at the post-settle `is_saving` assertion
     #[test]
     fn a_failed_save_stops_saying_saving_and_leaves_autosave_armed() {
@@ -10145,7 +10067,6 @@ mod library_wiring_tests {
         let root = temp_root("autosave-fails");
         let mut app = app_at(&ctx, root.clone());
 
-        // A path that cannot be written over, because it is a folder.
         let blocked = root.join("not-really-a-document.ondin");
         std::fs::create_dir_all(&blocked).unwrap();
         app.session.mark_saved(blocked.clone());
@@ -10177,7 +10098,6 @@ mod library_wiring_tests {
             app.session.status().text
         );
 
-        // The consequence: the next interval still fires.
         arm_autosave(&mut app);
         app.autosave_tick(&ctx);
         assert!(
@@ -10188,11 +10108,9 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A writer that dies mid-save is noticed by the frame, not only on exit: with
-    /// the worker gone no answer is ever sent, so `saving` would stay `Some` and
-    /// autosave stay off. Uses `disk_results` and never `disk_settle`, which only
-    /// `save_file`, `on_exit` and `relocate` run and which would pass unfixed code.
-    /// flip: revert `drain`'s `Disconnected` arm to a bare `break` → fails at
+    /// A writer that dies mid-save is noticed by the frame: with the worker gone no
+    /// answer is sent, so `saving` would stay `Some` and autosave stay off. Uses
+    /// `disk_results`, never `disk_settle`, which would pass unfixed code. flip: revert `drain`'s `Disconnected` arm to a bare `break` → fails at
     /// `is_saving`
     #[test]
     fn a_writer_death_mid_save_is_noticed_by_the_frame_and_not_only_by_the_exit() {
@@ -10200,7 +10118,6 @@ mod library_wiring_tests {
         let root = temp_root("writer-dies");
         let mut app = app_at(&ctx, root.clone());
 
-        // A write the worker will panic on rather than answer.
         let path = root.join("landing-v4.ondin");
         crate::library::writer::poison_document(&path);
         app.session.mark_saved(path.clone());
@@ -10214,7 +10131,6 @@ mod library_wiring_tests {
         );
         app.writer.as_mut().unwrap().wait_for_worker();
 
-        // The frame path, the only one an editor session runs by itself.
         app.disk_results();
 
         assert!(
@@ -10236,7 +10152,6 @@ mod library_wiring_tests {
              on every frame from here on"
         );
 
-        // The next interval fires, and now reports through `send`.
         arm_autosave(&mut app);
         app.autosave_tick(&ctx);
         assert!(
@@ -10258,7 +10173,6 @@ mod library_wiring_tests {
         let ctx = egui::Context::default();
         let root = temp_root("no-create");
         let mut app = app_at(&ctx, root.clone());
-        // Dirty, unfiled, past any interval.
         let mut meta = app.session.doc.meta().clone();
         meta.name = Some("Doodle".into());
         app.session.doc.set_meta(meta);
@@ -10275,9 +10189,8 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The snapshot covers the unfiled document autosave refuses to touch (a crash
-    /// there costs everything), without filing it, and stops covering it once the
-    /// file does. flip: give `recovery_tick` autosave's `path.is_none()` guard →
+    /// The snapshot covers the unfiled document autosave refuses to touch, without
+    /// filing it, and stops once the file does. flip: give `recovery_tick` autosave's `path.is_none()` guard →
     /// fails at the `expect` on `recovery.key`
     #[test]
     fn a_snapshot_covers_the_unfiled_document_and_stops_at_the_save() {
@@ -10290,7 +10203,6 @@ mod library_wiring_tests {
         app.session.doc.set_meta(meta);
         app.session.mark_unsaved();
 
-        // The tick queues and the worker writes, so settle before asserting a file.
         app.recovery_tick(&ctx);
         app.disk_settle();
         let key = app
@@ -10309,8 +10221,7 @@ mod library_wiring_tests {
             "and it is not a document: the library is still empty"
         );
 
-        // Filed and saved. `save_file` alone: `file_untitled` returns the path without
-        // setting `session.path`, so calling both files the document twice.
+        // `save_file` alone: `file_untitled` as well would file the document twice.
         app.save_file(false);
         assert!(!app.session.is_dirty(), "the fixture is a saved document");
         assert_eq!(
@@ -10331,11 +10242,9 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The feature end to end: a document edited past a save, a crash, a fresh app
-    /// that offers the work back, and the file on disk untouched until the user
-    /// says otherwise. The crash is modelled by dropping the app, so `open_at_launch`
-    /// must find the snapshot through `recovery::pending`. `Recover` loads the work
-    /// as unsaved and never writes the file. flip: `recover` writes the snapshot to
+    /// Recovery end to end: a document edited past a save, a crash (the app is
+    /// dropped), a fresh app that offers the work back through `recovery::pending`,
+    /// and the file untouched until the user saves. flip: `recover` writes the snapshot to
     /// `pending.target` → fails at the file-bytes assertion
     #[test]
     fn work_lost_to_a_crash_comes_back_and_the_file_waits_for_the_user() {
@@ -10344,29 +10253,25 @@ mod library_wiring_tests {
         let root = temp_root("recover");
         let mut app = app_at(&ctx, root.clone());
 
-        // A filed, saved document — the state a crash interrupts.
         let mut meta = app.session.doc.meta().clone();
         meta.name = Some("Landing v4".into());
         app.session.doc.set_meta(meta);
         app.session.mark_unsaved();
-        // `save_file` alone files an untitled document and records the path.
         app.save_file(false);
         let path = app.session.path.clone().expect("the fixture is filed");
         let on_disk = std::fs::read(&path).unwrap();
 
-        // Work that never reaches the file: renamed in memory, snapshotted, and
-        // then the process dies.
+        // Work that never reaches the file, then the process dies.
         let mut meta = app.session.doc.meta().clone();
         meta.name = Some("Landing v5".into());
         app.session.doc.set_meta(meta);
         app.session.mark_unsaved();
         app.recovery_tick(&ctx);
         let key = app.recovery.key.clone().expect("a snapshot was taken");
-        // No settle here, deliberately: the `Drop` on `library::writer::Writer` joining
-        // its worker is what puts the queued snapshot on disk before the relaunch.
+        // No settle, deliberately: `Writer`'s `Drop` joining its worker puts the
+        // queued snapshot on disk before the relaunch.
         drop(app);
 
-        // The relaunch.
         let mut app = app_at(&ctx, root.clone());
         app.library.refresh();
         app.open_at_launch();
@@ -10385,8 +10290,7 @@ mod library_wiring_tests {
         let pending = app.recovery.pending.pop().unwrap();
         assert_eq!(pending.target.as_deref(), Some(path.as_path()));
         app.recover(&pending);
-        // `assert!` with a named message rather than `assert_eq!` on two `Vec<u8>`,
-        // whose failure would be kilobytes of decimal bytes.
+        // `assert!` rather than `assert_eq!` on two `Vec<u8>`: a failure prints kilobytes.
         let after = std::fs::read(&path).unwrap();
         assert!(
             after == on_disk,
@@ -10414,7 +10318,6 @@ mod library_wiring_tests {
              a second file beside it"
         );
 
-        // Saving is the user's decision, and it is what ends the recovery.
         app.save_file(false);
         app.recovery_tick(&ctx);
         app.disk_settle();
@@ -10429,9 +10332,8 @@ mod library_wiring_tests {
     }
 
     /// A snapshot is offered even when `reopen_last` has already reopened the
-    /// document it belongs to, the usual case. Pins the outcome, not the statement
-    /// order: moving the collect to the end of `open_at_launch` leaves it green, but
-    /// a simplified reopen through `open_path` would `drop_recovery` and fail it.
+    /// document it belongs to. Pins the outcome, not the statement order: a
+    /// simplified reopen through `open_path` would `drop_recovery` and fail it.
     #[test]
     fn reopening_the_last_document_does_not_swallow_its_own_recovery() {
         use crate::library::recovery;
@@ -10446,7 +10348,6 @@ mod library_wiring_tests {
         let path = app.session.path.clone().unwrap();
         let id = app.session.doc.meta().id.clone().unwrap();
 
-        // Work the file never got, then the process dies.
         let mut meta = app.session.doc.meta().clone();
         meta.name = Some("Landing v5".into());
         app.session.doc.set_meta(meta);
@@ -10474,10 +10375,8 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Escape and the backdrop mean *Later*, and *Later* does not delete: the
-    /// free dismissals must never destroy somebody's only copy. Driven through
-    /// `OndinApp::ui`, since the card must run above the dashboard's early return.
-    /// flip: map `should_close()` to `RecoverChoice::Discard` → fails at the
+    /// Escape and the backdrop mean *Later*, and *Later* does not delete. Driven
+    /// through `OndinApp::ui`: the card runs above the dashboard's early return. flip: map `should_close()` to `RecoverChoice::Discard` → fails at the
     /// snapshot-exists assertion
     #[test]
     fn escape_defers_a_recovery_and_never_deletes_it() {
@@ -10492,8 +10391,7 @@ mod library_wiring_tests {
             ..doc.meta().clone()
         };
         doc.set_meta(meta);
-        // A key shaped like `library::ids::mint`'s, since `recovery::write` refuses
-        // anything else (the key is joined as a path component).
+        // Shaped like `library::ids::mint`'s: `recovery::write` refuses anything else.
         const ORPHAN_KEY: &str = "0ba9f11ce0ba9f11ce0ba9f11ce0ba9f";
         recovery::write(&root, ORPHAN_KEY, &doc).unwrap();
         app.library.refresh();
@@ -10517,8 +10415,7 @@ mod library_wiring_tests {
                 eframe::App::ui(app, ui, &mut frame);
             });
         };
-        // A frame before the key: `ModalResponse::should_close` gates Escape on
-        // `is_top_modal`, which egui works out from the previous pass's modal stack.
+        // `should_close` gates Escape on last pass's modal stack.
         pass(&mut app, Vec::new());
         pass(
             &mut app,
@@ -10548,10 +10445,8 @@ mod library_wiring_tests {
     }
 
     /// A modal owns the keyboard: the gate in `<OndinApp as eframe::App>::ui` must
-    /// cover every modal, since `input::resolve` asks `egui_wants_keyboard_input()`,
-    /// which is false for a modal of buttons. The no-modal row is the positive
-    /// control and `settings` the second. Two passes per case, as in the Escape test.
-    /// flip: narrow the arm to `self.settings.is_some()` → fails at the
+    /// cover every modal, since `egui_wants_keyboard_input()` is false for a modal of
+    /// buttons. The no-modal row is the positive control. flip: narrow the arm to `self.settings.is_some()` → fails at the
     /// `confirming_close` row
     #[test]
     fn every_modal_owns_the_keyboard_not_only_settings() {
@@ -10585,7 +10480,6 @@ mod library_wiring_tests {
             app.session.selection.set_one(rect);
             match modal {
                 "none" => {}
-                // Through the app's own door.
                 "settings" => app.toggle_settings(ctx),
                 "confirming_close" => app.confirming_close = true,
                 "recovery" => {
@@ -10633,13 +10527,11 @@ mod library_wiring_tests {
             (alive, depth)
         }
 
-        // The positive control: with no modal the key must reach the document.
         assert_eq!(
             survives(&ctx, "none"),
             (false, 1),
             "control: with nothing up, Delete must delete"
         );
-        // The one arm that always worked.
         assert_eq!(
             survives(&ctx, "settings"),
             (true, 0),
@@ -10661,9 +10553,8 @@ mod library_wiring_tests {
     }
 
     /// The tick's third gate: nothing committed since the last snapshot means no
-    /// write, however long the interval (`is_dirty` stays true until the next save).
-    /// Watches `recovery.last`, which only advances on a write, not the mtime.
-    /// flip: drop the `recovery.at` comparison → fails at the last assertion
+    /// write, however long the interval. Watches `recovery.last`, which only
+    /// advances on a write. flip: drop the `recovery.at` comparison → fails at the last assertion
     #[test]
     fn an_idle_dirty_document_is_snapshotted_once_rather_than_every_interval() {
         let ctx = egui::Context::default();
@@ -10672,13 +10563,11 @@ mod library_wiring_tests {
         app.session.mark_unsaved();
 
         app.recovery_tick(&ctx);
-        // The settle feeds the gate: `recovery.at` is written only from the worker's
-        // answer.
+        // `recovery.at` is written only from the worker's answer.
         app.disk_settle();
         let first = app.recovery.last.expect("the first tick writes");
         assert_eq!(app.recovery.at, Some(app.session.revision()));
 
-        // The interval elapses again, with nothing committed in between.
         app.recovery.last = Some(std::time::Instant::now() - std::time::Duration::from_secs(3600));
         app.recovery_tick(&ctx);
         assert!(
@@ -10689,9 +10578,8 @@ mod library_wiring_tests {
     }
 
     /// The frame decides to snapshot and does not pay for one: a 20 MB document
-    /// serialises far over the 50 ms bound, which is not a performance target, only
-    /// something a serialise on the frame would breach. The key and the on-disk size
-    /// keep the duration assertion from being vacuous. flip: put
+    /// serialises far over the 50 ms bound. The key and the on-disk size keep the
+    /// duration assertion from being vacuous. flip: put
     /// `recovery::write(&root, &key, &self.session.doc)` back on the frame in
     /// `recovery_tick` → fails at the duration assertion
     #[test]
@@ -10728,8 +10616,7 @@ mod library_wiring_tests {
     }
 
     /// A document with 20 MB of picture, so a snapshot of it is still being written
-    /// when the next thing happens. The bytes are never decoded (`AddImage` stores
-    /// the intrinsic size), so a pattern will do.
+    /// when the next thing happens. The bytes are never decoded.
     fn app_with_a_photo(ctx: &egui::Context, root: PathBuf) -> OndinApp {
         use ondin_core::{ImageEntry, ImageFormat, ImageId, ImageSource, Operation, Transaction};
         let mut app = app_at(ctx, root);
@@ -10750,10 +10637,9 @@ mod library_wiring_tests {
         app
     }
 
-    /// A removal cannot be overtaken by a write already in flight: with one worker,
-    /// `forget_snapshot` queues behind it, where a direct removal would delete a file
-    /// not there yet and the write would put it back. The 20 MB fixture holds the
-    /// write open long enough for the race to have a wrong answer. flip: call
+    /// A removal cannot be overtaken by a write already in flight: `forget_snapshot`
+    /// queues behind it, where a direct removal would delete a file not there yet and
+    /// the write would put it back. flip: call
     /// `crate::library::recovery::remove` unconditionally in `forget_snapshot` →
     /// fails at the only assertion
     #[test]
@@ -10766,7 +10652,7 @@ mod library_wiring_tests {
 
         app.recovery_tick(&ctx);
         let key = app.recovery.key.clone().expect("the tick took a snapshot");
-        // No settle in between: the point is that the write is *unfinished* here.
+        // No settle: the write must be unfinished here.
         app.drop_recovery();
         app.disk_settle();
 
@@ -10803,7 +10689,6 @@ mod library_wiring_tests {
         assert!(!old.exists(), "the old file is gone");
         assert!(root.join("homepage-hero.ondin").exists());
         assert_eq!(app.session.path, Some(root.join("homepage-hero.ondin")));
-        // The in-memory document knows its new name, or the next save would undo it.
         assert_eq!(
             app.session.doc.meta().name.as_deref(),
             Some("Homepage hero")
@@ -10827,7 +10712,6 @@ mod library_wiring_tests {
         assert!(crate::library::scan::scan(&root).is_empty());
         assert_eq!(crate::library::store::trashed(&root).len(), 1);
 
-        // A dirty document and an elapsed interval recreate nothing.
         app.session.mark_unsaved();
         arm_autosave(&mut app);
         app.autosave_tick(&ctx);
@@ -10844,8 +10728,7 @@ mod library_wiring_tests {
     }
 
     /// The trash's retention window is enforced at launch, not only from the
-    /// library-settings *Save* handler. The fresh deletion surviving shows a window
-    /// was applied rather than a broom. flip: remove the `purge_trash` call from
+    /// library-settings *Save* handler. flip: remove the `purge_trash` call from
     /// `open_at_launch` → fails at the `aged` assertion; `keep_days` read as `0` →
     /// fails at `fresh`
     #[test]
@@ -10867,8 +10750,7 @@ mod library_wiring_tests {
         let aged = file("Landing v4");
         let fresh = file("Pricing table");
 
-        // The retention clock is the trashed file's mtime (`store::trash_stamp`), so
-        // ageing the deletion means setting it.
+        // The retention clock is the trashed file's mtime (`store::trash_stamp`).
         std::fs::OpenOptions::new()
             .write(true)
             .open(&aged)
@@ -10907,7 +10789,6 @@ mod library_wiring_tests {
         let outside = temp_root("import-source");
         let mut app = app_at(&ctx, root.clone());
 
-        // A document with a name, filed somewhere that is not the library.
         let mut doc = ondin_core::Document::new(app.session.ids.mint());
         let source =
             crate::library::store::file_document(&outside, None, "My cool design", &mut doc)
@@ -10926,8 +10807,6 @@ mod library_wiring_tests {
             "an imported document is a new document"
         );
 
-        // The same file again is a second, independent document rather than an
-        // overwrite.
         app.import_paths(&[source]);
         let listed = crate::library::scan::scan(&root);
         assert_eq!(listed.len(), 2);
@@ -10976,7 +10855,6 @@ mod library_wiring_tests {
         let listed = crate::library::scan::scan(&root);
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].display_name(), "Old hero sketch");
-        // It is filed now, so the name is in the file rather than guessed per scan.
         assert_eq!(
             listed[0].meta.name.as_deref(),
             Some("Old hero sketch"),
@@ -11014,11 +10892,9 @@ mod library_wiring_tests {
     }
 
     /// An archived project is not a destination for a new document. Three doors
-    /// must agree: `new_file_into` (the dashed *New file in {project}* card),
-    /// `nav_project` (where `Act::NewFile` files, which `Ctrl+N` reaches without the
-    /// card) and `import_counting`. The unfiled answer is asserted, not just the
-    /// absence of the archived one. flip: `Projects::destination` reverted to plain
-    /// `get` → fails at the card assertion; the import row is a separate call site
+    /// must agree: `new_file_into` (the card), `nav_project` (where `Ctrl+N` files)
+    /// and `import_counting`. flip: `Projects::destination` reverted to plain `get`
+    /// → fails at the card assertion; the import row is a separate call site
     #[test]
     fn an_archived_project_is_not_a_destination_for_a_new_document() {
         let ctx = egui::Context::default();
@@ -11026,7 +10902,6 @@ mod library_wiring_tests {
         let mut app = app_with_a_project(&ctx, root.clone());
         app.dash.nav = crate::panels::dashboard::Nav::Project("p-1".into());
 
-        // The control first: an active project is a destination.
         assert_eq!(
             app.new_file_into().as_deref(),
             Some("Kestrel"),
@@ -11038,8 +10913,7 @@ mod library_wiring_tests {
             "control: and the act files into it"
         );
 
-        // The flag is set directly: `set_archived` is private and both functions
-        // read only `library.projects`.
+        // Set directly: `set_archived` is private.
         for p in &mut app.library.projects.projects {
             if p.id == "p-1" {
                 p.archived = true;
@@ -11067,7 +10941,6 @@ mod library_wiring_tests {
              project"
         );
 
-        // The third door: an import taken on this nav.
         let outside = temp_root("archived-dest-src");
         let mut incoming = ondin_core::Document::new(app.session.ids.mint());
         let source =
@@ -11099,8 +10972,7 @@ mod library_wiring_tests {
     }
 
     /// A project whose files could not all be moved is kept, and the user stays on
-    /// its heading where the retry is. The failure is staged by creating `.trash` as
-    /// a file, so `create_dir_all` refuses. flip: remove the `failed == 0` guard
+    /// its heading where the retry is. flip: remove the `failed == 0` guard
     /// from the `retain` → fails at the first assertion
     #[test]
     fn a_project_whose_files_could_not_move_is_kept() {
@@ -11141,7 +11013,6 @@ mod library_wiring_tests {
             app.session.status().text
         );
 
-        // The control: the same delete with a writable trash.
         std::fs::remove_file(root.join(crate::library::scan::TRASH_DIR)).unwrap();
         app.delete_project("p-1", None, false);
         assert!(
@@ -11171,17 +11042,14 @@ mod library_wiring_tests {
         assert!(app.library.projects.get("p-1").is_none(), "the row is gone");
         assert_eq!(app.library.file_count("p-2"), 2, "the files moved");
         assert_eq!(app.library.entries.len(), 2, "and none were deleted");
-        // The folder stays: it may hold things this app did not put there.
         assert!(root.join("kestrel").exists());
-        // The dashboard is not left standing on a heading that is gone.
         assert_eq!(app.dash.nav, crate::panels::dashboard::Nav::All);
         let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A project transfer takes the open document with it: `delete_project` must
     /// re-point `session.path` on the transfer branch too, or the next autosave
-    /// recreates the file under the same `meta.id`. The other transfer tests open no
-    /// document. flip: put `&& !keep_files` back on the follow → fails at "the open
+    /// recreates the file under the same `meta.id`. flip: put `&& !keep_files` back on the follow → fails at "the open
     /// document is where the transfer put it"
     #[test]
     fn transferring_a_project_takes_the_open_document_with_it() {
@@ -11205,7 +11073,6 @@ mod library_wiring_tests {
             "and it knows which project it is in now"
         );
 
-        // The save the user makes next.
         crate::library::store::write_document(&now, &app.session.doc).unwrap();
         app.library.refresh();
         assert_eq!(
@@ -11257,15 +11124,13 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A broken `projects.json` stops a project delete before it moves any files
-    /// (`Library::save_projects` latches on its own, so the bytes were never at
-    /// risk). flip: move the check below the file-moving loop → fails at the
+    /// A broken `projects.json` stops a project delete before it moves any files.
+    /// flip: move the check below the file-moving loop → fails at the
     /// trashed and entries assertions
     #[test]
     fn a_broken_projects_file_stops_a_project_delete_before_it_moves_anything() {
         let ctx = egui::Context::default();
         let root = temp_root("del-proj-latch");
-        // Built with a working projects file, so the project has real members.
         let mut app = app_with_a_project(&ctx, root.clone());
         assert_eq!(app.library.file_count("p-1"), 2);
 
@@ -11302,8 +11167,7 @@ mod library_wiring_tests {
     }
 
     /// Saving the settings with *Move my existing files there* takes the whole
-    /// library with it, and switching folders without it leaves the files behind;
-    /// the two halves fail in opposite directions.
+    /// library with it, and switching folders without it leaves the files behind.
     #[test]
     fn changing_the_base_folder_moves_the_library_only_when_asked() {
         let ctx = egui::Context::default();
@@ -11312,7 +11176,6 @@ mod library_wiring_tests {
         let mut app = app_with_a_project(&ctx, old.clone());
         assert_eq!(app.library.entries.len(), 2);
 
-        // Without the toggle: the new folder is empty, the old one keeps everything.
         app.library_settings = Some(crate::panels::dashboard::LibrarySettings {
             base_folder: new.display().to_string(),
             migrate: false,
@@ -11323,7 +11186,6 @@ mod library_wiring_tests {
         assert!(app.library.entries.is_empty(), "the new folder is empty");
         assert_eq!(crate::library::scan::scan(&old).len(), 2, "nothing moved");
 
-        // And back again, this time asking for the move.
         app.library_settings = Some(crate::panels::dashboard::LibrarySettings {
             base_folder: old.display().to_string(),
             migrate: true,
@@ -11338,7 +11200,7 @@ mod library_wiring_tests {
 
     /// *Move my library* takes the open document with it: `session.path` is absolute,
     /// so the next save would otherwise recreate the document in the abandoned folder
-    /// under the same `meta.id`. The test above opens no document. flip: delete the
+    /// under the same `meta.id`. flip: delete the
     /// re-point loop in `apply_library_settings` → fails at "the open document is in
     /// the library it now says it is in"; replace the map lookup with a
     /// `strip_prefix(&old_root).join(&new_root)` swap → fails at "it is the file that
@@ -11354,8 +11216,7 @@ mod library_wiring_tests {
         app.prefs.last_document = Some(open.clone());
         assert_eq!(app.session.path.as_deref(), Some(open.as_path()));
 
-        // A same-named document already waits at the destination, so `relocate`
-        // renames the migrated one; a prefix swap would then name this stranger.
+        // `relocate` renames the migrated document; a prefix swap would name this one.
         let squatter = new.join("kestrel");
         std::fs::create_dir_all(&squatter).unwrap();
         let mut other = ondin_core::Document::new(app.session.ids.mint());
@@ -11385,7 +11246,6 @@ mod library_wiring_tests {
             "and so does the document the next launch reopens"
         );
 
-        // Save, and count the files carrying this document's id.
         crate::library::store::write_document(&now, &app.session.doc).unwrap();
         assert!(
             crate::library::scan::scan(&old).is_empty(),
@@ -11414,7 +11274,6 @@ mod library_wiring_tests {
         let ctx = egui::Context::default();
         let old = temp_root("settings-make-old");
         let new = temp_root("settings-make-new");
-        // A named folder that is not there, on a machine that has seen documents.
         std::fs::remove_dir_all(&new).unwrap();
         let mut app = app_with_a_project(&ctx, old.clone());
         app.library.local.mark_opened("doc-1");
@@ -11449,7 +11308,6 @@ mod library_wiring_tests {
             autosave_secs: 999,
             ..crate::panels::dashboard::LibrarySettings::from_prefs(&app.prefs, &root)
         });
-        // What Cancel and Escape both do.
         app.library_settings = None;
         assert_eq!(app.prefs.autosave_secs, before);
         let _ = std::fs::remove_dir_all(&root);
@@ -11467,7 +11325,6 @@ mod library_wiring_tests {
             crate::panels::dashboard::LibrarySettings::from_prefs(&app.prefs, &app.library.root);
         assert_eq!(draft.base_folder, root.display().to_string());
         assert!(!draft.base_folder.is_empty());
-        // And re-saving that same text must not be read as a folder change.
         app.library_settings = Some(draft);
         app.apply_library_settings();
         assert_eq!(app.library.root, root);
@@ -11491,29 +11348,25 @@ mod library_wiring_tests {
         );
         assert_eq!(app.session.document_title(), "Landing v4");
 
-        // The library and the title bar share `scan::display_name`.
         app.library.refresh();
         assert_eq!(
             app.library.entries[0].display_name(),
             app.session.document_title()
         );
 
-        // A pre-library document has no block, so the filename is all there is.
         let bare = ondin_core::Document::new(app.session.ids.mint());
         let path = root.join("old-hero-sketch.ondin");
         std::fs::write(&path, ondin_core::io::save(&bare).unwrap()).unwrap();
         app.open_path(&path);
         assert_eq!(app.session.document_title(), "Old hero sketch");
 
-        // And the starter document, which has neither.
         let fresh = app_at(&ctx, temp_root("title-fresh"));
         assert_eq!(fresh.session.document_title(), "Untitled");
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// The name sits 12 points from the logo mark on both screens, measured from
-    /// the painted shapes. A gap belongs to the item before it, so the spacing is
-    /// set before the mark is allocated.
+    /// The name sits 12 points from the logo mark on both screens. A gap belongs to
+    /// the item before it, so the spacing is set before the mark is allocated.
     ///
     /// flip: allocating the editor's mark at its row's 8 → fails at the equality
     #[test]
@@ -11652,7 +11505,6 @@ mod library_wiring_tests {
         let root = temp_root("crumb");
         let mut app = app_with_a_project(&ctx, root.clone());
 
-        // A document in a project.
         app.library.refresh();
         let filed = app
             .library
@@ -11668,7 +11520,6 @@ mod library_wiring_tests {
         assert!(painted.contains(&"/".to_string()), "{painted:?}");
         assert!(painted.contains(&"Landing v4".to_string()), "{painted:?}");
 
-        // And one in none.
         let mut loose = ondin_core::Document::new(app.session.ids.mint());
         let path =
             crate::library::store::file_document(&root, None, "Loose sketch", &mut loose).unwrap();
@@ -11729,7 +11580,6 @@ mod library_wiring_tests {
             "{painted:?}"
         );
 
-        // A kit that has published version 3 stops sharing, then is a kit again.
         let mut meta = app.session.doc.meta().clone();
         meta.kit.as_mut().unwrap().version = 3;
         app.session.doc.set_meta(meta);
@@ -11742,7 +11592,6 @@ mod library_wiring_tests {
         assert_eq!(app.shared_kit().map(|k| k.version), Some(3), "continues");
         assert_eq!(crate::library::scan::scan(&root).len(), 1, "one file");
 
-        // A pre-library file: on disk, in the folder, with no id.
         let old = root.join("Old.ondin");
         let bare = ondin_core::Document::new(app.session.ids.mint());
         std::fs::write(&old, ondin_core::io::save(&bare).unwrap()).unwrap();
@@ -11825,7 +11674,6 @@ mod library_wiring_tests {
             !texts.iter().any(|t| t.contains("SENTINEL")),
             "no status text in the bar: {texts:?}"
         );
-        // The two grounds: the tag's 8% chip and Publish's accent, one height.
         let grounds: Vec<egui::Rect> = shapes
             .iter()
             .filter_map(|s| match &s.shape {
@@ -11867,7 +11715,6 @@ mod library_wiring_tests {
         for _ in 0..2 {
             shapes = ctx.run_ui(input(), |ui| app.top_bar(ui)).shapes;
         }
-        // The card paints with a shadow, so its box is egui's record of the area.
         let card = ctx
             .memory(|m| m.area_rect(egui::Id::new("view-menu")))
             .expect("the View menu's area");
@@ -11880,7 +11727,6 @@ mod library_wiring_tests {
                 _ => None,
             })
             .expect("the row");
-        // The row's own 8 inset, inside the card's padding and border.
         let inset = crate::app::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
         assert!(
             label <= card.right() - inset + 0.5,
@@ -11922,7 +11768,6 @@ mod library_wiring_tests {
         assert!(painted(&mut app).is_empty(), "the switch silences it");
         app.show_status = true;
 
-        // Age the message past its hold.
         let hold = crate::app::status_hold(app.session.status());
         app.session.status_mut().at =
             std::time::Instant::now() - hold - std::time::Duration::from_millis(10);
@@ -11935,7 +11780,6 @@ mod library_wiring_tests {
             "the mode stays"
         );
 
-        // Through a message's fade the mode stays whole.
         app.session.info("Reordered");
         app.session.status_mut().at = std::time::Instant::now() - hold
             + std::time::Duration::from_secs_f32(crate::app::STATUS_FADE * 0.5);
@@ -11970,7 +11814,6 @@ mod library_wiring_tests {
             .expect("the message is drawn while it fades");
         assert!(message.2 < 255, "and the message does fade: {faded:?}");
 
-        // A failure is held longer than a report of the same length.
         let mut s = app.session.status().clone();
         s.text = "x".repeat(40);
         let info = crate::app::status_hold(&s);
@@ -11986,7 +11829,6 @@ mod library_wiring_tests {
         let ctx = egui::Context::default();
         let root = temp_root("kit-save-fails");
         let mut app = app_at(&ctx, root.clone());
-        // A directory where the file should be: the write fails.
         let blocked = root.join("blocked.ondin");
         std::fs::create_dir_all(&blocked).unwrap();
         app.session.path = Some(blocked);
@@ -12015,7 +11857,6 @@ mod library_wiring_tests {
         let root = temp_root("draw");
         let mut app = app_at(&ctx, root.clone());
 
-        // Documents in a project and in none, so rows are exercised.
         app.library
             .projects
             .projects
@@ -12039,7 +11880,6 @@ mod library_wiring_tests {
         app.library.refresh();
         assert_eq!(app.library.entries.len(), 3, "the fixture must have rows");
 
-        // Both views and every sidebar entry: each is a different layout.
         for nav in [
             crate::panels::dashboard::Nav::Recent,
             crate::panels::dashboard::Nav::All,
@@ -12174,9 +12014,9 @@ mod library_wiring_tests {
         crate::theme::install(&ctx);
         let root = temp_root("opacity-subject");
 
-        /// Two rects at opacity 1.0, A selected. Returns their alphas after
-        /// pressing `4` at t=0.1 and letting the window shut at t=1.0, with
-        /// `moved` deciding what the selection is when the deadline arrives.
+        /// Two rects at opacity 1.0, A selected. Returns their alphas after pressing
+        /// `4` at t=0.1 and the window shutting at t=1.0, with `moved` deciding the
+        /// selection at the deadline.
         fn run(
             ctx: &egui::Context,
             root: &std::path::Path,
@@ -12200,7 +12040,6 @@ mod library_wiring_tests {
                 .try_commit(ondin_core::Transaction(vec![rect(a), rect(b)]))
                 .expect("two rects");
             app.session.selection.set_one(a);
-            // The fixture's creation is an undo step, so the delta is asserted.
             let before = app.session.history.undo_depth();
 
             let mut frame = eframe::Frame::_new_kittest();
@@ -12231,7 +12070,6 @@ mod library_wiring_tests {
                 }],
             );
             moved(&mut app, a, b);
-            // Well past the 0.6s window, so the fold runs.
             pass(&mut app, 1.0, Vec::new());
 
             let alpha = |app: &OndinApp, id| app.session.doc.get(id).expect("node").opacity();
@@ -12244,21 +12082,18 @@ mod library_wiring_tests {
             out
         }
 
-        // Control: nothing moves, and the digit lands where it was typed.
         assert_eq!(
             run(&ctx, &root, |_, _, _| {}),
             (0.4, 1.0, 1),
             "control: with the selection still on A, the digit commits to A"
         );
 
-        // The selection moves inside the window.
         assert_eq!(
             run(&ctx, &root, |app, _, b| app.session.selection.set_one(b)),
             (0.4, 1.0, 1),
             "a digit typed against A must land on A however the selection moves"
         );
 
-        // And the empty selection.
         assert_eq!(
             run(&ctx, &root, |app, _, _| app.session.selection.clear()),
             (0.4, 1.0, 1),
@@ -12325,7 +12160,6 @@ mod library_wiring_tests {
             other => panic!("the fixture's node is a text node, got {other:?}"),
         };
 
-        // Undo: the button's verb, run as the button runs it.
         let (mut app, id) = typed(&ctx, &root);
         app.finish_text_first();
         app.session.undo();
@@ -12337,7 +12171,6 @@ mod library_wiring_tests {
         );
         assert!(app.text.is_none(), "and the session is over");
 
-        // Save: the consequence is on disk, a pinned version missing what is on screen.
         let (mut app, id) = typed(&ctx, &root);
         app.finish_text_first();
         app.save_file(true);
@@ -12445,7 +12278,6 @@ mod library_wiring_tests {
             .expect("the fixture's rect");
         app.session.selection.set_one(id);
 
-        // A chrome field had the keyboard when the key arrived.
         app.chrome_focus = true;
         app.escape(&ctx);
         assert_eq!(
@@ -12454,7 +12286,6 @@ mod library_wiring_tests {
             "the selection survives: the key was spent on the field"
         );
 
-        // Control: with nothing focused the ladder runs, so the rung is not unconditional.
         app.chrome_focus = false;
         app.escape(&ctx);
         assert!(
@@ -12528,8 +12359,6 @@ mod library_wiring_tests {
 
     /// A file dropped while a modal is up does not reach the document behind it:
     /// drops arrive before any widget runs, so the backdrop does not block them.
-    /// The control (a drop with no modal) proves the drop works at all; all three
-    /// modals are covered because the guard is one predicate.
     ///
     /// flip: restoring the bare `self.take_dropped_images(&ctx)` → fails at the `settings` card
     #[test]
@@ -12571,7 +12400,6 @@ mod library_wiring_tests {
         // The revision, not a child count: `drop_images_at` picks the parent four ways.
         let kids = |app: &OndinApp| app.session.revision();
 
-        // Control: with nothing up, a drop lands.
         let before = kids(&app);
         drop_a_file(&ctx, &mut app);
         assert_ne!(
@@ -12580,7 +12408,6 @@ mod library_wiring_tests {
             "the control never landed, so this test asserts nothing about modals"
         );
 
-        // And behind each of the three cards, it does not.
         for (name, arm) in [
             ("settings", 0usize),
             ("confirming_close", 1),
@@ -12589,7 +12416,6 @@ mod library_wiring_tests {
             let mut app = app_at(&ctx, root_dir.clone());
             let settled = kids(&app);
             match arm {
-                // Through the real door: `Settings::from_prefs` is private.
                 0 => app.toggle_settings(&ctx),
                 1 => app.confirming_close = true,
                 _ => app
@@ -12639,7 +12465,7 @@ mod library_wiring_tests {
         app.confirming_close = true;
         app.tool = crate::tools::Tool::Rect;
 
-        // One pass puts the card on screen first: `should_close` needs its `Area` to exist.
+        // `should_close` needs the card's `Area` to exist.
         whole_frame(&ctx, &mut app, Vec::new());
         whole_frame(&ctx, &mut app, vec![escape()]);
 
@@ -12700,9 +12526,8 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// One `Escape` over a top-bar dropdown closes the dropdown and nothing else.
-    /// `input::resolve`'s keyboard guard does not cover it: opening a dropdown by
-    /// click leaves no focused widget.
+    /// One `Escape` over a top-bar dropdown closes the dropdown and nothing else; the
+    /// keyboard guard does not cover it, as a click leaves no focused widget.
     ///
     /// flip: removing the `Action::Escape if open_menu != None` arm → fails at the tool assertion (the menu closes either way)
     #[test]
@@ -12858,17 +12683,14 @@ mod library_wiring_tests {
 mod context_menu_rule_tests {
     //! The four context-menu rules of `context-menus.md` §10: R1's spent click, R4's
     //! replacement, R3's single rung, and no document action while a menu is open.
-    //! They live here, not in `menu.rs`, because each is a rule between frames or
-    //! subsystems that a hand-built `menu::Context` cannot get wrong.
-    //!
-    //! `whole_frame` and `app_with_two_groups` are borrowed from sibling test modules.
+    //! They span frames and subsystems, so they live here, not in `menu.rs`.
     use super::OndinApp;
     use super::library_wiring_tests::whole_frame;
     use super::ungroup_tests::app_with_two_groups;
     use crate::tools::Tool;
     use ondin_core::{Document, NodeId};
 
-    /// A secondary press, as two events, so a test can look between them.
+    /// A secondary press or release as one event.
     fn secondary(at: egui::Pos2, pressed: bool) -> egui::Event {
         egui::Event::PointerButton {
             pos: at,
@@ -12932,9 +12754,8 @@ mod context_menu_rule_tests {
     }
 
     /// R1's other half: a right-click that cancels a gesture is spent (opens no menu
-    /// and selects nothing), and the next one opens a menu. A marquee leaves the
-    /// pointer over the first group while the second is selected, so selecting the
-    /// layer under the pointer is distinguishable; the second right-click is the control.
+    /// and selects nothing), and the next one opens a menu. The marquee leaves the
+    /// pointer over the first group while the second is selected.
     ///
     /// flip: deleting `canvas_context_menu`'s `if self.gesture_cancelled { return; }` → fails at "and it selected nothing"
     #[test]
@@ -13060,8 +12881,7 @@ mod context_menu_rule_tests {
     }
 
     /// R3 with the whole ladder underneath: one Escape over a menu leaves the
-    /// selection, `entered_group` and the tool untouched. A second test, not a
-    /// widening, because the fall-through's extra rung differs with the fixture.
+    /// selection, `entered_group` and the tool untouched.
     ///
     /// flip: the dispatch loop over `input::resolve` in the menu arm after `self.context_menu = None` → fails at the `entered_group` assertion
     #[test]
@@ -13107,9 +12927,7 @@ mod context_menu_rule_tests {
     }
 
     /// No document action fires while a menu is open: `Delete` over a menu leaves
-    /// the node set and the dirty flag unchanged (the gate is `input::resolve`
-    /// not running while `context_menu.is_some()`). The dirty flag covers an edit
-    /// undone before the assertion.
+    /// the node set and the dirty flag unchanged (the flag covers an undone edit).
     ///
     /// flip: running `input::resolve` in the menu arm's `else` → fails at the node-count assertion
     #[test]
@@ -13241,9 +13059,7 @@ mod context_menu_rule_tests {
     }
 
     /// One `Escape` closes each of the five popovers and pays out no rung of the
-    /// ladder. A popover nothing draws answers every key alike, so each case
-    /// asserts `up_before`; the control (no popover, `Rect` → `Select`) proves
-    /// `Escape` still pays out.
+    /// ladder; the no-popover control proves `Escape` still pays out.
     ///
     /// flip: removing `a_popover_owns_escape`'s arm from `update` → fails at `stroke_menu`'s tool assertion
     /// flip: the arm swallowing every key → fails at "a tool letter still reaches the keymap"
@@ -13276,7 +13092,6 @@ mod context_menu_rule_tests {
                  underneath and one press does not pay out two"
             );
 
-            // Every key that is not `Escape` still goes through.
             open(&mut app);
             whole_frame(ctx, &mut app, Vec::new());
             assert!(up(&app), "{name}: reopened for the second half");
@@ -13328,7 +13143,6 @@ mod context_menu_rule_tests {
             &|a| a.export_row_open.is_some(),
         );
 
-        // Control: every assertion above is that the tool did not move, as a broken ladder would.
         let mut app = probe_app(&ctx).0;
         app.tool = Tool::Rect;
         whole_frame(&ctx, &mut app, Vec::new());
@@ -13342,9 +13156,8 @@ mod context_menu_rule_tests {
         );
     }
 
-    /// A popover flag nothing is drawing does not own `Escape`. Case B: the Type
-    /// popover is open and the selection leaves the text layer, so the press pays
-    /// out its rung and the dead flag clears. Case A: present mode hides the inspector.
+    /// A popover flag nothing is drawing does not own `Escape` (B: the selection
+    /// leaves the text layer; A: present mode hides the inspector).
     ///
     /// flip: dropping `popover_heard` from the gate → fails case B at "the press reaches the ladder"
     /// flip: dropping the dead-flag clearing → fails at "and the dead flag is cleared"
@@ -13354,7 +13167,6 @@ mod context_menu_rule_tests {
         use crate::tools::Tool;
         let ctx = egui::Context::default();
 
-        // Case B.
         let mut app = probe_text_app(&ctx);
         app.tool = Tool::Rect;
         whole_frame(&ctx, &mut app, Vec::new());
@@ -13371,7 +13183,6 @@ mod context_menu_rule_tests {
         assert_eq!(app.tool, Tool::Select, "the press reaches the ladder");
         assert!(app.type_menu.is_none(), "and the dead flag is cleared");
 
-        // Case A.
         let mut app = probe_text_app(&ctx);
         whole_frame(&ctx, &mut app, Vec::new());
         app.type_menu = Some(crate::app::TypeTab::Character);
@@ -13395,8 +13206,8 @@ mod clipboard_gate_tests {
     //! Two threads opening the OS clipboard at once corrupt the heap, so
     //! `with_clipboard` serialises them behind a gate.
 
-    /// The gate holds under eight threads doing nothing but opening it. The test
-    /// spawns its own threads and only reads, never overwriting the developer's clipboard.
+    /// The gate holds under eight threads doing nothing but opening it; the test only
+    /// reads, never overwriting the developer's clipboard.
     ///
     /// flip: opening `arboard::Clipboard::new()` without `with_clipboard`'s `GATE` → the binary aborts with `STATUS_HEAP_CORRUPTION`, naming no test
     #[test]
@@ -13417,9 +13228,8 @@ mod clipboard_gate_tests {
 
     /// A headless app takes the OS clipboard off the table for the whole process.
     ///
-    /// The check sits in the callers, not inside `with_clipboard`, so the test above
-    /// can still reach a real handle. Asserts the readers answer empty; the flag is
-    /// one-way, so the test builds its own headless app.
+    /// The check sits in the callers, so the test above can still reach a real
+    /// handle. The flag is one-way, so this builds its own app.
     ///
     /// flip: dropping the `CLIPBOARD_OFF.store` from `OndinApp::headless` → fails at the first assertion (the reader assertions pass on an empty clipboard)
     #[test]
@@ -13445,10 +13255,9 @@ mod clipboard_gate_tests {
 
 #[cfg(test)]
 mod clipboard_crossing_tests {
-    //! A layer copied in one window pastes as a layer in another: the payload follows
-    //! the names past `io::clip::FENCE`. One process stands in for two, since
-    //! `OndinApp::headless` sets `CLIPBOARD_OFF`; the tests assert that the text from
-    //! `copy_selection` alone rebuilds the layers, not that the OS carries it.
+    //! A layer copied in one window pastes as a layer in another. One process stands
+    //! in for two (`headless` sets `CLIPBOARD_OFF`); the text from `copy_selection`
+    //! alone must rebuild the layers.
 
     use super::{Clipboard, OndinApp};
     use ondin_core::kurbo::Size;
@@ -13468,9 +13277,8 @@ mod clipboard_crossing_tests {
         out
     }
 
-    /// The whole crossing: copy two groups in one app, hand the clipboard text to a
-    /// second app, and the six nodes arrive as layers with ids minted by the second
-    /// (a payload's ids are a template, since actors are random per process).
+    /// Copy two groups in one app, hand the clipboard text to a second, and the six
+    /// nodes arrive as layers with ids minted by the second.
     ///
     /// flip: `stamp_clipboard(ctx, heading)` in place of the payload write → fails at the `Clipboard::Layers` assertion
     #[test]
@@ -13489,7 +13297,6 @@ mod clipboard_crossing_tests {
             .expect("a layer copy writes the clipboard");
         let from_source = node_ids(&source);
 
-        // A second window: its own app, `IdSource` and document.
         let mut target = OndinApp::headless(&ctx);
         let before = node_ids(&target);
 
@@ -13515,9 +13322,8 @@ mod clipboard_crossing_tests {
         );
     }
 
-    /// The picture crosses too: a fill stores an image key and the bytes live in a
-    /// document table, so a cross-window paste is the route where the target never
-    /// holds the entry. Pasted twice, because `missing_image_ops` must add it once.
+    /// The picture crosses too: the target never holds the image entry, and pasting
+    /// twice must add it once (`missing_image_ops`).
     ///
     /// flip: `images: Vec::new()` in `adopt_clip_text`'s `Clip` → fails at the `image(&id)` assertion
     #[test]
@@ -13644,8 +13450,7 @@ mod clipboard_crossing_tests {
     }
 
     /// The receipt (a length and a hash) says yes to exactly the text a copy wrote
-    /// and no to anything else, and holds none of it. The target side is asserted
-    /// too, since adopting a foreign copy stamps it.
+    /// and no to anything else, and holds none of it.
     ///
     /// flip: `ClipStamp::of` hashing nothing → fails at "a text of the same length that is not ours"
     #[test]
@@ -13696,8 +13501,8 @@ mod clipboard_crossing_tests {
 #[cfg(test)]
 mod undo_rewind_tests {
     //! Undo is a structural edit, so app-side state that indexes into the document
-    //! must be told. The tests assert on a position, not the index set: the failures
-    //! leave every index in range, so `retain_valid` would be a no-op.
+    //! must be told. The tests assert on a position: the failures leave every index
+    //! in range, so `retain_valid` would be a no-op.
 
     use super::{OndinApp, Tool};
     use eframe::egui;
@@ -13820,7 +13625,6 @@ mod undo_rewind_tests {
 
     /// A pen resuming an existing path must not put back what an undo took:
     /// `PenEdit::subpaths` is a snapshot that `finish_pen` writes back whole.
-    /// Driven at the state; the assertion is that the pen is gone.
     ///
     /// flip: removing `document_rewound`'s `self.pen = None` → fails at "an undo drops a pen run whose snapshot it has just invalidated"
     #[test]
@@ -13828,7 +13632,6 @@ mod undo_rewind_tests {
         let ctx = egui::Context::default();
         let (mut app, id) = app_with_three_anchors(&ctx);
 
-        // One committed edit to undo, and a pen run resumed on the node it changed.
         app.points.set_one(id, (0, 1));
         app.delete_points();
         assert_eq!(
@@ -13925,7 +13728,6 @@ mod paint_drag_cancel_tests {
              commit it"
         );
 
-        // Control: with nothing in flight the cancel still declines.
         let mut idle = OndinApp::headless(&ctx);
         idle.session
             .adopt_document(Document::new(IdSource::new(2).mint()), None);
@@ -13939,9 +13741,8 @@ mod paint_drag_cancel_tests {
 #[cfg(test)]
 mod font_arrival_tests {
     //! A preview face arriving does not re-shape a document that has never heard of
-    //! its family. `poll` cannot be driven headlessly (only Inter is bundled), so
-    //! these assert the predicate `OndinApp::ui` consults and the cost of getting it
-    //! wrong, measured through `text::shapes`.
+    //! its family. `poll` cannot be driven headlessly, so these assert the predicate
+    //! `OndinApp::ui` consults and the cost of getting it wrong.
 
     use super::OndinApp;
     use crate::fonts::FontPoll;
@@ -14038,7 +13839,6 @@ mod font_arrival_tests {
 
     /// A family applied to a selection is a family the document names:
     /// `type_family_row` writes it into character spans, not `TextStyle::font_family`.
-    /// The fixture keeps the node's default Inter, so spans are read in addition to defaults.
     ///
     /// flip: removing the `spans.as_slice()` loop → fails at "a family applied to a selection is not in the set"
     #[test]
@@ -14117,8 +13917,7 @@ mod close_confirmation_tests {
             screen_rect: Some(screen),
             ..Default::default()
         };
-        // Events go in on the first frame and the reading comes off the last: a
-        // modal's `Area` fades in, scaling every colour until the fade ends.
+        // Read the last frame: a modal's `Area` fades in, scaling every colour.
         let mut out = ctx.run_ui(with, |ui| app.close_confirmation(ui.ctx()));
         for _ in 0..30 {
             out = ctx.run_ui(idle.clone(), |ui| app.close_confirmation(ui.ctx()));
@@ -14137,8 +13936,7 @@ mod close_confirmation_tests {
         found
     }
 
-    /// Every stroked rect painted in the accent, which is what a focus-visible
-    /// ring is and the only thing on this card that is one.
+    /// Every stroked rect painted in the accent: the card's focus-visible ring.
     fn accent_rings(app: &mut OndinApp, ctx: &egui::Context, events: Vec<egui::Event>) -> usize {
         rects(app, ctx, events)
             .iter()
@@ -14225,7 +14023,6 @@ mod svg_sniff_tests {
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
 
-        // A decodable PNG past `MAX_EDGE` on one side only.
         let (w, h) = (70_000_u32, 100_u32);
         let mut png = Vec::new();
         image::write_buffer_with_format(
@@ -14261,17 +14058,14 @@ mod svg_sniff_tests {
             "the message has to say what to change and by how much: {said:?}"
         );
 
-        // Control: a byte run that really is unreadable still gets the plain sentence.
         let Err(plain) = app.load_image_bytes(b"not a picture at all".to_vec(), None, None) else {
             panic!("twenty bytes of prose became a picture")
         };
         assert_eq!(plain.message("notes.txt"), "Could not read: notes.txt");
     }
 
-    /// The drop door (bytes) and the paste door (a string, `svg_in::looks_like_svg`)
-    /// give one answer per file. Asserts the answers, since comparing the thin
-    /// wrapper with core's function would compare a function with itself; the last
-    /// two rows are this side's own 512-byte cap and lossy decode.
+    /// The drop door (bytes) and the paste door (a string) give one answer per file.
+    /// The last two rows are this side's own 512-byte cap and lossy decode.
     ///
     /// flip: the old `text.starts_with("<svg") || (text.starts_with("<?xml") && text.contains("<svg"))` body over a giving-up `str::from_utf8` → fails at the first assertion
     #[test]
@@ -14324,7 +14118,6 @@ mod recover_snapshot_tests {
         crate::theme::install(&ctx);
         let mut app = OndinApp::headless(&ctx);
 
-        // A root of its own, so nothing touches the developer's library.
         let root = std::env::temp_dir().join(format!(
             "ondin-recover-test-{}",
             crate::library::ids::mint()
@@ -14369,9 +14162,8 @@ mod recover_snapshot_tests {
     }
 
     /// A second Recover press asks before it spends the first: the recovered session
-    /// is dirty and unfiled, so the save arm cannot run. `confirm_discard` raises a
-    /// blocking `rfd` dialog, so this asserts the state the guard reads and that
-    /// the pending entry remains, not the call (the sibling test above covers the drop).
+    /// is dirty and unfiled. `confirm_discard` raises a blocking `rfd` dialog, so this
+    /// asserts the state the guard reads and that the pending entry remains.
     #[test]
     fn a_second_recover_asks_before_it_spends_the_first() {
         let ctx = egui::Context::default();
@@ -14391,7 +14183,6 @@ mod recover_snapshot_tests {
         let second_path =
             crate::library::recovery::write(&root, &second, &doc).expect("snapshot 2");
 
-        // Two waiting puts "N more after this one" on the card.
         for (key, path) in [(&first, &first_path), (&second, &second_path)] {
             app.recovery
                 .pending
@@ -14405,11 +14196,10 @@ mod recover_snapshot_tests {
         }
         assert_eq!(app.recovery.pending.len(), 2, "the fixture is a queue");
 
-        // The first press.
         let pending = app.recovery.pending.pop().expect("one waiting");
         app.recover(&pending);
 
-        // The state the second press meets: dirty (`recover` marks it) and unfiled (no `target`).
+        // Dirty (`recover` marks it) and unfiled (no `target`).
         assert!(
             app.session.is_dirty(),
             "a recovered document is unsaved by construction, or there would be \
@@ -14468,12 +14258,9 @@ mod zoom_range_tests {
 
 #[cfg(test)]
 mod select_all_tests {
-    //! What `Ctrl+A` selects, one test per decision:
-    //!
-    //! 1. the candidate set: inside artboards plus loose non-artboard layers, not the artboards;
-    //! 2. the empty-set fallback: a document whose frames are empty selects the frames;
-    //! 3. a locked layer is left alone and a hidden one is taken (two halves of one
-    //!    predicate answering differently; no keyboard verb re-checks the lock).
+    //! What `Ctrl+A` selects, one test per decision: the candidate set (inside
+    //! artboards plus loose non-artboard layers), the empty-set fallback to the
+    //! frames, and a locked layer left alone while a hidden one is taken.
 
     use super::OndinApp;
     use ondin_core::kurbo::{Affine, Size};
@@ -14578,9 +14365,8 @@ mod select_all_tests {
         );
     }
 
-    /// A locked layer is left alone and a hidden one is taken: a locked layer is not
-    /// selectable from the canvas by any gesture, while a hidden-but-unlocked one is
-    /// fully editable (`context-menus.md` §5.9), so `visible()` must not be filtered.
+    /// A locked layer is left alone and a hidden one is taken: a hidden-but-unlocked
+    /// layer is fully editable (`context-menus.md` §5.9), so `visible()` must not filter.
     #[test]
     fn ctrl_a_skips_locked_layers_and_still_takes_hidden_ones() {
         let ctx = egui::Context::default();
@@ -14629,9 +14415,8 @@ mod select_all_tests {
         );
     }
 
-    /// `Ctrl+A` then `Delete` leaves a locked layer where it was. Asserted on the
-    /// node surviving, since that is what the user loses, on a document whose whole
-    /// range is locked.
+    /// `Ctrl+A` then `Delete` leaves a locked layer where it was, on a document whose
+    /// whole range is locked.
     ///
     /// flip: `select_all` asking `marquee_candidates()` for its emptiness test instead of `marquee_range()` → fails only here
     #[test]
@@ -14683,9 +14468,8 @@ mod chrome_focus_write_tests {
         }
     }
 
-    /// The flag is the focus at the end of the frame; in point editing the `Tab`
-    /// steps an anchor and the focus egui moved is handed back, so the flag must say
-    /// nothing is focused. The control is an ordinary editor frame.
+    /// The flag is the focus at the end of the frame; in point editing `Tab` steps an
+    /// anchor and the focus egui moved is handed back. The control is an ordinary frame.
     ///
     /// flip: the write moved above the surrender → fails at "after the surrender"
     /// flip: the write deleted → fails at the control
@@ -14715,8 +14499,7 @@ mod chrome_focus_write_tests {
     }
 
     /// The library screen writes the flag as well, since it returns above the
-    /// editor's write. Two frames: egui drops focus from an undrawn widget at the
-    /// end of the pass, so the second is the steady state.
+    /// editor's write. Two frames: the second is the steady state.
     ///
     /// flip: the dashboard's write deleted → fails at "not stale"
     #[test]
@@ -14748,8 +14531,8 @@ mod component_verb_tests {
     use ondin_core::kurbo::Size;
     use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
 
-    /// A main frame `m` holding a rect, and an instance `i` of it — built through
-    /// the app's own *Create component* and *Duplicate*, so the fixture is the verbs.
+    /// A main frame `m` holding a rect, and an instance `i` of it, built through the
+    /// app's own *Create component* and *Duplicate*.
     fn main_and_instance(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0x7C0);
@@ -14827,9 +14610,8 @@ mod component_verb_tests {
     }
 
     /// A panel *Paste* beside a row inside a main, with that main on the clipboard,
-    /// falls back to the ordinary paste: an instance of `m` inside `m` is
-    /// `ComponentCycle`, so `paste_clipboard_beside` asks `paste_is_held` and, refused,
-    /// pastes beside the original at the root. A row outside any component keeps its slot.
+    /// falls back to the ordinary paste (an instance of `m` inside `m` is
+    /// `ComponentCycle`). A row outside any component keeps its slot.
     ///
     /// flip: `paste_is_held` answering `true` always → fails at "the paste went through"
     #[test]
@@ -14867,7 +14649,6 @@ mod component_verb_tests {
             "m is untouched"
         );
 
-        // A slot outside any component is the panel's own: beside the instance.
         assert!(app.paste_clipboard_beside(i));
         let pasted = app
             .session
@@ -14879,8 +14660,7 @@ mod component_verb_tests {
         assert_eq!(at(pasted), at(i) + 1, "just above the row it was aimed at");
     }
 
-    /// The labels of the context menu a user opens on `ids`, through
-    /// `open_context_menu` → `menu_context` → `build`; the menu is closed again after.
+    /// The labels of the context menu a user opens on `ids`; the menu is closed after.
     fn menu_on(app: &mut OndinApp, ctx: &egui::Context, ids: &[NodeId]) -> Vec<String> {
         app.session.selection.set(ids.to_vec());
         app.open_context_menu(
@@ -14904,7 +14684,6 @@ mod component_verb_tests {
     /// Each component role's menu rows, read off a real document: main `m` holding
     /// rect `r`, its instance `i` (copy `c` of `r`), a local rect `loc` inside `i`, a
     /// second main `m2`, and a Boolean property *Show* bound to `r`, set off on `i`.
-    /// Reaches `component_role` and `menu_context` from a document, not a synthetic `Context`.
     ///
     /// flip: `component_role`'s member arm answering `Role::Local` → fails at "a member goes to its main"
     /// flip: `combinable: false && …` in `menu_context` → fails at "two mains combine"
@@ -15011,7 +14790,6 @@ mod component_verb_tests {
 
     /// *Go to main*, *Select all instances* on a main and on a set, and the delete's
     /// detach count: main `m`, instances `i` and `i2`, `c` the copy of `m`'s rect in `i`.
-    /// `m` needs a second child so a count of members (four) differs from instances (two).
     ///
     /// flip: `select_all_instances`' `is_set` test made `false && …` → fails at "a set selects its variants' instances"
     /// flip: `delete_selection`'s detached filter turned to `!=` → fails at "the delete counts the two instances"
@@ -15048,7 +14826,6 @@ mod component_verb_tests {
         want.sort();
         assert_eq!(got, want, "a main selects its instances");
 
-        // A second main beside `m`, and the two made a set.
         let m2 = app.session.ids.mint();
         let root = app.session.doc.root();
         assert!(app.session.commit(Transaction(vec![
@@ -15076,7 +14853,7 @@ mod component_verb_tests {
         got.sort();
         assert_eq!(got, want, "a set selects its variants' instances");
 
-        // A second child for `m`, so a count of detached members (four) cannot pass for instances.
+        // A second child, so a count of members (four) differs from instances (two).
         let r2 = app.session.ids.mint();
         assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
             id: r2,
@@ -15105,7 +14882,7 @@ mod component_verb_tests {
 
     /// A kit instance's main is never selected: it lives in the undrawn vault.
     /// *Go to main* on the instance and on a member says where the main is and
-    /// leaves the selection; a vault id reaching the selection otherwise is pruned at the next commit.
+    /// leaves the selection (a vault id in it would be pruned at the next commit).
     ///
     /// flip: removing `select_main`'s vault guard → fails at "an instance stays selected"
     #[test]
@@ -15181,8 +14958,7 @@ mod component_verb_tests {
         app.session.selection.retain_existing(&app.session.doc);
         assert_eq!(app.session.selection.ids(), &[inst], "the vault id pruned");
 
-        // Copied into another document, it lands an instance: through `copy_selection`,
-        // the swapped document and the paste chord's `insert_all`, commit passes included.
+        // Copied into another document, it lands an instance.
         // flip: `insert_all` calling `build::insert_subtrees` instead of `kit::insert_carrying` → fails at "still an instance"
         app.session.selection.set_one(inst);
         app.copy_selection(&ctx);
@@ -15197,8 +14973,7 @@ mod component_verb_tests {
     }
 
     /// A copy whose main does not come along lands detached, and the paste says so.
-    /// An instance copied inside a kit carries no vault main; driven with a
-    /// document's own main, which is the same case to the paste.
+    /// Driven with a document's own main, the same case as a kit instance's vault main.
     ///
     /// flip: `detached` counted as zero → fails at "the paste says so"
     #[test]
@@ -15222,7 +14997,6 @@ mod component_verb_tests {
             "the paste says so: {said}"
         );
 
-        // Back in a document holding the main, nothing is said.
         app.undo();
         let (mut home, _, i) = main_and_instance(&ctx);
         home.session.selection.set_one(i);
@@ -15231,9 +15005,9 @@ mod component_verb_tests {
         assert!(!home.session.status().text.contains("detached"));
     }
 
-    /// A cut main moves: the cut detaches the instance as a delete does and says it
-    /// will follow; the first paste puts the main back under its own id and relinks
-    /// it (an edit made to the instance meanwhile stays an override); a second paste is an instance.
+    /// A cut main moves: the cut detaches the instance and says it will follow; the
+    /// first paste puts the main back under its own id and relinks it (an edit made
+    /// meanwhile stays an override); a second paste is an instance.
     ///
     /// flip: `paste_cut_move` answering `false` → fails at "the main, under its own id"
     #[test]
@@ -15246,7 +15020,6 @@ mod component_verb_tests {
         assert_eq!(app.session.doc.get(i).unwrap().link(), None, "detached");
         let said = app.session.status().text.clone();
         assert!(said.contains("will follow it on paste"), "{said}");
-        // An edit to the detached instance meanwhile.
         assert!(app.session.commit(Transaction(vec![Operation::SetName {
             id: i,
             name: "mine".into(),
@@ -15263,7 +15036,6 @@ mod component_verb_tests {
             "its edit kept"
         );
         assert!(app.cut_move.is_none(), "taken");
-        // A second paste is a copy of a main present, so an instance.
         assert!(app.paste_clipboard());
         let two = app
             .session
@@ -15275,9 +15047,7 @@ mod component_verb_tests {
     }
 
     /// A cut main's nested copies come back to it too: `Card` holds two instances of
-    /// `Star`, and its instance `i` copies both, the second (`c2`) swapped to `Heart`.
-    /// The cut records what its commit left each link at, and the paste gives back
-    /// every one still holding it, link and swap.
+    /// `Star`, the second copy (`c2`) swapped to `Heart`; the paste restores link and swap.
     ///
     /// flip: the give-back filtered on the node being unlinked again → fails at "c1 follows Card's nested Star again"
     /// flip: giving back the link alone, the `SetSwap` dropped → fails at "still showing Heart"
@@ -15397,9 +15167,9 @@ mod component_verb_tests {
         );
     }
 
-    /// An undone cut owes its paste nothing: after cut, undo, an explicit *Detach
-    /// instance* and a plain Delete of the main, the paste is an ordinary one and
-    /// must not relink the instance. The cut's move is parked once history is undone past it.
+    /// An undone cut owes its paste nothing: after cut, undo, *Detach instance* and a
+    /// Delete of the main, the paste must not relink the instance (the cut's move is
+    /// parked once history is undone past it).
     ///
     /// flip: `document_rewound` leaving the move live on an undo → fails at "the detach stands"
     /// flip: `paste_cut_move` not refusing a parked move → fails at "the detach stands"
@@ -15460,9 +15230,8 @@ mod component_verb_tests {
         );
     }
 
-    /// Leaving an entered instance by another door leaves its scope: after *Go to
-    /// main* from inside the instance the selection is the main's layer, and `Escape`
-    /// clears it rather than yanking it back to the instance.
+    /// After *Go to main* from inside an instance, `Escape` clears the main's layer
+    /// rather than yanking the selection back to the instance.
     ///
     /// flip: `leave_a_scope_the_selection_left` answering nothing → fails at "the scope is left"
     #[test]
@@ -15486,9 +15255,8 @@ mod component_verb_tests {
         );
     }
 
-    /// `Enter` steps into an instance, as the double-click does, whatever its kind:
-    /// a frame instance is entered and its topmost layer selected; its main, an
-    /// ordinary frame, is not.
+    /// `Enter` steps into an instance, as the double-click does, whatever its kind;
+    /// its main, an ordinary frame, is not entered.
     ///
     /// flip: `enter_action` without its instance arm → leaves `entered_group` empty
     #[test]
@@ -15505,11 +15273,9 @@ mod component_verb_tests {
         assert_eq!(app.session.selection.single(), Some(top));
     }
 
-    /// Picking and entering an instance, driven through the whole app with real
-    /// pointer and key events into `eframe::App::ui`. In order: a click on the
-    /// instance's background selects it (its main's background selects nothing); a
-    /// click on its rect selects the instance too; a double-click on the background
-    /// enters it; `Escape` leaves; `Enter` enters again, its topmost layer selected.
+    /// Picking and entering an instance through `eframe::App::ui`: a click on its
+    /// background or its rect selects it (its main's background selects nothing); a
+    /// double-click enters; `Escape` leaves; `Enter` enters again.
     ///
     /// flip: `pick_leaf` without its instance clause → fails at the first assertion
     /// flip: `enter_action` without its instance arm → fails at "Enter steps back in"
@@ -15533,7 +15299,6 @@ mod component_verb_tests {
         };
         let ctx = egui::Context::default();
         let (mut app, m, i) = main_and_instance(&ctx);
-        // The duplicate lands on its main; set it beside, its placement its own.
         assert!(
             app.session
                 .commit(Transaction(vec![Operation::SetTransform {
@@ -15597,9 +15362,8 @@ mod component_verb_tests {
         );
         assert_eq!(app.entered_group, None, "and nothing was entered");
 
-        // No idle frames, deliberately: egui 0.35 counts a release within 0.6 s of the
-        // click before last as a triple, so `Response::double_clicked` would read 3 here;
-        // the app counts its own (`ui::double_clicked`).
+        // No idle frames: egui would count this as a triple click; the app counts its
+        // own (`ui::double_clicked`).
         whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(inst_ground)]);
         for pressed in [true, false, true, false] {
             whole_frame(&ctx, &mut app, vec![primary(inst_ground, pressed)]);
@@ -15627,9 +15391,8 @@ mod component_verb_tests {
         );
     }
 
-    /// The session's commit makes a swap's rewrite: a `SetSwap` alone comes back
-    /// with the nested copy's layer relinked to the swapped-to main's
-    /// (`EditorSession::commit_inner` runs `propagate::owed`), and one undo takes both back.
+    /// A `SetSwap` alone comes back from the session's commit with the nested copy's
+    /// layer relinked to the swapped-to main's, and one undo takes both back.
     ///
     /// flip: dropping `swap::settle` from `owed` → fails at `relinked`
     #[test]
@@ -15657,9 +15420,8 @@ mod component_verb_tests {
         );
     }
 
-    /// The menu's *Reset <property>* reaches a swap property: selecting the swapped
-    /// copy (itself an instance root) finds the property on the instance around it,
-    /// and resetting it clears the swap.
+    /// The menu's *Reset <property>* reaches a swap property on the instance around
+    /// the selected swapped copy, and resetting it clears the swap.
     ///
     /// flip: `overridden_property_and_root` asking only the selected layer's own instance → answers `None`
     #[test]
@@ -15700,8 +15462,7 @@ mod component_verb_tests {
             app.overridden_property_of_selection().map(|p| p.name),
             Some("Icon".to_string())
         );
-        // The menu a user opens on it draws the row: the copy is an instance root, so
-        // `layer_menu` takes its `Role::Instance` arm, built through `open_context_menu`.
+        // The copy is an instance root, so `layer_menu` takes its `Role::Instance` arm.
         // flip: the arm's `property_reset` push deleted → fails at "the instance arm offers Reset Icon"
         app.open_context_menu(
             &ctx,
@@ -15727,9 +15488,8 @@ mod component_verb_tests {
     }
 
     /// Two icon mains, `Star` and `Heart`, each holding a `Shape`; a `Button` main
-    /// holding a nested instance `n` of Star; and `b1`, an instance of Button,
-    /// whose copy of `n` is `r` and of Star's `Shape` is `shape` — the nested copy a
-    /// swap is made on.
+    /// holding a nested instance `n` of Star; and `b1`, an instance of Button, whose
+    /// copy of `n` is `r` (the swap target) and of Star's `Shape` is `shape`.
     struct SwapFixture {
         app: OndinApp,
         heart: NodeId,
@@ -15859,9 +15619,8 @@ mod component_verb_tests {
         }
     }
 
-    /// A pinned child still follows after the instance is resized: the rect is pinned
-    /// right, the instance resized wider, then the main's rect moved (`keep_insets`
-    /// turns it into new insets). The instance's rect must follow transform and
+    /// A pinned child still follows after the instance is resized: pinned right,
+    /// instance widened, then the main's rect moved. It must follow transform and
     /// insets exactly, since a ulp of drift would read as an override.
     #[test]
     fn a_pinned_child_still_follows_after_the_instance_is_resized() {
@@ -15933,9 +15692,8 @@ mod component_verb_tests {
     }
 
     /// Every selection the commit would refuse is refused by *Create component*
-    /// itself, saying which rule, and an in-place create is silent. Each case
-    /// asserts the sentence and that `create_component_refusal` (which dims the menu
-    /// row) agrees, so the row, the chord and the commit agree.
+    /// itself, saying which rule, and an in-place create is silent. Each case also
+    /// asserts that `create_component_refusal` (which dims the menu row) agrees.
     ///
     /// flip: `why_not_wrap`'s parent test removed → fails at "a rect inside a main"
     /// flip: `why_not_main`'s subtree test removed → fails at "a frame holding a main"
@@ -15984,7 +15742,6 @@ mod component_verb_tests {
             "a rect inside a main",
         );
 
-        // A second rect in the main, so the instance has two members.
         let second = app.session.ids.mint();
         assert!(app.session.commit(create(second, m, rect(8.0))));
         let members = app.session.doc.get(i).unwrap().children().to_vec();
@@ -16039,8 +15796,7 @@ mod component_verb_tests {
     }
 
     /// *Combine as variants* refuses a frame main and a group main, saying why (one
-    /// kind per set). `combine_refusal`, which dims the menu row, gives the same
-    /// sentence; two frame mains still combine.
+    /// kind per set); `combine_refusal` gives the same sentence. Two frame mains still combine.
     ///
     /// flip: the `one_kind` check deleted from `combine_as_variants` → fails at "said why" (`variant::combine`'s own refusal still holds the tree)
     #[test]
@@ -16111,11 +15867,10 @@ mod component_verb_tests {
         );
     }
 
-    /// A reset through the commit comes back exact: the instance is resized, renamed
-    /// and its pinned rect moved, then *Reset all* writes the main's size, name,
+    /// *Reset all* after a resize, rename and pinned-rect move writes size, name,
     /// transform and insets back in one transaction with no drift, and one `Ctrl+Z`
-    /// takes it all back. This holds because `keep_insets` leaves alone a layer whose
-    /// insets the transaction sets itself, not because of op order.
+    /// undoes it. That holds because `keep_insets` leaves alone a layer whose insets
+    /// the transaction sets itself, not because of op order.
     #[test]
     fn reset_all_through_the_commit_leaves_no_drift_and_undoes_in_one_step() {
         use ondin_core::reset;

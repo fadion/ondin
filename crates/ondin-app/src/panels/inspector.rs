@@ -7708,10 +7708,8 @@ impl OndinApp {
     /// The Effects panel: one row per effect, a popover behind each row, and a
     /// `+` in the header that adds one (§5.3a, §9.4).
     ///
-    /// Model order, first at the top, unlike Fill: effects are a pipeline, not a
-    /// stack in space. Over a selection, one agreed list or a disagreement, like
-    /// Export. The `+` over a disagreement replaces every layer's stack — the only
-    /// way out of the mixed state, said in its tooltip, one undo step (§15 D340).
+    /// Model order, first at the top: a pipeline, not a stack in space. Over a
+    /// disagreement the `+` replaces every layer's stack, in one undo step.
     fn inspector_effects(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
         let Some(&anchor) = subjects.first() else {
             return;
@@ -7728,7 +7726,6 @@ impl OndinApp {
         // Fill and Stroke's resting state; a disagreement counts as having
         // something. Its own edge: the paint panels consumed theirs.
         let fresh = self.effects_subject_changed();
-        // An instance's ghost rows are something to show.
         let ghosts = match subjects {
             [one] => self.has_ghosts(Some(*one), |n| n.effects()),
             _ => false,
@@ -7736,7 +7733,6 @@ impl OndinApp {
         self.sync_paint_collapse("Effects", !mixed && effects.is_empty() && !ghosts, fresh);
         let mut out = EffectRowOut::default();
         let mut acted: Option<usize> = None;
-        // An instance's stack read against its source's, for one layer only.
         let source = match subjects {
             [one] => self.source_list(*one, |n| n.effects()),
             _ => None,
@@ -7799,7 +7795,6 @@ impl OndinApp {
                         head = Some(resp);
                     }
                 }
-                // The main's effects this instance removed, as ghost rows.
                 for gone in source
                     .as_deref()
                     .map(|s| ondin_core::reset::removed_items(s, &effects))
@@ -7821,7 +7816,6 @@ impl OndinApp {
         );
         if add {
             self.open_paint_panel("Effects");
-            // The first kind the popover's list offers.
             let [drop, ..] = EffectKind::all_defaults();
             // Over a disagreement `effects` is empty, so this append is the
             // replacement.
@@ -7836,7 +7830,6 @@ impl OndinApp {
         // Written verbatim, not through `write_effects`, so a restored effect keeps
         // the main's id; the source exists for one subject only.
         let reset = acted.filter(|_| out.reset).map(|i| effects[i].id);
-        // A ghost row restores the main's whole stack; a row's ↺ resets that item.
         let list = match (restore, reset, source.as_deref()) {
             (Some(_), _, Some(src)) => Some(src.to_vec()),
             (None, Some(item), Some(src)) => {
@@ -7882,9 +7875,7 @@ impl OndinApp {
     /// The stack every subject agrees on, or `None` where they disagree.
     ///
     /// Through the preview, unlike `shared_exports`, so a scrub over several layers
-    /// does not read as mixed. Keyed with the first subject's item ids — the anchor
-    /// [`Self::write_effects`] retargets from — and agreement is by value.
-    /// `pub(crate)` for `picker_ui`, which orphans an `Effect` slot on this question.
+    /// does not read as mixed. `pub(crate)` for `picker_ui`.
     pub(crate) fn shared_effects(&self, subjects: &[NodeId]) -> Option<Vec<Keyed<Effect>>> {
         let mut nodes = subjects
             .iter()
@@ -7897,8 +7888,7 @@ impl OndinApp {
     /// Write one stack to every subject, as a single undo step.
     ///
     /// `effects` is an edit of the first subject's list, retargeted onto each
-    /// subject's own item ids (`ondin_core::item::retarget`). Over a mixed selection
-    /// it shares no id with the anchor, so every subject gets the same new items.
+    /// subject's own item ids (`ondin_core::item::retarget`).
     fn write_effects(&mut self, subjects: &[NodeId], effects: Vec<Keyed<Effect>>) {
         let anchor = subjects
             .first()
@@ -7947,8 +7937,7 @@ impl OndinApp {
     }
 
     /// Carry the picker and the hex buffer across a renumbering of an index-keyed
-    /// list, or drop them where the row they named went. Shared by the effect,
-    /// grid and paint lists, which differ only in `moved`.
+    /// list, or drop them where the row they named went.
     fn remap_slots(&mut self, anchor: NodeId, moved: impl Fn(PaintSlot) -> Option<PaintSlot>) {
         let next = self
             .picker
@@ -7975,9 +7964,6 @@ impl OndinApp {
     }
     /// Preview an effect's edit while a control is held and commit once when it
     /// ends — [`Self::stroke_valve`]'s twin over the effect stack.
-    ///
-    /// Rebuilt from the stack the panel is showing, with one entry replaced; the
-    /// undo entry is computed against the committed document (§9.3).
     fn effect_valve(
         &mut self,
         resp: &egui::Response,
@@ -8003,10 +7989,9 @@ impl OndinApp {
         self.edit_valve(resp, tx);
     }
 
-    /// `SetEffects` writing `edited` — an edit of `anchor`'s list, the first
-    /// subject's as the panel shows it — onto every subject, retargeted onto
-    /// each one's own item ids as [`Self::write_effects`] does, then `spare`d
-    /// against that subject's own list.
+    /// `SetEffects` writing `edited` (an edit of `anchor`'s list) onto every subject,
+    /// retargeted as [`Self::write_effects`] does, then `spare`d against that
+    /// subject's own list.
     fn effects_tx(
         &mut self,
         subjects: &[NodeId],
@@ -8028,12 +8013,11 @@ impl OndinApp {
                 .collect(),
         )
     }
-    /// One of effect `index`'s numbers in the popover — `slot` an `EffectVars`
-    /// place, `value` the literal, `prefix` the field's word — `size` big.
+    /// One of effect `index`'s numbers in the popover (`slot` an `EffectVars`
+    /// place, `prefix` the field's word).
     ///
-    /// Bound, on one layer, it is a chip (or the retype buffer). Otherwise the
-    /// scrub field over the anchor's resolved number, whose write clears the slot's
-    /// binding on every subject; `--` and the field menu where one layer is the subject.
+    /// A bound number on one layer is a chip; otherwise a scrub field over the
+    /// anchor's resolved number, whose write clears the slot's binding on every subject.
     #[allow(clippy::too_many_arguments)]
     fn effect_number_field(
         &mut self,
@@ -8132,13 +8116,11 @@ impl OndinApp {
         }
         Some(resp)
     }
-    /// One effect row: the kind's glyph and name, one headline number, a `×`, and
-    /// the eye beside the field.
+    /// One effect row: the kind's glyph and name, one headline number, a `×`, and an eye.
     ///
-    /// Returns what was pressed ([`EffectRowOut`]) and the field's own response,
-    /// which the popover anchors on and [`super::dismissed_by_click`] treats as its
-    /// head. Hidden fades the whole row: there is no swatch to spare. No `self`: a
-    /// row only reports. `item` is the instance's trailing slot; `None` outside one.
+    /// Returns what was pressed ([`EffectRowOut`]) and the field's response, the
+    /// popover's anchor and [`super::dismissed_by_click`]'s head. No `self`; `item`
+    /// is the instance's trailing slot.
     fn effect_row(
         ui: &mut egui::Ui,
         index: usize,
@@ -8149,7 +8131,6 @@ impl OndinApp {
         /// The `×`'s box, the paint rows' size so the cards' right edges line up.
         const CLOSE_W: f32 = 18.0;
         let mut out = EffectRowOut::default();
-        // Returned out of the closures, not stashed in an `Option` needing a fallback.
         let head = ui
             .scope(|ui| {
                 ui.multiply_opacity(if effect.visible { 1.0 } else { HIDDEN_OPACITY });
@@ -8157,10 +8138,8 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     let size = egui::vec2(ui.available_width() - 28.0 - ui::CARD_COL_GAP, 28.0);
-                    // `paint_row`'s `hot`, for the same slot.
                     let hot =
                         ui.rect_contains_pointer(egui::Rect::from_min_size(ui.cursor().min, size));
-                    // A scope only to get the field's rect back.
                     let field = ui.scope(|ui| {
                         field_row_active(ui, size, open, |ui| {
                             ui.spacing_mut().item_spacing.x = 9.0;
@@ -8199,7 +8178,6 @@ impl OndinApp {
                     // later claimant would otherwise win every press on the button.
                     let mut hit = field.response.rect;
                     hit.max.x -= CLOSE_W + ui::FIELD_PAD_X;
-                    // And the item slot's corner, where an instance's row has one.
                     if item.is_some() {
                         hit.max.x -= 14.0 + 9.0;
                     }
@@ -8209,12 +8187,10 @@ impl OndinApp {
                             ui.id().with(("effect-row", index)),
                             egui::Sense::click(),
                         )
-                        // Says what the row's number is.
                         .on_hover_text(effect_hint(&effect.kind));
                     if resp.clicked() {
                         out.open = true;
                     }
-                    // The eye sits outside the field, as on a paint row.
                     let (glyph, tip) = if effect.visible {
                         (icon::EYE, "Hide this effect")
                     } else {
@@ -8235,11 +8211,8 @@ impl OndinApp {
     }
     /// One effect's numbers, behind its row.
     ///
-    /// An `Area` in the popover lane ([`OndinApp::popover_anchor`]), not inline rows,
-    /// so opening it does not push the card down. The kind is a combo at the top,
-    /// so a mis-added row is a two-click fix; what carries across is
-    /// [`ondin_core::EffectKind::retyped`]'s call. No `Blend` dropdown: blend modes
-    /// are deferred.
+    /// An `Area` in the popover lane ([`OndinApp::popover_anchor`]), so opening it
+    /// does not push the card down. No `Blend` dropdown: blend modes are deferred.
     fn effect_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -8255,14 +8228,12 @@ impl OndinApp {
         const MENU_PAD: f32 = 11.0;
         /// The control height inside a popover.
         const CELL: f32 = ui::CONTROL_H;
-        /// Between two fields on one line — the stroke popover's six, not the
-        /// mockup's nine.
+        /// Between two fields on one line, as in the stroke popover.
         const COL: f32 = 6.0;
         /// The largest a `Filters` factor goes: twice its neutral, so the
         /// centre-growing meter is the same scale on both sides.
         const MAX_FACTOR: f64 = 2.0;
-        /// Half a turn either way — every hue rotation there is, and symmetric for
-        /// [`MAX_FACTOR`]'s reason.
+        /// Half a turn either way, symmetric for [`MAX_FACTOR`]'s reason.
         const MAX_HUE: f64 = 180.0;
         let ctx = ui.ctx().clone();
         let mut close = false;
@@ -8308,7 +8279,6 @@ impl OndinApp {
                                 .show_ui(ui, |ui| {
                                     ui::menu_rows(ui);
                                     ui.spacing_mut().button_padding.y = 2.0;
-                                    // The model's list and words.
                                     for kind in EffectKind::all_defaults() {
                                         let on = effect.kind.same_kind(&kind);
                                         let row = ui.selectable_label(
@@ -8370,7 +8340,6 @@ impl OndinApp {
                                 ) {
                                     let _ = r.on_hover_text("How soft the shadow's edge is");
                                 }
-                                // On the inner shadow too: the same dilation.
                                 if let Some(r) = self.effect_number_field(
                                     ui, subjects, index, ondin_core::EFFECT_SPREAD, "Spread",
                                     cell, s.spread, -MAX_OFFSET..=MAX_OFFSET,
@@ -8407,15 +8376,13 @@ impl OndinApp {
                         }
                         EffectKind::Filters(f) => {
                             let f = *f;
-                            // Full-width rows: the labels are words.
                             for channel in ondin_core::FilterChannel::ALL {
                                 let value = channel.of(&f);
                                 let at_rest = value == channel.neutral();
                                 ui.horizontal(|ui| {
                                     ui.spacing_mut().item_spacing.x = COL;
-                                    // Percent for a factor, degrees for the hue. The
-                                    // meter is a signed fraction of the channel's
-                                    // reach — `factor − 1.0`, given [`MAX_FACTOR`].
+                                    // Percent for a factor, degrees for the hue; the meter
+                                    // is a signed fraction of the channel's reach.
                                     let (mut shown, scrub, suffix, meter) = if channel.degrees() {
                                         (
                                             value,
@@ -8526,7 +8493,6 @@ impl OndinApp {
             };
             if let Some(entry) = effects.get_mut(index) {
                 entry.kind = entry.kind.retyped(&kind);
-                // Bindings the new kind has no number for are dropped in the edit.
                 let numbers = entry.value.numbers();
                 for (slot, number) in numbers.iter().enumerate() {
                     if number.is_none() {
@@ -8537,13 +8503,9 @@ impl OndinApp {
             }
         }
     }
-    /// A single colour on the Fill row's pattern: the chip, its hex and its
-    /// opacity — a shadow's ([`PaintSlot::Effect`]) or a layout grid's
-    /// ([`PaintSlot::Grid`]).
-    ///
-    /// The opacity is the alpha, so there is no separate `Opacity` field to
-    /// disagree with it. The chip opens the detached picker through `slot`; the hex
-    /// is [`Self::paint_hex_field`]. `tip` names what the chip edits.
+    /// A single colour on the Fill row's pattern (chip, hex, opacity) for a shadow
+    /// ([`PaintSlot::Effect`]) or a layout grid ([`PaintSlot::Grid`]). `tip` names
+    /// what the chip edits.
     fn slot_color_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -8558,7 +8520,6 @@ impl OndinApp {
             .as_ref()
             .is_some_and(|p| p.node == id && p.slot == slot);
         let mut open = false;
-        // Where the row lands, so the picker opens beside it.
         let anchor = ui.cursor().min;
         field_row_active(ui, size, targeted, |ui| {
             ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -8606,12 +8567,10 @@ impl OndinApp {
         if let Some(cs) = slot.char_scoped() {
             return self.char_slot_color(id, cs).map(Brush::Solid);
         }
-        // The node-less slots are answered before a node is looked up.
         match slot {
             PaintSlot::Canvas => {
                 return Some(Brush::Solid(self.session.preview_canvas_background()));
             }
-            // A variable's cell as it resolves, or the colour a drag is previewing.
             PaintSlot::VarCell(var, mode) => {
                 if let Some((v, m, c)) = self.var_cell_preview
                     && (v, m) == (var, mode)
@@ -8625,7 +8584,6 @@ impl OndinApp {
                     | ondin_core::Value::String(_) => None,
                 };
             }
-            // The shared colour, or the first guide's over a mixed set.
             PaintSlot::Guide => {
                 let guides = self.selected_guides();
                 let colour =
@@ -8718,10 +8676,8 @@ impl OndinApp {
     /// The layers the Group Colors census is taken over: the contents of a single
     /// selected container, or the selection itself.
     ///
-    /// A container is the box the question is asked about, so a selected frame's
-    /// own fills are the Fill card's business. The listing, `recolor`, `repaint`
-    /// and [`Self::group_color_shown`] must all take this scope, or a row could
-    /// count one layer and recolour two.
+    /// The listing, `recolor`, `repaint` and [`Self::group_color_shown`] must all
+    /// take this scope, or a row could count one layer and recolour two.
     fn group_color_scope(&self) -> Vec<NodeId> {
         let ids = self.session.selection.ids();
         if let [only] = ids
@@ -8734,9 +8690,8 @@ impl OndinApp {
     }
     /// What a Group Colors row currently looks like, following a live edit.
     ///
-    /// The row is keyed by the committed colour, but the swatch shows the one being
-    /// dragged: the committed document finds the first place the colour lives, and
-    /// the preview is read at that place.
+    /// Keyed by the committed colour, but the swatch shows the one being dragged:
+    /// the committed document finds the colour's first place, the preview is read there.
     fn group_color_shown(&self, key: [u8; 4]) -> Option<Brush> {
         // The census's scope, or this could find the colour on a layer the row
         // does not stand for.
@@ -8848,8 +8803,7 @@ impl OndinApp {
                 }
                 Transaction(vec![Operation::SetStrokes { id, strokes }])
             }
-            // The ground takes an opaque colour (the picker disables its gradient
-            // tabs): there is nothing behind the canvas to show through.
+            // Opaque: there is nothing behind the canvas to show through.
             PaintSlot::Canvas => match paint::stops_of(&brush).first() {
                 Some((_, colour)) => Transaction(vec![Operation::SetCanvasBackground {
                     background: colour.with_alpha(1.0),
@@ -8866,7 +8820,6 @@ impl OndinApp {
                 }]),
                 _ => Transaction(Vec::new()),
             },
-            // One row of the shared list, changed on every target at once.
             PaintSlot::Selection(target, i) => {
                 // Row `i` on each target in place, so each keeps its item ids. A
                 // `%`-only change keeps each target's own drawn colour, which may
@@ -8899,13 +8852,10 @@ impl OndinApp {
                     _ => brush.clone(),
                 })
             }
-            // Every paint in scope takes the whole brush, in its own place.
             PaintSlot::SelectionAll(target) => self.edit_paints_all(target, |_| brush.clone()),
             // Recolour by colour: every use of the key. A non-solid brush is
             // dropped, not flattened.
             PaintSlot::GroupColor(key) => match &brush {
-                // The census's scope ([`Self::group_color_scope`]), so the row's
-                // match count stays true.
                 Brush::Solid(to) => ondin_core::recolor(
                     &self.session.doc,
                     &self.group_color_scope(),
@@ -8915,8 +8865,7 @@ impl OndinApp {
                 _ => Transaction(Vec::new()),
             },
             // The same edit by value: `from` is read from the committed place, since
-            // mid-drag the preview already holds the new brush. Any brush is
-            // accepted; the census lists literal paints only.
+            // mid-drag the preview already holds the new brush.
             PaintSlot::GroupGradient(at) => match ondin_core::paint_at(&self.session.doc, at)
                 .as_ref()
                 .and_then(ondin_core::BrushSource::literal)
@@ -8929,8 +8878,7 @@ impl OndinApp {
             // Diverted to `write_char_slot` by every slot verb before this; empty
             // rather than `unreachable!`, so being wrong is not a panic.
             PaintSlot::TextDecoration(_) | PaintSlot::TextColor => Transaction(Vec::new()),
-            // An opaque colour on every selected guide, in one undo step
-            // (`PaintSlot::takes_alpha`).
+            // Opaque (`PaintSlot::takes_alpha`), on every selected guide.
             PaintSlot::Guide => match paint::stops_of(&brush).first() {
                 Some((_, colour)) => Transaction(
                     self.session
@@ -8945,11 +8893,9 @@ impl OndinApp {
                 ),
                 None => Transaction(Vec::new()),
             },
-            // A shadow's colour, alpha included (it is the shadow's opacity), on
-            // every selected layer. Each subject's own list is edited, and one
-            // whose entry `i` is not a shadow is skipped: the detached picker can
-            // outlive the card's agreement when the selection widens, and must
-            // then change one colour, not copy the anchor's stack.
+            // A shadow's colour, alpha included, on every selected layer's own list. A
+            // subject whose entry `i` is not a shadow is skipped: the detached picker
+            // can outlive the card's agreement and must change one colour, not copy the stack.
             PaintSlot::Effect(i) => match paint::stops_of(&brush).first() {
                 Some((_, colour)) => {
                     // The anchor through `display_node`, so a live preview is what
@@ -8989,9 +8935,8 @@ impl OndinApp {
                 }
                 None => Transaction(Vec::new()),
             },
-            // A grid's colour, alpha being the wash's strength, on row `i` of every
-            // selected frame's own list. From the committed document: the override
-            // tree cannot carry a grid.
+            // A grid's colour (alpha is the wash's strength) on row `i` of every selected
+            // frame, from the committed document: the override tree cannot carry a grid.
             PaintSlot::Grid(i) => match paint::stops_of(&brush).first() {
                 Some((_, colour)) => {
                     let subjects = self.frame_subjects();
@@ -8999,7 +8944,6 @@ impl OndinApp {
                         .iter()
                         .filter_map(|s| {
                             let mut grids = self.session.doc.get(*s)?.grids().to_vec();
-                            // A grid removed under the picker writes nothing.
                             grids.get_mut(i)?.color = *colour;
                             Some(Operation::SetLayoutGrids { id: *s, grids })
                         })
@@ -9023,16 +8967,11 @@ impl OndinApp {
         // The grid preview buffer ends with the commit, as `edit_valve` drops it
         // for a drag.
         self.in_flight.grid_paint = None;
-        // Both retargets, through the helper `valve_slot` uses.
         self.retarget_after(slot, &brush);
     }
     /// Show a slot edit without committing it — the third slot verb, for the frames a
     /// pointer is **down** on a colour control but has not yet travelled far enough
-    /// for egui to call it a drag.
-    ///
-    /// Returns whether it had anything to preview. A character-scoped slot goes
-    /// through `write_char_slot`'s `Preview`, which over a live selection writes the
-    /// editor's own spans.
+    /// for egui to call it a drag. Returns whether it had anything to preview.
     pub(crate) fn preview_slot(&mut self, id: NodeId, slot: PaintSlot, brush: Brush) -> bool {
         if let Some(cs) = slot.char_scoped() {
             return self.write_char_slot(id, cs, &brush, super::paint::CharWrite::Preview);
@@ -9073,14 +9012,11 @@ impl OndinApp {
         }
     }
 
-    /// Follow the picker onto whatever the edit just turned its slot into — both
-    /// retargets in one place, so the click (`write_slot`) and the drag
-    /// (`valve_slot`) cannot disagree.
+    /// Follow the picker onto whatever the edit just turned its slot into, so the
+    /// click (`write_slot`) and the drag (`valve_slot`) cannot disagree.
     ///
     /// A `GroupColor` key is the colour, so changing it renames the row; a
-    /// `SelectionAll` slot stands for disagreement, so an edit that brings
-    /// agreement deletes it. Not on a preview frame, where the new row does not
-    /// exist yet.
+    /// `SelectionAll` slot stands for disagreement, so agreement deletes it.
     fn retarget_after(&mut self, slot: PaintSlot, brush: &Brush) {
         if let (PaintSlot::GroupColor(key), Brush::Solid(c)) = (slot, brush) {
             let next = c.to_rgba8().to_u8_array();
@@ -9093,8 +9029,7 @@ impl OndinApp {
         }
     }
     /// Follow the picker off the mixed row and onto row 0 of the list that
-    /// replaced it — the common case being two layers with one fill each,
-    /// differently coloured, given one colour.
+    /// replaced it.
     fn retarget_mixed_paint(&mut self, target: PaintTarget) {
         let shown = match target {
             PaintTarget::Fill => self.fills_shown(PaintScope::Selection).is_mixed(),
@@ -9104,8 +9039,7 @@ impl OndinApp {
             PaintTarget::Fill => self.fills_in_scope(PaintScope::Selection).len(),
             PaintTarget::Stroke => self.strokes_in_scope(PaintScope::Selection).len(),
         };
-        // Still mixed: the slot is right. No rows: `slot_brush` closes it. `shown`
-        // is implied by `rows == 0` today, and kept as the intent.
+        // Still mixed: the slot is right. No rows: `slot_brush` closes it.
         if shown || rows == 0 {
             return;
         }
@@ -9135,13 +9069,11 @@ impl OndinApp {
             *slot = PaintSlot::GroupColor(to);
         }
     }
-    /// Replace a scope's fill (or stroke) list outright — the panel's one list
-    /// writer.
+    /// Replace a scope's fill (or stroke) list outright — the panel's one list writer.
     ///
-    /// Whole `Fill`s and `Stroke`s rather than bare brushes, so `visible`, the
-    /// order and a stroke's geometry survive. Over a selection `list` is an edit of
-    /// the shared `anchor`, which `all` retargets onto each target's own item ids.
-    /// No empty-transaction guard: `commit_inner` drops one.
+    /// Over a selection `list` is an edit of the shared `anchor`, which `all`
+    /// retargets onto each target's own item ids. No empty-transaction guard:
+    /// `commit_inner` drops one.
     fn write_paint_list<P>(
         &mut self,
         scope: PaintScope,
@@ -9259,10 +9191,9 @@ impl OndinApp {
         self.panel_head(ui, title, None, action, badge, body).acted
     }
 
-    /// [`Self::panel_badged`], answering with the whole of the header's clicks —
-    /// for a header `+` that opens a menu at [`ui::HeadClicks::action_rect`] — and
-    /// with `size`, a count after the title (*Variants 4*). The title alone stays
-    /// the card's key.
+    /// [`Self::panel_badged`], answering with the whole of the header's clicks (for a
+    /// header `+` that opens a menu) and with `size`, a count after the title
+    /// (*Variants 4*). The title alone stays the card's key.
     pub(super) fn panel_head(
         &mut self,
         ui: &mut egui::Ui,
@@ -9293,7 +9224,6 @@ impl OndinApp {
             None => title.to_string(),
         };
         let open = !self.collapsed_panels.contains(title);
-        // The card's overrides — header dot, count and reset — looked up by title.
         let (count, resets) = self
             .card_override(title)
             .map(|(n, ops)| (n, ops.to_vec()))
@@ -9350,12 +9280,8 @@ impl OndinApp {
     /// What `paint::with_fit` needs to seed a crop: the frame this picture is
     /// shown in, and the picture's intrinsic size.
     ///
-    /// The same box `ImageRef::framing` is given at the render boundary, so the
-    /// seed and the drawing agree. `None` where it is unknowable (no node, lost
-    /// image); the mode then changes without a seed rather than a guessed one.
-    ///
-    /// Also `None` for a slot spanning a selection: a seed is a rectangle for one
-    /// frame, and a selection write sends one brush to every node, so seeding from
+    /// `None` where it is unknowable (no node, lost image), and for a slot spanning
+    /// a selection: a write there sends one brush to every node, so seeding from
     /// the anchor would frame differently-shaped layers as the anchor.
     fn crop_seed(
         &self,
@@ -9393,16 +9319,10 @@ impl OndinApp {
             .unwrap_or_default()
     }
     // --- multi-selection actions ------------------------------------------
-    //
-    // Group and ungroup live in `OndinApp::group_selection` / `ungroup_selection`;
-    // the panel buttons call those verbs rather than keeping copies here.
     /// The box the selection aligns against: the key layer's box when one is
     /// designated, the selection's union when several layers are picked and none
     /// is, and the container's box when there is one. `None` for a lone top-level
     /// layer, where the only candidate is the whole document.
-    ///
-    /// "The key must not move" needs no code: aligning a layer to its own edge
-    /// leaves it where it is.
     fn align_target(&self) -> Option<ondin_core::kurbo::Rect> {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let res = &self.session.resolved;
@@ -9432,7 +9352,6 @@ impl OndinApp {
             return;
         };
         let ids = self.session.selection.ids().to_vec();
-        // One transaction: aligning is one undo step, not one per layer.
         let tx = build::align(
             &self.session.doc,
             &self.session.resolved,
@@ -9471,9 +9390,8 @@ impl OndinApp {
     /// The transaction one numeric-spacing edit produces for the layer subject
     /// (`build::distribute_spacing`, held at the key layer).
     ///
-    /// Read off the committed tree rather than the preview, as `resize_tx` does:
-    /// the target is absolute, so a base re-derived from the scrub's own preview
-    /// would compound.
+    /// Read off the committed tree, as `resize_tx` does: the target is absolute, so
+    /// a base re-derived from the scrub's own preview would compound.
     pub(crate) fn spacing_tx(&self, axis: Axis, gap: f64) -> Transaction {
         let ids = self.session.selection.ids().to_vec();
         build::distribute_spacing(
@@ -9490,11 +9408,8 @@ impl OndinApp {
 /// The gaps the spacing field shows over the selection, read through the preview.
 ///
 /// A scrubbed field re-reads its base every frame, so a base from the committed
-/// tree cannot move while the drag previews. Anything that shows a value wants
-/// the preview; an edit computed from a fixed origin (`OndinApp::spacing_tx`)
-/// wants the committed tree.
-///
-/// A free function over `EditorSession` so it can be tested headlessly.
+/// tree cannot move while the drag previews. An edit computed from a fixed origin
+/// (`OndinApp::spacing_tx`) wants the committed tree. Free for headless tests.
 pub(crate) fn layer_spacings(session: &EditorSession, axis: Axis) -> Vec<f64> {
     let boxes: Vec<ondin_core::kurbo::Rect> =
         build::outermost(&session.doc, session.selection.ids())
@@ -9506,12 +9421,9 @@ pub(crate) fn layer_spacings(session: &EditorSession, axis: Axis) -> Vec<f64> {
 
 /// What the spacing field shows, and what a drag on it starts from.
 ///
-/// The first is `None` (Mixed) unless every gap agrees; the second is the mean,
-/// so the first movement over a mixed set equalises roughly where the layers are.
-///
-/// "Agrees" is to the precision the field prints, so the tolerance is half the
-/// last digit shown. Not [`Spread`]: that agrees by `PartialEq` (Mixed forever
-/// over dragged gaps) and takes the first value as its base.
+/// The first is `None` (Mixed) unless every gap agrees to the precision the field
+/// prints (half its last digit); the second is the mean. Not [`Spread`]: that
+/// agrees by `PartialEq` (Mixed forever over dragged gaps).
 pub(crate) fn shown_gap(gaps: &[f64]) -> (Option<f64>, f64) {
     /// Half of the last digit `ui::number(2)` prints.
     const SAME: f64 = 0.005;
@@ -9532,8 +9444,7 @@ pub(crate) fn shown_gap(gaps: &[f64]) -> (Option<f64>, f64) {
 ///
 /// Asked of `croppable_fill`, not the row's own brush: with two image fills it
 /// answers the first visible one, so a click on the second would put the handles
-/// on another picture. It is inert there, as a canvas double-click is. A stroke
-/// is never edited, since `croppable_fill` reads `fills` alone.
+/// on another picture. A stroke is never edited.
 fn row_edits_the_mode_s_picture(
     doc: &ondin_core::Document,
     id: NodeId,
@@ -9552,12 +9463,8 @@ fn row_edits_the_mode_s_picture(
 ///
 /// A widget inside a `disable()`d `Ui` reports no hover, and `Ui::scope`'s own
 /// response is never hovered, so a dimmed row allocates a `Sense::empty()`
-/// claimant over the same rectangle to carry the "why" tooltip. A zero-sense
-/// widget is still granted hover when it sits above the top interactive widget,
-/// which it does by being allocated last. Live, the row itself is the claimant.
-///
-/// `tip` is asked for the state rather than passed as two strings because
-/// several callers build one from a number.
+/// claimant over its rectangle, last so it sits above the top interactive widget,
+/// to carry the "why" tooltip. Live, the row itself is the claimant.
 pub(super) fn menu_action(
     ui: &mut egui::Ui,
     enabled: bool,
@@ -9597,20 +9504,12 @@ type Preset = (&'static str, f64, f64);
 /// A heading and the sizes under it.
 type PresetGroup = (&'static str, &'static [Preset]);
 
-/// The frame sizes the Frame templates panel offers, by group — one card of
-/// pictures, two across ([`OndinApp::inspector_frame_templates`]).
+/// The frame sizes the Frame templates panel offers, by group, two cells across
+/// ([`OndinApp::inspector_frame_templates`]).
 ///
-/// One world unit is one pixel, so numbers are in the unit the W and H fields
-/// show; print sizes are points at 72/inch (A4 is 595×842).
-///
-/// Portrait by convention where a device has one; a landscape design is a
-/// different frame ([`OndinApp::inspector_frame_templates`] says why the match is
-/// order-sensitive). A table of sizes, not of devices: names only make them
-/// findable.
-///
-/// Two entries may not share a box, since [`preset_named`] answers with the first
-/// match and the other cell could never light (`frame_grid_tests` checks). Counts
-/// per group are even because the panel lays cells out two across.
+/// One world unit is one pixel; print sizes are points at 72/inch (A4 is 595×842).
+/// Portrait where a device has one. Two entries may not share a box, since
+/// [`preset_named`] answers with the first match (`frame_grid_tests` checks).
 const FRAME_PRESETS: &[PresetGroup] = &[
     (
         "PHONE",
@@ -9659,9 +9558,8 @@ const FRAME_PRESETS: &[PresetGroup] = &[
 
 /// How tall the Frame templates panel's scroll box may grow.
 ///
-/// A cap, not a height: the box shrinks to its contents, but the full table would
-/// push Transform below the fold. It lands between rows on purpose, so a cut-off
-/// cell says there is more.
+/// A cap, not a height: the full table would push Transform below the fold. It
+/// lands between rows on purpose, so a cut-off cell says there is more.
 const TEMPLATE_LIST_H: f32 = 184.0;
 /// One template cell's height, and the gap between two of them.
 ///
@@ -9673,9 +9571,7 @@ const TEMPLATE_CELL_GAP: f32 = 4.0;
 /// The box a template's proportional preview is fitted into, and the smallest a
 /// side of that preview may be drawn.
 ///
-/// The floor keeps extreme aspect ratios readable: below about five points the
-/// shape stops being a picture, so it is clamped and the dimensions beside it stay
-/// exact.
+/// The floor keeps extreme aspect ratios readable; the dimensions beside it stay exact.
 const TEMPLATE_BOX: egui::Vec2 = egui::vec2(20.0, 28.0);
 /// See [`TEMPLATE_BOX`].
 const TEMPLATE_BOX_MIN: f32 = 5.0;
@@ -9684,8 +9580,7 @@ const TEMPLATE_BOX_MIN: f32 = 5.0;
 /// frame already *is* that size.
 ///
 /// Painted rather than built from [`ui::button_face`]: a resting cell has no
-/// ground (a list, not a wall of buttons), and the ground arrives on hover. The
-/// other states use `button_face`'s inks.
+/// ground (a list, not a wall of buttons).
 ///
 /// The name is elided to the space left after the picture, using the galley that
 /// will be painted (`ui::action_button`'s trap).
@@ -9772,8 +9667,7 @@ fn template_cell(ui: &mut egui::Ui, width: f32, name: &str, w: f64, h: f64, on: 
 
 /// A template's name, and the size under it.
 ///
-/// The mock's 10.5 and 9 raised half a point each, as `ui`'s `PREFIX_PT` is: the
-/// panels read at a larger optical size than the mock draws them.
+/// Half a point over the mock's 10.5 and 9, as `ui`'s `PREFIX_PT` is.
 const TEMPLATE_NAME_PT: f32 = 11.0;
 /// See [`TEMPLATE_NAME_PT`].
 const TEMPLATE_DIMS_PT: f32 = 9.5;
@@ -9782,7 +9676,6 @@ const TEMPLATE_LINE_GAP: f32 = 2.0;
 
 /// The preset a frame's box is, or `None` for one that matches nothing.
 ///
-/// A free function over a size so the read-back rule is testable without a panel.
 /// The comparison is on whole units: a frame dragged to 393.0000001 is the preset.
 fn preset_named(size: Size) -> Option<&'static str> {
     FRAME_PRESETS.iter().find_map(|(_, entries)| {
@@ -9795,8 +9688,7 @@ fn preset_named(size: Size) -> Option<&'static str> {
 
 /// The Layout grid panel's control height, and the gap between two grids' blocks.
 ///
-/// The card's own 28, not the popovers' 26: these sit in the panel column beside
-/// the transform fields rather than inside a card floating over it.
+/// The card's own 28, not the popovers' 26.
 const GRID_CELL: f32 = 28.0;
 /// What goes between one grid's block and the next, on top of the card's own
 /// [`ui::CARD_ROW_GAP`], so two grids read as two blocks. Equal to the stroke
@@ -9815,9 +9707,8 @@ struct SizeMenu {
 }
 
 /// Where a layer is drawn inside its frame, as the Position card measures it
-/// (`OndinApp::inset_placement`): the frame's size, the layer's local transform
-/// and its box, and the kind that box was measured from — everything
-/// `container::with_edge` needs to pin an edge without moving anything.
+/// (`OndinApp::inset_placement`): everything `container::with_edge` needs to pin
+/// an edge without moving anything.
 struct InsetPlacement {
     frame: Size,
     local: Affine,
@@ -9852,8 +9743,7 @@ impl InsetPlacement {
 }
 
 /// Whether dragging `members` on the canvas reorders them: they are all in-flow
-/// items of one container. Over a mixed selection, or items of two containers,
-/// nothing reorders, and the X/Y tooltip must not promise it does.
+/// items of one container, so the X/Y tooltip must not promise it otherwise.
 fn drags_as_a_block(doc: &ondin_core::Document, members: &[NodeId]) -> bool {
     let parent = |id: &NodeId| doc.get(*id).and_then(|n| n.parent());
     !members.is_empty()
@@ -9864,8 +9754,8 @@ fn drags_as_a_block(doc: &ondin_core::Document, members: &[NodeId]) -> bool {
 }
 
 /// Why the multi-selection Transform card's X and Y are off; `None` when they
-/// are on, i.e. no member is placed by its container. Its answer is both the gate
-/// and the hover text, which a headless frame never shows.
+/// are on. Its answer is both the gate and the hover text, which a headless frame
+/// never shows.
 fn laid_out_xy(doc: &ondin_core::Document, members: &[NodeId]) -> Option<String> {
     let laid_out = members
         .iter()
@@ -9927,21 +9817,16 @@ fn inset_label(edge: ondin_core::container::Edge) -> &'static str {
 /// two field rows and the gap between them.
 const INSET_DIAGRAM_W: f32 = 74.0;
 
-/// The Position card's pin diagram, the mockup's: a layer in the middle of a
-/// field-coloured well and a strut from each of its edges out towards the well's
-/// — no container outline, the struts alone saying where the container is. A
-/// pinned strut is solid accent, an unpinned one dashed and faint, brighter under
-/// the pointer; the layer is accent while any edge holds. Clicking a strut
+/// The Position card's pin diagram: a layer in a field-coloured well and a strut
+/// from each of its edges out towards the well's. A pinned strut is solid accent,
+/// an unpinned one dashed and faint, brighter under the pointer. Clicking a strut
 /// answers its edge.
 ///
-/// Drawn, not a widget per strut: four `interact` rects over one painted picture,
-/// each the band between the layer's edge and the well's, so the target is the
-/// whole gap. A pinned strut between two auto margins (centring) is solid in
-/// [`color::MEASURE`].
-///
-/// `held` is whether the left and the top edge are held by default (an axis with
-/// no inset outside a layout keeps its offset from the container's top-left);
-/// such a strut is drawn solid, and clicking it pins it for real.
+/// Drawn, not a widget per strut: four `interact` rects over one picture, each the
+/// whole band between the layer's edge and the well's. A pinned strut between two
+/// auto margins (centring) is solid in [`color::MEASURE`]. `held` is whether the
+/// left and the top edge are held by default (an axis with no inset outside a
+/// layout keeps its offset from the top-left); such a strut is drawn solid.
 fn inset_diagram(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -9949,8 +9834,8 @@ fn inset_diagram(
     held: (bool, bool),
 ) -> Option<ondin_core::container::Edge> {
     use ondin_core::container::Edge as Pin;
-    // The mockup's measures: struts start 6 in from the well's edge, stop 3 short
-    // of the layer's, and are 2 wide; the layer is 28 × 20.
+    // Struts start 6 in from the well's edge, stop 3 short of the layer's, 2 wide;
+    // the layer is 28 × 20.
     const INSET: f32 = 6.0;
     const CLEAR: f32 = 3.0;
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
@@ -10090,18 +9975,13 @@ enum GridAdd {
     Write(LayoutGrid),
 }
 
-/// The `+`'s whole decision, as a function of the shared list and nothing else.
+/// The `+`'s whole decision, as a function of the shared list and nothing else, so
+/// a test exercises the rule itself.
 ///
-/// Lifted out of the panel so a test exercises the rule itself rather than a
-/// restatement of it.
-///
-/// Columns for the first grid, rows for the second (the likelier axis), and a
-/// colour the frames are not already using, so two grids read apart.
-/// `LayoutGrid::new` keeps the plain default for grids built elsewhere.
-///
-/// Over a disagreement (`None`) the `+` overrides rather than appends: appending
-/// to each frame's own list leaves the frames disagreeing with no way out. Export's
-/// `+` makes the same choice.
+/// Columns for the first grid, rows for the second, and a colour the frames are not
+/// already using. Over a disagreement (`None`) the `+` overrides rather than
+/// appends: appending leaves the frames disagreeing with no way out, as Export's
+/// `+` knows.
 fn grid_add(shared: Option<&[LayoutGrid]>) -> GridAdd {
     let seen = shared.unwrap_or(&[]);
     let axis = match seen.iter().any(|g| g.axis == GridAxis::Columns) {
@@ -10130,8 +10010,7 @@ struct GridRowOut {
 
 /// The inputs [`grid_step`] decides from.
 ///
-/// A near-copy of `panels::export`'s `ScrubInput`, deliberately unshared: neither
-/// panel should own the type, and the rule is what matters.
+/// A near-copy of `panels::export`'s `ScrubInput`, deliberately unshared.
 struct GridScrub {
     cancelled: bool,
     dragged: bool,
@@ -10149,8 +10028,7 @@ enum GridStep {
     Nothing,
 }
 
-/// The grid fields' whole decision, as a function of their inputs: the same three
-/// rules as `panels::export`'s `quality_step`.
+/// The grid fields' whole decision, as `panels::export`'s `quality_step` is.
 ///
 /// The cancel is answered first: egui may still report that frame's motion as
 /// `changed()`. A drag holds and never commits, since `cancel_gesture` undoes a
@@ -10172,9 +10050,8 @@ fn grid_step(input: GridScrub, value: LayoutGrid, current: LayoutGrid) -> GridSt
     GridStep::Nothing
 }
 
-/// The glyph a grid's axis switch shows: the same two the dashboard's own
-/// grid/list switch uses, because it is the same distinction — bands across, or
-/// bands down.
+/// The glyph a grid's axis switch shows: the dashboard's grid/list pair, the same
+/// distinction.
 fn axis_glyph(axis: GridAxis) -> &'static str {
     match axis {
         GridAxis::Columns => icon::COLUMNS,
@@ -10206,8 +10083,6 @@ fn grid_axis_word(axis: GridAxis) -> &'static str {
 }
 
 /// [`ui::segment_label`] for a cell whose label is a glyph.
-///
-/// The icon font, with the same two inks as a word cell.
 fn grid_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &'static str, on: bool) {
     painter.text(
         rect.center(),
@@ -10219,12 +10094,10 @@ fn grid_glyph(painter: &egui::Painter, rect: egui::Rect, glyph: &'static str, on
 }
 
 /// Where a line's end goes so that the line is `length` long, keeping its
-/// direction.
+/// direction; `None` for a zero-length line.
 ///
 /// The start is the anchor: a line's X and Y report its start point, so growing
 /// from the far end would move two other fields.
-///
-/// `None` for a zero-length line, which has no direction to keep.
 fn line_end_for_length(start: Point, end: Point, length: f64) -> Option<Point> {
     let v = end - start;
     let current = v.hypot();
@@ -10268,9 +10141,7 @@ fn sides_label(s: StrokeSides) -> &'static str {
 }
 /// What the sides button says about itself, given whether the kind takes per-side
 /// strokes at all, whether the row is open, and what the stroke is set to.
-///
-/// A function so the rule can be tested: [`ui::FieldButton::Set`] is reachable
-/// only when closed and not on every side.
+/// [`ui::FieldButton::Set`] is reachable only when closed and not on every side.
 fn sides_button_state(applies: bool, open: bool, sides: StrokeSides) -> ui::FieldButton {
     if !applies {
         ui::FieldButton::Disabled
@@ -10303,10 +10174,9 @@ pub(super) fn set_stroke_weight(stroke: &mut Stroke, width: f64) {
 
 /// The several-layer weight row's write: `width` onto every stroke in scope
 /// through [`set_stroke_weight`], each bound width detached in the edit itself,
-/// except a stroke whose bound width already draws `width`, which stays bound (as
-/// the opacity row leaves a layer already at the typed opacity). Resolved in each
-/// layer's own mode, hence [`ondin_core::edit_strokes_at_all`] and not the id-blind
-/// `edit_strokes_all`.
+/// except a stroke whose bound width already draws `width` (as the opacity row
+/// does). Resolved in each layer's own mode, hence
+/// [`ondin_core::edit_strokes_at_all`], not the id-blind `edit_strokes_all`.
 pub(super) fn weight_all_tx(doc: &ondin_core::Document, ids: &[NodeId], width: f64) -> Transaction {
     ondin_core::edit_strokes_at_all(doc, ids, |id, s| {
         let drawn = s
@@ -10329,18 +10199,13 @@ fn sides_hint(s: StrokeSides) -> &'static str {
 }
 
 /// The pattern switching to `style` should produce, keeping whatever the current
-/// one can supply.
-///
-/// Preserving the numbers is the point: Dotted → Dashed → Dotted must come back
-/// where it started. A dotted period becomes a dashed gap; only a mode with
-/// nothing to carry over falls back to a multiple of the stroke width.
+/// one can supply: Dotted → Dashed → Dotted must come back where it started.
 fn pattern_for(style: DashStyle, s: &Stroke) -> Vec<f64> {
     let unit = s.width.max(1.0);
     let (length, spacing) = match s.dash_style() {
         DashStyle::Solid => (unit * 3.0, unit * 2.0),
         DashStyle::Dotted => (unit * 3.0, s.dot_spacing()),
         DashStyle::Dashed => s.dash_length_spacing(),
-        // A custom list's first two numbers are the ones the simple modes use.
         DashStyle::Custom => (
             s.dashes.first().copied().unwrap_or(unit * 3.0),
             s.dashes.get(1).copied().unwrap_or(unit * 2.0),
@@ -10353,7 +10218,6 @@ fn pattern_for(style: DashStyle, s: &Stroke) -> Vec<f64> {
         // the width (re-clicking the lit tab too); the `Solid` arm supplies defaults.
         DashStyle::Dotted => vec![0.0, spacing.max(0.0)],
         DashStyle::Dashed => vec![length.max(0.0), spacing.max(0.0)],
-        // Four numbers, so the field opens showing an uneven repeat.
         DashStyle::Custom if s.dashes.len() > 2 => s.dashes.clone(),
         DashStyle::Custom => vec![length, spacing, unit, spacing],
     }
@@ -10434,7 +10298,6 @@ mod collapse_tests {
         assert!(!p.open("Stroke"), "an empty panel should start collapsed");
         p.sync("Stroke", true);
         assert!(!p.open("Stroke"), "and stay collapsed on its own");
-        // The user expands it. Every following frame must leave that alone.
         p.collapsed.remove("Stroke");
         for _ in 0..3 {
             p.sync("Stroke", true);
@@ -10499,7 +10362,6 @@ mod collapse_tests {
             p.sync("Stroke", false);
             assert!(!p.open("Stroke"), "re-reading the room fought the user");
         }
-        // ...and is forgotten on the next layer.
         p.select("Stroke", false);
         assert!(p.open("Stroke"));
     }
@@ -10536,8 +10398,7 @@ mod carry_tests {
     /// Shrinking a paint list paints no red id-change outline (egui's
     /// `warn_if_rect_changes_id`, which `theme::install` turns off).
     ///
-    /// Debug-only by nature: egui puts `Style::debug` behind `debug_assertions`, so
-    /// a release build has no overlay to paint.
+    /// Debug-only: egui puts `Style::debug` behind `debug_assertions`.
     #[test]
     fn shrinking_a_paint_list_paints_no_warning_outline() {
         let ctx = egui::Context::default();
@@ -10559,7 +10420,6 @@ mod carry_tests {
             })
             .shapes
         };
-        // The overlay's shape: a red stroked rect.
         let reds = |shapes: &[egui::epaint::ClippedShape]| {
             shapes
                 .iter()
@@ -10569,7 +10429,6 @@ mod carry_tests {
                 })
                 .count()
         };
-        // Both directions, two frames at each length.
         for n in [2usize, 2, 1, 1, 3, 3, 2, 2] {
             assert_eq!(
                 reds(&frame(n)),
@@ -10585,7 +10444,6 @@ mod carry_tests {
         assert_eq!(resting.len(), 3);
         let pitch = resting[1].top() - resting[0].top();
         assert!(pitch > 28.0, "expected a real pitch, got {pitch}");
-        // Carry the middle one, with the pointer well below its slot.
         let carried = slots(Some(1), Some(egui::pos2(100.0, 200.0)));
         assert_eq!(carried.len(), 3);
         for (i, (a, b)) in resting.iter().zip(&carried).enumerate() {
@@ -10639,7 +10497,6 @@ mod carry_tests {
             (resting[0].center().y - 300.0).abs() > 100.0,
             "the resting row was already at the pointer, so this proves nothing: {resting:?}"
         );
-        // Sideways it stays put: the list is a column.
         assert_eq!(
             resting[0].min.x, carried[0].min.x,
             "the carried row drifted horizontally"
@@ -10667,7 +10524,6 @@ mod angle_tests {
                 shown.is_sign_positive(),
                 "{radians:e} came back as negative zero, which formats as -0"
             );
-            // `-0.0 == 0.0`, so the formatting is checked directly.
             assert_eq!(format!("{shown:.0}"), "0", "{radians:e} formats wrongly");
         }
     }
@@ -10697,7 +10553,6 @@ mod carry_id_tests {
             let _ = ctx.run_ui(Default::default(), |ui| {
                 for i in order {
                     let (id, _) = carried_unit(ui, false, ("row", i), |ui| {
-                        // A widget whose id egui generates.
                         ui.allocate_response(egui::vec2(40.0, 20.0), egui::Sense::click())
                             .id
                     });
@@ -10734,7 +10589,6 @@ mod dash_list_tests {
             Some(vec![5.0, 10.0, 15.0]),
             "an odd list is legal — it repeats, so the third number is ink again"
         );
-        // Forgiving about separators and whitespace.
         assert_eq!(parse_dash_list("5 10"), Some(vec![5.0, 10.0]));
         assert_eq!(parse_dash_list("  5 ,10 , "), Some(vec![5.0, 10.0]));
         assert_eq!(parse_dash_list("2.5, 1.25"), Some(vec![2.5, 1.25]));
@@ -10781,7 +10635,6 @@ mod dash_list_tests {
             width: 2.0,
             ..Default::default()
         };
-        // Dotted at spacing 9, out to Dashed and back.
         let dotted = stroke(vec![0.0, 9.0]);
         assert_eq!(dotted.dash_style(), DashStyle::Dotted);
         let dashed = stroke(pattern_for(DashStyle::Dashed, &dotted));
@@ -10794,7 +10647,6 @@ mod dash_list_tests {
         let back = stroke(pattern_for(DashStyle::Dotted, &dashed));
         assert_eq!(back.dashes, dotted.dashes, "round trip lost the spacing");
 
-        // Through Solid, which has nothing to carry, back out to a legible default.
         let solid = stroke(pattern_for(DashStyle::Solid, &dashed));
         assert_eq!(solid.dash_style(), DashStyle::Solid);
         let fresh = stroke(pattern_for(DashStyle::Dashed, &solid));
@@ -10804,7 +10656,6 @@ mod dash_list_tests {
             "a mode with nothing to inherit must not open on zeroes: {fresh:?}"
         );
 
-        // Custom keeps a longer list intact and seeds four numbers from a shorter one.
         let long = stroke(vec![5.0, 10.0, 15.0, 5.0]);
         assert_eq!(pattern_for(DashStyle::Custom, &long), long.dashes);
         assert_eq!(pattern_for(DashStyle::Custom, &dashed).len(), 4);
@@ -10855,7 +10706,6 @@ mod dash_list_tests {
             "and the round trip comes back where it started"
         );
 
-        // A mode with nothing to inherit still opens on a multiple of the width.
         let solid = stroke(pattern_for(DashStyle::Solid, &tight));
         let fresh = stroke(pattern_for(DashStyle::Dotted, &solid));
         assert_eq!(
@@ -10903,7 +10753,6 @@ mod stroke_row_tests {
         let ctx = context();
         let mut rows: Vec<egui::Rect> = Vec::new();
         let _ = ctx.run_ui(Default::default(), |ui| {
-            // The card's own pitch around them, as `ui::card_at` sets it.
             ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
             let row = |rows: &mut Vec<egui::Rect>, ui: &mut egui::Ui| {
                 rows.push(
@@ -10940,8 +10789,6 @@ mod stroke_row_tests {
 
     /// A dimmed control is hovered only through a claimant of its own, not the widget or the
     /// scope around it, for both a `ui::menu_item` and a `ui::value_field`.
-    ///
-    /// Asserted on `hovered()`, not the tooltip's ink: a tooltip galley never reaches `.shapes`.
     #[test]
     fn a_dimmed_control_can_be_hovered_only_through_a_claimant_of_its_own() {
         /// `(the widget, the scope around it, an explicit claimant over the same
@@ -11051,7 +10898,6 @@ mod stroke_row_tests {
                 ui::value_field(
                     ui,
                     egui::vec2(width, 26.0),
-                    // The card's own prefix, a glyph.
                     Prefix::Icon(icon::RESIZE),
                     &mut v,
                     Scrub::fine(0.5, 2).range(1.0..=10_000.0),
@@ -11140,8 +10986,7 @@ mod stroke_row_tests {
                     });
                 });
             });
-            // Picked by width and ordered by top, not by height band (a band would
-            // select the thing under test). De-duplicated because a track paints its
+            // Picked by width, ordered by top, de-duplicated because a track paints its
             // box twice (ground, then hairline), which would shift `full[2]`.
             let want = ui::menu_inner_w(crate::app::POPOVER_W, 11.0);
             let mut full: Vec<egui::Rect> = Vec::new();
@@ -11166,7 +11011,6 @@ mod stroke_row_tests {
         let ctx = context();
 
         let c = column(&ctx, 26.0 - 4.0, 26.0);
-        // The fixture stacks the three things in the card's order.
         assert!(
             c.tabs.top() < c.modes.top() && c.modes.top() < c.field.top(),
             "the fixture is not a column: {:?}",
@@ -11192,7 +11036,6 @@ mod stroke_row_tests {
              measuring against the wrong yardstick",
             c.field.height()
         );
-        // Left and right edges shared: both tracks and the field use the same `inner`.
         assert!(
             (c.tabs.left() - c.field.left()).abs() < 0.51
                 && (c.tabs.right() - c.field.right()).abs() < 0.51
@@ -11294,12 +11137,10 @@ mod stroke_row_tests {
     ///
     /// egui 0.35 builds a `Button` frame from the widget state, so a resting row drops the
     /// stroke from layout while a hovered or selected one keeps it. The painted height must
-    /// be `ui::MENU_ROW_H` itself: a floor only raises, and the natural height is
-    /// `15 + 2 * button_padding.y` (23 at the theme's 4), so this is the tripwire for a caller
+    /// be `ui::MENU_ROW_H` itself: a floor only raises, so this is the tripwire for a caller
     /// that leaves the padding alone. It covers rows egui sizes, not `ui::menu_item` rows.
     #[test]
     fn a_menu_rows_height_does_not_depend_on_its_state() {
-        // Both ambient paddings a dropdown arrives with: 0 (the control's scope) and 2.
         for (ppp, pad) in [
             (1.0_f32, 0.0_f32),
             (1.0, 2.0),
@@ -11314,7 +11155,6 @@ mod stroke_row_tests {
             let heights = std::cell::RefCell::new(Vec::<(&str, f32)>::new());
             let widths = std::cell::RefCell::new(Vec::<(&str, f32)>::new());
             let _ = ctx.run_ui(Default::default(), |ui| {
-                // The scope every dropdown's control sets up.
                 ui.spacing_mut().interact_size.y = 28.0;
                 ui.spacing_mut().button_padding.y = pad;
                 ui.scope(|ui| {
@@ -11437,7 +11277,6 @@ mod stroke_row_tests {
         });
         let painted = painted_rows(&out, 27.5..28.5);
         assert_eq!(painted.len(), 4, "four fields: {painted:?}");
-        // Two per line, and the two lines at different heights.
         let tops: Vec<f32> = painted.iter().map(|r| r.top()).collect();
         assert!(
             (tops[0] - tops[1]).abs() < 0.51,
@@ -11451,7 +11290,6 @@ mod stroke_row_tests {
             tops[2] > tops[0] + 20.0,
             "the second line has to be below the first: {tops:?}"
         );
-        // Each field is half the card less the gap, and the pair spans it.
         let want = (CARD - 6.0) / 2.0;
         for r in &painted {
             assert!(
@@ -11475,7 +11313,6 @@ mod stroke_row_tests {
         let inner = ui::menu_inner_w(MENU_W, MENU_PAD);
         // Mirrors the popover's own `inner - 18.0 - ui::CARD_COL_GAP`.
         let tabs = inner - 18.0 - ui::CARD_COL_GAP;
-        // Four cells, 2px padding each side of the track and a 2px gap between.
         let cell = (tabs - 4.0 - 2.0 * 3.0) / 4.0;
         assert!(
             cell >= 44.0,
@@ -11486,7 +11323,6 @@ mod stroke_row_tests {
             "the tab row plus the close button overflows the popup"
         );
 
-        // The label fits, measured off the atlas.
         let ctx = context();
         let widest = ctx.fonts_mut(|f| {
             DashStyle::ALL
@@ -11551,7 +11387,6 @@ mod polish_tests {
              take a join like a rect's"
         );
 
-        // Ellipse and line, and the kinds that stroke nothing at all.
         for kind in [
             NodeKind::Ellipse {
                 size: Size::new(10.0, 10.0),
@@ -11591,7 +11426,6 @@ mod polish_tests {
             "…but it has no top edge to name, so per-side widths stay off"
         );
 
-        // Containers with nothing to paint are unaffected.
         for kind in [NodeKind::Group, NodeKind::Root] {
             assert!(!kind.takes_paint(), "{kind:?} carries no fills or strokes");
         }
@@ -11623,20 +11457,17 @@ mod polish_tests {
             left: 2.0,
         };
 
-        // Closed, and not on every side.
         assert_eq!(
             state(true, false, StrokeSides::Top),
             ui::FieldButton::Set,
             "a collapsed row with a side set has to say so"
         );
         assert_eq!(state(true, false, custom), ui::FieldButton::Set);
-        // The other states.
         assert_eq!(state(true, false, StrokeSides::All), ui::FieldButton::Off);
         assert_eq!(state(true, true, StrokeSides::All), ui::FieldButton::On);
         assert_eq!(state(true, true, custom), ui::FieldButton::On);
         assert_eq!(state(false, false, custom), ui::FieldButton::Disabled);
 
-        // `Set` is a clickable disclosure toggle.
         assert!(ui::FieldButton::Set.is_enabled());
         assert!(!ui::FieldButton::Disabled.is_enabled());
     }
@@ -11646,7 +11477,6 @@ mod polish_tests {
     fn editing_the_weight_re_broadcasts_it_to_every_side() {
         use ondin_core::{Stroke, StrokeSides};
 
-        // The real edit the weight field applies.
         let apply = |stroke: &Stroke, width: f64| {
             let mut s = stroke.clone();
             set_stroke_weight(&mut s, width);
@@ -11676,7 +11506,6 @@ mod polish_tests {
             "the weight has to reach every side, including the one that was 0"
         );
 
-        // The named single sides and `All` carry no widths and survive untouched.
         for sides in [
             StrokeSides::All,
             StrokeSides::Top,
@@ -11866,7 +11695,6 @@ mod mask_card_tests {
             "the button releases every mask the card reports"
         );
 
-        // One press finishes it: the flags are all off and the button goes out.
         app.toggle_mask();
         assert!(
             app.mask_card_targets(group).is_empty(),
@@ -11876,7 +11704,6 @@ mod mask_card_tests {
             !matches!(app.mask_action(), Ok(MaskAction::Release(_))),
             "so the button is no longer lit"
         );
-        // One undo step, not two.
         app.session.undo();
         assert_eq!(
             app.mask_card_targets(group).len(),
@@ -11965,8 +11792,7 @@ mod mask_card_tests {
     }
 
     /// Each `booleanable_selection` refusal gives its own sentence, not one count sentence
-    /// that is false for a shape plus text or for shapes in different groups. The
-    /// `InvalidParent` sentence is `mask_action`'s with this row's nouns.
+    /// that is false for a shape plus text or for shapes in different groups.
     ///
     /// flip: both arms collapsed back to the count sentence → fails at the second assertion.
     #[test]
@@ -12100,10 +11926,8 @@ mod mask_card_tests {
 
 #[cfg(test)]
 mod identity_row_tests {
-    //! The identity card's first row is built for a single layer and for a
-    //! multi-selection; the two must be the same height so the inspector below does
-    //! not shift. The contents are reproduced rather than called, as `OndinApp`
-    //! cannot be built here.
+    //! The identity card's first row is the same height for a single layer and for a
+    //! multi-selection, so the inspector below does not shift.
 
     use super::*;
 
@@ -12111,7 +11935,6 @@ mod identity_row_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut h = 0.0;
-        // Three passes: the first frame has no font atlas.
         for _ in 0..3 {
             let _ = ctx.run_ui(Default::default(), |ui| {
                 let r = ui.horizontal(|ui| {
@@ -12250,16 +12073,13 @@ mod press_away_tests {
             !dragged(egui::pos2(160.0, 300.0), egui::pos2(600.0, 700.0)),
             "a scrub off the edge of the card dismissed it"
         );
-        // The popover button, which a drag off it must not dismiss either.
         assert!(!dragged(egui::pos2(310.0, 40.0), egui::pos2(600.0, 700.0)));
     }
 
     /// The other half, so the term cannot be a constant `false`.
     #[test]
     fn a_press_that_began_elsewhere_still_dismisses() {
-        // A drag that started outside, e.g. a canvas selection.
         assert!(dragged(egui::pos2(600.0, 700.0), egui::pos2(610.0, 700.0)));
-        // A plain click on empty canvas.
         assert!(dragged(egui::pos2(700.0, 500.0), egui::pos2(700.0, 500.0)));
     }
 
@@ -12286,9 +12106,8 @@ mod spread_tests {
     }
 
     /// What a control may say (`agreed`) and what it operates from (`base`) are different
-    /// questions: a scrubbed control adds its delta to the base, so handing it the absence of
-    /// an agreed value makes it undraggable. A bare target (no stroke beside one with a 4pt
-    /// stroke) has no agreement but still a base.
+    /// questions: a scrubbed control adds its delta to the base, so a bare target (no stroke
+    /// beside one with a 4pt stroke) has no agreement but still a base.
     #[test]
     fn a_bare_target_removes_the_agreement_and_not_the_base() {
         let bare = spread(vec![4.0_f64], true);
@@ -12335,14 +12154,12 @@ mod spread_tests {
         let (uniform, base) = shown_gap(&[24.0, 24.0]);
         assert_eq!((uniform, base), (Some(24.0), 24.0));
 
-        // Two gaps that a 2-decimal field cannot tell apart.
         let (uniform, _) = shown_gap(&[24.0, 24.0001]);
         assert!(
             uniform.is_some_and(|g| (g - 24.0).abs() < 0.001),
             "gaps identical on screen read as {uniform:?}"
         );
 
-        // Far enough apart to print differently.
         let (uniform, base) = shown_gap(&[10.0, 30.0]);
         assert_eq!(uniform, None, "10 and 30 are not one number");
         assert!(
@@ -12350,7 +12167,6 @@ mod spread_tests {
             "the drag base was {base}, not the mean"
         );
 
-        // One layer selected, or none: no gaps at all, and nothing to drag from.
         assert_eq!(shown_gap(&[]), (None, 0.0));
     }
 }
@@ -12365,10 +12181,7 @@ mod rotation_field_tests {
     /// The Rotation field's per-frame loop, run headlessly (the arithmetic only; that an
     /// untouched frame writes nothing is covered in `canvas::headless_app_tests`).
     ///
-    /// The field reads the previewed world, takes the displayed angle from `Basis::of`, and
-    /// egui's `DragValue` advances its own accumulator seeded on the first frame; the write
-    /// goes through `turned_about` from the reference `AngleScrub` picks. Returns each
-    /// frame's resulting world transform.
+    /// Returns each frame's resulting world transform.
     fn drag(mut world: Affine, pivot: Point, step_deg: f64, frames: usize) -> Vec<Affine> {
         let mut latch: Option<AngleScrub> = None;
         let mut accumulator: Option<f64> = None;
@@ -12376,7 +12189,6 @@ mod rotation_field_tests {
         for _ in 0..frames {
             let at_rest = shown_degrees(build::Basis::of(world).orientation.angle);
             let shown = latch.map_or(at_rest, |l| l.shown);
-            // The accumulator seeds from what the field was handed, once.
             let angle_deg = accumulator.unwrap_or(shown) + step_deg;
             accumulator = Some(angle_deg);
             let (base, from) = AngleScrub::reference(latch, at_rest, world);
@@ -12392,19 +12204,15 @@ mod rotation_field_tests {
     }
 
     /// A mirrored layer dragged past ±90° turns by exactly what the drag asked for each frame,
-    /// not half a circle (the field holds state through `AngleScrub` rather than re-reading a
-    /// decomposition). Measured as the angle of the top-centre point about the pivot; the layer
-    /// must be mirrored and the drag must cross ±90°, where §5.7a relabels `Mirror::X` at θ as
-    /// `Mirror::Y` at θ−π.
+    /// not half a circle: §5.7a relabels `Mirror::X` at θ as `Mirror::Y` at θ−π there, and the
+    /// field holds state through `AngleScrub` rather than re-reading a decomposition.
     #[test]
     fn a_mirrored_layer_turns_by_the_drag_and_not_half_a_circle() {
         let pivot = Point::new(10.0, 5.0);
-        // 80°, mirrored, off the origin and past the threshold within the drag.
         let world = Affine::translate(Vec2::new(200.0, 150.0))
             * Affine::rotate(80.0_f64.to_radians())
             * Affine::FLIP_X;
 
-        // The fixture must be in the state the test is about.
         let split = build::Basis::of(world);
         assert_eq!(
             split.orientation.mirror,
@@ -12463,9 +12271,8 @@ mod rotation_field_tests {
         );
     }
 
-    /// Two flips never leave a layer mirrored: `build::flip` composes
-    /// `translate(c) · FLIP · translate(−c)`, whose 2×2 part is exactly `FLIP_X` or `FLIP_Y`,
-    /// and each contributes a factor of −1 to the determinant.
+    /// Two flips never leave a layer mirrored: each contributes a factor of −1 to the
+    /// determinant.
     #[test]
     fn flipping_both_axes_is_a_half_turn_and_not_a_mirror() {
         let odd = Affine::rotate(0.7) * build::skew_x(0.3) * Affine::scale_non_uniform(2.0, 0.5);
@@ -12485,7 +12292,6 @@ mod rotation_field_tests {
                 "{name}: and must be exactly a half turn"
             );
         }
-        // One flip does mirror, so the pair reads as a boundary.
         assert_ne!(
             build::Basis::of(Affine::FLIP_X).orientation.mirror,
             build::Mirror::None,
@@ -12523,15 +12329,13 @@ mod line_length_tests {
     use super::*;
 
     /// Typing a length moves the end along the line's direction: the start does not move, the
-    /// direction is kept exactly (scaling the vector, not `atan2`/`sin`/`cos`), and a degenerate
-    /// line has no answer.
+    /// direction is kept exactly, and a degenerate line has no answer.
     ///
     /// flip: anchoring the far end (`end - v * k`) → fails at the shortening assertion (answers
     /// (22, 36)); dropping the `/ current` → fails there too.
     #[test]
     fn a_typed_length_moves_the_end_and_leaves_the_start_and_the_angle_alone() {
         let a = Point::new(10.0, 20.0);
-        // A 3-4-5 triangle, 30 units long and exact in binary.
         let b = Point::new(28.0, 44.0);
         assert_eq!((b - a).hypot(), 30.0, "the fixture is 30 long");
 
@@ -12548,7 +12352,6 @@ mod line_length_tests {
             "and it is the length that was asked for: {third:?}"
         );
 
-        // Doubled, and the angle is bit-identical.
         let twice = line_end_for_length(a, b, 60.0).expect("a line with direction");
         assert_eq!(
             (twice.y - a.y).atan2(twice.x - a.x),
@@ -12556,10 +12359,8 @@ mod line_length_tests {
             "the direction has to survive exactly, or every edit churns the file"
         );
 
-        // The identity edit is a true no-op, so the field may write back every frame.
         assert_eq!(line_end_for_length(a, b, 30.0), Some(b));
 
-        // A 45° line, where the naive sin/cos round trip is inexact.
         let d = Point::new(1.0, 1.0);
         let out = line_end_for_length(Point::ZERO, d, 2.0f64.sqrt() * 3.0).expect("diagonal");
         assert!(
@@ -12567,7 +12368,6 @@ mod line_length_tests {
             "a 45° line stays at 45°: {out:?}"
         );
 
-        // No direction, no answer; nor for a length that is not a length.
         assert_eq!(line_end_for_length(a, a, 10.0), None);
         assert_eq!(line_end_for_length(a, b, 0.0), None);
         assert_eq!(line_end_for_length(a, b, f64::NAN), None);
@@ -12644,7 +12444,6 @@ mod line_length_tests {
              below pass against a card that draws no size row at all"
         );
 
-        // The 3-4-5 line the test above measures.
         let line = size_prefixes(NodeKind::Line {
             end: Point::new(18.0, 24.0),
         });
@@ -12667,10 +12466,8 @@ mod line_length_tests {
 
 #[cfg(test)]
 mod frame_fill_tests {
-    //! A frame's paint panel is headed *Fill*, like every other layer's, exactly once (not
-    //! two Fill panels). The strings are shouted because the title is uppercased in
-    //! `crate::ui::eyebrow`; the title passed to `super::OndinApp::panel` is the collapse key,
-    //! the id salt and the header source.
+    //! A frame's paint panel is headed *Fill*, like every other layer's, exactly once. The
+    //! strings are shouted because the title is uppercased in `crate::ui::eyebrow`.
     //!
     //! flip: `"Frame background"` put back → fails at "the old title is gone".
 
@@ -12756,7 +12553,6 @@ mod frame_fill_tests {
             1,
             "and it is Fill — once, not twice: {frame:?}"
         );
-        // Group Colors is a different question that sits below both paint panels.
         let paint: Vec<&String> = frame
             .iter()
             .filter(|t| *t == "FILL" || *t == "STROKE")
@@ -12775,8 +12571,7 @@ mod frame_fill_tests {
     }
 
     /// `galleys` with a rectangle inside the subject filled with `inside`, or no child when empty.
-    /// A child makes the *Group Colors* card appear, so the subject's own paint and its
-    /// contents' are two distinguishable colour sets.
+    /// A child makes the *Group Colors* card appear.
     fn galleys_holding(kind: NodeKind, fills: Vec<Fill>, inside: Vec<Fill>) -> Vec<String> {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -12851,10 +12646,8 @@ mod frame_fill_tests {
         found
     }
 
-    /// A frame's Fill card draws a row per fill, the same rows a rect's does. Each colour row
-    /// carries a hex field (`ui::hex_of`, six upper-case digits), so two distinct hexes are two
-    /// rows; asserted against a rect with the same fills (parity), with an empty-state check
-    /// that the frame-only word *Transparent* is gone.
+    /// A frame's Fill card draws a row per fill, the same rows a rect's does (counted by the
+    /// hex field each colour row carries), and the frame-only word *Transparent* is gone.
     #[test]
     fn a_frames_fill_card_draws_one_row_per_fill_just_as_a_rects_does() {
         let two = vec![
@@ -12881,7 +12674,6 @@ mod frame_fill_tests {
                 .filter(|t| ["010203", "070809"].contains(&t.as_str()))
                 .collect()
         };
-        // The control: two fills, two hex fields, top of the stack first.
         let on_a_rect = hexes(galleys(rect, two.clone()));
         assert_eq!(
             on_a_rect,
@@ -12894,15 +12686,13 @@ mod frame_fill_tests {
             on_a_rect,
             "and a frame draws exactly the same rows, with nothing over: {on_a_frame:?}"
         );
-        // No Group Colors card: the frame is empty, so there is nothing to census.
         assert!(
             !on_a_frame.iter().any(|t| t == "GROUP COLORS"),
             "an empty frame has no contents to list: {on_a_frame:?}"
         );
 
-        // Empty, a frame gets the shared treatment. An empty Fill card auto-collapses
-        // (`sync_paint_collapse`), so *No fill* is never laid out; the claim is that
-        // *Transparent* is gone and the card behaves like a rect's.
+        // An empty Fill card auto-collapses (`sync_paint_collapse`), so *No fill* is
+        // never laid out; the claim is that the card behaves like a rect's.
         let bare_frame = galleys(frame, Vec::new());
         let bare_rect = galleys(
             NodeKind::Rect {
@@ -12927,9 +12717,8 @@ mod frame_fill_tests {
     }
 
     /// Group Colors on a selected frame lists what is inside it, not the frame's own fills
-    /// (a frame filled `010203` holding a rect filled `070809`). The `1 match` assertion reads
-    /// the census's own `ColorUse::nodes.len()` back out of the row, so it fails if the listing
-    /// narrows without the scope.
+    /// (a frame filled `010203` holding a rect filled `070809`); the `1 match` count is read
+    /// back out of the row.
     ///
     /// flip: `group_color_scope` returning `ids.to_vec()` unconditionally → fails at the hex list.
     #[test]
@@ -12950,7 +12739,6 @@ mod frame_fill_tests {
             solid(0x07, 0x08, 0x09),
         );
 
-        // The control: the card is drawn at all.
         let head = texts
             .iter()
             .position(|t| t == "GROUP COLORS")
@@ -12965,13 +12753,11 @@ mod frame_fill_tests {
             [child_ink],
             "the child's colour, and only it: {texts:?}"
         );
-        // The frame's own is still on the page, in the Fill card above.
         assert!(
             texts[..head].iter().any(|t| t == frame_ink),
             "the frame's own fill is in the Fill card: {texts:?}"
         );
 
-        // The printed count is the cheapest witness that the scope narrowed.
         assert!(
             texts[head..].iter().any(|t| t == "1 match"),
             "one layer carries it — the rect, not the frame as well: {texts:?}"
@@ -12980,7 +12766,7 @@ mod frame_fill_tests {
 
     /// A group is unaffected: it has no paint, so excluding the selected container from its own
     /// census removes nothing. The flip does not bite (reverting `group_color_scope` leaves this
-    /// green); it guards a non-regression, and the test above proves the feature.
+    /// green); it guards a non-regression.
     #[test]
     fn group_colors_inside_a_group_are_unchanged_by_the_narrowing() {
         let child_ink = "070809";
@@ -13007,9 +12793,8 @@ mod frame_fill_tests {
     }
 
     /// The Group Colors edit is scoped like the census, so the match count is true of what pressing
-    /// it changes. The galley tests above see only the listing; a frame and the rect inside it
-    /// carrying the same colour tell the scopes apart. Asserted on the transaction: one `SetFills`
-    /// naming the child and none naming the frame.
+    /// it changes: a frame and the rect inside it carrying the same colour tell the scopes
+    /// apart. Asserted on the transaction, one `SetFills` naming the child and none the frame.
     ///
     /// flip: `self.session.selection.ids()` put back in `slot_transaction`'s `GroupColor` arm →
     /// fails at the length assertion (two `SetFills`); the other tests in the module stay green.
@@ -13054,7 +12839,6 @@ mod frame_fill_tests {
             },
         ]))
         .expect("the fixture");
-        // The same colour on both is the whole fixture.
         doc.apply(&Transaction(vec![
             Operation::SetFills {
                 id: frame,
@@ -13091,7 +12875,6 @@ mod frame_fill_tests {
             "and it is the child's fills: {:?}",
             tx.0
         );
-        // `Operation::overwrites` names the node an operation sets a field of.
         assert!(
             !tx.0.iter().any(|op| op.overwrites() == Some(frame)),
             "the frame's own ground is the Fill card's business, not this row's: {:?}",
@@ -13102,8 +12885,7 @@ mod frame_fill_tests {
     /// A click over a Group Colors row moves the picker onto the colour it just made, as a drag
     /// does: a `GroupColor` key is the colour, so `write_slot` must retarget it or `slot_brush`
     /// finds nothing and `picker_ui` shuts the picker. Asserts the slot moved and that
-    /// `slot_brush` resolves (the picker stays open); the fixture assertion above the write is
-    /// the control, and `SelectionAll` is not exercised here.
+    /// `slot_brush` resolves (the picker stays open); `SelectionAll` is not exercised here.
     ///
     /// flip: `retarget_after`'s `GroupColor` arm removed → fails at "the slot follows the colour it became".
     #[test]
@@ -13155,7 +12937,6 @@ mod frame_fill_tests {
         let key = red.to_rgba8().to_u8_array();
         let next = blue.to_rgba8().to_u8_array();
         let slot = PaintSlot::GroupColor(key);
-        // The fixture: the row exists, so there is something for the picker to be on.
         assert!(
             app.slot_brush(root, slot).is_some(),
             "the fixture: the Group Colors row is showing red"
@@ -13217,8 +12998,7 @@ mod spacing_readout_tests {
     }
 
     /// The spacing readout follows a live preview: a scrubbed field re-reads its base every frame,
-    /// so a base from the committed tree would reset the gap each frame. Sets the preview a
-    /// spacing transaction would set and asks what the field shows next frame.
+    /// so a base from the committed tree would reset the gap each frame.
     #[test]
     fn the_spacing_readout_follows_a_live_preview_rather_than_the_committed_tree() {
         let (mut s, ids) = three_selected();
@@ -13228,7 +13008,6 @@ mod spacing_readout_tests {
             "the fixture should start at two gaps of 20"
         );
 
-        // One frame of a scrub: 40 between them, held at the first.
         let tx = build::distribute_spacing(&s.doc, &s.resolved, &ids, Axis::X, None, 40.0);
         assert!(!tx.0.is_empty(), "the preview transaction moved nothing");
         s.set_preview(&tx);
@@ -13239,7 +13018,6 @@ mod spacing_readout_tests {
             "the field would read {shown:?} while previewing 40 — the base cannot \
              move, so the scrub resets to the committed gap every frame"
         );
-        // The document itself is untouched, so the above is about the preview.
         assert_eq!(
             build::gaps_along(
                 &ids.iter()
@@ -13353,14 +13131,12 @@ mod scale_row_tests {
 
     /// Typing `50` one digit at a time compounds (5% then 50% of that is 2.5%): the scale
     /// transaction is relative to the box it is about to write, so a per-keystroke commit is
-    /// wrong here. Pins the premise; the fix is `edit_valve`'s engagement transition, asserted by
-    /// `typing_a_value_leaves_exactly_one_step_in_the_history`.
+    /// wrong. The fix is asserted by `typing_a_value_leaves_exactly_one_step_in_the_history`.
     #[test]
     fn scaling_compounds_which_is_why_a_commit_per_keystroke_was_wrong() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
 
-        // One commit per digit.
         let (mut typed, ids) = app_with_rects(&ctx, 1, false);
         assert_eq!(
             authored(&typed, ids[0]).width,
@@ -13372,7 +13148,6 @@ mod scale_row_tests {
             typed.session.try_commit(tx).expect("the scale to take");
         }
 
-        // One commit, when the edit is over.
         let (mut once, ids2) = app_with_rects(&ctx, 1, false);
         let tx = once.scale_tx(50.0).expect("a box to scale");
         once.session.try_commit(tx).expect("the scale to take");
@@ -13438,10 +13213,9 @@ mod scale_row_tests {
             "the Scale row should cost one row and its gap: {with} armed against              {without} not"
         );
     }
-    /// A typed value lands when the field is clicked away from, not only on `Enter`. On click-away
-    /// the valve's falling edge is the frame focus is lost and egui's write-back can arrive on the
-    /// next one; the shared valve must not lose the number (a bare `egui::DragValue` does,
-    /// `value_field` does not).
+    /// A typed value lands when the field is clicked away from, not only on `Enter`: egui's
+    /// write-back can arrive a frame after focus is lost, and the shared valve must not lose the
+    /// number (a bare `egui::DragValue` does).
     #[test]
     fn a_typed_value_lands_when_the_field_is_clicked_away_from() {
         let ctx = egui::Context::default();
@@ -13504,9 +13278,7 @@ mod scale_row_tests {
     }
 
     /// Drive the Scale field the way a hand does: focus it, type `text`, then press `finish`.
-    /// Returns the rect's authored width afterwards. Real events through `RawInput`, since the
-    /// behaviours are about when a valve fires; `scale_row` returns its `Response` so the first
-    /// pass can find the widget's rect.
+    /// Returns the rect's authored width afterwards.
     fn typed_into_the_field(text: &str, finish: egui::Key) -> f64 {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -13538,7 +13310,6 @@ mod scale_row_tests {
             got
         };
 
-        // Two settling passes, then keep the field's rect.
         for _ in 0..2 {
             at = run(app, Vec::new(), None)
                 .expect("the row to be drawn under the Scale tool")
@@ -13571,7 +13342,6 @@ mod scale_row_tests {
             }],
             None,
         );
-        // A settling pass, so a commit on the key frame has landed.
         run(app, Vec::new(), None);
     }
 
@@ -13650,10 +13420,9 @@ mod scale_row_tests {
         app.session.selection.ids()[0]
     }
 
-    /// A cancelled frame spends the edit; it does not defer it. `Escape` reaches
-    /// `cancel_gesture`, which drops the typing preview, and `edit_valve` must update its
+    /// A cancelled frame spends the edit; it does not defer it. `edit_valve` must update its
     /// engagement latch before returning on `gesture_cancelled`, or the next frame commits the
-    /// edit the cancel threw away. Asserts the document stays untouched on the following frames.
+    /// edit the cancel threw away.
     ///
     /// flip: the latch moved back below the `gesture_cancelled` guard → the layer is scaled on the second pass after the cancel.
     #[test]
@@ -13727,9 +13496,8 @@ mod scale_row_tests {
     }
 
     /// Escape abandons the edit rather than committing it. This passes only because of
-    /// `edit_valve`'s own `Escape` guard: egui's `DragValue` updates while being edited
-    /// (default, `egui-0.35.0/src/widgets/drag_value.rs:81`), so the valve sees the typed number
-    /// on that frame. The guard looks redundant and is load-bearing.
+    /// `edit_valve`'s own `Escape` guard: egui's `DragValue` updates while being edited, so the
+    /// valve sees the typed number on that frame. The guard looks redundant and is load-bearing.
     #[test]
     fn escaping_the_field_abandons_the_edit() {
         assert_eq!(
@@ -13741,9 +13509,8 @@ mod scale_row_tests {
         );
     }
 
-    /// A named row keeps its widgets' ids when a row above it is not drawn. The wrong version is
-    /// inside the test: the same rows drawn through `OndinApp::transform_row` (stable) and the
-    /// plain `ui.horizontal` it replaced (not).
+    /// A named row (`OndinApp::transform_row`) keeps its widgets' ids when a row above it is not
+    /// drawn, unlike the plain `ui.horizontal` it replaced.
     #[test]
     fn a_conditional_row_does_not_renumber_the_rows_below_it() {
         fn second_row_id(ctx: &egui::Context, keyed: bool, first_row_drawn: bool) -> egui::Id {
@@ -13799,9 +13566,8 @@ mod scale_row_tests {
         );
     }
 
-    /// `0.5x` then `2x` puts a set back where it started (sizes, positions and stroke widths):
-    /// the two are inverses through a recomputed union, since the second call re-measures the
-    /// box the first left. It does not pin the anchor (any consistently held point round trips);
+    /// `0.5x` then `2x` puts a set back where it started (sizes, positions and stroke widths).
+    /// It does not pin the anchor (any consistently held point round trips);
     /// `a_selection_scales_about_its_union_and_the_gap_grows_too` does. Two rects, as one
     /// layer's union is its box.
     #[test]
@@ -13899,7 +13665,6 @@ mod scale_row_tests {
         let tx = app.scale_tx(200.0).expect("a box to scale");
         app.session.try_commit(tx).expect("the scale to take");
 
-        // The union's top-left is held; everything else moves away from it.
         assert_eq!(
             app.session
                 .resolved
@@ -14362,8 +14127,7 @@ mod align_card_tests {
         crate::theme::install(&ctx);
         let (mut app, _) = app_with_pair(&ctx, in_group);
         let mut height = 0.0;
-        // Two passes: the first is where egui hands out ids and stores sizes, so a
-        // single pass measures a card that has not settled.
+        // Two passes: ids and sizes settle on the first.
         for _ in 0..2 {
             let _ = ctx.run_ui(
                 egui::RawInput {
@@ -14403,7 +14167,6 @@ mod align_card_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let (mut app, right) = app_with_pair(&ctx, true);
-        // The group itself, plus both of its children.
         let group = app
             .session
             .doc
@@ -14524,8 +14287,7 @@ mod stroke_card_geometry_tests {
         crate::theme::install(&ctx);
         let (mut app, id) = app_with_strokes(&ctx, n);
         let mut height = 0.0;
-        // Two passes: the first is where egui hands out ids and stores sizes, so a
-        // single pass measures a card that has not settled.
+        // Two passes: ids and sizes settle on the first.
         for _ in 0..2 {
             let out = ctx.run_ui(
                 egui::RawInput {
@@ -14572,8 +14334,7 @@ mod stroke_card_geometry_tests {
     /// `last` flag correctly.
     ///
     /// A wrong flag adds one gap at every `n`, so differences between card heights agree in both
-    /// worlds and only the absolute height past `chrome_height` tells them apart. The unit height
-    /// is derived from the slope, so the test survives a redesign of the rows.
+    /// worlds and only the absolute height past `chrome_height` tells them apart.
     #[test]
     fn the_last_stroke_in_the_card_gets_no_trailing_gap() {
         let (chrome, h1, h2, h3) = (
@@ -14583,15 +14344,13 @@ mod stroke_card_geometry_tests {
             card_height(3),
         );
 
-        // The rhythm holds down the list, which is the part a difference *can* see.
         assert_eq!(
             h3 - h2,
             h2 - h1,
             "every stroke past the first has to cost the same: {h1}, {h2}, {h3}"
         );
 
-        // One unit is what a card grows by, less the gap that joins it to the one
-        // above — derived rather than measured, so the rows may change freely.
+        // One unit is what a card grows by, less the gap that joins it to the one above.
         let unit = (h2 - h1) - ui::CARD_ROW_GAP;
         assert_eq!(
             h1 - chrome,
@@ -14604,9 +14363,6 @@ mod stroke_card_geometry_tests {
     }
 
     /// A stroke unit's two rows end on the same x, a relation between rows rather than a number.
-    ///
-    /// Each row's rightmost control is compared: a row holds several controls side by side, so an
-    /// ungrouped census would report different edges.
     #[test]
     fn a_stroke_units_two_rows_end_on_the_same_x() {
         let ctx = egui::Context::default();
@@ -14625,10 +14381,9 @@ mod stroke_card_geometry_tests {
                     app.inspector_stroke(ui, scope, &shown, false);
                 },
             );
-            // Every stroked control box in the card — the `rhythm_tests` census,
-            // narrowed to one card — grouped into rows by centre y, keeping each
-            // row's **rightmost** edge. A row holds several controls side by side,
-            // so it is the last one in each that says where the column ends.
+            // Every stroked control box in the card, grouped into rows by centre y,
+            // keeping each row's **rightmost** edge: the last control says where the
+            // column ends.
             let mut boxes: Vec<(f32, f32)> = Vec::new();
             fn walk(s: &egui::Shape, v: &mut Vec<(f32, f32)>) {
                 match s {
@@ -14892,9 +14647,7 @@ mod effects_panel_tests {
             self.settle();
         }
 
-        /// The recessed grounds of the effect rows, top-first.
-        ///
-        /// Picked out by size: a row's field is the only thing 28 points tall and most of the width.
+        /// The recessed grounds of the effect rows, top-first (the only 28-point rects that wide).
         fn row_fields(&mut self) -> Vec<egui::Rect> {
             let out = self.settle();
             let mut rects: Vec<egui::Rect> = out
@@ -15013,7 +14766,6 @@ mod effects_panel_tests {
             "above neutral it fills right from the middle: {bright:?} against {middle}"
         );
 
-        // 0.6 below neutral against 0.7 above.
         let ratio = f64::from(dark.width()) / f64::from(bright.width());
         assert!(
             (ratio - 6.0 / 7.0).abs() < 0.05,
@@ -15030,7 +14782,6 @@ mod effects_panel_tests {
         let mut card = Card::new(vec![EffectKind::DropShadow(Default::default())]);
         card.app.effect_menu = Some((card.id, 0));
         let out = card.settle();
-        // The colour chip is the only 14-point square the popover draws.
         let chip = out
             .shapes
             .iter()
@@ -15045,7 +14796,6 @@ mod effects_panel_tests {
         assert_eq!(picker.node, card.id);
         assert_eq!(picker.slot, PaintSlot::Effect(0));
 
-        // The round trip: the picker reads the colour out of the slot and a write goes back in.
         let now = card.app.slot_brush(card.id, PaintSlot::Effect(0));
         assert_eq!(
             now,
@@ -15104,7 +14854,6 @@ mod effects_panel_tests {
                     kind.label()
                 );
             }
-            // Only the shadows have a colour, a hex row rather than a prefixed field.
             let hex = painted.iter().any(|t| t == "000000");
             assert_eq!(
                 hex,
@@ -15117,8 +14866,7 @@ mod effects_panel_tests {
 
     /// The kind combo retypes a row and carries across what the two kinds share. The rule lives
     /// in `ondin_core::EffectKind::retyped`; this pins the wiring and that the popover survives
-    /// the click (the `over_overlay` exemption in `dismissed_by_click`). The shadow is tuned so a
-    /// retype that resets to defaults fails.
+    /// the click (the `over_overlay` exemption in `dismissed_by_click`).
     #[test]
     fn the_kind_combo_retypes_a_row_and_keeps_the_shared_numbers() {
         let tuned = ondin_core::Shadow {
@@ -15130,7 +14878,6 @@ mod effects_panel_tests {
         let mut card = Card::new(vec![EffectKind::DropShadow(tuned.clone())]);
         card.app.effect_menu = Some((card.id, 0));
         let out = card.settle();
-        // The combo's closed state is one run: the kind's glyph and its name.
         let closed = format!("{}Drop shadow", icon::DROP_HALF_BOTTOM);
         card.click(word(&out, &closed).center());
         // The list is its own `Area`, drawn from the frame after the press.
@@ -15155,8 +14902,7 @@ mod effects_panel_tests {
 
     /// A scrub in the popover previews every frame and commits once: the offset accumulates
     /// (`inspector_effects` reads the stack through `display_node`, so the field is re-seeded from
-    /// the preview) and one drag is one undo step. The X field is found from the popover's own
-    /// frame, since `popover_anchor` decides where it lands.
+    /// the preview) and one drag is one undo step.
     #[test]
     fn scrubbing_a_shadows_offset_accumulates_and_lands_as_one_undo_step() {
         let mut card = Card::new(vec![EffectKind::DropShadow(Default::default())]);
@@ -15193,7 +14939,6 @@ mod effects_panel_tests {
         };
         let from = x_field.center();
         card.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
-        // Four equal steps, so moving by the last one differs clearly from moving by all four.
         for step in 1..=4 {
             let at = from + egui::vec2(20.0 * step as f32, 0.0);
             card.frame(vec![egui::Event::PointerMoved(at)]);
@@ -15301,7 +15046,6 @@ mod effects_panel_tests {
             "the second shadow is index 0 now, and the picker followed it"
         );
 
-        // The picker's own row going takes it with it.
         let mut card = Card::new(stack());
         let fields = card.row_fields();
         card.app.picker = Some(super::super::Picker::new(
@@ -15385,7 +15129,6 @@ mod effects_panel_tests {
             card.app.collapsed_panels.contains("Effects"),
             "an empty stack rests shut"
         );
-        // The `+` sits left of the `⋯` in the header's right-hand corner.
         let x = COLUMN - ui::CARD_MARGIN_X - ui::HEAD_MORE_W - ui::HEAD_ACTION_W * 0.5;
         card.click(egui::pos2(x, 19.0));
         let now = card.committed();
@@ -15406,7 +15149,6 @@ mod effects_panel_tests {
         };
         let mut card = Card::new(vec![EffectKind::DropShadow(tuned.clone())]);
         let fields = card.row_fields();
-        // The eye is 28 square, one item-spacing (6) to the right of the field.
         card.click(egui::pos2(
             fields[0].right() + 6.0 + 14.0,
             fields[0].center().y,

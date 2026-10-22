@@ -13414,8 +13414,7 @@ mod headless_app_tests {
         );
     }
 
-    /// Drawing the inspector must not edit the document: two frames (the first hands
-    /// out ids) over a layer with two strokes and a fill, so the paint lists are populated.
+    /// Drawing the inspector commits and previews nothing, over a layer with paint.
     #[test]
     fn laying_out_the_inspector_commits_nothing_and_previews_nothing() {
         let ctx = egui::Context::default();
@@ -13520,9 +13519,8 @@ mod headless_app_tests {
         );
     }
 
-    /// A character-scoped slot is diverted onto the type's own `TextStyle::color` by
-    /// each of `write_slot`, `preview_slot` and `valve_slot`; the last needs a real
-    /// drag, since a resting `Response` reaches `char_valve` and does nothing.
+    /// `write_slot`, `preview_slot` and `valve_slot` each divert a character-scoped slot
+    /// onto the type's own `TextStyle::color`; the last needs a real drag.
     #[test]
     fn a_character_scoped_slot_is_diverted_onto_the_types_own_colour() {
         use crate::panels::paint::PaintSlot;
@@ -13561,7 +13559,6 @@ mod headless_app_tests {
 
         let blue = ondin_core::peniko::Color::from_rgb8(0, 0, 255);
         let brush = ondin_core::Brush::Solid(blue);
-        // A diverted text colour lands on the node's own `TextStyle::color`, not a fill or span.
         let colour = |app: &OndinApp| match app.session.display_node(text).map(|n| n.kind()) {
             Some(ondin_core::NodeKind::Text { style, .. }) => style.color,
             _ => None,
@@ -13576,7 +13573,7 @@ mod headless_app_tests {
         );
         assert_eq!(fills(&app), Some(0), "and never onto the fill list");
 
-        // The second verb, on a fresh node so the commit above cannot stand in for it.
+        // A fresh node, so the commit above cannot stand in for the preview.
         let (mut app, _, _) = app_with_two_rects(&ctx);
         let parts = crate::fonts::FontService::default_text_parts();
         let second = ondin_core::IdSource::new(811).mint();
@@ -13619,7 +13616,6 @@ mod headless_app_tests {
              session, not the end of the drag (§9.3)"
         );
 
-        // The third verb, driven far enough that egui calls it a drag.
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
         let third = ondin_core::IdSource::new(812).mint();
         let parts = crate::fonts::FontService::default_text_parts();
@@ -13700,8 +13696,7 @@ mod headless_app_tests {
         );
     }
 
-    /// Turn the two-rect set 60° about its own centre and leave the orientation
-    /// stored on the selection, with both layers selected.
+    /// Both rects selected and turned 60° about their centre, the orientation kept on the selection.
     fn app_with_a_turned_pair(ctx: &egui::Context) -> OndinApp {
         let (mut app, a, b) = app_with_two_rects(ctx);
         app.session.selection.set(vec![a, b]);
@@ -13712,7 +13707,6 @@ mod headless_app_tests {
             .unwrap()
             .union(app.session.resolved.world_bounds(b).unwrap());
         let pivot = union.center();
-        // 60°, as a pointer position (`rotate_tx` takes one): (cos 60°, sin 60°) × 100.
         let at = pivot + Vec2::new(100.0 * 0.5, 100.0 * 3f64.sqrt() / 2.0);
         let (tx, turn) = app.rotate_tx(Target::Selection, pivot, 0.0, at, false);
         app.session.try_commit(tx).expect("the turn commits");
@@ -13746,7 +13740,6 @@ mod headless_app_tests {
             let (frame, _) = app.selection_frame_box().expect("an oriented box");
             let grabbed = drawn_corner(&app, Handle::TopLeft);
             let held = drawn_corner(&app, Handle::BottomRight);
-            // 40 units along the set's own −x axis: the same gesture in both passes.
             let pointer = grabbed + (frame * Point::new(-40.0, 0.0) - frame * Point::ZERO);
 
             let tx = app.resize_tx(
@@ -13777,9 +13770,8 @@ mod headless_app_tests {
         }
     }
 
-    /// A guide over a lone line's endpoint does not take the press the chrome
-    /// claims, and `chrome_claims` agrees with `begin_select_drag` along the line;
-    /// the empty-canvas point is the control.
+    /// A guide does not take a press over a lone line's endpoint, and `chrome_claims` agrees
+    /// with `begin_select_drag` along the line.
     /// flip: `chrome_claims` reduced to the `handles.armed` term → fails at the endpoint assertion.
     #[test]
     fn a_guide_does_not_steal_a_press_the_chrome_claims() {
@@ -13805,7 +13797,6 @@ mod headless_app_tests {
         app.canvas_px = (800, 600);
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
 
-        // A lone line wears no box handles at all.
         assert!(
             app.selection_handles(area, 1.0).is_none(),
             "the fixture has to be a lone line, or this is about something else"
@@ -13821,7 +13812,6 @@ mod headless_app_tests {
              pass everything above"
         );
 
-        // The two ladders agree at every point along the line, endpoints included.
         let _ = ctx.run_ui(Default::default(), |ui| {
             for k in 0..=40 {
                 let at = egui::pos2(start.x + k as f32 * 5.0, start.y);
@@ -13951,15 +13941,13 @@ mod headless_app_tests {
 
 #[cfg(test)]
 mod size_badge_lock_tests {
-    //! Which lock the size pill reports: `query::is_effectively_locked`, not
-    //! `Node::locked`. Measured as the pill's width (the padlock reserves
-    //! `LOCK_PT + LOCK_GAP`), with the fixtures read against each other rather than a literal.
+    //! Which lock the size pill reports: `query::is_effectively_locked`, not `Node::locked`,
+    //! measured as the pill's width (the padlock reserves `LOCK_PT + LOCK_GAP`).
 
     use super::*;
     use ondin_core::kurbo::Size;
 
-    /// A 120 × 80 rect inside a group, nothing locked yet; the extents differ so a
-    /// transposed label would show.
+    /// A 120 × 80 rect inside a group, nothing locked yet.
     fn app_with_a_grouped_rect(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(1);
@@ -14030,7 +14018,6 @@ mod size_badge_lock_tests {
     fn the_padlock_follows_the_effective_lock_not_the_nodes_own_flag() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        // One pass so the fonts exist.
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         let (mut app, group, rect) = app_with_a_grouped_rect(&ctx);
@@ -14066,8 +14053,7 @@ mod size_badge_lock_tests {
 
 #[cfg(test)]
 mod baseline_overlay_tests {
-    //! A selected text node's baselines, drawn: the layout's baselines reach the
-    //! painter, one per line, and the switch turns them off. Snapping is pinned in `snap.rs`.
+    //! A selected text node's baselines are drawn, one per line, and the switch turns them off.
 
     use super::*;
 
@@ -14167,8 +14153,7 @@ mod baseline_overlay_tests {
         );
     }
 
-    /// `baseline_lines` skips a rotated node (a slanted baseline has no axis-aligned
-    /// y), keeps a half-turn (still horizontal) and skips a hidden node.
+    /// `baseline_lines` skips a rotated node and a hidden one, and keeps a half-turn (still horizontal).
     #[test]
     fn a_rotated_or_hidden_text_node_offers_no_baselines_but_a_half_turn_does() {
         let ctx = egui::Context::default();
@@ -14208,7 +14193,6 @@ mod baseline_overlay_tests {
              — the predicate has become an is-it-unrotated test"
         );
 
-        // Back upright, then hidden.
         turn(&mut app, 0.0);
         app.session
             .try_commit(Transaction(vec![Operation::SetVisible {
@@ -14233,7 +14217,6 @@ mod baseline_overlay_tests {
         let (mut app, text) = app_with_text(&ctx, "a\nb");
         let view = app.session.camera.viewport(app.canvas_px).view;
 
-        // Wrap the text in a group, which is the whole fixture.
         let group = app.session.ids.mint();
         let root = app.session.doc.root();
         app.session
@@ -14268,15 +14251,13 @@ mod baseline_overlay_tests {
             "and a group carrying the text must not be offered its baselines — \
              the drag would be pulled back to where its own text used to be"
         );
-        // The two are built side by side and must agree, which is the whole point.
         assert!(
             app.snapping(&[group]).baselines.is_empty(),
             "`snapping` hands the gesture the same answer"
         );
     }
 
-    /// The switch empties the snap source, not only the overlay; the other tests
-    /// call `baseline_lines` directly and never reach `snapping`'s guard.
+    /// The switch empties the snap source, not only the overlay (`snapping`'s guard).
     #[test]
     fn the_switch_empties_the_snap_source_and_not_only_the_overlay() {
         let ctx = egui::Context::default();
@@ -14294,7 +14275,6 @@ mod baseline_overlay_tests {
             "the switch is off and baselines still reached the snap source, so a \
              drag goes on being pulled by lines that are no longer drawn"
         );
-        // One switch, one source: the shape targets are untouched.
         assert!(
             !app.snapping(&[]).targets.is_empty(),
             "turning baselines off took the shape targets with it"
@@ -14359,8 +14339,7 @@ mod baseline_overlay_tests {
 mod rail_drag_tests {
     use super::*;
 
-    /// One text node on a closed 200-unit ring, at the document's origin so that
-    /// world and local differ by nothing and the assertions read as geometry.
+    /// One text node on a closed 200-unit ring at the origin, so world and local coincide.
     fn app_on_a_ring(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(3);
@@ -14435,8 +14414,6 @@ mod rail_drag_tests {
             .rail_handle(area(), 1.0)
             .expect("a railed node has one")
             .1;
-        // The handle sits on the first glyph's own origin, so the tolerance is tight:
-        // `bend` steps back half an advance, landing the origin on the rail.
         let layout = app.session.resolved.text_layout(id).expect("a layout");
         let first = layout.runs[0].glyphs[0];
         let glyph = app.to_screen(
@@ -14449,7 +14426,6 @@ mod rail_drag_tests {
             "the handle is on the type it moves: {at_zero:?} against {glyph:?}"
         );
 
-        // Move the type a quarter of the way round; the handle goes with it.
         app.session.commit(Transaction(vec![Operation::SetGeometry {
             id,
             geometry: ondin_core::GeometryPatch::TextPathOffset(0.25),
@@ -14462,15 +14438,13 @@ mod rail_drag_tests {
         );
     }
 
-    /// A drag writes the offset that puts the start under the pointer; a press
-    /// without moving, and a drag back to the rail's origin from a committed 0.25,
-    /// write back the offset they began with (the no-op cases catch drift).
+    /// A drag writes the offset that puts the start under the pointer; a press without
+    /// moving, and a drag back to the origin from a committed 0.25, write back what they began with.
     #[test]
     fn a_drag_puts_the_start_under_the_pointer_and_returns_it() {
         let ctx = context();
         let (mut app, id) = app_on_a_ring(&ctx);
 
-        // Pressing on the handle and not moving writes the offset back unchanged.
         let handle = app.rail_handle(area(), 1.0).expect("a handle").1;
         let still = app.to_world(handle, area(), 1.0);
         assert!(
@@ -14479,16 +14453,13 @@ mod rail_drag_tests {
             dragged_to(&app, id, still)
         );
 
-        // The ring spans (0,0)–(200,200), so its bottom is (100, 200). kurbo starts
-        // an ellipse at its rightmost point and runs clockwise, so the bottom is a
-        // quarter of the way round.
+        // kurbo starts an ellipse at its rightmost point and runs clockwise: the bottom is a quarter round.
         let quarter = dragged_to(&app, id, Point::new(100.0, 200.0));
         assert!(
             (quarter - 0.25).abs() < 0.02,
             "dragging to the ring's bottom puts the start a quarter round: {quarter}"
         );
 
-        // Now a node that really is at 0.25, dragged back to the rail's own start.
         app.session.commit(Transaction(vec![Operation::SetGeometry {
             id,
             geometry: ondin_core::GeometryPatch::TextPathOffset(0.25),
@@ -14500,9 +14471,8 @@ mod rail_drag_tests {
         );
     }
 
-    /// A drag on a centred railed node keeps its offset inside one lap, since the
-    /// SVG writer emits it as `startOffset`. Centred alignment is the fixture: with
-    /// `Start` the sum is in `0..1` by construction and the normalisation is unreachable.
+    /// A drag on a centred railed node keeps its offset inside one lap (the SVG writer
+    /// emits `startOffset`); centred is the fixture, since with `Start` the normalisation is unreachable.
     #[test]
     fn a_drag_on_a_centred_node_stays_inside_one_lap() {
         let ctx = context();
@@ -14517,8 +14487,6 @@ mod rail_drag_tests {
                 spans: None,
             }]));
 
-        // The rail's own first point, which is behind where a centred node's type
-        // begins — so the raw sum goes under zero.
         let at_seam = dragged_to(&app, id, Point::new(200.0, 100.0));
         assert!(
             (0.0..1.0).contains(&at_seam),
@@ -14602,8 +14570,8 @@ mod rail_drag_tests {
 
 #[cfg(test)]
 mod paste_placement_tests {
-    //! Where a paste lands and whose child it is. `paste_placement` is a `&self`
-    //! decision function because the paste commands read the clipboard and cannot be driven headlessly.
+    //! Where a paste lands and whose child it is, via `paste_placement`, a `&self` function
+    //! because the paste commands read the clipboard and cannot be driven headlessly.
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -14644,17 +14612,14 @@ mod paste_placement_tests {
         (app, frame, inside)
     }
 
-    /// A pointer beats the selection; without one the selected frame decides, and a
-    /// shape selected inside a frame hands back that frame (`paste_frame` walks up
-    /// to the enclosing artboard).
+    /// A pointer beats the selection; without one the selected frame decides, and a shape
+    /// inside a frame hands back that frame.
     #[test]
     fn a_paste_takes_the_pointer_then_the_selected_frames_centre_then_the_view() {
         let ctx = egui::Context::default();
         let (mut app, frame, inside) = app_with_a_frame(&ctx);
-        // The frame spans world (100,100)–(300,250), so its centre is (200, 175).
         let frame_centre = Point::new(200.0, 175.0);
 
-        // 1. A pointer wins outright, whatever is selected.
         app.session.selection.set(vec![frame]);
         let (centre, _, _) = app.paste_placement(Some(Point::new(7.0, 9.0)));
         assert_eq!(
@@ -14663,12 +14628,10 @@ mod paste_placement_tests {
             "a paste aimed at a place goes to that place"
         );
 
-        // 2. No pointer, the frame selected: its centre, and it is the parent.
         let (centre, parent, _) = app.paste_placement(None);
         assert_eq!(centre, frame_centre, "the selected frame's centre");
         assert_eq!(parent, frame, "and the paste is its child");
 
-        // 3. A shape inside the frame, selected: the same answer as the frame.
         app.session.selection.set(vec![inside]);
         let (centre, parent, _) = app.paste_placement(None);
         assert_eq!(
@@ -14678,7 +14641,6 @@ mod paste_placement_tests {
         );
         assert_eq!(parent, frame, "and the frame is still the parent");
 
-        // 4. Nothing selected: the middle of the view, and whatever is under it.
         app.session.selection.clear();
         let (centre, _, _) = app.paste_placement(None);
         assert_eq!(
@@ -14691,9 +14653,8 @@ mod paste_placement_tests {
 
 #[cfg(test)]
 mod frame_menu_door_tests {
-    //! An occupied frame's name tag is a pick, and the context-menu door asks the
-    //! same `pick_at_pointer` as the left-click. Asserted on that shared chain,
-    //! since `canvas_context_menu` runs behind `resp.secondary_clicked()`.
+    //! An occupied frame's name tag is a pick, and the context-menu door asks the same
+    //! `pick_at_pointer` as the left-click; asserted on that chain, not `canvas_context_menu`.
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -14735,9 +14696,8 @@ mod frame_menu_door_tests {
         (app, frame)
     }
 
-    /// A component set's tag is a tab on the frame's top edge; it adds the variant
-    /// count while selected and names a clash, each clashing variant's tag leading
-    /// with the warning glyph.
+    /// A component set's tag is a tab on the frame's top edge; it adds the variant count
+    /// while selected and names a clash, each clashing variant leading with the warning glyph.
     #[test]
     fn a_sets_tag_is_a_tab_with_its_count_and_its_clash() {
         use ondin_core::variant::{VariantProp, VariantSet};
@@ -14808,7 +14768,6 @@ mod frame_menu_door_tests {
         app.session.selection.set_one(set);
         assert!(tag(&app, set).1.ends_with("2 variants"));
 
-        // A clash: both Small.
         assert!(app.session.commit(Transaction(vec![Operation::SetVariant {
             id: b,
             values: vec!["Small".into()],
@@ -14952,9 +14911,9 @@ mod frame_menu_door_tests {
         assert_eq!(variants_in(&app, set), 2, "the click on the + adds one");
     }
 
-    /// A press-drag on a selected set's `+` starts nothing and the cursor over it is
-    /// the arrow; the disc sits on the bottom-middle resize handle, and only
-    /// `begin_select_drag`'s early return keeps a sliding press from arming it.
+    /// A press-drag on a selected set's `+` starts nothing and the cursor over it is the
+    /// arrow; the disc sits on the bottom-middle resize handle, which only
+    /// `begin_select_drag`'s early return keeps from arming.
     /// flip: `begin_select_drag`'s guard made `if false && …` → fails at "the set keeps its box";
     /// `select_cursor`'s arm made `&& false &&` → fails at "the arrow over the disc".
     #[test]
@@ -15020,11 +14979,9 @@ mod frame_menu_door_tests {
         assert!(matches!(app.drag, Drag::None), "nothing is in flight");
     }
 
-    /// The components chrome, read off the frame's shapes: a main's tag is a
-    /// `COMPONENT` chip with a filled hexagon in `COMPONENT_INK` and an instance's
-    /// has neither (words in `COMPONENT`); a selected main's instance gets four
-    /// `text::FAINT` hairlines; an entered instance's edge is dashed in `text::DIM`
-    /// with an *Esc to exit* tag; a selected set's `+` is a `CARD` disc with two `STRONG` arms.
+    /// The components chrome, read off the frame's shapes: a main's hexagon chip, an
+    /// instance's hairlines when its main is selected, an entered instance's dashed edge
+    /// and *Esc to exit* tag, a selected set's `+` disc.
     /// flip: drop `paint_hexagon_filled` → fails at "one filled hexagon"; draw the entered
     /// edge as four solid segments → fails at "dashed" (run alone, since the first flip hides it).
     #[test]
@@ -15092,7 +15049,6 @@ mod frame_menu_door_tests {
             "the chip's ink and the instance's violet tag (§15 D1001)"
         );
 
-        // A selected main's instance hairlines.
         app.session.selection.set_one(main);
         let chrome = shapes(&app, false);
         assert_eq!(
@@ -15101,7 +15057,6 @@ mod frame_menu_door_tests {
             "four hairlines round the one instance"
         );
 
-        // An entered instance's dashed edge and its tag.
         app.session.selection.clear();
         app.entered_group = Some(inst);
         let chrome = shapes(&app, false);
@@ -15117,7 +15072,6 @@ mod frame_menu_door_tests {
         );
         app.entered_group = None;
 
-        // A selected set's disc.
         let (mut app, set) = app_with_a_set(&ctx);
         app.session.selection.set_one(set);
         let (_, at) = app.set_plus(rect, 1.0).expect("the +");
@@ -15134,8 +15088,7 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// `main` made a main by *Create component*, and an instance of it placed 300
-    /// to its right through the commit — the instance's id.
+    /// `main` made a main by *Create component*, plus an instance of it 300 to its right; returns the instance.
     fn main_with_an_instance(app: &mut OndinApp, main: NodeId) -> NodeId {
         app.session.selection.set_one(main);
         app.create_component();
@@ -15222,9 +15175,8 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// A main's tag is a hexagon chip counting its instances while selected; an
-    /// instance's tag trails its main's name, or is a path when entered; neither
-    /// turns `color::SELECT` when selected.
+    /// A main's tag is a hexagon chip counting its instances while selected; an instance's
+    /// trails its main's name, or is a path when entered; neither turns `color::SELECT`.
     /// flip: `draw_frame_labels` without the two component arms → fails at the hue assertion.
     #[test]
     fn a_mains_tag_is_a_chip_and_an_instances_tag_names_its_main() {
@@ -15277,7 +15229,6 @@ mod frame_menu_door_tests {
         );
         app.entered_group = None;
 
-        // The hue: every tag's ink with the main and the instance selected.
         app.session.selection.set(vec![main, inst]);
         let mut inks = Vec::new();
         let out = ctx.run_ui(
@@ -15325,7 +15276,6 @@ mod frame_menu_door_tests {
             frame(inner, main, 1, "Inner"),
             frame(icon, root, 1, "Icon"),
         ])));
-        // `Icon` made a main, and an instance of it placed inside `main`.
         app.session.selection.set_one(icon);
         app.create_component();
         let doc = &app.session.doc;
@@ -15342,7 +15292,6 @@ mod frame_menu_door_tests {
         assert!(app.session.commit(tx));
         let nested = made[0];
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-        // Each layer is asked selected, since an unselected instance has no tag anyway.
         let tagged = |app: &mut OndinApp, id| {
             app.session.selection.set_one(id);
             let mut out = false;
@@ -15436,9 +15385,8 @@ mod frame_menu_door_tests {
         assert!(tagged(&app, inst), "entered, its path");
     }
 
-    /// A selected main's outline, handles and size badge take `COMPONENT`; a layer
-    /// inside keeps `SELECT`; a mixed selection keeps each outline's hue while the
-    /// handles and badge go back to `SELECT`. Read off whole canvas frames.
+    /// A selected main's outline, handles and size badge take `COMPONENT`; a layer inside
+    /// keeps `SELECT`; a mixed selection keeps each outline's hue, handles and badge `SELECT`.
     /// flip: `chrome_hue` always answering `SELECT` → fails at "the main's outline".
     #[test]
     fn a_components_selection_chrome_takes_the_component_hue() {
@@ -15548,7 +15496,6 @@ mod frame_menu_door_tests {
                 .expect("bounds")
                 .center()
         };
-        // The 40² rect sits in the top-left corner; the middle is background.
         assert_eq!(app.pick_leaf(middle(main)), None, "a main is a frame (D22)");
         assert_eq!(app.pick_leaf(middle(inst)), Some(inst));
         let child = app.session.doc.get(inst).unwrap().children()[0];
@@ -15609,11 +15556,9 @@ mod frame_menu_door_tests {
              the menu to `Target::Canvas`"
         );
 
-        // The control: emptied, `pick_leaf` answers the frame directly.
         let inside = app.session.doc.get(frame).expect("frame").children()[0];
         app.session
             .commit(Transaction(vec![Operation::DeleteNode { id: inside }]));
-        // World coordinates: the frame is 200×150 at (100, 100).
         assert_eq!(
             app.pick_leaf(Point::new(200.0, 175.0)),
             Some(frame),
@@ -15622,9 +15567,8 @@ mod frame_menu_door_tests {
         );
     }
 
-    /// Where two name tags coincide, the tag painted last (the inner frame's) is the
-    /// one a click picks; the paint order and the pick are asserted together so
-    /// neither can be fixed by flipping the other.
+    /// Where two name tags coincide, the tag painted last (the inner frame's) is the one a
+    /// click picks; paint order and pick are asserted together so neither can be flipped alone.
     /// flip: remove `.rev()` from `frame_label_at` → fails at the pick assertion (`Page` for `Header`).
     #[test]
     fn the_name_tag_you_can_read_is_the_one_a_click_picks() {
@@ -15648,7 +15592,6 @@ mod frame_menu_door_tests {
                 transform: None,
                 name: Some("Page".into()),
             },
-            // A full-bleed header flush in the corner, so the two tags share a `min`.
             Operation::CreateNode {
                 id: header,
                 parent: page,
@@ -15689,16 +15632,13 @@ mod frame_menu_door_tests {
                     .frame_label(ui, header, rect, ppp)
                     .expect("the header draws a name tag")
                     .0;
-                // The overlap's centre: both tags start at the same `min`, and the
-                // shorter word's box is the smaller of the two.
                 let over = outer.intersect(inner);
                 let at = over.center();
                 answers = Some((
                     over,
                     at,
                     app.frame_label_at(ui, at, rect, ppp),
-                    // The control's point is inside both bodies, not at the tag: a tag is
-                    // drawn outside its frame, so `target_artboard` answers `None` there.
+                    // Inside both bodies: a tag is drawn outside its frame, so `target_artboard` answers `None` at it.
                     app.target_artboard(Point::new(200.0, 40.0))
                         .map(|(id, _)| id),
                 ));
@@ -15713,7 +15653,6 @@ mod frame_menu_door_tests {
              no ambiguity to resolve; the overlap was {over:?}"
         );
 
-        // What the user can read: the last text painted at that position.
         let on_screen = out
             .shapes
             .iter()
@@ -15753,9 +15692,8 @@ mod frame_menu_door_tests {
 
 #[cfg(test)]
 mod locked_picture_tests {
-    //! A locked picture refuses crop (`edited_image`) and replacement
-    //! (`image_drop_target`), guarded separately: the layers panel can lock a row
-    //! or select another locked picture while image editing is armed, bypassing `begin_image_edit`.
+    //! A locked picture refuses crop (`edited_image`) and replacement (`image_drop_target`),
+    //! guarded separately: the layers panel can bypass `begin_image_edit`.
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -15806,7 +15744,6 @@ mod locked_picture_tests {
         let (mut app, rect) = app_with_a_picture(&ctx);
         app.tool = Tool::ImageEdit;
 
-        // The control first: unlocked, both doors are open.
         assert_eq!(
             app.edited_image(),
             Some((rect, 0)),
@@ -15823,7 +15760,6 @@ mod locked_picture_tests {
             "control: the paste arm too, which is addressed by the selection alone"
         );
 
-        // Lock it the chord's way, which leaves the selection in place.
         app.session.commit(Transaction(vec![Operation::SetLocked {
             id: rect,
             locked: true,
@@ -15906,7 +15842,6 @@ mod locked_path_verb_tests {
     fn a_locked_path_is_not_reversed_by_the_selection_door() {
         let ctx = egui::Context::default();
 
-        // The control first: unlocked, the verb does something.
         let (mut app, id) = app_with_a_path(&ctx);
         app.tool = Tool::Select;
         let before = stored(&app, id);
@@ -15942,9 +15877,7 @@ mod locked_path_verb_tests {
 #[cfg(test)]
 mod crop_click_tests {
     //! A click in image-edit mode commits nothing: `crop_tx` writes `ImageFit::Crop`
-    //! unconditionally, so a zero-delta pan would silently change the picture's mode.
-    //! Driven through the real `image_edit_input` with pointer events, since which
-    //! frame commits is invisible from `crop_tx`.
+    //! unconditionally, so a zero-delta pan would change the picture's mode.
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -15965,7 +15898,6 @@ mod crop_click_tests {
                 entry: ImageEntry {
                     source: ImageSource::Embedded(vec![0u8; 8].into()),
                     format: ImageFormat::Png,
-                    // Wider than the frame, so a pan has somewhere to go.
                     width: 200,
                     height: 100,
                 },
@@ -15993,8 +15925,6 @@ mod crop_click_tests {
         app.session.adopt_document(doc, None);
         app.session.selection.set_one(rect);
         app.tool = Tool::ImageEdit;
-        // The camera must be aimed: the default puts the frame off the 400×300 canvas,
-        // so no press would arm `Drag::CropPan`.
         app.canvas_px = (400, 300);
         app.session.camera.zoom = 1.0;
         app.session.camera.center = ondin_core::kurbo::Point::new(50.0, 50.0);
@@ -16041,8 +15971,8 @@ mod crop_click_tests {
         }
     }
 
-    /// A press and release with no travel commits nothing and changes no mode; the
-    /// mode is asserted first because the transaction is not a no-op (it writes `Crop`).
+    /// A press and release with no travel commits nothing and changes no mode (asserted
+    /// first, since the transaction itself is not a no-op: it writes `Crop`).
     /// flip: commit unconditionally → fails at the mode assertion (`Crop` for `Fill`).
     #[test]
     fn a_click_in_image_edit_mode_commits_nothing() {
@@ -16071,8 +16001,7 @@ mod crop_click_tests {
         );
     }
 
-    /// The control for the test above: a drag that travels still commits and flips
-    /// the mode, which is what moving a picture inside its frame means.
+    /// Control for the test above: a drag that travels still commits and flips the mode.
     #[test]
     fn a_travelled_crop_pan_still_commits() {
         let ctx = egui::Context::default();
@@ -16162,7 +16091,6 @@ mod empty_text_session_tests {
         let ctx = egui::Context::default();
         let (mut app, id) = app_with_a_text(&ctx);
 
-        // Session 1: open, select all, delete, close.
         app.begin_edit_text(Some(id), None);
         {
             let s = app.text.as_mut().expect("a session");
@@ -16178,7 +16106,6 @@ mod empty_text_session_tests {
         let depth = app.session.history.undo_depth();
         assert!(depth >= 1, "session 1: and it is an edit, not a no-op");
 
-        // Session 2: open and close. Nothing typed.
         app.begin_edit_text(Some(id), None);
         app.finish_text_edit();
         assert_eq!(
@@ -16192,7 +16119,6 @@ mod empty_text_session_tests {
             "and no undo step is spent"
         );
 
-        // Control: a node this session created and left empty is still removed.
         let mut app = OndinApp::headless(&ctx);
         let mut ids = ondin_core::IdSource::new(0x7F);
         let root = ids.mint();
@@ -16220,9 +16146,8 @@ mod boolean_outline_tests {
 
     use super::*;
 
-    /// A boolean of two 100×100 rects, the second offset by `offset`. `Subtract` at
-    /// `(50, 50)` gives an L, whose silhouette bends inside its bounding box where
-    /// a traced selection quad has no point; the operands span `(0,0)–(150,150)`.
+    /// A boolean of two 100×100 rects, the second offset by `offset`. `Subtract` at `(50, 50)`
+    /// gives an L, whose silhouette bends inside its bounding box.
     fn app_with_boolean(
         ctx: &egui::Context,
         op: ondin_core::BoolOp,
@@ -16295,7 +16220,6 @@ mod boolean_outline_tests {
                 );
             },
         );
-        // The `Path`'s own points, not `visual_bounding_rect`, which inflates by the stroke.
         let mut bbox = egui::Rect::NOTHING;
         let mut n = 0;
         let mut pts = Vec::new();
@@ -16312,10 +16236,9 @@ mod boolean_outline_tests {
         (bbox, n, pts)
     }
 
-    /// A boolean is traced by its silhouette, not its operands or its box. The box
-    /// catches operand outlines, the shape count catches operands left underneath,
-    /// and the bend catches a `match` arm tracing the selection quad; the plain
-    /// rect operand is the control. The expected box is read off `Resolved::boolean_path`.
+    /// A boolean is traced by its silhouette, not its operands or its box: the box catches
+    /// operand outlines, the shape count operands left underneath, the bend a `match` arm
+    /// tracing the selection quad.
     #[test]
     fn a_booleans_outline_is_its_own_silhouette_and_not_its_operands() {
         let ctx = egui::Context::default();
@@ -16331,9 +16254,7 @@ mod boolean_outline_tests {
             .expect("the fixture's boolean resolves to a shape")
             .clone();
         let want = ondin_core::kurbo::Shape::bounding_box(&path);
-        // The fixture is the geometry the assertions are about, or the numbers
-        // below are about some other drawing: an L whose box is the first rect's
-        // and whose corner is bitten out at (50, 50).
+        // The fixture: an L whose box is the first rect's, bitten out at (50, 50).
         assert!(
             (want.x0).abs() < 1e-6
                 && (want.y0).abs() < 1e-6
@@ -16361,7 +16282,6 @@ mod boolean_outline_tests {
              {bend:?}, and traced {pts:?}"
         );
 
-        // Control: a plain rect operand traces its own box, before and after.
         let rb = ondin_core::local_box(&app.session.doc, &app.session.resolved, a1).expect("a box");
         let (rlo, rhi) = (corner(rb.x0, rb.y0), corner(rb.x1, rb.y1));
         let (rgot, rshapes, _) = traced(&app, &ctx, a1);
@@ -16378,9 +16298,7 @@ mod boolean_outline_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
-        // Two disjoint rects, intersected: nothing left.
         let (app, b, _) = app_with_boolean(&ctx, ondin_core::BoolOp::Intersect, (500.0, 0.0));
-        // The fixture is in the state the assertion is about.
         assert!(
             app.session
                 .resolved
@@ -16405,8 +16323,7 @@ mod outline_reject_tests {
 
     use super::*;
 
-    /// A group of `n` 100×100 rects in a row, the group translated by `at`;
-    /// `hidden` lists the children switched off, by index.
+    /// A group of `n` 100×100 rects in a row, translated by `at`; `hidden` indexes children switched off.
     fn app_with_row(
         ctx: &egui::Context,
         n: usize,
@@ -16527,7 +16444,6 @@ mod outline_reject_tests {
             "and the ring stops at the visible one: {bbox:?}"
         );
 
-        // A hidden group is the same rule one level up.
         let (mut app, group) = app_with_row(&ctx, 2, (0.0, 0.0), &[]);
         app.session
             .doc
@@ -16542,8 +16458,8 @@ mod outline_reject_tests {
 
 #[cfg(test)]
 mod rotated_click_away_tests {
-    //! A click that ends a text session on a rotated node: `text_mode_input` must test the
-    //! node's own local rectangle, as the I-beam does, not its upright world bounds.
+    //! A click ending a text session on a rotated node: `text_mode_input` tests the node's
+    //! own local rectangle, as the I-beam does, not its upright world bounds.
 
     use super::*;
     use crate::app::OndinApp;
@@ -16592,7 +16508,7 @@ mod rotated_click_away_tests {
     const PPP: f32 = 1.0;
 
     /// The `preview_world_bounds` box and `over_edited_text` disagree under rotation and
-    /// agree upright; the upright control keeps a predicate that is never true from passing.
+    /// agree upright (the control against a predicate that is never true).
     #[test]
     fn the_world_box_and_the_local_box_disagree_only_when_the_node_is_rotated() {
         let ctx = egui::Context::default();
@@ -16657,8 +16573,6 @@ mod rotated_click_away_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         let (mut app, id) = app_with_rotated_text(&ctx, 45.0);
-        // One settling frame, then read the canvas rect back: `canvas_ui` lays out from
-        // `available_size()`, not `RECT`, and a point off the response delivers no click.
         frame(&ctx, &mut app, Vec::new());
         let rect = app.canvas_rect;
         assert!(rect.width() > 1.0, "the fixture: the canvas was laid out");
@@ -16667,10 +16581,8 @@ mod rotated_click_away_tests {
             .session
             .preview_world_bounds(id)
             .expect("the node has a world box");
-        // Centre the camera on the node, or the screen points fall off the canvas.
         app.session.camera.center = aabb.center();
 
-        // Inside the upright box, outside the rotated rectangle: the AABB's top-left, nudged in.
         let corner = Point::new(
             aabb.x0 + aabb.width() * 0.02,
             aabb.y0 + aabb.height() * 0.02,
@@ -16687,7 +16599,6 @@ mod rotated_click_away_tests {
             "the fixture: and outside the letters, so the pointer is not an I-beam"
         );
 
-        // Control: a click on the node's centre keeps the session.
         let middle = app.to_screen(aabb.center(), rect, PPP);
         click(&ctx, &mut app, middle);
         assert!(
@@ -16739,8 +16650,7 @@ mod tool_switch_drops_the_drag_tests {
     use crate::app::OndinApp;
     use crate::canvas::headless_app_tests::app_with_two_rects;
 
-    /// A live crop-resize with a gesture preview standing behind it, built by hand so
-    /// the crop mechanics stay out of the tool-switch test.
+    /// A live crop-resize with a gesture preview behind it, built by hand to keep crop mechanics out.
     fn mid_crop_drag(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let (mut app, a, _b) = app_with_two_rects(ctx);
         let frame = KRect::new(0.0, 0.0, 100.0, 100.0);
@@ -16753,7 +16663,6 @@ mod tool_switch_drops_the_drag_tests {
             limit: frame,
             grab_world: Point::new(100.0, 100.0),
         };
-        // A standing gesture preview, the way the valve installs one.
         app.session
             .set_preview(&Transaction(vec![Operation::SetTransform {
                 id: a,
@@ -16857,7 +16766,7 @@ mod autopan_ownership_tests {
 
             let middle = egui::pos2(400.0, 300.0);
             let over = egui::pos2(460.0, 300.0);
-            // Warm-up frame: egui assigns a press to a widget only after one.
+            // egui assigns a press to a widget only after a warm-up frame.
             frame(&ctx, &mut app, vec![egui::Event::PointerMoved(middle)]);
             frame(
                 &ctx,
@@ -16865,7 +16774,6 @@ mod autopan_ownership_tests {
                 vec![egui::Event::PointerMoved(middle), button(middle, true)],
             );
 
-            // Seeded after the press: a previous gesture's scrolling.
             app.autopan_total = LEFTOVER;
             frame(&ctx, &mut app, vec![egui::Event::PointerMoved(over)]);
             assert_eq!(
@@ -16874,7 +16782,6 @@ mod autopan_ownership_tests {
                 "{tool:?} clears on the press"
             );
 
-            // And again on the release, so a later cancel has nothing to unwind.
             app.autopan_total = LEFTOVER;
             frame(&ctx, &mut app, vec![button(over, false)]);
             assert_eq!(
@@ -16890,8 +16797,8 @@ mod autopan_ownership_tests {
 
 #[cfg(test)]
 mod session_rebase_tests {
-    //! One editing session is one undo step, including when something outside the
-    //! session writes to the node (§9.3): `TextSession::original` is re-based with the editor.
+    //! One editing session is one undo step, even when something outside it writes to the
+    //! node: `TextSession::original` is re-based with the editor.
 
     use super::*;
     use crate::app::OndinApp;
@@ -16930,9 +16837,8 @@ mod session_rebase_tests {
         (app, id)
     }
 
-    /// The Type panel's character write, as `char_attrs_tx` builds it: the style
-    /// re-stated and the character list carried, committed and then handed to
-    /// `text_session_restyled_after`.
+    /// The Type panel's character write as `char_attrs_tx` builds it, committed and handed
+    /// to `text_session_restyled_after`.
     fn panel_sets_a_character_size(app: &mut OndinApp, id: NodeId, range: std::ops::Range<usize>) {
         let style = match app.session.doc.get(id).map(|n| n.kind()) {
             Some(NodeKind::Text { style, .. }) => (**style).clone(),
@@ -16983,7 +16889,6 @@ mod session_rebase_tests {
             depth0 + 1,
             "the fixture: the panel's write must be an undo step of its own"
         );
-        // Asked of the document, not `original`: a fixture check must hold without the fix.
         let stored_spans = match app.session.doc.get(id).map(|n| n.kind()) {
             Some(NodeKind::Text { spans, .. }) => spans.clone(),
             _ => panic!("the fixture is a text node"),
@@ -16997,7 +16902,6 @@ mod session_rebase_tests {
         let changed = app.text.as_ref().unwrap().changed();
         app.finish_text_edit();
 
-        // The toast the user sees first, the mechanism after.
         assert_ne!(
             app.session.status().text,
             "Text updated",
@@ -17018,7 +16922,6 @@ mod session_rebase_tests {
     fn typed_text_survives_an_outside_restyle() {
         let ctx = egui::Context::default();
         let (mut app, id) = app_with_text(&ctx);
-        // No world point: `begin_edit_text` selects all, so the insert replaces the buffer.
         app.begin_edit_text(Some(id), None);
         app.text
             .as_mut()
@@ -17035,7 +16938,6 @@ mod session_rebase_tests {
         let changed = app.text.as_ref().unwrap().changed();
         app.finish_text_edit();
 
-        // Content first, mechanism after.
         let content = match app.session.doc.get(id).map(|n| n.kind()) {
             Some(NodeKind::Text { content, .. }) => content.clone(),
             _ => panic!("the text node survived"),
@@ -17050,8 +16952,8 @@ mod session_rebase_tests {
 
 #[cfg(test)]
 mod session_preview_shape_tests {
-    //! A keystroke shapes the edited node once: the session preview reuses the editor's
-    //! layout. Counted with `ondin_core::text::shapes()`, not timed.
+    //! A keystroke shapes the edited node once; the preview reuses the editor's layout.
+    //! Counted with `ondin_core::text::shapes()`.
 
     use super::*;
     use crate::app::OndinApp;
@@ -17088,14 +16990,13 @@ mod session_preview_shape_tests {
         app.session.adopt_document(doc, None);
         app.session.selection.set_one(id);
         app.begin_edit_text(Some(id), None);
-        // Collapse the select-all so the insert below is an insert, not a replace.
         let editor = &mut app.text.as_mut().expect("a live session").editor;
         editor.move_line_end(false);
         (app, id)
     }
 
-    /// Typing one character shapes once, and the preview build shapes nothing; the editor's
-    /// count and the preview's existence are fixture checks against a vacuous zero.
+    /// Typing one character shapes once and the preview shapes nothing; the editor's count
+    /// and the preview's existence guard against a vacuous zero.
     /// flip: `preview_session` passes `None` for the layout → fails at "the preview re-shaped what the editor had just shaped".
     #[test]
     fn a_keystroke_shapes_the_node_once() {
@@ -17137,8 +17038,7 @@ mod session_preview_shape_tests {
         );
     }
 
-    /// Control: a caller with no layout in hand still gets a shaped preview, so
-    /// `set_kind` cannot have stopped shaping outright.
+    /// Control: a caller with no layout in hand still gets a shaped preview.
     #[test]
     fn a_preview_with_nothing_prepared_still_shapes() {
         let ctx = egui::Context::default();
@@ -17167,8 +17067,7 @@ mod point_box_snap_tests {
     use super::*;
     use crate::app::OndinApp;
 
-    /// A side handle draws no guide for the axis it cannot move; asserts guides, not a
-    /// position, since `resize_factors` already keeps the geometry right.
+    /// A side handle draws no guide for the axis it cannot move; asserts guides, not position.
     /// flip: `snapped_point_box` passes `(true, true)` → fails at the `Right` case (two guides).
     #[test]
     fn a_side_handle_snaps_one_axis_and_a_corner_snaps_both() {
@@ -17192,7 +17091,7 @@ mod point_box_snap_tests {
             name: None,
         }]))
         .expect("a rect");
-        // A second shape, not a ruler guide: `snap_point` emits no `Guide` mark for a ruler guide.
+        // Not a ruler guide: `snap_point` emits no `Guide` mark for those.
         let target = ids.mint();
         doc.apply(&Transaction(vec![Operation::CreateNode {
             id: target,
@@ -17207,7 +17106,6 @@ mod point_box_snap_tests {
         }]))
         .expect("something to snap to");
         app.session.adopt_document(doc, None);
-        // `snap::targets` reads the visible view; a headless canvas is one pixel square.
         app.canvas_px = (1200, 1200);
         app.session.camera.center = Point::new(300.0, 300.0);
 
@@ -17231,7 +17129,6 @@ mod point_box_snap_tests {
             vec![crate::measure::Axis::Horizontal],
             "and a bottom handle along y only"
         );
-        // Control: a corner travels along both axes.
         assert_eq!(
             axes_of(Handle::BottomRight).len(),
             2,
@@ -17242,8 +17139,8 @@ mod point_box_snap_tests {
 
 #[cfg(test)]
 mod pivot_snap_scale_tests {
-    //! The nine-point pivot snap is a distance on the screen: `pivot_at` converts its
-    //! threshold with the zoom and the node's own basis, which may carry scale or skew.
+    //! The nine-point pivot snap is a screen distance: `pivot_at` converts its threshold
+    //! with the zoom and the node's own basis (scale or skew).
 
     use super::*;
     use ondin_core::kurbo::{Affine, Size};
@@ -17278,7 +17175,6 @@ mod pivot_snap_scale_tests {
     fn x_frac(app: &OndinApp, id: NodeId, world: Point) -> f64 {
         match app.pivot_at(id, world) {
             Some(Pivot::Normalized(v)) => v.x,
-            // The centre snaps to `None`, which none of these releases is near.
             other => panic!("expected a normalized pivot, got {other:?}"),
         }
     }
@@ -17292,7 +17188,7 @@ mod pivot_snap_scale_tests {
     }
 
     /// A 4× basis does not widen the corner snap beyond `PIVOT_SNAP_PX` screen units;
-    /// the first assertion is the control that the snap still fires.
+    /// the first assertion shows the snap still fires.
     /// flip: `tol = PIVOT_SNAP_PX / zoom` → fails at the second assertion.
     #[test]
     fn a_scaled_basis_does_not_widen_the_pivot_snap() {
@@ -17300,13 +17196,11 @@ mod pivot_snap_scale_tests {
         crate::theme::install(&ctx);
         let (app, id) = app_with_basis(&ctx, Affine::scale(4.0));
 
-        // world 5 → local 1.25, inside a local tolerance of 6/4 = 1.5.
         assert_eq!(
             x_frac(&app, id, Point::new(5.0, 0.0)),
             0.0,
             "five screen units from the corner is still a corner grab"
         );
-        // world 10 → local 2.5, outside it.
         assert_ne!(
             x_frac(&app, id, Point::new(10.0, 0.0)),
             0.0,
@@ -17339,11 +17233,10 @@ mod pivot_snap_scale_tests {
 
 #[cfg(test)]
 mod zero_travel_release_tests {
-    //! A gesture that ends where it began is not an undo step, in every arm of
-    //! `finish_drag`. The arms are guarded by three different mechanisms: `Move` has its
-    //! own epsilon, `Skew` and `Rotate` emit no operation for a zero drag, and `Resize`,
-    //! `LineEnd` and `RailOffset` are absorbed by `commit_inner`'s `changes_nothing` guard.
-    //! The test asserts the outcome rather than the route.
+    //! A gesture that ends where it began is no undo step, in every arm of `finish_drag`.
+    //! Three mechanisms guard the arms: `Move` has its own epsilon, `Skew` and `Rotate` emit
+    //! nothing for a zero drag, `Resize`, `LineEnd` and `RailOffset` fall to `commit_inner`'s
+    //! `changes_nothing`. The outcome is asserted, not the route.
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -17381,9 +17274,8 @@ mod zero_travel_release_tests {
         (app, id)
     }
 
-    /// A headless app holding a selected 400 × 200 frame at the origin laid out
-    /// as a row — padding 20, gap 10 — of two 40 × 30 rects: the gap band at
-    /// x 60–70.
+    /// A selected 400 × 200 frame at the origin laid out as a row (padding 20, gap 10) of
+    /// two 40 × 30 rects: the gap band is at x 60–70.
     fn app_with_a_laid_frame(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(0x2E83);
@@ -17498,8 +17390,7 @@ mod zero_travel_release_tests {
         (app, id)
     }
 
-    /// Every committing arm of `finish_drag`, released where it was pressed, leaves the
-    /// undo depth alone; the failure names the arms that regressed.
+    /// Every committing arm of `finish_drag`, released where pressed, leaves the undo depth alone.
     /// flip: disable the `changes_nothing` guard in `session::commit_inner` → fails with
     /// `["Resize", "LineEnd", "RailOffset"]`.
     #[test]
@@ -17508,7 +17399,6 @@ mod zero_travel_release_tests {
         crate::theme::install(&ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        // `(name, build the app, the gesture, the point it is released at)`.
         let cases: Vec<Case<'_>> = vec![
             (
                 "Move",
@@ -17533,7 +17423,6 @@ mod zero_travel_release_tests {
                 Box::new(|id: NodeId| Drag::Rotate {
                     target: Target::Layer(id),
                     pivot: Point::new(50.0, 30.0),
-                    // The angle from the pivot to the release point below: zero turn.
                     start: 0.0,
                     turn: Affine::IDENTITY,
                 }),
@@ -17563,11 +17452,10 @@ mod zero_travel_release_tests {
                 "RailOffset",
                 Box::new(|| app_on_a_ring(&ctx)),
                 Box::new(|id: NodeId| Drag::RailOffset { id }),
-                // The ring's start point: `geometry::local_path` opens an ellipse at `MoveTo((200, 100))`.
+                // `geometry::local_path` opens an ellipse at `MoveTo((200, 100))`.
                 Point::new(200.0, 100.0),
             ),
             (
-                // A spacing band released where it was pressed; the gap stays 10.
                 "Spacing",
                 Box::new(|| app_with_a_laid_frame(&ctx)),
                 Box::new(|id: NodeId| Drag::Spacing {
@@ -17580,7 +17468,6 @@ mod zero_travel_release_tests {
             ),
         ];
 
-        // Collected, not asserted per row, so the failure names every arm that regressed.
         let mut spent: Vec<&str> = Vec::new();
         for (name, build, gesture, release) in cases {
             let (mut app, id) = build();
@@ -17591,7 +17478,6 @@ mod zero_travel_release_tests {
             app.drag = gesture(id);
             app.finish_drag(Some(release), false, false);
 
-            // Fixture checks stay hard: a release away from the start is a genuine edit.
             assert_eq!(
                 app.session.doc.get(id).map(|n| n.kind().clone()),
                 kind_before,
@@ -17625,15 +17511,14 @@ mod pick_policy_tests {
         NodeId::from_wire(&format!("1:{i}")).expect("a well-formed id")
     }
 
-    /// All five arms of the click policy; the leaf is `9` so it never equals a group id,
-    /// and `Ctrl` alone is asserted against a deep chain because an empty one answers the leaf everywhere.
+    /// All five arms of the click policy; `Ctrl` alone is asserted against a deep chain
+    /// because an empty one answers the leaf everywhere.
     /// flip: widen `ctrl && !alt` to `ctrl` → fails at the `Ctrl+Alt` two-group assertion.
     #[test]
     fn the_five_arms_of_the_click_policy() {
         let leaf = n(9);
         let (outer, inner) = (n(1), n(2));
 
-        // No groups above it: every modifier answers the leaf.
         for (ctrl, alt) in [(false, false), (true, false), (true, true), (false, true)] {
             assert_eq!(
                 pick_from_chain(ctrl, alt, &[], leaf),
@@ -17643,14 +17528,12 @@ mod pick_policy_tests {
             );
         }
 
-        // Ctrl alone: the exact thing under the pointer, however deep.
         assert_eq!(
             pick_from_chain(true, false, &[outer, inner], leaf),
             leaf,
             "Ctrl reaches past every group to the layer itself"
         );
 
-        // Ctrl+Alt: one level in, the outermost group's child.
         assert_eq!(
             pick_from_chain(true, true, &[outer, inner], leaf),
             inner,
@@ -17663,7 +17546,6 @@ mod pick_policy_tests {
             "and with a single group one level in is the leaf"
         );
 
-        // No modifier: the outermost group.
         assert_eq!(
             pick_from_chain(false, false, &[outer, inner], leaf),
             outer,
@@ -17676,8 +17558,7 @@ mod pick_policy_tests {
         );
     }
 
-    /// Root, two sibling groups, one rect in each. Returns the app, the groups
-    /// and the rects.
+    /// Root, two sibling groups, one rect in each; returns the app, groups and rects.
     fn two_groups(ctx: &egui::Context) -> (OndinApp, [NodeId; 2], [NodeId; 2]) {
         use ondin_core::{Document, IdSource, Operation, Transaction};
         let mut app = OndinApp::headless(ctx);
@@ -17741,7 +17622,6 @@ mod pick_policy_tests {
         let (mut app, groups, leaves) = two_groups(&ctx);
         app.entered_group = Some(groups[0]);
 
-        // Control: a click inside the scope keeps it and picks the leaf.
         let picked = pick(&mut app, &ctx, leaves[0], false);
         assert_eq!(
             app.entered_group,
@@ -17750,7 +17630,6 @@ mod pick_policy_tests {
         );
         assert_eq!(picked, leaves[0], "and picks the layer, not the group");
 
-        // A click outside ends the isolation and selects by the ordinary rule.
         let picked = pick(&mut app, &ctx, leaves[1], false);
         assert_eq!(app.entered_group, None, "the click left the group");
         assert_eq!(
@@ -17784,9 +17663,9 @@ mod pick_policy_tests {
 
 #[cfg(test)]
 mod marquee_selectability_tests {
-    //! What a rubber band may pick up. The two halves of `selectable` are deliberately
-    //! different rules: the lock is effective (a layer in a locked group is refused, as a
-    //! click is), the visibility half is the node's own flag (`context-menus.md` §5.9).
+    //! What a rubber band may pick up. The halves of `selectable` differ on purpose: the
+    //! lock is effective (a layer in a locked group is refused, as a click is), visibility
+    //! is the node's own flag (`context-menus.md` §5.9).
 
     use super::*;
     use ondin_core::kurbo::Size;
@@ -17847,9 +17726,8 @@ mod marquee_selectability_tests {
         (app, plain, locked, hidden)
     }
 
-    /// A band over all three picks the plain layer, not the locked or hidden one; the
-    /// fixture asserts both flags are set. `may_select_in_bulk` is the one lock rule shared
-    /// with `select_all`, while the visibility term is `apply_marquee`'s alone.
+    /// A band over all three picks the plain layer only. `may_select_in_bulk` is the lock
+    /// rule shared with `select_all`; the visibility term is `apply_marquee`'s alone.
     /// flip: `may_select_in_bulk` returns `true` → fails at the set equality.
     #[test]
     fn a_marquee_takes_neither_a_locked_layer_nor_a_hidden_one() {
@@ -17890,8 +17768,7 @@ mod frame_edge_tests {
     use ondin_core::kurbo::Size;
     use ondin_core::{Document, IdSource, Operation, Transaction};
 
-    /// A 200×200 frame at the world origin holding one 10×10 rect, so the frame is
-    /// occupied (an empty one is clickable anywhere already).
+    /// A 200×200 frame at the origin holding one 10×10 rect, so it is occupied.
     fn fixture(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0xED9E);
@@ -17927,9 +17804,8 @@ mod frame_edge_tests {
         (app, board, inside)
     }
 
-    /// An occupied frame's border answers, its middle does not (`pick_leaf` skips an
-    /// occupied frame on purpose so a marquee can cross its contents), and its contents
-    /// still win their own pixels. The band is `FRAME_EDGE_PICK_PX` at zoom 1.
+    /// An occupied frame's border answers, its middle does not (`pick_leaf` skips it so a
+    /// marquee can cross its contents), and its contents win their own pixels.
     /// flip: drop the `!…inflate(-slop)` term → fails at "the middle of a frame is not the frame".
     /// Dropping the `is_occupied_frame` term does not bite: this fixture's frame is occupied.
     #[test]
@@ -17946,7 +17822,7 @@ mod frame_edge_tests {
             slop > 0.0 && slop < 50.0,
             "the fixture must reach the state: a usable band at this zoom, got {slop}"
         );
-        // Wider than a line's pick: six points either side of the border is still the edge, ten in is not.
+        // Wider than a line's pick: six points either side is still the edge, ten in is not.
         let pt = 1.0 / app.points_per_world();
         for (at, what) in [
             (
@@ -17963,7 +17839,6 @@ mod frame_edge_tests {
             "ten points inside is the interior"
         );
 
-        // Just inside the top border, and just outside it: both are the edge.
         for (at, what) in [
             (Point::new(100.0, slop / 2.0), "just inside the top border"),
             (Point::new(100.0, -slop / 2.0), "just outside it"),
@@ -17990,7 +17865,6 @@ mod frame_edge_tests {
             "and neither is empty canvas well outside it"
         );
 
-        // Contents win their own pixels, so the edge is the last link of `pick_at_pointer`.
         assert_eq!(
             app.pick_leaf(Point::new(95.0, 95.0)),
             Some(inside),
@@ -17998,8 +17872,8 @@ mod frame_edge_tests {
         );
     }
 
-    /// The frame edge is reached through the shipped `pick_at_pointer` chain, not just
-    /// `frame_edge_at`; the screen point is derived with `to_screen` so `frame_label_at` cannot answer first.
+    /// The frame edge is reached through the `pick_at_pointer` chain, not just `frame_edge_at`;
+    /// the point comes from `to_screen` so `frame_label_at` cannot answer first.
     /// flip: delete the `.or_else(|| self.frame_edge_at(world))` link → fails at "the border is reached through the chain".
     #[test]
     fn a_frames_edge_is_reached_through_the_shipped_chain() {
@@ -18034,7 +17908,7 @@ mod frame_edge_tests {
     }
 
     /// A locked or hidden frame is not selectable by its border (`Selection::set_one`
-    /// filters nothing); each case first asserts the border answers, so a missed band fails.
+    /// filters nothing); each case first asserts the border answers.
     /// flip: delete the lock term, keep `shown_visible` → fails on the locked case only.
     #[test]
     fn a_locked_or_hidden_frames_edge_is_not_pickable() {
@@ -18066,7 +17940,7 @@ mod frame_edge_tests {
         }
     }
 
-    /// A press on the border grabs the frame as a click selects it, and does not clear
+    /// A press on the border grabs the frame as a click selects it, and keeps
     /// `entered_group`; the frame starts unselected, or `selected_frame_at` would answer.
     /// flip: delete the fourth link of `begin_select_drag` → fails at the drag-arm assertion.
     #[test]
@@ -18112,7 +17986,7 @@ mod pointer_allowance_tests {
     use ondin_core::kurbo::Point;
 
     /// The pick band measured on screen through `to_screen` (not `pick_slop * points_per_world`,
-    /// which is circular) at 100, 125, 150 and 200%, plus the snap tolerance's scale.
+    /// which is circular) at 100, 125, 150 and 200%, plus the snap tolerance.
     /// flip: `points_per_world` answers `camera.zoom` alone → fails at 125%.
     #[test]
     fn the_pick_band_is_four_points_at_every_display_scale() {
@@ -18208,8 +18082,8 @@ mod group_fence_tests {
         );
     }
 
-    /// A frame nudged inside the frame that holds it stays there: the moved frame and its
-    /// contents are excluded before `frame_covering` takes the topmost.
+    /// A frame nudged inside its holder stays there: the moved frame and its contents are
+    /// excluded before `frame_covering` takes the topmost.
     /// flip: filter after `frame_covering` → fails at "a nudge keeps it in its set".
     #[test]
     fn a_frame_nudged_inside_its_parent_frame_stays_in_it() {
@@ -18253,9 +18127,8 @@ mod group_fence_tests {
         );
     }
 
-    /// Two overlapping sibling frames dragged together both stay on the canvas: every
-    /// selected frame is excluded as a drop candidate, not just the one being placed.
-    /// An Alt-drag keeps the narrow exclusion, since its originals do not move.
+    /// Two overlapping sibling frames dragged together both stay on the canvas: every selected
+    /// frame is excluded as a drop candidate. An Alt-drag keeps the narrow exclusion.
     /// flip: narrow the moving set to `[id]` in `moving_with` → fails at "stacked: A stays on the canvas".
     #[test]
     fn overlapping_frames_dragged_together_stay_on_the_canvas() {
@@ -18280,7 +18153,6 @@ mod group_fence_tests {
             ("small over large", 300.0, (-100.0, -100.0)),
         ] {
             let mut doc = Document::new(root);
-            // `index: 0` each, so A — created last — is on top.
             doc.apply(&Transaction(vec![
                 create(b, b_side, b_at),
                 create(a, 100.0, (0.0, 0.0)),
@@ -18310,8 +18182,8 @@ mod group_fence_tests {
         }
     }
 
-    /// No drop destination is a frame the component rules refuse (nested main, component
-    /// cycle, a set of two kinds): the drop passes to the frame beneath and the move commits.
+    /// No drop destination is a frame the component rules refuse (nested main, cycle, a set
+    /// of two kinds): the drop passes to the frame beneath.
     /// flip: `covering_that_holds` returns `frame_covering` unfiltered → fails at "a main over a main stays on the canvas".
     /// flip: disable `can_hold`'s set-kind clause → fails at "a group main over a set of frames stays on the canvas".
     #[test]
@@ -18383,7 +18255,6 @@ mod group_fence_tests {
             "the fixture's set"
         );
 
-        // Each drag, aimed by the moved layer's own box onto the target's.
         let onto = |app: &OndinApp, id, target| {
             let (from, to) = (at(app, id), at(app, target));
             Vec2::new(to.x0 - from.x0 + 10.0, to.y0 - from.y0 + 10.0)
@@ -18404,7 +18275,6 @@ mod group_fence_tests {
             "a main over a main stays on the canvas"
         );
 
-        // Before `m` moves: once over `k`, an instance dropped on it is over `k` too.
         app.session.selection.set_one(i);
         assert_eq!(
             app.move_destination(i, onto(&app, i, m)),
@@ -18495,7 +18365,6 @@ mod group_fence_tests {
         assert!(ondin_core::variant::is_set(&app.session.doc, set));
         assert!(ondin_core::variant::variants(&app.session.doc, set).is_empty());
 
-        // Both land inside the set's 300×300: `f` at (10, 10), `g` at (130, 10).
         let delta = Vec2::new(-490.0, 10.0);
         app.session.selection.set(vec![f, g]);
         assert_eq!(
@@ -18517,7 +18386,6 @@ mod group_fence_tests {
         app.session.try_commit(tx).expect("the move commits");
         assert!(ondin_core::variant::variants(&app.session.doc, set).is_empty());
 
-        // One kind alone still goes in: `f`, now lying over the set, nudged.
         let nudge = Vec2::new(1.0, 0.0);
         app.session.selection.set_one(f);
         assert_eq!(app.move_destination(f, nudge), Some(set));
@@ -18676,7 +18544,6 @@ mod flex_drag_tests {
             "dragged out of the frame, it leaves: {tx:?}"
         );
 
-        // The preview draws what the release commits: one item carries its reorder, two move as a block.
         app.session.selection.set_one(a);
         let tx = app
             .move_preview_tx(Vec2::new(70.0, 0.0))
@@ -18706,9 +18573,8 @@ mod flex_drag_tests {
 
 #[cfg(test)]
 mod flex_canvas_tests {
-    //! The app reads where layout draws a layer, end to end: a click selects a flex item
-    //! and a pinned layer where they are drawn, snapping measures a flex item's drawn
-    //! edges, and a real drag through `canvas_ui` reorders the row.
+    //! The app reads where layout draws a layer: clicks select, snapping measures, and a real
+    //! drag through `canvas_ui` reorders the row.
 
     use super::*;
     use crate::app::OndinApp;
@@ -18722,10 +18588,8 @@ mod flex_canvas_tests {
     };
     const PPP: f32 = 1.0;
 
-    /// A 400 × 200 frame laid out as a row (padding 20, gap 10, items to the start) of a
-    /// 40 × 30, a 60 × 30 and a 20 × 30, all stored at (300, 150) so a reader of the stored
-    /// place shows. Drawn: `a` at (20, 20)–(60, 50), `b` at (70, 20)–(130, 50), the third
-    /// at (140, 20)–(160, 50). The camera is on the frame's centre.
+    /// A 400 × 200 frame laid out as a row (padding 20, gap 10) of a 40 × 30, a 60 × 30 and a
+    /// 20 × 30, all stored at (300, 150). Drawn: `a` at (20, 20)–(60, 50), `b` at (70, 20)–(130, 50).
     fn app_with_a_row(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0xAE);
@@ -18771,7 +18635,7 @@ mod flex_canvas_tests {
         app.session.adopt_document(doc, None);
         app.session.camera.center = Point::new(200.0, 100.0);
         app.session.camera.zoom = 1.0;
-        // Two frames first: `to_screen` reads the canvas size, which the canvas learns by drawing.
+        // `to_screen` reads the canvas size, which the canvas learns by drawing.
         for _ in 0..2 {
             frame(ctx, &mut app, Vec::new());
         }
@@ -18803,8 +18667,7 @@ mod flex_canvas_tests {
         }
     }
 
-    /// Press at world `from`, drag to world `to` in eight steps, release — each in
-    /// the frames egui needs to see a press, a drag and a release.
+    /// Press at world `from`, drag to `to` in eight steps, release, each in its own frame.
     fn drag(ctx: &egui::Context, app: &mut OndinApp, from: Point, to: Point) {
         let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
         let start = at(app, from);
@@ -18860,8 +18723,7 @@ mod flex_canvas_tests {
         frame(ctx, app, Vec::new());
     }
 
-    /// A click selects a flex item where it is drawn, and nothing at its stored place
-    /// (the frame's empty interior, which an occupied frame does not answer).
+    /// A click selects a flex item where it is drawn, and nothing at its stored place.
     #[test]
     fn a_click_selects_a_flex_item_where_it_is_drawn() {
         let ctx = egui::Context::default();
@@ -18945,8 +18807,8 @@ mod flex_canvas_tests {
         let _ = (frame_id, a);
     }
 
-    /// A real drag of `b` left past `a` reorders the row as one undo step, leaving its
-    /// stored transform untouched; a preview is up mid-drag.
+    /// A real drag of `b` left past `a` reorders the row as one undo step, its stored
+    /// transform untouched; a preview is up mid-drag.
     /// flip: delete `move_tx`'s reorder arm → fails at "b comes first".
     #[test]
     fn a_real_drag_reorders_the_row() {
@@ -18992,14 +18854,13 @@ mod flex_canvas_tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let (mut app, _frame_id, a, _b) = app_with_a_row(&ctx);
-        // The pixel grid alone: with shapes on, edge snaps claim both axes first.
+        // Shape snapping would claim both axes first.
         app.snap_shapes = false;
         assert!(app.snap_grid, "the default this test is about");
         let press = Point::new(40.0, 35.0);
         let start = app.to_screen(press, RECT, PPP);
         frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
         frame(&ctx, &mut app, vec![button(start, true)]);
-        // The anchor is the pointer where the move begins, past egui's threshold: read it back.
         let mut anchor = None;
         for step in 1..=10 {
             let p = app.to_screen(press + Vec2::new(2.0 * step as f64, 0.0), RECT, PPP);
@@ -19079,8 +18940,6 @@ mod flex_canvas_tests {
         );
 
         let depth = app.session.history.undo_depth();
-        // The anchor is where the move begins (the first of `drag`'s eight steps), so the centre
-        // moves 7/8 of (240, 140): to (220, 132.5), column 3, row 2.
         drag(
             &ctx,
             &mut app,
@@ -19132,8 +18991,8 @@ mod flex_canvas_tests {
         assert_eq!(start(b), (GridPlacement::Line(4), GridPlacement::Line(2)));
     }
 
-    /// A 400 × 200 frame laid as a four-by-two grid of 100 × 100 cells holding two
-    /// 20 × 20 rects: `a` drawn at (0, 0) and `b` at (100, 0), both stored at (300, 150).
+    /// A 400 × 200 frame as a four-by-two grid of 100 × 100 cells holding two 20 × 20 rects:
+    /// `a` drawn at (0, 0) and `b` at (100, 0), both stored at (300, 150).
     fn app_with_a_grid(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
         use ondin_core::container::{Grid, Track, TrackBreadth, TrackSize};
         let mut app = OndinApp::headless(ctx);
@@ -19185,7 +19044,7 @@ mod flex_canvas_tests {
         (app, a, b)
     }
 
-    /// A context with the theme in; one per `held` drag, since a second press with the button down starts nothing.
+    /// A themed context; one per `held` drag, since a second press with the button down starts nothing.
     fn fresh() -> egui::Context {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
@@ -19221,8 +19080,8 @@ mod flex_canvas_tests {
         shapes
     }
 
-    /// The screen box of the landing outline in `shapes` (the union of `draw_flex_landing`'s
-    /// dashes, the only 1.5-wide `SELECT` segments), or `None`.
+    /// The screen box of the landing outline in `shapes` (`draw_flex_landing`'s 1.5-wide
+    /// `SELECT` dashes), or `None`.
     fn landing_outline(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
         shapes
             .iter()
@@ -19267,7 +19126,6 @@ mod flex_canvas_tests {
             landing_outline(&shapes)
         );
 
-        // Past the frame's right edge, `a` wholly outside it.
         let ctx = fresh();
         let (mut app, _row, a, _b) = app_with_a_row(&ctx);
         let shapes = held(
@@ -19484,8 +19342,8 @@ mod flex_canvas_tests {
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
     }
 
-    /// A block in a grid whose rows overflow its frame moves whole wherever the pointer is
-    /// in the frame: the half-area rule alone would have `b` leaving by its box.
+    /// A block in a grid whose rows overflow its frame moves whole while the pointer is in
+    /// the frame; the half-area rule alone would have `b` leaving by its box.
     /// flip: drop `move_destination`'s pointer test → fails at "b stays in the grid".
     /// flip: `finish_drag` builds the commit with the drag already cleared → same assertion.
     #[test]
@@ -19744,11 +19602,8 @@ mod flex_canvas_tests {
                 Point::new(0.0, 100.0),
             )
         };
-        // The item's centre, at (20, 20) in the row, in world.
         let press = turned * Point::new(20.0, 20.0);
-        // Inside the turned box: (100, 50) in the row's own space.
         let inside = turned * Point::new(100.0, 50.0);
-        // Inside the turned box's upright bounds (x −70.7..141.4, y 0..212.1), past its top edge.
         let corner = Point::new(138.0, 1.0);
         assert!(
             !ondin_core::kurbo::Rect::new(0.0, 0.0, 200.0, 100.0)
@@ -19760,15 +19615,14 @@ mod flex_canvas_tests {
         drag(&ctx, &mut app, press, inside);
         assert_eq!(app.session.doc.get(a).unwrap().parent(), Some(row), "kept");
 
-        // Asked of `pointer_in` directly: move snapping adjusts a drag's delta, so a drag cannot hit an exact point.
+        // Asked directly: move snapping adjusts a drag's delta, so a drag cannot hit an exact point.
         assert!(
             !app.pointer_in(row, corner),
             "the corner outside the turned box is not in the container"
         );
         assert!(app.pointer_in(row, inside), "the inside is");
 
-        // `box_meets` answers for the turned box too. A 20 × 10 box at (120, 0) is inside the
-        // upright bounds but past the turned top edge, y = x.
+        // A 20 × 10 box at (120, 0) is inside the upright bounds but past the turned top edge, y = x.
         // flip: `box_meets` answers from the upright bounds → fails at "a box past the turned edge does not meet it".
         let past = ondin_core::kurbo::Rect::new(120.0, 0.0, 140.0, 10.0);
         assert!(
@@ -19796,8 +19650,7 @@ mod flex_canvas_tests {
         );
     }
 
-    /// A 200 × 100 row at the origin holding two 50 × 30 rects, `a` then `b`,
-    /// laid at x 0 and 50; `a` selected.
+    /// A 200 × 100 row at the origin holding two 50 × 30 rects, `a` then `b`; `a` selected.
     fn two_in_a_row(ctx: &egui::Context, seed: u64) -> (OndinApp, NodeId, NodeId, NodeId, NodeId) {
         let mut ids = IdSource::new(seed);
         let (root, row, a, b) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
@@ -19856,8 +19709,7 @@ mod flex_canvas_tests {
         );
     }
 
-    /// An Alt-drag of an in-flow item leaves the original in its slot and puts the copy
-    /// where a move would put the item.
+    /// An Alt-drag of an in-flow item leaves the original in its slot, the copy where a move would go.
     /// flip: `clone_tx` places every copy in its source's parent → fails at "the original keeps its slot".
     #[test]
     fn an_alt_drag_copies_an_in_flow_item_where_a_move_would_put_it() {
@@ -19953,9 +19805,8 @@ mod flex_canvas_tests {
 
 #[cfg(test)]
 mod string_binding_session_tests {
-    //! A text whose content is bound to a string variable, edited on the canvas: the
-    //! session opens on the string drawn, closing it unedited keeps the binding, and
-    //! typing detaches it (the commit's `keep_text_bindings`).
+    //! A text bound to a string variable, edited on the canvas: the session opens on the
+    //! string drawn, closing it unedited keeps the binding, typing detaches it.
 
     use super::*;
     use ondin_core::{Cell, Mode, VarKind, Variable};
@@ -20057,8 +19908,7 @@ mod string_binding_session_tests {
 #[cfg(test)]
 mod bound_resize_tests {
     //! A resize handle dragged over a bound W detaches it and says so: a real drag through
-    //! `canvas_ui`, the commit's `keep_size_bindings` cutting the binding, and the floating
-    //! status naming the variable.
+    //! `canvas_ui`, `keep_size_bindings` cutting the binding, the floating status naming the variable.
 
     use super::*;
     use crate::app::OndinApp;
@@ -20147,7 +19997,6 @@ mod bound_resize_tests {
         }
         assert_eq!(app.session.doc.get(id).unwrap().size_vars()[0], Some(var));
 
-        // The right edge's handle, dragged 40 out in eight steps.
         let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
         let (from, to) = (Point::new(100.0, 30.0), Point::new(140.0, 30.0));
         let start = at(&app, from);

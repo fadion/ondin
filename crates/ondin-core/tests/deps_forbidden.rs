@@ -1,60 +1,32 @@
-//! Enforces §3's layering rules, of which invariant 1 — `ondin-core` is
-//! headless — is one. This is the CI gate that keeps the core testable without
-//! a graphics context and keeps the chrome out of the two crates between core
-//! and the app.
+//! Enforces §3's layering rules, of which invariant 1 (`ondin-core` is headless)
+//! is one: core stays testable without a graphics context, and the chrome stays
+//! out of the two crates between core and the app. A table rather than a single
+//! check, because an unenforced layering rule does not stay true.
 //!
-//! ⚠️ **It enforced exactly one of §3's four rules until 2026-09-15**
-//! (§15 D775, `[A2-L7-05]`), and **two of the other three were already false with every
-//! gate green** — `ondin-mcp` reaching vello through an `ondin-export` edge no
-//! line of its source used (§15 D427), and §3's wgpu clause being unsatisfiable
-//! (`[A2-L7-04]`). That is the argument for a table rather than a crate: an
-//! unenforced layering rule in this repository does not stay true, and nothing
-//! says when it stopped.
+//! Two tests answer different questions. The first reads `cargo tree`, so a
+//! transitive leak is caught. The second reads the manifests, because §3's vello
+//! rule is about what a crate may declare: `ondin-app` and `ondin-export` reach
+//! vello through `ondin-render` by construction, so no subtree could assert its
+//! absence. Neither can express the other's rule.
 //!
-//! **There are two tests here and they answer different questions.** The first
-//! reads `cargo tree` rather than the manifests, so a *transitive* leak — a
-//! permitted dep that itself pulls in wgpu, say — is caught and not just a
-//! direct one. The second reads the manifests, because §3's vello rule is about
-//! what a crate may **declare**: `ondin-app` and `ondin-export` reach vello
-//! through `ondin-render` by construction, so there is no subtree in which its
-//! absence could be asserted. 🚨 **Neither test can express the other's rule**,
-//! and a reader who folds them together will drop one.
-//!
-//! ⚠️ **The tree it reads has to be the tree that is *built*, and for a long
-//! time it was not.** With `resolver = "3"`, cargo unifies features across the
-//! members being built, so `cargo tree -p ondin-core` and `cargo tree
-//! --workspace` are two different resolutions of the same crate's closure — and
-//! they demonstrably differ today, on core's own dependencies:
-//!
-//! ```text
-//! cargo tree -p ondin-core -e normal -f "{p} {f}" → smallvec  const_generics,const_new,serde
-//! cargo tree --workspace   -e normal -f "{p} {f}" → smallvec  const_generics,const_new,serde,union
-//! ```
-//!
-//! (`union` is requested by `wgpu-hal` and reaches the build only through
-//! `ondin-render`; it is also the cause of `peniko::Gradient` measuring 168
-//! bytes under `-p` and 160 under `--workspace`.) Every gate that *compiles*
-//! `ondin-core` — `build`, `test`, `clippy` — resolves workspace-wide. So one
-//! member declaring `parley = { features = ["system"] }` would put a
-//! DirectWrite binding into the closure core is compiled against, and this test,
-//! reading core resolved alone, would have stayed green.
-//!
-//! Feature unification only ever *adds*, so the workspace-resolved closure is a
-//! superset of the standalone one and scanning it strictly dominates. **One
-//! `cargo tree` invocation, not two**: running cargo inside a `cargo test` is
-//! already the riskiest thing this file does, and a second call is a second
-//! chance to contend for the package-cache lock.
+//! The tree read must be the tree that is built. With `resolver = "3"` cargo
+//! unifies features across the members being built, so `cargo tree -p ondin-core`
+//! and `cargo tree --workspace` resolve core's closure differently (for example
+//! `smallvec` gains `union` through `wgpu-hal` under `--workspace`), and every gate
+//! that compiles core resolves workspace-wide. Unification only adds, so scanning
+//! the workspace tree dominates. One `cargo tree` call, not two: running cargo
+//! inside `cargo test` is risky enough without a second chance to contend for the
+//! package-cache lock.
 
 use std::process::Command;
 
 /// Crate-name prefixes that must never appear in the dependency tree of a crate
-/// that has to stay **headless** — `ondin-core` by invariant 1, `ondin-mcp` by
-/// §3. No GPU, no windowing, no UI. The transitive half of core's rule; its
-/// direct dependencies are held to `CORE_PERMITTED` below.
+/// that has to stay headless — `ondin-core` by invariant 1, `ondin-mcp` by §3: no
+/// GPU, no windowing, no UI. The transitive half of core's rule; its direct
+/// dependencies are held to `CORE_PERMITTED` below.
 ///
-/// ⚠️ **Matched by `starts_with`, so every name is enumerated**:
-/// `"eframe".starts_with("egui")` is `false`, and so are `emath`, `ecolor`,
-/// `epaint` and `raw-window-handle`, all really in the app's tree.
+/// Matched by `starts_with`, so every name is enumerated: `"eframe"` does not
+/// start with `"egui"`, nor do `emath`, `ecolor`, `epaint` or `raw-window-handle`.
 const HEADLESS: &[&str] = &[
     "vello",             // GPU/CPU renderer — belongs only in ondin-render
     "wgpu",              // GPU abstraction
@@ -72,48 +44,30 @@ const HEADLESS: &[&str] = &[
     "raw-window-handle", // the seam every windowing crate meets a surface at
 ];
 
-/// The chrome half of `HEADLESS`, for the crates that are allowed a GPU and
-/// are not allowed a user interface.
+/// The chrome half of `HEADLESS`, for the crates that are allowed a GPU and not a
+/// user interface.
 ///
-/// (Plain backticks throughout this file, not `[link]`s: an integration test is
-/// its own crate root, `cargo doc` documents no test target, and there is no
-/// `deny` here — so a broken link would be checked by nothing. §15 D319.)
+/// Plain backticks throughout this file, not `[link]`s: no gate checks doc links
+/// in an integration test.
 ///
-/// ⚠️ **`glutin` is deliberately absent, and it is the whole reason this is a
-/// second list rather than a filter over the first.** `glutin_wgl_sys` is
-/// really under both `ondin-render` and `ondin-export` — `wgpu-hal` pulls it for
-/// the GL backend — so a row using `HEADLESS` here would fail on a crate that
-/// is doing nothing wrong. It is forbidden to `ondin-core` because core may have
-/// no GPU **at all**, which is a different rule with a different reason, and
-/// collapsing the two lists is what would make the stricter one unstatable.
-/// `ash`, `metal`, `naga` and `raw-window-handle` are absent for the same
-/// reason: every one of them arrives legitimately under `wgpu`.
+/// `glutin` is deliberately absent, which is why this is a second list rather than
+/// a filter over the first: `glutin_wgl_sys` legitimately sits under
+/// `ondin-render` and `ondin-export` (`wgpu-hal` pulls it for the GL backend).
+/// Core forbids it because core may have no GPU at all, a different rule.
+/// `ash`, `metal`, `naga` and `raw-window-handle` are absent for the same reason.
 const NO_UI: &[&str] = &["egui", "eframe", "emath", "ecolor", "epaint", "winit"];
 
 /// One row per §3 layering rule that can be read off the dependency tree.
 ///
-/// ⚠️ **This is a table because §3 states *four* rules and, until 2026-09-15,
-/// exactly one of them had a test** (`[A2-L7-05]`). Two of the other three were
-/// already false with every gate green, which is the argument in its strongest
-/// form: an unenforced layering rule in this repository does not stay true, and
-/// nothing says when it stopped.
-///
-/// 🚨 **The rule §3 states about `vello`/`vello_cpu` is not on this table and
-/// cannot be**, because it is a rule about what a manifest may *declare*, not
-/// about what a tree may contain: `ondin-app` reaches vello through
-/// `ondin-render` by construction, and so does `ondin-export`. It has its own
-/// test below, over the manifests. **A transitive test cannot express a direct
-/// rule**, and reading it as though it could is how the row would come to be
-/// omitted as "impossible".
+/// The `vello`/`vello_cpu` rule is not on this table and cannot be: it is about
+/// what a manifest may declare, not what a tree may contain, since `ondin-app` and
+/// `ondin-export` reach vello through `ondin-render` by construction. It has its
+/// own test below, over the manifests.
 const RULES: &[(&str, &[&str])] = &[
     // Invariant 1 / §3: core is headless.
     ("ondin-core", HEADLESS),
-    // §3: "`ondin-mcp` contains no rendering or UI dependency." ⚠️ **§3 has
-    // always said so about it, with nothing checking, and the sentence was
-    // false**: the crate declared `ondin-export`, which reaches `ondin-render`
-    // and so vello, wgpu and naga. That edge turned out to be a manifest line
-    // no line of the crate's source used, so the rule is true now and this row
-    // is what keeps it true.
+    // §3: "`ondin-mcp` contains no rendering or UI dependency." An unused
+    // `ondin-export` edge once broke this by pulling in vello, wgpu and naga.
     ("ondin-mcp", HEADLESS),
     // §3: "Only `ondin-app` may depend on egui/winit" — the two crates that sit
     // between core and the app and could quietly acquire chrome.
@@ -121,8 +75,8 @@ const RULES: &[(&str, &[&str])] = &[
     ("ondin-export", NO_UI),
 ];
 
-/// What `ondin-core` may declare: `design/foundations.md` §3's permitted list,
-/// which must stay set-equal to the manifest.
+/// What `ondin-core` may declare: §3's permitted list, which must stay set-equal
+/// to the manifest.
 const CORE_PERMITTED: &[&str] = &[
     "base64",
     "flo_curves",
@@ -199,29 +153,19 @@ fn subjects() -> Vec<&'static str> {
     RULES.iter().map(|(subject, _)| *subject).collect()
 }
 
-/// ⚠️ **Flip-checked three ways, and the negative one is already standing.**
-///
-/// 1. Adding `"kurbo"` to the list above — a crate core really does depend on —
-///    fails with it named, so the subtree walk finds what is under a subject.
-/// 2. Restoring `ondin-export` to `ondin-mcp`'s manifest — the exact regression
-///    this now guards — fails with **sixteen** crates named *(under ondin-mcp)*:
-///    the whole vello/wgpu/naga closure. Two of the sixteen, `glutin_wgl_sys`
-///    and `raw-window-handle`, are ones the original eight prefixes would have
-///    missed, which is the widening above earning its keep on a real tree
-///    rather than by argument.
-/// 3. The negative: `"egui"` is *in the list already* while `egui` is really in
-///    the workspace tree under `ondin-app`, and the test is green — so the walk
-///    excludes what is not under a subject. Without that half the whole thing
-///    could have been scanning the workspace forest and passing for the wrong
-///    reason.
+/// flips: adding `"kurbo"` to a forbidden list → fails naming it, so the walk
+/// finds what is under a subject; restoring `ondin-export` to `ondin-mcp`'s
+/// manifest → fails naming the vello/wgpu/naga closure (under ondin-mcp). The
+/// negative control stands already: `egui` is really in the tree under
+/// `ondin-app` and the test is green, so the walk excludes what is not under a
+/// subject.
 #[test]
 fn every_layering_rule_in_section_3_holds_in_the_dependency_tree() {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let output = Command::new(cargo)
         .args([
             "tree",
-            // ⚠️ **`--workspace`, not `--package ondin-core`** — see the module
-            // note. This is the resolution every gate that compiles core uses.
+            // `--workspace`, not `--package ondin-core` (see the module doc).
             "--workspace",
             "--edges",
             "normal", // ignore dev/build deps — the test harness itself is fine
@@ -250,19 +194,14 @@ fn every_layering_rule_in_section_3_holds_in_the_dependency_tree() {
         Some((depth, line[digits..].split_whitespace().next()?))
     }
 
-    // Every node under a subject node, at any depth, **once per rule**. The
-    // whole forest is scanned rather than the first match, because
-    // `--no-dedupe` repeats a package everywhere it is reached from and core
-    // appears under every member that depends on it.
+    // Every node under a subject node, at any depth, once per rule. The whole
+    // forest is scanned, since `--no-dedupe` repeats a package under every member
+    // that reaches it.
     //
-    // ⚠️ **One pass per rule rather than one pass carrying a stack**, and the
-    // reason is that the rows no longer share a list: `ondin-core` sits inside
-    // `ondin-render`'s subtree, and core's forbidden list contains `vello`,
-    // which render is *allowed*. A single walk that re-rooted on the inner
-    // subject would report render's own vello against core; one that did not
-    // would check core against render's looser list. Neither is the rule. The
-    // tree is parsed once and walked four times, which costs nothing next to
-    // the `cargo tree` call.
+    // One pass per rule, not one carrying a stack: `ondin-core` sits inside
+    // `ondin-render`'s subtree and core forbids `vello`, which render may use. A
+    // single walk would either report render's vello against core or check core
+    // against render's looser list.
     let mut unseen: Vec<&str> = subjects();
     let mut violations: Vec<String> = Vec::new();
     for (subject, forbidden) in RULES {
@@ -278,10 +217,8 @@ fn every_layering_rule_in_section_3_holds_in_the_dependency_tree() {
             }
             if name == *subject {
                 unseen.retain(|s| s != subject);
-                // ⚠️ **The outermost occurrence wins**, deliberately: a subject
-                // met *inside* its own subtree is already being scanned, and
-                // re-rooting there would silently drop the outer one's
-                // remaining siblings.
+                // The outermost occurrence wins: re-rooting inside its own
+                // subtree would drop the outer one's remaining siblings.
                 if inside.is_none() {
                     inside = Some(depth);
                 }
@@ -293,20 +230,17 @@ fn every_layering_rule_in_section_3_holds_in_the_dependency_tree() {
         }
     }
 
-    // ⚠️ **Without this the test passes when the parse breaks.** A change to
-    // cargo's `--prefix depth` format, a rename, or a `--workspace` that stopped
-    // including core would leave `violations` empty and the assertion below
-    // green — which is the shape of vacuity this project has found in its own
-    // tests four times over.
+    // Without this the test passes when the parse breaks: a changed `--prefix
+    // depth` format or a rename would leave `violations` empty and the assertion
+    // below green.
     assert!(
         unseen.is_empty(),
         "the tree does not contain {unseen:?} at all, so nothing was checked for \
          {}:\n{tree}",
         unseen.join(", ")
     );
-    // Deduped for the message only. `--no-dedupe` repeats every reachable node
-    // once per path to it, so a single leak reported itself twenty-eight times
-    // in the flip-check below — which buries the name it is there to give.
+    // Deduped for the message only: `--no-dedupe` repeats a node once per path to
+    // it, which buries the name.
     violations.sort_unstable();
     violations.dedup();
     assert!(
@@ -317,33 +251,20 @@ fn every_layering_rule_in_section_3_holds_in_the_dependency_tree() {
     );
 }
 
-/// The one §3 rule that is about a **manifest** and not about a tree.
+/// The one §3 rule that is about a manifest and not a tree: only `ondin-render`
+/// may declare `vello`/`vello_cpu`. The question is who declares it, not who can
+/// reach it.
 ///
-/// 🚨 **`ondin-app` and `ondin-export` both reach vello through
-/// `ondin-render` by construction**, so there is no subtree anywhere in which
-/// the absence of vello could be asserted — which is exactly why this rule went
-/// untested while the other three did, and why a reader generalising
-/// `RULES` would have concluded it was unenforceable and dropped it
-/// (`[A2-L7-05]`: *"each row that cannot be made green today is a decision to
-/// record, not a row to omit"*). It is enforceable; it is simply a different
-/// question. **Who declares it**, not **who can reach it**.
+/// §3's `wgpu` half is deliberately not asserted: `ondin-render`'s seam takes
+/// `&Device`, `&Queue` and `&TextureView`, so the app cannot call it without
+/// naming wgpu and `ondin-app` really declares it.
 ///
-/// ⚠️ **§3's `wgpu` half is deliberately not asserted here, because §3 no longer
-/// claims it** (`[A2-L7-04]`). The rule read *"Only `ondin-render` may depend on
-/// `vello`, `vello_cpu`, `wgpu`"* and was **unsatisfiable**: `ondin-render`'s own
-/// seam takes `&Device`, `&Queue` and `&TextureView`, so the app cannot call it
-/// without naming wgpu, and `ondin-app` really does declare `wgpu.workspace =
-/// true`. A rule nobody can obey is a false statement rather than an aspiration.
+/// The members are read off the directory rather than listed, so a new crate
+/// cannot be left unchecked.
 ///
-/// ⚠️ **The members are read off the directory rather than listed**, so adding a
-/// crate cannot quietly leave it unchecked — which is the failure mode
-/// `RULES`' own table has and pays for with the `unseen` guard.
-///
-/// **Flip-checked**: adding `vello.workspace = true` to
-/// `crates/ondin-export/Cargo.toml` fails with
-/// `["ondin-export", "ondin-render"]` against `["ondin-render"]`, and the
-/// positive control below — that `ondin-render` is found declaring it at all —
-/// is what stops a broken parse passing as "nobody declares vello".
+/// flip: adding `vello.workspace = true` to `crates/ondin-export/Cargo.toml` →
+/// fails at the `assert_eq!` (`["ondin-export", "ondin-render"]`); the
+/// `manifests` guard stops a broken parse passing as "nobody declares vello".
 #[test]
 fn only_ondin_render_declares_vello() {
     let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -371,9 +292,8 @@ fn only_ondin_render_declares_vello() {
         }
     }
 
-    // ⚠️ **Without this, a parse that matched nothing would read as compliance**
-    // — the shape of vacuity the sibling test's `unseen` guard exists for, and
-    // the one this project has now found in its own tests five times over.
+    // Without this, a parse that matched nothing would read as compliance (the
+    // sibling test's `unseen` guard, again).
     assert!(
         manifests >= 4,
         "only {manifests} manifest(s) found under {}; the scan is not reading \

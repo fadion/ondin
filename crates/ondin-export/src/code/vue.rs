@@ -260,8 +260,8 @@ fn rename(el: &mut Element, taken: &HashSet<String>, all: &mut HashSet<String>) 
     }
 }
 
-/// An `img`'s `src` written from the file, which Vue's compiler turns into an
-/// import only when it starts with `.`.
+/// An `img`'s `src`, and an inline SVG's picture `href`, written from the file,
+/// which Vue's compiler turns into an import only when it starts with `.`.
 fn relink_images(el: &mut Element, up: &str) {
     if el.tag == "img" {
         for (k, v) in &mut el.attrs {
@@ -269,6 +269,9 @@ fn relink_images(el: &mut Element, up: &str) {
                 v.insert_str(0, up);
             }
         }
+    }
+    if let Some(m) = &mut el.markup {
+        *m = m.replace("href=\"assets/", &format!("href=\"{up}assets/"));
     }
     for c in &mut el.children {
         if let Child::Element(e) = c {

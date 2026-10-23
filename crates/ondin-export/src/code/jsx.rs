@@ -107,6 +107,12 @@ fn tag(out: &mut String, t: &str) {
                 out.push_str(&decls.join(", "));
                 out.push_str(" }}");
             }
+            // A linked picture, read through the binding it is imported as.
+            "href" if value.starts_with("assets/") => {
+                out.push_str("href={");
+                out.push_str(&asset_binding(value));
+                out.push('}');
+            }
             _ => {
                 out.push_str(&attr_name(name));
                 out.push_str("=\"");

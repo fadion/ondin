@@ -79,11 +79,25 @@ pub fn svg_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> String {
 /// [`svg_of`], and what it could not say exactly — see [`Export`]. [`svg_of`] is
 /// the markup-only shim; the export panel and *Copy as SVG* ask for the report.
 pub fn svg_of_reported(doc: &Document, res: &Resolved, origins: &[NodeId]) -> Export {
+    svg_linking(doc, res, origins, Default::default())
+}
+
+/// [`svg_of_reported`], each picture in `linked` written as a link to its path
+/// there rather than embedded: code export's pages share one file per picture.
+pub(crate) fn svg_linking(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[NodeId],
+    linked: std::collections::HashMap<ondin_core::ImageId, String>,
+) -> Export {
     // `crate::extent`, shared with the PNG writer so the two frame the same box.
     let view = crate::extent(res, origins).unwrap_or_else(|| Rect::new(0.0, 0.0, 100.0, 100.0));
 
     // Defs first so the header can carry them; ids follow document order.
-    let mut defs = Defs::default();
+    let mut defs = Defs {
+        linked,
+        ..Default::default()
+    };
     for id in origins {
         collect_defs(doc, res, *id, origin_outer(doc, res, *id), &mut defs);
     }
@@ -141,6 +155,8 @@ struct Defs {
     /// The same ids as a set, so `add` and `has` are O(1) rather than Θ(D²) overall;
     /// std's `HashSet`, as the win is not worth a hasher dependency.
     seen: std::collections::HashSet<DefKey>,
+    /// Pictures written as a link to this path, not embedded ([`svg_linking`]).
+    linked: std::collections::HashMap<ondin_core::ImageId, String>,
 }
 
 /// A def's id: a `String` whose equality is counted in tests. Blind spot: a
@@ -548,7 +564,8 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
                     });
                     // `Defs::add` dedupes, so the payload is a no-op after the first node.
                     let payload = payload_id(&img.image.id);
-                    defs.add(payload.clone(), image_payload_def(&payload, entry));
+                    let link = defs.linked.get(&img.image.id).cloned();
+                    defs.add(payload.clone(), image_payload_def(&payload, entry, link));
                     let name = image_id(id, slot);
                     let body = image_def(
                         &name,
@@ -670,14 +687,15 @@ fn image_def(
 }
 
 /// The encoded picture itself, written once per distinct [`ondin_core::ImageId`];
-/// the per-node difference stays in the `<pattern>`'s `patternTransform`.
-fn image_payload_def(name: &str, entry: &ondin_core::ImageEntry) -> String {
+/// the per-node difference stays in the `<pattern>`'s `patternTransform`. `link`
+/// is a path to write in place of the picture.
+fn image_payload_def(name: &str, entry: &ondin_core::ImageEntry, link: Option<String>) -> String {
     format!(
         "    <image id=\"{name}\" href=\"{href}\" x=\"0\" y=\"0\" \
          width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\"/>\n",
         w = entry.width,
         h = entry.height,
-        href = escape_xml(&entry.href()),
+        href = escape_xml(&link.unwrap_or_else(|| entry.href())),
     )
 }
 

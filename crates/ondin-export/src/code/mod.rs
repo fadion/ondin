@@ -274,6 +274,15 @@ pub(crate) fn references<'a>(
             {
                 images.push(src.clone());
             }
+            // An inline SVG's linked pictures.
+            for link in e.markup.iter().flat_map(|m| m.split("href=\"").skip(1)) {
+                if let Some((path, _)) = link.split_once('"')
+                    && path.starts_with("assets/")
+                    && !images.iter().any(|i| i == path)
+                {
+                    images.push(path.to_string());
+                }
+            }
         })
     });
     (uses, images)

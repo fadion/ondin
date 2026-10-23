@@ -1936,6 +1936,61 @@ fn a_faint_picture_fill_is_written_as_svg() {
     );
 }
 
+/// Inline SVGs link the pictures they draw, so layers sharing one share its file
+/// rather than each embedding it; React imports it, Vue links it from the file.
+///
+/// flip: `Walk::picture` linking nothing → the page embeds two base64 copies.
+#[test]
+fn a_picture_in_inline_svg_is_one_linked_file() {
+    use ondin_core::{ImageBrush, ImageEntry, ImageFormat, ImageId, ImageRef, ImageSource};
+    let mut d = Doc::new();
+    let id = ImageId("photo".into());
+    d.apply(vec![Operation::AddImage {
+        id: id.clone(),
+        entry: ImageEntry {
+            source: ImageSource::Embedded(picture_png().into()),
+            format: ImageFormat::Png,
+            width: 24,
+            height: 16,
+        },
+    }]);
+    let f = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    for x in [10.0, 100.0] {
+        let r = d.rect(f, x, 10.0, 72.0, 80.0, 0.0);
+        d.fills(
+            r,
+            vec![Brush::Image(ImageBrush {
+                image: ImageRef::new(id.clone()),
+                sampler: ondin_core::peniko::ImageSampler {
+                    alpha: 0.5,
+                    ..Default::default()
+                },
+            })],
+        );
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    assert!(!html.contains("base64"), "{html}");
+    assert_eq!(
+        html.matches("href=\"assets/photo.png\"").count(),
+        2,
+        "{html}"
+    );
+    assert!(export.file("assets/photo.png").is_some());
+
+    let react = ondin_export::code::react::react_of(&doc, &res, &[f]);
+    let app = String::from_utf8(react.file("App.tsx").unwrap().to_vec()).unwrap();
+    assert!(
+        app.contains("import photo_png from \"./assets/photo.png\";"),
+        "{app}"
+    );
+    assert!(app.contains("href={photo_png}"), "{app}");
+    let vue = ondin_export::code::vue::vue_of(&doc, &res, &[f]);
+    let app = String::from_utf8(vue.file("App.vue").unwrap().to_vec()).unwrap();
+    assert!(app.contains("href=\"./assets/photo.png\""), "{app}");
+}
+
 /// A text's bound colour and a single side's bound width are `var()` too, not the
 /// default mode's numbers.
 #[test]

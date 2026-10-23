@@ -69,6 +69,15 @@ pub(crate) fn layer(doc: &Document, brush: &ImageBrush, size: Size) -> Result<La
     })
 }
 
+/// The file an inline SVG links a picture to, upright as the SVG writer's
+/// payload is (its pattern turns it), and the bytes for it; `None` for a linked
+/// or missing picture, which the writer leaves as it is.
+pub(crate) fn payload(doc: &Document, id: &ondin_core::ImageId) -> Option<(String, Vec<u8>)> {
+    let entry = doc.image(id).filter(|e| !e.is_linked())?;
+    let upright = ImageRef::new(id.clone());
+    Some((path_of(&upright, entry.format), file(doc, &upright)?))
+}
+
 /// Where a picture's file goes: one per image and orientation, so two fills of
 /// one picture share it.
 fn path_of(r: &ImageRef, format: ImageFormat) -> String {

@@ -2110,13 +2110,37 @@ impl Walk<'_> {
         let ink = self.res.ink_bounds(id)?;
         let world = self.res.world_transform(id)?;
         let class = self.classes.mint(node.name(), node.kind().default_name());
-        let svg = crate::svg::svg_of_reported(self.doc, self.res, &[id]);
+        // Pictures are linked, so every layer drawing one shares its file.
+        let mut linked = HashMap::new();
+        let mut files = Vec::new();
+        let mut under = vec![id];
+        while let Some(at) = under.pop() {
+            let Some(n) = self.doc.get(at) else { continue };
+            let paint = self.doc.resolved_paint(at, n.paint());
+            let brushes = paint.fills.iter().map(|f| f.brush.drawn());
+            for b in brushes.chain(paint.strokes.iter().map(|s| s.brush.drawn())) {
+                if let Brush::Image(img) = b
+                    && !linked.contains_key(&img.image.id)
+                    && let Some((path, bytes)) = image::payload(self.doc, &img.image.id)
+                {
+                    files.push((path.clone(), bytes));
+                    linked.insert(img.image.id.clone(), path);
+                }
+            }
+            under.extend(n.children());
+        }
+        let svg = crate::svg::svg_linking(self.doc, self.res, &[id], linked);
         let mut pic = if svg.approximated.is_empty() {
             self.report.position(format!(
                 "{} {}: {why}, written as inline SVG",
                 kind_word(node),
                 label(node)
             ));
+            for (path, bytes) in files {
+                if !self.assets.iter().any(|(p, _)| *p == path) {
+                    self.assets.push((path, bytes));
+                }
+            }
             let mut e = Element::new("svg", class.clone());
             e.markup = Some(
                 svg.svg

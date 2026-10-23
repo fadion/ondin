@@ -1733,7 +1733,8 @@ mod measurable_bounds_tests {
     /// A blur radius whose square overflows does not report that it reaches
     /// nowhere, which would make `scene::paint_node` cull visible artwork; an
     /// infinite escape is an absence. Asked of `stack_escape` and `escaped`
-    /// directly, since `Document::apply` refuses such a radius.
+    /// directly, since `Document::apply` refuses such a radius and a load clamps
+    /// it; `escaped`'s floor stays as the renderers' own defence.
     ///
     /// flip: `deviation(radius).powi(2)` restored in `stack_escape` → fails at the
     /// `expect`; with `escaped`'s finiteness guard also removed → fails at the

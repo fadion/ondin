@@ -98,7 +98,9 @@ impl History {
     }
 
     /// Undo the most recent transaction, returning its `DirtySet` (or `None` if
-    /// there was nothing to undo). The inverse is pushed to the redo stack.
+    /// there was nothing to undo). The inverse is pushed to the redo stack. A step
+    /// that fails to apply stays where it was: `apply` changed nothing, and
+    /// dropping it would lose what it held.
     pub fn undo(&mut self, doc: &mut Document) -> Result<Option<DirtySet>, OpError> {
         self.run = None;
         let Some(tx) = self.undo.pop() else {
@@ -106,13 +108,20 @@ impl History {
         };
         // A step puts back values the document held, including a layout value a
         // file carried that CSS refuses (§15 D937).
-        let outcome = doc.apply_restoring(&tx)?;
+        let outcome = match doc.apply_restoring(&tx) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                self.undo.push(tx);
+                return Err(e);
+            }
+        };
         self.redo.push(outcome.inverse);
         Ok(Some(outcome.dirty))
     }
 
     /// Redo the most recently undone transaction, returning its `DirtySet` (or
-    /// `None` if there was nothing to redo).
+    /// `None` if there was nothing to redo). A failed step stays, as in
+    /// [`Self::undo`].
     pub fn redo(&mut self, doc: &mut Document) -> Result<Option<DirtySet>, OpError> {
         // Before the `pop`, and that placement is the point: a redo that restores a
         // step always finds `run` already `None`, so the only reachable effect is
@@ -121,7 +130,13 @@ impl History {
         let Some(tx) = self.redo.pop() else {
             return Ok(None);
         };
-        let outcome = doc.apply_restoring(&tx)?;
+        let outcome = match doc.apply_restoring(&tx) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                self.redo.push(tx);
+                return Err(e);
+            }
+        };
         self.undo.push(outcome.inverse);
         Ok(Some(outcome.dirty))
     }
@@ -506,5 +521,32 @@ mod tests {
             Some(10.0),
             "and one undo lands where the run began, not one tap back inside it"
         );
+    }
+
+    /// A step that fails to apply stays on its stack, for undo and for redo.
+    /// flip: `undo`'s push-back on `Err` removed → fails at the depth assertion.
+    #[test]
+    fn a_step_that_fails_to_apply_is_kept() {
+        let (mut doc, mut history, rect) = doc_with_rect();
+        history.commit(&mut doc, move_to(rect, 5.0)).unwrap();
+        // The rect goes outside history, so both stacks now name a missing node.
+        doc.apply(&Transaction(vec![Operation::DeleteNode { id: rect }]))
+            .unwrap();
+        let depth = history.undo_depth();
+        assert!(history.undo(&mut doc).is_err());
+        assert!(history.can_undo(), "the failed step is still there");
+        assert_eq!(history.undo_depth(), depth);
+        assert!(!history.can_redo());
+
+        // A fresh document: the move undone, then the rect taken away outside
+        // history, so the redo fails.
+        let (mut fresh, mut h2, r2) = doc_with_rect();
+        h2.commit(&mut fresh, move_to(r2, 5.0)).unwrap();
+        h2.undo(&mut fresh).unwrap();
+        fresh
+            .apply(&Transaction(vec![Operation::DeleteNode { id: r2 }]))
+            .unwrap();
+        assert!(h2.redo(&mut fresh).is_err());
+        assert!(h2.can_redo(), "the failed redo step is still there");
     }
 }

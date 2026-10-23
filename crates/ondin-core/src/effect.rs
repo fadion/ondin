@@ -42,8 +42,8 @@ pub const BLUR_CUTOFF: f64 = 3.0;
 /// The largest blur radius an effect may carry — a shadow's or a layer blur's.
 ///
 /// The CPU backend allocates padding proportional to [`reach`], so an absurd
-/// radius is an enormous buffer. `Document::apply` refuses past it and the SVG
-/// importer clamps to it.
+/// radius is an enormous buffer. `Document::apply` refuses past it outside a
+/// history step, and the loader and the SVG importer clamp to it.
 pub const MAX_BLUR: f64 = 1_000.0;
 
 /// Whether no blur in `effect` is past [`MAX_BLUR`].
@@ -53,6 +53,22 @@ pub fn blur_within_cap(effect: &Effect) -> bool {
         EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => ok(s.blur),
         EffectKind::LayerBlur { radius } => ok(*radius),
         EffectKind::Filters(_) => true,
+    }
+}
+
+/// Lowers every blur in `effect` past [`MAX_BLUR`] to it: what the loader does
+/// with a file written before the cap or by another tool, so a loaded document
+/// never holds a radius `Document::apply` refuses.
+pub(crate) fn clamp_blur(effect: &mut Effect) {
+    let clamp = |r: &mut f64| {
+        if *r > MAX_BLUR {
+            *r = MAX_BLUR;
+        }
+    };
+    match &mut effect.kind {
+        EffectKind::DropShadow(s) | EffectKind::InnerShadow(s) => clamp(&mut s.blur),
+        EffectKind::LayerBlur { radius } => clamp(radius),
+        EffectKind::Filters(_) => {}
     }
 }
 

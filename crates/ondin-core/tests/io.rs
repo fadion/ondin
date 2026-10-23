@@ -4044,3 +4044,74 @@ fn every_caller_of_into_entry_decided_about_linked_pictures() {
          loader) or refuses one (the clipboard), per §15 D819 and D852, and list it here"
     );
 }
+
+/// A file holding a blur past `MAX_BLUR`, on a layer and in an effects style,
+/// loads clamped to the cap, so deleting the layer undoes and re-inserting it
+/// (a paste's door) is taken.
+/// flip: `clamp_blur` in the node DTO's conversion removed → the radius assertion fails.
+#[test]
+fn a_blur_past_the_cap_loads_at_the_cap_and_its_delete_undoes() {
+    use ondin_core::style::{Style, StyleValue};
+    let cap = ondin_core::effect::MAX_BLUR;
+    let mut ids = IdSource::new(0xB1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let r = ids.mint();
+    let s = ids.mint_style();
+    let blur = |radius| keyed_by_position([Effect::new(EffectKind::LayerBlur { radius })]);
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: r,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetEffects {
+            id: r,
+            effects: blur(777.0),
+        },
+        Operation::AddStyle {
+            style: Style {
+                id: s,
+                name: "soft".into(),
+                value: StyleValue::Effects(blur(777.0)),
+                origin: None,
+                forked: None,
+            },
+        },
+    ]))
+    .unwrap();
+    let json = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    assert_eq!(
+        json.matches("777.0").count(),
+        2,
+        "both radii are in the file"
+    );
+    let mut doc = io::load(json.replace("777.0", "5000.0").as_bytes()).expect("it loads");
+
+    let radius = |effects: &[ondin_core::Keyed<Effect>]| match effects[0].value.kind {
+        EffectKind::LayerBlur { radius } => radius,
+        _ => unreachable!(),
+    };
+    assert_eq!(radius(doc.get(r).unwrap().effects()), cap, "the layer's");
+    let StyleValue::Effects(v) = &doc.styles().get(s).unwrap().value else {
+        unreachable!()
+    };
+    assert_eq!(radius(v), cap, "the style's");
+
+    let delete = Transaction(vec![Operation::DeleteNode { id: r }]);
+    let mut history = History::new();
+    history.commit(&mut doc, delete.clone()).unwrap();
+    history.undo(&mut doc).expect("the delete undoes");
+    assert!(doc.contains(r));
+
+    let inverse = doc.apply(&delete).unwrap().inverse;
+    doc.apply(&inverse)
+        .expect("re-inserted outside a history step");
+    assert!(doc.contains(r));
+}

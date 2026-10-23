@@ -473,7 +473,14 @@ impl NodeDto {
                 .into_iter()
                 .filter(|k| crate::document::export_spec_is_usable(k))
                 .collect(),
-            effects: self.effects,
+            effects: self
+                .effects
+                .into_iter()
+                .map(|mut k| {
+                    crate::effect::clamp_blur(&mut k.value);
+                    k
+                })
+                .collect(),
             grids: self.grids,
             insets: self.insets,
             display: self.display,
@@ -713,9 +720,15 @@ impl DocumentDto {
         // list differs from its style's loads as written; the next
         // `style::settle` puts it back unless that edit wrote the slot.
         let mut styles = Vec::with_capacity(self.styles.len());
-        for s in self.styles {
+        for mut s in self.styles {
             if styles.iter().any(|t: &crate::style::Style| t.id == s.id) {
                 return Err(IoError::Integrity(format!("duplicate style id {:?}", s.id)));
+            }
+            // Clamped as a layer's are, or `style::settle` could never apply it.
+            if let crate::style::StyleValue::Effects(v) = &mut s.value {
+                for k in v.iter_mut() {
+                    crate::effect::clamp_blur(&mut k.value);
+                }
             }
             styles.push(s);
         }

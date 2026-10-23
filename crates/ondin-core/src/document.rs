@@ -894,7 +894,7 @@ impl Document {
 
     /// [`Self::apply`] for a **history step** — an undo or a redo putting back
     /// values this document held before — with the layout operations' CSS
-    /// validity check stood down (§15 D937).
+    /// validity check and the blur cap stood down.
     ///
     /// A file may carry a layout value CSS refuses, which the loader keeps as
     /// written. An edit replaces it, and that edit's inverse writes the refused
@@ -1769,7 +1769,8 @@ impl Document {
             {
                 return Err(OpError::NonFinite);
             }
-            if !n.effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
+            // Not for a history step, as at `op_set_effects`.
+            if !self.restoring && !n.effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
                 return Err(OpError::BlurTooLarge);
             }
         }
@@ -2248,7 +2249,10 @@ impl Document {
         if !effects.iter().all(|e| effect_is_finite(e)) {
             return Err(OpError::NonFinite);
         }
-        if !effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
+        // The loader clamps, so a history step should never carry a radius past
+        // the cap; standing the check down for one anyway keeps an undo from
+        // failing over a value the document already held.
+        if !self.restoring && !effects.iter().all(|e| crate::effect::blur_within_cap(e)) {
             return Err(OpError::BlurTooLarge);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -3427,8 +3431,9 @@ mod tests {
     }
 
     /// Both effect doors refuse a blur past `effect::MAX_BLUR` and take one at
-    /// it. Flip: either `blur_within_cap` check removed → that door's `Err`
-    /// assertion fails.
+    /// it, and take any in a history step. Flip: either `blur_within_cap` check
+    /// removed → that door's `Err` assertion fails; its `!self.restoring` removed
+    /// → that door's history-step `expect` fails.
     #[test]
     fn a_blur_past_the_cap_is_refused_at_both_doors() {
         let blur = |radius| {
@@ -3465,10 +3470,32 @@ mod tests {
         let mut n = group(h, None, vec![]);
         n.effects = blur(1e30);
         assert!(matches!(
-            insert(&mut doc, vec![n], ab),
+            insert(&mut doc, vec![n.clone()], ab),
             Err(OpError::BlurTooLarge)
         ));
         assert!(!doc.contains(h));
+
+        // A history step puts back what the document held, so neither door
+        // refuses one.
+        let restore = |doc: &mut Document, op| doc.apply_restoring(&Transaction(vec![op]));
+        restore(
+            &mut doc,
+            Operation::SetEffects {
+                id: g,
+                effects: blur(cap + 1.0),
+            },
+        )
+        .expect("SetEffects in a history step");
+        restore(
+            &mut doc,
+            Operation::InsertSubtree {
+                parent: ab,
+                index: 0,
+                nodes: vec![n],
+            },
+        )
+        .expect("InsertSubtree in a history step");
+        assert!(doc.contains(h));
     }
 
     /// The pivot arm's twin for **paint** (§15 D831): `op_set_fills` and

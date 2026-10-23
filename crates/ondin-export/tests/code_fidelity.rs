@@ -1238,8 +1238,12 @@ fn text_decorations_match_the_canvas() {
 /// Decorations' limit, over text's: Chrome snaps a band to whole device pixels
 /// where the canvas antialiases its fractional thickness and position, so a
 /// 1.3px underline is a crisp 1px one on the page. The matching fixture peaks at
-/// 9.7.
-const MAX_DECORATION_CELL_ERROR: f64 = 12.0;
+/// 9.7, and at 14.1 under macOS Chrome's glyph smoothing (see `MAX_TEXT_CELL_ERROR`).
+const MAX_DECORATION_CELL_ERROR: f64 = if cfg!(target_os = "macos") {
+    22.0
+} else {
+    12.0
+};
 
 /// A run's baseline shift moves its ink and leaves the lines where they are, a
 /// whole node's shift moves all of it, and case is the canvas's: Title lowercases

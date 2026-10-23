@@ -405,8 +405,8 @@ combinations asserts the two **partition** the space.
 | `Enter` | step **into** the selection, or back out | ✅ `OndinApp::enter_action`: the node tool and image editing toggle out; with one layer selected an instance with children first (§12), then text, picture, path, group/boolean, in `double_click_pick`'s order so key and double-click cannot disagree. On text with no pointer it **selects the whole string**; a group is a *depth*, so `Escape` is the way out |
 | `Escape` | unwind one rung | ✅ |
 
-**The Escape ladder belongs in the cheatsheet.** `OndinApp::escape` is an `else if` chain, so the
-order is the whole content; re-derive it from the code rather than editing this sentence:
+`OndinApp::escape` is an `else if` chain, so the order is the whole content; re-derive it from the
+code rather than editing this sentence:
 
 present mode → a bindable field's menu / `--` list / mode menu → a style card's menu, picker, name
 or edit (`escape_styles`) → an armed eyedropper (`disarm_dropper`: a picker's pick button, else the

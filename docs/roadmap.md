@@ -33,9 +33,7 @@ code before picking an item up — an item's premise can go stale while its ask 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
 (`export.md`, *Code export*).
 
-- **The components still written out as layers** (D1098 (9)):
-  - kit components, under a folder named for the kit;
-  - instances whose root sets a mode.
+- **Kit components, still written out as layers**, under a folder named for the kit (D1098 (9)).
 - **Merging a set's variant trees** that match by name path into one tree with conditional
   classes (D1098 (9)). Each variant is its own tree behind a condition now, which is exact but
   long.

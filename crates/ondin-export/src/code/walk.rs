@@ -194,13 +194,8 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
                 && let Some(mode) = inherited.and_then(|m| walk.tokens.mode(m))
             {
                 if el.instance.is_some() {
-                    // A component use writes no attributes of its own, so the mode
-                    // goes on an element around it that draws no box.
-                    let mut around = Element::new("div", walk.classes.mint("mode", "mode"));
-                    around.set("display", "contents");
-                    around.attrs.push(("data-mode", mode.to_string()));
-                    around.children.push(Child::Element(Box::new(el)));
-                    el = around;
+                    let mode = mode.to_string();
+                    el = walk.with_mode(el, mode);
                 } else {
                     el.attrs.push(("data-mode", mode.to_string()));
                 }
@@ -308,7 +303,8 @@ impl Walk<'_> {
     /// Why the instance at `root` cannot be a use of its main's component, or
     /// `None` when it can: when every value it differs from its main in is a
     /// property's, up the chain of copies to the main, apart from its root's
-    /// size, which its use sets.
+    /// size, which its use sets, and its root's mode, which an element around the
+    /// use sets.
     fn why_inline(&self, root: NodeId) -> Option<String> {
         if let Some(why) = self.inline_memo.borrow().get(&root) {
             return why.clone();
@@ -325,10 +321,16 @@ impl Walk<'_> {
             return Some(why);
         }
         const OVERRIDES: &str = "inlined because of overrides; make it a property to keep the link";
+        // The root's own mode goes on an element around the use, which a mode
+        // the component's root sets itself would override.
+        let main_mode = doc.get(main)?.mode();
+        if main_mode.is_some() && doc.get(root)?.mode() != main_mode {
+            return Some(OVERRIDES.into());
+        }
         let mut at = root;
         loop {
             let n = doc.get(at)?;
-            if n.swap().is_some() || n.mode() != doc.get(main)?.mode() {
+            if n.swap().is_some() {
                 return Some(OVERRIDES.into());
             }
             let drift = reset::drift(doc, at);
@@ -358,7 +360,7 @@ impl Walk<'_> {
                         }
                         O::SetText { .. } => props.contains(&(id, PropKind::Text)),
                         O::SetSwap { .. } => props.contains(&(id, PropKind::Swap)),
-                        O::SetGeometry { .. } => id == at,
+                        O::SetGeometry { .. } | O::SetMode { .. } => id == at,
                         _ => false,
                     };
                     if !allowed {
@@ -722,7 +724,27 @@ impl Walk<'_> {
             args,
             slot,
         });
-        el
+        // `why_inline` let a root's own mode through only where the main sets none.
+        let own = node
+            .mode()
+            .filter(|m| doc.get(main).and_then(Node::mode) != Some(*m));
+        match own.and_then(|m| self.tokens.mode(m)) {
+            Some(mode) => {
+                let mode = mode.to_string();
+                self.with_mode(el, mode)
+            }
+            None => el,
+        }
+    }
+
+    /// `used` inside an element that draws no box and sets `mode`: a component
+    /// use writes no attributes of its own.
+    fn with_mode(&mut self, used: Element, mode: String) -> Element {
+        let mut around = Element::new("div", self.classes.mint("mode", "mode"));
+        around.set("display", "contents");
+        around.attrs.push(("data-mode", mode));
+        around.children.push(Child::Element(Box::new(used)));
+        around
     }
 
     /// The component written from `main`, or from the set it is a variant of,

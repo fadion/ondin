@@ -323,6 +323,62 @@ fn a_use_keeps_the_mode_its_ancestors_set() {
     assert!(css.contains(".mode {\n  display: contents;\n}"), "{css}");
 }
 
+/// An instance whose root sets a mode is a use inside an element carrying it,
+/// while its main sets none; once the main sets one of its own, which the
+/// component's root carries, the instance is its layers.
+/// flip: `why_inline` refusing any root mode unlike its main's → fails at "a use".
+#[test]
+fn an_instance_setting_a_mode_is_a_use_inside_it() {
+    use ondin_core::variable::Mode;
+    let mut f = fixture();
+    let (light, dark) = (f.ids.mint_mode(), f.ids.mint_mode());
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: light,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: dark,
+                    name: "Dark".into(),
+                },
+                index: 1,
+                cells: vec![],
+            },
+            Operation::SetMode {
+                id: f.clean,
+                mode: Some(dark),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(f.doc.get(f.clean).unwrap().mode(), Some(dark));
+    let res = Resolved::rebuild(&f.doc);
+    let out = react_of(&f.doc, &res, &[f.clean]);
+    let app = file(&out, "App.tsx");
+    assert!(
+        app.contains("<div className={styles.mode} data-mode=\"dark\">\n        <Card "),
+        "a use: {app}"
+    );
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.main[0],
+            mode: Some(light),
+        }]))
+        .unwrap();
+    assert_eq!(f.doc.get(f.clean).unwrap().mode(), Some(dark), "still dark");
+    let res = Resolved::rebuild(&f.doc);
+    let out = react_of(&f.doc, &res, &[f.clean]);
+    assert!(!file(&out, "App.tsx").contains("<Card "));
+    assert_eq!(out.inlined.len(), 1, "{:?}", out.inlined);
+}
+
 /// In Vue a child component's root also wears its user's scope, so no element of
 /// the user may share the child root's class: the inlined card, met first, would
 /// otherwise be `card` and its rule would reach the component's root.

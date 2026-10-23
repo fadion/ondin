@@ -15,9 +15,13 @@ use crate::tools::Tool;
 use eframe::egui;
 use ondin_core::{BoolOp, build};
 
-/// The card's outer width and its greatest height.
+/// The card's outer width and its greatest height, both shrunk to the window
+/// less [`MARGIN`] a side.
 const W: f32 = 960.0;
 const MAX_H: f32 = 640.0;
+const MARGIN: f32 = 24.0;
+/// The narrowest a column gets before the sheet deals into one column fewer.
+const MIN_COLUMN_W: f32 = 220.0;
 const ROW_H: f32 = 24.0;
 const TITLE_H: f32 = 26.0;
 /// The air under a section.
@@ -108,10 +112,15 @@ fn keys_of(accel: &str) -> Vec<String> {
 }
 
 fn items_section(title: &'static str, items: &[Item]) -> Section {
-    Section {
-        title,
-        rows: items.iter().filter_map(|i| item_row(*i)).collect(),
-    }
+    let rows: Vec<Row> = items.iter().filter_map(|i| item_row(*i)).collect();
+    // An item that lost its chord would drop off the sheet unseen; the chord
+    // test builds every section, so this is where it goes red.
+    debug_assert_eq!(
+        rows.len(),
+        items.len(),
+        "{title}: an item on the sheet has no chord"
+    );
+    Section { title, rows }
 }
 
 /// Every section, in `docs/shortcuts.md`'s order, with `lead` moved first.
@@ -281,7 +290,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 hand_row("Open the selection", &["Enter"]),
                 hand_row("Rename the selection", &["F2", "Ctrl+R"]),
                 hand_row("Duplicate the selection", &["Ctrl+D"]),
-                hand_row("Delete the selection", &["Delete"]),
+                hand_row("Delete the selection", &["Delete", "Backspace"]),
                 hand_row("Clear the selection", &["Esc"]),
                 hand_row("New file", &["Ctrl+N"]),
             ],
@@ -392,8 +401,12 @@ impl OndinApp {
                 ..egui::Margin::same(crate::settings::PAD as i8)
             })
         });
+        let screen = ctx.content_rect();
+        let pad = crate::settings::PAD;
+        let inner = W.min(screen.width() - MARGIN * 2.0) - pad * 2.0;
+        let card_h = MAX_H.min(screen.height() - MARGIN * 2.0);
+        let n = column_count(inner);
         let modal = card.show(ctx, |ui| {
-            let inner = W - crate::settings::PAD * 2.0;
             ui.set_width(inner);
             ui.horizontal(|ui| {
                 ui.label(
@@ -411,7 +424,8 @@ impl OndinApp {
                         &mut sheet.filter,
                         egui::Id::new("cheatsheet-filter"),
                         "Filter by name or key",
-                        FILTER_W,
+                        // What the title and ✕ leave of a narrow card.
+                        FILTER_W.min(inner - 170.0),
                     );
                     // Focused once, on open; a click elsewhere on the sheet may take it.
                     if opening {
@@ -420,7 +434,11 @@ impl OndinApp {
                 });
             });
             ui.add_space(14.0);
-            let body_h = MAX_H - crate::settings::PAD - 28.0 - 14.0 - FOOTER_H;
+            // What the card has left once its top margin, the header as drawn,
+            // the footer, the item spacing either side of the body and the
+            // frame's two hairlines are paid.
+            let used = ui.min_rect().height() + ui.spacing().item_spacing.y * 2.0;
+            let body_h = (card_h - pad - used - FOOTER_H - 2.0).max(ROW_H);
             egui::ScrollArea::vertical()
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .max_height(body_h)
@@ -437,8 +455,8 @@ impl OndinApp {
                         );
                         return;
                     }
-                    let columns = split_columns(&all, lead == Lead::Library);
-                    let col_w = (inner - COLUMN_GAP * 2.0) / 3.0;
+                    let columns = split_columns(&all, lead == Lead::Library, n);
+                    let col_w = (inner - COLUMN_GAP * (n - 1) as f32) / n as f32;
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = COLUMN_GAP;
                         for column in columns {
@@ -467,19 +485,28 @@ impl OndinApp {
     }
 }
 
-/// The sections dealt into three columns in order, each column filled to about a
-/// third of the rows before the next starts, so the sheet reads down and across
-/// as CSS columns do. A section is never split. `divide` marks the first section
-/// after the library's, which gets the *In a file* divider.
-fn split_columns(all: &[Section], divide: bool) -> Vec<Vec<(bool, usize)>> {
+/// How many columns a body `inner` wide deals into: three on a full-width card,
+/// fewer as the window narrows, so no column drops under [`MIN_COLUMN_W`].
+fn column_count(inner: f32) -> usize {
+    (1..=3)
+        .rev()
+        .find(|&n| inner >= n as f32 * MIN_COLUMN_W + (n - 1) as f32 * COLUMN_GAP)
+        .unwrap_or(1)
+}
+
+/// The sections dealt into `n` columns in order, each column filled to about
+/// its share of the rows before the next starts, so the sheet reads down and
+/// across as CSS columns do. A section is never split. `divide` marks the first
+/// section after the library's, which gets the *In a file* divider.
+fn split_columns(all: &[Section], divide: bool, n: usize) -> Vec<Vec<(bool, usize)>> {
     let height = |s: &Section| s.rows.len() as f32 * ROW_H + TITLE_H + SECTION_GAP;
     let total: f32 = all.iter().map(height).sum();
-    let target = total / 3.0;
+    let target = total / n as f32;
     let mut out: Vec<Vec<(bool, usize)>> = vec![Vec::new()];
     let mut filled = 0.0;
     for (i, s) in all.iter().enumerate() {
         let h = height(s);
-        let last = out.len() == 3;
+        let last = out.len() == n;
         if !last && !out.last().is_some_and(Vec::is_empty) && filled + h / 2.0 > target {
             out.push(Vec::new());
             filled = 0.0;
@@ -709,17 +736,23 @@ fn footer(ui: &mut egui::Ui) {
     ] {
         job.append(text, 0.0, fmt.clone());
     }
+    let esc = p.layout_no_wrap("Esc close".into(), font, theme::text::DIM);
+    // On a narrow card the hints give way to "Esc close", never run under it.
+    job.wrap = egui::text::TextWrapping {
+        max_width: (rect.width() - esc.size().x - 16.0).max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
     let g = p.layout_job(job);
     p.galley(
         egui::pos2(rect.left(), y - g.size().y / 2.0),
         g,
         theme::text::DIM,
     );
-    p.text(
-        egui::pos2(rect.right(), y),
-        egui::Align2::RIGHT_CENTER,
-        "Esc close",
-        font,
+    p.galley(
+        egui::pos2(rect.right() - esc.size().x, y - esc.size().y / 2.0),
+        esc,
         theme::text::DIM,
     );
 }
@@ -728,9 +761,6 @@ fn footer(ui: &mut egui::Ui) {
 mod tests {
     use super::*;
 
-    /// Every registry chord the sheet shows resolves to its row's own action —
-    /// the registry's spelling and `input::resolve`'s binding agree.
-    ///
     /// Every registry chord the sheet shows resolves to its row's action and to
     /// nothing else — walking the sheet's own sections, so a row added there is
     /// driven too, and each spelling as `egui_winit` delivers it (`resolve_chord`).
@@ -738,6 +768,8 @@ mod tests {
     /// flip: spelling `Item::ZoomOut`'s accel as `Ctrl+0` → fails at "Zoom out".
     /// flip: spelling `Item::Boolean(Exclude)`'s accel as `Ctrl+Alt+E` → fails at
     /// "Exclude" (that chord is *Export all*).
+    /// flip: `item_row` dropping `Item::Flip(Axis::Y)` → fails at
+    /// `items_section`'s assertion, which a lost accel trips the same way.
     #[test]
     fn every_sheet_chord_resolves_to_its_rows_action() {
         let mut checked = 0;
@@ -774,6 +806,64 @@ mod tests {
         assert!(checked > 90, "only {checked} chords were driven");
     }
 
+    /// The other way round: every action any key and modifier set resolves to,
+    /// in either mode, is on the sheet, or one the design keeps off it.
+    ///
+    /// flip: dropping `Item::Delete` from the Edit section → fails at `Delete`.
+    #[test]
+    fn every_bound_action_is_on_the_sheet() {
+        use crate::input::Action as A;
+        let shown: Vec<A> = sections(Lead::None)
+            .into_iter()
+            .flat_map(|s| s.rows)
+            .filter_map(|r| r.item?.action())
+            .collect();
+        let kept_off = |a: &A| {
+            matches!(
+                a,
+                A::Nudge(_)
+                    | A::SizeStep(_)
+                    | A::StepPoint(_)
+                    | A::Escape
+                    | A::Enter
+                    | A::PasteRelease
+                    | A::OpacityDigit(_)
+            )
+        };
+        let m = |ctrl, alt, shift| egui::Modifiers {
+            alt,
+            ctrl,
+            shift,
+            mac_cmd: false,
+            command: ctrl,
+        };
+        let mut missing = Vec::new();
+        for text_mode in [false, true] {
+            for &key in egui::Key::ALL {
+                for (ctrl, alt, shift) in [
+                    (false, false, false),
+                    (true, false, false),
+                    (false, true, false),
+                    (false, false, true),
+                    (true, true, false),
+                    (true, false, true),
+                    (false, true, true),
+                    (true, true, true),
+                ] {
+                    for a in resolve_press(key, m(ctrl, alt, shift), text_mode) {
+                        if !kept_off(&a) && !shown.contains(&a) && !missing.contains(&a) {
+                            missing.push(a);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "bound but not on the sheet: {missing:?}"
+        );
+    }
+
     /// Press `spelling` and let go, through `input::resolve`, as `egui_winit`
     /// delivers it: a command chord on C, X or V arrives as `Event::Copy` / `Cut` /
     /// `Paste` instead of a key press, whatever Alt and Shift are doing, and its
@@ -803,7 +893,15 @@ mod tests {
                 }
             }
         }
-        let key = key.expect("a chord has a key");
+        resolve_press(key.expect("a chord has a key"), modifiers, text_mode)
+    }
+
+    /// Press `key` with `modifiers` held and let go, as `resolve_chord` does.
+    fn resolve_press(
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+        text_mode: bool,
+    ) -> Vec<crate::input::Action> {
         let event = |pressed| egui::Event::Key {
             key,
             physical_key: None,
@@ -913,6 +1011,143 @@ mod tests {
         assert!(row_matches(&row, &["sel".into()]));
         assert!(row_matches(&row, &["ctrl".into()]));
         assert!(!row_matches(&row, &["alt".into()]));
+    }
+
+    /// One whole app frame at `size`.
+    fn app_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        size: egui::Vec2,
+        events: Vec<egui::Event>,
+    ) {
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut frame));
+    }
+
+    fn card_rect(ctx: &egui::Context) -> egui::Rect {
+        ctx.memory(|m| m.area_rect(egui::Id::new("cheatsheet")))
+            .expect("the card was drawn")
+    }
+
+    /// **The card fits the window**: full width on a large one, narrowed with
+    /// fewer columns on a small one, never past an edge.
+    /// flip: `cheatsheet_ui` sizing the card to `W` whatever the window → fails
+    /// at 800×560.
+    #[test]
+    fn the_card_fits_the_window() {
+        for (w, h, columns) in [(1320.0, 820.0, 3), (800.0, 560.0, 2), (520.0, 420.0, 1)] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let mut app = OndinApp::headless(&ctx);
+            let size = egui::vec2(w, h);
+            app_frame(&ctx, &mut app, size, Vec::new());
+            app.open_cheatsheet(Opened::Editor);
+            for _ in 0..4 {
+                app_frame(&ctx, &mut app, size, Vec::new());
+            }
+            let card = card_rect(&ctx);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+            assert!(
+                screen.shrink(MARGIN - 1.0).contains_rect(card),
+                "{w}×{h}: the card {card:?} leaves the window"
+            );
+            if w > W + MARGIN * 2.0 {
+                // The frame's hairline sits outside the width it was given.
+                assert!(
+                    (card.width() - W).abs() <= 2.0,
+                    "{w}×{h}: full width, got {}",
+                    card.width()
+                );
+            }
+            let inner = card.width() - 2.0 - crate::settings::PAD * 2.0;
+            assert_eq!(column_count(inner), columns, "{w}×{h}: columns");
+        }
+    }
+
+    /// **The sheet holds the keyboard over a text session**: a click on its body
+    /// takes the focus off the filter, and the typing, Backspace and Escape that
+    /// follow still never reach the text behind the backdrop.
+    /// flip: `text_mode_input` reading events under a modal → fails at the text.
+    #[test]
+    fn the_sheet_sends_no_keys_to_the_text_behind_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let id = app.session.ids.mint();
+        let parent = app.session.doc.root();
+        let parts = crate::fonts::FontService::default_text_parts();
+        app.session
+            .try_commit(ondin_core::Transaction(vec![
+                ondin_core::Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind: ondin_core::NodeKind::Text {
+                        content: "hello".into(),
+                        style: Box::new(parts.style),
+                        spans: parts.spans,
+                        para_spans: parts.para_spans,
+                        paragraph: parts.paragraph,
+                        block: parts.block,
+                        sizing: parts.sizing,
+                        on_path: None,
+                        on_path_flip: false,
+                        on_path_offset: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]))
+            .expect("the fixture's text node");
+        let size = egui::vec2(1320.0, 820.0);
+        app_frame(&ctx, &mut app, size, Vec::new());
+        app.begin_edit_text(Some(id), None);
+        app.open_cheatsheet(Opened::Editor);
+        for _ in 0..3 {
+            app_frame(&ctx, &mut app, size, Vec::new());
+        }
+        let at = egui::pos2(card_rect(&ctx).center().x, card_rect(&ctx).top() + 60.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        app_frame(&ctx, &mut app, size, vec![egui::Event::PointerMoved(at)]);
+        app_frame(&ctx, &mut app, size, vec![button(true)]);
+        app_frame(&ctx, &mut app, size, vec![button(false)]);
+        assert!(
+            app.cheatsheet.is_some(),
+            "fixture: the click kept the sheet"
+        );
+        assert_eq!(
+            ctx.memory(|m| m.focused()),
+            None,
+            "fixture: the filter lost focus"
+        );
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        app_frame(&ctx, &mut app, size, vec![egui::Event::Text("Z".into())]);
+        app_frame(&ctx, &mut app, size, vec![key(egui::Key::Backspace)]);
+        let content = |app: &OndinApp| app.text.as_ref().map(|s| s.editor.content().to_string());
+        assert_eq!(content(&app).as_deref(), Some("hello"), "the text");
+        app_frame(&ctx, &mut app, size, vec![key(egui::Key::Escape)]);
+        assert!(app.cheatsheet.is_none(), "Escape closed the sheet");
+        assert_eq!(
+            content(&app).as_deref(),
+            Some("hello"),
+            "and only the sheet"
+        );
     }
 
     /// Opened from the library, the library's section leads.

@@ -166,16 +166,19 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 - **Doors.** `Ctrl+Shift+/` (and `Key::Questionmark`) in the editor (`discovery_chord`, both modes)
   and in the library (`dashboard_keys`, through `input::cheatsheet_chord`), and the palette's
   *Keyboard shortcuts* row. Opening it closes the palette and any context menu.
-- **The card.** A `settings::card_modal`, 960 wide: title, a filter field and ✕; the body scrolls
-  and the card is at most 640 tall. It counts in `modal_is_up` and `library_keys_are_free`. It
+- **The card.** A `settings::card_modal`, 960 wide and at most 640 tall, each shrunk to the window
+  less 24 a side: title, a filter field and ✕; the body scrolls. It counts in `modal_is_up` and
+  `library_keys_are_free`, and while it is up a text session under it reads no keys, even once a
+  click on the card has taken the filter's focus (`text_mode_input`). It
   closes on Escape, ✕, the backdrop, or the chord again — read in `cheatsheet_ui` itself, since
   `resolve` does not run under a modal, and not on the frame that opened it (`just_opened`).
 - **Rows** are the registry's items with an accel: label and spelling from `Item::spec` (*Hide /
   Show*, *Lock / Unlock* and *Paste* name the verb rather than one state), alternatives from
   `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs.
 - **Sections** (`sections`): Tools, Zoom, Edit, Structure, Arrange, Layer, View, Components and
-  kits, File, Text editing, Mouse, Library, dealt in order into three columns, each filled to about a
-  third; a section is never split. Opened from the library, its section leads, followed by an *In a
+  kits, File, Text editing, Mouse, Library, dealt in order into three columns, each filled to about
+  its share; a section is never split. A narrow window deals into two or one, so no column is under
+  220 wide (`column_count`). Opened from the library, its section leads, followed by an *In a
   file* divider; opened in a text session, the text keys lead.
 - **Filter and hold.** Every filter word must start a label word or a key name. Holding modifiers
   with an empty filter dims every row whose chord does not use exactly those modifiers — only once
@@ -189,7 +192,12 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   `input::resolve` as `egui_winit` delivers it: a command chord on C, X or V arrives as a
   clipboard event, and the key's release follows on the next frame. Each must resolve to its
   row's `Item::action` and nothing else; the one exemption is `PasteRelease` beside a paste, the
-  image-clipboard witness `dispatch` stands down. A sheet row with no `Item::action` fails it.
+  image-clipboard witness `dispatch` stands down. A sheet row with no `Item::action` fails it, and
+  an item `sections` names that has lost its chord trips `items_section`'s assertion.
+  `every_bound_action_is_on_the_sheet` runs the other way: every key under every modifier set, in
+  both modes, must resolve to an action on the sheet or to one kept off it (nudge, size and point
+  steps, Escape, Enter, `PasteRelease`, opacity digits). It checks actions, not spellings, so a
+  second key for an action already shown is the hand list's to carry (`Item::alt_accel`).
 
 ## Present mode
 

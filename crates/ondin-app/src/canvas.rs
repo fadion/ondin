@@ -5394,9 +5394,11 @@ impl OndinApp {
             self.drag = Drag::None;
         }
 
-        // Nothing typed into a panel reaches the text. `egui_wants_keyboard_input`
-        // over-approximates (any focus), as `input::resolve` does.
-        let events = if ui.ctx().egui_wants_keyboard_input() {
+        // Nothing typed into a panel or under a modal reaches the text.
+        // `egui_wants_keyboard_input` over-approximates (any focus), as
+        // `input::resolve` does; a modal holds the keyboard even when a click on
+        // its body has taken the focus away.
+        let events = if ui.ctx().egui_wants_keyboard_input() || self.modal_is_up() {
             Vec::new()
         } else {
             ui.input(|i| i.events.clone())

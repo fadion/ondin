@@ -1060,6 +1060,7 @@ impl Item {
             Item::ZoomSelection => Some("Ctrl+2"),
             Item::ZoomReset => Some("Shift+0"),
             Item::Palette => Some("Ctrl+/"),
+            Item::Delete => Some("Backspace"),
             _ => None,
         }
     }

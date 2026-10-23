@@ -859,7 +859,7 @@ impl OndinApp {
             // The eyedropper's door into this one slot (the design's P1).
             let picking = self.picker.as_ref().is_some_and(|p| p.picking);
             let pick = icon_button(ui, icon::EYEDROPPER, 20.0, 14.0, picking, true)
-                .on_hover_text("Pick a colour from the canvas");
+                .on_hover_text("Pick a colour from anywhere in the window");
             if pick.clicked()
                 && let Some(p) = &mut self.picker
             {
@@ -1304,6 +1304,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A pick or a hex into a gradient writes the picker's selected stop, at that
+    /// stop's own alpha, and leaves the other stops alone.
+    /// flip: `write_slot_rgb`'s index forced to 0 → fails at stop 0.
+    #[test]
+    fn a_colour_written_into_a_gradient_lands_on_the_selected_stop() {
+        use ondin_core::peniko::{Gradient, color::DynamicColor};
+        use ondin_core::{Document, Fill, IdSource, NodeKind, Operation, Transaction};
+        let ctx = egui::Context::default();
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x6D1);
+        let root = ids.mint();
+        let a = ids.mint();
+        let mut doc = Document::new(root);
+        let (red, green) = (
+            Color::from_rgba8(255, 0, 0, 255),
+            Color::from_rgba8(0, 255, 0, 128),
+        );
+        let ramp = Gradient::new_linear((0.0, 0.0), (100.0, 0.0))
+            .with_stops([(0.0, red), (1.0, green)].as_slice());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: a,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: a,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Gradient(ramp.into()).into(),
+                    visible: true,
+                }]),
+            },
+        ]))
+        .expect("build");
+        app.session.adopt_document(doc, None);
+        let mut picker = Picker::new(a, PaintSlot::Fill(0), egui::pos2(400.0, 300.0));
+        picker.stop = 1;
+        app.picker = Some(picker);
+        app.write_slot_rgb(a, PaintSlot::Fill(0), Color::from_rgba8(0, 0, 255, 255));
+        let fill = &app.session.doc.get(a).expect("a").paint().fills[0];
+        let Some(Brush::Gradient(g)) = fill.brush.literal() else {
+            panic!("still a gradient")
+        };
+        let rgba = |c: &DynamicColor| {
+            let c: Color = c.to_alpha_color();
+            c.to_rgba8().to_u8_array()
+        };
+        let stops: Vec<[u8; 4]> = g.gradient.stops.iter().map(|s| rgba(&s.color)).collect();
+        assert_eq!(stops[0], [255, 0, 0, 255], "stop 0 untouched");
+        assert_eq!(stops[1], [0, 0, 255, 128], "stop 1 blue, at its own alpha");
     }
 }
 

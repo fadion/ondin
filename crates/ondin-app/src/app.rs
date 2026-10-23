@@ -4489,7 +4489,10 @@ impl OndinApp {
         self.library.reload_projects();
         // Once per visit, not per refresh: the sweep is a `read_dir` over the cover cache.
         self.covers.sweep(&self.library.entries);
-        // Editor chrome that would otherwise float over the dashboard.
+        // Editor chrome that would otherwise float over the dashboard. An armed
+        // eyedropper first: its input gate runs on every screen, and the library
+        // has no canvas and no Escape to disarm it from.
+        self.disarm_dropper();
         self.picker = None;
         self.context_menu = None;
         self.open_menu = TopMenu::None;

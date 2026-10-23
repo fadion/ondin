@@ -167,13 +167,11 @@ impl OndinApp {
         let (mut down, latest) = ctx.input(|i| (i.pointer.any_down(), i.pointer.latest_pos()));
         let mut hidden = self.dropper_pointer;
         // Armed with the pointer resting on a panel — `I`, or the rail's own
-        // button: hide it now rather than at its first move.
-        if hidden.is_none()
-            && !down
-            && let Some(p) = latest.filter(|p| !live(*p))
-        {
-            hidden = Some(p);
-            raw.events.insert(0, egui::Event::PointerGone);
+        // button: hide it now rather than at its first move. Its `PointerGone` goes
+        // in after the pass below, which would read it as the pointer leaving.
+        let resting = hidden.is_none() && !down && latest.is_some_and(|p| !live(p));
+        if resting {
+            hidden = latest;
         }
         let mut at = hidden.or(latest);
         raw.events.retain_mut(|e| match *e {
@@ -213,6 +211,9 @@ impl OndinApp {
             }
             _ => true,
         });
+        if resting {
+            raw.events.insert(0, egui::Event::PointerGone);
+        }
         self.dropper_pointer = hidden;
         self.dropper_press = press;
         match released {
@@ -369,6 +370,7 @@ impl OndinApp {
         // Ask for frames until the capture lands, but not forever: a surface
         // format egui cannot capture never answers.
         let mut busy = matches!(self.dropper_frozen, Frozen::Asked(at, _) if pass < at + 30);
+        self.reaim_pick(&camera);
         // The pick first: it is the sample that must land, and the hover is
         // usually the same pixel.
         let want = self
@@ -441,6 +443,38 @@ impl OndinApp {
             ctx.set_cursor_image(self.cursors.image(&ctx, crate::cursor::Bitmap::Eyedropper));
         }
         busy
+    }
+
+    /// Re-aim a canvas pick made under another camera or canvas size at the
+    /// pixel now showing the world point it was clicked on, or drop it when that
+    /// point has left the canvas. A pick waiting behind a hover readback is
+    /// copied a frame late, off that frame's render, so a pan or zoom in between
+    /// would otherwise read whatever now sits under the old screen spot.
+    fn reaim_pick(&mut self, camera: &crate::view::Camera) {
+        let Some(PendingPick {
+            at: PickAt::Canvas(key),
+            ..
+        }) = &mut self.dropper_pick
+        else {
+            return;
+        };
+        let size = self.canvas_px;
+        if (key.center, key.zoom, key.size) == (camera.center, camera.zoom, size) {
+            return;
+        }
+        let then = crate::view::Camera {
+            center: key.center,
+            zoom: key.zoom,
+        };
+        let at = ondin_core::kurbo::Vec2::new(key.at.0 as f64 + 0.5, key.at.1 as f64 + 0.5);
+        let now = camera.world_to_screen(then.screen_to_world(at, key.size), size);
+        let inside = |v: f64, max: u32| (0.0..max as f64).contains(&v);
+        if !(inside(now.x, size.0) && inside(now.y, size.1)) {
+            self.dropper_pick = None;
+            return;
+        }
+        key.at = (now.x.floor() as u32, now.y.floor() as u32);
+        (key.center, key.zoom, key.size) = (camera.center, camera.zoom, size);
     }
 }
 
@@ -1214,6 +1248,58 @@ mod tests {
         assert_eq!(app.session.revision(), revision, "nothing written");
     }
 
+    /// **Leaving the editor disarms the rail tool**: on the library a click off
+    /// the old canvas reaches egui, and none is kept as a pick.
+    /// flip: `go_to_dashboard` not calling `disarm_dropper` → fails at the events.
+    #[test]
+    fn leaving_the_editor_disarms_the_eyedropper() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        app.picker = None;
+        app.choose_tool(Tool::Hand);
+        app.choose_tool(Tool::Eyedropper);
+        app_frame(&ctx, &mut app, Vec::new(), egui::Modifiers::NONE);
+        assert!(
+            matches!(app.dropper_frozen, Frozen::Asked(..)),
+            "fixture: armed"
+        );
+        app.go_to_dashboard();
+        let events = vec![
+            egui::Event::PointerMoved(ON_LAYERS),
+            button(ON_LAYERS, true),
+            button(ON_LAYERS, false),
+        ];
+        assert_eq!(gate(&ctx, &mut app, events.clone()), events);
+        assert_eq!(app.dropper_pick, None);
+        assert_eq!(app.tool, Tool::Hand, "handed back");
+    }
+
+    /// **Armed with the pointer resting on a panel, the pointer is hidden at
+    /// once**, not at its first move.
+    /// flip: `gate_dropper_input`'s resting-pointer branch removed → fails at the
+    /// events.
+    #[test]
+    fn arming_over_a_panel_hides_the_resting_pointer() {
+        let ctx = egui::Context::default();
+        let mut app = laid_out(&ctx);
+        app.picker = None;
+        let none = egui::Modifiers::NONE;
+        app_frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerMoved(ON_LAYERS)],
+            none,
+        );
+        app_frame(&ctx, &mut app, Vec::new(), none);
+        assert_eq!(app.dropper_pointer, None, "fixture: not armed yet");
+        app.choose_tool(Tool::Eyedropper);
+        assert_eq!(
+            gate(&ctx, &mut app, Vec::new()),
+            vec![egui::Event::PointerGone]
+        );
+        assert_eq!(app.dropper_pointer, Some(ON_LAYERS));
+    }
+
     /// **A pick that stays armed asks for the window again**, since the panels
     /// now show what it wrote.
     /// flip: `land_pick` not resetting `dropper_frozen` → fails at `Asked`.
@@ -1318,5 +1404,63 @@ mod tests {
                 .request_sample(key, doc, res, &camera, Color::WHITE)
         );
         assert_eq!(app.canvas.sample().map(|s| s.center()), Some(Some(BLUE)));
+    }
+
+    /// **A translucent layer picks as drawn**: its colour composited over the
+    /// canvas ground.
+    /// flip: `loupe_pixels`' `over` ignoring alpha → fails at the colour.
+    #[test]
+    fn a_translucent_layer_picks_its_blend_over_the_ground() {
+        let ctx = egui::Context::default();
+        let (mut app, _, b) = app(&ctx);
+        app.session.selection.set_one(b);
+        app.choose_tool(Tool::Eyedropper);
+        click(
+            &ctx,
+            &mut app,
+            egui::pos2(50.0, 50.0),
+            egui::Modifiers::NONE,
+        );
+        let [gr, gg, gb, _] = app
+            .session
+            .preview_canvas_background()
+            .to_rgba8()
+            .to_u8_array();
+        let over = |c: u32, bg: u8| ((c * 102 + bg as u32 * 153 + 127) / 255) as i32;
+        let want = [over(255, gr), over(0, gg), over(0, gb)];
+        let got = top_fill(&app, b).expect("a solid fill");
+        for i in 0..3 {
+            assert!(
+                (got[i] as i32 - want[i]).abs() <= 1,
+                "40% red over the ground: got {got:?}, want {want:?}"
+            );
+        }
+        assert_eq!(got[3], 255, "b keeps its own opacity");
+    }
+
+    /// **A canvas pick landing under a moved camera reads the point it was
+    /// clicked on**, not what now sits under the old screen spot — the GPU
+    /// readback can copy it a frame late.
+    /// flip: `reaim_pick` not called → fails at the colour.
+    #[test]
+    fn a_late_pick_follows_its_world_point_across_a_pan() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app(&ctx);
+        app.choose_tool(Tool::Eyedropper);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(ON_BLUE)]);
+        let key = SampleKey {
+            pick: 99,
+            ..app.sample_key(ON_BLUE, app.canvas_rect, 1.0)
+        };
+        // World 250 moves to screen 50; screen 250 now shows bare ground.
+        app.session.camera.center.x += 200.0;
+        app.dropper_pick = Some(PendingPick {
+            at: PickAt::Canvas(key),
+            stroke: false,
+            stay: false,
+        });
+        frame(&ctx, &mut app, Vec::new());
+        let [r, g, bl] = BLUE;
+        assert_eq!(top_fill(&app, a), Some([r, g, bl, 102]));
     }
 }

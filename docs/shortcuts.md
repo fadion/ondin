@@ -466,7 +466,7 @@ here.
 
 | Key | Action | |
 |---|---|---|
-| `Shift+I` | open the insert picker | ✅ `Action::InsertPicker` (§15 D1014): the floating picker at the foot of the vertical toolbar, toggled with the rail's hexagon. Plain `I` stays unbound (`Ctrl+Alt+I` is Intersect). ⚠️ **It closes the picker only while the search field does not hold the keyboard**: the field takes it once on opening and a focused widget silences the keymap, so `Shift+I` right after opening types a capital *I*. `Escape` and the button close it either way (`toggle_kit_picker`) |
+| `Shift+I` | open the insert picker | ✅ `Action::InsertPicker` (§15 D1014): the floating picker at the foot of the vertical toolbar, toggled with the rail's hexagon. Plain `I` is the eyedropper (§3); `Ctrl+Alt+I` is Intersect. ⚠️ **It closes the picker only while the search field does not hold the keyboard**: the field takes it once on opening and a focused widget silences the keymap, so `Shift+I` right after opening types a capital *I*. `Escape` and the button close it either way (`toggle_kit_picker`) |
 | `Ctrl+Alt+P` | publish kit… | ✅ `Action::PublishKit` (`cmd && alt && !shift && P`, §15 D1015). In a kit only; otherwise the status line says why. `the_kit_chords_land_and_leave_their_neighbours_alone`. ⚠️ The dashboard's `Ctrl+Alt+P` is deliberately inert (§15 D712) |
 
 The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` is one more chord for

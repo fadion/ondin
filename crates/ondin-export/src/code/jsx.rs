@@ -26,6 +26,34 @@ pub(crate) fn from_svg(svg: &str) -> String {
     out
 }
 
+/// The SVG writer's markup for a Vue template: tags as written, each text as
+/// [`super::dom::vue_text`] writes it, since the compiler condenses an SVG's text
+/// as it does any other.
+pub(crate) fn vue_svg(svg: &str) -> String {
+    let mut out = String::with_capacity(svg.len());
+    let mut rest = svg;
+    let text = |out: &mut String, t: &str| {
+        // Indentation between tags, which the compiler drops, as JSX does.
+        if t.is_empty() || (t.trim().is_empty() && t.contains('\n')) {
+            out.push_str(t);
+        } else {
+            out.push_str(&super::dom::vue_text(&decode(t)));
+        }
+    };
+    while let Some(lt) = rest.find('<') {
+        text(&mut out, &rest[..lt]);
+        rest = &rest[lt..];
+        let Some(gt) = tag_end(rest) else {
+            text(&mut out, rest);
+            return out;
+        };
+        out.push_str(&rest[..=gt]);
+        rest = &rest[gt + 1..];
+    }
+    text(&mut out, rest);
+    out
+}
+
 /// The index of the `>` closing the tag `s` starts with, outside quotes.
 fn tag_end(s: &str) -> Option<usize> {
     let mut quoted = false;
@@ -105,13 +133,46 @@ fn text(out: &mut String, t: &str) {
     out.push('}');
 }
 
-/// An attribute's JSX name: `data-` and `aria-` stay as written, a namespace or a
-/// hyphen camel-cases.
+/// An attribute's JSX name: camel-cased where React knows the camel-cased name
+/// and sets the hyphenated one (`stroke-width` → `strokeWidth`), else as written,
+/// since React sets an unknown name as given and an SVG element ignores
+/// `textDecorationColor`.
 fn attr_name(name: &str) -> String {
-    if name.starts_with("data-") || name.starts_with("aria-") {
-        return name.to_string();
+    // React's SVG aliases among the names the SVG writer emits, and the
+    // namespaced ones.
+    const ALIASED: &[&str] = &[
+        "clip-path",
+        "clip-rule",
+        "color-interpolation-filters",
+        "fill-opacity",
+        "fill-rule",
+        "flood-color",
+        "flood-opacity",
+        "font-family",
+        "font-size",
+        "font-style",
+        "font-weight",
+        "letter-spacing",
+        "stop-color",
+        "stop-opacity",
+        "stroke-dasharray",
+        "stroke-dashoffset",
+        "stroke-linecap",
+        "stroke-linejoin",
+        "stroke-miterlimit",
+        "stroke-opacity",
+        "stroke-width",
+        "text-anchor",
+        "text-decoration",
+        "word-spacing",
+        "xlink:href",
+        "xml:space",
+    ];
+    if ALIASED.contains(&name) {
+        camel(name)
+    } else {
+        name.to_string()
     }
-    camel(name)
 }
 
 /// `stroke-width` → `strokeWidth`, `xlink:href` → `xlinkHref`.
@@ -256,6 +317,31 @@ mod tests {
             "{jsx}"
         );
         assert!(jsx.ends_with("</svg>"), "{jsx}");
+    }
+
+    /// A name React does not alias reaches JSX hyphenated, which React sets as
+    /// written; camel-cased, an SVG element would ignore it.
+    ///
+    /// flip: `attr_name` camel-casing every hyphenated name → `textDecorationColor`.
+    #[test]
+    fn an_attribute_react_does_not_alias_stays_hyphenated() {
+        let jsx = from_svg("<tspan text-decoration=\"underline\" text-decoration-color=\"#f00\">");
+        assert_eq!(
+            jsx,
+            "<tspan textDecoration=\"underline\" text-decoration-color=\"#f00\">"
+        );
+    }
+
+    /// Vue gets an SVG's text as an interpolated string wherever its compiler
+    /// would condense or interpolate it, and its tags and indentation as written.
+    #[test]
+    fn svg_text_is_kept_whole_for_vue() {
+        let svg = "<svg class=\"a\">\n  <text><tspan>Total:  {{ x }}</tspan><tspan>plain</tspan></text>\n</svg>";
+        assert_eq!(
+            vue_svg(svg),
+            "<svg class=\"a\">\n  <text><tspan>{{ 'Total:  \\u007b\\u007b x \\u007d\\u007d' }}</tspan>\
+             <tspan>plain</tspan></text>\n</svg>"
+        );
     }
 
     /// Only text JSX would read back unchanged goes in bare.

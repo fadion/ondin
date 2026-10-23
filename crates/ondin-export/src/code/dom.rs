@@ -130,8 +130,8 @@ pub(crate) enum Syntax {
     /// JSX against a CSS module imported as `styles`, an `img`'s `src` naming the
     /// binding its file is imported as ([`super::jsx::asset_binding`]).
     Jsx,
-    /// A Vue template: HTML, with `v-pre` where text holds `{{`, which Vue would
-    /// read as an interpolation.
+    /// A Vue template: HTML, with text Vue's compiler would change written as an
+    /// interpolated string ([`vue_text`]).
     Vue,
 }
 
@@ -197,8 +197,7 @@ impl Element {
             let mut m = match syntax {
                 Syntax::Html => m.clone(),
                 Syntax::Jsx => super::jsx::from_svg(m),
-                Syntax::Vue if m.contains("{{") => m.replacen("<svg ", "<svg v-pre ", 1),
-                Syntax::Vue => m.clone(),
+                Syntax::Vue => super::jsx::vue_svg(m),
             };
             if let (Some(guard), Syntax::Vue) = (self.guard(syntax), syntax) {
                 m = m.replacen("<svg ", &format!("<svg v-if=\"{}\" ", escape(&guard)), 1);
@@ -365,9 +364,6 @@ impl Element {
             if let Some(guard) = self.guard(syntax) {
                 let _ = write!(out, " v-if=\"{}\"", escape(&guard));
             }
-            if self.holds_text() && self.text_has("{{") {
-                out.push_str(" v-pre");
-            }
         }
         out.push_str(match (void, syntax) {
             (true, Syntax::Jsx) => " />",
@@ -388,15 +384,6 @@ impl Element {
                 Child::Prop(p) => out.push_str(&prop(p, syntax)),
             }
         }
-    }
-
-    /// Whether any text in the subtree contains `needle`.
-    fn text_has(&self, needle: &str) -> bool {
-        self.children.iter().any(|c| match c {
-            Child::Element(e) => e.text_has(needle),
-            Child::Text(t) => t.contains(needle),
-            Child::Break | Child::Prop(_) => false,
-        })
     }
 
     /// Every element in the subtree, this one first, in document order.
@@ -491,8 +478,29 @@ pub(crate) fn slug(name: &str) -> String {
 fn text(t: &str, syntax: Syntax) -> String {
     match syntax {
         Syntax::Jsx => super::jsx::child_text(t),
-        _ => escape(t),
+        Syntax::Vue => vue_text(t),
+        Syntax::Html => escape(t),
     }
+}
+
+/// Text in a Vue template: as written where Vue's compiler leaves it alone, else
+/// an interpolated string. The compiler condenses runs of whitespace and trims
+/// it at the edges, and reads `{{` as an interpolation; a `v-pre` would also
+/// void the directives on its element.
+pub(crate) fn vue_text(t: &str) -> String {
+    let plain = !t.is_empty()
+        && t.trim() == t
+        && !t.contains(['\n', '\r', '\t'])
+        && !t.contains("  ")
+        && !t.contains("{{");
+    if plain {
+        return escape(t);
+    }
+    // No brace in the string, which `}}` would end early.
+    let literal = super::jsx::single_quoted(t)
+        .replace('{', "\\u007b")
+        .replace('}', "\\u007d");
+    format!("{{{{ {} }}}}", escape(&literal))
 }
 
 /// `arg` as an expression: JSX's double-quoted strings, Vue's single-quoted ones
@@ -569,5 +577,37 @@ mod tests {
         assert_eq!(c.mint("Card 2", "Frame"), "card-2-2");
         assert_eq!(c.mint("✦", "Ellipse"), "ellipse");
         assert_eq!(c.mint("404", "Text"), "l-404");
+    }
+
+    /// Text Vue's compiler would condense, trim or interpolate is a string it
+    /// leaves alone, braces and markup escaped; plain text is as written.
+    ///
+    /// flip: `vue_text` passing `\t` through → fails at `a\tb`, which Vue would
+    /// condense to a space.
+    #[test]
+    fn vue_text_survives_the_compiler() {
+        assert_eq!(vue_text("Sign in"), "Sign in");
+        assert_eq!(vue_text("Total:   $5\tdue"), "{{ 'Total:   $5\\tdue' }}");
+        assert_eq!(vue_text("a\tb"), "{{ 'a\\tb' }}");
+        assert_eq!(vue_text(" lead"), "{{ ' lead' }}");
+        assert_eq!(
+            vue_text("a {{ b }}"),
+            "{{ 'a \\u007b\\u007b b \\u007d\\u007d' }}"
+        );
+        assert_eq!(vue_text("<i>  \"q\""), "{{ '&lt;i&gt;  &quot;q&quot;' }}");
+    }
+
+    /// No element carries `v-pre`, which would void a `v-if` beside it.
+    ///
+    /// flip: `Element::open` writing `v-pre` on text holding `{{` → fails at "v-pre".
+    #[test]
+    fn a_guarded_text_with_braces_keeps_its_guard_in_vue() {
+        let mut p = Element::new("p", "note".into());
+        p.shown_by = Some("showNote".into());
+        p.children.push(Child::Text("Hi {{ name }}".into()));
+        let mut out = String::new();
+        p.markup(&mut out, 0, Syntax::Vue);
+        assert!(!out.contains("v-pre"), "{out}");
+        assert!(out.contains("v-if=\"showNote\""), "{out}");
     }
 }

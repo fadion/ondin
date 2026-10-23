@@ -3363,7 +3363,15 @@ impl OndinApp {
         if modal.should_close() {
             cancel = true;
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        // Enter needs a name, as the disabled button does, or it would close the
+        // card and silently drop the colour and folder chosen.
+        if ctx.input(|i| i.key_pressed(egui::Key::Enter))
+            && self
+                .dash
+                .new_project
+                .as_ref()
+                .is_some_and(|np| !np.name.trim().is_empty())
+        {
             create = true;
         }
         if cancel {
@@ -4998,6 +5006,29 @@ mod tests {
             None,
             "the field asks once, so once it has been left it stays left"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Enter in *New project* with no name keeps the card and what was chosen on
+    /// it, as the disabled *Create project* button does.
+    /// flip: `new_project_modal`'s Enter not checking the name → fails here.
+    #[test]
+    fn enter_with_no_name_keeps_the_new_project_card() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "np-enter");
+        app.dash.new_project = Some(NewProject {
+            color: 3,
+            ..NewProject::default()
+        });
+        let _ = galleys(&mut app, &ctx);
+        press(&mut app, &ctx, egui::Key::Enter);
+        assert_eq!(
+            app.dash.new_project.as_ref().map(|np| np.color),
+            Some(3),
+            "the card and its colour stay"
+        );
+        assert!(app.library.projects.projects.is_empty(), "nothing created");
         let _ = std::fs::remove_dir_all(&root);
     }
 

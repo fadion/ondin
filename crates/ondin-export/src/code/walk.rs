@@ -316,6 +316,7 @@ impl Walk<'_> {
             },
         };
         el.shown_by = shown_by;
+        el.key = Some(name_step(doc, node));
         Some(el)
     }
 
@@ -2023,21 +2024,26 @@ fn name_path(doc: &Document, top: NodeId, id: NodeId) -> Vec<(String, usize)> {
             steps.reverse();
             return steps;
         }
-        let k = n
-            .parent()
-            .and_then(|p| doc.get(p))
-            .map(|p| {
-                p.children()
-                    .iter()
-                    .take_while(|c| **c != n.id())
-                    .filter(|c| doc.get(**c).is_some_and(|c| c.name() == n.name()))
-                    .count()
-            })
-            .unwrap_or(0);
-        steps.push((n.name().to_string(), k));
+        steps.push(name_step(doc, n));
         at = n.parent();
     }
     Vec::new()
+}
+
+/// `n`'s step in a name path: its name and which sibling of that name it is.
+fn name_step(doc: &Document, n: &Node) -> (String, usize) {
+    let k = n
+        .parent()
+        .and_then(|p| doc.get(p))
+        .map(|p| {
+            p.children()
+                .iter()
+                .take_while(|c| **c != n.id())
+                .filter(|c| doc.get(**c).is_some_and(|c| c.name() == n.name()))
+                .count()
+        })
+        .unwrap_or(0);
+    (n.name().to_string(), k)
 }
 
 /// The layer below `top` at `path`, [`name_path`]'s inverse.

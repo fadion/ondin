@@ -21,6 +21,12 @@ pub(crate) struct Element {
     pub instance: Option<Instance>,
     /// Drawn only while this boolean property is true.
     pub shown_by: Option<String>,
+    /// In a set's merged tree, drawn only under these variants (`Show::Under`)
+    /// or under all but these (`Show::Except`).
+    pub shown_when: Option<Show>,
+    /// The layer's step in its name path, which matches it across a set's
+    /// variant trees; `None` for an element drawn for no layer of its own.
+    pub key: Option<(String, usize)>,
     /// A component's root, which takes the class its user places it with.
     pub takes_class: bool,
     /// The Vue directive choosing this variant's tree (`v-if="…"`, `v-else`),
@@ -44,6 +50,16 @@ pub(crate) struct Alt {
 /// Variant values a tree or class is drawn for, as `(prop, value)`: every one
 /// must hold.
 pub(crate) type When = Vec<(String, String)>;
+
+/// Which variants a merged tree's element is drawn under.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Show {
+    /// Under any of these.
+    Under(Vec<When>),
+    /// Under any but these: the default's tree draws it, and that tree is drawn
+    /// for any values no other tree is.
+    Except(Vec<When>),
+}
 
 /// `when` as a condition: JSX's double-quoted strings, Vue's single-quoted ones.
 pub(crate) fn condition(when: &[(String, String)], syntax: Syntax) -> String {
@@ -146,13 +162,28 @@ impl Element {
             || self.tag == "span"
     }
 
+    /// The condition the element is drawn under — its boolean property's and
+    /// its variants' — or `None` when it is always drawn.
+    fn guard(&self, syntax: Syntax) -> Option<String> {
+        let when = self.shown_when.as_ref().map(|s| match s {
+            Show::Under(w) if w.len() == 1 => condition(&w[0], syntax),
+            Show::Under(w) => format!("({})", any_of(w, syntax)),
+            Show::Except(w) => format!("!({})", any_of(w, syntax)),
+        });
+        match (&self.shown_by, when) {
+            (Some(p), Some(w)) => Some(format!("{p} && {w}")),
+            (Some(p), None) => Some(p.clone()),
+            (None, w) => w,
+        }
+    }
+
     /// The element and everything under it in `syntax`, indented by `depth`.
     pub fn markup(&self, out: &mut String, depth: usize, syntax: Syntax) {
-        // JSX shows a bound element through an expression around it; Vue puts a
-        // `v-if` on the element itself.
-        if let (Some(prop), Syntax::Jsx) = (&self.shown_by, syntax) {
+        // JSX shows a guarded element through an expression around it; Vue puts
+        // a `v-if` on the element itself.
+        if let (Some(guard), Syntax::Jsx) = (self.guard(syntax), syntax) {
             let pad = "  ".repeat(depth);
-            let _ = writeln!(out, "{pad}{{{prop} && (");
+            let _ = writeln!(out, "{pad}{{{guard} && (");
             self.markup_shown(out, depth + 1, syntax);
             let _ = writeln!(out, "{pad})}}");
             return;
@@ -169,8 +200,8 @@ impl Element {
                 Syntax::Vue if m.contains("{{") => m.replacen("<svg ", "<svg v-pre ", 1),
                 Syntax::Vue => m.clone(),
             };
-            if let (Some(prop), Syntax::Vue) = (&self.shown_by, syntax) {
-                m = m.replacen("<svg ", &format!("<svg v-if=\"{prop}\" "), 1);
+            if let (Some(guard), Syntax::Vue) = (self.guard(syntax), syntax) {
+                m = m.replacen("<svg ", &format!("<svg v-if=\"{}\" ", escape(&guard)), 1);
             }
             for line in m.lines() {
                 let _ = writeln!(out, "{pad}{line}");
@@ -229,8 +260,8 @@ impl Element {
             }
         }
         self.class_attr(out, syntax);
-        if let (Some(prop), Syntax::Vue) = (&self.shown_by, syntax) {
-            let _ = write!(out, " v-if=\"{prop}\"");
+        if let (Some(guard), Syntax::Vue) = (self.guard(syntax), syntax) {
+            let _ = write!(out, " v-if=\"{}\"", escape(&guard));
         }
         for (name, arg) in &i.args {
             match (arg, syntax) {
@@ -331,8 +362,8 @@ impl Element {
             if let Some(b) = &self.branch {
                 let _ = write!(out, " {b}");
             }
-            if let Some(prop) = &self.shown_by {
-                let _ = write!(out, " v-if=\"{prop}\"");
+            if let Some(guard) = self.guard(syntax) {
+                let _ = write!(out, " v-if=\"{}\"", escape(&guard));
             }
             if self.holds_text() && self.text_has("{{") {
                 out.push_str(" v-pre");

@@ -403,16 +403,34 @@ fn a_vue_page_never_shares_a_class_with_a_component_root_it_uses() {
     assert!(app.contains("\n.card-3 {"), "its rule moved with it: {app}");
 }
 
+/// Where [`button_set`]'s *Badge* is.
+#[derive(Clone, Copy, PartialEq)]
+enum Badge {
+    None,
+    /// In *Large* alone, above its label.
+    InLarge,
+    /// In both, under *Small*'s label and above *Large*'s: an order no one
+    /// tree keeps.
+    UnderInSmall,
+}
+
 /// A *Button* set with a *Size* property (*Small*, the default as the topmost,
 /// and *Large*) and a *Label* text property bound in both, and an instance of
-/// *Large* labelled *Go*. With `badge`, *Large* also holds a *Badge* rect, so
-/// the two variants draw different elements.
-fn button_set(badge: bool) -> (Document, NodeId) {
+/// *Large* labelled *Go*, and a *Badge* rect as `badge` says.
+fn button_set(badge: Badge) -> (Document, NodeId) {
     use ondin_core::variant::{VariantProp, VariantSet};
     let mut ids = IdSource::new(0xB7);
     let root = ids.mint();
     let mut doc = Document::new(root);
-    let [set, small, small_label, large, large_label, large_badge] = [(); 6].map(|_| ids.mint());
+    let [
+        set,
+        small,
+        small_label,
+        large,
+        large_label,
+        large_badge,
+        small_badge,
+    ] = [(); 7].map(|_| ids.mint());
     let frame = |w, h| NodeKind::Artboard {
         size: Size::new(w, h),
     };
@@ -439,19 +457,21 @@ fn button_set(badge: bool) -> (Document, NodeId) {
         ),
     ]))
     .unwrap();
-    if badge {
+    let rect = NodeKind::Rect {
+        size: Size::new(8.0, 8.0),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    if badge != Badge::None {
         doc.apply(&Transaction(vec![
-            create(
-                large_badge,
-                (large, 1),
-                NodeKind::Rect {
-                    size: Size::new(8.0, 8.0),
-                    corner_radii: RoundedRectRadii::default(),
-                },
-                (100.0, 4.0),
-                "Badge",
-            ),
+            create(large_badge, (large, 1), rect.clone(), (100.0, 4.0), "Badge"),
             paint(large_badge, RED),
+        ]))
+        .unwrap();
+    }
+    if badge == Badge::UnderInSmall {
+        doc.apply(&Transaction(vec![
+            create(small_badge, (small, 0), rect.clone(), (60.0, 4.0), "Badge"),
+            paint(small_badge, RED),
         ]))
         .unwrap();
     }
@@ -493,19 +513,10 @@ fn button_set(badge: bool) -> (Document, NodeId) {
         },
     ]))
     .unwrap();
-    if badge {
+    if badge != Badge::None {
         let inst_badge = ids.mint();
         doc.apply(&Transaction(vec![
-            create(
-                inst_badge,
-                (inst, 1),
-                NodeKind::Rect {
-                    size: Size::new(8.0, 8.0),
-                    corner_radii: RoundedRectRadii::default(),
-                },
-                (100.0, 4.0),
-                "Badge",
-            ),
+            create(inst_badge, (inst, 1), rect, (100.0, 4.0), "Badge"),
             paint(inst_badge, RED),
             Operation::SetLink {
                 id: inst_badge,
@@ -525,7 +536,7 @@ fn button_set(badge: bool) -> (Document, NodeId) {
 /// flip: `merge::same_shape` answering false → fails at "one tree".
 #[test]
 fn a_set_whose_variants_match_is_one_tree_choosing_classes() {
-    let (doc, inst) = button_set(false);
+    let (doc, inst) = button_set(Badge::None);
     let res = Resolved::rebuild(&doc);
     let out = react_of(&doc, &res, &[inst]);
     assert!(out.inlined.is_empty(), "{:?}", out.inlined);
@@ -564,15 +575,45 @@ fn a_set_whose_variants_match_is_one_tree_choosing_classes() {
     assert!(app.contains("<Button class=\"large-2\""), "{app}");
 }
 
+/// A layer only some variants draw is in the merged tree, shown under those.
+/// flip: `merge::children` leaving `shown_when` unset → fails at "under Large".
+#[test]
+fn a_layer_only_some_variants_draw_is_shown_under_them() {
+    let (doc, inst) = button_set(Badge::InLarge);
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &[inst]);
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+    let button = file(&out, "components/Button.tsx");
+    assert!(!button.contains("if (size"), "one tree: {button}");
+    assert!(
+        button.contains(
+            "      {size === \"Large\" && (\n        <div className={styles.badge}>\n        </div>\n      )}"
+        ),
+        "under Large: {button}"
+    );
+    let label = button.find("{label}").expect(&button);
+    assert!(
+        label < button.find("styles.badge").expect(&button),
+        "above the label, as Large orders them: {button}"
+    );
+
+    let out = vue_of(&doc, &res, &[inst]);
+    let button = file(&out, "components/Button.vue");
+    assert!(
+        button.contains("<div class=\"badge\" v-if=\"size === 'Large'\">\n"),
+        "{button}"
+    );
+}
+
 /// A set is one component: its variant property a string union defaulting to the
-/// default variant's value, and where its variants draw different elements, each
-/// other variant's tree behind its condition and the default's last; the use
-/// names the variant it shows.
+/// default variant's value, and where its variants' trees do not merge — here,
+/// two layers ordered each way round — each other variant's tree behind its
+/// condition and the default's last; the use names the variant it shows.
 /// flip: `vue::keep_uses_apart` doing nothing → fails at "a use's class is none
 /// of the used file's".
 #[test]
 fn a_set_is_one_component_choosing_its_variant_by_a_union_prop() {
-    let (doc, inst) = button_set(true);
+    let (doc, inst) = button_set(Badge::UnderInSmall);
     let res = Resolved::rebuild(&doc);
     let out = react_of(&doc, &res, &[inst]);
     assert!(out.inlined.is_empty(), "{:?}", out.inlined);

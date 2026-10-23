@@ -33,9 +33,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vue` are built
 (`export.md`, *Code export*).
 
-- **Merging variant trees that differ in which layers they draw** — a layer only some variants
-  show as an element behind a condition, so a set whose variants hide a layer still merges.
-  Today any difference but declarations keeps every variant its own tree (`code::merge`).
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
   has not run on CI's Linux and macOS legs; unverified until it does. It covers only the HTML
   output; React and Vue have no browser test (no bundler in the test run).

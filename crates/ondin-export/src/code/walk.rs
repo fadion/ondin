@@ -46,6 +46,9 @@ pub(crate) struct Page {
 pub(crate) struct Component {
     /// Its name as code reads it, unique in the export.
     pub name: String,
+    /// The folder its file is in, from the export's top: empty for the page,
+    /// `components`, or a kit's folder under it.
+    pub dir: String,
     /// Each variant's tree with the variant values it is drawn for, the default
     /// variant's last and drawn for any others. A main outside a set has one
     /// tree, drawn always.
@@ -60,6 +63,7 @@ impl Component {
     pub fn page(root: Element) -> Self {
         Component {
             name: "App".into(),
+            dir: String::new(),
             bodies: vec![(Vec::new(), root)],
             props: Vec::new(),
         }
@@ -147,6 +151,19 @@ enum Place {
 /// use of a component made from the main, where it can be; without, every
 /// instance is written out as its layers.
 pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], components: bool) -> Page {
+    // A kit's mains live in the vault, which is never resolved: a component
+    // written from one is drawn from a copy of the document with the vault's
+    // tops at the root, which leaves the page's own layers where they are.
+    let (placed, placed_res);
+    let (doc, res) = match doc.vault().filter(|_| components) {
+        Some(vault) => {
+            let tops = doc.get(vault).map(|v| v.children().to_vec());
+            placed = ondin_core::kit::as_placed(doc, &tops.unwrap_or_default());
+            placed_res = Resolved::rebuild(&placed);
+            (&placed, &placed_res)
+        }
+        None => (doc, res),
+    };
     let view = crate::extent(res, origins).unwrap_or(Rect::new(0.0, 0.0, 100.0, 100.0));
     let mut walk = Walk {
         doc,
@@ -243,6 +260,8 @@ struct Components {
     list: Vec<Component>,
     /// Component names taken; `App` is the page's.
     names: HashSet<String>,
+    /// Each kit's folder under `components`, by kit id.
+    kit_dirs: HashMap<String, String>,
 }
 
 /// What a use of a component needs to know of it.
@@ -379,9 +398,6 @@ impl Walk<'_> {
     /// Why no component can be made from `main`, or `None` when one can.
     fn unwritable(&self, main: NodeId) -> Option<String> {
         let doc = self.doc;
-        if doc.in_vault(main) {
-            return Some("its main is from a kit, which is written out as layers".into());
-        }
         if let Some(set) = variant::set_of(doc, main)
             && variant::find_variant(doc, set, doc.get(main)?.variant()) != Some(main)
         {
@@ -758,6 +774,25 @@ impl Walk<'_> {
         }
         let owner = doc.get(owner_id).expect("a main in the document");
         let name = unique(component_name(owner.name()), &mut comps.names);
+        // A kit's components go in a folder named for the kit.
+        let dir = match owner.origin() {
+            None => "components".to_string(),
+            Some(o) => {
+                if !comps.kit_dirs.contains_key(&o.kit) {
+                    let named = o.name.clone().or_else(|| {
+                        let kits = doc.variables().kits();
+                        kits.get(&o.kit).and_then(|k| k.name.clone())
+                    });
+                    let mut taken = comps.kit_dirs.values().cloned().collect();
+                    let folder = unique(
+                        component_name(named.as_deref().unwrap_or("Kit")),
+                        &mut taken,
+                    );
+                    comps.kit_dirs.insert(o.kit.clone(), folder);
+                }
+                format!("components/{}", comps.kit_dirs[&o.kit])
+            }
+        };
         let params = self.params(main);
         let sig = Signature {
             name: name.clone(),
@@ -859,6 +894,7 @@ impl Walk<'_> {
         let comps = self.components.as_mut().expect("components are on");
         comps.list.push(Component {
             name,
+            dir,
             bodies,
             props,
         });

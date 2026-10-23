@@ -205,6 +205,37 @@ pub(crate) fn stylesheet(root: &dom::Element, up: &str) -> String {
     css.replace("url(\"assets/", &format!("url(\"{up}assets/"))
 }
 
+/// Each component's folder, by name.
+pub(crate) fn dirs(components: &[walk::Component]) -> std::collections::HashMap<&str, &str> {
+    components
+        .iter()
+        .map(|c| (c.name.as_str(), c.dir.as_str()))
+        .collect()
+}
+
+/// The way back to the export's top folder from a file in `dir`: `./`, `../`,
+/// `../../`.
+pub(crate) fn up(dir: &str) -> String {
+    match dir.split('/').filter(|s| !s.is_empty()).count() {
+        0 => "./".into(),
+        n => "../".repeat(n),
+    }
+}
+
+/// `path`, from the export's top folder, as an import in a file in `dir`
+/// writes it.
+pub(crate) fn relative(dir: &str, path: &str) -> String {
+    let from: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    let to: Vec<&str> = path.split('/').collect();
+    // The last of `to` is the file, never a folder `from` shares.
+    let shared = from
+        .iter()
+        .zip(&to[..to.len() - 1])
+        .take_while(|(a, b)| a == b)
+        .count();
+    up(&from[shared..].join("/")) + &to[shared..].join("/")
+}
+
 /// The components the trees under `roots` use and the pictures they link, each
 /// once, in document order. A slot's default and a component passed to a swap
 /// property are uses: the file names both.
@@ -273,3 +304,28 @@ body {
   margin: 0;
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An import between the page, `components` and a kit's folder under it
+    /// climbs only out of the folders the two files do not share.
+    #[test]
+    fn imports_climb_out_of_the_folders_not_shared() {
+        assert_eq!(up(""), "./");
+        assert_eq!(up("components/Kit"), "../../");
+        for (dir, path, import) in [
+            ("", "components/Card", "./components/Card"),
+            ("", "components/Kit/Badge", "./components/Kit/Badge"),
+            ("components", "components/Card", "./Card"),
+            ("components", "components/Kit/Badge", "./Kit/Badge"),
+            ("components/Kit", "components/Kit/Dot", "./Dot"),
+            ("components/Kit", "components/Card", "../Card"),
+            ("components/Kit", "components/Other/Dot", "../Other/Dot"),
+            ("components/Kit", "assets/a.png", "../../assets/a.png"),
+        ] {
+            assert_eq!(relative(dir, path), import, "{dir} -> {path}");
+        }
+    }
+}

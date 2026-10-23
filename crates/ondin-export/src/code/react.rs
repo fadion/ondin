@@ -1,7 +1,8 @@
 //! The React emitter: TypeScript components, each with a CSS module.
 //!
 //! `App.tsx` is the page; each main an instance on it uses, or the set it is a
-//! variant of, becomes `components/<Name>.tsx` beside `<Name>.module.css`: its
+//! variant of, becomes `components/<Name>.tsx` beside `<Name>.module.css` (a
+//! kit's in `components/<Kit>/`): its
 //! variant properties string unions, its boolean and text properties typed
 //! props, each defaulting to the default variant's value. A component's root
 //! takes a `className`, which its user places it with. `base.css` holds the page
@@ -12,6 +13,7 @@ use super::jsx::{asset_binding, js_string};
 use super::walk::{self, Component, Ty};
 use super::{BASE_CSS, CodeExport, CodeFile};
 use ondin_core::{Document, NodeId, Resolved};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 
 /// `origins` as `App`, in the order given (later on top).
@@ -19,10 +21,11 @@ pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExpor
     let page = walk::page(doc, res, origins, true);
     let tokens = page.tokens.is_some();
     let app = Component::page(page.root.clone());
+    let dirs = super::dirs(&page.components);
     let mut files = vec![
         CodeFile {
             path: "App.tsx".into(),
-            bytes: module(&app, tokens, "./").into_bytes(),
+            bytes: module(&app, tokens, &dirs).into_bytes(),
         },
         CodeFile {
             path: "App.module.css".into(),
@@ -35,18 +38,18 @@ pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExpor
     ];
     for c in &page.components {
         files.push(CodeFile {
-            path: format!("components/{}.tsx", c.name),
-            bytes: module(c, tokens, "../").into_bytes(),
+            path: format!("{}/{}.tsx", c.dir, c.name),
+            bytes: module(c, tokens, &dirs).into_bytes(),
         });
     }
     for c in &page.components {
         let css: String = c
             .bodies
             .iter()
-            .map(|(_, root)| super::stylesheet(root, "../"))
+            .map(|(_, root)| super::stylesheet(root, &super::up(&c.dir)))
             .collect();
         files.push(CodeFile {
-            path: format!("components/{}.module.css", c.name),
+            path: format!("{}/{}.module.css", c.dir, c.name),
             bytes: css.into_bytes(),
         });
     }
@@ -55,14 +58,16 @@ pub fn react_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExpor
 
 /// One `.tsx` file: imports, the props interface for a component, and the
 /// function returning its tree — each variant's under the condition it is drawn
-/// for. `up` reaches the export's top folder from the file.
-fn module(c: &Component, tokens: bool, up: &str) -> String {
+/// for. `dirs` holds each component's folder, which its imports are written to.
+fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
     let Component {
         name,
+        dir,
         bodies,
         props,
     } = c;
     let is_app = name == "App";
+    let up = super::up(dir);
     let (uses, images) = super::references(bodies.iter().map(|(_, e)| e));
     let uses = super::with_defaults(uses, props);
     let mut out = String::new();
@@ -74,11 +79,8 @@ fn module(c: &Component, tokens: bool, up: &str) -> String {
         let _ = writeln!(out, "import \"{up}tokens.css\";");
     }
     for u in &uses {
-        let from = if is_app {
-            format!("./components/{u}")
-        } else {
-            format!("./{u}")
-        };
+        let at = dirs.get(u.as_str()).copied().unwrap_or("components");
+        let from = super::relative(dir, &format!("{at}/{u}"));
         let _ = writeln!(out, "import {u} from \"{from}\";");
     }
     let _ = writeln!(out, "import styles from \"./{name}.module.css\";");

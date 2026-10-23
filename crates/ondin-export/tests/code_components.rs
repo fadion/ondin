@@ -913,3 +913,96 @@ fn a_shown_nested_instances_properties_are_forwarded() {
     let app = file(&out, "App.vue");
     assert!(app.contains("buttonLabel=\"Buy\""), "{app}");
 }
+
+/// A kit's *Badge*, a frame holding a filled dot and a label, published by a kit named
+/// *Acme UI*, and a consumer holding one instance of it at its root.
+fn kit_badge() -> (Document, NodeId) {
+    use ondin_core::meta::{DocumentMeta, KitMark};
+    const KIT: &str = "5eed00000000000000000000000000c0";
+    let mut ids = IdSource::new(0xC4);
+    let root = ids.mint();
+    let mut kit = Document::new(root);
+    let [badge, dot, label] = [(); 3].map(|_| ids.mint());
+    kit.apply(&Transaction(vec![
+        create(
+            badge,
+            (root, 0),
+            NodeKind::Artboard {
+                size: Size::new(40.0, 20.0),
+            },
+            (0.0, 0.0),
+            "Badge",
+        ),
+        create(
+            dot,
+            (badge, 0),
+            NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            (5.0, 5.0),
+            "Dot",
+        ),
+        create(label, (badge, 1), text("New"), (18.0, 2.0), "Label"),
+        paint(dot, Color::from_rgba8(200, 30, 40, 255)),
+        Operation::SetComponent {
+            id: badge,
+            component: true,
+        },
+    ]))
+    .unwrap();
+    kit.set_meta(DocumentMeta {
+        id: Some(KIT.into()),
+        name: Some("Acme UI".into()),
+        kit: Some(KitMark::default()),
+        ..Default::default()
+    });
+    let published = ondin_core::kit::freeze(&kit).unwrap();
+    let mut dids = IdSource::new(0xC5);
+    let mut d = Document::new(dids.mint());
+    let droot = d.root();
+    let (tx, inst) =
+        ondin_core::kit::insert(&d, &mut dids, KIT, 1, &published, badge, droot).unwrap();
+    d.apply(&tx).unwrap();
+    (d, inst)
+}
+
+/// An instance of a kit's main is a use of a component written from the vault,
+/// in a folder named for the kit, its imports reaching back two folders.
+/// flip: `walk::page` walking the document as given, its vault unresolved →
+/// fails at "laid out from the vault".
+#[test]
+fn a_kit_main_is_a_component_in_the_kits_folder() {
+    let (doc, inst) = kit_badge();
+    let main = ondin_core::component::main_of(&doc, inst).unwrap();
+    assert!(doc.in_vault(main), "the main is the vault's");
+    let res = Resolved::rebuild(&doc);
+
+    let out = react_of(&doc, &res, &[inst]);
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+    let app = file(&out, "App.tsx");
+    assert!(
+        app.contains("import Badge from \"./components/AcmeUI/Badge\";"),
+        "{app}"
+    );
+    assert!(app.contains("<Badge className={styles.badge} />"), "{app}");
+    let badge = file(&out, "components/AcmeUI/Badge.tsx");
+    assert!(badge.starts_with("import \"../../base.css\";"), "{badge}");
+    let css = file(&out, "components/AcmeUI/Badge.module.css");
+    assert!(css.contains(".dot {"), "the badge's dot: {css}");
+    // A text's automatic line height is the one its resolved layout laid.
+    assert!(
+        css.lines()
+            .any(|l| l.trim_start().starts_with("line-height:") && l.ends_with("px;")),
+        "laid out from the vault: {css}"
+    );
+
+    let out = vue_of(&doc, &res, &[inst]);
+    let app = file(&out, "App.vue");
+    assert!(
+        app.contains("import Badge from \"./components/AcmeUI/Badge.vue\";"),
+        "{app}"
+    );
+    let badge = file(&out, "components/AcmeUI/Badge.vue");
+    assert!(badge.contains("import \"../../base.css\";"), "{badge}");
+}

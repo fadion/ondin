@@ -1,7 +1,8 @@
 //! The Vue emitter: single-file components in TypeScript with scoped styles.
 //!
 //! `App.vue` is the page; each main an instance on it uses, or the set it is a
-//! variant of, becomes `components/<Name>.vue`: its variant properties string
+//! variant of, becomes `components/<Name>.vue` (a kit's in `components/<Kit>/`):
+//! its variant properties string
 //! unions choosing a variant's tree by `v-if`, its boolean and text properties
 //! typed props, each defaulting to the default variant's value. A class on a
 //! component falls through to its root, and the user's scoped rule reaches that
@@ -66,15 +67,16 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
         }
     }
 
+    let dirs = super::dirs(&page.components);
     let mut files = Vec::new();
     for (i, (c, bodies)) in all.iter().zip(trees).enumerate() {
-        let (path, up) = match i {
-            0 => ("App.vue".to_string(), "./"),
-            _ => (format!("components/{}.vue", c.name), "../"),
+        let path = match i {
+            0 => "App.vue".to_string(),
+            _ => format!("{}/{}.vue", c.dir, c.name),
         };
         files.push(CodeFile {
             path,
-            bytes: sfc(c, bodies, tokens, up).into_bytes(),
+            bytes: sfc(c, bodies, tokens, &dirs).into_bytes(),
         });
         if i == 0 {
             files.push(CodeFile {
@@ -135,10 +137,15 @@ fn keep_uses_apart(
     }
 }
 
-/// One `.vue` file from `c` and its trees, their classes settled. `up` reaches
-/// the export's top folder from the file.
-fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> String {
-    let is_app = c.name == "App";
+/// One `.vue` file from `c` and its trees, their classes settled. `dirs` holds
+/// each component's folder, which its imports are written to.
+fn sfc(
+    c: &Component,
+    mut bodies: Vec<Element>,
+    tokens: bool,
+    dirs: &HashMap<&str, &str>,
+) -> String {
+    let up = &super::up(&c.dir);
     let (uses, _) = super::references(bodies.iter());
     let uses = super::with_defaults(uses, &c.props);
     // A chain of `v-if`s is one root to Vue, so a class still falls through. The
@@ -167,11 +174,8 @@ fn sfc(c: &Component, mut bodies: Vec<Element>, tokens: bool, up: &str) -> Strin
         let _ = writeln!(out, "import \"{up}tokens.css\";");
     }
     for u in &uses {
-        let from = if is_app {
-            format!("./components/{u}.vue")
-        } else {
-            format!("./{u}.vue")
-        };
+        let at = dirs.get(u.as_str()).copied().unwrap_or("components");
+        let from = super::relative(&c.dir, &format!("{at}/{u}.vue"));
         let _ = writeln!(out, "import {u} from \"{from}\";");
     }
     if !c.props.is_empty() {

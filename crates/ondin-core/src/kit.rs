@@ -1210,15 +1210,15 @@ pub fn insert_carrying(
     Ok((Transaction(ops), created))
 }
 
-/// **A document for drawing pictures only**: `doc` with each of `nodes` moved
-/// to the root, last, with its own transform — where an insert of it lands,
-/// with no ancestor's transform or layout, and a vault main among them resolved
-/// like any other (the picker's tiles and drag picture; the v0.5.0 release
-/// review's `[X4.1-L1-02]`). A node already at the root stays put.
+/// **A document for drawing only**: `doc` with each of `nodes` moved to the
+/// root, last, with its own transform — where an insert of it lands, with no
+/// ancestor's transform or layout, and a vault main among them resolved like
+/// any other (the picker's tiles and drag picture, and code export writing a
+/// kit's mains as components). A node already at the root stays put.
 ///
 /// 🚨 **Not a document anything may keep**: the move is applied unchecked, and
-/// a vault node at the root breaks the vault's rules (§15 D1012). That is
-/// nothing to a renderer, which is all this is for.
+/// a vault node at the root breaks the vault's rules. That is nothing to a
+/// reader that only draws, which is all this is for.
 pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
     let mut scratch = doc.clone();
     let root = doc.root();

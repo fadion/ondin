@@ -407,6 +407,29 @@ pub(crate) fn node_icon(kind: &NodeKind) -> (&'static str, egui::Color32) {
     }
 }
 
+/// Every layer whose name contains `needle`, case folded, top to bottom as the
+/// layers panel lists them (children reversed, parents before their children).
+///
+/// The one name-match rule: the panel's filter keeps these plus their ancestors,
+/// and the command palette lists them. The root can match; callers that list
+/// layers drop it.
+pub(crate) fn name_hits(doc: &ondin_core::Document, needle: &str) -> Vec<NodeId> {
+    let needle = needle.to_lowercase();
+    let mut out = Vec::new();
+    let mut stack = vec![doc.root()];
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.get(id) else {
+            continue;
+        };
+        if node.name().to_lowercase().contains(&needle) {
+            out.push(id);
+        }
+        // Pushed in child order so the last child, the panel's top row, pops first.
+        stack.extend(node.children().iter().copied());
+    }
+    out
+}
+
 /// The egui id of a row's rename field, stable across frames so focus can be
 /// asked for before the widget exists. `pub(crate)` because `Ctrl+R`, `F2` and the
 /// context menu open a rename from outside this file (§15 D216).
@@ -1192,25 +1215,19 @@ impl OndinApp {
     /// Rows to show for a name filter: every node whose name matches, plus the
     /// ancestors needed to reach it. Non-matching descendants are dropped.
     fn matching_rows(&self, needle: &str) -> HashSet<NodeId> {
+        let doc = &self.session.doc;
         let mut keep = HashSet::new();
-        let mut stack = vec![self.session.doc.root()];
-        while let Some(id) = stack.pop() {
-            let Some(node) = self.session.doc.get(id) else {
-                continue;
-            };
-            if node.name().to_lowercase().contains(needle) {
-                keep.insert(id);
-                let mut cursor = node.parent();
-                // Stop at the first ancestor already recorded: whenever one was
-                // added, its own ancestors were added with it.
-                while let Some(p) = cursor {
-                    if !keep.insert(p) {
-                        break;
-                    }
-                    cursor = self.session.doc.get(p).and_then(|n| n.parent());
+        for id in name_hits(doc, needle) {
+            keep.insert(id);
+            let mut cursor = doc.get(id).and_then(|n| n.parent());
+            // Stop at the first ancestor already recorded: whenever one was
+            // added, its own ancestors were added with it.
+            while let Some(p) = cursor {
+                if !keep.insert(p) {
+                    break;
                 }
+                cursor = doc.get(p).and_then(|n| n.parent());
             }
-            stack.extend(node.children().iter().copied());
         }
         keep
     }

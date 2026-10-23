@@ -437,14 +437,23 @@ fn holds(test: &str, doc: &Document, res: &Resolved) {
 /// edges differently even where every glyph is placed alike, and each platform's
 /// Chrome differently again — Linux peaks at 9.1 and macOS at 19.1 on fixtures
 /// Windows holds under 6.0. Only Windows is tight enough for a one-pixel drop of a
-/// line to show; elsewhere `MAX_MEAN_ERROR` is what still catches a layout shift.
-/// flip (Windows): an automatic line height written as `normal` → 9.8.
+/// line to show; elsewhere `MAX_TEXT_MEAN_ERROR` is what still catches a layout
+/// shift. flip (Windows): an automatic line height written as `normal` → 9.8.
 const MAX_TEXT_CELL_ERROR: f64 = if cfg!(target_os = "macos") {
     22.0
 } else if cfg!(target_os = "linux") {
     12.0
 } else {
     8.0
+};
+
+/// The mean limit for a blurred comparison, which only text takes. macOS Chrome's
+/// glyph smoothing adds about 0.8 to every text fixture's mean, which carries
+/// `decorations` (1.2 on Windows) past `MAX_MEAN_ERROR`.
+const MAX_TEXT_MEAN_ERROR: f64 = if cfg!(target_os = "macos") {
+    2.5
+} else {
+    MAX_MEAN_ERROR
 };
 
 /// [`holds`], comparing after `passes` of `blurred` with `limit` per cell.
@@ -508,15 +517,18 @@ fn holds_as(
         (cpu.width, cpu.height),
         "{test}: the screenshot is not the page's size"
     );
-    let (cells, mean) = if passes == 0 {
-        compare(&cpu, &page)
+    let ((cells, mean), mean_limit) = if passes == 0 {
+        (compare(&cpu, &page), MAX_MEAN_ERROR)
     } else {
-        compare(&blurred(&cpu, passes), &blurred(&page, passes))
+        (
+            compare(&blurred(&cpu, passes), &blurred(&page, passes)),
+            MAX_TEXT_MEAN_ERROR,
+        )
     };
     let (worst, at) = cells.first().copied().unwrap_or_default();
     eprintln!("{test}: worst cell {worst:.1}/255 at {at:?}, mean {mean:.2}/255");
     assert!(
-        worst <= limit && mean <= MAX_MEAN_ERROR,
+        worst <= limit && mean <= mean_limit,
         "{test}: the page differs from the canvas — worst cells {:?}, mean {mean:.2}/255 \
          (see {})",
         cells

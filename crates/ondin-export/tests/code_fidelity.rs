@@ -20,12 +20,14 @@ use ondin_core::peniko::{
     Color, ColorStop, Extend, Gradient, GradientKind, LinearGradientPosition,
     RadialGradientPosition, SweepGradientPosition,
 };
+use ondin_core::variant::{self, PropKind, PropValue};
 use ondin_core::{
     Brush, CharAttr, Document, Effect, EffectKind, Fill, GradientBrush, IdSource, NodeId, NodeKind,
     Operation, Resolved, Shadow, Stroke, StrokeAlign, StrokeSides, TextAlign, TextSizing,
     TextStyle, Transaction, VerticalAlign, keyed_by_position,
 };
-use ondin_export::code::html::html_of;
+use ondin_export::code::CodeExport;
+use ondin_export::code::html::{html_of, html_of_components};
 use std::path::{Path, PathBuf};
 
 /// The cell size and the two limits. Matching pages peak at 14.6 (an inline-SVG
@@ -439,8 +441,20 @@ const MAX_TEXT_CELL_ERROR: f64 = 8.0;
 
 /// [`holds`], comparing after `passes` of `blurred` with `limit` per cell.
 fn holds_within(test: &str, doc: &Document, res: &Resolved, passes: usize, limit: f64) {
+    holds_as(test, doc, res, passes, limit, html_of);
+}
+
+/// [`holds_within`] for the page `export` writes.
+fn holds_as(
+    test: &str,
+    doc: &Document,
+    res: &Resolved,
+    passes: usize,
+    limit: f64,
+    export: fn(&Document, &Resolved, &[NodeId]) -> CodeExport,
+) {
     let origins: Vec<NodeId> = doc.get(doc.root()).expect("root").children().to_vec();
-    let export = html_of(doc, res, &origins);
+    let export = export(doc, res, &origins);
     assert!(
         export.approximated.is_empty(),
         "{test}: the fixture is meant to be exact, but the export reports {:?}",
@@ -2029,4 +2043,262 @@ fn an_approximated_layer_is_reported() {
         html.contains(r#"<img class="rect" src="assets/rect.png""#),
         "{html}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Components: the React and Vue walk, drawn as plain HTML
+// ---------------------------------------------------------------------------
+
+impl Doc {
+    /// A card — a frame holding an icon and a title, `painted` after it is made —
+    /// under `parent`, linked to `main`'s layers when it is given.
+    fn card(
+        &mut self,
+        parent: NodeId,
+        at: (f64, f64),
+        main: Option<[NodeId; 3]>,
+        painted: impl Fn(&mut Doc, [NodeId; 3]),
+    ) -> [NodeId; 3] {
+        let frame = self.frame(Some(parent), at.0, at.1, 160.0, 60.0, "Card");
+        let icon = self.rect(frame, 12.0, 18.0, 24.0, 24.0, 4.0);
+        self.fill(icon, solid(220, 60, 60, 255));
+        let title = text_node(
+            "Hello",
+            TextSizing::Auto,
+            TextStyle {
+                font_size: 20.0,
+                line_height: Some(ondin_core::Length::Px(24.0)),
+                ..Default::default()
+            },
+            |_| {},
+        );
+        let title = self.add(Some(frame), title, Affine::translate((48.0, 18.0)), "Title");
+        let card = [frame, icon, title];
+        painted(self, card);
+        match main {
+            None => self.apply(vec![Operation::SetComponent {
+                id: frame,
+                component: true,
+            }]),
+            Some(m) => {
+                // The two trees are alike, `painted`'s layers included.
+                let mut links = Vec::new();
+                let mut pairs = vec![(frame, m[0])];
+                while let Some((copy, source)) = pairs.pop() {
+                    links.push(Operation::SetLink {
+                        id: copy,
+                        link: Some(source),
+                    });
+                    let children = |id| self.doc.get(id).unwrap().children().to_vec();
+                    pairs.extend(children(copy).into_iter().zip(children(source)));
+                }
+                self.apply(links);
+            }
+        }
+        card
+    }
+
+    /// `main` given a property per `(name, kind, bound layer)`.
+    fn properties(&mut self, main: NodeId, props: &[(&str, PropKind, NodeId)]) {
+        for (name, kind, bound) in props {
+            let (tx, _) =
+                variant::define(&self.doc, &mut self.ids, main, name, *kind, vec![*bound])
+                    .expect("a property");
+            self.doc.apply(&tx).expect("the property applies");
+        }
+    }
+
+    /// The instance at `root` set to `values`, in its properties' order.
+    fn set_properties(&mut self, root: NodeId, values: Vec<PropValue>) {
+        let props = variant::instance_properties(&self.doc, root);
+        for (p, v) in props.iter().zip(values) {
+            let ops = variant::set_property(&self.doc, &[root], p, &v);
+            self.apply(ops);
+        }
+    }
+}
+
+/// A main card with a boolean and a text property, and two uses of it: one
+/// setting both, one setting neither. The control for the component fixtures:
+/// both are uses, and the page matches.
+///
+/// flip: `html_of_components` dropping a use's arguments → 125.3 at the icon
+/// the set use hides.
+#[test]
+fn component_uses_match_the_canvas() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 380.0, 180.0, "Board");
+    let main = d.card(board, (10.0, 10.0), None, |_, _| {});
+    d.properties(
+        main[0],
+        &[
+            ("Show icon", PropKind::Boolean, main[1]),
+            ("Title", PropKind::Text, main[2]),
+        ],
+    );
+    let set = d.card(board, (10.0, 100.0), Some(main), |_, _| {});
+    d.set_properties(
+        set[0],
+        vec![PropValue::Boolean(false), PropValue::Text("World".into())],
+    );
+    d.card(board, (200.0, 100.0), Some(main), |_, _| {});
+    let (doc, res) = d.done();
+    let export = html_of_components(&doc, &res, &[board]);
+    assert!(export.inlined.is_empty(), "{:?}", export.inlined);
+    let html = String::from_utf8(export.file("index.html").unwrap().to_vec()).unwrap();
+    assert_eq!(html.matches("Card--card").count(), 2, "two uses: {html}");
+    holds_components("component-uses", &doc, &res);
+}
+
+/// [`holds`] for [`html_of_components`], after three passes of `blurred`: a
+/// component's text lands at whatever x its use puts it, and at some offsets
+/// glyph antialiasing alone passes the two-pass limit (8.9 on the default use
+/// in `component_uses_match_the_canvas`).
+fn holds_components(test: &str, doc: &Document, res: &Resolved) {
+    holds_as(test, doc, res, 3, MAX_TEXT_CELL_ERROR, html_of_components);
+}
+
+/// A boolean property bound to a dot inside a masked group, which is drawn as a
+/// picture: a use cannot pass it into the picture, so the instance hiding the
+/// dot is its layers.
+///
+/// flip: `Walk::unwritable` checking only the trees' roots → `inlined` is empty;
+/// past that assertion, the use draws the main's dot at 112.0.
+#[test]
+fn a_property_drawn_as_a_picture_is_not_frozen_at_the_mains_value() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    // The card's fourth layer: a group masked by a circle, holding a dot.
+    let badge = |d: &mut Doc, [frame, ..]: [NodeId; 3]| {
+        let g = d.add(
+            Some(frame),
+            NodeKind::Group,
+            Affine::translate((120.0, 14.0)),
+            "Badge",
+        );
+        let mask = d.add(
+            Some(g),
+            NodeKind::Ellipse {
+                size: Size::new(32.0, 32.0),
+            },
+            Affine::IDENTITY,
+            "Mask",
+        );
+        d.fill(mask, solid(0, 0, 0, 255));
+        d.apply(vec![Operation::SetMask {
+            id: mask,
+            mask: true,
+        }]);
+        let dot = d.rect(g, 0.0, 0.0, 32.0, 32.0, 0.0);
+        d.fill(dot, solid(40, 120, 220, 255));
+    };
+    let dot_of = |d: &Doc, frame: NodeId| {
+        let g = d.doc.get(frame).unwrap().children()[2];
+        d.doc.get(g).unwrap().children()[1]
+    };
+    // The main past the board's clipping edge: only the instance is compared.
+    let main = d.card(board, (500.0, 10.0), None, badge);
+    let dot = dot_of(&d, main[0]);
+    d.properties(main[0], &[("Show dot", PropKind::Boolean, dot)]);
+    let set = d.card(board, (10.0, 10.0), Some(main), badge);
+    d.set_properties(set[0], vec![PropValue::Boolean(false)]);
+    assert!(!d.doc.get(dot_of(&d, set[0])).unwrap().visible());
+    let (doc, res) = d.done();
+    let export = html_of_components(&doc, &res, &[board]);
+    assert_eq!(
+        export.inlined,
+        vec!["instance “Card”: its main draws a property's layer as a picture"]
+    );
+    holds_components("picture-prop", &doc, &res);
+}
+
+/// A use under another mode than its main's, whose main draws a picture filled
+/// from a colour variable and a stroke whose width variable is 0 in the main's
+/// mode: the canvas draws both in the use's mode, so the instance is its layers.
+///
+/// flip: `Walk::why_inline` ignoring the use's mode → nothing is inlined; past
+/// that assertion, the star is red and the stroke missing, at 127.4.
+#[test]
+fn a_use_in_another_mode_draws_that_modes_values() {
+    use ondin_core::BrushSource;
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut d = Doc::new();
+    let (light, dark) = (d.ids.mint_mode(), d.ids.mint_mode());
+    for (i, (mode, name)) in [(light, "Light"), (dark, "Dark")].into_iter().enumerate() {
+        d.apply(vec![Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: name.into(),
+            },
+            index: i,
+            cells: vec![],
+        }]);
+    }
+    let (ink, line) = (d.ids.mint_var(), d.ids.mint_var());
+    for (id, name, kind, cells) in [
+        (
+            ink,
+            "ink",
+            VarKind::Color,
+            [
+                (light, Cell::Color(Color::from_rgba8(220, 40, 40, 255))),
+                (dark, Cell::Color(Color::from_rgba8(40, 80, 220, 255))),
+            ],
+        ),
+        (
+            line,
+            "line",
+            VarKind::Number,
+            [(light, Cell::Number(0.0)), (dark, Cell::Number(4.0))],
+        ),
+    ] {
+        d.apply(vec![Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.into(),
+                kind,
+                cells: cells.into_iter().collect(),
+                origin: None,
+                forked: None,
+            },
+        }]);
+    }
+    let board = d.frame(None, 0.0, 0.0, 200.0, 100.0, "Board");
+    let painted = |d: &mut Doc, [frame, _, _]: [NodeId; 3]| {
+        d.stroke(frame, 0.0, StrokeAlign::Inside, StrokeSides::All);
+        let mut strokes = d.doc.get(frame).unwrap().paint().strokes.clone();
+        strokes[0].value.width_var = Some(line);
+        d.apply(vec![Operation::SetStrokes { id: frame, strokes }]);
+        // A picture filled from `ink`.
+        let star = d.add(
+            Some(frame),
+            NodeKind::Star {
+                size: Size::new(24.0, 24.0),
+                points: 5,
+                inner_ratio: 0.5,
+            },
+            Affine::translate((120.0, 18.0)),
+            "Star",
+        );
+        d.apply(vec![Operation::SetFills {
+            id: star,
+            fills: keyed_by_position([Fill {
+                brush: BrushSource::Bound {
+                    var: ink,
+                    alpha: 1.0,
+                },
+                visible: true,
+            }]),
+        }]);
+    };
+    // The main past the board's clipping edge: only the instance is compared.
+    let main = d.card(board, (500.0, 10.0), None, painted);
+    let used = d.card(board, (10.0, 10.0), Some(main), painted);
+    d.apply(vec![Operation::SetMode {
+        id: used[0],
+        mode: Some(dark),
+    }]);
+    let (doc, res) = d.done();
+    assert_eq!(html_of_components(&doc, &res, &[board]).inlined.len(), 1);
+    holds_components("use-mode", &doc, &res);
 }

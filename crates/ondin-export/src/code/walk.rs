@@ -347,6 +347,13 @@ impl Walk<'_> {
         if main_mode.is_some() && doc.get(root)?.mode() != main_mode {
             return Some(OVERRIDES.into());
         }
+        if doc.mode_at(root) != doc.mode_at(main) && self.varies_by_mode(main) {
+            return Some(
+                "drawn in another mode than its main, whose pictures, strokes, effects, \
+                 visibility or content read a variable that changes with the mode"
+                    .into(),
+            );
+        }
         let mut at = root;
         loop {
             let n = doc.get(at)?;
@@ -405,12 +412,103 @@ impl Walk<'_> {
             return Some("its variant has the values of another, which is written".into());
         }
         // Every variant is a tree of the component, so each must be a CSS root.
-        for t in self.trees(main).0 {
-            if self.css_blocker(doc.get(t)?).is_some() {
+        let trees = self.trees(main).0;
+        for t in &trees {
+            if self.css_blocker(doc.get(*t)?).is_some() {
                 return Some("its main is drawn as a picture".into());
             }
         }
+        // A use cannot reach into a picture, which holds the main's values.
+        let owner = variant::owner_of_main(doc, main).unwrap_or(main);
+        let mut bound: HashMap<NodeId, Vec<PropKind>> = HashMap::new();
+        for p in doc.get(owner)?.props() {
+            for b in &p.bound {
+                bound.entry(*b).or_default().push(p.kind);
+            }
+        }
+        for t in &trees {
+            for c in doc.get(*t)?.children() {
+                if self.pictures_bound(*c, &bound) {
+                    return Some("its main draws a property's layer as a picture".into());
+                }
+            }
+        }
         None
+    }
+
+    /// Whether the layer at `id`, or one under it written as it is, is a picture
+    /// holding a layer a property is `bound` to — but for a boolean on the
+    /// picture itself, which shows the picture's element.
+    fn pictures_bound(&self, id: NodeId, bound: &HashMap<NodeId, Vec<PropKind>>) -> bool {
+        let doc = self.doc;
+        let Some(n) = doc.get(id) else {
+            return false;
+        };
+        // A use is its own component's to write.
+        if n.link().is_some()
+            && component::instance_root(doc, id) == Some(id)
+            && self.why_inline(id).is_none()
+        {
+            return false;
+        }
+        if self.css_blocker(n).is_none() {
+            return n.children().iter().any(|c| self.pictures_bound(*c, bound));
+        }
+        let shows = bound
+            .get(&id)
+            .is_some_and(|k| k.iter().all(|k| *k == PropKind::Boolean));
+        let mut under = vec![id];
+        while let Some(at) = under.pop() {
+            if (at != id || !shows) && bound.contains_key(&at) {
+                return true;
+            }
+            under.extend(doc.get(at).map(Node::children).unwrap_or_default());
+        }
+        false
+    }
+
+    /// Whether a component written from `main` in its own mode would draw wrong
+    /// in another: a picture reading a variable that changes with the mode, which
+    /// the picture bakes, or a layer whose stroke, effects, visibility or content
+    /// read one, which decide what CSS is written rather than a `var()` in it.
+    fn varies_by_mode(&self, main: NodeId) -> bool {
+        let doc = self.doc;
+        let varies =
+            |vars: &[Option<VarId>]| vars.iter().flatten().any(|v| tokens::varies(doc, *v));
+        let mut under: Vec<(NodeId, bool)> =
+            self.trees(main).0.into_iter().map(|t| (t, false)).collect();
+        while let Some((at, pictured)) = under.pop() {
+            let Some(n) = doc.get(at) else { continue };
+            let pictured = pictured || self.css_blocker(n).is_some();
+            let paint = n.paint();
+            let mut structural: Vec<Option<VarId>> = vec![n.visible_var(), n.text_vars()[0]];
+            structural.extend(paint.strokes.iter().map(|s| s.width_var));
+            structural.extend(n.effects().iter().flat_map(|e| e.vars));
+            if varies(&structural) {
+                return true;
+            }
+            if pictured {
+                let mut drawn: Vec<Option<VarId>> = vec![n.opacity_var(), n.text_vars()[1]];
+                drawn.extend(n.size_vars());
+                drawn.extend(n.corner_vars());
+                drawn.extend(n.spacing_vars());
+                for b in paint
+                    .fills
+                    .iter()
+                    .map(|f| &f.brush)
+                    .chain(paint.strokes.iter().map(|s| &s.brush))
+                {
+                    if let BrushSource::Bound { var, .. } = b {
+                        drawn.push(Some(*var));
+                    }
+                }
+                if varies(&drawn) {
+                    return true;
+                }
+            }
+            under.extend(n.children().iter().map(|c| (*c, pictured)));
+        }
+        false
     }
 
     /// The trees the component made from `main` draws — its set's variants, the

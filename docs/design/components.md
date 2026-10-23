@@ -428,12 +428,13 @@ any other pass that recomputes a copy's value.
 
 ### Not built / open
 
-- A guide scoped to a main frame (§5.5) is not copied into its instances — not ruled.
-- Whether a group *instance* gets a canvas label — not ruled.
-- Pushing an instance's changes to its main — later.
+- Changing a top-level instance's main: designed as a relink, with no door (`roadmap.md` *Now*).
+- *Preferred mains* for swap (`roadmap.md` *Now*).
+- Pushing an instance's changes to its main, and a verb that un-makes a component (it would owe a
+  detach) — `roadmap.md` *Later*.
+- Unruled, parked in `roadmap.md`: a main-scoped guide not copied into instances; whether a group
+  *instance* gets a canvas label.
 - Real-time collaboration — non-goal for now (it is where linked copies cost).
-- A verb that un-makes a component (would owe a detach).
-- *Preferred mains* for swap.
 
 ### Chrome
 

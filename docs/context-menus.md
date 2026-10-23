@@ -365,8 +365,9 @@ No variable is offered on a field's label badge (it scrubs).
   if submenus exist.
 - **Reveal in layers panel** — built and removed: selecting already scrolls the tree to the row.
 - **Select all with same…** — belongs in the palette.
-- **Paste to replace** — needs a rule for mismatched layer counts; a candidate, not a row.
-- **Rotate 90°** — no builder for it.
+- **Paste to replace** — planned (`roadmap.md`); its row waits on a rule for mismatched layer counts.
+- **Rotate 90°** — the inspector's quarter-turn buttons (`inspector::rotate_selection_quarter`); the
+  palette entry is in `roadmap.md`.
 - **Keep proportions** — the inspector's chain link; a modifier, not a verb.
 - **Corner radius, side count, star ratio** — numbers belong to the inspector.
 - **Blend modes, effects, container layout** — authored in their inspector cards.

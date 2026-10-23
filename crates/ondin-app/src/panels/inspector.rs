@@ -8232,7 +8232,7 @@ impl OndinApp {
     /// One effect's numbers, behind its row.
     ///
     /// An `Area` in the popover lane ([`OndinApp::popover_anchor`]), so opening it
-    /// does not push the card down. No `Blend` dropdown: blend modes are deferred.
+    /// does not push the card down. No `Blend` dropdown: blend modes are not built.
     fn effect_menu_popup(
         &mut self,
         ui: &mut egui::Ui,

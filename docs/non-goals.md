@@ -12,6 +12,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 - **Multiplayer** — kept possible by the model (`architecture.md` §12), not built.
 - **A comment tool.**
 - **A unit system** — a screen tool's units are all px at 1x; density belongs to export (§15 D358).
+- **Custom key bindings** — the keymap is fixed (`shortcuts.md`).
 
 ## Canvas and interaction
 
@@ -37,10 +38,7 @@ it as a gap. Post-v1 work with a design of its own (MCP, Command Mode, multiplay
 
 ## Effects and paint
 
-- **Blend modes**, including per-effect blend modes.
-- **Background blur** — the export cannot contain the backdrop and SVG cannot express it; no `backdrop-filter`.
 - **Noise** — one generator written three times to agree to the pixel; belongs in fills if anywhere.
-- **Reordering an effect stack** — order changes a pixel in only two measured cases (§15 D340).
 - **Arrowheads, variable-width profiles, separate start/end caps** — a `Stroke` is ink at one width along an outline (§15 D126).
 - **A cap on the number of fills or strokes** (§15 D133).
 - **A pool of reusable effect-pass renderers** — the build cost is a one-off hitch, and a pool conflicts with a correctness rule (§15 D779).

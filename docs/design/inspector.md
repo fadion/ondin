@@ -163,7 +163,7 @@ comes from the committed document.
 - **A Filters row** uses `ui::value_field_metered`, a bar growing from the middle, plus a per-channel reset. Ranges are 0…200%, symmetric about the 100% neutral, so the meter reads `factor − 1.0`.
 - Opens on a layer with effects and shuts on one without, through its own `synced_selection` *Effects* entry.
 - **Multi-selection.** Export's shape: one agreed stack, or *"These layers have different effects"*, where `+` replaces every stack. The `Effect(i)` write reads each subject's own list rather than cloning the anchor's, because the detached picker can outlive an agreeing state.
-- **Not built:** reordering the stack is a decided non-goal; it changes pixels only between `Filters` and `LayerBlur`, and between two shadows on the same side.
+- **Not built:** drag-reorder of the rows, as fills and strokes have (`roadmap.md` *Now*). Order changes pixels only between `Filters` and `LayerBlur`, and between two shadows on the same side.
 
 ### Export (§7)
 

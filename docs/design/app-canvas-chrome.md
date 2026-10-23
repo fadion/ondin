@@ -61,7 +61,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - Both render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
   messages*.
-- All are **view state**, not persisted. All default on except *Lock guides* and present mode.
+- All are **view state**, not persisted (persisting them is in `roadmap.md`). All default on except
+  *Lock guides* and present mode.
 
 ### Settings
 

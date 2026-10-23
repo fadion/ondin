@@ -1,15 +1,118 @@
 # Ondin — Roadmap
 
-Open work only. **Now** is defects and gaps on shipped features, **Next** is decided and unbuilt,
-**Later** is deferred with a stated reason or trigger. Decided non-goals are in `non-goals.md`; built
-work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
-code before picking an item up — an item's premise can go stale while its ask still reads true.
+Open work only. **Now · Immediately** is defects and dead ends on shipped features, **Now · Soon** is
+what a designer reaches for and does not find, **Later · Before MCP** is larger work that lands before
+MCP and Command Mode, and the other **Later** sections are deferred with a stated reason or trigger.
+Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`. Refs are file +
+function name, never line numbers. Read the code before picking an item up — an item's premise can go
+stale while its ask still reads true.
 
-## Now
+## Now · Immediately
 
 - **Drag-reorder of the effects card's rows**, as the fill and stroke rows have (`paint::PaintDrag`,
   `inspector.md` *Live reorder*). The effects stack is ordered and `SetEffects` writes it whole, so
   only the card's drag is missing.
+- **Importing an SVG file.** A dropped `.svg` is refused with a message saying the parser is unbuilt
+  (`app.rs` `take_dropped_images`), and the place-image dialog's filter has no `svg`
+  (`place_image_action`). The parser exists: route both to `svg_in::import` as `canvas::paste_svg` does.
+- **Version history has no door.** `Ctrl+S` pins a copy under `.versions/`, but `library::store::versions`
+  has no production caller, so pins are never offered back. Browse and restore.
+- **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an
+  outer instance; `components.md` says a root "changes main by relinking", but nothing writes
+  `SetLink` except cut-move (`app.rs` `paste_cut_move`).
+- **A sweep gradient is rewritten as linear.** `paint::kind_of` files it under the Linear tab, and an
+  angle edit rewrites it (`paint::with_linear_angle`). Imported SVGs carry sweeps.
+- **The inspector's and picker's hex fields drop an 8-digit value's alpha** (`ui::parse_hex`;
+  `inspector::paint_hex_field`, `picker` `hex_row`). The variables browser reads it (`variables.rs`).
+- **SVG export drops text properties without reporting them**: `svg::run_attrs` writes no
+  `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
+  `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two
+  (`code::walk`).
+- **Opening a document from the OS.** `main.rs` `parse` answers a positional path with "unknown
+  command", so `ondin file.ondin` and a double-click do nothing.
+- **Status messages overwrite each other.** `session.info` and `fail` share one slot, so a later
+  message in the same handler hides a refusal (`take_dropped_images`, `place_image_action`).
+- **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
+  kit* and *Show in library* are not registry `Item`s, and quarter turns
+  (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.
+- **Snap and view toggles reset every launch** (`input::ViewSwitch`; `app-canvas-chrome.md`). Persist
+  them in `prefs`.
+- **`Ctrl+D` remembers its step for one layer only** (`duplicate_selection` keeps a `CloneChain` only
+  for a lone selection).
+- **The marquee only adds** (`canvas::apply_marquee`): no `Shift` toggle, no subtract.
+- **`Stroke::dash_offset` has no editor.** It loads from SVG and the Scale tool writes it; the stroke
+  popover does not.
+
+## Now · Soon
+
+- **Outline stroke** — a verb turning a stroke into a filled path. `scene::lay_stroke` already expands
+  outlines with `kurbo::stroke`.
+- **Joining the ends of two path layers.** Join works only between open ends of one path
+  (`tools::joinable_ends`, `canvas::join_points`).
+- **Gradient editing.** On-canvas handles; a linear gradient's two ends (only an angle today, spanning
+  the box: `paint::with_linear_angle`); a radial's radius and ellipse (`paint::with_radial_centre`,
+  `GradientBrush::transform`); conic in the picker (`paint::PaintKind::ALL` has no sweep, though the
+  model and both renderers do).
+- **Colour entry beyond hex** — RGB/HSL/HSB fields and CSS `rgb()`/`hsl()` input — and **recent
+  colours** beside the document swatches (`picker::document_swatches`).
+- **Select same** (fill, stroke, font, effect) and **select inverse**, in the palette
+  (`shortcuts.md` *Deliberately unbound*).
+- **Paste into the selected frame** (`app.rs` `paste_clipboard_at` returns a paste to its original
+  parent) and **paste to replace** (`context-menus.md` §7: owes a rule for mismatched layer counts).
+- **Paste properties carrying effects** — `build::Properties` takes fills, strokes and opacity only.
+- **Adding layout to a loose selection** should infer direction, gap and padding from where the
+  children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
+- **The insert picker drops at the top level only** (`kits/picker.rs`); a drop over a frame or flex
+  container should land inside it.
+- **Snapping to layout grids** — `snap.rs` never reads `Node::grids`.
+- **Combine as variants** should parse `Size=L, State=Hover` names into properties
+  (`variant::combine` makes one *Property 1*).
+- **Groups in the styles browser** for slash paths (`variables.rs` `styles_tab`), as variables have
+  (`Menu::Group`).
+- **Descriptions** on components, styles and variables — no field on `Style`, `Variable` or a main.
+  An agent over MCP reads them too.
+- **Reordering modes**, so the default (the first) can change. `op.rs` has add, remove and rename only.
+- **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,
+  min/max W/H (`binding::FieldKey`).
+- **Preferred mains for swap** (`components.md`).
+- **Missing fonts, document-wide**: a list of the families the document lacks and a replace-all.
+  Today a per-layer `WARN` glyph (`fonts::FamilyStatus::Missing`).
+- **Fonts installed mid-session** — `fonts/mod.rs` loads system fonts once, at startup.
+- **`Ctrl+B` / `Ctrl+I`** (`shortcuts.md` §10). Decide what bold and italic mean for a family with
+  named faces, a `wght` axis or a `slnt` axis (`typography::bold_toggle` is a 400↔700 switch), then
+  bind them (`input::TextChord`).
+- **WebP export** (`export::ExportFormat`); WebP already imports.
+- **Copy as PNG at a scale** (1× only, `context-menus.md`) and **copy as CSS** of a layer.
+- **Export all frames** without first giving each an export row (`Ctrl+Alt+E` runs layers that carry
+  specs).
+- **Present mode**: step between frames, fit to frame, fullscreen, and no selection chrome. It only
+  hides the panels today.
+- **A typed zoom percentage** in `app.rs` `zoom_control`.
+
+## Later · Before MCP
+
+- **Pages.** `Document` has one root (and the kit vault). Settle it before MCP fixes the snapshot and
+  tool surface around a single page.
+- **Blend modes**, per layer and per effect. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9`.
+- **Background blur.** Canvas and raster draw the backdrop; SVG cannot express it and the code export
+  has `backdrop-filter`, so the SVG writer owes an answer (a reported approximation, at least).
+- **More than one open document** — `OndinApp` holds one `session`.
+- **A light theme and a UI scale** — `theme.rs` is dark only; there is no scale setting.
+- **Tools**: pencil (freehand), slices.
+- **Shapes**: ellipse arcs and donuts, corner smoothing, a polygon's and star's corner radius.
+- **Paths**: simplify, offset, and vector networks (`core-model.md`: every reader takes a `BezPath`).
+- **Canvas**: lasso, tidy up, spacing handles on a loose multi-selection (`spacing.rs` covers
+  containers).
+- **Views and panels**: outline (wireframe) view, minimap, an undo history panel.
+- **PDF** export (through the SVG and a converter, with a text-as-outlines decision;
+  `export::ExportFormat`) and import.
+- **Importing other tools' files**, in this order: **Sketch** (a published JSON spec; also covers
+  Lunacy, which saves `.sketch`), **Figma** (`.fig` is reverse-engineered binary that breaks when
+  Figma changes it; the REST API is documented but needs a network and the user's token), then
+  **Penpot** (open source, so its format can be read from its code). Pixso works with `.fig`;
+  Affinity and Illustrator arrive through SVG and PDF.
+- **A default font preference** — `FontService::default_text_parts` is Inter.
+- **Variable collections and scoping** — one mode list per document today (`styles-variables.md`).
 
 ## Later · Components and layout
 

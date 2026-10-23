@@ -9,7 +9,8 @@ Variables (named, typed, per-mode values that fields bind to) and styles (reusab
 A **variable** is a named, typed value — **colour, number, string or boolean** — with **one value per mode**. An **alias** is a per-mode cell naming another variable of the same type (not a fifth type). CSS custom properties are the model.
 
 **Modes**
-- One mode list per document, no collections; the default mode is the first.
+- One mode list per document, no collections; the default mode is the first, and modes cannot be
+  reordered. Collections and reordering are in `roadmap.md`.
 - Only a **frame** (an `Artboard`, never a group) sets a mode, exactly one: `Node::mode: Option<ModeId>`; `None` inherits from the nearest ancestor frame that sets one, else the default.
 - On an instance, a mode set on the copy is an override like any field (§5.3d).
 - Deleting a mode returns every frame set to it to inherit, in one undoable transaction.

@@ -35,7 +35,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 
 ### Deferred (design for, do not build)
 
-- Blend modes beyond normal. Two effects were designed and deliberately not built: background blur (meaningful only when the export contains the backdrop, inexpressible in SVG) and noise (three generators would have to agree to the pixel, and it is probably a fill). §15 D333 holds the reasoning. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9` behind blend modes.
+- Blend modes beyond normal and background blur are planned work (`roadmap.md`, *Later · Before MCP*); `shortcuts.md` §2 reserves `Shift+3`…`Shift+9` for blend modes. Noise is not built: three generators would have to agree to the pixel, and it is probably a fill (`non-goals.md`).
 - Hyphenation: a decided non-goal for v1 (§15 D399, `non-goals.md`), declined on price.
 - Persistent constraints in §13's sense (live relationships between arbitrary properties, a dependency graph). Layout insets are not this.
 - Real-time multiplayer: a real future goal. Operation and identity model are designed not to preclude it (§5.2, §12); the sync layer is not built.

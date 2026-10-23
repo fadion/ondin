@@ -207,8 +207,8 @@ impl ExportScale {
 
 /// What comes out of an export.
 ///
-/// PDF is deliberately absent: it would go through our SVG and a converter, which
-/// is a dependency tree and a text-as-outlines decision.
+/// PDF is not built: it would go through our SVG and a converter, which is a
+/// dependency tree and a text-as-outlines decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExportFormat {
     #[default]

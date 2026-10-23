@@ -6,17 +6,11 @@
 //!
 //! **Four effects**: drop shadow, inner shadow, layer blur and colour filters
 //! are the ones that agree across the canvas (vello on wgpu), the raster export
-//! (`vello_cpu`) and the SVG writer. Two are deliberately absent:
-//!
-//! - **Background blur** only means something when the export contains the
-//!   backdrop, and SVG cannot express it (`BackgroundImage` was never
-//!   implemented by any renderer).
-//! - **Noise** would need one generator written three times and agreeing to the
-//!   pixel; it belongs in the fill list as a brush question.
-//!
-//! **Blend modes are absent** too, including the per-effect one the mockup
-//! draws: they are a deferred non-goal with a keyboard block reserved
-//! (`shortcuts.md` §2).
+//! (`vello_cpu`) and the SVG writer. **Background blur** and **blend modes**
+//! (per layer and per effect) are planned but not built: SVG cannot express a
+//! backdrop (`BackgroundImage` was never implemented by any renderer), so that
+//! writer owes an answer. **Noise** is a non-goal: one generator written three
+//! times would have to agree to the pixel, and it belongs in the fill list.
 
 use crate::item::Keyed;
 use kurbo::{Insets, Vec2};

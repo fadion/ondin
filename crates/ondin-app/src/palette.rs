@@ -49,6 +49,9 @@ pub(crate) struct Palette {
     /// The clipboard state at open, which the rows read as a context menu's do.
     /// Its target is rewritten each frame from the selection.
     snapshot: ContextMenu,
+    /// Why *Publish kit…* is dim, read at open as the document menu reads it:
+    /// counting the changes takes `&mut self`, and nothing edits under the palette.
+    publish_why: Option<&'static str>,
     /// The query and scope the highlight was last reset for; any change sends it
     /// back to the first live row.
     reset_for: Option<(String, bool)>,
@@ -68,6 +71,8 @@ pub(crate) struct Keys {
     escape: bool,
     /// The palette's own chord again.
     close: bool,
+    /// The cheatsheet's chord, which closes the palette and opens the sheet.
+    cheatsheet: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +103,12 @@ pub(crate) fn read_keys(ctx: &egui::Context) -> Keys {
             enter: i.consume_key(none, egui::Key::Enter),
             tab: i.consume_key(none, egui::Key::Tab),
             escape: i.consume_key(none, egui::Key::Escape),
+            // Before `close`, whose `/` would take the shifted chord too: an extra
+            // Shift still matches logically.
+            cheatsheet: i.consume_key(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::Slash,
+            ) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Questionmark),
             close: i.consume_key(egui::Modifiers::COMMAND, egui::Key::K)
                 || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Slash),
         }
@@ -239,9 +250,12 @@ fn query_words(query: &str) -> Vec<String> {
 /// Each query word takes a different label word, in any order: "al c" finds
 /// *Align horizontal centres*. An alias match lights nothing, since the letters
 /// typed are not in the label.
+///
+/// A query with no words (`🔥`, `#`) answers no command: matching every one
+/// would put an arbitrary verb under Enter. The layers section still answers it.
 fn rank(label: &str, aliases: &[&str], query: &[String]) -> Option<(u8, Vec<Range<usize>>)> {
     if query.is_empty() {
-        return Some((0, Vec::new()));
+        return None;
     }
     let lw = words(label);
     let mut used = vec![false; lw.len()];
@@ -363,11 +377,17 @@ impl OndinApp {
         self.export_row_open = None;
         self.type_menu = None;
         let target = self.palette_target();
+        let publish_why = match self.kit_changes() {
+            None => Some("Make this document a kit first"),
+            Some(c) if !c.any() => Some("No changes"),
+            Some(_) => None,
+        };
         self.palette = Some(Palette {
             query: String::new(),
             layers_only: false,
             highlight: 0,
             snapshot: self.menu_snapshot(egui::Pos2::ZERO, target, None),
+            publish_why,
             reset_for: None,
             scroll: false,
         });
@@ -508,9 +528,10 @@ impl OndinApp {
             cmd.checked = Some(self.view_switch(sw));
             push(&mut out, cmd);
         }
-        for item in [Item::InsertPicker, Item::VariablesBrowser, Item::PublishKit] {
+        for item in [Item::InsertPicker, Item::VariablesBrowser] {
             push(&mut out, Cmd::verb(item, None));
         }
+        push(&mut out, Cmd::verb(Item::PublishKit, pal.publish_why));
         for t in [
             ondin_export::code::Target::Html,
             ondin_export::code::Target::React,
@@ -768,6 +789,10 @@ impl OndinApp {
         let Some(mut pal) = self.palette.take() else {
             return;
         };
+        if keys.cheatsheet {
+            self.open_cheatsheet(crate::cheatsheet::Opened::Editor);
+            return;
+        }
         if self.modal_is_up() || keys.escape || keys.close {
             return;
         }
@@ -1378,8 +1403,13 @@ mod tests {
         query_words(s)
     }
 
-    /// A rectangle at the top of the document's root.
+    /// A rectangle named *Card* at the top of the document's root.
     pub(crate) fn add_rect(app: &mut OndinApp) -> NodeId {
+        add_named(app, "Card")
+    }
+
+    /// A rectangle named `name` at the top of the document's root.
+    fn add_named(app: &mut OndinApp, name: &str) -> NodeId {
         use ondin_core::{NodeKind, Operation, Transaction};
         let s = &mut app.session;
         let id = s.ids.mint();
@@ -1394,7 +1424,7 @@ mod tests {
                 corner_radii: ondin_core::kurbo::RoundedRectRadii::default(),
             },
             transform: None,
-            name: Some("Card".into()),
+            name: Some(name.into()),
         }])));
         id
     }
@@ -1410,6 +1440,8 @@ mod tests {
         assert!(rank("Group selection", &[], &q("g g")).is_none());
         // Inside a word is not a start.
         assert!(rank("Ungroup", &[], &q("group")).is_none());
+        // A query of no words matches nothing.
+        assert!(rank("Cut", &[], &q("🔥")).is_none());
     }
 
     /// A prefix of the whole label outranks scattered word starts, which outrank
@@ -1596,5 +1628,160 @@ mod tests {
         assert!(
             find(Item::ExportCode(ondin_export::code::Target::React)).is_some_and(|c| c.enabled)
         );
+    }
+
+    /// Open the palette through real frames and type `text` into it.
+    fn type_into_palette(ctx: &egui::Context, app: &mut OndinApp, text: &str) {
+        let none = egui::Modifiers::NONE;
+        pass(ctx, app, Vec::new(), none);
+        app.toggle_palette(ctx);
+        pass(ctx, app, Vec::new(), none);
+        pass(ctx, app, vec![egui::Event::Text(text.into())], none);
+        // The rows are built before the field reads its text: one more frame
+        // builds them for the query.
+        pass(ctx, app, Vec::new(), none);
+        assert_eq!(
+            app.palette.as_ref().map(|p| p.query.as_str()),
+            Some(text),
+            "fixture: the query was typed"
+        );
+    }
+
+    /// **A query with no words answers no command**: `🔥` lists the layer it
+    /// names and Enter selects it, rather than running the first verb (*Cut*).
+    /// flip: `rank` answering an empty word list with a match → fails at "the
+    /// card was not cut".
+    #[test]
+    fn a_wordless_query_finds_its_layer_and_runs_no_command() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let card = add_rect(&mut app);
+        let hero = add_named(&mut app, "🔥 Hero");
+        app.session.selection.set_one(card);
+        type_into_palette(&ctx, &mut app, "🔥");
+        let none = egui::Modifiers::NONE;
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter, none)], none);
+        assert!(app.session.doc.get(card).is_some(), "the card was not cut");
+        assert_eq!(app.session.selection.ids(), &[hero]);
+    }
+
+    /// **The cheatsheet chord swaps the palette for the sheet**, in both
+    /// spellings a keyboard can send it.
+    /// flip: `read_keys` not reading the cheatsheet chord → fails at "Slash".
+    #[test]
+    fn the_cheatsheet_chord_swaps_the_palette_for_the_sheet() {
+        let shift_ctrl = CTRL | egui::Modifiers::SHIFT;
+        for (spelling, k) in [
+            ("Slash", egui::Key::Slash),
+            ("Questionmark", egui::Key::Questionmark),
+        ] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let mut app = OndinApp::headless(&ctx);
+            type_into_palette(&ctx, &mut app, "x");
+            pass(&ctx, &mut app, vec![key(k, shift_ctrl)], shift_ctrl);
+            pass(&ctx, &mut app, Vec::new(), egui::Modifiers::NONE);
+            assert!(app.palette.is_none(), "{spelling}: the palette closed");
+            assert!(app.cheatsheet.is_some(), "{spelling}: the sheet opened");
+        }
+    }
+
+    /// **The rows act on the topmost selected layer** in panel order when there
+    /// is no key layer, whichever order the layers were selected in.
+    /// flip: `topmost_selected` answering `sel.first()` → fails here.
+    #[test]
+    fn the_target_is_the_topmost_selected_layer() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let (a, b, c) = (
+            add_named(&mut app, "A"),
+            add_named(&mut app, "B"),
+            add_named(&mut app, "C"),
+        );
+        app.session.selection.set(vec![a, c, b]);
+        assert_eq!(app.session.selection.key(), None, "fixture: no key layer");
+        assert_eq!(
+            app.palette_target(),
+            Target::Layer {
+                id: c,
+                door: Door::Panel
+            }
+        );
+    }
+
+    /// **The name rule lists layers top to bottom as the panel does**, case
+    /// folded, parents before their children, the root included.
+    /// flip: `name_hits` pushing children reversed → fails at the order.
+    #[test]
+    fn name_hits_lists_in_panel_order_case_folded() {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let low = add_named(&mut app, "card low");
+        let s = &mut app.session;
+        let (group, inner) = (s.ids.mint(), s.ids.mint());
+        let root = s.doc.root();
+        let top = s.doc.get(root).map_or(0, |n| n.children().len());
+        assert!(s.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: top,
+                kind: NodeKind::Group,
+                transform: None,
+                name: Some("Card group".into()),
+            },
+            Operation::CreateNode {
+                id: inner,
+                parent: group,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: Some("CARD inner".into()),
+            },
+        ])));
+        let hits = crate::panels::layers::name_hits(&app.session.doc, "Card");
+        assert_eq!(hits, vec![group, inner, low]);
+    }
+
+    /// **The highlight starts on the first live row** when the best-ranked row
+    /// is dim, so Enter runs something.
+    /// flip: the `reset_for` block highlighting index 0 → fails here.
+    #[test]
+    fn the_highlight_skips_a_dim_top_row() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        type_into_palette(&ctx, &mut app, "re");
+        let pal = app.palette.take().expect("open");
+        let sections = app.palette_sections(&pal);
+        let entries: Vec<&Entry> = sections.iter().flat_map(|s| &s.entries).collect();
+        let live = entries
+            .iter()
+            .position(|e| !matches!(e, Entry::Cmd(c) if !c.enabled))
+            .expect("fixture: a live row");
+        assert!(live > 0, "fixture: the top row is dim");
+        assert_eq!(pal.highlight, live);
+    }
+
+    /// **Publish kit… dims outside a kit**, as the document menu's row does.
+    /// flip: `palette_commands` passing no reason for it → fails here.
+    #[test]
+    fn publish_kit_is_dim_outside_a_kit() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_palette(&ctx);
+        let pal = app.palette.take().expect("open");
+        let cmds = app.palette_commands(&pal);
+        let publish = cmds
+            .iter()
+            .find(|c| c.item == Item::PublishKit)
+            .expect("a publish row");
+        assert!(!publish.enabled);
+        assert_eq!(publish.why, Some("Make this document a kit first"));
     }
 }

@@ -112,14 +112,17 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   from `menu::KIND_VERBS`, a hand list giving each its *Needs …* sentence (*Needs text on a path*);
   with nothing selected every one reads `menu::NEEDS_SELECTION`, *Select a layer first*. They show
   only when the query matches, last, under *Not available here*. App verbs dim on their own
-  predicate (*Nothing to undo*, *Needs three or more layers*). Enter on a dim row runs nothing; the
-  footer shows the reason.
+  predicate (*Nothing to undo*, *Needs three or more layers*); *Publish kit…* takes the document
+  menu's, read at open (*Make this document a kit first*, *No changes*). Enter on a dim row runs
+  nothing; the footer shows the reason.
 - **Matching** (`rank`). Every query word matches the start of a label word, in any order,
   case-folded, each taking a distinct word (*al c* → *Align horizontal centres*; *g g* does not
   find *Group selection*). Matched letters take the accent. An alias counts only when the label
   alone cannot answer some query word, and lights nothing (*svg* → *Copy as SVG*). Rank 0 when the
   query is a prefix of the label's words, 1 for word starts, 2 through an alias; ties go by recency,
-  then registry order. *Not available here* sorts by rank, then registry order.
+  then registry order. *Not available here* sorts by rank, then registry order. A query with no
+  words (`🔥`, `#`) matches no command, so only the layers section answers it and Enter never runs
+  an arbitrary verb.
 - **No syntax.** No `>` or `@` prefixes and no typed arguments: a verb with an argument is one row
   per value (*Align left*, *Export as React…*).
 - **Running.** Enter or a click closes the palette first, then `run_palette_item` records the row
@@ -153,7 +156,8 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   outlines stay visible; the panels are unchanged. A backdrop click closes it and is swallowed. While
   open it owns the keyboard: `palette::read_keys` takes its keys at the top of the frame, before any
   panel draws, and `input::resolve` does not run. ↑↓ wrap, Page Up/Down move eight rows, Escape
-  closes whatever is typed, the chord again closes. It works in present mode.
+  closes whatever is typed, the chord again closes, and the cheatsheet's chord (read first, since
+  the palette's `/` would take it too) swaps the palette for the sheet. It works in present mode.
 - **Not listed:** nudge, size step, point stepping, opacity digits, Escape and Enter, text chords
   outside a text session, `PasteRelease`.
 

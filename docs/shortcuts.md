@@ -5,10 +5,11 @@ The whole keymap: ✅ bound, ➕ agreed and unbuilt, ⛔ deliberately unbound. T
 `ViewSwitch::accel`) for the editor, `panels/dashboard.rs` (`dashboard_keys`, `search_field`) for
 the library.
 
-**Unbuilt (five):** §8's `Ctrl+K` / `Ctrl+/` command palette and `Ctrl+Shift+/` cheatsheet
-(waiting on the command registry, `roadmap.md`), and §10's `Ctrl+B` / `Ctrl+I`. The cheatsheet
-**is** this file rendered from the registry; when it lands this document becomes the registry's
-test. Not kept on the design canvas: its artboards are mockups, not specs.
+**Unbuilt:** §10's `Ctrl+B` / `Ctrl+I`. The cheatsheet (`Ctrl+Shift+/`, `app-canvas-chrome.md`)
+renders the editor's bindings from the command registry, plus hand-kept Mouse and Library
+sections. Its test checks the registry's spelling against `input::resolve` for the rows with an
+`Item::action` only; the menu verbs are not yet checked (`roadmap.md`). Not kept on the design
+canvas: its artboards are mockups, not specs.
 
 **Sources.** Figma and Sketch agree with each other far more than with Adobe, so take their
 binding where they disagree with Adobe about a concept both have, and Adobe's where Figma has no
@@ -28,7 +29,7 @@ the unshifted key plus Shift. `egui::Key` has variants for `!` `?` `:` `|` `{` `
 | `Shift+1` | `!` | `Key::Exclamationmark` | accept both — ✅ (§3) |
 | `Ctrl+Shift+;` | `:` | `Key::Colon` | accept both — ✅ (§6) |
 | `Ctrl+Shift+\` | `\|` | `Key::Pipe` | accept both — ✅ (§6) |
-| `Ctrl+Shift+/` | `?` | `Key::Questionmark` | accept both — unbuilt (§8) |
+| `Ctrl+Shift+/` | `?` | `Key::Questionmark` | accept both — ✅ (§8) |
 | `Ctrl+Shift+[` `]` | `{` `}` | `Key::Open/CloseCurlyBracket` | ✅ |
 | `Ctrl+Shift+=` | `+` | `Key::Plus` | ✅ the *primary* zoom-in spelling (§3) |
 | `Shift+2`, `Shift+0` | `@`, `)` | no variant → physical `Num2`/`Num0` | nothing (§3) |
@@ -256,9 +257,9 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+Alt+E` | export all | ✅ not Figma's. Re-runs every layer's saved export settings into the last export folder, asking only the first time (`architecture.md` §7). Alt **and** not-Shift: `Ctrl+Alt+Shift+E` is neither this nor `Ctrl+Shift+E` |
 | `Ctrl+,` | **settings** | ✅ VS Code's; `,` was unspent. ⚠️ **Opens, cannot close**: `resolve` is not called while a modal is up (`Action::OpenSettings` is named for that). Escape, ✕, *Cancel*, backdrop close it. `cmd_only && !m.shift` |
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
-| `Ctrl+K` | ➕ command palette | editor; this file's choice |
-| `Ctrl+/` | ➕ command palette | Figma's quick actions, alias |
-| `Ctrl+Shift+/` | ➕ shortcut cheatsheet | accept `Key::Questionmark` too |
+| `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, read by `input::discovery_chord` in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
+| `Ctrl+/` | **command palette** | ✅ Figma's quick actions, alias; Shift up, so it never reads as `Ctrl+Shift+/` |
+| `Ctrl+Shift+/` | **shortcut cheatsheet** | ✅ `Key::Questionmark` too (§0). Editor (both modes) and library (`dashboard_keys`); the chord again closes it, read in `cheatsheet_ui` because `resolve` does not run under a modal |
 
 ⚠️ `Ctrl+K` (palette) and `Ctrl+Shift+K` (place image) are adjacent and unrelated; a stray Shift
 opens a file dialog, visible and undone by `Escape`. If it grates, give up `Ctrl+K`: `Ctrl+/` has
@@ -468,8 +469,8 @@ here.
 | `Shift+I` | open the insert picker | ✅ `Action::InsertPicker` (§15 D1014): the floating picker at the foot of the vertical toolbar, toggled with the rail's hexagon. Plain `I` stays unbound (`Ctrl+Alt+I` is Intersect). ⚠️ **It closes the picker only while the search field does not hold the keyboard**: the field takes it once on opening and a focused widget silences the keymap, so `Shift+I` right after opening types a capital *I*. `Escape` and the button close it either way (`toggle_kit_picker`) |
 | `Ctrl+Alt+P` | publish kit… | ✅ `Action::PublishKit` (`cmd && alt && !shift && P`, §15 D1015). In a kit only; otherwise the status line says why. `the_kit_chords_land_and_leave_their_neighbours_alone`. ⚠️ The dashboard's `Ctrl+Alt+P` is deliberately inert (§15 D712) |
 
-Until a command palette exists these two are the keyboard's whole route to the kit verbs.
-`Ctrl+Alt+P` is one more chord for §12's `AltGr` question.
+The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` is one more chord for
+§12's `AltGr` question.
 
 ## 14. Styles and variables
 

@@ -711,6 +711,20 @@ pub struct OndinApp {
     /// The one open context menu (`docs/context-menus.md` §0 R4); one slot, so opening
     /// the next closes the last.
     pub(crate) context_menu: Option<ContextMenu>,
+    /// The open command palette (`crate::palette`).
+    pub(crate) palette: Option<crate::palette::Palette>,
+    /// The open shortcut cheatsheet (`crate::cheatsheet`); a modal on either screen.
+    pub(crate) cheatsheet: Option<crate::cheatsheet::Cheatsheet>,
+    /// A card a palette row asked to show: the inspector opens it and scrolls to it
+    /// on the next frame it draws it, then clears this.
+    pub(crate) reveal_card: Option<&'static str>,
+    /// The inspector cards drawn this frame, by title, and the ones drawn last
+    /// frame, which the palette offers to show.
+    pub(crate) cards_drawn: Vec<&'static str>,
+    pub(crate) cards_shown: Vec<&'static str>,
+    /// Every card title drawn this session, so a card the selection does not show
+    /// can still be offered, dim.
+    pub(crate) cards_seen: std::collections::BTreeSet<&'static str>,
     /// Where the secondary press that may open a menu landed (§0 R1): egui has forgotten
     /// the press by the time `secondary_clicked` fires on release.
     pub(crate) secondary_press: Option<egui::Pos2>,
@@ -1226,6 +1240,12 @@ impl OndinApp {
             making_all_local: None,
             unsharing_kit: None,
             context_menu: None,
+            palette: None,
+            cheatsheet: None,
+            reveal_card: None,
+            cards_drawn: Vec::new(),
+            cards_shown: Vec::new(),
+            cards_seen: std::collections::BTreeSet::new(),
             secondary_press: None,
             show_grid: true,
             show_layout_grids: true,
@@ -1346,7 +1366,10 @@ impl eframe::App for OndinApp {
         // read off the frame lands here, before the screen it switches to is drawn.
         self.poll_open(ui.ctx());
         if self.view == View::Dashboard {
+            // The palette is the editor's; one left open must not greet the next file.
+            self.palette = None;
             self.dashboard_ui(ui);
+            self.cheatsheet_ui(ui.ctx());
             // Last of the library's frame, after every card (the editor's twin is at
             // the end of this function).
             crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
@@ -1414,8 +1437,13 @@ impl eframe::App for OndinApp {
         // (`docs/context-menus.md` §0 R3): Escape closes only the menu, and its
         // navigation keys travel to it as a value.
         let mut nav = None;
+        let mut palette_keys = crate::palette::Keys::default();
         let popover_heard = std::mem::take(&mut self.popover_heard);
-        if self.context_menu.is_some() {
+        if self.palette.is_some() && !self.modal_is_up() {
+            // The palette owns the keyboard: its keys leave `Events` before its
+            // field can read them, and nothing reaches `input::resolve`.
+            palette_keys = crate::palette::read_keys(&ctx);
+        } else if self.context_menu.is_some() {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.context_menu = None;
             } else {
@@ -1518,8 +1546,11 @@ impl eframe::App for OndinApp {
         // After every door, so a right-click that replaced the open menu has already
         // written the slot (R4); unguarded, a context menu opens in present mode.
         self.context_menu_ui(&ctx, nav);
-        // Last; unguarded because its only door is a top-bar button present mode hides.
+        // Unguarded: its chord works in present mode, over the canvas alone.
+        self.palette_ui(&ctx, canvas, palette_keys);
+        // Last, and unguarded: `Ctrl+,` and the palette open it in present mode too.
         self.settings_ui(&ctx);
+        self.cheatsheet_ui(&ctx);
 
         // A button click's commit requests no repaint of its own.
         if self.pending_edit.is_some() {
@@ -1647,6 +1678,8 @@ impl OndinApp {
             Action::CloseDocument => self.go_to_dashboard(),
             // The top bar's door; it cannot arrive with the modal already up.
             Action::OpenSettings => self.toggle_settings(ctx),
+            Action::Palette => self.toggle_palette(ctx),
+            Action::Cheatsheet => self.open_cheatsheet(crate::cheatsheet::Opened::Editor),
             // No dialog once a destination is known this session.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::ExportCode(target) => self.export_code(target),
@@ -5808,6 +5841,7 @@ impl OndinApp {
             || self.kits_used_open
             || self.making_all_local.is_some()
             || self.unsharing_kit.is_some()
+            || self.cheatsheet.is_some()
     }
 
     /// Read a workspace switch; the menus tick their rows from here.
@@ -6425,6 +6459,8 @@ impl OndinApp {
     /// to the window edge, the canvas below the last card stays clickable, and the gaps
     /// between cards are not, so aiming at a card can never deselect.
     pub(crate) fn inspector_panel(&mut self, ctx: &egui::Context) {
+        // Last frame's cards are what the palette offers to show.
+        self.cards_shown = std::mem::take(&mut self.cards_drawn);
         let screen = ctx.input(|i| i.content_rect());
         let column = Self::inspector_column(screen);
 

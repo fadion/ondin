@@ -64,7 +64,9 @@ ondin-app/src/
 ├─ grid.rs          pixel grid (one-world-unit lattice)
 ├─ input.rs         Mode + Action: mode-aware keyboard routing
 ├─ measure.rs       Axis + Measure: Alt-hover measure and spacing-snap gaps; pure Rect geometry
-├─ menu.rs          context-menu registry (Item, Spec, Group, build) + app half (see context-menus.md)
+├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
+├─ palette.rs       the command palette (app-canvas-chrome.md)
+├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
 ├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
 ├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json
 ├─ rulers.rs        ruler bars + ruler guides

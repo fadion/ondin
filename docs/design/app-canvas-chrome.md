@@ -1,7 +1,8 @@
-# Canvas chrome, the top bar's menus and present mode
+# Canvas chrome, the top bar's menus, the command palette, the cheatsheet and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
-pixel grid, the top bar's View/Snap menus and Settings button, and present mode. Part of §9.4.
+pixel grid, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
+cheatsheet, and present mode. Part of §9.4.
 
 ## 9.4 Gesture chrome
 
@@ -80,6 +81,108 @@ mutually exclusive by construction. `OndinApp::dropdown` spells the closing half
 Escape). `OndinApp::context_menu` is the same one-slot shape; opening a context menu clears this field
 and the floating popovers.
 
+## The command palette (`palette.rs`)
+
+`Ctrl+K`, alias `Ctrl+/` (`shortcuts.md` §8), in the editor only: in the library `Ctrl+K` stays the
+file search, and the library screen clears an open palette. `input::discovery_chord` reads the
+chord in both `normal_mode` and `text_insert_mode`. With a modal up the chord does nothing, and a
+modal that opens closes the palette. App actions only; typed syntax belongs to Command Mode
+(`vm.md`). The design canvas's *Command Palette* artboard is the mockup; these rules are the spec.
+
+- **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
+  dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new and
+  close document, the library, settings, *Export as …*, tools, place image, zoom, align,
+  distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
+  and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
+  `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
+  chord are one verb; `Item::aliases` holds the extra words. `palette_commands` chooses which verbs
+  are offered; their words live in the registry.
+- **The target** (`palette_target`, re-read every frame): a text session → `Target::TextSession`; a
+  point or segment selection on the edited path → `Target::Points`; selected layers →
+  `Target::Layer { id, door: Panel }`, `id` the key layer, else the topmost selected in
+  layers-panel order; only a guide selected → `Target::Guide`; else `Target::Canvas`. The rows are
+  that target's menu built with no pointer (`menu_snapshot`), then in a text session the text
+  chords, then always the page's (canvas menu's) rows. *Add point here* and *Make this the key
+  layer* are never listed: the keyboard supplies no point and no pointer names "this". The footer
+  names the target (*Card and 2 more*, *Editing text*, *Nothing selected*).
+- **Paste.** `PasteHere` is labelled *Paste* and runs `Action::Paste` outside a text session
+  (`run_palette_item`).
+- **Present, dim, absent.** A row the menu would dim is dim with the same reason and keeps its rank,
+  so the list does not reshuffle when the selection changes. The verbs a target's menu omits come
+  from `menu::KIND_VERBS`, a hand list giving each its *Needs …* sentence (*Needs text on a path*);
+  with nothing selected every one reads `menu::NEEDS_SELECTION`, *Select a layer first*. They show
+  only when the query matches, last, under *Not available here*. App verbs dim on their own
+  predicate (*Nothing to undo*, *Needs three or more layers*). Enter on a dim row runs nothing; the
+  footer shows the reason.
+- **Matching** (`rank`). Every query word matches the start of a label word, in any order,
+  case-folded, each taking a distinct word (*al c* → *Align horizontal centres*; *g g* does not
+  find *Group selection*). Matched letters take the accent. An alias counts only when the label
+  alone cannot answer some query word, and lights nothing (*svg* → *Copy as SVG*). Rank 0 when the
+  query is a prefix of the label's words, 1 for word starts, 2 through an alias; ties go by recency,
+  then registry order. *Not available here* sorts by rank, then registry order.
+- **No syntax.** No `>` or `@` prefixes and no typed arguments: a verb with an argument is one row
+  per value (*Align left*, *Export as React…*).
+- **Running.** Enter or a click closes the palette first, then `run_palette_item` records the row
+  in *Recent* and dispatches it as its menu row would, so a dialog never opens under it.
+- **Empty query.** *Recent* (the last five rows run, keyed by `verb_key`, the `Item`'s `Debug`
+  form, so *Hide* and *Show* are one; `prefs.palette_recent`), then the target's own menu rows
+  (*For the selection*, *For the page*, *For the text*, …). The first enabled row is highlighted,
+  and again whenever the query or scope changes.
+- **Layers.** Matching layers follow the commands: `layers::name_hits`, the layers panel's own
+  filter rule (`matching_rows` keeps these and their ancestors), a case-folded substring in panel
+  order, the root dropped. The first five show, then *N more layers*, which Tab or Enter opens. Each
+  row has its kind glyph, ancestor path (outermost first, cut from the left a parent at a time) and
+  hidden or locked mark. Tab toggles a layers-only scope (a chip in the field, the query kept,
+  Backspace on an empty query removes the chip), capped at 200 rows. Enter selects the layer as
+  clicking its panel row does; the panel opens its parents and `reveal_selection` brings it into
+  view without changing zoom. Shift+Enter or Shift-click adds it to the selection.
+- **Verbs with no other door.** *Export as HTML… / React… / Vue…*, one row per `code::Target`, dim
+  with nothing selected, aliases *code*, *html*, *react*, *vue*, *zip*. *Show ‹card›*: the cards the
+  inspector drew last frame (`cards_shown`) are live; cards drawn earlier this session but not now
+  (`cards_seen`) are dim, *Not shown for this selection*; in present mode all are dim. Running one
+  sets `reveal_card`, and `panel_full` opens that card and scrolls it to the top. Tool rows (*Tool:
+  Pen*, `P`). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
+  baselines*, *Show status messages*, *Show layout grid*) a keyboard route.
+- **In a text session** the chord opens the palette too, with the text session's menu rows and
+  styling chords first. The session stays open under it; the palette's field holds focus, so the
+  canvas reads no keys, and Escape closes only the palette.
+- **Placement and keys.** An `egui::Modal` with a transparent backdrop, 560 wide, anchored
+  centre-top over the canvas column, its top 56pt below the canvas's top. Nothing dims, so selection
+  outlines stay visible; the panels are unchanged. A backdrop click closes it and is swallowed. While
+  open it owns the keyboard: `palette::read_keys` takes its keys at the top of the frame, before any
+  panel draws, and `input::resolve` does not run. ↑↓ wrap, Page Up/Down move eight rows, Escape
+  closes whatever is typed, the chord again closes. It works in present mode.
+- **Not listed:** nudge, size step, point stepping, opacity digits, Escape and Enter, text chords
+  outside a text session, `PasteRelease`.
+
+## The shortcut cheatsheet (`cheatsheet.rs`)
+
+- **Doors.** `Ctrl+Shift+/` (and `Key::Questionmark`) in the editor (`discovery_chord`, both modes)
+  and in the library (`dashboard_keys`, through `input::cheatsheet_chord`), and the palette's
+  *Keyboard shortcuts* row. Opening it closes the palette and any context menu.
+- **The card.** A `settings::card_modal`, 960 wide: title, a filter field and ✕; the body scrolls
+  and the card is at most 640 tall. It counts in `modal_is_up` and `library_keys_are_free`. It
+  closes on Escape, ✕, the backdrop, or the chord again — read in `cheatsheet_ui` itself, since
+  `resolve` does not run under a modal, and not on the frame that opened it (`just_opened`).
+- **Rows** are the registry's items with an accel: label and spelling from `Item::spec` (*Hide /
+  Show*, *Lock / Unlock* and *Paste* name the verb rather than one state), alternatives from
+  `Item::alt_accel` joined by "or". A row is never dimmed for availability and never runs.
+- **Sections** (`sections`): Tools, Zoom, Edit, Structure, Arrange, Layer, View, Components and
+  kits, File, Text editing, Mouse, Library, dealt in order into three columns, each filled to about a
+  third; a section is never split. Opened from the library, its section leads, followed by an *In a
+  file* divider; opened in a text session, the text keys lead.
+- **Filter and hold.** Every filter word must start a label word or a key name. Holding modifiers
+  with an empty filter dims every row whose chord does not use exactly those modifiers.
+- **Hand-kept, a known duplication.** The Mouse section, the opacity-digit row and the Library
+  section have no registry rows (gestures and opacity digits are not verbs, and the library's keys
+  are read by `dashboard_keys`, not `input::resolve`), so a change to one of those keys is made here
+  too. Which items each section lists is also chosen by hand in `sections`.
+- **What its test covers.** `every_sheet_chord_resolves_to_its_rows_action` drives each sheet chord
+  whose item has an `Item::action` through `input::resolve` and asserts that action, walking
+  `sections` itself so a new row is covered. The other menu verbs (clipboard, structure, order,
+  flips) and *Centre text* (`Ctrl+Shift+C` is read from the release) are not driven; they
+  dispatch through `perform_menu_item` or arrive as clipboard events or releases.
+
 ## Present mode
 
 - Hides exactly: top bar, layers pane, tool rail, inspector, picker, ruler bars. Everything edited
@@ -105,3 +208,6 @@ and the floating popovers.
   first.
 - A modal flag set behind a `!present` draw guard swallows all keys in present mode.
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
+- The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
+  frame's input; `just_opened` is all that stops the opening press closing it.
+  `the_chord_opens_the_sheet_and_closes_it` pins it.

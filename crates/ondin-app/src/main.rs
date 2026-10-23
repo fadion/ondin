@@ -38,6 +38,7 @@
 mod app;
 mod atomic;
 mod canvas;
+mod cheatsheet;
 mod chrome;
 mod cursor;
 mod expr;
@@ -54,6 +55,7 @@ mod logging;
 mod machine_dir;
 mod measure;
 mod menu;
+mod palette;
 mod panels;
 mod prefs;
 mod preview;

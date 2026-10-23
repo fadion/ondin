@@ -71,8 +71,11 @@ pub enum Action {
     /// *Export as HTML / React / Vue…*: the selection's code export, one zip
     /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
     /// the command palette is its door.
-    #[expect(dead_code, reason = "reached only through the unbuilt command palette")]
     ExportCode(ondin_export::code::Target),
+    /// `Ctrl+K` and `Ctrl+/` — open the command palette, or close it.
+    Palette,
+    /// `Ctrl+Shift+/` — the shortcut cheatsheet.
+    Cheatsheet,
     Copy,
     Cut,
     Paste,
@@ -478,7 +481,7 @@ pub fn resolve(ctx: &egui::Context, mode: Mode, nudge: NudgeStep) -> Vec<Action>
 ///
 /// Three keys mean something else in `Mode::Normal` (`Ctrl+U` snap-to-shapes,
 /// `Ctrl+Shift+L` lock, `Alt`+arrows nudge); only the mode tells them apart.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextChord {
     /// `Ctrl+U` — underline on or off.
     ///
@@ -598,9 +601,33 @@ fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
                 out.push(action);
             }
         }
+        out.extend(discovery_chord(i));
 
         out
     })
+}
+
+/// Whether this frame pressed the cheatsheet's chord — the library's door, which
+/// reads the context itself because `resolve` does not run there.
+pub(crate) fn cheatsheet_chord(ctx: &egui::Context) -> bool {
+    ctx.input(|i| discovery_chord(i) == Some(Action::Cheatsheet))
+}
+
+/// The palette's and the cheatsheet's chords, which both modes admit
+/// (`docs/shortcuts.md` §8).
+///
+/// `Ctrl+Shift+/` arrives as `Key::Questionmark` on most layouts (§0), so both
+/// spellings are read; the palette's `/` is Shift-up so the two never fire together.
+fn discovery_chord(i: &egui::InputState) -> Option<Action> {
+    let m = i.modifiers;
+    let cmd_only = m.command && !m.alt;
+    if cmd_only
+        && ((m.shift && i.key_pressed(egui::Key::Slash)) || i.key_pressed(egui::Key::Questionmark))
+    {
+        return Some(Action::Cheatsheet);
+    }
+    (cmd_only && !m.shift && (i.key_pressed(egui::Key::K) || i.key_pressed(egui::Key::Slash)))
+        .then_some(Action::Palette)
 }
 
 fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
@@ -665,6 +692,7 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::OpenSettings,
             &mut out,
         );
+        out.extend(discovery_chord(i));
         // `Ctrl+Shift+E` is deliberately unbound: plain `Ctrl+E` is *Flatten*, so
         // that arm's `!m.shift` is all that stops the old export chord flattening
         // (`a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening`).

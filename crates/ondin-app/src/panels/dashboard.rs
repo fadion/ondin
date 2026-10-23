@@ -2204,6 +2204,7 @@ impl OndinApp {
             && self.library_settings.is_none()
             && self.rename_entry.is_none()
             && self.unsharing_kit.is_none()
+            && self.cheatsheet.is_none()
     }
 
     /// The library's own keymap — arrows, `Enter`, `Delete`, `Escape`, `F2`,
@@ -2230,6 +2231,11 @@ impl OndinApp {
             || !self.library_keys_are_free()
             || ctx.egui_wants_keyboard_input()
         {
+            return;
+        }
+        // The editor's chord, read here because `input::resolve` is not.
+        if crate::input::cheatsheet_chord(ctx) {
+            self.open_cheatsheet(crate::cheatsheet::Opened::Library);
             return;
         }
         let (arrow, enter, delete, escape, rename, new_file, duplicate, rename_chord, plain, chord) =

@@ -5,6 +5,18 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
+## Now · Command palette and cheatsheet
+
+Specified in `app-canvas-chrome.md`, *The command palette* and *The shortcut cheatsheet*.
+
+- **A *Show ‹card›* row does not focus the card's first field.** The accepted design opens the
+  card, scrolls to it and focuses its first field; `panel_full` honours `reveal_card` by opening
+  and scrolling only.
+- **The sheet's menu-verb chords are not checked against `input::resolve`.**
+  `every_sheet_chord_resolves_to_its_rows_action` walks `sections` but drives only the rows with an
+  `Item::action`. The clipboard, structure, order and flip rows and *Centre text* dispatch through
+  `perform_menu_item` or arrive as clipboard events or releases, and are not driven.
+
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).
@@ -12,7 +24,6 @@ code before picking an item up — an item's premise can go stale while its ask 
 - **CSS layout properties §5.3c defers** — non-`auto` margin, `order`, named grid areas,
   `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float.
 - **A per-component review table for kit updates** — deferred, not declined (§15 D1010 (3), D1011 5D).
-- **Kit verbs in the command palette** (§15 D1011 (5)) — waits on the palette.
 - **Team publishing of kits, and servers** — undesigned (§15 D1010).
 - **Binding the other users of an extracted value** after *Extract into variable…* (§15 D1037, D1038).
 - **Whether a preset follows a paste's rule** across documents (D1037 premise (iv)) — trigger: a preset
@@ -38,22 +49,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
   output; React and Vue have no browser test (no bundler in the test run).
 - **Text styles as classes** — revisit once real exports exist (D1098 (7)).
 - **A per-layer HTML tag field** — parked, new model (D1098 (3)).
-
-## Later · Command palette and cheatsheet
-
-`Ctrl+K`, `Ctrl+/` alias (`shortcuts.md` §8). For app actions, distinct from Command Mode.
-
-- **Build on `menu.rs`'s registry extending `Action`**, not a list of strings: name, availability
-  (`Row::dim_if`, dim with a reason), toggle state, dispatched `Action`.
-- **A palette has no `Target`**; `menu::Context` is keyed on a mandatory one. Something must answer it.
-- **About 16 `Action`s have no `Item`** (`Undo`, `Save`, `NewDocument`, `OpenSettings`, zoom, …) and
-  verbs with no context ("Open Typography panel") need a home.
-- **`Action::ExportCode` has no other door**: the palette is how code export reaches the GUI. Drop
-  its `expect(dead_code)` when the palette constructs it.
-- **Layer search**: lift `matching_rows`' rule into a free function over `&Document` returning hits
-  and ancestors separately, with its own case folding.
-- **Do not absorb `build.rs`'s document vocabulary** — that is shared by MCP and Command Mode.
-- **The cheatsheet** is `shortcuts.md` rendered from the registry; it then becomes the registry's test.
 
 ## Later · Platform and dependencies
 

@@ -161,6 +161,10 @@ pub struct Prefs {
     /// library and this is read before the first scan. A stale path opens the
     /// dashboard.
     pub last_document: Option<PathBuf>,
+    /// The command palette's last rows run, most recent first, as
+    /// `crate::palette::verb_key` names them: by verb, so a renamed label
+    /// (*Hide* / *Show*) is still the same entry. A habit, hence a preference.
+    pub palette_recent: Vec<String>,
 }
 
 impl Default for Prefs {
@@ -195,6 +199,7 @@ impl Default for Prefs {
             dashboard_sort: "edited".into(),
             reopen_last: false,
             last_document: None,
+            palette_recent: Vec::new(),
         }
     }
 }

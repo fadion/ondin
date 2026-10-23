@@ -9223,6 +9223,17 @@ impl OndinApp {
             Some(n) => format!("{title} {n}"),
             None => title.to_string(),
         };
+        // What the palette's *Show ‹card›* rows read next frame.
+        self.cards_drawn.push(title);
+        self.cards_seen.insert(title);
+        let reveal = self.reveal_card == Some(title);
+        if reveal {
+            open_paint_panel(
+                &mut self.collapsed_panels,
+                &mut self.paint_auto_collapsed,
+                title,
+            );
+        }
         let open = !self.collapsed_panels.contains(title);
         let (count, resets) = self
             .card_override(title)
@@ -9248,6 +9259,10 @@ impl OndinApp {
                 })
             })
             .inner;
+        if reveal {
+            ui.scroll_to_rect(card_rect, Some(egui::Align::TOP));
+            self.reveal_card = None;
+        }
         if !open {
             // Everything but the action icon's corner, so a collapsed card can take
             // its `+`; the later claimant would otherwise win every press there.

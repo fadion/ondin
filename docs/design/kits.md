@@ -18,7 +18,7 @@ Covers §5.3e: a kit is a document marked as one whose published components othe
 
 ## Publishing
 
-- A kit's top bar carries a neutral *Kit* tag after the save dot and, hard against it, *Publish N* (the accent button), counting components changed since the last publish (added/changed/removed, in the hover). At zero it is disabled ("Nothing to publish · no changes since v8"). Never published: every component counts. *Publish kit...* is the document menu's row and `Ctrl+Alt+P`, disabled with "No changes" when nothing is new.
+- A kit's top bar carries a neutral *Kit* tag after the save dot and, hard against it, *Publish N* (the accent button), counting components changed since the last publish (added/changed/removed, in the hover). At zero it is disabled ("Nothing to publish · no changes since v8"). Never published: every component counts. *Publish kit...* is the document menu's row, a command-palette row and `Ctrl+Alt+P`, disabled with "No changes" when nothing is new.
 - **The change count** is the kit frozen now against the kit frozen at its last publish, each top by id. A top is compared with the vault mains it reaches, leaving out every reached top's own place (transform, parent, insets, layout item, visibility: `propagate::is_placement`) and every origin's version (the frozen tables' variable and style origins included), since none of it reaches a consumer's instance. A move into another top-level frame is a change (the frame is the picker grouping). A kit rename or a new order of published mains is worth a publish (`Changes::renamed`, `reordered`, counted by `any()` not `count()`).
 - **`kit::publish`** bumps the version, stamps the caller's date and a non-blank note, and stores the frozen copy. Not an operation, not undoable. A kit that has published and now holds no main publishes an empty state so consumers learn of the removal. The count is cached on the session's revision and the mark's version.
 - **The dialog** (`kits/publish.rs`) is a modal card: a first publish lists the first six components and "+ N more"; a later one groups *Added* / *Changed* / *Removed* (removed ones "kept as copy where used", read from the last published state); an optional note; *Cancel* / *Publish*. Publishing saves; a failed save keeps its own status. A live text session is ended before counting and freezing so typed text is published (every kit verb that commits or saves does this). A toast follows.
@@ -30,7 +30,7 @@ Covers §5.3e: a kit is a document marked as one whose published components othe
 
 ## Inserting
 
-**The insert picker** (`kits/picker.rs`) is a floating panel beside the toolbar, opened from a hexagon at the foot of the vertical toolbar or `Shift+I`, bottom-aligned with the button; closed by `Escape` (a rung of `OndinApp::escape` after the colour picker's, so one press closes one thing) or the button. It opens with a library rescan. Search at the top, grouped by kit then by set; a click places at the viewport centre, a drag places on the canvas.
+**The insert picker** (`kits/picker.rs`) is a floating panel beside the toolbar, opened from a hexagon at the foot of the vertical toolbar, `Shift+I` or the command palette's *Insert* row, bottom-aligned with the button; closed by `Escape` (a rung of `OndinApp::escape` after the colour picker's, so one press closes one thing) or the button. It opens with a library rescan. Search at the top, grouped by kit then by set; a click places at the viewport centre, a drag places on the canvas.
 
 - Browsing lists the kits D uses first, by last use (kept per machine and per document: `library::cache::LocalIndex::kit_use`), each opening to its sets and lone mains grouped by the top-level frame they sit in (outside a frame: under the kit's name). A set is listed once, its tile its default variant (`index::tile_subject`, `kit::default_variant`: first variant in reading order, topmost then leftmost, ties to the earlier child). Then "In your library, not used here" with counts.
 - Search runs across every kit as a flat list with the kit on the right, best match first, `Enter` placing the highlighted one; a variant matches through its set.
@@ -76,7 +76,7 @@ The popover lists per kit "v8 → v9" and what the update changes (component, va
 ## Not built / non-goals
 
 - A per-component review table before accepting an update is the next phase, not a non-goal; the popover leaves room for its disclosure.
-- Kit verbs in a command palette and team publishing are later (`roadmap.md`). Real-time collaboration is a non-goal (§12): a kit reaches another machine through the synced base folder (§5.11a), with no network code.
+- Team publishing is later (`roadmap.md`). Real-time collaboration is a non-goal (§12): a kit reaches another machine through the synced base folder (§5.11a), with no network code.
 
 ## Traps
 

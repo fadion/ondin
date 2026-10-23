@@ -79,11 +79,18 @@ pub enum Group {
     Export,
     /// The workspace switches §6.1 and §6.3 carry (rulers, guides, grid). Last.
     View,
+    // The app verbs' groups, which no context menu emits.
+    History,
+    Tools,
+    File,
+    Kits,
+    Text,
+    Panels,
 }
 
 impl Group {
     /// The canonical order, and the order [`fn@build`] emits in.
-    const ORDER: [Group; 10] = [
+    const ORDER: [Group; 16] = [
         Group::Head,
         Group::Clipboard,
         Group::Properties,
@@ -94,7 +101,34 @@ impl Group {
         Group::Navigate,
         Group::Export,
         Group::View,
+        Group::History,
+        Group::Tools,
+        Group::File,
+        Group::Kits,
+        Group::Text,
+        Group::Panels,
     ];
+
+    /// The name the palette shows beside a row, so two similar labels can be told
+    /// apart by where they come from.
+    pub fn label(self) -> &'static str {
+        match self {
+            Group::Head | Group::State => "Layer",
+            Group::Clipboard => "Clipboard",
+            Group::Properties => "Properties",
+            Group::Structure => "Structure",
+            Group::Order => "Order",
+            Group::Transform => "Transform",
+            Group::Navigate | Group::View => "View",
+            Group::Export => "Export",
+            Group::History => "Edit",
+            Group::Tools => "Tools",
+            Group::File => "File",
+            Group::Kits => "Components",
+            Group::Text => "Text",
+            Group::Panels => "Panels",
+        }
+    }
 }
 
 /// One verb the registry can dispatch.
@@ -299,6 +333,35 @@ pub enum Item {
     /// The subject is the point selection rather than the pointer; it shares
     /// `tools::join_runs` with the pen so both orient a splice the same way.
     Join,
+
+    // --- app verbs: no context menu builds these ----------------------------
+    // The command palette and the cheatsheet read them; each is an `Action`
+    // ([`Self::action`]) so a row and its chord cannot diverge.
+    Undo,
+    Redo,
+    Save,
+    NewDocument,
+    CloseDocument,
+    /// `Action::Open`, the library.
+    Library,
+    Settings,
+    ExportCode(ondin_export::code::Target),
+    Tool(Tool),
+    PlaceImage,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    Align(build::Axis, build::Edge),
+    Distribute(build::Axis),
+    InsertPicker,
+    VariablesBrowser,
+    PublishKit,
+    /// One of the chords a live text session admits.
+    TextChord(crate::input::TextChord),
+    /// Scroll the inspector to the card with this title and open it.
+    ShowCard(&'static str),
+    Palette,
+    Cheatsheet,
 }
 
 /// A layer's kind, as much of it as a menu needs.
@@ -803,7 +866,262 @@ impl Item {
             ),
             // Shares `ARROWS_MERGE` with the inspector's *Flatten*; never in the same menu.
             Item::Join => s("Join", icon::ARROWS_MERGE, None, Group::Structure),
+
+            Item::Undo => s(
+                "Undo",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                Some("Ctrl+Z"),
+                Group::History,
+            ),
+            Item::Redo => s(
+                "Redo",
+                icon::ARROW_CLOCKWISE,
+                Some("Ctrl+Shift+Z"),
+                Group::History,
+            ),
+            Item::Save => s(
+                "Save a version",
+                icon::FLOPPY_DISK,
+                Some("Ctrl+S"),
+                Group::File,
+            ),
+            Item::NewDocument => s("New file", icon::PLUS_SQUARE, Some("Ctrl+N"), Group::File),
+            Item::CloseDocument => s("Close file", icon::X, Some("Ctrl+W"), Group::File),
+            Item::Library => s(
+                "Go to the library",
+                icon::SQUARES_FOUR,
+                Some("Ctrl+O"),
+                Group::File,
+            ),
+            Item::Settings => s("Settings", icon::SLIDERS, Some("Ctrl+,"), Group::File),
+            Item::ExportCode(t) => s(
+                match t {
+                    ondin_export::code::Target::Html => "Export as HTML…",
+                    ondin_export::code::Target::React => "Export as React…",
+                    ondin_export::code::Target::Vue => "Export as Vue…",
+                },
+                icon::BRACKETS_CURLY,
+                None,
+                Group::Export,
+            ),
+            Item::Tool(tool) => {
+                let (label, glyph, accel) = match tool {
+                    Tool::Select => ("Tool: Select", icon::CURSOR, "V"),
+                    Tool::Hand => ("Tool: Hand", icon::HAND, "H"),
+                    Tool::Scale => ("Tool: Scale", icon::RESIZE, "K"),
+                    Tool::Frame => ("Tool: Frame", icon::FRAME_CORNERS, "F"),
+                    Tool::Rect => ("Tool: Rectangle", icon::SQUARE, "R"),
+                    Tool::Ellipse => ("Tool: Ellipse", icon::CIRCLE, "O"),
+                    Tool::Polygon => ("Tool: Polygon", icon::TRIANGLE, "G"),
+                    Tool::Star => ("Tool: Star", icon::STAR, "S"),
+                    Tool::Line => ("Tool: Line", icon::LINE_SEGMENT, "L"),
+                    Tool::Pen => ("Tool: Pen", icon::PEN_NIB, "P"),
+                    Tool::Node => ("Tool: Edit points", icon::BEZIER_CURVE, "A"),
+                    Tool::Text => ("Tool: Text", icon::TEXT_T, "T"),
+                    Tool::Eyedropper => ("Tool: Eyedropper", icon::EYEDROPPER, "I"),
+                    // Neither has a letter; [`Self::PlaceImage`] is the image tool's
+                    // door and image editing needs a subject.
+                    Tool::Image | Tool::ImageEdit => ("Tool: Image", icon::IMAGE, ""),
+                };
+                s(
+                    label,
+                    glyph,
+                    (!accel.is_empty()).then_some(accel),
+                    Group::Tools,
+                )
+            }
+            Item::PlaceImage => s(
+                "Place image…",
+                icon::IMAGE,
+                Some("Ctrl+Shift+K"),
+                Group::Tools,
+            ),
+            Item::ZoomIn => s(
+                "Zoom in",
+                icon::MAGNIFYING_GLASS_PLUS,
+                Some("Ctrl+="),
+                Group::Navigate,
+            ),
+            Item::ZoomOut => s(
+                "Zoom out",
+                icon::MAGNIFYING_GLASS_MINUS,
+                Some("Ctrl+-"),
+                Group::Navigate,
+            ),
+            Item::ZoomReset => s(
+                "Zoom to 100%",
+                icon::NUMBER_SQUARE_ONE,
+                Some("Ctrl+0"),
+                Group::Navigate,
+            ),
+            Item::Align(axis, edge) => {
+                use build::{Axis, Edge};
+                let (label, glyph, accel) = match (axis, edge) {
+                    (Axis::X, Edge::Min) => ("Align left", icon::ALIGN_LEFT, "Alt+A"),
+                    (Axis::X, Edge::Mid) => (
+                        "Align horizontal centres",
+                        icon::ALIGN_CENTER_HORIZONTAL,
+                        "Alt+H",
+                    ),
+                    (Axis::X, Edge::Max) => ("Align right", icon::ALIGN_RIGHT, "Alt+D"),
+                    (Axis::Y, Edge::Min) => ("Align top", icon::ALIGN_TOP, "Alt+W"),
+                    (Axis::Y, Edge::Mid) => (
+                        "Align vertical centres",
+                        icon::ALIGN_CENTER_VERTICAL,
+                        "Alt+V",
+                    ),
+                    (Axis::Y, Edge::Max) => ("Align bottom", icon::ALIGN_BOTTOM, "Alt+S"),
+                };
+                s(label, glyph, Some(accel), Group::Transform)
+            }
+            Item::Distribute(build::Axis::X) => s(
+                "Distribute horizontally",
+                icon::ARROWS_HORIZONTAL,
+                Some("Alt+Shift+H"),
+                Group::Transform,
+            ),
+            Item::Distribute(_) => s(
+                "Distribute vertically",
+                icon::ARROWS_VERTICAL,
+                Some("Alt+Shift+V"),
+                Group::Transform,
+            ),
+            Item::InsertPicker => s("Insert", icon::HEXAGON, Some("Shift+I"), Group::Kits),
+            Item::VariablesBrowser => s(
+                "Styles and variables",
+                icon::SWATCHES,
+                Some("Shift+S"),
+                Group::Kits,
+            ),
+            Item::PublishKit => s(
+                "Publish kit…",
+                icon::UPLOAD_SIMPLE,
+                Some("Ctrl+Alt+P"),
+                Group::Kits,
+            ),
+            Item::TextChord(chord) => {
+                use crate::input::TextChord;
+                use ondin_core::TextAlign;
+                let (label, glyph, accel) = match chord {
+                    TextChord::Underline => ("Underline", icon::TEXT_UNDERLINE, "Ctrl+U"),
+                    TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_AA, "Ctrl+Shift+."),
+                    TextChord::Size(_) => ("Smaller text", icon::TEXT_AA, "Ctrl+Shift+,"),
+                    TextChord::Tracking(n) if n > 0 => {
+                        ("Wider letter spacing", icon::ARROWS_HORIZONTAL, "Alt+→")
+                    }
+                    TextChord::Tracking(_) => {
+                        ("Tighter letter spacing", icon::ARROWS_HORIZONTAL, "Alt+←")
+                    }
+                    TextChord::Leading(n) if n > 0 => {
+                        ("Taller line height", icon::ARROWS_VERTICAL, "Alt+↑")
+                    }
+                    TextChord::Leading(_) => {
+                        ("Shorter line height", icon::ARROWS_VERTICAL, "Alt+↓")
+                    }
+                    TextChord::Align(TextAlign::Center) => {
+                        ("Centre text", icon::TEXT_ALIGN_CENTER, "Ctrl+Shift+C")
+                    }
+                    TextChord::Align(TextAlign::End | TextAlign::Right) => {
+                        ("Align text right", icon::TEXT_ALIGN_RIGHT, "Ctrl+Shift+R")
+                    }
+                    TextChord::Align(TextAlign::Justify) => {
+                        ("Justify text", icon::TEXT_ALIGN_JUSTIFY, "Ctrl+Shift+J")
+                    }
+                    TextChord::Align(TextAlign::Start | TextAlign::Left) => {
+                        ("Align text left", icon::TEXT_ALIGN_LEFT, "Ctrl+Shift+L")
+                    }
+                };
+                s(label, glyph, Some(accel), Group::Text)
+            }
+            // Renamed for its card by the palette; this is the label the table sees.
+            Item::ShowCard(_) => s("Show card", icon::SLIDERS_HORIZONTAL, None, Group::Panels),
+            Item::Palette => s(
+                "Command palette",
+                icon::MAGNIFYING_GLASS,
+                Some("Ctrl+K"),
+                Group::File,
+            ),
+            Item::Cheatsheet => s(
+                "Keyboard shortcuts",
+                icon::LIST,
+                Some("Ctrl+Shift+/"),
+                Group::File,
+            ),
         }
+    }
+
+    /// The chord's second spelling, where `docs/shortcuts.md` binds two — the
+    /// cheatsheet shows both, joined by "or".
+    pub fn alt_accel(self) -> Option<&'static str> {
+        match self {
+            Item::Redo => Some("Ctrl+Y"),
+            Item::Rename => Some("F2"),
+            Item::ZoomFit => Some("Shift+1"),
+            Item::ZoomSelection => Some("Ctrl+2"),
+            Item::ZoomReset => Some("Shift+0"),
+            Item::Palette => Some("Ctrl+/"),
+            _ => None,
+        }
+    }
+
+    /// Other words the palette finds this row by, beyond its label.
+    pub fn aliases(self) -> &'static [&'static str] {
+        match self {
+            Item::CopyAsSvg => &["svg", "vector"],
+            Item::CopyAsPng => &["png", "bitmap", "raster"],
+            Item::ExportCode(_) => &["code", "html", "react", "vue", "zip"],
+            Item::ToggleHidden => &["hide", "show", "visibility"],
+            Item::ToggleLocked => &["lock", "unlock"],
+            Item::Delete => &["remove"],
+            Item::Library => &["open", "files", "dashboard", "home"],
+            Item::Settings => &["preferences", "options"],
+            Item::Save => &["version", "pin"],
+            Item::CreateComponent => &["main", "symbol"],
+            Item::InsertPicker => &["component", "kit", "asset"],
+            Item::VariablesBrowser => &["tokens", "colours", "colors"],
+            Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
+            Item::Restack(_) => &["order", "arrange", "z"],
+            Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
+            Item::ZoomFit => &["fit", "all"],
+            Item::TextChord(_) => &["text", "type"],
+            Item::Tool(Tool::Rect) => &["square", "box"],
+            Item::Tool(Tool::Node) => &["node", "direct"],
+            _ => &[],
+        }
+    }
+
+    /// The keymap's own verb for this row, where it has one: what the palette and
+    /// [`OndinApp::perform_menu_item`] dispatch, so row and chord stay one verb.
+    pub fn action(self) -> Option<crate::input::Action> {
+        use crate::input::Action;
+        Some(match self {
+            Item::Undo => Action::Undo,
+            Item::Redo => Action::Redo,
+            Item::Save => Action::Save,
+            Item::NewDocument => Action::NewDocument,
+            Item::CloseDocument => Action::CloseDocument,
+            Item::Library => Action::Open,
+            Item::Settings => Action::OpenSettings,
+            Item::ExportCode(t) => Action::ExportCode(t),
+            Item::Tool(tool) => Action::ChooseTool(tool),
+            Item::PlaceImage => Action::PlaceImage,
+            Item::ZoomIn => Action::ZoomIn,
+            Item::ZoomOut => Action::ZoomOut,
+            Item::ZoomReset => Action::ZoomReset,
+            Item::Align(axis, edge) => Action::Align(axis, edge),
+            Item::Distribute(axis) => Action::Distribute(axis),
+            Item::InsertPicker => Action::InsertPicker,
+            Item::VariablesBrowser => Action::VariablesBrowser,
+            Item::PublishKit => Action::PublishKit,
+            Item::TextChord(chord) => Action::TextStyle(chord),
+            Item::Palette => Action::Palette,
+            Item::Cheatsheet => Action::Cheatsheet,
+            Item::ViewSwitch(sw) => Action::ToggleView(sw),
+            Item::ZoomFit => Action::ZoomFit,
+            Item::ZoomSelection => Action::ZoomSelection,
+            Item::ExportAll => Action::ExportAll,
+            _ => return None,
+        })
     }
 }
 
@@ -1553,6 +1871,77 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     .collect()
 }
 
+/// The layer verbs a menu leaves out for some selections, each with what it
+/// needs — the command palette's *Not available here* rows, shown only when typed
+/// for. With nothing selected every one reads [`NEEDS_SELECTION`] instead.
+pub const KIND_VERBS: &[(Item, &str)] = &[
+    (Item::EnterGroup, "Needs one group"),
+    (Item::EnterBoolean, "Needs one boolean"),
+    (Item::MakeBaseOperand, "Needs a layer inside a boolean"),
+    (Item::ClipContent, "Needs one frame"),
+    (Item::EditText, "Needs a text layer"),
+    (Item::EditPoints, "Needs one path"),
+    (Item::EditImage, "Needs one layer with a picture"),
+    (Item::OriginalSize, "Needs one layer with a picture"),
+    (
+        Item::CreateComponent,
+        "Needs a layer that is not a component",
+    ),
+    (Item::DuplicateAsComponent, "Needs one main component"),
+    (Item::SelectAllInstances, "Needs a main component or a set"),
+    (Item::GoToMain, "Needs an instance"),
+    (Item::DetachInstance, "Needs an instance"),
+    (Item::CombineAsVariants, "Needs two or more main components"),
+    (Item::AddVariant, "Needs a variant or a component set"),
+    (Item::Ungroup, "Needs a group or a boolean"),
+    (Item::Mask, "Needs a layer that is not a frame"),
+    (Item::EvenOdd, "Needs one path"),
+    (
+        Item::Boolean(BoolOp::Union),
+        "Needs two layers or a boolean",
+    ),
+    (
+        Item::Boolean(BoolOp::Subtract),
+        "Needs two layers or a boolean",
+    ),
+    (
+        Item::Boolean(BoolOp::Intersect),
+        "Needs two layers or a boolean",
+    ),
+    (
+        Item::Boolean(BoolOp::Exclude),
+        "Needs two layers or a boolean",
+    ),
+    (Item::Flatten, "Needs two layers or a boolean"),
+    (Item::OutlineShape, "Needs one shape"),
+    (Item::OutlineText, "Needs one text layer"),
+    (Item::DetachTextPath, "Needs text on a path"),
+    (Item::FlipTextPath, "Needs text on a path"),
+    (Item::Cut, NEEDS_SELECTION),
+    (Item::Copy, NEEDS_SELECTION),
+    (Item::Duplicate, NEEDS_SELECTION),
+    (Item::Delete, NEEDS_SELECTION),
+    (Item::CopyProperties, NEEDS_SELECTION),
+    (Item::PasteProperties, NEEDS_SELECTION),
+    (Item::Group, NEEDS_SELECTION),
+    (Item::FrameSelection, NEEDS_SELECTION),
+    (Item::Restack(build::ZMove::Front), NEEDS_SELECTION),
+    (Item::Restack(build::ZMove::Forward), NEEDS_SELECTION),
+    (Item::Restack(build::ZMove::Backward), NEEDS_SELECTION),
+    (Item::Restack(build::ZMove::Back), NEEDS_SELECTION),
+    (Item::Flip(build::Axis::X), NEEDS_SELECTION),
+    (Item::Flip(build::Axis::Y), NEEDS_SELECTION),
+    (Item::ToggleHidden, NEEDS_SELECTION),
+    (Item::ToggleLocked, NEEDS_SELECTION),
+    (Item::Rename, NEEDS_SELECTION),
+    (Item::ZoomSelection, NEEDS_SELECTION),
+    (Item::CopyAsSvg, NEEDS_SELECTION),
+    (Item::CopyAsPng, NEEDS_SELECTION),
+];
+
+/// Why a layer verb is not offered with nothing selected.
+pub const NEEDS_SELECTION: &str = "Select a layer first";
+
 /// The height a menu of these groups will paint at, in points.
 ///
 /// Computed rather than measured, because [`crate::ui::menu_place`] needs the size
@@ -1698,8 +2087,20 @@ impl OndinApp {
         // Image editing's card is not cleared: it is the mode's own chrome, and
         // clearing it would half-leave the mode.
         self.type_menu = None;
+        self.palette = None;
+        self.context_menu = Some(self.menu_snapshot(at, target, world));
+    }
+
+    /// The state a menu open on `target` reads once rather than per frame: the
+    /// clipboards and the outline question. The command palette takes one too.
+    pub(crate) fn menu_snapshot(
+        &self,
+        at: egui::Pos2,
+        target: Target,
+        world: Option<Point>,
+    ) -> ContextMenu {
         let system_text = crate::app::system_clipboard_text();
-        self.context_menu = Some(ContextMenu {
+        ContextMenu {
             at,
             target,
             world,
@@ -1716,7 +2117,7 @@ impl OndinApp {
             },
             // A fresh menu belongs to the pointer; the first `↓` takes it (§8).
             highlight: None,
-        });
+        }
     }
 
     /// Draw the open menu, and close it the two ways every menu closes.
@@ -1853,7 +2254,7 @@ impl OndinApp {
     /// `open` is the snapshot taken when the menu was opened, not live state: the
     /// clipboard questions are all in it (see [`ContextMenu::system_text`] and
     /// [`ContextMenu::system_image`]).
-    fn menu_context<'a>(&'a self, open: &ContextMenu, kinds: &'a [Kind]) -> Context<'a> {
+    pub(crate) fn menu_context<'a>(&'a self, open: &ContextMenu, kinds: &'a [Kind]) -> Context<'a> {
         let target = open.target;
         let state = match target {
             Target::Layer { id, .. } => self.layer_menu_state(id),
@@ -2026,7 +2427,7 @@ impl OndinApp {
     /// Run one row. Anything with a chord goes straight to `dispatch`, so row and
     /// key cannot diverge; the rest are about where the menu was opened or a target
     /// the keymap cannot name.
-    fn perform_menu_item(
+    pub(crate) fn perform_menu_item(
         &mut self,
         ctx: &egui::Context,
         item: Item,
@@ -2266,6 +2667,33 @@ impl OndinApp {
                 if self.session.commit(Transaction(ops)) {
                     self.session.selection.clear_guides();
                     self.session.info(format!("Cleared {n} guide(s)"));
+                }
+            }
+            Item::ShowCard(title) => self.reveal_card = Some(title),
+            // The app verbs: each is its chord's `Action`.
+            Item::Undo
+            | Item::Redo
+            | Item::Save
+            | Item::NewDocument
+            | Item::CloseDocument
+            | Item::Library
+            | Item::Settings
+            | Item::ExportCode(_)
+            | Item::Tool(_)
+            | Item::PlaceImage
+            | Item::ZoomIn
+            | Item::ZoomOut
+            | Item::ZoomReset
+            | Item::Align(..)
+            | Item::Distribute(_)
+            | Item::InsertPicker
+            | Item::VariablesBrowser
+            | Item::PublishKit
+            | Item::TextChord(_)
+            | Item::Palette
+            | Item::Cheatsheet => {
+                if let Some(action) = item.action() {
+                    self.dispatch(ctx, action);
                 }
             }
         }

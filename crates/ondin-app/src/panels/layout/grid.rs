@@ -1,5 +1,5 @@
 //! Grid's rows of the **Container** and **Item** cards (§15 D920), from the
-//! mockup's screen 04 (`design/Layout Cards.dc.html`).
+//! mockup's screen 04 (the design canvas's *Layout Cards* artboard).
 //!
 //! **Container**, under `display: grid`: `grid-auto-flow`, the two track lists —
 //! each track a row leading with its kind, a function's arguments as fields of

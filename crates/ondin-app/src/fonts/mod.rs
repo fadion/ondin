@@ -2228,6 +2228,9 @@ mod tests {
         // A headless context; this test drives `poll` itself. `true`: this is the
         // web path.
         let mut service = FontService::new(&egui::Context::default(), true);
+        // No popular-family prefetch: its faces set `fonts_registered` too, so the
+        // poll carrying the catalog could carry a registration that is not its own.
+        service.prefetched = true;
 
         // Wait for the catalog.
         let mut catalog_poll = None;
@@ -2254,8 +2257,10 @@ mod tests {
         service.ensure_loaded(family);
         assert!(service.is_loading(family), "the field can say so");
 
+        // Wait on Roboto itself: any face registering sets `fonts_registered`.
         for _ in 0..600 {
-            if service.poll().fonts_registered {
+            service.poll();
+            if ondin_core::text::is_family_available(family) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(20));

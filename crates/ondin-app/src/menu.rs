@@ -1221,7 +1221,8 @@ pub struct Context<'a> {
     /// The kind of every selected layer, in `selection` order. A head row appears
     /// only when every member qualifies; a tail row when any does.
     pub kinds: &'a [Kind],
-    /// Of the layer under the pointer: hidden, locked, has a picture, moved pivot, clips.
+    /// The target layer's flags (locked, has a picture, moved pivot, clips…), and
+    /// what *Hide* / *Show* and *Lock* / *Unlock* read off the selection's set.
     pub state: LayerState,
     /// Whether the document holds any guide at all — what makes *Clear all guides* offered.
     pub any_guides: bool,
@@ -1362,8 +1363,9 @@ pub struct LayerState {
     pub all_hidden: bool,
     /// Every layer *Lock* / *Unlock* acts on is locked, so the row reads *Unlock*.
     pub all_locked: bool,
-    /// This layer's own lock flag — what the editing rows' refusal names and what
-    /// *Lock* / *Unlock* writes. What dims an editing row is [`Self::locked_within`].
+    /// This layer's own lock flag, which picks the editing rows' refusal sentence.
+    /// What dims an editing row is [`Self::locked_within`]; the *Lock* / *Unlock*
+    /// label reads [`Self::all_locked`].
     pub locked: bool,
     /// Some ancestor is locked.
     ///
@@ -1395,8 +1397,7 @@ pub struct LayerState {
 
 impl LayerState {
     /// Whether an edit of this layer is refused: its own lock, or a lock on
-    /// anything it sits inside. Every `dim_if` reads this; only *Lock* / *Unlock*
-    /// reads [`Self::locked`].
+    /// anything it sits inside. Every `dim_if` reads this.
     pub fn locked_within(&self) -> bool {
         self.locked || self.locked_by_ancestor
     }
@@ -1529,7 +1530,7 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
 
     // §5.9 — a locked layer's editing rows are dimmed with one sentence while the
     // way-back rows stay live. Only the panel can deliver it (C4). `locked_within`,
-    // not `locked`: a locked group locks its contents; `ToggleLocked` alone reads `st.locked`.
+    // not `locked`: a locked group locks its contents. `locked` picks the sentence.
     let locked = st.locked_within();
     // The reason names the thing that would have to change.
     let why = if st.locked {
@@ -3904,7 +3905,8 @@ mod tests {
     }
 
     /// A layer inside a locked group dims the same rows with the group's reason,
-    /// and *Unlock* does not appear since `ToggleLocked` reads the own flag.
+    /// and *Unlock* does not appear: the label reads `all_locked`, the selection's
+    /// own flags, which are clear.
     ///
     /// flip: `locked_within` reading `locked` alone → every row live; `why`
     /// unconditional → wrong sentence; `ToggleLocked`'s label on `locked_within()`
@@ -3956,8 +3958,8 @@ mod tests {
         assert_eq!(
             row(Item::ToggleLocked).label,
             "Lock",
-            "the toggle reads the layer's own flag: offering *Unlock* here would \
-             write a flag that is already clear and appear to do nothing"
+            "the toggle reads the selection's own flags: offering *Unlock* here \
+             would write a flag that is already clear and appear to do nothing"
         );
     }
 

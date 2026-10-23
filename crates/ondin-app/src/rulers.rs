@@ -1,4 +1,5 @@
-//! The rulers, and the guides pulled out of them (`design/Editor.dc.html`).
+//! The rulers, and the guides pulled out of them (the design canvas's *Editor*
+//! artboard).
 //!
 //! Two 20pt bars along the top and left of the canvas, ticked and labelled in
 //! world units, plus the guides dragged off them. The guides are document
@@ -2283,11 +2284,12 @@ mod guide_grab_tests {
     /// dropped on the ruler leaves the original, (2) a press that changes
     /// nothing is no undo step, (3) a scope change alone is one, (4) a guide
     /// pulled out and put back never existed, (5) an Alt-dragged copy dropped on
-    /// the canvas is copied there.
+    /// the canvas is copied there, colour and all, and selected.
     ///
     /// Flips: collapsing (1)'s `if d.copying` arm into the delete fails at (1);
     /// dropping `|| g.owner != d.owner` fails at (3); making (5)'s arm the plain
-    /// move fails at "a copy exists". `let moved = true;` does not bite, since
+    /// move fails at "a copy exists"; (5)'s copy written with `color: None`
+    /// fails at "the copy carries the colour". `let moved = true;` does not bite, since
     /// `EditorSession::commit_inner` also drops a no-op transaction.
     #[test]
     fn the_guide_commit_table_answers_each_of_its_arms() {
@@ -2413,9 +2415,18 @@ mod guide_grab_tests {
             "control: dropped on the canvas, a pulled guide exists"
         );
 
-        // 5. An Alt-dragged guide dropped on the canvas is copied there.
+        // 5. An Alt-dragged guide dropped on the canvas is copied there, with its
+        // colour, and the copy is the selection.
         let (mut app, id, rect, ppp) = app_with_guide(&ctx, GuideAxis::Vertical, 200.0);
         app.show_rulers = true;
+        let red = Some(ondin_core::peniko::Color::from_rgba8(255, 0, 0, 255));
+        app.session
+            .try_commit(Transaction(vec![Operation::SetGuideColor {
+                id,
+                color: red,
+            }]))
+            .expect("colour the guide");
+        assert!(!app.lock_guides, "fixture: guides unlocked");
         let before = app.session.doc.guides().len();
         let depth = app.session.history.undo_depth();
         let on_line = app.to_screen(Point::new(200.0, 100.0), rect, ppp);
@@ -2441,6 +2452,12 @@ mod guide_grab_tests {
             (copy.position - 200.0).abs() > 1.0,
             "the copy lands where the line was dragged to: {}",
             copy.position
+        );
+        assert_eq!(copy.color, red, "the copy carries the colour");
+        assert_eq!(
+            app.session.selection.guides(),
+            &[copy.id],
+            "and is selected"
         );
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
     }

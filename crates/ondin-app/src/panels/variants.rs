@@ -1,5 +1,5 @@
 //! Variants and component properties in the inspector (§5.3d build step 7, §15
-//! D982, from `design/Variants.dc.html` with the maintainer's three rulings held
+//! D982, from the design canvas's *Variants* artboard with the maintainer's three rulings held
 //! over it): a set's **Variants** card, a variant's face inside the Component card,
 //! an instance's variant dropdowns and property rows between the card's heading (the
 //! main's name, its *Instance of* caption gone since §15 D993) and *Reset all*, the

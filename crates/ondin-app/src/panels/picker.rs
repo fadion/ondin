@@ -1,4 +1,4 @@
-//! The detached colour picker (`design/Editor.dc.html`).
+//! The detached colour picker (the design canvas's *Editor* artboard).
 //!
 //! One picker, three faces — solid, linear, radial — that differ only in the
 //! geometry controls above the ramp. It floats over the canvas and is dragged

@@ -190,10 +190,10 @@ mod tests {
     }
 
     /// At the threshold the drawn lattice steps one world unit, which the camera
-    /// makes [`VISIBLE_AT_ZOOM`] device pixels at every display scale.
+    /// makes `VISIBLE_AT_ZOOM` device pixels at every display scale.
     ///
-    /// flip: stepping the vertical loop by two units in `draw_pixel_grid` → fails at
-    /// "a cell is one world unit".
+    /// flip: stepping either loop by two units in `draw_pixel_grid` → fails at
+    /// "a cell is one world unit" on that axis.
     #[test]
     fn a_cell_is_one_world_unit_and_wide_enough_to_read_at_the_threshold() {
         let ctx = egui::Context::default();
@@ -203,22 +203,26 @@ mod tests {
         app.session.camera.zoom = VISIBLE_AT_ZOOM;
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 300.0));
         for ppp in [1.0f32, 1.25, 1.5, 2.0] {
-            let mut xs: Vec<f32> = grid_lines(&app, &ctx, rect, ppp)
-                .iter()
-                .filter(|p| (p[0].x - p[1].x).abs() < 0.01)
-                .map(|p| p[0].x)
-                .collect();
-            xs.sort_by(f32::total_cmp);
-            assert!(
-                xs.len() > 8,
-                "fixture: a lattice at {ppp}, got {}",
-                xs.len()
-            );
-            for gap in xs.windows(2).map(|w| (w[1] - w[0]) * ppp) {
+            let lines = grid_lines(&app, &ctx, rect, ppp);
+            // A vertical line keeps its x; a horizontal one its y.
+            for (axis, across) in [("vertical", 0), ("horizontal", 1)] {
+                let mut at: Vec<f32> = lines
+                    .iter()
+                    .filter(|p| (p[0][across] - p[1][across]).abs() < 0.01)
+                    .map(|p| p[0][across])
+                    .collect();
+                at.sort_by(f32::total_cmp);
                 assert!(
-                    (gap - VISIBLE_AT_ZOOM as f32).abs() < 1e-3,
-                    "a cell is one world unit: {gap} device px at {ppp}"
+                    at.len() > 8,
+                    "fixture: a {axis} lattice at {ppp}, got {}",
+                    at.len()
                 );
+                for gap in at.windows(2).map(|w| (w[1] - w[0]) * ppp) {
+                    assert!(
+                        (gap - VISIBLE_AT_ZOOM as f32).abs() < 1e-3,
+                        "a cell is one world unit: {axis} {gap} device px at {ppp}"
+                    );
+                }
             }
         }
     }

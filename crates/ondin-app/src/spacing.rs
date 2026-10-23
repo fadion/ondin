@@ -7,9 +7,8 @@
 //! D1075) and the override marks judge it exactly as they judge a typed value,
 //! and the floating status names whatever was detached (§15 D1071). What this
 //! module adds is what is drawn, where it picks and what a drag writes, from
-//! `design/Spacing Handles.dc.html` (the design accepted as a reference, the
-//! session ruling where it is ambiguous; the record carries the substance,
-//! `design/` being regenerated).
+//! the design canvas's *Spacing Handles* artboard (a reference; where it is
+//! ambiguous the docs carry the ruling).
 //!
 //! **The geometry is pure and in the container's local space** — [`bands`]
 //! reads a `Display`, the container's box and its in-flow items' laid boxes (or

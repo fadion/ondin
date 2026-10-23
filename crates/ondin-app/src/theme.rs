@@ -320,7 +320,7 @@ pub mod icon {
     pub const FLIP_VERTICAL: &str = "\u{ed6c}";
     pub const ARROWS_CLOCKWISE: &str = "\u{e094}"; // reverse a gradient's stops
     /// The dashboard's sort control, which is one button carrying whichever order
-    /// is in force (`design/Dashboard.dc.html`, `ph-arrows-down-up`).
+    /// is in force (the design canvas's *Dashboard* artboard, `ph-arrows-down-up`).
     ///
     /// Not [`ARROWS_CLOCKWISE`], which means *reverse*: the button steps to the
     /// next key, and arrows passing each other read as "ordered by".
@@ -568,7 +568,7 @@ pub mod icon {
     /// adds a mark that is noise at icon size.
     pub const EXPORT: &str = "\u{eaf0}";
     /// The Export panel's format dropdown — a picture in a sheet, saying "this row
-    /// makes a file" (§7, `design/Editor.dc.html`'s export rows).
+    /// makes a file" (§7, the design canvas's *Editor* artboard's export rows).
     ///
     /// One glyph for all three formats: Phosphor's `file-png`/`file-jpg`/`file-svg`
     /// are illegible micro-text at 15pt, and the word beside the glyph already

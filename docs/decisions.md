@@ -133,7 +133,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D953** The release `ondin.exe` is a GUI-subsystem binary; `ondin.com` is its console twin.
 - **D954** Velopack auto-update from GitHub Releases applies only at the exit the user asked for, never while another Ondin runs. `ONDIN_NO_UPDATE_CHECK` opts out.
 - **D955** CI builds and tests on Linux, Windows and macOS.
-- **D956/D976** A `v*` tag builds and publishes every platform. Build steps hold a read-only token; one `publish` job writes.
+- **D956/D976** A `v*` tag builds and publishes every platform. Build steps hold a read-only token; one `publish` job writes. Every action in a job that holds a write token or the package signing key (`release.yml`'s `publish`, `pages.yml`'s steps after the key import) is pinned by commit, since a tag can be moved.
 - **D957** Signed apt and dnf repositories are rebuilt on GitHub Pages. `install.sh` pins the key fingerprint.
 - **D969** The Windows data folder is `OndinData`, because `%LocalAppData%\Ondin` belongs to the installer.
 

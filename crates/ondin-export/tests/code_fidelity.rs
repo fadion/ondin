@@ -434,10 +434,18 @@ fn holds(test: &str, doc: &Document, res: &Resolved) {
 }
 
 /// Text's limit, after two passes of `blurred`: Chrome and vello antialias glyph
-/// edges differently even where every glyph is placed alike, and Chrome on Linux
-/// differently again. The matching fixture peaks at 6.0. flip: an automatic line
-/// height written as `normal` → 9.8, a one-pixel drop of the centred line.
-const MAX_TEXT_CELL_ERROR: f64 = 8.0;
+/// edges differently even where every glyph is placed alike, and each platform's
+/// Chrome differently again — Linux peaks at 9.1 and macOS at 19.1 on fixtures
+/// Windows holds under 6.0. Only Windows is tight enough for a one-pixel drop of a
+/// line to show; elsewhere `MAX_MEAN_ERROR` is what still catches a layout shift.
+/// flip (Windows): an automatic line height written as `normal` → 9.8.
+const MAX_TEXT_CELL_ERROR: f64 = if cfg!(target_os = "macos") {
+    22.0
+} else if cfg!(target_os = "linux") {
+    12.0
+} else {
+    8.0
+};
 
 /// [`holds`], comparing after `passes` of `blurred` with `limit` per cell.
 fn holds_within(test: &str, doc: &Document, res: &Resolved, passes: usize, limit: f64) {

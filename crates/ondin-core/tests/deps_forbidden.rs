@@ -95,16 +95,27 @@ const CORE_PERMITTED: &[&str] = &[
 ];
 
 /// The crate names `manifest` declares under `[dependencies]` and its
-/// `[target.….dependencies]` tables — not dev or build dependencies, which are
-/// not part of the shipped graph §3 is about.
+/// `[target.….dependencies]` tables, or as a dotted `[dependencies.<name>]`
+/// table of either — not dev or build dependencies, which are not part of the
+/// shipped graph §3 is about.
 fn declared(manifest: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut in_deps = false;
     for line in manifest.lines() {
         let line = line.trim();
         if let Some(header) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            in_deps = header == "dependencies"
-                || (header.starts_with("target.") && header.ends_with(".dependencies"));
+            let target = header.starts_with("target.");
+            in_deps = header == "dependencies" || (target && header.ends_with(".dependencies"));
+            // The table's keys below are that one crate's, not names.
+            let dotted = header.strip_prefix("dependencies.").or_else(|| {
+                target
+                    .then(|| header.split_once(".dependencies."))
+                    .flatten()
+                    .map(|(_, name)| name)
+            });
+            if let Some(name) = dotted {
+                names.push(name.trim_matches('"').to_string());
+            }
             continue;
         }
         if !in_deps || line.starts_with('#') || line.is_empty() {
@@ -145,6 +156,28 @@ fn ondin_core_declares_exactly_the_permitted_list() {
         declared, permitted,
         "ondin-core's [dependencies] (left) must equal §3's permitted list (right)"
     );
+}
+
+/// `declared` reads every way a manifest can name a shipped dependency, and
+/// none a dev or build one. Flip: `declared`'s `dotted` arm removed → fails
+/// missing `image` and `vello`.
+#[test]
+fn the_manifest_parse_reads_dotted_tables() {
+    let manifest = r#"
+[dependencies]
+kurbo.workspace = true
+[dependencies.image]
+version = "0.25"
+[target.'cfg(windows)'.dependencies.vello]
+version = "0.6"
+[target.'cfg(unix)'.dependencies]
+rustix = "1"
+[dev-dependencies.proptest]
+version = "1"
+[build-dependencies]
+cc = "1"
+"#;
+    assert_eq!(declared(manifest), ["image", "kurbo", "rustix", "vello"]);
 }
 
 /// The packages named by `RULES`, for the vacuity guard below: a rule whose

@@ -3356,6 +3356,38 @@ mod flex_tests {
         );
     }
 
+    /// The reader of that case: a whitespace-only wrapping text with a 40 px
+    /// start indent, shrunk in a too-narrow row, is laid at its paragraph edges
+    /// alone. Flip: `content_widths` without its whitespace case → fails here,
+    /// the spaces' width added to the 40.
+    #[test]
+    fn a_whitespace_only_wrapping_text_shrinks_to_its_edges() {
+        let paragraph = crate::typography::ParagraphStyle {
+            indent_start: crate::typography::Length::Px(40.0),
+            ..Default::default()
+        };
+        let text = NodeKind::Text {
+            content: "   ".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph,
+            block: Default::default(),
+            sizing: TextSizing::AutoHeight(500.0),
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let mut v = View::default();
+        let f = v.add(None, frame(50.0, 400.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let t = v.add(Some(f), text);
+        v.add(Some(f), rect(20.0, 20.0));
+        let out = lay_out(&v, f);
+        let (_, size) = laid(&out, t);
+        assert_eq!(size.width, 40.0, "shrunk to its indent, not past it");
+    }
+
     /// A group with its own layout nested in a row is laid out in the same pass:
     /// its size comes from the row, its children from it.
     #[test]

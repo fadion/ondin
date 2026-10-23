@@ -272,7 +272,30 @@ fn decode(bytes: &[u8]) -> Image {
     }
 }
 
+/// The top-left `width`×`height` of `img`.
+fn crop(img: &Image, width: u32, height: u32) -> Image {
+    assert!(
+        img.width >= width && img.height >= height,
+        "the screenshot is {}×{}, smaller than the page's {width}×{height}",
+        img.width,
+        img.height
+    );
+    let row = |y: u32| {
+        let at = (y * img.width * 4) as usize;
+        &img.rgba[at..at + (width * 4) as usize]
+    };
+    Image {
+        rgba: (0..height).flat_map(row).copied().collect(),
+        width,
+        height,
+    }
+}
+
 /// `dir/index.html` screenshotted at `width`×`height` CSS px, one device pixel each.
+///
+/// Headless Chrome's viewport is narrower and shorter than `--window-size` (at least 500 px
+/// wide, less a toolbar's height), and from Chrome 156 nothing outside the viewport is
+/// painted, so the window is oversized and the shot cropped to the page.
 fn screenshot(browser: &Path, dir: &Path, width: u32, height: u32) -> Image {
     let shot = dir.join("shot.png");
     let url = format!(
@@ -297,7 +320,7 @@ fn screenshot(browser: &Path, dir: &Path, width: u32, height: u32) -> Image {
         .arg("--virtual-time-budget=10000")
         .arg("--default-background-color=00000000")
         .arg(format!("--user-data-dir={}", dir.join("profile").display()))
-        .arg(format!("--window-size={width},{height}"))
+        .arg(format!("--window-size={},{}", width.max(500), height + 200))
         .arg(format!("--screenshot={}", shot.display()))
         .arg(url)
         .output()
@@ -308,7 +331,7 @@ fn screenshot(browser: &Path, dir: &Path, width: u32, height: u32) -> Image {
             String::from_utf8_lossy(&out.stderr)
         )
     });
-    decode(&bytes)
+    crop(&decode(&bytes), width, height)
 }
 
 /// One channel of a straight-alpha pixel composited over white.
@@ -400,11 +423,11 @@ fn holds(test: &str, doc: &Document, res: &Resolved) {
     holds_within(test, doc, res, 0, MAX_CELL_ERROR);
 }
 
-/// Text's limit, after one pass of `blurred`: Chrome and vello antialias glyph
-/// edges differently even where every glyph is placed alike. The matching fixture
-/// peaks at 7.7. flip: an automatic line height written as `normal` → 12.8, a
-/// one-pixel drop of the centred line.
-const MAX_TEXT_CELL_ERROR: f64 = 10.0;
+/// Text's limit, after two passes of `blurred`: Chrome and vello antialias glyph
+/// edges differently even where every glyph is placed alike, and Chrome on Linux
+/// differently again. The matching fixture peaks at 6.0. flip: an automatic line
+/// height written as `normal` → 9.8, a one-pixel drop of the centred line.
+const MAX_TEXT_CELL_ERROR: f64 = 8.0;
 
 /// [`holds`], comparing after `passes` of `blurred` with `limit` per cell.
 fn holds_within(test: &str, doc: &Document, res: &Resolved, passes: usize, limit: f64) {
@@ -891,7 +914,7 @@ fn text_matches_the_canvas() {
     let c = d.add(Some(f), centred, Affine::translate((180.0, 120.0)), "Badge");
     d.fill(c, solid(200, 40, 90, 255));
     let (doc, res) = d.done();
-    holds_within("text", &doc, &res, 1, MAX_TEXT_CELL_ERROR);
+    holds_within("text", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
 }
 
 /// Variables as `var()` in two modes: one frame in the default, one set to Dark

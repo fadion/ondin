@@ -5,14 +5,6 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
-## Now · Command palette and cheatsheet
-
-Specified in `app-canvas-chrome.md`, *The command palette* and *The shortcut cheatsheet*.
-
-- **A *Show ‹card›* row does not focus the card's first field.** The accepted design opens the
-  card, scrolls to it and focuses its first field; `panel_full` honours `reveal_card` by opening
-  and scrolling only.
-
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

@@ -140,7 +140,9 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   with nothing selected, aliases *code*, *html*, *react*, *vue*, *zip*. *Show ‹card›*: the cards the
   inspector drew last frame (`cards_shown`) are live; cards drawn earlier this session but not now
   (`cards_seen`) are dim, *Not shown for this selection*; in present mode all are dim. Running one
-  sets `reveal_card`, and `panel_full` opens that card and scrolls it to the top. Tool rows (*Tool:
+  sets `reveal_card`, and `panel_full` opens that card, scrolls it to the top and focuses its first
+  field: the first widget drawn in it that senses click, drag and focus (`first_field`), which a
+  value or text field does and a button or a reorder grip does not. Tool rows (*Tool:
   Pen*, `P`). The View and Snap switches show their tick, which gives the unbound ones (*Snap to
   baselines*, *Show status messages*, *Show layout grid*) a keyboard route.
 - **In a text session** the chord opens the palette too, with the text session's menu rows and

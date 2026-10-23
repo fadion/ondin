@@ -1496,6 +1496,49 @@ mod tests {
         );
     }
 
+    /// *Show Transform* opens the card and puts the keyboard in its first field.
+    ///
+    /// flip: dropping the `request_focus` in `panel_full`'s reveal → fails at
+    /// "a field has the keyboard".
+    #[test]
+    fn show_card_focuses_the_cards_first_field() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let id = add_rect(&mut app);
+        app.session.selection.set_one(id);
+        app.collapsed_panels.insert("Transform");
+        let none = egui::Modifiers::NONE;
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new(), none);
+        }
+        assert!(
+            app.cards_shown.contains(&"Transform"),
+            "the fixture shows a Transform card: {:?}",
+            app.cards_shown
+        );
+        app.toggle_palette(&ctx);
+        pass(&ctx, &mut app, Vec::new(), none);
+        pass(
+            &ctx,
+            &mut app,
+            vec![egui::Event::Text("show tra".into())],
+            none,
+        );
+        pass(&ctx, &mut app, vec![key(egui::Key::Enter, none)], none);
+        assert!(app.palette.is_none());
+        for _ in 0..3 {
+            pass(&ctx, &mut app, Vec::new(), none);
+        }
+        assert!(
+            !app.collapsed_panels.contains("Transform"),
+            "the card opened"
+        );
+        let focused = ctx.memory(|m| m.focused());
+        assert!(focused.is_some(), "a field has the keyboard");
+        assert_ne!(focused, Some(egui::Id::new("command-palette-field")));
+    }
+
     /// `Escape` closes the palette and nothing else: the selection stays.
     #[test]
     fn escape_closes_only_the_palette() {

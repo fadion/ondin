@@ -484,6 +484,26 @@ fn effect_hint(kind: &EffectKind) -> &'static str {
         }
     }
 }
+/// The first field drawn inside `card` this frame, for *Show ‹card›* to focus: the
+/// first widget on this layer that senses click, drag and focus, which a value
+/// field (`DragValue`) and a text field do and a button (click) or a reorder grip
+/// (drag) does not. A focused `DragValue` becomes its text field.
+fn first_field(ui: &egui::Ui, card: egui::Rect) -> Option<egui::Id> {
+    let layer = ui.layer_id();
+    ui.ctx().viewport(|v| {
+        v.this_pass
+            .widgets
+            .get_layer(layer)
+            .find(|w| {
+                w.enabled
+                    && card.contains_rect(w.rect)
+                    && w.sense.senses_click()
+                    && w.sense.senses_drag()
+                    && w.sense.is_focusable()
+            })
+            .map(|w| w.id)
+    })
+}
 /// [`OndinApp::sync_paint_collapse`]'s rule, over the two sets it is about — a
 /// free function so a test can drive it.
 fn sync_paint_collapse(
@@ -9261,6 +9281,9 @@ impl OndinApp {
             .inner;
         if reveal {
             ui.scroll_to_rect(card_rect, Some(egui::Align::TOP));
+            if let Some(field) = first_field(ui, card_rect) {
+                ui.memory_mut(|m| m.request_focus(field));
+            }
             self.reveal_card = None;
         }
         if !open {

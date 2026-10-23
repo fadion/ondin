@@ -172,7 +172,8 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   third; a section is never split. Opened from the library, its section leads, followed by an *In a
   file* divider; opened in a text session, the text keys lead.
 - **Filter and hold.** Every filter word must start a label word or a key name. Holding modifiers
-  with an empty filter dims every row whose chord does not use exactly those modifiers.
+  with an empty filter dims every row whose chord does not use exactly those modifiers — only once
+  every modifier has been let go since the sheet opened, so the opening chord's own keys do not.
 - **Hand-kept, a known duplication.** The Mouse section, the opacity-digit row and the Library
   section have no registry rows (gestures and opacity digits are not verbs, and the library's keys
   are read by `dashboard_keys`, not `input::resolve`), so a change to one of those keys is made here

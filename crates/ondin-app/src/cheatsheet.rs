@@ -24,7 +24,8 @@ const TITLE_H: f32 = 26.0;
 const SECTION_GAP: f32 = 18.0;
 const COLUMN_GAP: f32 = 32.0;
 const FILTER_W: f32 = 280.0;
-const FOOTER_H: f32 = 34.0;
+/// The palette's, so the two footers read alike.
+const FOOTER_H: f32 = crate::palette::FOOTER_H;
 
 /// Which screen the sheet was opened from; that screen's section comes first.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,6 +41,9 @@ pub(crate) struct Cheatsheet {
     first: Lead,
     /// The frame that opened it, whose chord press must not also close it.
     just_opened: bool,
+    /// Every modifier has been let go since it opened. Until then *hold to look*
+    /// stays off, or the chord's own Ctrl+Shift would filter the sheet as it opens.
+    released: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -343,6 +347,7 @@ impl OndinApp {
             filter: String::new(),
             first,
             just_opened: true,
+            released: false,
         });
     }
 
@@ -353,7 +358,8 @@ impl OndinApp {
         };
         // The chord again closes, as it toggles the palette. Not on the opening
         // frame, which drew the sheet after the door that read the same press.
-        if !std::mem::take(&mut sheet.just_opened) && crate::input::cheatsheet_chord(ctx) {
+        let opening = std::mem::take(&mut sheet.just_opened);
+        if !opening && crate::input::cheatsheet_chord(ctx) {
             self.cheatsheet = None;
             return;
         }
@@ -367,7 +373,9 @@ impl OndinApp {
             let m = i.modifiers;
             [m.command || m.ctrl, m.alt, m.shift]
         });
-        let looking = query.is_empty() && held.iter().any(|h| *h);
+        let any_held = held.iter().any(|h| *h);
+        sheet.released |= !any_held;
+        let looking = sheet.released && query.is_empty() && any_held;
         let lead = sheet.first;
         let mut all = sections(lead);
         for s in &mut all {
@@ -376,7 +384,15 @@ impl OndinApp {
         all.retain(|s| !s.rows.is_empty());
 
         let mut closed = false;
-        let modal = crate::settings::card_modal("cheatsheet").show(ctx, |ui| {
+        let mut card = crate::settings::card_modal("cheatsheet");
+        // No margin under the footer: it sits on the card's bottom edge, as the palette's does.
+        card.frame = card.frame.map(|f| {
+            f.inner_margin(egui::Margin {
+                bottom: 0,
+                ..egui::Margin::same(crate::settings::PAD as i8)
+            })
+        });
+        let modal = card.show(ctx, |ui| {
             let inner = W - crate::settings::PAD * 2.0;
             ui.set_width(inner);
             ui.horizontal(|ui| {
@@ -397,14 +413,16 @@ impl OndinApp {
                         "Filter by name or key",
                         FILTER_W,
                     );
-                    if !field.has_focus() && !looking {
+                    // Focused once, on open; a click elsewhere on the sheet may take it.
+                    if opening {
                         field.request_focus();
                     }
                 });
             });
             ui.add_space(14.0);
-            let body_h = MAX_H - crate::settings::PAD * 2.0 - 28.0 - 14.0 - FOOTER_H;
+            let body_h = MAX_H - crate::settings::PAD - 28.0 - 14.0 - FOOTER_H;
             egui::ScrollArea::vertical()
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                 .max_height(body_h)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
@@ -674,7 +692,7 @@ fn footer(ui: &mut egui::Ui) {
         egui::Stroke::new(1.0, theme::color::text_a(20)),
     );
     let font = egui::FontId::proportional(10.5);
-    let y = rect.center().y + 3.0;
+    let y = rect.center().y;
     let mut job = egui::text::LayoutJob::default();
     let dim = egui::TextFormat::simple(font.clone(), theme::text::DIM);
     let strong = egui::TextFormat::simple(font.clone(), theme::text::MUTED);

@@ -21,7 +21,10 @@ const TOP_GAP: f32 = 56.0;
 const FIELD_H: f32 = 42.0;
 const ROW_H: f32 = 30.0;
 const SECTION_H: f32 = 24.0;
-const FOOTER_H: f32 = 30.0;
+/// The footer's height, shared with the cheatsheet's.
+pub(crate) const FOOTER_H: f32 = 30.0;
+/// How far the footer's text sits above the footer's centre.
+const FOOTER_TEXT_LIFT: f32 = 1.0;
 /// The list scrolls past this; the field and the footer never do.
 const LIST_MAX_H: f32 = 372.0;
 /// The list's inset inside the card.
@@ -860,6 +863,7 @@ impl OndinApp {
                 divider(ui);
                 let mut index = 0usize;
                 egui::ScrollArea::vertical()
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .max_height(LIST_MAX_H)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
@@ -945,7 +949,8 @@ fn palette_field(ui: &mut egui::Ui, pal: &mut Palette) {
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
-            ui.add_space(14.0 - 10.0);
+            // The glyph sits where the rows' glyphs do: the list's inset plus a row's.
+            ui.add_space(PAD + 8.0);
             ui.label(
                 egui::RichText::new(icon::MAGNIFYING_GLASS)
                     .font(theme::icon_font(16.0))
@@ -1329,6 +1334,8 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(W, FOOTER_H), egui::Sense::empty());
     let p = ui.painter();
     let font = egui::FontId::proportional(10.5);
+    // The text's optical centre, a point above the box's.
+    let y = rect.center().y - FOOTER_TEXT_LIFT;
     let keys = if layers_only {
         "Enter select    Shift+Enter add    Tab commands    Esc close"
     } else {
@@ -1337,10 +1344,7 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     let keys_g = p.layout_no_wrap(keys.into(), font.clone(), theme::text::DIM);
     let keys_w = keys_g.size().x;
     p.galley(
-        egui::pos2(
-            rect.right() - 14.0 - keys_w,
-            rect.center().y - keys_g.size().y / 2.0,
-        ),
+        egui::pos2(rect.right() - 14.0 - keys_w, y - keys_g.size().y / 2.0),
         keys_g,
         theme::text::DIM,
     );
@@ -1360,7 +1364,7 @@ fn footer(ui: &mut egui::Ui, why: Option<&str>, note: &str, layers_only: bool) {
     };
     let galley = p.layout_job(job);
     p.galley(
-        egui::pos2(rect.left() + 14.0, rect.center().y - galley.size().y / 2.0),
+        egui::pos2(rect.left() + 14.0, y - galley.size().y / 2.0),
         galley,
         col,
     );

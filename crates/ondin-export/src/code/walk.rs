@@ -1176,8 +1176,29 @@ impl Walk<'_> {
                         ));
                     }
                     el.children.truncate(1);
-                    if let Some(Child::Element(p)) = el.children.first_mut() {
-                        p.children = vec![Child::Prop(b.name.clone())];
+                    if let NodeKind::Text {
+                        content,
+                        style,
+                        spans,
+                        ..
+                    } = &kind
+                    {
+                        let first = spans.runs(style, content.len()).into_iter().next();
+                        let s = first.map_or_else(|| (**style).clone(), |(_, s)| s);
+                        let value =
+                            self.run(Child::Prop(b.name.clone()), &s, style, node, &el.class);
+                        if let Some(Child::Element(p)) = el.children.first_mut() {
+                            // The value is cased as it arrives, by CSS's rules.
+                            if let Some(t) = text_transform(s.case) {
+                                p.set("text-transform", t);
+                                self.report.approximate(format!(
+                                    "text {}: its property is cased by CSS's `text-transform`, \
+                                     which cases some letters differently",
+                                    label(node)
+                                ));
+                            }
+                            p.children = vec![value];
+                        }
                     }
                 }
             }
@@ -1670,8 +1691,9 @@ impl Walk<'_> {
         }
     }
 
-    /// A text node: the face on the element, a `p` per paragraph, a `span` per
-    /// run whose face differs from the node's.
+    /// A text node: the face on the element, a `p` per paragraph, its runs as
+    /// [`Self::run`] writes them, and the content already cased as the canvas
+    /// cases it.
     fn text(&mut self, el: &mut Element, node: &Node) {
         let kind = self.res.used_kind_of(node);
         let NodeKind::Text {
@@ -1755,16 +1777,31 @@ impl Walk<'_> {
                 },
             );
         }
+        // CSS's `text-overflow` never fires on text that wraps, and the canvas's
+        // cut is its own.
         if block.overflow != ondin_core::TextOverflow::Visible {
             el.set("overflow", "hidden");
-            if block.overflow == ondin_core::TextOverflow::Ellipsis {
-                el.set("text-overflow", "ellipsis");
+            if block.overflow == ondin_core::TextOverflow::Ellipsis
+                && self.res.text_layout(node.id()).is_some_and(|l| l.truncated)
+            {
+                self.report.approximate(format!(
+                    "text {}: an ellipsis where the text overflows",
+                    label(node)
+                ));
             }
         }
         if block.max_lines > 0 || block.trim != ondin_core::BoxTrim::None {
             self.report
                 .approximate(format!("text {}: a line limit or box trim", label(node)));
         }
+        // The canvas's shaper infers the base direction, which the page does not.
+        if content.chars().any(right_to_left) {
+            self.report
+                .approximate(format!("text {}: right-to-left text", label(node)));
+        }
+        // Length-preserving, so the runs' ranges index it as they do `content`.
+        let cased = ondin_core::text::cased_text(content, &runs);
+        let shown = cased.as_deref().unwrap_or(content);
 
         let mut start = 0;
         let mut first = true;
@@ -1774,11 +1811,46 @@ impl Walk<'_> {
             let mut p = Element::new("p", String::new());
             let mut decl: Vec<(&'static str, String)> = Vec::new();
             decl.push(("margin", "0".into()));
-            decl.push(("white-space", white_space.into()));
+            let wraps = p_style.wrap == ondin_core::WrapMode::Wrap;
+            decl.push((
+                "white-space",
+                if wraps { white_space } else { "pre" }.into(),
+            ));
             if !first && !p_style.spacing.is_zero() {
                 decl.push(("margin-top", px(p_style.spacing.resolve(style.font_size))));
             }
-            decl.push(("text-align", text_align(p_style.align).into()));
+            decl.push((
+                "text-align",
+                text_align(p_style.align, p_style.direction).into(),
+            ));
+            // The model only translates the last line, as `text-align-last` does.
+            if p_style.align == ondin_core::TextAlign::Justify {
+                match p_style.justify_last {
+                    ondin_core::JustifyLast::Start => {}
+                    ondin_core::JustifyLast::Center => {
+                        decl.push(("text-align-last", "center".into()))
+                    }
+                    ondin_core::JustifyLast::End => decl.push(("text-align-last", "right".into())),
+                }
+            }
+            match p_style.word_break {
+                ondin_core::WordBreak::Normal => {}
+                ondin_core::WordBreak::BreakAll => decl.push(("word-break", "break-all".into())),
+                ondin_core::WordBreak::KeepAll => decl.push(("word-break", "keep-all".into())),
+            }
+            match p_style.overflow_wrap {
+                ondin_core::OverflowWrap::Normal => {}
+                ondin_core::OverflowWrap::Anywhere => {
+                    decl.push(("overflow-wrap", "anywhere".into()))
+                }
+                ondin_core::OverflowWrap::BreakWord => {
+                    decl.push(("overflow-wrap", "break-word".into()))
+                }
+            }
+            if p_style.optical_margins {
+                self.report
+                    .approximate(format!("text {}: optical margin alignment", label(node)));
+            }
             if !p_style.indent.is_zero() {
                 if p_style.hanging {
                     self.report
@@ -1810,19 +1882,9 @@ impl Walk<'_> {
                 if lo >= hi {
                     continue;
                 }
-                let text = content[lo..hi].to_string();
-                let own = face(s, Some(style));
-                if own.is_empty() {
-                    p.children.push(Child::Text(text));
-                } else {
-                    let mut span = Element::new(
-                        "span",
-                        self.classes.mint(&format!("{} span", el.class), "span"),
-                    );
-                    span.style = own;
-                    span.children.push(Child::Text(text));
-                    p.children.push(Child::Element(Box::new(span)));
-                }
+                let text = Child::Text(shown[lo..hi].to_string());
+                let run = self.run(text, s, style, node, &el.class);
+                p.children.push(run);
             }
             // An empty paragraph still takes a line.
             if p.children.is_empty() {
@@ -1832,6 +1894,107 @@ impl Walk<'_> {
             start = end + 1;
             first = false;
         }
+    }
+
+    /// One run's `content` in its own inline box where it needs one: for a face
+    /// differing from the node's `base`, a baseline shift (moving the ink, not the
+    /// line, as the model does), or a decoration. A decoration is drawn by the box
+    /// carrying it and cannot be taken off below it, so it is never the node's:
+    /// both on one run nest, the underline outside.
+    fn run(
+        &mut self,
+        content: Child,
+        s: &TextStyle,
+        base: &TextStyle,
+        node: &Node,
+        class: &str,
+    ) -> Child {
+        let mut own = face(s, Some(base));
+        let shift = s.baseline_shift.resolve(s.font_size);
+        if shift != 0.0 {
+            own.push(("position", "relative".into()));
+            own.push(("top", px(-shift)));
+        }
+        let under = s
+            .underline
+            .as_ref()
+            .map(|d| self.decoration(node, "underline", d, s));
+        let strike = s
+            .strikethrough
+            .as_ref()
+            .map(|d| self.decoration(node, "line-through", d, s));
+        let span = |walk: &mut Self, style: Vec<(&'static str, String)>, child: Child| {
+            let mut e = Element::new("span", walk.classes.mint(&format!("{class} span"), "span"));
+            e.style = style;
+            e.children.push(child);
+            Child::Element(Box::new(e))
+        };
+        match (under, strike) {
+            (Some(mut u), Some(t)) => {
+                let inner = span(self, t, content);
+                own.append(&mut u);
+                span(self, own, inner)
+            }
+            (None, None) if own.is_empty() => content,
+            (u, t) => {
+                own.extend(u.or(t).unwrap_or_default());
+                span(self, own, content)
+            }
+        }
+    }
+
+    /// An underline or a strikethrough (`line`) as the declarations of the box
+    /// drawing it. The font decides an absent thickness or offset on both sides;
+    /// a style CSS draws its own way, or a strikethrough's offset, is reported.
+    fn decoration(
+        &mut self,
+        node: &Node,
+        line: &'static str,
+        d: &ondin_core::Decoration,
+        s: &TextStyle,
+    ) -> Vec<(&'static str, String)> {
+        let what = if line == "underline" {
+            "underline"
+        } else {
+            "strikethrough"
+        };
+        let mut out = vec![("text-decoration-line", line.to_string())];
+        let style = match d.style {
+            ondin_core::LineStyle::Solid => None,
+            ondin_core::LineStyle::Dashed => Some("dashed"),
+            ondin_core::LineStyle::Dotted => Some("dotted"),
+            ondin_core::LineStyle::Wavy => Some("wavy"),
+        };
+        if let Some(style) = style {
+            out.push(("text-decoration-style", style.into()));
+            self.report.approximate(format!(
+                "text {}: a dashed, dotted or wavy {what}",
+                label(node)
+            ));
+        }
+        if let Some(c) = d.color {
+            out.push(("text-decoration-color", css::color(c, 1.0)));
+        }
+        let thickness = d
+            .thickness
+            .map_or("from-font".into(), |t| px(t.resolve(s.font_size)));
+        out.push(("text-decoration-thickness", thickness));
+        if line == "underline" {
+            match d.offset {
+                // The model's offset is up from the baseline, CSS's down.
+                Some(o) => out.push(("text-underline-offset", px(-o.resolve(s.font_size)))),
+                None => out.push(("text-underline-position", "from-font".into())),
+            }
+            if !d.skip_ink {
+                out.push(("text-decoration-skip-ink", "none".into()));
+            }
+        } else if d.offset.is_some() {
+            self.report.approximate(format!(
+                "text {}: a strikethrough moved off the font's position",
+                label(node)
+            ));
+        }
+        out
     }
 
     /// Tiers 2 and 3: the subtree as inline SVG, or as a PNG when the SVG writer
@@ -2034,16 +2197,38 @@ fn align_content(a: AlignContent) -> &'static str {
     }
 }
 
-fn text_align(a: ondin_core::TextAlign) -> &'static str {
+/// `a` under `direction`, as the model resolves it: an explicit direction only
+/// picks the side `Start` and `End` mean, the base direction staying the
+/// content's.
+fn text_align(a: ondin_core::TextAlign, direction: ondin_core::TextDirection) -> &'static str {
     use ondin_core::TextAlign as A;
-    match a {
-        A::Start => "start",
-        A::End => "end",
-        A::Left => "left",
-        A::Center => "center",
-        A::Right => "right",
-        A::Justify => "justify",
+    use ondin_core::TextDirection as D;
+    match (a, direction) {
+        (A::Start, D::Auto) => "start",
+        (A::End, D::Auto) => "end",
+        (A::Start, D::Ltr) | (A::End, D::Rtl) | (A::Left, _) => "left",
+        (A::End, D::Ltr) | (A::Start, D::Rtl) | (A::Right, _) => "right",
+        (A::Center, _) => "center",
+        (A::Justify, _) => "justify",
     }
+}
+
+/// CSS's nearest case transform for `case`, `None` for none.
+fn text_transform(case: ondin_core::TextCase) -> Option<&'static str> {
+    match case {
+        ondin_core::TextCase::Original => None,
+        ondin_core::TextCase::Upper => Some("uppercase"),
+        ondin_core::TextCase::Lower => Some("lowercase"),
+        ondin_core::TextCase::Title => Some("capitalize"),
+    }
+}
+
+/// Whether `c` belongs to a right-to-left script.
+fn right_to_left(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF
+    )
 }
 
 /// What a layer is, for the report.
@@ -2231,6 +2416,7 @@ fn unique(base: String, taken: &mut HashSet<String>) -> String {
 }
 
 /// A face as declarations: all of it, or with `base` only what differs from it.
+/// Case, decorations and baseline shift are a run's own ([`Walk::run`]).
 fn face(s: &TextStyle, base: Option<&TextStyle>) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     let differs = |f: &dyn Fn(&TextStyle) -> String| base.is_none_or(|b| f(b) != f(s));
@@ -2271,39 +2457,6 @@ fn face(s: &TextStyle, base: Option<&TextStyle>) -> Vec<(&'static str, String)> 
     let words = |t: &TextStyle| px(t.word_spacing.resolve(t.font_size));
     if differs(&words) && (base.is_some() || !s.word_spacing.is_zero()) {
         out.push(("word-spacing", words(s)));
-    }
-    let case = |t: &TextStyle| {
-        match t.case {
-            ondin_core::TextCase::Original => "none",
-            ondin_core::TextCase::Upper => "uppercase",
-            ondin_core::TextCase::Lower => "lowercase",
-            ondin_core::TextCase::Title => "capitalize",
-        }
-        .to_string()
-    };
-    if differs(&case) && (base.is_some() || s.case != ondin_core::TextCase::Original) {
-        out.push(("text-transform", case(s)));
-    }
-    let deco = |t: &TextStyle| {
-        let names: Vec<&str> = [
-            t.underline.map(|_| "underline"),
-            t.strikethrough.map(|_| "line-through"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        if names.is_empty() {
-            "none".to_string()
-        } else {
-            names.join(" ")
-        }
-    };
-    if differs(&deco) && (base.is_some() || deco(s) != "none") {
-        out.push(("text-decoration", deco(s)));
-    }
-    let shift = |t: &TextStyle| px(t.baseline_shift.resolve(t.font_size));
-    if differs(&shift) && (base.is_some() || !s.baseline_shift.is_zero()) {
-        out.push(("vertical-align", shift(s)));
     }
     let ink = |t: &TextStyle| t.color.map(|c| css::color(c, 1.0)).unwrap_or_default();
     if s.color.is_some() && differs(&ink) {

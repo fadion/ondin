@@ -1082,6 +1082,383 @@ fn text_matches_the_canvas() {
     holds_within("text", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
 }
 
+/// A text node of `content` in `style`, edited by `edit` before it is placed.
+fn text_node(
+    content: &str,
+    sizing: TextSizing,
+    style: TextStyle,
+    edit: impl FnOnce(&mut NodeKind),
+) -> NodeKind {
+    let mut kind = NodeKind::Text {
+        content: content.into(),
+        style: Box::new(style),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    edit(&mut kind);
+    kind
+}
+
+/// The 18px Inter the text fixtures below are set in, on a 24px line.
+fn body_style() -> TextStyle {
+    TextStyle {
+        font_size: 18.0,
+        line_height: Some(ondin_core::Length::Px(24.0)),
+        ..Default::default()
+    }
+}
+
+/// Underlines and strikethroughs: the font's own, a thick coloured one that does
+/// not skip ink, one moved off the baseline, both on one run, one on a middle run,
+/// and a node's underline that one run takes off.
+///
+/// flip: `Walk::run` taking the node's underline for every run → 31.2 on the
+/// runs whose underline differs from their node's.
+#[test]
+fn text_decorations_match_the_canvas() {
+    use ondin_core::Decoration;
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 230.0, "Board");
+    let under = |deco: Decoration| TextStyle {
+        underline: Some(deco),
+        ..body_style()
+    };
+    let red = Color::from_rgba8(220, 30, 40, 255);
+    let lines = [
+        ("Underlined gyp", under(Decoration::default())),
+        (
+            "Thick red, through gyp",
+            under(Decoration {
+                thickness: Some(ondin_core::Length::Px(4.0)),
+                color: Some(red),
+                skip_ink: false,
+                ..Default::default()
+            }),
+        ),
+        (
+            "Moved down",
+            under(Decoration {
+                offset: Some(ondin_core::Length::Px(-6.0)),
+                ..Default::default()
+            }),
+        ),
+        (
+            "Struck through",
+            TextStyle {
+                strikethrough: Some(Decoration::default()),
+                ..body_style()
+            },
+        ),
+        (
+            "Both at once",
+            TextStyle {
+                underline: Some(Decoration::default()),
+                strikethrough: Some(Decoration {
+                    color: Some(red),
+                    ..Default::default()
+                }),
+                ..body_style()
+            },
+        ),
+    ];
+    for (i, (content, style)) in lines.into_iter().enumerate() {
+        let t = text_node(content, TextSizing::Auto, style, |_| {});
+        d.add(
+            Some(f),
+            t,
+            Affine::translate((16.0, 12.0 + i as f64 * 32.0)),
+            "Line",
+        );
+    }
+    let middle = text_node("plain marked plain", TextSizing::Auto, body_style(), |k| {
+        if let NodeKind::Text { spans, style, .. } = k {
+            spans.set(
+                6..12,
+                CharAttr::Underline(Some(Decoration::default())),
+                style,
+            );
+        }
+    });
+    d.add(Some(f), middle, Affine::translate((16.0, 172.0)), "Middle");
+    let off = text_node(
+        "all but this one",
+        TextSizing::Auto,
+        under(Decoration::default()),
+        |k| {
+            if let NodeKind::Text { spans, style, .. } = k {
+                spans.set(8..12, CharAttr::Underline(None), style);
+            }
+        },
+    );
+    d.add(Some(f), off, Affine::translate((16.0, 200.0)), "Off");
+    let (doc, res) = d.done();
+    holds_within("decorations", &doc, &res, 2, MAX_DECORATION_CELL_ERROR);
+}
+
+/// Decorations' limit, over text's: Chrome snaps a band to whole device pixels
+/// where the canvas antialiases its fractional thickness and position, so a
+/// 1.3px underline is a crisp 1px one on the page. The matching fixture peaks at
+/// 9.7.
+const MAX_DECORATION_CELL_ERROR: f64 = 12.0;
+
+/// A run's baseline shift moves its ink and leaves the lines where they are, a
+/// whole node's shift moves all of it, and case is the canvas's: Title lowercases
+/// the rest of each word and starts one after an apostrophe, Upper keeps `ß`.
+///
+/// flip: `Walk::run` writing a shift as `vertical-align` → 82.8, the shifted
+/// run's line box growing and the second line dropping.
+#[test]
+fn baseline_shift_and_case_match_the_canvas() {
+    use ondin_core::TextCase;
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 200.0, "Board");
+    let shifted = text_node("x2 and\nmore below", TextSizing::Auto, body_style(), |k| {
+        if let NodeKind::Text { spans, style, .. } = k {
+            spans.set(
+                1..2,
+                CharAttr::BaselineShift(ondin_core::Length::Px(8.0)),
+                style,
+            );
+        }
+    });
+    d.add(Some(f), shifted, Affine::translate((16.0, 12.0)), "Power");
+    let whole = text_node(
+        "Raised whole",
+        TextSizing::Auto,
+        TextStyle {
+            baseline_shift: ondin_core::Length::Px(6.0),
+            ..body_style()
+        },
+        |_| {},
+    );
+    d.add(Some(f), whole, Affine::translate((160.0, 12.0)), "Raised");
+    for (i, (content, case)) in [
+        ("HELLO WORLD it's", TextCase::Title),
+        ("straße", TextCase::Upper),
+        ("QUIET Words", TextCase::Lower),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let t = text_node(
+            content,
+            TextSizing::Auto,
+            TextStyle {
+                case,
+                ..body_style()
+            },
+            |_| {},
+        );
+        d.add(
+            Some(f),
+            t,
+            Affine::translate((16.0, 90.0 + i as f64 * 32.0)),
+            "Cased",
+        );
+    }
+    let (doc, res) = d.done();
+    holds_within("shift-and-case", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
+/// Paragraph breaking and alignment: no wrap, a justified paragraph with its last
+/// line centred, break-all, a long word broken anywhere, and an RTL paragraph's
+/// start edge on the right.
+///
+/// flip: `Walk::text` leaving `wrap` unread → 85.4, the no-wrap line wrapping on
+/// the page.
+#[test]
+fn paragraph_breaking_matches_the_canvas() {
+    use ondin_core::{JustifyLast, OverflowWrap, TextDirection, WordBreak, WrapMode};
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 420.0, 330.0, "Board");
+    let paragraph = |edit: fn(&mut ondin_core::ParagraphStyle)| {
+        move |k: &mut NodeKind| {
+            if let NodeKind::Text { paragraph, .. } = k {
+                edit(paragraph);
+            }
+        }
+    };
+    let cases = [
+        (
+            "A line that would wrap at the box",
+            150.0,
+            paragraph(|p| p.wrap = WrapMode::NoWrap),
+        ),
+        (
+            "Justified text whose last line sits in the middle",
+            180.0,
+            paragraph(|p| {
+                p.align = TextAlign::Justify;
+                p.justify_last = JustifyLast::Center;
+            }),
+        ),
+        (
+            "Break all of these words",
+            120.0,
+            paragraph(|p| p.word_break = WordBreak::BreakAll),
+        ),
+        (
+            "Antidisestablishmentarianism",
+            120.0,
+            paragraph(|p| p.overflow_wrap = OverflowWrap::Anywhere),
+        ),
+        (
+            "Starts on the right",
+            180.0,
+            paragraph(|p| p.direction = TextDirection::Rtl),
+        ),
+    ];
+    for (i, (content, width, edit)) in cases.into_iter().enumerate() {
+        let (x, y) = (16.0 + (i % 2) as f64 * 200.0, 12.0 + (i / 2) as f64 * 100.0);
+        let t = text_node(content, TextSizing::AutoHeight(width), body_style(), edit);
+        d.add(Some(f), t, Affine::translate((x, y)), "Para");
+    }
+    let (doc, res) = d.done();
+    holds_within("breaking", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
+/// Letter and word spacing, a first-line indent, a start indent, space between
+/// paragraphs, and a font feature.
+///
+/// flip: `face` dropping letter spacing → 71.7.
+#[test]
+fn text_spacing_and_features_match_the_canvas() {
+    use ondin_core::{FeatureSetting, Tag};
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 200.0, "Board");
+    let spaced = text_node(
+        "Spaced out words",
+        TextSizing::Auto,
+        TextStyle {
+            letter_spacing: ondin_core::Length::Px(2.0),
+            word_spacing: ondin_core::Length::Px(6.0),
+            ..body_style()
+        },
+        |_| {},
+    );
+    d.add(Some(f), spaced, Affine::translate((16.0, 12.0)), "Spaced");
+    let indented = text_node(
+        "First paragraph runs on.\nSecond one.",
+        TextSizing::AutoHeight(220.0),
+        body_style(),
+        |k| {
+            if let NodeKind::Text { paragraph, .. } = k {
+                paragraph.indent = ondin_core::Length::Px(20.0);
+                paragraph.indent_start = ondin_core::Length::Px(10.0);
+                paragraph.spacing = ondin_core::Length::Px(8.0);
+            }
+        },
+    );
+    d.add(
+        Some(f),
+        indented,
+        Affine::translate((16.0, 50.0)),
+        "Indented",
+    );
+    let figures = text_node(
+        "1111 0000",
+        TextSizing::Auto,
+        TextStyle {
+            features: vec![FeatureSetting {
+                tag: Tag::new(*b"tnum"),
+                value: 1,
+            }],
+            ..body_style()
+        },
+        |_| {},
+    );
+    d.add(
+        Some(f),
+        figures,
+        Affine::translate((16.0, 150.0)),
+        "Figures",
+    );
+    let (doc, res) = d.done();
+    holds_within("spacing", &doc, &res, 2, MAX_TEXT_CELL_ERROR);
+}
+
+/// What the page cannot draw as the canvas does is reported: a wavy underline, a
+/// strikethrough moved off the font's position, an ellipsis that fires, optical
+/// margins and right-to-left content.
+#[test]
+fn text_the_page_cannot_match_is_reported() {
+    use ondin_core::{Decoration, LineStyle, TextOverflow};
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 300.0, "Board");
+    // The layer's name, its content, its style and an edit of its kind.
+    type Case = (&'static str, &'static str, TextStyle, fn(&mut NodeKind));
+    let cases: [Case; 5] = [
+        (
+            "Wavy",
+            "wavy",
+            TextStyle {
+                underline: Some(Decoration {
+                    style: LineStyle::Wavy,
+                    ..Default::default()
+                }),
+                ..body_style()
+            },
+            |_| {},
+        ),
+        (
+            "Moved",
+            "moved strike",
+            TextStyle {
+                strikethrough: Some(Decoration {
+                    offset: Some(ondin_core::Length::Px(3.0)),
+                    ..Default::default()
+                }),
+                ..body_style()
+            },
+            |_| {},
+        ),
+        (
+            "Clipped",
+            "A long line that will not fit",
+            body_style(),
+            |k| {
+                if let NodeKind::Text { block, sizing, .. } = k {
+                    block.overflow = TextOverflow::Ellipsis;
+                    *sizing = TextSizing::Fixed(Size::new(150.0, 24.0));
+                }
+            },
+        ),
+        ("Optical", "Optical", body_style(), |k| {
+            if let NodeKind::Text { paragraph, .. } = k {
+                paragraph.optical_margins = true;
+            }
+        }),
+        ("Hebrew", "שלום", body_style(), |_| {}),
+    ];
+    for (i, (name, content, style, edit)) in cases.into_iter().enumerate() {
+        let t = text_node(content, TextSizing::Auto, style, edit);
+        d.add(
+            Some(f),
+            t,
+            Affine::translate((16.0, 12.0 + i as f64 * 40.0)),
+            name,
+        );
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    assert_eq!(
+        export.approximated,
+        vec![
+            "text “Wavy”: a dashed, dotted or wavy underline",
+            "text “Moved”: a strikethrough moved off the font's position",
+            "text “Clipped”: an ellipsis where the text overflows",
+            "text “Optical”: optical margin alignment",
+            "text “Hebrew”: right-to-left text",
+        ]
+    );
+}
+
 /// Variables as `var()` in two modes: one frame in the default, one set to Dark
 /// with a Light frame inside. A fill bound through an alias (at full and half
 /// alpha), and bound radius, gap, opacity, width, stroke width and shadow blur.

@@ -1580,8 +1580,9 @@ fn push_style(
 ///
 /// Length-preserving only: byte indices are the currency of the span list, caret
 /// and hit tests. A character whose cased form changes the byte count (`ß`→`SS`)
-/// is left alone.
-fn cased_text(content: &str, runs: &[(Range<usize>, TextStyle)]) -> Option<String> {
+/// is left alone. Code export writes this string, so the page draws the letters
+/// the canvas shaped.
+pub fn cased_text(content: &str, runs: &[(Range<usize>, TextStyle)]) -> Option<String> {
     if runs.iter().all(|(_, s)| s.case == TextCase::Original) {
         return None;
     }

@@ -15,7 +15,7 @@ use ondin_core::container::{
     AlignItems, Display, Flex, FlexDirection, Grid, Insets, JustifyContent, LayoutItem, LengthPct,
     Track, TrackBreadth, TrackSize,
 };
-use ondin_core::kurbo::{Affine, Point, RoundedRectRadii, Size, Vec2};
+use ondin_core::kurbo::{Affine, Join, Point, RoundedRectRadii, Size, Vec2};
 use ondin_core::peniko::{
     Color, ColorStop, Extend, Gradient, GradientKind, LinearGradientPosition,
     RadialGradientPosition, SweepGradientPosition,
@@ -145,6 +145,14 @@ impl Doc {
                 visible: true,
             }]),
         }]);
+    }
+
+    /// [`Self::stroke`] on all sides, with `join` at its corners.
+    fn stroke_joined(&mut self, id: NodeId, width: f64, align: StrokeAlign, join: Join) {
+        self.stroke(id, width, align, StrokeSides::All);
+        let mut strokes = self.doc.get(id).expect("stroked").paint().strokes.clone();
+        strokes[0].value.join = join;
+        self.apply(vec![Operation::SetStrokes { id, strokes }]);
     }
 
     fn effects(&mut self, id: NodeId, kinds: Vec<EffectKind>) {
@@ -581,6 +589,126 @@ fn a_per_side_stroke_matches_the_canvas() {
         vec!["layer “Rect”: a per-side stroke CSS borders cannot draw, written as inline SVG"]
     );
     holds("per-side", &doc, &res);
+}
+
+/// A frame's stroke paints over its children, at each alignment: on a clipping
+/// frame with a full-bleed child, and on one that does not clip, whose child
+/// reaches past its edges.
+///
+/// flip: `paint` writing an inside or unclipped stroke on the frame itself → the
+/// child covers it, 143.3 along the inside card's edges.
+#[test]
+fn a_frame_stroke_draws_over_its_children() {
+    let mut d = Doc::new();
+    let board = d.frame(None, 0.0, 0.0, 420.0, 260.0, "Board");
+    for (i, align) in [
+        StrokeAlign::Inside,
+        StrokeAlign::Center,
+        StrokeAlign::Outside,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for (j, clip) in [true, false].into_iter().enumerate() {
+            let (x, y) = (20.0 + i as f64 * 135.0, 20.0 + j as f64 * 125.0);
+            let card = d.frame(Some(board), x, y, 110.0, 90.0, "Card");
+            d.apply(vec![Operation::SetClip { id: card, clip }]);
+            d.stroke(card, 10.0, align, StrokeSides::All);
+            let bleed = if clip { 0.0 } else { 8.0 };
+            let child = d.rect(
+                card,
+                -bleed,
+                -bleed,
+                110.0 + 2.0 * bleed,
+                90.0 + 2.0 * bleed,
+                0.0,
+            );
+            d.fill(child, solid(90, 170, 240, 255));
+        }
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[board]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(
+        css.contains("outline: 5px solid") && css.contains("outline-offset: -5px"),
+        "the clipping centred card splits its stroke at the edge:\n{css}"
+    );
+    holds("frame-stroke", &doc, &res);
+}
+
+/// A stroked circle at each alignment is CSS; a stroked ellipse that is not a
+/// circle is inline SVG, an outline's offset radii not being its parallel curve.
+///
+/// flip: `stroke_blocker` letting every ellipse through → `positioned` is empty.
+#[test]
+fn stroked_ellipses_match_the_canvas() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 300.0, 260.0, "Board");
+    for (i, align) in [
+        StrokeAlign::Inside,
+        StrokeAlign::Center,
+        StrokeAlign::Outside,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let y = 20.0 + i as f64 * 80.0;
+        let circle = d.add(
+            Some(f),
+            NodeKind::Ellipse {
+                size: Size::new(50.0, 50.0),
+            },
+            Affine::translate((20.0, y)),
+            "Dot",
+        );
+        d.fill(circle, solid(250, 200, 80, 255));
+        d.stroke(circle, 8.0, align, StrokeSides::All);
+        let oval = d.add(
+            Some(f),
+            NodeKind::Ellipse {
+                size: Size::new(180.0, 50.0),
+            },
+            Affine::translate((100.0, y)),
+            "Oval",
+        );
+        d.fill(oval, solid(120, 200, 250, 255));
+        d.stroke(oval, 10.0, align, StrokeSides::All);
+    }
+    let (doc, res) = d.done();
+    let export = html_of(&doc, &res, &[f]);
+    let css = String::from_utf8(export.file("styles.css").unwrap().to_vec()).unwrap();
+    assert!(css.contains(".dot {"), "the circles are CSS:\n{css}");
+    assert_eq!(
+        export.positioned,
+        vec!["layer “Oval”: a stroked ellipse that is not a circle, written as inline SVG"]
+    );
+    holds("ellipses", &doc, &res);
+}
+
+/// Round and bevel joins on a rect with one rounded corner and three square ones
+/// are drawn as joined; the outline's square corners are always mitred.
+///
+/// flip: `stroke_blocker` testing the join only when every corner is square →
+/// 134.6 at the square corners.
+#[test]
+fn a_join_on_mixed_corners_matches_the_canvas() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 320.0, 140.0, "Board");
+    for (i, join) in [Join::Round, Join::Bevel].into_iter().enumerate() {
+        let r = d.add(
+            Some(f),
+            NodeKind::Rect {
+                size: Size::new(120.0, 80.0),
+                corner_radii: RoundedRectRadii::new(20.0, 0.0, 0.0, 0.0),
+            },
+            Affine::translate((30.0 + i as f64 * 160.0, 30.0)),
+            "Tab",
+        );
+        d.fill(r, solid(250, 230, 200, 255));
+        d.stroke_joined(r, 12.0, StrokeAlign::Outside, join);
+    }
+    let (doc, res) = d.done();
+    holds("mixed-joins", &doc, &res);
 }
 
 /// Linear, repeating, concentric radial and sweep gradients.

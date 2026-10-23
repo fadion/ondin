@@ -1013,9 +1013,10 @@ impl Walk<'_> {
     }
 
     /// Why one stroke has no CSS form here, or `None`. All four sides are an
-    /// `outline` offset to the alignment; per-side widths are `border`s, which
-    /// only an inside stroke on a childless rect matches — a border moves the
-    /// padding box absolutely positioned children are measured from.
+    /// `outline` offset to the alignment ([`Self::paint`]); per-side widths are
+    /// `border`s, which only an inside stroke on a childless rect matches — a
+    /// border moves the padding box absolutely positioned children are measured
+    /// from.
     fn stroke_blocker(&self, node: &Node, kind: &NodeKind, s: &Stroke) -> Option<String> {
         if !matches!(s.brush.drawn(), Brush::Solid(_)) {
             return Some("a gradient or image stroke".into());
@@ -1023,12 +1024,27 @@ impl Walk<'_> {
         if !s.dashes.is_empty() {
             return Some("a dashed stroke".into());
         }
-        let square = match kind {
-            NodeKind::Rect { corner_radii, .. } => {
-                ondin_core::geometry::is_square_cornered(corner_radii)
-            }
-            NodeKind::Artboard { .. } => true,
-            _ => false,
+        // An outline offsets an ellipse's radii, which is its parallel curve
+        // only for a circle.
+        if let NodeKind::Ellipse { size } = kind
+            && size.width != size.height
+        {
+            return Some("a stroked ellipse that is not a circle".into());
+        }
+        let (square, any_square) = match kind {
+            NodeKind::Rect { corner_radii, .. } => (
+                ondin_core::geometry::is_square_cornered(corner_radii),
+                [
+                    corner_radii.top_left,
+                    corner_radii.top_right,
+                    corner_radii.bottom_right,
+                    corner_radii.bottom_left,
+                ]
+                .iter()
+                .any(|r| *r <= 0.0),
+            ),
+            NodeKind::Artboard { .. } => (true, true),
+            _ => (false, false),
         };
         let sides = ondin_core::geometry::effective_sides(kind, s);
         if !sides.is_all() {
@@ -1039,11 +1055,11 @@ impl Walk<'_> {
             }
             return None;
         }
-        // An outline's corners are square where the radius is zero; the model
+        // An outline's corners are mitred where the radius is zero; the model
         // joins them as asked.
         let mitred =
             s.join == ondin_core::kurbo::Join::Miter && s.miter_limit >= std::f64::consts::SQRT_2;
-        if square && s.align != StrokeAlign::Inside && !mitred {
+        if any_square && s.align != StrokeAlign::Inside && !mitred {
             return Some("a stroke with rounded or bevelled corners".into());
         }
         None
@@ -1094,6 +1110,7 @@ impl Walk<'_> {
         }
         self.effects(&mut el, node);
 
+        let mut over_children = None;
         match &kind {
             NodeKind::Rect { corner_radii, size } => {
                 let half = size.width.min(size.height).max(0.0) * 0.5;
@@ -1144,7 +1161,7 @@ impl Walk<'_> {
                 if node.clip() {
                     el.set("overflow", "hidden");
                 }
-                self.paint(&mut el, node, *size);
+                over_children = self.paint(&mut el, node, *size);
             }
             NodeKind::Text { .. } => {
                 self.text(&mut el, node);
@@ -1195,6 +1212,9 @@ impl Walk<'_> {
             if let Some(e) = self.node(*child, place) {
                 el.children.push(Child::Element(Box::new(e)));
             }
+        }
+        if let Some(e) = over_children {
+            el.children.push(Child::Element(Box::new(e)));
         }
         el
     }
@@ -1392,8 +1412,9 @@ impl Walk<'_> {
 
     /// Fills as `background` layers (CSS lists the top one first) and the one
     /// stroke as an `outline` or `border`s. [`Self::css_blocker`] has already
-    /// checked that each has a form.
-    fn paint(&mut self, el: &mut Element, node: &Node, size: Size) {
+    /// checked that each has a form. Answers the element drawing a frame's
+    /// stroke over its children, which goes after them.
+    fn paint(&mut self, el: &mut Element, node: &Node, size: Size) -> Option<Element> {
         let paint = self.doc.resolved_paint(node.id(), node.paint());
         // The resolved list for the tier's checks, the stored one for bindings;
         // resolving keeps every item in place.
@@ -1432,51 +1453,70 @@ impl Walk<'_> {
             el.set("image-rendering", "pixelated");
         }
         let kind = self.res.used_kind_of(node);
-        let Some((s, raw)) = paint
+        let (s, raw) = paint
             .strokes
             .iter()
             .zip(&stored.strokes)
-            .find(|(s, _)| s.visible && s.width > 0.0)
-        else {
-            return;
-        };
+            .find(|(s, _)| s.visible && s.width > 0.0)?;
         let c = match raw.brush {
             BrushSource::Bound { var, alpha } => self.tokens.color(var, alpha),
             BrushSource::Literal(_) => {
                 let Brush::Solid(c) = s.brush.drawn() else {
-                    return;
+                    return None;
                 };
                 css::color(*c, 1.0)
             }
         };
         let sides = ondin_core::geometry::effective_sides(kind, s);
         if sides.is_all() {
-            let w = s.width;
-            match raw.width_var {
-                Some(var) => {
-                    let width = self.tokens.px_floored(var);
-                    el.set("outline", format!("{width} solid {c}"));
-                    let k = match s.align {
-                        StrokeAlign::Inside => Some("-1"),
-                        StrokeAlign::Center => Some("-0.5"),
-                        StrokeAlign::Outside => None,
-                    };
-                    if let Some(k) = k {
-                        el.set("outline-offset", format!("calc({width} * {k})"));
-                    }
+            let bound = raw.width_var.map(|var| self.tokens.px_floored(var));
+            // `k` times the stroke's width.
+            let times = |k: f64| match &bound {
+                Some(w) if k == 1.0 => w.clone(),
+                Some(w) => format!("calc({w} * {})", fmt(k)),
+                None => px(s.width * k),
+            };
+            let offset = match s.align {
+                StrokeAlign::Inside => -1.0,
+                StrokeAlign::Center => -0.5,
+                StrokeAlign::Outside => 0.0,
+            };
+            // The canvas strokes a frame over its children, which paint over the
+            // frame's own outline: the part inside the box goes on a last child,
+            // the part outside stays on a clipping frame, which would clip it.
+            let (own, over) = match (node.children().is_empty(), node.clip(), s.align) {
+                (true, ..) => (Some((1.0, offset)), None),
+                (false, true, StrokeAlign::Outside) => (Some((1.0, 0.0)), None),
+                (false, true, StrokeAlign::Center) => (Some((0.5, 0.0)), Some((0.5, -0.5))),
+                (false, ..) => (None, Some((1.0, offset))),
+            };
+            let outline = |el: &mut Element, (width, offset): (f64, f64)| {
+                el.set("outline", format!("{} solid {c}", times(width)));
+                if offset != 0.0 {
+                    el.set("outline-offset", times(offset));
                 }
-                None => {
-                    el.set("outline", format!("{} solid {c}", px(w)));
-                    let offset = match s.align {
-                        StrokeAlign::Inside => -w,
-                        StrokeAlign::Center => -w * 0.5,
-                        StrokeAlign::Outside => 0.0,
-                    };
-                    if offset != 0.0 {
-                        el.set("outline-offset", px(offset));
-                    }
-                }
+            };
+            if let Some(own) = own {
+                outline(el, own);
             }
+            over.map(|over| {
+                let class = self.classes.mint(&format!("{} stroke", el.class), "stroke");
+                let mut e = Element::new("div", class);
+                for (p, v) in [
+                    ("position", "absolute"),
+                    ("left", "0"),
+                    ("top", "0"),
+                    ("width", "100%"),
+                    ("height", "100%"),
+                    ("pointer-events", "none"),
+                ] {
+                    e.set(p, v);
+                }
+                outline(&mut e, over);
+                // No layer's name path: a merged set matches it as its own.
+                e.key = Some((String::new(), usize::MAX));
+                e
+            })
         } else {
             el.set("box-sizing", "border-box");
             // A picture is framed on the whole box, not inside the borders.
@@ -1503,6 +1543,7 @@ impl Walk<'_> {
                     el.set(prop, format!("{width} solid {c}"));
                 }
             }
+            None
         }
     }
 

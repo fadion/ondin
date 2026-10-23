@@ -425,6 +425,16 @@ fn run_export(
     let out_path = out
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::Path::new(file).with_extension(format.extension()));
+    // `-o` naming the document itself would replace it with the export.
+    let same = |a: &std::path::Path, b: &str| {
+        std::fs::canonicalize(a).ok() == std::fs::canonicalize(b).ok() && a.exists()
+    };
+    if same(&out_path, file) {
+        return Err(format!(
+            "refusing to write the export over {file}, the document it is made from"
+        ));
+    }
+    let replaced = out_path.exists();
 
     let data = match format {
         ExportFormat::Svg => ondin_export::svg::svg(&doc, &res, None).into_bytes(),
@@ -481,7 +491,9 @@ fn run_export(
 
     std::fs::write(&out_path, data)
         .map_err(|e| format!("cannot write {}: {e}", out_path.display()))?;
-    println!("wrote {}", out_path.display());
+    // A door that writes with no dialog owes its count of what it replaced.
+    let note = if replaced { " (replaced)" } else { "" };
+    println!("wrote {}{note}", out_path.display());
     Ok(())
 }
 
@@ -1189,6 +1201,31 @@ mod tests {
             clamp_note(view, ExportScale::Times(0.01), vp.pixel_size),
             None
         );
+    }
+
+    /// `-o` naming the document is refused and leaves it as it was.
+    ///
+    /// flip: `run_export` without its same-file check → the document is a zip.
+    #[test]
+    fn export_refuses_to_write_over_its_document() {
+        let dir = std::env::temp_dir().join(format!("ondin-export-self-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("doc.ondin");
+        let saved = ondin_core::io::save(&ondin_core::Document::new(
+            ondin_core::IdSource::new(7).mint(),
+        ))
+        .unwrap();
+        std::fs::write(&src, &saved).unwrap();
+        let src = src.to_string_lossy().into_owned();
+        let err =
+            run_export(&src, ExportFormat::Vue, Some(&src), ExportScale::Times(1.0)).unwrap_err();
+        assert!(err.contains("refusing"), "{err}");
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            saved,
+            "the document is untouched"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

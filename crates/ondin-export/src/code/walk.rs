@@ -172,8 +172,11 @@ pub(crate) fn page(doc: &Document, res: &Resolved, origins: &[NodeId], component
         report: Report::default(),
         assets: Vec::new(),
         tokens: Tokens::new(doc),
+        // The page's name, and the component types React and Vue import.
         components: components.then(|| Components {
-            names: HashSet::from(["App".to_string()]),
+            names: ["app", "component", "componenttype"]
+                .map(String::from)
+                .into(),
             ..Default::default()
         }),
         bound: HashMap::new(),
@@ -258,7 +261,7 @@ struct Components {
     by_owner: HashMap<NodeId, Signature>,
     /// In the order finished, so a component comes after those it uses.
     list: Vec<Component>,
-    /// Component names taken; `App` is the page's.
+    /// Component names taken, lowercase ([`unique_file`]).
     names: HashSet<String>,
     /// Each kit's folder under `components`, by kit id.
     kit_dirs: HashMap<String, String>,
@@ -872,7 +875,7 @@ impl Walk<'_> {
             return sig.clone();
         }
         let owner = doc.get(owner_id).expect("a main in the document");
-        let name = unique(component_name(owner.name()), &mut comps.names);
+        let name = unique_file(component_name(owner.name()), "Component", &mut comps.names);
         // A kit's components go in a folder named for the kit.
         let dir = match owner.origin() {
             None => "components".to_string(),
@@ -882,9 +885,14 @@ impl Walk<'_> {
                         let kits = doc.variables().kits();
                         kits.get(&o.kit).and_then(|k| k.name.clone())
                     });
-                    let mut taken = comps.kit_dirs.values().cloned().collect();
-                    let folder = unique(
+                    let mut taken = comps
+                        .kit_dirs
+                        .values()
+                        .map(|d| d.to_ascii_lowercase())
+                        .collect();
+                    let folder = unique_file(
                         component_name(named.as_deref().unwrap_or("Kit")),
+                        "Kit",
                         &mut taken,
                     );
                     comps.kit_dirs.insert(o.kit.clone(), folder);
@@ -2491,14 +2499,47 @@ fn prop_name(name: &str) -> String {
         "let",
         "static",
         "await",
+        // Reserved in strict code, which every ES module is.
+        "implements",
+        "interface",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "arguments",
+        "eval",
         "style",
         "is",
         "slot",
+        // The CSS module every React component imports its classes as.
+        "styles",
     ];
     if RESERVED.contains(&out.as_str()) {
         out.push_str("Prop");
     }
     out
+}
+
+/// `base` as a file or folder name too: off the Windows device names (`Con` +
+/// `suffix`), and unique in `taken` ignoring case, as NTFS and APFS compare.
+/// `taken` holds lowercase names.
+fn unique_file(mut base: String, suffix: &str, taken: &mut HashSet<String>) -> String {
+    const DEVICES: &[&str] = &[
+        "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
+        "LPT9",
+    ];
+    if DEVICES.contains(&base.to_ascii_uppercase().as_str()) {
+        base.push_str(suffix);
+    }
+    let mut candidate = base.clone();
+    let mut n = 1;
+    while taken.contains(&candidate.to_ascii_lowercase()) {
+        n += 1;
+        candidate = format!("{base}{n}");
+    }
+    taken.insert(candidate.to_ascii_lowercase());
+    candidate
 }
 
 /// `base`, or `base2`, `base3`… for the first not in `taken`, which it joins.

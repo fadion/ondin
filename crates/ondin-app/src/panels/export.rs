@@ -1864,11 +1864,9 @@ impl OndinApp {
                 .session
                 .doc
                 .get(*one)
-                .map(|n| n.name().to_string())
-                .filter(|n| !n.trim().is_empty()),
+                .and_then(|n| code_archive_name(n.name())),
             _ => None,
         }
-        .map(|n| format!("{n}.zip"))
         .unwrap_or_else(|| self.export_archive_name());
         let Some(path) = rfd::FileDialog::new()
             .set_directory(self.export_start_dir())
@@ -1889,6 +1887,14 @@ impl OndinApp {
         }
         self.session.info(code_export_summary(target, &export));
     }
+}
+
+/// The zip a save dialog is seeded with for a layer named `layer`: a file name,
+/// never a path (`Button / Primary` would be read as a folder), or `None` when
+/// nothing of the name is usable.
+fn code_archive_name(layer: &str) -> Option<String> {
+    let name = ondin_export::plan::sanitize_segment(layer.trim());
+    (!name.is_empty()).then(|| format!("{name}.zip"))
 }
 
 /// The status line after a code export: what was written, then what the report
@@ -3143,5 +3149,20 @@ mod code_export_tests {
             code_export_summary(Target::React, &noted),
             "Exported React code — 1 drawn differently, 2 written out as layers; see report.txt"
         );
+    }
+
+    /// The save dialog is seeded with a file name, never a path or a name Windows
+    /// refuses, and a name with nothing usable falls back.
+    ///
+    /// flip: `code_archive_name` without `sanitize_segment` → `Button / Primary.zip`.
+    #[test]
+    fn the_code_archive_is_named_as_a_file() {
+        assert_eq!(
+            code_archive_name("Button / Primary").as_deref(),
+            Some("Button - Primary.zip")
+        );
+        assert_eq!(code_archive_name("a:b?c").as_deref(), Some("a-b-c.zip"));
+        assert_eq!(code_archive_name("Con").as_deref(), Some("_Con.zip"));
+        assert_eq!(code_archive_name("  "), None);
     }
 }

@@ -1130,3 +1130,120 @@ fn a_kit_main_is_a_component_in_the_kits_folder() {
     let badge = file(&out, "components/AcmeUI/Badge.vue");
     assert!(badge.contains("import \"../../base.css\";"), "{badge}");
 }
+
+/// Mains named `names`, each a bare frame with one instance beside it; the
+/// instances, in order.
+fn named_mains(names: &[&str]) -> (Document, Vec<NodeId>) {
+    let mut ids = IdSource::new(0xA1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let mut uses = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        let (main, copy) = (ids.mint(), ids.mint());
+        let frame = |id, x| {
+            create(
+                id,
+                (root, 0),
+                NodeKind::Artboard {
+                    size: Size::new(40.0, 30.0),
+                },
+                (x, i as f64 * 50.0),
+                name,
+            )
+        };
+        doc.apply(&Transaction(vec![
+            frame(main, 0.0),
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+            frame(copy, 100.0),
+            Operation::SetLink {
+                id: copy,
+                link: Some(main),
+            },
+        ]))
+        .expect("a main and its instance");
+        uses.push(copy);
+    }
+    (doc, uses)
+}
+
+/// Component files never collide on a case-insensitive filesystem, never take a
+/// Windows device name, and never take a name an emitter imports itself.
+///
+/// flip: `unique_file` comparing case → `ICONButton.tsx` beside `IconButton.tsx`,
+/// and `Component.tsx` for the unnamed main.
+#[test]
+fn component_files_are_apart_on_every_filesystem() {
+    let (doc, uses) = named_mains(&["Icon Button", "ICON button", "con", "★"]);
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &uses);
+    let mut paths: Vec<String> = out
+        .files
+        .iter()
+        .map(|f| f.path.clone())
+        .filter(|p| p.ends_with(".tsx"))
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            "App.tsx",
+            "components/Component2.tsx",
+            "components/ConComponent.tsx",
+            "components/ICONButton2.tsx",
+            "components/IconButton.tsx",
+        ]
+    );
+}
+
+/// A property whose name is a word strict code reserves, or the CSS module's
+/// binding, gets the `Prop` suffix.
+///
+/// flip: `prop_name` without the strict-mode words → `private = true` in the
+/// destructuring, which an ES module cannot parse.
+#[test]
+fn a_prop_never_takes_a_reserved_name() {
+    let (mut doc, uses) = named_mains(&["Card"]);
+    let mut ids = IdSource::new(0xB2);
+    let main = ondin_core::component::main_of(&doc, uses[0]).unwrap();
+    for (i, name) in ["Styles", "Private", "Interface"].into_iter().enumerate() {
+        let (dot, copy) = (ids.mint(), ids.mint());
+        let rect = |id, parent| {
+            create(
+                id,
+                (parent, i),
+                NodeKind::Rect {
+                    size: Size::new(4.0, 4.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                (i as f64 * 6.0, 0.0),
+                name,
+            )
+        };
+        doc.apply(&Transaction(vec![
+            rect(dot, main),
+            rect(copy, uses[0]),
+            Operation::SetLink {
+                id: copy,
+                link: Some(dot),
+            },
+        ]))
+        .unwrap();
+        let (tx, _) = variant::define(&doc, &mut ids, main, name, PropKind::Boolean, vec![dot])
+            .expect("a property");
+        doc.apply(&tx).unwrap();
+    }
+    let res = Resolved::rebuild(&doc);
+    let out = react_of(&doc, &res, &uses);
+    assert!(out.inlined.is_empty(), "{:?}", out.inlined);
+    let card = file(&out, "components/Card.tsx");
+    for prop in [
+        "stylesProp = true",
+        "privateProp = true",
+        "interfaceProp = true",
+    ] {
+        assert!(card.contains(prop), "{prop}: {card}");
+    }
+}

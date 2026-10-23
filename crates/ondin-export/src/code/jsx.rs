@@ -205,24 +205,27 @@ pub(crate) fn slot_binding(prop: &str) -> String {
     }
 }
 
-/// The binding an asset is imported as: `assets/card-box.png` → `cardBoxPng`.
+/// The binding an asset is imported as: `assets/card-box.png` → `card_box_png`.
+/// Snake case, with the extension always a word of its own, so it never meets a
+/// prop or a component, whose names have no `_`.
 pub(crate) fn asset_binding(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
     let mut out = String::new();
-    let mut up = false;
+    let mut gap = false;
     for c in file.chars() {
         if c.is_ascii_alphanumeric() {
-            if out.is_empty() && c.is_ascii_digit() {
+            // A leading digit, or a word after the first.
+            if (out.is_empty() && c.is_ascii_digit()) || (gap && !out.is_empty()) {
                 out.push('_');
             }
-            out.push(if up { c.to_ascii_uppercase() } else { c });
-            up = false;
+            out.push(c);
+            gap = false;
         } else {
-            up = !out.is_empty();
+            gap = true;
         }
     }
-    if out.is_empty() {
-        out.push_str("asset");
+    if !out.contains('_') {
+        out.insert_str(0, "asset_");
     }
     out
 }
@@ -267,8 +270,9 @@ mod tests {
 
     #[test]
     fn asset_bindings_are_identifiers() {
-        assert_eq!(asset_binding("assets/card-box.png"), "cardBoxPng");
-        assert_eq!(asset_binding("assets/2up.jpg"), "_2upJpg");
+        assert_eq!(asset_binding("assets/card-box.png"), "card_box_png");
+        assert_eq!(asset_binding("assets/2up.jpg"), "_2up_jpg");
+        assert_eq!(asset_binding("assets/logo"), "asset_logo");
         assert_eq!(module_class("card"), "{styles.card}");
         assert_eq!(module_class("card-2"), "{styles[\"card-2\"]}");
     }

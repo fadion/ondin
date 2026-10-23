@@ -253,7 +253,10 @@ fn path_stem(name: &str, opts: PlanOptions) -> String {
     }
 }
 
-fn sanitize_segment(s: &str) -> String {
+/// `s` as one file or folder name the strictest filesystem takes: separators and
+/// Windows' forbidden characters as `-`, no trailing dot or space, a device name
+/// prefixed with `_`. Empty when nothing of it is usable.
+pub fn sanitize_segment(s: &str) -> String {
     const RESERVED: [&str; 22] = [
         "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
         "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",

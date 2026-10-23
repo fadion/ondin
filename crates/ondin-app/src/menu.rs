@@ -1090,11 +1090,36 @@ impl Item {
         }
     }
 
-    /// The keymap's own verb for this row, where it has one: what the palette and
-    /// [`OndinApp::perform_menu_item`] dispatch, so row and chord stay one verb.
+    /// The keymap's own verb for this row, where it has one: what its chord
+    /// resolves to. [`OndinApp::perform_menu_item`] dispatches it for the app verbs;
+    /// the menu rows have their own arms there, some door-dependent (*Paste here*).
+    /// The cheatsheet's test holds every chord on the sheet to this.
     pub fn action(self) -> Option<crate::input::Action> {
         use crate::input::Action;
         Some(match self {
+            Item::Cut => Action::Cut,
+            Item::Copy => Action::Copy,
+            Item::PasteHere => Action::Paste,
+            Item::PasteInPlace => Action::PasteInPlace,
+            Item::CopyProperties => Action::CopyProperties,
+            Item::PasteProperties => Action::PasteProperties,
+            Item::Duplicate => Action::Duplicate,
+            Item::Delete => Action::Delete,
+            Item::SelectAll => Action::SelectAll,
+            Item::Group => Action::Group,
+            Item::Ungroup => Action::Ungroup,
+            Item::FrameSelection => Action::FrameSelection,
+            Item::CreateComponent => Action::CreateComponent,
+            Item::DetachInstance => Action::DetachInstance,
+            Item::Mask => Action::Mask,
+            Item::Boolean(op) => Action::Boolean(op),
+            Item::Flatten => Action::Flatten,
+            Item::ReverseSubpaths => Action::ReverseSubpaths,
+            Item::Restack(mv) => Action::Restack(mv),
+            Item::Flip(axis) => Action::Flip(axis),
+            Item::ToggleHidden => Action::ToggleHidden,
+            Item::ToggleLocked => Action::ToggleLocked,
+            Item::Rename => Action::Rename,
             Item::Undo => Action::Undo,
             Item::Redo => Action::Redo,
             Item::Save => Action::Save,

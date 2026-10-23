@@ -7,9 +7,9 @@ the library.
 
 **Unbuilt:** §10's `Ctrl+B` / `Ctrl+I`. The cheatsheet (`Ctrl+Shift+/`, `app-canvas-chrome.md`)
 renders the editor's bindings from the command registry, plus hand-kept Mouse and Library
-sections. Its test checks the registry's spelling against `input::resolve` for the rows with an
-`Item::action` only; the menu verbs are not yet checked (`roadmap.md`). Not kept on the design
-canvas: its artboards are mockups, not specs.
+sections. Its test checks every registry chord it shows against `input::resolve`; the hand-kept
+sections and this file are not checked. Not kept on the design canvas: its artboards are
+mockups, not specs.
 
 **Sources.** Figma and Sketch agree with each other far more than with Adobe, so take their
 binding where they disagree with Adobe about a concept both have, and Adobe's where Figma has no

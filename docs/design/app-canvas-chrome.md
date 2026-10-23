@@ -178,11 +178,12 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   section have no registry rows (gestures and opacity digits are not verbs, and the library's keys
   are read by `dashboard_keys`, not `input::resolve`), so a change to one of those keys is made here
   too. Which items each section lists is also chosen by hand in `sections`.
-- **What its test covers.** `every_sheet_chord_resolves_to_its_rows_action` drives each sheet chord
-  whose item has an `Item::action` through `input::resolve` and asserts that action, walking
-  `sections` itself so a new row is covered. The other menu verbs (clipboard, structure, order,
-  flips) and *Centre text* (`Ctrl+Shift+C` is read from the release) are not driven; they
-  dispatch through `perform_menu_item` or arrive as clipboard events or releases.
+- **What its test covers.** `every_sheet_chord_resolves_to_its_rows_action` walks `sections`, so
+  a new row is covered, and drives every registry chord and its alternative through
+  `input::resolve` as `egui_winit` delivers it: a command chord on C, X or V arrives as a
+  clipboard event, and the key's release follows on the next frame. Each must resolve to its
+  row's `Item::action` and nothing else; the one exemption is `PasteRelease` beside a paste, the
+  image-clipboard witness `dispatch` stands down. A sheet row with no `Item::action` fails it.
 
 ## Present mode
 

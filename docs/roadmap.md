@@ -12,10 +12,6 @@ Specified in `app-canvas-chrome.md`, *The command palette* and *The shortcut che
 - **A *Show ‹card›* row does not focus the card's first field.** The accepted design opens the
   card, scrolls to it and focuses its first field; `panel_full` honours `reveal_card` by opening
   and scrolling only.
-- **The sheet's menu-verb chords are not checked against `input::resolve`.**
-  `every_sheet_chord_resolves_to_its_rows_action` walks `sections` but drives only the rows with an
-  `Item::action`. The clipboard, structure, order and flip rows and *Centre text* dispatch through
-  `perform_menu_item` or arrive as clipboard events or releases, and are not driven.
 
 ## Later · Components and layout
 

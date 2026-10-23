@@ -731,12 +731,13 @@ mod tests {
     /// Every registry chord the sheet shows resolves to its row's own action —
     /// the registry's spelling and `input::resolve`'s binding agree.
     ///
-    /// Walks the sheet's own sections, so a row added there is driven too. Covers
-    /// the rows with an `Item::action`; the other menu verbs dispatch through
-    /// `perform_menu_item` and several arrive as clipboard events or releases, as
-    /// *Centre text*'s `Ctrl+Shift+C` does, so they are not driven here.
+    /// Every registry chord the sheet shows resolves to its row's action and to
+    /// nothing else — walking the sheet's own sections, so a row added there is
+    /// driven too, and each spelling as `egui_winit` delivers it (`resolve_chord`).
     ///
     /// flip: spelling `Item::ZoomOut`'s accel as `Ctrl+0` → fails at "Zoom out".
+    /// flip: spelling `Item::Boolean(Exclude)`'s accel as `Ctrl+Alt+E` → fails at
+    /// "Exclude" (that chord is *Export all*).
     #[test]
     fn every_sheet_chord_resolves_to_its_rows_action() {
         let mut checked = 0;
@@ -745,30 +746,38 @@ mod tests {
             .flat_map(|s| s.rows)
             .filter_map(|r| r.item);
         for item in items {
-            let Some(action) = item.action() else {
-                continue;
-            };
-            // Read from the release, which one pressed frame cannot show.
-            if item == Item::TextChord(TextChord::Align(ondin_core::TextAlign::Center)) {
-                continue;
-            }
             let spec = item.spec();
+            let action = item
+                .action()
+                .unwrap_or_else(|| panic!("{} is on the sheet with no keymap action", spec.label));
             let accel = spec.accel.expect("a sheet item has a chord");
             let text_mode = matches!(item, Item::TextChord(_));
             for spelling in std::iter::once(accel).chain(item.alt_accel()) {
-                let got = resolve_chord(spelling, text_mode);
-                assert!(
-                    got.contains(&action),
+                let mut got = resolve_chord(spelling, text_mode);
+                // The image-only clipboard's witness, which both pastes' releases
+                // push and `dispatch` stands down whenever the clipboard holds text.
+                if matches!(
+                    action,
+                    crate::input::Action::Paste | crate::input::Action::PasteInPlace
+                ) {
+                    got.retain(|a| *a != crate::input::Action::PasteRelease);
+                }
+                assert_eq!(
+                    got,
+                    vec![action],
                     "{} ({spelling}) resolved to {got:?}, not {action:?}",
                     spec.label
                 );
                 checked += 1;
             }
         }
-        assert!(checked > 40, "only {checked} chords were driven");
+        assert!(checked > 90, "only {checked} chords were driven");
     }
 
-    /// One frame pressing `spelling`, through `input::resolve`.
+    /// Press `spelling` and let go, through `input::resolve`, as `egui_winit`
+    /// delivers it: a command chord on C, X or V arrives as `Event::Copy` / `Cut` /
+    /// `Paste` instead of a key press, whatever Alt and Shift are doing, and its
+    /// release still arrives as a key. Two frames, the actions of both.
     fn resolve_chord(spelling: &str, text_mode: bool) -> Vec<crate::input::Action> {
         let keys = keys_of(spelling);
         let mut modifiers = egui::Modifiers::NONE;
@@ -785,6 +794,7 @@ mod tests {
                 "←" => key = Some(egui::Key::ArrowLeft),
                 "↑" => key = Some(egui::Key::ArrowUp),
                 "↓" => key = Some(egui::Key::ArrowDown),
+                "Del" => key = Some(egui::Key::Delete),
                 other => {
                     key =
                         Some(egui::Key::from_name(other).unwrap_or_else(|| {
@@ -794,27 +804,41 @@ mod tests {
             }
         }
         let key = key.expect("a chord has a key");
-        let ctx = egui::Context::default();
-        let input = egui::RawInput {
+        let event = |pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
             modifiers,
-            events: vec![egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers,
-            }],
-            ..Default::default()
+        };
+        let press = match key {
+            _ if !modifiers.command => event(true),
+            egui::Key::C => egui::Event::Copy,
+            egui::Key::X => egui::Event::Cut,
+            egui::Key::V => egui::Event::Paste("text".into()),
+            _ => event(true),
+        };
+        let ctx = egui::Context::default();
+        let mode = if text_mode {
+            crate::input::Mode::TextInsert
+        } else {
+            crate::input::Mode::Normal
         };
         let mut out = Vec::new();
-        let _ = ctx.run_ui(input, |ui| {
-            let mode = if text_mode {
-                crate::input::Mode::TextInsert
-            } else {
-                crate::input::Mode::Normal
+        for events in [vec![press], vec![event(false)]] {
+            let input = egui::RawInput {
+                modifiers,
+                events,
+                ..Default::default()
             };
-            out = crate::input::resolve(ui.ctx(), mode, crate::input::NudgeStep::default());
-        });
+            let _ = ctx.run_ui(input, |ui| {
+                out.extend(crate::input::resolve(
+                    ui.ctx(),
+                    mode,
+                    crate::input::NudgeStep::default(),
+                ));
+            });
+        }
         out
     }
 

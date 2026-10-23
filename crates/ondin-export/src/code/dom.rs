@@ -26,10 +26,51 @@ pub(crate) struct Element {
     /// The Vue directive choosing this variant's tree (`v-if="…"`, `v-else`),
     /// written whole.
     pub branch: Option<String>,
+    /// In a set's merged tree, the classes worn instead of [`Self::class`] under
+    /// other variants, the first whose values hold winning. Each rule is whole,
+    /// so exactly one of the element's rules applies.
+    pub alts: Vec<Alt>,
+}
+
+/// A class an element wears under some of its set's variants.
+#[derive(Debug, Clone)]
+pub(crate) struct Alt {
+    /// The variant values it is worn for, any one of them.
+    pub when: Vec<When>,
+    pub class: String,
+    pub style: Vec<(&'static str, String)>,
+}
+
+/// Variant values a tree or class is drawn for, as `(prop, value)`: every one
+/// must hold.
+pub(crate) type When = Vec<(String, String)>;
+
+/// `when` as a condition: JSX's double-quoted strings, Vue's single-quoted ones.
+pub(crate) fn condition(when: &[(String, String)], syntax: Syntax) -> String {
+    let terms: Vec<String> = when
+        .iter()
+        .map(|(p, v)| match syntax {
+            Syntax::Jsx => format!("{p} === {}", super::jsx::js_string(v)),
+            _ => format!("{p} === {}", super::jsx::single_quoted(v)),
+        })
+        .collect();
+    terms.join(" && ")
+}
+
+/// A condition holding when any of `whens` does.
+fn any_of(whens: &[When], syntax: Syntax) -> String {
+    let parts: Vec<String> = whens
+        .iter()
+        .map(|w| match (whens.len(), w.len()) {
+            (1, _) | (_, 1) => condition(w, syntax),
+            _ => format!("({})", condition(w, syntax)),
+        })
+        .collect();
+    parts.join(" || ")
 }
 
 /// A use of a component: its name and the properties it sets.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Instance {
     pub component: String,
     pub args: Vec<(String, Arg)>,
@@ -231,23 +272,48 @@ impl Element {
         if self.class.is_empty() {
             return;
         }
+        // The class as an expression: a module's binding in JSX, a string in
+        // Vue, each alternative behind its condition.
+        let one = |class: &str| match syntax {
+            Syntax::Jsx => {
+                let m = super::jsx::module_class(class);
+                m[1..m.len() - 1].to_string()
+            }
+            _ => format!("'{class}'"),
+        };
+        let mut expr = String::new();
+        for a in &self.alts {
+            let _ = write!(expr, "{} ? {} : ", any_of(&a.when, syntax), one(&a.class));
+        }
+        expr.push_str(&one(&self.class));
         match syntax {
             // The class a component root is placed with joins its own.
             Syntax::Jsx if self.takes_class => {
-                let own = super::jsx::module_class(&self.class);
-                let _ = write!(
-                    out,
-                    " className={{`${{{}}} ${{className ?? \"\"}}`}}",
-                    &own[1..own.len() - 1]
-                );
+                let _ = write!(out, " className={{`${{{expr}}} ${{className ?? \"\"}}`}}");
+            }
+            Syntax::Jsx if !self.alts.is_empty() => {
+                let _ = write!(out, " className={{{expr}}}");
             }
             Syntax::Jsx => {
                 let _ = write!(out, " className={}", super::jsx::module_class(&self.class));
+            }
+            Syntax::Vue if !self.alts.is_empty() => {
+                let _ = write!(out, " :class=\"{}\"", escape(&expr));
             }
             _ => {
                 let _ = write!(out, " class=\"{}\"", escape(&self.class));
             }
         }
+    }
+
+    /// [`Self::classes`], to rename.
+    pub fn classes_mut(&mut self) -> impl Iterator<Item = &mut String> {
+        std::iter::once(&mut self.class).chain(self.alts.iter_mut().map(|a| &mut a.class))
+    }
+
+    /// Every class the element may wear: its own, then its alternatives'.
+    pub fn classes(&self) -> impl Iterator<Item = &String> {
+        std::iter::once(&self.class).chain(self.alts.iter().map(|a| &a.class))
     }
 
     /// The opening tag; `void` closes it as an element with no content.
@@ -316,13 +382,17 @@ impl Element {
     /// its class twice, so it outranks the component root's own rule whichever
     /// stylesheet loads last.
     pub fn css(&self, out: &mut String) {
-        if !self.class.is_empty() && !self.style.is_empty() {
-            if self.instance.is_some() {
-                let _ = writeln!(out, ".{0}.{0} {{", self.class);
-            } else {
-                let _ = writeln!(out, ".{} {{", self.class);
+        let alts = self.alts.iter().map(|a| (&a.class, &a.style));
+        for (class, style) in std::iter::once((&self.class, &self.style)).chain(alts) {
+            if class.is_empty() || style.is_empty() {
+                continue;
             }
-            for (p, v) in &self.style {
+            if self.instance.is_some() {
+                let _ = writeln!(out, ".{class}.{class} {{");
+            } else {
+                let _ = writeln!(out, ".{class} {{");
+            }
+            for (p, v) in style {
                 let _ = writeln!(out, "  {p}: {v};");
             }
             out.push_str("}\n");

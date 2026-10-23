@@ -21,6 +21,7 @@ mod dom;
 pub mod html;
 mod image;
 mod jsx;
+mod merge;
 pub mod react;
 mod tokens;
 pub mod vue;

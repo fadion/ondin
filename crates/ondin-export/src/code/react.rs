@@ -8,7 +8,7 @@
 //! takes a `className`, which its user places it with. `base.css` holds the page
 //! reset every file imports, and `tokens.css` the variables.
 
-use super::dom::{Arg, Syntax};
+use super::dom::{Arg, Syntax, condition};
 use super::jsx::{asset_binding, js_string};
 use super::walk::{self, Component, Ty};
 use super::{BASE_CSS, CodeExport, CodeFile};
@@ -135,11 +135,7 @@ fn module(c: &Component, tokens: bool, dirs: &HashMap<&str, &str>) -> String {
             root.markup(&mut out, 2, Syntax::Jsx);
             out.push_str("  );\n");
         } else {
-            let cond: Vec<String> = when
-                .iter()
-                .map(|(p, v)| format!("{p} === {}", js_string(v)))
-                .collect();
-            let _ = writeln!(out, "  if ({}) {{", cond.join(" && "));
+            let _ = writeln!(out, "  if ({}) {{", condition(when, Syntax::Jsx));
             out.push_str("    return (\n");
             root.markup(&mut out, 3, Syntax::Jsx);
             out.push_str("    );\n  }\n");

@@ -9,8 +9,8 @@
 //! root, so the user places it. `base.css` holds the page reset every file
 //! imports, and `tokens.css` the variables.
 
-use super::dom::{Arg, Child, Element, Syntax, escape};
-use super::jsx::{js_string, single_quoted};
+use super::dom::{Arg, Child, Element, Syntax, condition, escape};
+use super::jsx::js_string;
 use super::walk::{self, Component, Ty};
 use super::{BASE_CSS, CodeExport, CodeFile};
 use ondin_core::{Document, NodeId, Resolved};
@@ -30,7 +30,12 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
     let roots: HashMap<&str, Vec<&str>> = all
         .iter()
         .map(|c| {
-            let classes = c.bodies.iter().map(|(_, e)| e.class.as_str()).collect();
+            let classes = c
+                .bodies
+                .iter()
+                .flat_map(|(_, e)| e.classes())
+                .map(String::as_str);
+            let classes = classes.collect();
             (c.name.as_str(), classes)
         })
         .collect();
@@ -92,9 +97,7 @@ pub fn vue_of(doc: &Document, res: &Resolved, origins: &[NodeId]) -> CodeExport 
 fn classes_in(bodies: &[Element]) -> HashSet<String> {
     let mut all = HashSet::new();
     for body in bodies {
-        body.each(&mut |e| {
-            all.insert(e.class.clone());
-        });
+        body.each(&mut |e| all.extend(e.classes().cloned()));
     }
     all
 }
@@ -111,23 +114,27 @@ fn keep_uses_apart(
     roots: &HashMap<&str, Vec<&str>>,
     mine: &mut HashSet<String>,
 ) {
-    if let Some(i) = &el.instance {
+    if let Some(i) = el.instance.clone() {
         let theirs = match i.slot {
             Some(_) => Some(any),
             None => classes.get(&i.component),
         };
-        let own_root = i.slot.is_none()
-            && roots
-                .get(i.component.as_str())
-                .is_some_and(|r| r.len() == 1 && r[0] == el.class);
-        if let Some(theirs) = theirs.filter(|t| !own_root && t.contains(&el.class)) {
-            let base = el.class.clone();
-            let mut n = 2;
-            while mine.contains(&format!("{base}-{n}")) || theirs.contains(&format!("{base}-{n}")) {
-                n += 1;
+        for class in el.classes_mut() {
+            let own_root = i.slot.is_none()
+                && roots
+                    .get(i.component.as_str())
+                    .is_some_and(|r| r.len() == 1 && r[0] == class);
+            if let Some(theirs) = theirs.filter(|t| !own_root && t.contains(class.as_str())) {
+                let base = class.clone();
+                let mut n = 2;
+                while mine.contains(&format!("{base}-{n}"))
+                    || theirs.contains(&format!("{base}-{n}"))
+                {
+                    n += 1;
+                }
+                *class = format!("{base}-{n}");
+                mine.insert(class.clone());
             }
-            el.class = format!("{base}-{n}");
-            mine.insert(el.class.clone());
         }
     }
     for c in &mut el.children {
@@ -157,12 +164,9 @@ fn sfc(
             }
             continue;
         }
-        let cond: Vec<String> = when
-            .iter()
-            .map(|(p, v)| format!("{p} === {}", single_quoted(v)))
-            .collect();
+        let cond = condition(when, Syntax::Vue);
         let directive = if i == 0 { "v-if" } else { "v-else-if" };
-        body.branch = Some(format!("{directive}=\"{}\"", escape(&cond.join(" && "))));
+        body.branch = Some(format!("{directive}=\"{}\"", escape(&cond)));
     }
 
     let mut out = String::from("<script setup lang=\"ts\">\n");
@@ -238,14 +242,16 @@ fn avoid(bodies: &mut [Element], taken: &HashSet<String>) {
 }
 
 fn rename(el: &mut Element, taken: &HashSet<String>, all: &mut HashSet<String>) {
-    if el.instance.is_none() && taken.contains(&el.class) {
-        let base = el.class.clone();
-        let mut n = 2;
-        while all.contains(&format!("{base}-{n}")) {
-            n += 1;
+    if el.instance.is_none() {
+        for class in el.classes_mut().filter(|c| taken.contains(c.as_str())) {
+            let base = class.clone();
+            let mut n = 2;
+            while all.contains(&format!("{base}-{n}")) {
+                n += 1;
+            }
+            *class = format!("{base}-{n}");
+            all.insert(class.clone());
         }
-        el.class = format!("{base}-{n}");
-        all.insert(el.class.clone());
     }
     for c in &mut el.children {
         if let Child::Element(e) = c {

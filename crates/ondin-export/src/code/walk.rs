@@ -8,7 +8,7 @@
 
 use super::Report;
 use super::css::{self, px};
-use super::dom::{Arg, Child, Classes, Element, Instance};
+use super::dom::{Arg, Child, Classes, Element, Instance, When};
 use super::image;
 use super::tokens::{self, Tokens};
 use crate::svg::fmt;
@@ -50,9 +50,9 @@ pub(crate) struct Component {
     /// `components`, or a kit's folder under it.
     pub dir: String,
     /// Each variant's tree with the variant values it is drawn for, the default
-    /// variant's last and drawn for any others. A main outside a set has one
-    /// tree, drawn always.
-    pub bodies: Vec<(Vec<(String, String)>, Element)>,
+    /// variant's last and drawn for any others. A main outside a set, and a set
+    /// whose trees merge (`merge::merge`), has one tree, drawn always.
+    pub bodies: Vec<(When, Element)>,
     /// Its props: each one's name in code, its type and its default, which a
     /// forwarded prop has none of — the slot it reaches supplies its own.
     pub props: Vec<(String, Ty, Option<Arg>)>,
@@ -868,7 +868,12 @@ impl Walk<'_> {
         let outer_bound = std::mem::replace(&mut self.bound, bound);
         let outer_forwards = std::mem::replace(&mut self.forwards, forwards);
         let mut bodies = Vec::new();
-        for t in trees.iter().filter(|t| **t != default).chain([&default]) {
+        // The default's tree is walked first, so its classes take the plain
+        // names, and moved last, where it is the fallback.
+        for t in [&default]
+            .into_iter()
+            .chain(trees.iter().filter(|t| **t != default))
+        {
             let Some(node) = doc.get(*t) else { continue };
             let mut root = self.css_element(node, Place::Root);
             root.takes_class = true;
@@ -886,6 +891,7 @@ impl Walk<'_> {
             };
             bodies.push((when, root));
         }
+        bodies.rotate_left(1);
         self.bound = outer_bound;
         self.forwards = outer_forwards;
         self.classes = classes;
@@ -895,7 +901,7 @@ impl Walk<'_> {
         comps.list.push(Component {
             name,
             dir,
-            bodies,
+            bodies: super::merge::merge(bodies),
             props,
         });
         sig

@@ -29,7 +29,7 @@ The document lives in a running Ondin process (GUI or headless), so that process
 Phase 1 — read/export (ship first):
 `get_document() -> Snapshot`, `get_node(id)`, `list_children(id)`, `hit_test(x,y)`,
 `get_bounds(id)`, `get_selection() -> Vec<NodeId>`, `export_svg(artboard?)`, `export_png(viewport)`,
-`run_exports(ids?) -> Vec<File>`, `list_components()`, `list_variables() -> VariableTable`,
+`run_exports(ids?) -> Vec<File>`, `export_code(target, ids?) -> CodeExport`, `list_components()`, `list_variables() -> VariableTable`,
 `list_styles() -> StyleTable`.
 
 Phase 2 — write (1:1 with operations/composites):
@@ -112,6 +112,8 @@ The raw kit ops (`OpenVault`, `CloseVault`, `SetOrigin`, a `SetKitModes` rewriti
 #### Exports
 
 `set_exports` writes a layer's export list (the *Export* card's rows: format, scale, prefix and suffix, background, quality, trim, square padding; `ExportSpec`, see export.md §7). `run_exports` renders the listed layers' files through `ondin_export::plan` and `plan::render` (the path `ondin export --all` takes) and **returns bytes with their names** rather than writing them; where files land is the client's and the person's call. The panel's *Export all* uses the same two functions; the panel and CLI each keep a copy of the walk that collects layers carrying settings, held to one answer by `build::all_in_document_order`.
+
+`export_code` writes layers as HTML/CSS, React or Vue through `code::Target::export` (export.md, *Code export*), the CLI's `--html`, `--react` and `--vue` path, and returns the files with the three report lists (`approximated`, `positioned`, `inlined`) beside them, never writing to disk. `ids` defaults to the selection, as *Export as HTML / React / Vue…* takes it. It is the door the deterministic translation exists for: the snapshot carries used values, so CSS an agent writes from it is absolute positions, where `export_code` keeps the specified layout, the variables and the components for the agent to build on.
 
 #### set_pivot
 

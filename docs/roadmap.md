@@ -36,7 +36,6 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 - **Merging a set's variant trees** that match by name path into one tree with conditional
   classes (D1098 (9)). Each variant is its own tree behind a condition now, which is exact but
   long.
-- **The MCP tool** — lands with `architecture.md` §8.4 and `tools.rs` in one commit (D726's gate).
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
   has not run on CI's Linux and macOS legs; unverified until it does. It covers only the HTML
   output; React and Vue have no browser test (no bundler in the test run).

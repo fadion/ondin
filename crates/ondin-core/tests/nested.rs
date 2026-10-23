@@ -821,6 +821,56 @@ fn showing_the_second_of_two_same_named_slots_in_a_set_shows_only_that_one() {
     );
 }
 
+/// **A reorder of same-named slots keeps the showing on the layers picked**: the
+/// shown second `Icon` moved above the first in Small stays the one shown, and
+/// the next unrelated commit binds neither first `Icon`.
+///
+/// Flip, run: `owed_slots` binding every bound slot's path in every variant, as
+/// it did, fails at *"Small's first Icon is not shown"*.
+#[test]
+fn reordering_same_named_slots_keeps_the_showing_on_the_layers_picked() {
+    let mut f = fixture();
+    let (_, mains, firsts) = buttons(&mut f, &["Small", "Large"]);
+    let mut seconds = Vec::new();
+    for m in &mains {
+        let (tx, icon) = instance(&f.doc, &mut f.ids, f.a_reg, *m);
+        f.commit(tx.0);
+        f.commit(vec![Operation::SetName {
+            id: icon,
+            name: "Icon".into(),
+        }]);
+        seconds.push(icon);
+    }
+    f.show(seconds[0], true);
+    let at = f
+        .node(mains[0])
+        .children()
+        .iter()
+        .position(|c| *c == firsts[0])
+        .unwrap();
+    f.commit(vec![Operation::Reorder {
+        id: seconds[0],
+        index: at,
+    }]);
+    assert_eq!(
+        f.node(mains[0])
+            .children()
+            .iter()
+            .position(|c| *c == seconds[0]),
+        Some(at),
+        "Small's shown Icon is now the first"
+    );
+    let r = f.ids.mint();
+    let index = f.node(f.root).children().len();
+    f.commit(vec![create(r, f.root, index, rect(), "Elsewhere")]);
+
+    let shown = |f: &F, s| variant::slot_is_shown(&f.doc, s);
+    assert!(shown(&f, seconds[0]), "Small's picked Icon is shown");
+    assert!(shown(&f, seconds[1]), "Large's picked Icon is shown");
+    assert!(!shown(&f, firsts[0]), "Small's first Icon is not shown");
+    assert!(!shown(&f, firsts[1]), "Large's first Icon is not shown");
+}
+
 /// **Two mains that each show a slot, combined, make one showing on the set**,
 /// bound to both slots, and the mains keep none of their own.
 ///

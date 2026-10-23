@@ -2100,29 +2100,61 @@ fn slots_at(doc: &Document, set: NodeId, path: &[(String, usize)]) -> Vec<NodeId
         .collect()
 }
 
-/// The slots `set`'s showing owes beyond `bound`: the nested instance at each
-/// bound slot's name path in every variant, as [`set_shown`] binds them. A main
-/// that joins the set, or a nested instance added to one variant at a shown
-/// path, is bound by this at the commit.
+/// The slots `set`'s showing owes beyond `bound`, as [`set_shown`] binds them by
+/// name path: a variant that shows fewer slots of one name than another variant
+/// does is owed the slots at the other's shown paths, the first variant's first,
+/// until it shows as many. A main that joins the set, or a nested instance added
+/// or renamed onto a shown path, is bound by this at the commit. Counting by name
+/// rather than binding every shown path is what keeps a reorder of same-named
+/// slots from showing the ones nobody picked.
 fn owed_slots(doc: &Document, set: NodeId, bound: &[NodeId]) -> Vec<NodeId> {
-    let mut paths: Vec<Vec<(String, usize)>> = Vec::new();
+    let order = variants(doc, set);
+    // Each bound slot's variant and name path, in variant order.
+    let mut placed: Vec<(usize, Vec<(String, usize)>)> = Vec::new();
     for &b in bound {
         // A slot that has left the set is the pruning's, not a path to follow.
-        let Some(v) =
-            main_above(doc, b).filter(|v| doc.get(*v).and_then(|n| n.parent) == Some(set))
-        else {
+        let Some(v) = main_above(doc, b).and_then(|v| order.iter().position(|o| *o == v)) else {
             continue;
         };
-        let path = name_path(doc, v, b);
-        if !path.is_empty() && !paths.contains(&path) {
-            paths.push(path);
+        let path = name_path(doc, order[v], b);
+        if !path.is_empty() {
+            placed.push((v, path));
         }
     }
+    placed.sort_by_key(|(v, _)| *v);
+    let names = |p: &[(String, usize)]| p.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+    let mut keys: Vec<Vec<String>> = Vec::new();
+    for (_, p) in &placed {
+        let k = names(p);
+        if !keys.contains(&k) {
+            keys.push(k);
+        }
+    }
+    let linked_to_main = |s: &NodeId| {
+        doc.get(*s)
+            .and_then(|n| n.link)
+            .and_then(|l| doc.get(l))
+            .is_some_and(|l| l.component)
+    };
     let mut out = Vec::new();
-    for path in &paths {
-        for s in slots_at(doc, set, path) {
-            if !bound.contains(&s) && !out.contains(&s) {
-                out.push(s);
+    for key in &keys {
+        let of_key: Vec<&(usize, Vec<(String, usize)>)> =
+            placed.iter().filter(|(_, p)| names(p) == *key).collect();
+        let count = |v: usize| of_key.iter().filter(|(u, _)| *u == v).count();
+        let need = (0..order.len()).map(count).max().unwrap_or(0);
+        for (w, &variant) in order.iter().enumerate() {
+            let mut owed = need - count(w);
+            for (_, path) in &of_key {
+                if owed == 0 {
+                    break;
+                }
+                let Some(s) = at_name_path(doc, variant, path).filter(linked_to_main) else {
+                    continue;
+                };
+                if !bound.contains(&s) && !out.contains(&s) {
+                    out.push(s);
+                    owed -= 1;
+                }
             }
         }
     }

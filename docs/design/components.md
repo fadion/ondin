@@ -698,7 +698,10 @@ never raw fields) on every instance of the main.
   shown slots, driving no field, so binding checks, delete pruning and set scope are the property
   machinery's. `set_shown` binds the slot at its name path in every variant of a set, and
   `variant::settle` keeps that true at every commit: a main joining the set by any door, or a nested
-  instance added or renamed onto a shown path, is bound (`owed_slots`).
+  instance added or renamed onto a shown path, is bound (`owed_slots`). It binds by count, per layer
+  name: a variant showing fewer slots of a name than another is owed the slots at the other's shown
+  paths, the first variant's first. So a reorder of same-named slots in one variant keeps the showing
+  on the layers picked and binds nothing in the others.
 - An instance's card draws, after its own rows, one group per shown instance (`shown_nested`, layers
   order, recursing so two levels flatten under a › path), headed by the layer and the main it shows now
   (a group follows an outer swap); rows are `instance_rows` = `own_rows` + `shown_groups`, but **never

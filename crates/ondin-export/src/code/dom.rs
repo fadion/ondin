@@ -1,7 +1,7 @@
 //! The tree the walk builds and the emitters print: elements, their class and
 //! their declarations, before any target's syntax.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 /// One DOM element. Its declarations become one rule on its class, which is
@@ -429,6 +429,10 @@ impl Element {
 #[derive(Default)]
 pub(crate) struct Classes {
     taken: HashSet<String>,
+    /// Each base's last suffix: every one below it is taken, and nothing is
+    /// ever freed, so the search resumes there rather than at 1 — a page of
+    /// thousands of *Rectangle*s would otherwise mint in quadratic time.
+    next: HashMap<String, usize>,
 }
 
 impl Classes {
@@ -445,12 +449,16 @@ impl Classes {
             base.insert_str(0, "l-");
         }
         // `card-2` may itself be a layer's name, so a suffix is checked like any name.
-        let mut candidate = base.clone();
-        let mut n = 1;
+        let mut n = self.next.get(&base).copied().unwrap_or(1);
+        let mut candidate = match n {
+            1 => base.clone(),
+            n => format!("{base}-{n}"),
+        };
         while self.taken.contains(&candidate) {
             n += 1;
             candidate = format!("{base}-{n}");
         }
+        self.next.insert(base, n);
         self.taken.insert(candidate.clone());
         candidate
     }
@@ -577,6 +585,19 @@ mod tests {
         assert_eq!(c.mint("Card 2", "Frame"), "card-2-2");
         assert_eq!(c.mint("✦", "Ellipse"), "ellipse");
         assert_eq!(c.mint("404", "Text"), "l-404");
+    }
+
+    /// Minting resumes at a base's last suffix and names as the search from 1
+    /// would, a literal `card-3` still skipped.
+    ///
+    /// flip: `Classes::mint` searching from 1 each time → the counter assertion.
+    #[test]
+    fn a_repeated_name_mints_from_its_last_suffix() {
+        let mut c = Classes::default();
+        assert_eq!(c.mint("Card 3", "Frame"), "card-3");
+        let names: Vec<String> = (0..4).map(|_| c.mint("Card", "Frame")).collect();
+        assert_eq!(names, ["card", "card-2", "card-4", "card-5"]);
+        assert_eq!(c.next.get("card"), Some(&5));
     }
 
     /// Text Vue's compiler would condense, trim or interpolate is a string it

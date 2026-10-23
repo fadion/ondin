@@ -55,7 +55,7 @@ pub enum PropKind {
     /// The main they show — an **instance swap** (§15 D983), bound to nested
     /// instances inside the main; on an instance, the copies of those swap.
     Swap,
-    /// Not a value but a **showing** (§15 D988, `design/Variants.dc.html` 4K–4S):
+    /// Not a value but a **showing** (§15 D988, the design canvas's *Variants* artboard, 4K–4S):
     /// the nested instances inside the main whose own properties an instance's
     /// card shows under a sub-heading of their own, without selecting them. At
     /// most one per owner, bound to every shown slot in every variant, and
@@ -1960,7 +1960,7 @@ fn own_property_fields(doc: &Document, root: NodeId) -> FxHashSet<(NodeId, PropK
         .collect()
 }
 
-// ── Nested properties (§15 D988, `design/Variants.dc.html` 4K–4S) ────────────
+// ── Nested properties (§15 D988, the design canvas's *Variants* artboard, 4K–4S) ──
 
 /// A nested instance whose own properties an instance's card shows, under a
 /// sub-heading of its own.

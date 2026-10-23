@@ -1,4 +1,4 @@
-//! Nested component properties (§15 D988, `design/Variants.dc.html` 4K–4S): a
+//! Nested component properties (§15 D988, the design canvas's *Variants* artboard, 4K–4S): a
 //! main's author shows a nested instance's own properties on every instance of
 //! the main, and the instance's card lists them under a sub-heading — which
 //! copies are shown, through how many levels, what counts and resets as a

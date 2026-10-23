@@ -1204,8 +1204,10 @@ impl Walk<'_> {
             let place = if in_flow {
                 Place::Flow { grid }
             } else {
+                // Where layout put it: a picture is placed by this alone, and an
+                // inset-pinned layer's stored transform is stale.
                 Place::Free {
-                    local: c.transform(),
+                    local: self.res.used_local_of(c),
                     boxed,
                 }
             };

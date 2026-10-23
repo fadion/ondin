@@ -984,6 +984,43 @@ fn pictures_match_the_canvas() {
     holds("pictures", &doc, &res);
 }
 
+/// A picture pinned by insets sits where layout puts it, not at its stored
+/// transform.
+///
+/// flip: `css_element` placing an out-of-flow child by `Node::transform` → the
+/// star is drawn at the frame's top-left.
+#[test]
+fn a_pinned_picture_sits_where_layout_puts_it() {
+    let mut d = Doc::new();
+    let f = d.frame(None, 0.0, 0.0, 240.0, 160.0, "Board");
+    let star = d.add(
+        Some(f),
+        NodeKind::Star {
+            size: Size::new(50.0, 50.0),
+            points: 5,
+            inner_ratio: 0.5,
+        },
+        Affine::IDENTITY,
+        "Star",
+    );
+    d.fill(star, solid(250, 180, 30, 255));
+    d.apply(vec![Operation::SetInsets {
+        id: star,
+        insets: Insets {
+            right: Some(LengthPct::Px(12.0)),
+            bottom: Some(LengthPct::Px(10.0)),
+            ..Default::default()
+        },
+    }]);
+    let (doc, res) = d.done();
+    assert_eq!(
+        doc.get(star).unwrap().transform(),
+        Affine::IDENTITY,
+        "the stored transform is not where the star is drawn"
+    );
+    holds("pinned-picture", &doc, &res);
+}
+
 /// A text node with its own size and colour and a bold run, one wrapping at a
 /// width with a second paragraph, and one centred in a fixed box.
 #[test]

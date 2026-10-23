@@ -1,7 +1,7 @@
 # Ondin — Architecture
 
 Ondin is a native 2D design tool: a Rust workspace of `ondin-core` (the headless document
-model), `ondin-render` (vello on GPU and CPU), `ondin-export` (SVG, PNG, HTML/CSS, JSON), `ondin-mcp`
+model), `ondin-render` (vello on GPU and CPU), `ondin-export` (SVG, PNG, HTML/CSS, React, Vue, JSON), `ondin-mcp`
 (the agent adapter) and `ondin-app` (egui + wgpu). This file is the index. The design is in
 `docs/design/`, one file per subsystem. **Open only the file you need.** Headings keep the
 old section numbers, so a `§5.3d` cited from code is found by grepping `docs/design/` for

@@ -5,6 +5,12 @@ Open work only. **Now** is defects and gaps on shipped features, **Next** is dec
 work is described in `architecture.md`. Refs are file + function name, never line numbers. Read the
 code before picking an item up — an item's premise can go stale while its ask still reads true.
 
+## Now
+
+- **Drag-reorder of the effects card's rows**, as the fill and stroke rows have (`paint::PaintDrag`,
+  `inspector.md` *Live reorder*). The effects stack is ordered and `SetEffects` writes it whole, so
+  only the card's drag is missing.
+
 ## Later · Components and layout
 
 - **Pushing an instance's changes to its main** (`architecture.md` §5.3d).

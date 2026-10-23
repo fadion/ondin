@@ -43,8 +43,9 @@ impl ImageFormat {
         }
     }
 
-    /// The file extension for a *stored* picture's format. Has no caller; not
-    /// `ExportFormat::extension`, which is about a *rendered* file.
+    /// The file extension for a *stored* picture's format, which code export
+    /// names its picture files with; not `ExportFormat::extension`, which is
+    /// about a *rendered* file.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Png => "png",

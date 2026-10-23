@@ -17,7 +17,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 - Fonts: all installed system fonts, the full Google Fonts library (on-demand download with local cache), and a bundled fallback (§5.4a).
 - Paint: solid and linear/radial gradient fills; strokes with width, join, cap, dash, mitre limit and alignment (inside/centre/outside, §6.3, since no backend has it natively); a rectangle's stroke on any of its four sides. Several fills and strokes per layer, painted and exported in list order.
 - Masks: any layer with an outline can mask the run of siblings drawn above it in the same parent, by its outline or by its own alpha (`MaskMode`). Luminance masks are deferred on a dependency (§15 D288).
-- Effects: a repeatable ordered stack per layer (drop shadow, inner shadow, layer blur, colour filters), meaningful on containers too. Drawn on the canvas, the raster export and the SVG file from one specification, `ondin_render::effects` (§5.3a, §6.4, §7). Drag-reorder of the rows is open work in `roadmap.md`.
+- Effects: a repeatable ordered stack per layer (drop shadow, inner shadow, layer blur, colour filters), meaningful on containers too. Drawn on the canvas, the raster export and the SVG file from one specification, `ondin_render::effects` (§5.3a, §6.4, §7). Drag-reorder of the rows is open work in `roadmap.md` *Now*.
 - Transform: translate/rotate/skew per node (local) about a movable per-node origin; resize edits geometry, not scale (§5.3, §5.6).
 - Selection, move, resize, z-order; copy/paste/duplicate via `InsertSubtree` (§5.7).
 - Bulk property edits over a selection (transform, opacity, corner radius, paint), and recolouring by colour rather than by layer (§9.4).
@@ -36,7 +36,7 @@ Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) wr
 ### Deferred (design for, do not build)
 
 - Blend modes beyond normal. Two effects were designed and deliberately not built: background blur (meaningful only when the export contains the backdrop, inexpressible in SVG) and noise (three generators would have to agree to the pixel, and it is probably a fill). §15 D333 holds the reasoning. `shortcuts.md` §2 reserves `Shift+3`…`Shift+9` behind blend modes.
-- Hyphenation: a decided non-goal for v1 (§15 D399, `roadmap.md` §0), declined on price.
+- Hyphenation: a decided non-goal for v1 (§15 D399, `non-goals.md`), declined on price.
 - Persistent constraints in §13's sense (live relationships between arbitrary properties, a dependency graph). Layout insets are not this.
 - Real-time multiplayer: a real future goal. Operation and identity model are designed not to preclude it (§5.2, §12); the sync layer is not built.
 - Command Mode: the keyboard-driven modal workflow, Ondin's end-game identity. Designed in §13 and `vm.md`; v1 only reserves its seams.
@@ -81,7 +81,7 @@ ondin/
 └─ crates/
    ├─ ondin-core/            # headless engine: model, ops, history, resolve, text layout, io
    ├─ ondin-render/          # ScenePainter + Vello GPU impl + vello_cpu impl
-   ├─ ondin-export/          # SVG, PNG, JPEG, JSON snapshot; export plan and zip
+   ├─ ondin-export/          # SVG, PNG, JPEG, JSON snapshot; code export (HTML/CSS, React, Vue); export plan and zip
    ├─ ondin-mcp/             # MCP server: socket listener, tool dispatch, stdio proxy
    └─ ondin-app/             # `ondin` binary: GUI shell, tools, panels, `serve`/`export` subcommands
 ```
@@ -172,7 +172,7 @@ Not designed: the keybinding scheme, and `/ai` invocation mechanics (provider vs
 
 ## 14. Deferred decisions
 
-Parked decisions live in `roadmap.md` under *Later · Parked decisions*. None blocks v1, and none may become an invariant by accident. If a parked decision starts constraining the design, it has stopped being parked and wants a section of its own.
+Parked decisions live in `roadmap.md` under *Parked decisions*. None blocks v1, and none may become an invariant by accident. If a parked decision starts constraining the design, it has stopped being parked and wants a section of its own.
 
 ## 15. Deviations
 

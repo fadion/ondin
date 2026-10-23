@@ -39,8 +39,10 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 (`export.md`, *Code export*).
 
 - **The fidelity tests on Linux and macOS** — `code_fidelity.rs` fails on CI without a browser and
-  has not run on CI's Linux and macOS legs; unverified until it does. It covers only the HTML
-  output; React and Vue have no browser test (no bundler in the test run).
+  has not run on CI's Linux and macOS legs; unverified until it does. It draws the HTML output
+  and the component walk (`html_of_components`), not React's or Vue's own syntax: no bundler,
+  TypeScript or Vue compiler runs in the tests. A CI leg parsing the emitted `.tsx` with `tsc`
+  and the `.vue` files with `@vue/compiler-sfc` would catch output that does not compile.
 - **Text styles as classes** — revisit once real exports exist (D1098 (7)).
 - **A per-layer HTML tag field** — parked, new model (D1098 (3)).
 

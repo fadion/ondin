@@ -959,6 +959,199 @@ pub fn outline_text(
     replace_with_path(doc, ids, id, path)
 }
 
+/// Whether *Outline stroke* has something to turn into a shape: a shape, path or
+/// boolean with a visible stroke. A frame (whose children would be lost), a group
+/// and text are refused.
+pub fn can_outline_stroke(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| {
+        !matches!(
+            n.kind(),
+            NodeKind::Root | NodeKind::Group | NodeKind::Artboard { .. } | NodeKind::Text { .. }
+        ) && n.paint().strokes.iter().any(|s| s.visible)
+    })
+}
+
+/// *Outline stroke*: each visible stroke of `id` becomes a `Path` filled with that
+/// stroke's paint, its ink as drawn — width, alignment, sides, caps, joins and
+/// dashes ([`stroke_ink`]).
+///
+/// A layer with no visible fill and one stroke is replaced by that path, which
+/// keeps everything about the layer but its geometry and paint. Otherwise the
+/// layer, stripped of its strokes, and the stroke paths above it go into a new group
+/// in its slot; the group takes the layer's effects and opacity, which composite
+/// over both. A layer with no visible fill is not kept. Returns the transaction and
+/// the layer to select.
+pub fn outline_stroke(
+    doc: &Document,
+    res: &Resolved,
+    ids: &mut IdSource,
+    id: NodeId,
+) -> Result<(Transaction, NodeId), OpError> {
+    if !can_outline_stroke(doc, id) {
+        return Err(OpError::WrongKindForOp);
+    }
+    let node = doc.get(id).ok_or(OpError::NoSuchNode(id))?;
+    let kind = res.used_kind(doc, id).unwrap_or(node.kind());
+    let shape = res.local_path(doc, id).ok_or(OpError::EmptyGeometry)?;
+    let drawn = doc.resolved_paint(id, node.paint());
+    let inks: Vec<(kurbo::BezPath, crate::BrushSource)> = node
+        .paint()
+        .strokes
+        .iter()
+        .zip(&drawn.strokes)
+        .filter(|(s, _)| s.visible)
+        .filter_map(|(s, d)| Some((stroke_ink(kind, &shape, &d.value)?, s.value.brush.clone())))
+        .collect();
+    if inks.is_empty() {
+        return Err(OpError::EmptyGeometry);
+    }
+    let filled = |brush: crate::BrushSource| {
+        crate::item::keyed_by_position([Fill {
+            brush,
+            visible: true,
+        }])
+    };
+    let has_fill = node.paint().fills.iter().any(|f| f.visible);
+    if !has_fill && inks.len() == 1 {
+        let (ink, brush) = inks.into_iter().next().expect("one ink");
+        let (mut tx, made) = replace_with_path(doc, ids, id, ink)?;
+        tx.0.push(Operation::SetFills {
+            id: made,
+            fills: filled(brush),
+        });
+        tx.0.push(Operation::SetStrokes {
+            id: made,
+            strokes: Vec::new(),
+        });
+        if node.fill_rule() != crate::node::FillRule::NonZero {
+            tx.0.push(Operation::SetFillRule {
+                id: made,
+                rule: crate::node::FillRule::NonZero,
+            });
+        }
+        return Ok((tx, made));
+    }
+
+    let (mut tx, g) = group(doc, res, ids, &[id])?;
+    let local = res.used_local(doc, id).unwrap_or(node.transform());
+    for (i, (ink, brush)) in inks.into_iter().enumerate() {
+        let made = ids.mint();
+        tx.0.push(Operation::CreateNode {
+            id: made,
+            parent: g,
+            index: i + 1,
+            kind: NodeKind::Path {
+                path: ink,
+                corner_radii: Vec::new(),
+            },
+            transform: Some(local),
+            name: Some(format!("{} stroke", node.name())),
+        });
+        tx.0.push(Operation::SetFills {
+            id: made,
+            fills: filled(brush),
+        });
+    }
+    tx.0.push(Operation::SetName {
+        id: g,
+        name: node.name().to_string(),
+    });
+    if !node.effects().is_empty() {
+        tx.0.push(Operation::SetEffects {
+            id: g,
+            effects: node.effects().to_vec(),
+        });
+        tx.0.push(Operation::SetEffects {
+            id,
+            effects: Vec::new(),
+        });
+    }
+    // A bound opacity stays on the layer: the group would need the binding moved too.
+    if node.opacity_var().is_none() && node.opacity() != 1.0 {
+        tx.0.push(Operation::SetOpacity {
+            id: g,
+            opacity: node.opacity(),
+        });
+        tx.0.push(Operation::SetOpacity { id, opacity: 1.0 });
+    }
+    if has_fill {
+        tx.0.push(Operation::SetStrokes {
+            id,
+            strokes: Vec::new(),
+        });
+    } else {
+        tx.0.push(Operation::DeleteNode { id });
+    }
+    Ok((tx, g))
+}
+
+/// The ink one stroke lays on `shape` (`kind`'s outline, local space), as a path to
+/// fill non-zero: what `scene::paint_strokes` draws, built the same way — per side
+/// where the stroke has sides, dash patterns resolved against each piece, and an
+/// inside or outside stroke laid at twice the width and cut to the shape.
+fn stroke_ink(kind: &NodeKind, shape: &kurbo::BezPath, s: &Stroke) -> Option<kurbo::BezPath> {
+    use crate::node::StrokeAlign;
+    if s.width.is_nan() || s.width <= 0.0 {
+        return None;
+    }
+    let align = if crate::geometry::stroke_align_applies(kind) {
+        s.align
+    } else {
+        StrokeAlign::Center
+    };
+    let mut pieces: Vec<kurbo::BezPath> = Vec::new();
+    let mut lay = |path: &kurbo::BezPath, width: f64| {
+        let laid = if align == StrokeAlign::Center {
+            width
+        } else {
+            width * 2.0
+        };
+        let runs = crate::geometry::dash_fit_pieces(s, width, path).unwrap_or_else(|| {
+            vec![(
+                path.clone(),
+                crate::geometry::resolved_dashes(s, width, path),
+            )]
+        });
+        for (sub, dashes) in runs {
+            let laid_path = if dashes.is_empty() {
+                sub
+            } else {
+                kurbo::BezPath::from_iter(kurbo::dash(sub.iter(), s.dash_offset, &dashes))
+            };
+            pieces.extend(crate::geometry::stroke_pieces(
+                &laid_path,
+                laid,
+                s.join,
+                s.cap,
+                s.miter_limit,
+            ));
+        }
+    };
+    match crate::geometry::effective_sides(kind, s).per_side(s.width) {
+        None => lay(shape, s.width),
+        Some(sides) => {
+            for (side, width) in sides {
+                if let Some(edge) = crate::geometry::side_path(kind, side) {
+                    lay(&edge, width);
+                }
+            }
+        }
+    }
+    if pieces.is_empty() {
+        return None;
+    }
+    let band = crate::boolean::evaluate(crate::BoolOp::Union, &pieces)?;
+    match align {
+        StrokeAlign::Center => Some(band),
+        StrokeAlign::Inside => {
+            crate::boolean::evaluate(crate::BoolOp::Intersect, &[band, shape.clone()])
+        }
+        StrokeAlign::Outside => {
+            crate::boolean::evaluate(crate::BoolOp::Subtract, &[band, shape.clone()])
+        }
+    }
+}
+
 /// Whether [`outline_text`] would produce anything. Empty or all-space content
 /// shapes to no contours, so this asks `text::outline`, not the kind.
 pub fn can_outline_text(res: &Resolved, id: NodeId) -> bool {

@@ -1,7 +1,7 @@
 # Booleans, flatten, outline and masks in the identity row
 
 Non-destructive boolean containers (`core::boolean`, `NodeKind::Boolean`), the destructive verbs
-beside them (flatten, outline shape, convert text to path), the identity card's boolean row with its
+beside them (flatten, outline shape, outline stroke, convert text to path), the identity card's boolean row with its
 Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part of §9.4.
 
 ## 9.4 Booleans
@@ -96,18 +96,19 @@ Mask/Group/Ungroup buttons, the Mask card, and how a failed boolean draws. Part 
 - **Release is `build::ungroup`**: the splice a group needs, folding the used transform into each child.
   Operands' own paint comes back into view; `Ctrl+Shift+G` and the identity row's Ungroup reach it.
 
-## Flatten, Outline shape, Convert to path
+## Flatten, Outline shape, Outline stroke, Convert to path
 
-All three share `build::replace_with_path`, which carries what survives being redrawn: transform,
-z-slot, paint, name, opacity, visibility, **moved pivot**, **mask flag**, the **effective fill rule**
+All four share `build::replace_with_path` (*Outline stroke* only when it replaces the layer), which carries what survives being redrawn: transform,
+z-slot, paint, name, opacity, visibility, effects, **moved pivot**, **mask flag**, the **effective fill rule**
 (derived even-odd for an `Exclude`, else stored), and the layer's place in a layout (insets when
 authored, item properties when non-default). `display` is not carried (a path has no children).
-Lock and the proportion lock are dropped deliberately. None of the three has a chord.
+Lock and the proportion lock are dropped deliberately. None of the four has a chord.
 
 | Verb | Admits | Result |
 | --- | --- | --- |
 | `build::flatten` (`Ctrl+E`) | one boolean, or two or more layers | one boolean → `Path` of its outline in place; a set → union in the parent's space at the topmost member's slot with the bottom member's paint (`build::flatten_union`, carries paint only) |
 | `build::outline` (*Outline shape*) | one Rect/Ellipse/Polygon/Star/Line/Path | `Path` of its own outline, per-anchor radii baked in; cut at the **drawn** (used) size, via a `Resolved` lookup |
+| `build::outline_stroke` (*Outline stroke*) | one Shape/Path/Boolean with a visible stroke | each visible stroke a `Path` filled with that stroke's brush (a bound brush stays bound), below |
 | `build::outline_text` (*Convert to path*) | one Text | `Path` from `ondin_core::text::outline` (glyph coords already node-local) |
 
 - Flatten refuses a single non-boolean (that is *Outline shape*'s verb — the two rows never appear
@@ -123,6 +124,27 @@ Lock and the proportion lock are dropped deliberately. None of the three has a c
   root refused.
 - `build::can_outline_text` asks `text::outline` itself (all-space text has glyphs but no contours).
   ~1µs per glyph, so the menu computes it once at open (`ContextMenu::text_outlineable`).
+
+### Outline stroke
+
+- **The geometry is the ink as drawn** (private `build::stroke_ink`, mirroring `scene::paint_strokes`):
+  the drawn width (`Document::resolved_paint`), per-side strokes, dash patterns
+  (`geometry::dash_fit_pieces`, `resolved_dashes`, cut with `kurbo::dash`), caps, joins and mitre
+  limit. An inside or outside stroke is laid at twice the width, then intersected with or subtracted
+  from the shape through `boolean::evaluate`.
+- **The band is `geometry::stroke_pieces`**, a union of simple contours: each segment stroked alone
+  with butt ends, a join wedge on the outside of each corner, and the caps. Not `kurbo::stroke`'s
+  expansion: that is right only filled non-zero (its inner joins pivot through the vertex and loop back
+  over the band), and `boolean::evaluate` reads every operand even-odd.
+- **Result shape.** A layer with no visible fill and one stroke is replaced by the path
+  (`replace_with_path`, then the stroke's brush as its one fill, no strokes, non-zero). Otherwise the
+  layer, its strokes removed, and the stroke paths above it (each named "‹layer› stroke") go into a new
+  group in its slot, named as the layer; the group takes the layer's effects and unbound opacity, which
+  composite over both (a bound opacity stays on the layer). A layer with no visible fill is deleted
+  inside that group.
+- Refused for frames (their children would be lost), groups and text (`build::can_outline_stroke`). The
+  layer-menu row dims without a visible stroke (`LayerState::stroke_outlineable`);
+  `inspector::outline_stroke` commits and selects the result.
 
 ## The identity card's boolean row
 
@@ -176,7 +198,6 @@ one transaction. There is no "mask group" flag; it is derived from the children 
   the node world bounds so it stays in the R-tree. Committed-only: during a gesture
   `RenderOverrides::boolean_path` always has an entry.
 - Text cannot be an operand; a mask can be text (`Resolved::mask_path` takes glyph outlines).
-- Outline-stroke (turning a stroke into fill) does not exist.
 
 Performance: re-running the whole boolean per operand edit and per preview build is cheap enough with
 the balanced fold; per-operand caching is not to be built. Pixel tests live in
@@ -193,3 +214,7 @@ the balanced fold; per-operand caching is not to be built. Pixel tests live in
 - Group's lone-container refusal looks redundant in front of a builder that says yes, and nothing
   tests the row's gating.
 - `replace_with_path` must carry the effective fill rule, or a flattened `Exclude` becomes its union.
+- *Outline stroke*'s band must stay `stroke_pieces`, though `kurbo::stroke` looks like the same thing
+  in one call: its expansion read even-odd double-counts the inner corners (a 100 square with a 10
+  stroke comes out 4100 instead of 4000). `outline_stroke_traces_the_ink_each_alignment_draws` and
+  `stroke_pieces_cover_what_a_non_zero_expansion_fills` (`ondin-core/tests/build.rs`) pin it.

@@ -2768,6 +2768,174 @@ fn outlining_a_path_keeps_the_fill_rule_the_user_set_on_it() {
     );
 }
 
+/// The 100 square given one 10-wide mitred black stroke laid `align`; no fill.
+fn stroked_square(f: &mut Fixture, align: ondin_core::StrokeAlign) -> NodeId {
+    let id = f.add(f.artboard, rect(100.0, 100.0), (0.0, 0.0));
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id,
+            fills: Vec::new(),
+        },
+        Operation::SetStrokes {
+            id,
+            strokes: keyed_by_position([ondin_core::Stroke {
+                width: 10.0,
+                align,
+                ..Default::default()
+            }]),
+        },
+    ]));
+    id
+}
+
+fn filled_area(f: &Fixture, id: NodeId) -> f64 {
+    use ondin_core::kurbo::Shape;
+    match f.doc.get(id).unwrap().kind() {
+        NodeKind::Path { path, .. } => path.area().abs(),
+        other => panic!("not a path: {other:?}"),
+    }
+}
+
+/// *Outline stroke* traces the ink each alignment draws: on a 100 square a 10 stroke
+/// covers 110² − 90² centred, 100² − 80² inside and 120² − 100² outside.
+/// flip: `stroke_ink` skipping the cut to the shape → fails at the inside area.
+#[test]
+fn outline_stroke_traces_the_ink_each_alignment_draws() {
+    use ondin_core::StrokeAlign;
+    for (align, want) in [
+        (StrokeAlign::Center, 4000.0),
+        (StrokeAlign::Inside, 3600.0),
+        (StrokeAlign::Outside, 4400.0),
+    ] {
+        let mut f = Fixture::new();
+        let id = stroked_square(&mut f, align);
+        let (tx, made) = build::outline_stroke(&f.doc, &f.resolved(), &mut f.ids, id).unwrap();
+        f.commit(tx);
+        assert!(
+            f.doc.get(id).is_none(),
+            "{align:?}: the stroke-only square is replaced"
+        );
+        let area = filled_area(&f, made);
+        assert!(
+            (area - want).abs() < want * 0.01,
+            "{align:?}: {area} against {want}"
+        );
+        let node = f.doc.get(made).unwrap();
+        assert!(node.paint().strokes.is_empty(), "{align:?}: no stroke left");
+        assert_eq!(
+            node.paint().fills.len(),
+            1,
+            "{align:?}: filled with the stroke's paint"
+        );
+    }
+}
+
+/// `geometry::stroke_pieces`' union covers what `kurbo::stroke`'s expansion fills
+/// non-zero — the renderer's reading — on a concave star, an ellipse and an open,
+/// round-capped, dashed zigzag, sampled on a grid.
+/// flip: `join_piece` putting the wedge on the inside of the turn → fails at the star.
+#[test]
+fn stroke_pieces_cover_what_a_non_zero_expansion_fills() {
+    use ondin_core::kurbo::{self, BezPath, Cap, Join, Shape};
+    let star = ondin_core::geometry::local_path(&NodeKind::Star {
+        size: Size::new(100.0, 100.0),
+        points: 5,
+        inner_ratio: 0.4,
+    })
+    .unwrap();
+    let ellipse = ondin_core::geometry::local_path(&ellipse(100.0, 60.0)).unwrap();
+    let mut zig = BezPath::new();
+    zig.move_to((0.0, 0.0));
+    zig.line_to((40.0, 60.0));
+    zig.line_to((80.0, 0.0));
+    zig.curve_to((100.0, 40.0), (60.0, 100.0), (100.0, 100.0));
+    for (what, path, join, cap, dashes) in [
+        ("star", star, Join::Miter, Cap::Butt, vec![]),
+        ("ellipse", ellipse, Join::Miter, Cap::Butt, vec![]),
+        ("zigzag", zig, Join::Round, Cap::Round, vec![30.0, 12.0]),
+    ] {
+        let dashed = if dashes.is_empty() {
+            path.clone()
+        } else {
+            BezPath::from_iter(kurbo::dash(path.iter(), 0.0, &dashes))
+        };
+        let pieces = ondin_core::geometry::stroke_pieces(&dashed, 8.0, join, cap, 4.0);
+        let ours = ondin_core::boolean::evaluate(ondin_core::BoolOp::Union, &pieces).unwrap();
+        let style = kurbo::Stroke {
+            width: 8.0,
+            join,
+            start_cap: cap,
+            end_cap: cap,
+            dash_pattern: dashes.iter().copied().collect(),
+            ..Default::default()
+        };
+        let theirs = kurbo::stroke(path.iter(), &style, &kurbo::StrokeOpts::default(), 0.01);
+        let (mut differ, mut inked) = (0, 0);
+        let n = 160;
+        for i in 0..n {
+            for j in 0..n {
+                let p = Point::new(
+                    -20.0 + 140.0 * (f64::from(i) + 0.5) / f64::from(n),
+                    -20.0 + 140.0 * (f64::from(j) + 0.5) / f64::from(n),
+                );
+                let a = ours.winding(p) != 0;
+                let b = theirs.winding(p) != 0;
+                inked += usize::from(b);
+                differ += usize::from(a != b);
+            }
+        }
+        assert!(inked > 0, "{what}: the fixture inks something");
+        assert!(
+            (differ as f64) < inked as f64 * 0.01,
+            "{what}: {differ} of {inked} samples disagree"
+        );
+    }
+}
+
+/// A filled layer keeps its fill: it and the stroke's path go into a group in its slot,
+/// and the group takes the layer's effects.
+#[test]
+fn outline_stroke_groups_a_filled_layer_with_its_stroke() {
+    let mut f = Fixture::new();
+    let id = stroked_square(&mut f, ondin_core::StrokeAlign::Center);
+    let blur = ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 2.0 });
+    let item = f.ids.mint_item();
+    f.commit(Transaction(vec![
+        Operation::SetFills {
+            id,
+            fills: keyed_by_position([ondin_core::Fill {
+                brush: ondin_core::peniko::Color::WHITE.into(),
+                visible: true,
+            }]),
+        },
+        Operation::SetEffects {
+            id,
+            effects: vec![ondin_core::Keyed::new(item, blur)],
+        },
+    ]));
+    let (tx, g) = build::outline_stroke(&f.doc, &f.resolved(), &mut f.ids, id).unwrap();
+    f.commit(tx);
+    assert_eq!(
+        f.children_of(f.artboard),
+        vec![g],
+        "the group took the slot"
+    );
+    let inside = f.children_of(g);
+    assert_eq!(inside.len(), 2);
+    assert_eq!(inside[0], id, "the fill below");
+    assert!(f.doc.get(id).unwrap().paint().strokes.is_empty());
+    assert!(f.doc.get(id).unwrap().effects().is_empty());
+    assert_eq!(
+        f.doc.get(g).unwrap().effects().len(),
+        1,
+        "the group took the blur"
+    );
+    assert!(
+        (filled_area(&f, inside[1]) - 4000.0).abs() < 40.0,
+        "the stroke above"
+    );
+}
+
 /// **What `can_outline` says yes and no to, and the one kind where it is a question
 /// about *state*** (§15 D230).
 ///

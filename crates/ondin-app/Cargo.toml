@@ -34,7 +34,9 @@ ondin-render = { path = "../ondin-render" }
 ondin-export = { path = "../ondin-export" }
 ondin-mcp = { path = "../ondin-mcp" }
 # eframe (default features) brings egui + egui-wgpu + winit at matching versions.
-eframe.workspace = true
+# `persistence` is for the window's size, position and maximized state alone
+# (`main::run_gui`): eframe clamps a restored position to the monitors present.
+eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 egui-wgpu.workspace = true
 wgpu.workspace = true

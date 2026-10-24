@@ -71,7 +71,7 @@ ondin-app/src/
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
 ├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
-├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json
+├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json (the window's geometry is eframe's, in window.ron beside it)
 ├─ rulers.rs        ruler bars + ruler guides
 ├─ settings.rs      Settings modal and the app's form-in-a-modal card (card_modal, modal_title, modal_footer, section, caption)
 ├─ snap.rs          snapping (bounds, guides, baselines, equal gaps, pixel grid); draws its own transient lines (not rulers.rs's guides)

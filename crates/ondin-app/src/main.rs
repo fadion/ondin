@@ -698,6 +698,9 @@ fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
                 .with_title("Ondin")
                 .with_icon(window_icon()),
         ),
+        // The window's last size, position and maximized state, beside
+        // `prefs.json`; with no file yet, the size above.
+        persistence_path: dirs::config_dir().map(|d| d.join("ondin").join("window.ron")),
         ..Default::default()
     };
     eframe::run_native(

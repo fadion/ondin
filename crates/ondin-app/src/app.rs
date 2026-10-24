@@ -1362,6 +1362,12 @@ impl eframe::App for OndinApp {
         self.updater.on_exit();
     }
 
+    /// Off: eframe's persistence is on for the window's geometry only, and a
+    /// restored egui `Memory` would bring back last session's popups and scroll.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     /// An armed eyedropper keeps the panels from seeing the pointer
     /// (`OndinApp::gate_dropper_input`).
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {

@@ -2418,11 +2418,13 @@ fn var_row(
     let table = doc.variables();
     let w = b.inner_w;
     let id = ui.id().with(("var-row", v.id));
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, ROW_H), egui::Sense::click());
     let menu_open = matches!(&b.menu, Some((Menu::Var(m), _)) if *m == v.id);
     if menu_open {
         ui.painter().rect_filled(rect, 4, color::text_a(23));
-    } else if resp.hovered() {
+    } else if ui.rect_contains_pointer(rect) {
+        // Not the row's own response: the name's and the cells' hit areas lie
+        // over it and take the hover.
         ui.painter().rect_filled(rect, 4, color::text_a(18));
     }
     // From where the rename field starts, across the cells: a variable's name
@@ -2820,7 +2822,9 @@ fn kit_var_row(
     let table = doc.variables();
     let id = ui.id().with(("kit-var-row", v.id));
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(b.inner_w, ROW_H), egui::Sense::hover());
-    if resp.hovered() {
+    // The pointer, not the row's response, which the count's and the cells' hit
+    // areas lying over it take.
+    if ui.rect_contains_pointer(rect) {
         ui.painter().rect_filled(rect, 4, color::text_a(10));
     }
     let name_rect = egui::Rect::from_min_size(rect.min, egui::vec2(NAME_W, ROW_H));
@@ -3386,6 +3390,42 @@ mod tests {
         assert_eq!(app.session.doc.variables().modes().len(), 2);
         assert_eq!(v.cells.len(), 2);
         assert!(v.cells.values().all(|c| *c == Cell::Color(Color::WHITE)));
+    }
+
+    /// **A variable row lights under the pointer**, over its name as a group's
+    /// and a style's rows do, though the name's own hit area lies on top.
+    ///
+    /// flip: `var_row` asking its own response `hovered()` → fails at "lit".
+    #[test]
+    fn a_variable_row_lights_under_the_pointer() {
+        let (ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Color));
+        app.var_browser.as_mut().unwrap().edit = None;
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = pass(&ctx, &mut app, vec![], |app, ctx| app.var_browser_ui(ctx));
+        }
+        let at = last_text(&shapes, "colour 1").expect("the row's name");
+        let hover = vec![egui::Event::PointerMoved(at)];
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = pass(&ctx, &mut app, hover.clone(), |app, ctx| {
+                app.var_browser_ui(ctx)
+            });
+        }
+        // A row-tall fill under the pointer, any alpha: the browser's `Area`
+        // fades in, so the colour is not yet `text_a(18)`.
+        fn lit(shape: &egui::Shape, at: egui::Pos2) -> bool {
+            match shape {
+                egui::Shape::Rect(r) => {
+                    r.rect.contains(at) && r.rect.height() == ROW_H && r.fill.a() > 0
+                }
+                egui::Shape::Vec(v) => v.iter().any(|x| lit(x, at)),
+                _ => false,
+            }
+        }
+        assert!(shapes.iter().any(|c| lit(&c.shape, at)), "lit");
     }
 
     /// The browser and the insert picker share one place (G11): opening either

@@ -3112,13 +3112,14 @@ const LAYER_SCROLL_BAND: f32 = 22.0;
 /// the target is one 20px row, so the last stretch has to be steerable.
 const LAYER_SCROLL_MAX: f32 = 420.0;
 
-/// The run of duplicates Ctrl+D is currently building. Only the most recent clone is
+/// The run of duplicates Ctrl+D is currently building. Only the most recent clones are
 /// remembered, so duplicating anything else starts a new run at zero.
 pub(crate) struct CloneChain {
-    /// The clone the last Ctrl+D produced.
-    last: NodeId,
-    /// Its world origin when created; the difference from where it sits now is the
-    /// movement to repeat.
+    /// The clones the last Ctrl+D produced, one per duplicated layer, sorted: the run
+    /// continues while exactly these are selected.
+    last: Vec<NodeId>,
+    /// The first clone's world origin when created; the difference from where it sits
+    /// now is the movement to repeat (a selection moves as one).
     placed_at: Point,
     /// The step being repeated, carried forward so a run of presses keeps its spacing.
     step: Vec2,
@@ -3831,25 +3832,28 @@ impl OndinApp {
             &Default::default(),
         );
 
-        self.clones = match self.session.selection.single() {
-            Some(new_id) => self.origin_of(new_id).map(|at| CloneChain {
-                last: new_id,
+        let mut made = build::outermost(&self.session.doc, self.session.selection.ids());
+        made.sort();
+        self.clones = made
+            .first()
+            .and_then(|&first| self.origin_of(first))
+            .map(|at| CloneChain {
+                last: made,
                 placed_at: at,
                 step,
-            }),
-            None => None,
-        };
+            });
     }
 
-    /// How far the next duplicate of `ids` is offset: zero unless the single selected
-    /// node is the chain's last clone, then how far it has moved since (or, if unmoved,
-    /// the step already being repeated).
+    /// How far the next duplicate of `ids` is offset: zero unless they are the chain's
+    /// last clones, then how far they have moved since (or, if unmoved, the step
+    /// already being repeated).
     fn clone_step(&self, ids: &[NodeId]) -> Vec2 {
-        let [id] = ids else { return Vec2::ZERO };
-        let Some(chain) = self.clones.as_ref().filter(|c| c.last == *id) else {
+        let mut ids = ids.to_vec();
+        ids.sort();
+        let Some(chain) = self.clones.as_ref().filter(|c| c.last == ids) else {
             return Vec2::ZERO;
         };
-        let Some(now) = self.origin_of(*id) else {
+        let Some(now) = ids.first().and_then(|&id| self.origin_of(id)) else {
             return Vec2::ZERO;
         };
         let moved = now - chain.placed_at;
@@ -16155,5 +16159,76 @@ mod component_verb_tests {
 
         assert!(app.session.undo());
         assert_eq!(reset::drift(&app.session.doc, i), drifted, "one step back");
+    }
+}
+
+#[cfg(test)]
+mod clone_chain_tests {
+    use super::OndinApp;
+    use ondin_core::kurbo::{Affine, Point, Size};
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Transaction};
+
+    /// `Ctrl+D` over two layers, the copies moved, then `Ctrl+D` again: the third pair
+    /// repeats the move, as a lone layer's run does.
+    /// flip: `clone_step` answering zero for more than one id → fails at the third pair.
+    #[test]
+    fn a_run_of_duplicates_repeats_its_step_for_several_layers() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xD0D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [a, b] = [(); 2].map(|_| ids.mint());
+        for (i, id) in [a, b].into_iter().enumerate() {
+            doc.apply(&Transaction(vec![Operation::CreateNode {
+                id,
+                parent: root,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((40.0 * i as f64, 0.0))),
+                name: None,
+            }]))
+            .expect("a rect");
+        }
+        app.session.adopt_document(doc, None);
+        let origins = |app: &OndinApp| {
+            let mut at: Vec<Point> = app
+                .session
+                .selection
+                .ids()
+                .iter()
+                .map(|&id| app.origin_of(id).expect("placed"))
+                .collect();
+            at.sort_by(|p, q| p.x.total_cmp(&q.x));
+            at
+        };
+        app.session.selection.set(vec![a, b]);
+        app.duplicate_selection();
+        assert_eq!(
+            origins(&app),
+            vec![Point::new(0.0, 0.0), Point::new(40.0, 0.0)],
+            "the first copies land in place"
+        );
+        let moved: Vec<Operation> = app
+            .session
+            .selection
+            .ids()
+            .iter()
+            .map(|&id| Operation::SetTransform {
+                id,
+                transform: Affine::translate((5.0, 15.0))
+                    * app.session.doc.get(id).unwrap().transform(),
+            })
+            .collect();
+        assert!(app.session.commit(Transaction(moved)));
+        app.duplicate_selection();
+        assert_eq!(
+            origins(&app),
+            vec![Point::new(10.0, 30.0), Point::new(50.0, 30.0)],
+            "the third pair repeats the move"
+        );
     }
 }

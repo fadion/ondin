@@ -26,8 +26,6 @@ stale while its ask still reads true.
   (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.
 - **Snap and view toggles reset every launch** (`input::ViewSwitch`; `app-canvas-chrome.md`). Persist
   them in `prefs`.
-- **`Ctrl+D` remembers its step for one layer only** (`duplicate_selection` keeps a `CloneChain` only
-  for a lone selection).
 - **`Stroke::dash_offset` has no editor.** It loads from SVG and the Scale tool writes it; the stroke
   popover does not.
 

@@ -64,8 +64,9 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
 
 ## Where copies land
 
-- **`Ctrl+D` remembers** (`CloneChain`: last clone, its placement, the step): move a duplicate and
-  duplicate again, and the step repeats. Duplicating anything else restarts at zero.
+- **`Ctrl+D` remembers** (`CloneChain`: the last clones, the first one's placement, the step): move
+  the duplicates and duplicate again, and the step repeats, for one layer or several (measured on
+  the first clone, since a selection moves as one). Duplicating any other set restarts at zero.
 - `Ctrl+V` offsets by 20 on each axis.
 - **Every copy lands one step above its original** (duplicate, paste, Alt-drag), under whatever was
   above it. Paste can name the slot because a captured subtree keeps the original's ids until

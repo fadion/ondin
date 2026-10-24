@@ -3698,9 +3698,9 @@ impl OndinApp {
         });
     }
 
-    /// Put each selected layer's own CSS on the clipboard as text, under a comment
-    /// naming it — the declarations code export writes on its class, without the
-    /// children's rules.
+    /// Put each selected layer's CSS on the clipboard as text, under a comment
+    /// naming it: a leaf's declarations, a container's rules for its subtree
+    /// (`ondin_export::code::css_of`).
     pub(crate) fn copy_as_css(&mut self, ctx: &egui::Context) {
         let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {

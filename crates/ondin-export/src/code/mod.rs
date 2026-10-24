@@ -57,12 +57,14 @@ impl Target {
     }
 }
 
-/// *Copy as CSS*: each of `ids`' own declarations, under a comment naming the
-/// layer — what the HTML export writes on its class, without its children's rules.
+/// *Copy as CSS*: each of `ids` under a comment naming the layer. A leaf layer
+/// (text included) is its bare declarations, to paste into a rule; a layer with
+/// children is the HTML export's rules for its subtree, selectors and all.
 ///
-/// Placement (`position`, `left`, `top`) is left out: each layer is written as
-/// its own page, so it would always read as the origin. A variable stays a
-/// `var(--…)`.
+/// The layer's own placement (`position`, `left`, `top`) is left out: each is
+/// written as its own page, so it would always read as the origin. Its
+/// children keep theirs, measured from it, so a container is `position:
+/// relative`. A variable stays a `var(--…)`.
 pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
     let mut out = String::new();
     for id in ids {
@@ -71,17 +73,41 @@ pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
         let Some(dom::Child::Element(el)) = page.root.children.first() else {
             continue;
         };
+        let mut el = (**el).clone();
+        el.style
+            .retain(|(p, _)| !matches!(*p, "position" | "left" | "top"));
+        collapse_solids(&mut el);
         if !out.is_empty() {
             out.push('\n');
         }
         out.push_str(&format!("/* {} */\n", node.name().replace("*/", "* /")));
-        for (prop, value) in &el.style {
-            if !matches!(*prop, "position" | "left" | "top") {
-                out.push_str(&format!("{prop}: {};\n", lone_solid(value)));
+        match node.children().is_empty() {
+            true => {
+                for (prop, value) in &el.style {
+                    out.push_str(&format!("{prop}: {value};\n"));
+                }
+            }
+            // Its children's `left`/`top` are measured from it, so it must be
+            // their containing block.
+            false => {
+                el.style.insert(0, ("position", "relative".into()));
+                el.css(&mut out);
             }
         }
     }
     out
+}
+
+/// [`lone_solid`] over every declaration in `el`'s subtree.
+fn collapse_solids(el: &mut dom::Element) {
+    for (_, value) in &mut el.style {
+        *value = lone_solid(value).to_string();
+    }
+    for child in &mut el.children {
+        if let dom::Child::Element(e) = child {
+            collapse_solids(e);
+        }
+    }
 }
 
 /// A background of one solid layer as its colour: the walk writes a solid as a
@@ -429,6 +455,72 @@ mod tests {
             !css.contains("position:") && !css.contains("left:"),
             "{css}"
         );
+        assert!(!css.contains('{'), "a leaf is bare declarations: {css}");
+    }
+
+    /// A frame copies its subtree's rules: its own without placement but as the
+    /// containing block, its child's with the child's place in it.
+    ///
+    /// flip: `css_of` writing a container as bare declarations → fails at
+    /// "the frame's own rule"; dropping the `position: relative` insert → fails
+    /// at "what the child's left/top measure from".
+    #[test]
+    fn css_of_a_frame_is_the_rules_of_its_subtree() {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::peniko::Color;
+        use ondin_core::{Brush, Fill, IdSource, NodeKind, Operation, Transaction};
+        let mut ids = IdSource::new(0x5D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (frame, rect) = (ids.mint(), ids.mint());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 100.0),
+                },
+                transform: Some(Affine::translate((500.0, 500.0))),
+                name: Some("Card".into()),
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((10.0, 30.0))),
+                name: Some("Badge".into()),
+            },
+            Operation::SetFills {
+                id: rect,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(0, 0, 255, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let css = css_of(&doc, &res, &[frame]);
+        let (own, rest) = css
+            .split_once("}\n")
+            .unwrap_or_else(|| panic!("the frame's own rule: {css}"));
+        assert!(own.starts_with("/* Card */\n.card {\n"), "{css}");
+        assert!(
+            !own.contains("left:"),
+            "the frame's place is dropped: {css}"
+        );
+        assert!(
+            own.contains("position: relative;"),
+            "the frame is what the child's left/top measure from: {css}"
+        );
+        assert!(rest.contains(".badge {"), "the child's rule: {css}");
+        assert!(rest.contains("left: 10px;"), "{css}");
+        assert!(rest.contains("background: #0000ff;"), "{css}");
     }
 
     /// The collapse takes a colour holding commas whole and leaves a real

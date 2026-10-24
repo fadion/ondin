@@ -296,8 +296,8 @@ pub enum Item {
     /// (`ondin_export::svg::svg_of`), so the other application receives editable
     /// groups and shapes.
     CopyAsSvg,
-    /// Each selected layer's own CSS declarations as text, under a comment naming
-    /// it (`ondin_export::code::css_of`).
+    /// Each selected layer's CSS as text, under a comment naming it — a container
+    /// with its contents, as *Copy as PNG* (`ondin_export::code::css_of`).
     CopyAsCss,
     /// The selection as a picture on the clipboard at this multiplier, 1 or 2
     /// (`ondin_export::png::raster_of`).

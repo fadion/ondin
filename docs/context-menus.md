@@ -193,7 +193,7 @@ and *Duplicate as component* draw the filled hexagon.
 | Row | Chord | Shown / enabled |
 |---|---|---|
 | Copy as SVG | — | always live; the committed document, in document order |
-| Copy as CSS | — | always live; each layer's own declarations under a `/* name */` comment, no placement (`export.md`) |
+| Copy as CSS | — | always live; under a `/* name */` comment, a leaf's own declarations, a container's rules for its whole subtree (`export.md`) |
 | Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
 | Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row, since the menu has no submenus |
 

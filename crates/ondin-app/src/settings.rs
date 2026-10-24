@@ -335,7 +335,7 @@ pub(crate) fn card<R>(
     ctx: &egui::Context,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::ModalResponse<R> {
-    card_modal(id).show(ctx, |ui| {
+    card_modal(ctx, id).show(ctx, |ui| {
         let out = body(ui);
         ui::focus_ring(ui);
         // The card's rect, frame included, so the window's own controls laid over
@@ -352,8 +352,25 @@ pub(crate) fn card<R>(
 ///
 /// Shared so every settings-shaped modal is the same object. The caller sets its
 /// own width: [`CARD_W`] is this file's, and a modal with a wider row may be wider.
-pub(crate) fn card_modal(id: &str) -> egui::Modal {
-    egui::Modal::new(egui::Id::new(id))
+///
+/// Centred on [`set_card_centre`]'s point when one is set (the canvas, as the
+/// command palette is), else on the window. The move off the window's centre is
+/// cut short [`CARD_EDGE`] from the edge, measured on last frame's card: not
+/// `Area::constrain_to`, which clips the backdrop the card blocks clicks with.
+pub(crate) fn card_modal(ctx: &egui::Context, id: &str) -> egui::Modal {
+    let id = egui::Id::new(id);
+    let screen = ctx.content_rect();
+    let size = ctx
+        .memory(|m| m.area_rect(id))
+        .map_or(egui::Vec2::ZERO, |r| r.size());
+    let room = ((screen.size() - size) / 2.0 - egui::Vec2::splat(CARD_EDGE)).max(egui::Vec2::ZERO);
+    let offset = ctx
+        .data(|d| d.get_temp::<egui::Pos2>(card_centre_id()))
+        .map_or(egui::Vec2::ZERO, |c| {
+            (c - screen.center()).clamp(-room, room)
+        });
+    egui::Modal::new(id)
+        .area(egui::Modal::default_area(id).anchor(egui::Align2::CENTER_CENTER, offset))
         // The design's `rgba(0,0,0,.5)`: a modal over a canvas must dim more than
         // egui's default 100/255, or a light document still reads as in focus.
         .backdrop_color(egui::Color32::from_black_alpha(128))
@@ -373,6 +390,24 @@ pub(crate) fn card_modal(id: &str) -> egui::Modal {
                 })
                 .inner_margin(egui::Margin::same(PAD as i8)),
         )
+}
+
+/// The least room a card moved toward the canvas keeps from the window's edge.
+pub(crate) const CARD_EDGE: f32 = 24.0;
+
+/// Where this frame's cards centre: `Some` the canvas's middle in the editor,
+/// `None` the window's. Written by `OndinApp::ui` before any card is shown.
+pub(crate) fn set_card_centre(ctx: &egui::Context, centre: Option<egui::Pos2>) {
+    ctx.data_mut(|d| match centre {
+        Some(c) => {
+            d.insert_temp(card_centre_id(), c);
+        }
+        None => d.remove::<egui::Pos2>(card_centre_id()),
+    });
+}
+
+fn card_centre_id() -> egui::Id {
+    egui::Id::new("card-centre")
 }
 
 /// The title row every settings-shaped modal opens with: the name on the left, the
@@ -1026,5 +1061,38 @@ mod tests {
             !edited.apply(&mut prefs),
             "applying the same form twice moves no switch"
         );
+    }
+
+    /// A card centres on the point `set_card_centre` names, and on the window with none.
+    /// flip: `card_modal` ignoring the centre → fails at the canvas assert.
+    #[test]
+    fn a_card_centres_on_the_canvas_when_there_is_one() {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let centre_of = |centre: Option<egui::Pos2>| {
+            let ctx = egui::Context::default();
+            let mut rect = egui::Rect::NOTHING;
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                };
+                let _ = ctx.run_ui(input, |ui| {
+                    set_card_centre(ui.ctx(), centre);
+                    rect = card("probe-card", ui.ctx(), |ui| {
+                        ui.allocate_exact_size(egui::vec2(200.0, 100.0), egui::Sense::hover());
+                    })
+                    .response
+                    .rect;
+                });
+            }
+            rect.center()
+        };
+        let canvas = egui::pos2(500.0, 330.0);
+        assert!(
+            (centre_of(Some(canvas)) - canvas).length() < 1.0,
+            "on the canvas: {:?}",
+            centre_of(Some(canvas))
+        );
+        assert!((centre_of(None) - screen.center()).length() < 1.0);
     }
 }

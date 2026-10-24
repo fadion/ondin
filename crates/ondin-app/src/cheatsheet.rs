@@ -19,7 +19,7 @@ use ondin_core::{BoolOp, build};
 /// less [`MARGIN`] a side.
 const W: f32 = 960.0;
 const MAX_H: f32 = 640.0;
-const MARGIN: f32 = 24.0;
+const MARGIN: f32 = crate::settings::CARD_EDGE;
 /// The narrowest a column gets before the sheet deals into one column fewer.
 const MIN_COLUMN_W: f32 = 220.0;
 const ROW_H: f32 = 24.0;
@@ -393,7 +393,7 @@ impl OndinApp {
         all.retain(|s| !s.rows.is_empty());
 
         let mut closed = false;
-        let mut card = crate::settings::card_modal("cheatsheet");
+        let mut card = crate::settings::card_modal(ctx, "cheatsheet");
         // No margin under the footer: it sits on the card's bottom edge, as the palette's does.
         card.frame = card.frame.map(|f| {
             f.inner_margin(egui::Margin {

@@ -1381,6 +1381,11 @@ impl eframe::App for OndinApp {
         self.session.next_status_pass();
         self.remember_view_switches();
 
+        // Before any card: the editor's centre on the canvas, as the palette does.
+        let canvas = (self.view != View::Dashboard && self.canvas_rect.is_positive())
+            .then(|| self.canvas_rect.center());
+        crate::settings::set_card_centre(&ctx, canvas);
+
         // Above the view branch: a launch can land on either screen.
         self.recovery_modal(&ctx);
 

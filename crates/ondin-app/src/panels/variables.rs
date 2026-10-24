@@ -197,6 +197,8 @@ enum Act {
     GroupName(String, String),
     Duplicate(VarId),
     DuplicateMode(ModeId),
+    /// A mode moved to an index of the list; index 0 makes it the default.
+    MoveMode(ModeId, usize),
     Delete(Vec<VarId>, String),
     DeleteMode(ModeId),
     Select(Vec<NodeId>),
@@ -576,6 +578,7 @@ impl OndinApp {
         let rows = match &menu {
             Menu::Add => 3.0,
             Menu::Var(_) => 4.0,
+            Menu::Mode(_) if table.modes().len() > 1 => 6.5,
             Menu::Mode(_) => 3.0,
             Menu::Group(_) => 3.0,
             Menu::ConfirmMode(_) => 3.0,
@@ -675,6 +678,30 @@ impl OndinApp {
                             if row(ui, icon::COPY, "Duplicate mode") {
                                 acts.push(Act::DuplicateMode(mode.id));
                                 close = true;
+                            }
+                            // The order: the first mode is the default every
+                            // unset frame reads.
+                            let n = table.modes().len();
+                            let i = table.mode_index(mode.id).unwrap_or(0);
+                            if n > 1 {
+                                ui::menu_sep(ui);
+                                let moves = [
+                                    (icon::STAR, "Make default", 0, i > 0),
+                                    (icon::ARROW_LEFT, "Move left", i.saturating_sub(1), i > 0),
+                                    (icon::ARROW_RIGHT, "Move right", i + 1, i + 1 < n),
+                                ];
+                                for (glyph, label, to, on) in moves {
+                                    let r = ui::menu_row(
+                                        ui,
+                                        ui::MenuRow::new(glyph, label).enabled(on),
+                                        MENU_ROW_H,
+                                    );
+                                    if on && r.clicked() {
+                                        acts.push(Act::MoveMode(mode.id, to));
+                                        close = true;
+                                    }
+                                }
+                                ui::menu_sep(ui);
                             }
                             // The last mode cannot go while there are variables:
                             // every variable has a value in every mode.
@@ -1073,6 +1100,12 @@ impl OndinApp {
                         text: name,
                     });
                     b.edit_focus = true;
+                }
+            }
+            Act::MoveMode(mode, to) => {
+                let ops = var::move_mode_ops(doc, mode, to);
+                if !ops.is_empty() {
+                    self.commit_edit(Transaction(ops));
                 }
             }
             Act::DuplicateMode(from) => {
@@ -3928,6 +3961,19 @@ mod tests {
         );
         app.var_act(Act::ModeName(light, "Day copy".into()));
         assert_eq!(refusal(&app).as_deref(), Some("Day copy already exists."));
+        let last = app.session.doc.variables().modes()[2].id;
+        app.var_act(Act::MoveMode(last, 0));
+        assert_eq!(
+            modes(&app),
+            ["Day copy", "Day", "Day copy 2"],
+            "made default"
+        );
+        app.var_act(Act::MoveMode(last, 2));
+        assert_eq!(
+            modes(&app),
+            ["Day", "Day copy 2", "Day copy"],
+            "moved back"
+        );
 
         let copy = app.session.doc.variables().modes()[2].id;
         let frame = app.session.ids.mint();

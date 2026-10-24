@@ -265,6 +265,28 @@ fn removing_a_mode_carries_its_column_in_the_inverse() {
     assert_eq!(f.doc, before);
 }
 
+/// **Moving a mode first makes it the default**: an unset frame's layers draw
+/// in it, its column is whole, and undo puts the order back.
+///
+/// flip: `move_mode_ops` re-adding at the old index → fails at the order.
+#[test]
+fn moving_a_mode_first_makes_it_the_default() {
+    let mut f = fixture();
+    bind_fill(&mut f.doc, f.rect, f.brand, 1.0);
+    assert_eq!(drawn(&f.doc, f.rect), Brush::Solid(WHITE));
+    let before = f.doc.clone();
+    let ops = ondin_core::variable::move_mode_ops(&f.doc, f.dark, 0);
+    let out = f.doc.apply(&Transaction(ops)).expect("a move");
+    let order: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
+    assert_eq!(order, [f.dark, f.light]);
+    assert_eq!(drawn(&f.doc, f.rect), Brush::Solid(NAVY));
+    let brand = f.doc.variables().get(f.brand).unwrap();
+    assert_eq!(brand.cells.get(&f.dark), Some(&Cell::Color(NAVY)));
+    assert!(ondin_core::variable::move_mode_ops(&f.doc, f.dark, 0).is_empty());
+    f.doc.apply(&out.inverse).unwrap();
+    assert_eq!(f.doc, before);
+}
+
 /// An alias reads its target in the same mode, and a loop is refused.
 #[test]
 fn an_alias_follows_its_target_and_a_loop_is_refused() {

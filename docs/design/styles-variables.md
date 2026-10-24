@@ -9,8 +9,10 @@ Variables (named, typed, per-mode values that fields bind to) and styles (reusab
 A **variable** is a named, typed value — **colour, number, string or boolean** — with **one value per mode**. An **alias** is a per-mode cell naming another variable of the same type (not a fifth type). CSS custom properties are the model.
 
 **Modes**
-- One mode list per document, no collections; the default mode is the first, and modes cannot be
-  reordered. Collections and reordering are in `roadmap.md`.
+- One mode list per document, no collections (`roadmap.md`); the default mode is the first.
+  `variable::move_mode_ops(doc, mode, index)` reorders: a `RemoveMode` then an `AddMode` of the same
+  mode (same id and name) with its whole column at the new index, so frames set to it and kit mappings
+  keyed by its id hold. Index 0 makes it the default every unset frame reads.
 - Only a **frame** (an `Artboard`, never a group) sets a mode, exactly one: `Node::mode: Option<ModeId>`; `None` inherits from the nearest ancestor frame that sets one, else the default.
 - On an instance, a mode set on the copy is an override like any field (§5.3d).
 - Deleting a mode returns every frame set to it to inherit, in one undoable transaction.
@@ -126,6 +128,7 @@ Deletion: a bare `RemoveStyle` of a style in use is refused; `style::remove_ops`
 **The browser** (`panels/variables.rs`)
 - Opened by `Shift+S` or the rail's swatches button above the hexagon; opening it or the insert picker closes the other (same anchor); fixed height 460; width 340/436/532 by mode count (scrolls sideways past three modes). `Escape` takes an open menu/field first, then the browser. *Variables* and *Styles* tabs, an *In selection* filter, usage counts that select.
 - Groups = everything before a name's last `/` (`variable::split_name`), each distinct path one flat header; renaming a group onto one holding a same-named leaf is refused, else merged. `Alt`-click opens/closes all; collapsed groups are kept per root id for the process (not saved). A usage count is layers whose own fields read the variable, not through an alias (`variable::users`), leaving out vault nodes (a kit's frozen mains read its variables by rule and can't be selected); *Select* takes the same set. A document group's menu acts on the document's own variables only.
+- A mode header's menu: *Rename mode*, *Duplicate mode*, then with two or more modes *Make default*, *Move left*, *Move right* (`move_mode_ops`; each disabled where it would not move), then *Delete mode…*.
 - Cells edit in place (`Enter`/defocus commits, `Escape` abandons, `Tab` next mode, scrolled into view); an alias is typed `--name` (so a literal string starting `--` can't be typed), resolving to the cell's current target first when it has that name (an alias of a kit's variable shows its name unqualified, and the document may hold its own of that name). Colour cells open the colour popup (`PaintSlot::VarCell`); its Variables tab makes the cell an alias and greys rows that would loop. Picker drags preview in the picker and browser cell (`OndinApp::var_cell_preview`) and on every layer reading the variable through `absorb`, which re-resolves every bound node against the table with one cell changed (`Variables::with_cell`) each frame; kept at 3.7 ms a frame over 200 content-bound texts rather than narrowed to the variable's readers.
 - Deleting goes through core verbs putting detaches in the deleting transaction (`variable::remove_ops`, `remove_mode_ops`); the commit refuses a bare removal. A first variable brings the document's first mode; the last mode can't be deleted while the document has variables of its own (kits' variables read their own modes). Refusals show as one sentence above the table, refused text dim over dots.
 - Boolean variable: `true` in every mode; click on the box toggles, on the word types (`true/false`, `yes/no`, `on/off`, `1/0`). String variable: default "Text" in every mode; cell drawn quoted, line breaks as spaces, typed bare and untrimmed.

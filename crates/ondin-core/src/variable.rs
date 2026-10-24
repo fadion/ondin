@@ -1387,6 +1387,33 @@ pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operat
     ops
 }
 
+/// Move document mode `mode` to `index` of the list — index 0 makes it the
+/// default every unset frame reads. The mode goes and comes back under its own id
+/// with its column, so frames set to it and kit mappings naming it hold. Empty
+/// when `mode` is not a mode or already sits there.
+pub fn move_mode_ops(doc: &crate::Document, mode: ModeId, index: usize) -> Vec<crate::Operation> {
+    let t = doc.variables();
+    let Some(at) = t.mode_index(mode) else {
+        return Vec::new();
+    };
+    let index = index.min(t.modes.len() - 1);
+    if at == index {
+        return Vec::new();
+    }
+    let cells = t
+        .iter()
+        .filter_map(|v| v.cells.get(&mode).map(|c| (v.id, c.clone())))
+        .collect();
+    vec![
+        crate::Operation::RemoveMode { id: mode },
+        crate::Operation::AddMode {
+            mode: t.modes[at].clone(),
+            index,
+            cells,
+        },
+    ]
+}
+
 /// The frames set to `mode` — what *Delete mode…* counts in its confirmation.
 pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
     doc.node_map()

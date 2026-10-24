@@ -21,7 +21,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   (`Menu::Group`).
 - **Descriptions** on components, styles and variables — no field on `Style`, `Variable` or a main.
   An agent over MCP reads them too.
-- **Reordering modes**, so the default (the first) can change. `op.rs` has add, remove and rename only.
 - **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,
   min/max W/H (`binding::FieldKey`).
 - **Preferred mains for swap** (`components.md`).

@@ -71,7 +71,8 @@ pub enum Operation {
     AddImage, RemoveImage, OpenVault, CloseVault, SetOrigin,   // image table, vault, provenance
     // variables table (no node named; variable::check after the last op):
     AddVariable, RemoveVariable (refused while bound), SetVariable, SetKitModes, SetVariableName, SetVariableCell,
-    AddMode (with every variable's cell), RemoveMode (refused while a frame uses it; inverts to AddMode carrying the column), SetModeName,
+    AddMode (with every variable's cell), RemoveMode (refused while a frame uses it at the transaction's end; inverts to AddMode carrying the column), SetModeName,
+    // (a mode moves as RemoveMode + AddMode of the same id: variable::move_mode_ops)
     // styles table (no node named; style::check after the last op):
     AddStyle, RemoveStyle (refused while bound), SetStyleName, SetStyleValue, SetStyleOrigin,
     SetFillStyle, SetStrokeStyle, SetEffectsStyle, SetTypeStyle, SetLayoutStyle, // binding alone; style::settle writes the values; no ink

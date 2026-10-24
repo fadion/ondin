@@ -408,6 +408,9 @@ impl OndinApp {
         let n = column_count(inner);
         let modal = card.show(ctx, |ui| {
             ui.set_width(inner);
+            // An `Area` lays out in last frame's size; without this a body that
+            // grows back after the filter clears gains only a step per frame.
+            ui.set_max_height(card_h);
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Keyboard shortcuts")
@@ -1067,6 +1070,38 @@ mod tests {
             let inner = card.width() - 2.0 - crate::settings::PAD * 2.0;
             assert_eq!(column_count(inner), columns, "{w}×{h}: columns");
         }
+    }
+
+    /// Clearing the filter brings the card back to its full height on the next
+    /// frame, not a step at a time over the frames after.
+    /// flip: drop `cheatsheet_ui`'s `set_max_height` → fails at the height, 241 of 544.
+    #[test]
+    fn clearing_the_filter_restores_the_height_at_once() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let size = egui::vec2(1320.0, 820.0);
+        app_frame(&ctx, &mut app, size, Vec::new());
+        app.open_cheatsheet(Opened::Editor);
+        for _ in 0..4 {
+            app_frame(&ctx, &mut app, size, Vec::new());
+        }
+        let full = card_rect(&ctx).height();
+
+        app.cheatsheet.as_mut().unwrap().filter = "group".into();
+        for _ in 0..4 {
+            app_frame(&ctx, &mut app, size, Vec::new());
+        }
+        let filtered = card_rect(&ctx).height();
+        assert!(
+            filtered < full - 100.0,
+            "the filter has to shrink the card ({filtered} of {full})"
+        );
+
+        app.cheatsheet.as_mut().unwrap().filter.clear();
+        app_frame(&ctx, &mut app, size, Vec::new());
+        app_frame(&ctx, &mut app, size, Vec::new());
+        assert_eq!(card_rect(&ctx).height(), full);
     }
 
     /// **The sheet holds the keyboard over a text session**: a click on its body

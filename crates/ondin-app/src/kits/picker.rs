@@ -6,9 +6,9 @@
 //! first, by last use, each open to its sets and lone mains grouped by the
 //! top-level frame they sat in; then the library's other kits (3E). Typing turns
 //! it into one flat list across every kit, best match first (3F). A click places
-//! an instance at the viewport's centre; a tile dragged out of the panel and let
-//! go over the canvas places it centred there, at the document's top level as a
-//! click does — not into a frame under the pointer (§15 D1018).
+//! an instance at the viewport's centre, at the document's top level; a tile dragged
+//! out of the panel and let go over the canvas places it centred there, inside the
+//! frame under the pointer if there is one.
 
 use super::index::{KitEntry, Load, Pixels, kits_in, raster_fit, tile_subject, tiles_of};
 use crate::app::OndinApp;
@@ -381,7 +381,7 @@ impl OndinApp {
             && let Some(pl) = self.kit_placing.take()
         {
             let at = pl.at.unwrap_or(self.canvas_rect.center());
-            self.place_kit_at(ctx, pl.source, at);
+            self.place_kit_at(ctx, pl.source, at, pl.at.is_some());
         }
         if closed {
             return;
@@ -790,7 +790,30 @@ impl OndinApp {
     /// `cfg(test)` item's doc is one `cargo doc` never builds (§15 D319).
     #[cfg(test)]
     fn place_from_picker(&mut self, ctx: &egui::Context, source: Source) {
-        self.place_kit_at(ctx, source, self.canvas_rect.center());
+        self.place_kit_at(ctx, source, self.canvas_rect.center(), false);
+    }
+
+    /// The frame a tile let go at `world` lands in: the topmost shown, unlocked one
+    /// under the point, `None` for the canvas. A frame that is or sits in a component
+    /// is passed over, since the component rules may refuse an instance there.
+    fn drop_frame_at(&self, world: ondin_core::kurbo::Point) -> Option<NodeId> {
+        let doc = &self.session.doc;
+        let in_component = |f: NodeId| {
+            std::iter::successors(doc.get(f), |n| n.parent().and_then(|p| doc.get(p)))
+                .any(|n| n.component() || n.link().is_some() || n.set().is_some())
+        };
+        self.with_frames(|i| {
+            i.boxes
+                .iter()
+                .rev()
+                .find(|(f, b)| {
+                    b.contains(world)
+                        && doc.shown(*f)
+                        && !ondin_core::is_effectively_locked(doc, *f)
+                        && !in_component(*f)
+                })
+                .map(|(f, _)| *f)
+        })
     }
 
     /// A click's, a drop's or `Enter`'s placement, run once a frame has shown
@@ -809,11 +832,16 @@ impl OndinApp {
         }
     }
 
-    /// Place an instance of `source` centred on the screen point `at`, at the
-    /// document's top level, as one undoable step, and select it — a click's
-    /// viewport centre, or where a dragged tile was let go.
-    fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2) {
-        let root = self.session.doc.root();
+    /// Place an instance of `source` centred on the screen point `at`, as one
+    /// undoable step, and select it — a click's viewport centre at the document's top
+    /// level, or where a dragged tile was let go (`dropped`), inside the frame there
+    /// ([`Self::drop_frame_at`]).
+    fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2, dropped: bool) {
+        let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
+        let parent = dropped
+            .then(|| self.drop_frame_at(centre))
+            .flatten()
+            .unwrap_or(self.session.doc.root());
         let built = match &source {
             Source::Kit {
                 id,
@@ -827,7 +855,7 @@ impl OndinApp {
                 *version,
                 published,
                 *top,
-                root,
+                parent,
             )
             .map_err(|e| match e {
                 // A main, or the kit's modes, held at an older version (§15
@@ -864,7 +892,7 @@ impl OndinApp {
                             &mut self.session.ids,
                             &[ondin_core::build::Placement {
                                 nodes,
-                                parent: root,
+                                parent,
                                 index: None,
                             }],
                             Vec2::ZERO,
@@ -881,7 +909,6 @@ impl OndinApp {
                 return;
             }
         };
-        let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
         if let Some(op) = centred(&self.session.doc, &tx, instance, centre) {
             tx.0.push(op);
         }
@@ -960,8 +987,13 @@ fn centred(
     // content stores the size it was drawn at, not the one layout gives it
     // (§15 D874), and centring the stored box put a hugging main 55 px off the
     // aim (the v0.5.0 release review's `[R1-L2-01]`).
-    let bounds: Rect = ondin_core::Resolved::rebuild(&scratch).world_bounds(instance)?;
-    let shift = centre - bounds.center();
+    let res = ondin_core::Resolved::rebuild(&scratch);
+    let bounds: Rect = res.world_bounds(instance)?;
+    // The shift is in world space; the transform is in the parent's, a frame's when
+    // a tile was dropped on one.
+    let parent = scratch.get(instance)?.parent()?;
+    let into = res.world_transform(parent)?.inverse();
+    let shift = into * centre - into * bounds.center();
     Some(Operation::SetTransform {
         id: instance,
         transform: Affine::translate(shift) * at,
@@ -1862,6 +1894,52 @@ pub(crate) mod tests {
             );
             lib.entries.reverse();
         }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A tile let go over a frame lands inside it, centred on the release point,
+    /// though the frame is turned; a click still lands at the top level.
+    /// flip: `centred` shifting in world space rather than the parent's → fails at
+    /// "centred on the release".
+    #[test]
+    fn a_tile_dropped_on_a_frame_lands_inside_it() {
+        use ondin_core::kurbo::{Point, Size};
+        let ctx = egui::Context::default();
+        let root = temp_root("drop-into");
+        let (id, _set, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let frame = app.session.ids.mint();
+        let doc_root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: frame,
+            parent: doc_root,
+            index: 0,
+            kind: ondin_core::NodeKind::Artboard {
+                size: Size::new(400.0, 400.0),
+            },
+            transform: Some(
+                Affine::translate((1000.0, 1000.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2),
+            ),
+            name: None,
+        }])));
+        let aim = Point::new(820.0, 1150.0);
+        let at = app.to_screen(aim, app.canvas_rect, 1.0);
+        let source = kit_source(&mut app, &id, badge);
+        app.place_kit_at(&ctx, source, at, true);
+        let inst = app.session.selection.single().expect("placed");
+        assert_eq!(app.session.doc.get(inst).unwrap().parent(), Some(frame));
+        let c = app.session.preview_world_bounds(inst).unwrap().center();
+        let landed = app.to_world(at, app.canvas_rect, 1.0);
+        assert!((c - landed).hypot() < 1e-6, "centred on the release: {c:?}");
+
+        let source = kit_source(&mut app, &id, badge);
+        app.place_kit_at(&ctx, source, at, false);
+        let inst = app.session.selection.single().expect("placed");
+        assert_eq!(
+            app.session.doc.get(inst).unwrap().parent(),
+            Some(doc_root),
+            "a click"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

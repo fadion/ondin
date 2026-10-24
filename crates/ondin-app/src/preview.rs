@@ -44,6 +44,25 @@ pub enum LineEnd {
     End,
 }
 
+/// What a marquee does to the selection it starts from, chosen by the modifier held at
+/// the press: none replaces, `Shift` toggles what it covers, `Alt` takes it away.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MarqueeMode {
+    Replace,
+    Toggle,
+    Subtract,
+}
+
+impl MarqueeMode {
+    pub fn from_modifiers(shift: bool, alt: bool) -> Self {
+        match (shift, alt) {
+            (true, _) => MarqueeMode::Toggle,
+            (false, true) => MarqueeMode::Subtract,
+            (false, false) => MarqueeMode::Replace,
+        }
+    }
+}
+
 /// The pointer gesture currently in progress.
 pub enum Drag {
     None,
@@ -124,10 +143,10 @@ pub enum Drag {
     Pivot {
         id: NodeId,
     },
-    /// Rubber-band selection from `origin` to the current pointer.
+    /// Rubber-band selection from `origin` to the current pointer, resolved on release.
     Marquee {
         origin: Point,
-        additive: bool,
+        mode: MarqueeMode,
     },
     /// Drawing a new shape. `id` is minted up front so the preview is stable
     /// across frames; committed once on release.

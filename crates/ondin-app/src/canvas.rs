@@ -19,8 +19,8 @@ use crate::cursor::{Bitmap, Remaining, Turn};
 use crate::input::Mode;
 use crate::measure::{self, Axis};
 use crate::preview::{
-    Drag, Handle, LineEnd, PenAnchor, PenEdit, PenState, PenSubpath, PointRef, Side, Target,
-    TextSession,
+    Drag, Handle, LineEnd, MarqueeMode, PenAnchor, PenEdit, PenState, PenSubpath, PointRef, Side,
+    Target, TextSession,
 };
 use crate::session::EditorSession;
 use crate::snap;
@@ -1705,7 +1705,7 @@ impl OndinApp {
                 self.drag = Drag::Marquee {
                     // The press, not where the drag was recognised.
                     origin: grab_world,
-                    additive: shift,
+                    mode: MarqueeMode::from_modifiers(shift, ui.input(|i| i.modifiers.alt)),
                 };
             }
         }
@@ -1957,7 +1957,7 @@ impl OndinApp {
                     self.place_image_at(start);
                 }
             }
-            Drag::Marquee { origin, additive } => self.apply_marquee(origin, world, additive),
+            Drag::Marquee { origin, mode } => self.apply_marquee(origin, world, mode),
             // `pivot_at` answers `None` back at the centre, which clears the field.
             Drag::Pivot { id } => {
                 let pivot = self.pivot_at(id, world);
@@ -2760,7 +2760,7 @@ impl OndinApp {
         (delta + result.adjust, result.marks)
     }
 
-    fn apply_marquee(&mut self, origin: Point, end: Point, additive: bool) {
+    fn apply_marquee(&mut self, origin: Point, end: Point, mode: MarqueeMode) {
         let area = KRect::new(
             origin.x.min(end.x),
             origin.y.min(end.y),
@@ -2783,13 +2783,22 @@ impl OndinApp {
                 picked.push(child);
             }
         }
-        if additive {
-            for id in picked {
-                self.session.selection.add(id);
+        let mut next = self.session.selection.ids().to_vec();
+        match mode {
+            MarqueeMode::Replace => next = picked,
+            MarqueeMode::Toggle => {
+                for id in picked {
+                    match next.iter().position(|&n| n == id) {
+                        Some(i) => {
+                            next.remove(i);
+                        }
+                        None => next.push(id),
+                    }
+                }
             }
-        } else {
-            self.session.selection.set(picked);
+            MarqueeMode::Subtract => next.retain(|n| !picked.contains(n)),
         }
+        self.session.selection.set(next);
     }
 
     // --- shape creation ---------------------------------------------------
@@ -3866,7 +3875,7 @@ impl OndinApp {
             && resp.contains_pointer()
             && let Some(p) = ui.ctx().pointer_interact_pos()
         {
-            self.node_press(self.to_world(p, rect, ppp), shift, ctrl);
+            self.node_press(self.to_world(p, rect, ppp), shift, alt, ctrl);
         }
         let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos()) else {
             return;
@@ -3941,9 +3950,9 @@ impl OndinApp {
                     self.session.commit(tx);
                 }
             }
-            Drag::Marquee { origin, additive } if released => {
+            Drag::Marquee { origin, mode } if released => {
                 self.drag = Drag::None;
-                self.marquee_points(origin, world, additive);
+                self.marquee_points(origin, world, mode);
             }
             _ => {}
         }
@@ -4062,7 +4071,7 @@ impl OndinApp {
         tools::points_box(&subpaths, &points)
     }
 
-    fn node_press(&mut self, world: Point, shift: bool, ctrl: bool) {
+    fn node_press(&mut self, world: Point, shift: bool, alt: bool, ctrl: bool) {
         let id = match self.edited_path() {
             Some(id) => id,
             None => {
@@ -4156,15 +4165,15 @@ impl OndinApp {
             None => {
                 self.drag = Drag::Marquee {
                     origin: world,
-                    additive: shift,
+                    mode: MarqueeMode::from_modifiers(shift, alt),
                 };
             }
         }
     }
 
-    /// Select every anchor inside the marquee, on release. Anchors only: a
-    /// handle belongs to its point.
-    fn marquee_points(&mut self, origin: Point, end: Point, additive: bool) {
+    /// Select the anchors inside the marquee, on release, by `mode` as the layer
+    /// marquee does. Anchors only: a handle belongs to its point.
+    fn marquee_points(&mut self, origin: Point, end: Point, mode: MarqueeMode) {
         let Some(id) = self.edited_path() else { return };
         let Some((_, subpaths)) = self.edited_subpaths(id) else {
             return;
@@ -4175,12 +4184,18 @@ impl OndinApp {
             origin.x.max(end.x),
             origin.y.max(end.y),
         );
-        if !additive {
+        if mode == MarqueeMode::Replace {
             self.points.clear();
         }
         for (s, sub) in subpaths.iter().enumerate() {
             for (a, an) in sub.anchors.iter().enumerate() {
-                if area.contains(an.at) && !self.points.contains(id, (s, a)) {
+                let on = self.points.contains(id, (s, a));
+                let flip = match mode {
+                    MarqueeMode::Replace => !on,
+                    MarqueeMode::Toggle => true,
+                    MarqueeMode::Subtract => on,
+                };
+                if area.contains(an.at) && flip {
                     self.points.toggle(id, (s, a));
                 }
             }
@@ -11276,7 +11291,7 @@ mod autopan_tests {
         assert!(
             Drag::Marquee {
                 origin: ondin_core::kurbo::Point::ZERO,
-                additive: false
+                mode: MarqueeMode::Replace
             }
             .autopans()
         );
@@ -17820,7 +17835,11 @@ mod marquee_selectability_tests {
             "and its hidden layer really is hidden"
         );
 
-        app.apply_marquee(Point::new(-50.0, -50.0), Point::new(200.0, 200.0), false);
+        app.apply_marquee(
+            Point::new(-50.0, -50.0),
+            Point::new(200.0, 200.0),
+            MarqueeMode::Replace,
+        );
         let got = app.session.selection.ids().to_vec();
 
         assert_eq!(got, vec![plain], "only the plain layer is picked up");
@@ -17833,6 +17852,59 @@ mod marquee_selectability_tests {
             !got.contains(&hidden),
             "and a hidden one is refused by `apply_marquee`'s own visibility \
              term, which is the node's flag and stays here"
+        );
+    }
+
+    /// `Shift` toggles what the band covers against the selection, `Alt` takes it away,
+    /// and a bare band replaces; the modifiers map to modes in that order.
+    /// flip: `Toggle` resolved as an add → fails at `{a, c}`.
+    #[test]
+    fn a_marquee_toggles_with_shift_and_subtracts_with_alt() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x5A12);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let board = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: board,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(200.0, 200.0),
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }]))
+        .expect("an artboard");
+        // Ten wide, at x = 0, 20 and 40.
+        let [a, b, c] = [0, 1, 2].map(|i| rect(&mut doc, &mut ids, board, i));
+        app.session.adopt_document(doc, None);
+        let band = |app: &mut OndinApp, x0: f64, x1: f64, mode| {
+            app.apply_marquee(Point::new(x0, -5.0), Point::new(x1, 15.0), mode);
+            let mut got = app.session.selection.ids().to_vec();
+            got.sort();
+            got
+        };
+        let sorted = |mut v: Vec<NodeId>| {
+            v.sort();
+            v
+        };
+        app.session.selection.set(vec![a, b]);
+        assert_eq!(
+            band(&mut app, 15.0, 55.0, MarqueeMode::Toggle),
+            sorted(vec![a, c])
+        );
+        assert_eq!(band(&mut app, -5.0, 12.0, MarqueeMode::Subtract), vec![c]);
+        assert_eq!(band(&mut app, -5.0, 12.0, MarqueeMode::Replace), vec![a]);
+        assert_eq!(MarqueeMode::from_modifiers(true, true), MarqueeMode::Toggle);
+        assert_eq!(
+            MarqueeMode::from_modifiers(false, true),
+            MarqueeMode::Subtract
+        );
+        assert_eq!(
+            MarqueeMode::from_modifiers(false, false),
+            MarqueeMode::Replace
         );
     }
 }

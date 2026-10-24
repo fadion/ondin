@@ -42,7 +42,8 @@ per-anchor corner radii. Part of §9.4.
   selected, a click with the tool armed, or a double-click.
 - Anchors draw as markers (square = corner, round = smooth); the selection box is hidden while they
   are up (`canvas::chrome_hidden`, also covering a pen gesture).
-- Click selects an anchor, `Shift` adds, a drag from empty canvas marquees points, dragging moves all
+- Click selects an anchor, `Shift` adds, a drag from empty canvas marquees points (`Shift` toggles, `Alt` removes, as the layer
+  marquee does), dragging moves all
   selected anchors. Handles drag from their dots, or are pulled out of an anchor with `Ctrl`+drag;
   `Alt` breaks the pair. Dragging a handle back onto its anchor within `PEN_PICK_PX` retracts it.
   `Delete` removes points and heals. `Enter` steps in and out; `Escape` unwinds a rung. Every grab goes

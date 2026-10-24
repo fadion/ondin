@@ -28,7 +28,6 @@ stale while its ask still reads true.
   them in `prefs`.
 - **`Ctrl+D` remembers its step for one layer only** (`duplicate_selection` keeps a `CloneChain` only
   for a lone selection).
-- **The marquee only adds** (`canvas::apply_marquee`): no `Shift` toggle, no subtract.
 - **`Stroke::dash_offset` has no editor.** It loads from SVG and the Scale tool writes it; the stroke
   popover does not.
 

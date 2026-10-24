@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The .ondin document type, installed to /usr/share/mime/packages/ under the app
+  id. The desktop entry's MimeType names the same type, which is what makes a
+  file manager offer Ondin for a double-click. A document is JSON, so a text
+  editor stays on offer beside it.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-ondin">
+    <comment>Ondin document</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.ondin"/>
+    <icon name="io.github.fadion.Ondin"/>
+  </mime-type>
+</mime-info>

@@ -43,6 +43,8 @@ mod chrome;
 mod cursor;
 mod expr;
 mod eyedropper;
+#[cfg(windows)]
+mod file_type;
 mod fonts;
 mod grid;
 mod input;
@@ -75,7 +77,11 @@ use ondin_core::ExportScale;
 
 #[derive(Debug, PartialEq)]
 enum Command {
-    Gui,
+    /// The window, opening `open` when the command line named a document
+    /// (`ondin file.ondin`, which is also what a double-click runs).
+    Gui {
+        open: Option<std::path::PathBuf>,
+    },
     Serve {
         file: String,
     },
@@ -130,8 +136,9 @@ impl ExportFormat {
 }
 
 /// Whether `args` are a launch Velopack's startup hook must see: the GUI's
-/// (nothing, or `gui`) and Velopack's own `--veloapp-*` re-invocations — an
-/// allowlist on the first argument, since the re-invocations carry arguments too.
+/// (nothing, `gui`, or a document to open) and Velopack's own `--veloapp-*`
+/// re-invocations — an allowlist on the first argument, since the re-invocations
+/// carry arguments too.
 ///
 /// It lists what reaches the hook, not what avoids it, so a mistyped
 /// `ondin exprot …` or `ondin --version` never reaches it and `parse` refuses it
@@ -139,8 +146,24 @@ impl ExportFormat {
 fn hook_runs(args: &[String]) -> bool {
     match args.first() {
         None => true,
-        Some(first) => first == "gui" || first.to_ascii_lowercase().starts_with("--veloapp-"),
+        Some(first) => {
+            first == "gui"
+                || first.to_ascii_lowercase().starts_with("--veloapp-")
+                || names_a_document(first)
+        }
     }
+}
+
+/// Whether a first argument is a document to open rather than a subcommand: a
+/// `.ondin` name, or any file that exists. Anything else stays "unknown command",
+/// so a typo of `export` is refused, not opened.
+fn names_a_document(arg: &str) -> bool {
+    let path = std::path::Path::new(arg);
+    !arg.starts_with('-')
+        && (path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("ondin"))
+            || path.is_file())
 }
 
 /// The command line as strings, or the refusal for one that is not Unicode.
@@ -162,13 +185,21 @@ fn unicode_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<St
 
 fn parse(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
-        None | Some("gui") => Ok(Command::Gui),
+        None | Some("gui") => Ok(Command::Gui { open: None }),
         Some("serve") => args
             .get(1)
             .map(|file| Command::Serve { file: file.clone() })
             .ok_or_else(|| "usage: ondin serve <file>".to_string()),
         Some("export") => parse_export(&args[1..]),
         Some("mcp-proxy") => Ok(Command::McpProxy),
+        // Absolute, so the session's save path and `prefs.last_document` survive a
+        // different working directory next launch.
+        Some(file) if names_a_document(file) => match args.get(1) {
+            Some(extra) => Err(format!("ondin {file}: unexpected argument {extra}")),
+            None => Ok(Command::Gui {
+                open: Some(std::path::absolute(file).map_err(|e| format!("ondin {file}: {e}"))?),
+            }),
+        },
         Some(other) => Err(format!("unknown command: {other}")),
     }
 }
@@ -331,17 +362,26 @@ fn main() {
     // question. An update applies only through the chip, once nothing else is
     // running (`update::Updater::on_exit`). Other command lines skip it, see
     // `hook_runs`.
+    //
+    // On Windows the install and update hooks also register the `.ondin` file type
+    // (the update re-registers installs that predate it), and uninstall removes it.
     if hook_runs(&args) {
         logging::init();
-        velopack::VelopackApp::build()
-            .set_auto_apply_on_startup(false)
-            .run();
+        let mut hooks = velopack::VelopackApp::build().set_auto_apply_on_startup(false);
+        #[cfg(windows)]
+        {
+            hooks = hooks
+                .on_after_install_fast_callback(|_| file_type::register())
+                .on_after_update_fast_callback(|_| file_type::register())
+                .on_before_uninstall_fast_callback(|_| file_type::unregister());
+        }
+        hooks.run();
     }
     // Counted by any other Ondin's updater before it applies — the GUI and a
     // headless export alike, since the updater stops both.
     instances::register();
     let result = match parse(&args) {
-        Ok(Command::Gui) => run_gui().map_err(|e| format!("ondin gui failed: {e}")),
+        Ok(Command::Gui { open }) => run_gui(open).map_err(|e| format!("ondin gui failed: {e}")),
         Ok(Command::Export {
             file,
             format,
@@ -646,7 +686,7 @@ fn window_icon() -> eframe::egui::IconData {
     eframe::icon_data::from_png_bytes(PNG).expect("the bundled window icon is not a valid PNG")
 }
 
-fn run_gui() -> eframe::Result<()> {
+fn run_gui(open: Option<std::path::PathBuf>) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         // The system's title bar off, or transparent on macOS, with the app
@@ -662,7 +702,7 @@ fn run_gui() -> eframe::Result<()> {
     eframe::run_native(
         "Ondin",
         options,
-        Box::new(|cc| Ok(Box::new(app::OndinApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::OndinApp::new(cc, open)))),
     )
 }
 
@@ -742,8 +782,39 @@ mod tests {
 
     #[test]
     fn defaults_to_gui() {
-        assert!(matches!(parse(&[]), Ok(Command::Gui)));
-        assert!(matches!(parse(&["gui".into()]), Ok(Command::Gui)));
+        assert_eq!(parse(&[]), Ok(Command::Gui { open: None }));
+        assert_eq!(parse(&["gui".into()]), Ok(Command::Gui { open: None }));
+    }
+
+    /// A first argument naming a document opens it, as an absolute path, and reaches
+    /// the install hook as a GUI launch does; a typo of a subcommand is still refused.
+    /// flip: `names_a_document` answering false → fails at the `.ondin` launch.
+    #[test]
+    fn a_document_on_the_command_line_opens_in_the_gui() {
+        let open = |a: &str| match parse(&[a.to_string()]) {
+            Ok(Command::Gui { open: Some(p) }) => Some(p),
+            _ => None,
+        };
+        let named = open("Landing.ONDIN").expect("a .ondin name opens, whatever its case");
+        assert!(named.is_absolute() && named.ends_with("Landing.ONDIN"));
+        // An existing file of any name opens too (the loader says what is wrong with it).
+        let file = std::env::temp_dir().join("ondin-launch-arg-test.txt");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(open(file.to_str().unwrap()), Some(file.clone()));
+        let _ = std::fs::remove_file(&file);
+        assert!(hook_runs(&["a.ondin".to_string()]));
+        assert!(
+            parse(&["exprot".into()]).is_err(),
+            "not a file, not a .ondin"
+        );
+        assert!(
+            parse(&["--a.ondin".into()]).is_err(),
+            "a flag is not a file"
+        );
+        assert!(
+            parse(&["a.ondin".into(), "b.ondin".into()]).is_err(),
+            "one document per launch"
+        );
     }
 
     #[test]

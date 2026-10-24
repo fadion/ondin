@@ -3,7 +3,10 @@ Type=Application
 Name=Ondin
 GenericName=Vector Design Tool
 Comment=A 2D design tool for frames, shapes, paths, text and CSS-style layout
-Exec=ondin
+# %f: one document per launch, which is what `ondin <file>` takes; the type is
+# io.github.fadion.Ondin.mime.xml's.
+Exec=ondin %f
+MimeType=application/x-ondin;
 Icon=io.github.fadion.Ondin
 Terminal=false
 Categories=Graphics;VectorGraphics;

@@ -183,12 +183,18 @@ libc = "0.2"
 # prompt stops an export rather than leaving it writing. Three modules of
 # `extern` declarations — `CreateJobObjectW`'s signature names a `Security`
 # type and the extended limit struct a `Threading` one — and no code.
+#
+# **`Win32_System_Registry` and `Win32_UI_Shell` are the `.ondin` file type's**
+# (`file_type.rs`): the per-user registration Velopack's install hook writes, and
+# the shell notice that makes Explorer read it.
 windows-sys = { version = "0.52.0", features = [
   "Win32_Foundation",
   "Win32_Security",
   "Win32_System_JobObjects",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_System_Time",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 # Fontsource serves *variable* fonts as woff2 only, and a family's variable file

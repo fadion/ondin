@@ -38,6 +38,7 @@ LICENSE_FILES="Hack-LICENSE.txt NotoEmoji-OFL-1.1.txt Phosphor-LICENSE.txt Ubunt
 required=("$BINARY" \
     "${HERE}/${APP_ID}.desktop" \
     "${HERE}/${APP_ID}.metainfo.xml" \
+    "${HERE}/${APP_ID}.mime.xml" \
     "${REPO}/LICENSE" \
     "${REPO}/THIRD-PARTY-NOTICES.md" \
     "${REPO}/README.md" \
@@ -71,11 +72,15 @@ shopt -u nullglob
 mkdir -p "${ROOT}/usr/bin" \
     "${ROOT}/usr/share/applications" \
     "${ROOT}/usr/share/metainfo" \
+    "${ROOT}/usr/share/mime/packages" \
     "${ROOT}/usr/share/icons/hicolor/512x512/apps" \
     "${ROOT}/usr/share/doc/ondin"
 
 install -m 0755 "$BINARY" "${ROOT}/usr/bin/ondin"
 install -m 0644 "${HERE}/${APP_ID}.desktop" "${ROOT}/usr/share/applications/${APP_ID}.desktop"
+# The .ondin type. dpkg's and rpm's shared-mime-info triggers rebuild the database
+# when this directory changes, so neither package carries a scriptlet for it.
+install -m 0644 "${HERE}/${APP_ID}.mime.xml" "${ROOT}/usr/share/mime/packages/${APP_ID}.xml"
 
 # icons/icon.png is 512x512 (measured 2026-10-03), which is the hicolor
 # directory it goes in. A mismatch here is not a build error - the icon simply

@@ -95,6 +95,7 @@ cp -a %{_sourcedir}/payload/. %{buildroot}/
 %{_bindir}/ondin
 %{_datadir}/applications/%{appid}.desktop
 %{_datadir}/metainfo/%{appid}.metainfo.xml
+%{_datadir}/mime/packages/%{appid}.xml
 %{_datadir}/icons/hicolor/512x512/apps/%{appid}.png
 
 %changelog

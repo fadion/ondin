@@ -24,8 +24,6 @@ stale while its ask still reads true.
   `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
   `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two
   (`code::walk`).
-- **Opening a document from the OS.** `main.rs` `parse` answers a positional path with "unknown
-  command", so `ondin file.ondin` and a double-click do nothing.
 - **Status messages overwrite each other.** `session.info` and `fail` share one slot, so a later
   message in the same handler hides a refusal (`take_dropped_images`, `place_image_action`).
 - **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
@@ -149,6 +147,10 @@ Designed in §15 D1098. The three emitters and `ondin export --html|--react|--vu
 ## Later · Platform and dependencies
 
 - **`Event::Zoom` and touchscreen pinch** (§15 D822) — trigger: a Mac or a touch device.
+- **Double-click to open on macOS.** Finder sends an `application:openURLs:` event, which winit 0.30
+  does not expose, and the `.app`'s `Info.plist` (written by `vpk`) declares no
+  `CFBundleDocumentTypes`. Windows and Linux are built (`app-chrome.md`, *Opening a document from
+  the OS*); `ondin <file>` works everywhere. Trigger: a Mac to test on, or a winit that delivers it.
 - **Eyedropper: sampling outside the window** with the same loupe (design canvas, *Eyedropper*).
   Needs a capture path per OS (Windows has no system picker), and an off-window sample needs
   converting from the display's space to sRGB. Inside the window is built (`tools.md`, *The

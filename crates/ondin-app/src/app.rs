@@ -1030,7 +1030,7 @@ impl ChromeHold {
 }
 
 impl OndinApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, open: Option<std::path::PathBuf>) -> Self {
         let render_state = cc
             .wgpu_render_state
             .clone()
@@ -1052,7 +1052,7 @@ impl OndinApp {
             prefs,
         );
         app.updater = crate::update::Updater::start(&cc.egui_ctx);
-        app.open_at_launch();
+        app.open_at_launch(open.as_deref());
         app
     }
 
@@ -1091,13 +1091,14 @@ impl OndinApp {
         ));
     }
 
-    /// Decide what the window shows on the first frame: the library, unless
-    /// `reopen_last` names a document that still loads.
+    /// Decide what the window shows on the first frame: `open` when the command line
+    /// named a document, else the library, unless `reopen_last` names a document that
+    /// still loads.
     ///
-    /// `open_path` is deliberately not used: it autosaves the outgoing document, asks
-    /// about unsaved work, rewrites `last_document` and drops the recovery snapshot this
-    /// collects.
-    fn open_at_launch(&mut self) {
+    /// The reopen deliberately skips `open_path`, which rewrites `last_document`; a
+    /// named document goes through it, so it is remembered and a failure is reported.
+    /// Nothing is open yet for its autosave, question or recovery drop to touch.
+    fn open_at_launch(&mut self, open: Option<&std::path::Path>) {
         self.view = View::Dashboard;
         self.report_unreadable_records();
         // Enforced at launch to reach users who reopen straight into a document.
@@ -1107,6 +1108,10 @@ impl OndinApp {
         // Collected before the reopen; a later frame's modal asks over whatever opens.
         self.recovery.pending =
             crate::library::recovery::pending(&self.library.root, &self.library.entries);
+        if let Some(path) = open {
+            self.open_path(path);
+            return;
+        }
         if !self.prefs.reopen_last {
             return;
         }
@@ -10314,7 +10319,7 @@ mod library_wiring_tests {
 
         let mut app = app_at(&ctx, root.clone());
         app.library.refresh();
-        app.open_at_launch();
+        app.open_at_launch(None);
         let waiting: Vec<String> = app
             .recovery
             .pending
@@ -10397,7 +10402,7 @@ mod library_wiring_tests {
         let mut app = app_at(&ctx, root.clone());
         app.prefs.reopen_last = true;
         app.prefs.last_document = Some(path.clone());
-        app.open_at_launch();
+        app.open_at_launch(None);
         assert_eq!(
             app.session.path.as_deref(),
             Some(path.as_path()),
@@ -10412,6 +10417,49 @@ mod library_wiring_tests {
             vec!["Landing v5".to_string()],
             "and still asks about the work that document is missing"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A document named on the command line opens over `reopen_last`, is remembered as
+    /// the last document, and still leaves its recovery to ask about; a file that does
+    /// not load leaves the library showing.
+    /// flip: `open_at_launch` ignoring `open` → fails at the opened path.
+    #[test]
+    fn a_document_named_at_launch_opens() {
+        use crate::library::recovery;
+        let ctx = egui::Context::default();
+        let root = temp_root("launch-open");
+        let mut app = app_at(&ctx, root.clone());
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Named".into());
+        app.session.doc.set_meta(meta);
+        app.session.mark_unsaved();
+        app.save_file(false);
+        let named = app.session.path.clone().unwrap();
+        let id = app.session.doc.meta().id.clone().unwrap();
+        // Work the file is missing, or the snapshot is nothing to ask about.
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Named v2".into());
+        app.session.doc.set_meta(meta);
+        recovery::write(&root, &id, &app.session.doc).unwrap();
+        drop(app);
+
+        let mut app = app_at(&ctx, root.clone());
+        app.prefs.reopen_last = true;
+        app.prefs.last_document = Some(root.join("elsewhere.ondin"));
+        app.open_at_launch(Some(&named));
+        assert_eq!(app.session.path.as_deref(), Some(named.as_path()));
+        assert!(matches!(app.view, View::Editor));
+        assert_eq!(app.prefs.last_document.as_deref(), Some(named.as_path()));
+        assert_eq!(app.recovery.pending.len(), 1, "its recovery still asks");
+
+        let mut app = app_at(&ctx, root.clone());
+        app.open_at_launch(Some(&root.join("missing.ondin")));
+        assert!(
+            matches!(app.view, View::Dashboard),
+            "a missing file stays on the library"
+        );
+        assert!(app.session.path.is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -10435,7 +10483,7 @@ mod library_wiring_tests {
         const ORPHAN_KEY: &str = "0ba9f11ce0ba9f11ce0ba9f11ce0ba9f";
         recovery::write(&root, ORPHAN_KEY, &doc).unwrap();
         app.library.refresh();
-        app.open_at_launch();
+        app.open_at_launch(None);
         assert_eq!(app.recovery.pending.len(), 1, "the fixture is one snapshot");
 
         let snapshot = root
@@ -10805,7 +10853,7 @@ mod library_wiring_tests {
             "the fixture has to have two deletions in the trash to say anything"
         );
 
-        app.open_at_launch();
+        app.open_at_launch(None);
 
         assert!(
             !aged.exists(),

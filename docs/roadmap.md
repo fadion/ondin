@@ -24,8 +24,6 @@ stale while its ask still reads true.
 - **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
   kit* and *Show in library* are not registry `Item`s, and quarter turns
   (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.
-- **Snap and view toggles reset every launch** (`input::ViewSwitch`; `app-canvas-chrome.md`). Persist
-  them in `prefs`.
 - **`Stroke::dash_offset` has no editor.** It loads from SVG and the Scale tool writes it; the stroke
   popover does not.
 

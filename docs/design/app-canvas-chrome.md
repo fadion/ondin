@@ -61,8 +61,11 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
 - Both render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
   messages*.
-- All are **view state**, not persisted (persisting them is in `roadmap.md`). All default on except
-  *Lock guides* and present mode.
+- All are **view state**, not document state. All but present mode are kept in `prefs.view`
+  (`prefs::ViewPrefs`), written once a frame when one has changed
+  (`OndinApp::remember_view_switches`, which also catches side doors such as a guide pulled from a
+  ruler turning guides on), and a launch opens on them. All default on except *Lock guides* and
+  present mode; a launch never opens in present mode.
 
 ### Settings
 

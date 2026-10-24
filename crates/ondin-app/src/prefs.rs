@@ -28,6 +28,47 @@ pub struct ExportPreset {
     pub specs: Vec<ExportSpec>,
 }
 
+/// The View and Snap menus' switches as last set, so a launch opens on them.
+/// Present mode is not here: it is a mode a launch should never open in.
+///
+/// Container-level `#[serde(default)]`, as on [`Prefs`]: a missing key is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewPrefs {
+    pub rulers: bool,
+    pub guides: bool,
+    pub lock_guides: bool,
+    pub grid: bool,
+    pub layout_grids: bool,
+    pub layers: bool,
+    pub toolbar: bool,
+    pub status: bool,
+    pub snap_shapes: bool,
+    pub snap_guides: bool,
+    pub snap_grid: bool,
+    pub snap_baselines: bool,
+}
+
+impl Default for ViewPrefs {
+    /// Every switch on but the guide lock.
+    fn default() -> Self {
+        Self {
+            rulers: true,
+            guides: true,
+            lock_guides: false,
+            grid: true,
+            layout_grids: true,
+            layers: true,
+            toolbar: true,
+            status: true,
+            snap_shapes: true,
+            snap_guides: true,
+            snap_grid: true,
+            snap_baselines: true,
+        }
+    }
+}
+
 /// Everything the Settings modal writes, plus the export habits the export
 /// panel's popover writes.
 ///
@@ -165,6 +206,9 @@ pub struct Prefs {
     /// `crate::palette::verb_key` names them: by verb, so a renamed label
     /// (*Hide* / *Show*) is still the same entry. A habit, hence a preference.
     pub palette_recent: Vec<String>,
+    /// The View and Snap switches, written as they change
+    /// (`OndinApp::remember_view_switches`).
+    pub view: ViewPrefs,
 }
 
 impl Default for Prefs {
@@ -200,6 +244,7 @@ impl Default for Prefs {
             reopen_last: false,
             last_document: None,
             palette_recent: Vec::new(),
+            view: ViewPrefs::default(),
         }
     }
 }
@@ -280,6 +325,17 @@ fn path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file from before the view switches were kept opens with all of them on, and
+    /// one that names a single switch keeps the rest on.
+    #[test]
+    fn a_missing_view_switch_reads_as_on() {
+        let old: Prefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.view, ViewPrefs::default());
+        let one: Prefs = serde_json::from_str(r#"{"view":{"snap_grid":false}}"#).unwrap();
+        assert!(!one.view.snap_grid);
+        assert!(one.view.rulers && one.view.snap_shapes && !one.view.lock_guides);
+    }
 
     /// The `ephemeral` flag defaults off and never survives serialization. It
     /// asserts on the flag and the JSON rather than calling `save()`, which would

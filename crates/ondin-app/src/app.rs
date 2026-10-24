@@ -1158,6 +1158,7 @@ impl OndinApp {
         let library = crate::library::state::Library::open(root);
         let prefs_page = prefs.dashboard_page.clone();
         let prefs_sort = prefs.dashboard_sort.clone();
+        let view = prefs.view;
         let prefs_list_view = prefs.dashboard_list_view;
         Self {
             session: EditorSession::new(),
@@ -1252,18 +1253,18 @@ impl OndinApp {
             cards_shown: Vec::new(),
             cards_seen: std::collections::BTreeSet::new(),
             secondary_press: None,
-            show_grid: true,
-            show_layout_grids: true,
-            show_layers: true,
-            show_toolbar: true,
-            show_status: true,
+            show_grid: view.grid,
+            show_layout_grids: view.layout_grids,
+            show_layers: view.layers,
+            show_toolbar: view.toolbar,
+            show_status: view.status,
             present: false,
             // Off: a marker on every selection would be permanent chrome.
             show_pivot: false,
-            snap_shapes: true,
-            snap_guides: true,
-            snap_grid: true,
-            snap_baselines: true,
+            snap_shapes: view.snap_shapes,
+            snap_guides: view.snap_guides,
+            snap_grid: view.snap_grid,
+            snap_baselines: view.snap_baselines,
             clones: None,
             entered_group: None,
             gesture_cancelled: false,
@@ -1293,9 +1294,9 @@ impl OndinApp {
             char_hex: None,
             multi_transform_drag: None,
             cursors: Cursors::default(),
-            show_rulers: true,
-            show_guides: true,
-            lock_guides: false,
+            show_rulers: view.rulers,
+            show_guides: view.guides,
+            lock_guides: view.lock_guides,
             guide_previews: Vec::new(),
             var_cell_preview: None,
             guide_clipboard: None,
@@ -1355,6 +1356,7 @@ impl eframe::App for OndinApp {
         let ctx = ui.ctx().clone();
         // First: this frame's status writes join one another, not the last frame's.
         self.session.next_status_pass();
+        self.remember_view_switches();
 
         // Above the view branch: a launch can land on either screen.
         self.recovery_modal(&ctx);
@@ -5916,6 +5918,30 @@ impl OndinApp {
             || self.making_all_local.is_some()
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()
+    }
+
+    /// Write the View and Snap switches to `prefs` when one has changed, so the next
+    /// launch opens on them. Once a frame rather than in [`Self::set_view_switch`]: a
+    /// guide pulled out of a ruler turns guides on, and a door shows the layers panel.
+    fn remember_view_switches(&mut self) {
+        let now = crate::prefs::ViewPrefs {
+            rulers: self.show_rulers,
+            guides: self.show_guides,
+            lock_guides: self.lock_guides,
+            grid: self.show_grid,
+            layout_grids: self.show_layout_grids,
+            layers: self.show_layers,
+            toolbar: self.show_toolbar,
+            status: self.show_status,
+            snap_shapes: self.snap_shapes,
+            snap_guides: self.snap_guides,
+            snap_grid: self.snap_grid,
+            snap_baselines: self.snap_baselines,
+        };
+        if now != self.prefs.view {
+            self.prefs.view = now;
+            self.prefs.save();
+        }
     }
 
     /// Read a workspace switch; the menus tick their rows from here.
@@ -16159,6 +16185,39 @@ mod component_verb_tests {
 
         assert!(app.session.undo());
         assert_eq!(reset::drift(&app.session.doc, i), drifted, "one step back");
+    }
+}
+
+#[cfg(test)]
+mod view_prefs_tests {
+    use super::*;
+
+    /// A switch set this session, by its menu or by a side door, is in the prefs the
+    /// next app is built from, and that app opens with it; present mode is not kept.
+    /// flip: `remember_view_switches` not called from `ui` → fails at the prefs.
+    #[test]
+    fn view_and_snap_switches_survive_a_relaunch() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.set_view_switch(ViewSwitch::SnapGrid, false);
+        app.set_view_switch(ViewSwitch::Rulers, false);
+        app.set_view_switch(ViewSwitch::Present, true);
+        // A side door: pulling a guide out turns guides on without the switch.
+        app.show_guides = false;
+        let mut frame = eframe::Frame::_new_kittest();
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            eframe::App::ui(&mut app, ui, &mut frame)
+        });
+        assert!(!app.prefs.view.snap_grid && !app.prefs.view.rulers && !app.prefs.view.guides);
+
+        let next = OndinApp::with(
+            CanvasRenderer::headless(),
+            FontService::inert(),
+            app.prefs.clone(),
+        );
+        assert!(!next.snap_grid && !next.show_rulers && !next.show_guides);
+        assert!(next.snap_shapes && next.show_layers, "the rest stay on");
+        assert!(!next.present, "a launch never opens in present mode");
     }
 }
 

@@ -12,9 +12,6 @@ stale while its ask still reads true.
 - **Drag-reorder of the effects card's rows**, as the fill and stroke rows have (`paint::PaintDrag`,
   `inspector.md` *Live reorder*). The effects stack is ordered and `SetEffects` writes it whole, so
   only the card's drag is missing.
-- **Importing an SVG file.** A dropped `.svg` is refused with a message saying the parser is unbuilt
-  (`app.rs` `take_dropped_images`), and the place-image dialog's filter has no `svg`
-  (`place_image_action`). The parser exists: route both to `svg_in::import` as `canvas::paste_svg` does.
 - **Version history has no door.** `Ctrl+S` pins a copy under `.versions/`, but `library::store::versions`
   has no production caller, so pins are never offered back. Browse and restore.
 - **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an

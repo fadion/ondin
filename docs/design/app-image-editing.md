@@ -131,7 +131,12 @@ window onto its picture. There is no crop tool, rail button or `C` key.
 - `canvas::draw_drop_indicator` while files hover: outline round the target frame (`target_artboard`,
   or an inset canvas border), a pill naming the outcome, and the hover outline on a shape to be
   replaced.
-- SVG is refused with a message rather than rasterized.
+- SVG is never rasterized: a dropped or placed `.svg` (sniffed by its bytes, `app::looks_like_svg`)
+  is read by `svg_in::import` as a paste is (`canvas::import_svg`, shared with `paste_svg`): one
+  group named for the file's stem, centred on the drop point (cascaded `DROP_CASCADE` per file) or
+  where a paste would land for the *Place image* dialog, which takes `.svg` and imports at once
+  rather than loading the Image tool. Its report (*Imported logo.svg — 5 layers*) follows the
+  pictures' in one status, and the drop selects both.
 - `Ctrl+V` over a picture-only clipboard produces no egui event, so `input::normal_mode` also reads the
   key **release**; `Action::Paste` tries the picture before the in-app layer paste.
 

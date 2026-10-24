@@ -849,6 +849,16 @@ thread_local! {
     static GRIDS_LAID: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// What [`OndinApp::import_svg`] did with some markup.
+pub(crate) enum SvgImport {
+    /// Committed and selected; what was made, as `5 layers, skipped filter`.
+    Placed(String),
+    /// Nested past what the reader will descend into.
+    TooDeep,
+    /// Not SVG, no shapes in it, or the build did not apply.
+    Unreadable,
+}
+
 /// Where the pictures inside a pasted SVG go (`ondin_core::svg_in::ImageSink`).
 /// The same steps as `OndinApp::load_image_bytes`, which cannot be called
 /// because the importer already borrows `self.session.ids` mutably.
@@ -5098,10 +5108,9 @@ impl OndinApp {
         true
     }
 
-    /// Paste SVG markup as layers (`ondin_core::svg_in`), the arm between the
-    /// app's clipboard and the text fallback. Markup that will not parse falls
-    /// through silently, except one nested too deeply, refused out loud. Placed by
-    /// applying to a clone, reading the bounds and correcting the root's transform.
+    /// Paste SVG markup as layers, the arm between the app's clipboard and the text
+    /// fallback. Markup that will not parse falls through silently, except one nested
+    /// too deeply, refused out loud rather than pasted as a huge text layer.
     pub(crate) fn paste_svg(&mut self, at: Option<Point>) -> bool {
         let Some(text) = crate::app::system_clipboard_text() else {
             return false;
@@ -5109,6 +5118,30 @@ impl OndinApp {
         if !ondin_core::svg_in::looks_like_svg(&text) {
             return false;
         }
+        match self.import_svg(&text, at, None) {
+            SvgImport::Placed(said) => {
+                self.session.info(format!("Pasted SVG — {said}"));
+                true
+            }
+            SvgImport::TooDeep => {
+                self.session
+                    .fail("That SVG is nested too deeply to read — nothing was pasted.");
+                true
+            }
+            SvgImport::Unreadable => false,
+        }
+    }
+
+    /// Build SVG markup's layers (`ondin_core::svg_in`) as one undo step, centred
+    /// where [`Self::paste_placement`] puts `at`, and select them; `name` names the
+    /// root group (a file's stem). Placed by applying to a clone, reading the bounds
+    /// and correcting the root's transform. The status is the caller's to write.
+    pub(crate) fn import_svg(
+        &mut self,
+        text: &str,
+        at: Option<Point>,
+        name: Option<&str>,
+    ) -> SvgImport {
         let (centre, parent, parent_world) = self.paste_placement(at);
 
         let index = self.child_count(parent);
@@ -5117,29 +5150,32 @@ impl OndinApp {
             images: self.canvas.images_mut(),
         };
         let mut out = match ondin_core::svg_in::import(
-            &text,
+            text,
             &mut self.session.ids,
             parent,
             index,
             Some(&mut sink),
         ) {
             Ok(out) => out,
-            // Refused rather than pasted as a huge text layer of markup. Untested
-            // here (the clipboard is unreachable under `cfg(test)`); `svg_in` tests it.
-            Err(ondin_core::svg_in::SvgError::TooDeep) => {
-                self.session
-                    .fail("That SVG is nested too deeply to read — nothing was pasted.");
-                return true;
-            }
-            Err(_) => return false,
+            Err(ondin_core::svg_in::SvgError::TooDeep) => return SvgImport::TooDeep,
+            Err(_) => return SvgImport::Unreadable,
         };
         if out.shapes == 0 {
-            return false;
+            return SvgImport::Unreadable;
+        }
+        if let Some(name) = name
+            && let Some(Operation::CreateNode { name: root, .. }) = out
+                .tx
+                .0
+                .iter_mut()
+                .find(|op| matches!(op, Operation::CreateNode { id, .. } if *id == out.root))
+        {
+            *root = Some(name.to_string());
         }
 
         let mut probe = self.session.doc.clone();
         if probe.apply(&out.tx).is_err() {
-            return false;
+            return SvgImport::Unreadable;
         }
         if let Some(bounds) = ondin_core::Resolved::rebuild(&probe).world_bounds(out.root) {
             let inv = parent_world.inverse();
@@ -5155,7 +5191,7 @@ impl OndinApp {
         }
 
         if !self.session.commit(out.tx) {
-            return false;
+            return SvgImport::Unreadable;
         }
         self.session.selection.set_one(out.root);
         let n = out.shapes;
@@ -5163,15 +5199,14 @@ impl OndinApp {
         // Skipped is missing; approximated is there and slightly wrong.
         out.skipped.sort();
         out.approximated.sort();
-        let mut msg = format!("Pasted SVG — {n} {plural}");
+        let mut msg = format!("{n} {plural}");
         if !out.skipped.is_empty() {
             msg.push_str(&format!(", skipped {}", out.skipped.join(", ")));
         }
         if !out.approximated.is_empty() {
             msg.push_str(&format!(", approximated {}", out.approximated.join(", ")));
         }
-        self.session.info(msg);
-        true
+        SvgImport::Placed(msg)
     }
 
     /// The frame a paste is aimed at — the enclosing frame of the first selected
@@ -8240,14 +8275,21 @@ impl OndinApp {
         /// The border drawn inside the canvas edge, when there is no frame to
         /// put one round instead.
         const BORDER: f32 = 2.0;
-        let files = ui.input(|i| i.raw.hovered_files.len());
+        let (files, svgs) = ui.input(|i| {
+            let hovered = &i.raw.hovered_files;
+            (
+                hovered.len(),
+                hovered.iter().filter(|f| hovers_svg(f)).count(),
+            )
+        });
         if files == 0 {
             return;
         }
-        // One gate for outline and words, `drop_images_at`'s own: a single file on the shape.
+        // One gate for outline and words, `drop_images_at`'s own: a single picture on
+        // the shape. An SVG makes layers instead.
         let at = self.drop_point(ui.ctx());
         let replacing = at
-            .filter(|_| files == 1)
+            .filter(|_| files == 1 && svgs == 0)
             .and_then(|p| self.image_drop_target(Some(p)));
         // The hover outline's weight and hue, so it does not read as selected.
         let anchor = match replacing {
@@ -8289,7 +8331,7 @@ impl OndinApp {
             painter,
             inner,
             self.to_screen(world, rect, ppp),
-            &drop_label(files, name.as_deref()),
+            &drop_label(files, svgs, name.as_deref()),
         );
     }
 
@@ -8475,12 +8517,26 @@ fn os_cursor_screen_pos(ctx: &egui::Context) -> Option<egui::Pos2> {
 /// What releasing the drag would do, as the future tense of `drop_images_at`'s
 /// messages. It names the shape in full, since the outline can be off screen and
 /// a destructive drop must not surprise.
-fn drop_label(files: usize, replacing: Option<&str>) -> String {
+fn drop_label(files: usize, svgs: usize, replacing: Option<&str>) -> String {
     match (files, replacing) {
         (_, Some(name)) => format!("Replace image in {name}"),
+        (1, None) if svgs == 1 => "Import SVG".to_string(),
+        (n, None) if svgs == n => format!("Import {n} SVGs"),
+        (n, None) if svgs > 0 => format!("Place {n} files"),
         (1, None) => "Place image".to_string(),
         (n, None) => format!("Place {n} images"),
     }
+}
+
+/// Whether a file hovering over the window is SVG, by its name or its MIME type: the
+/// bytes arrive only with the drop.
+fn hovers_svg(file: &egui::HoveredFile) -> bool {
+    file.mime == "image/svg+xml"
+        || file
+            .path
+            .as_deref()
+            .and_then(|p| p.extension())
+            .is_some_and(|e| e.eq_ignore_ascii_case("svg"))
 }
 
 /// The drop's pill, laid out on `at` but kept inside `canvas`.
@@ -10978,6 +11034,25 @@ mod image_name_tests {
 #[cfg(test)]
 mod drop_label_tests {
     use super::*;
+
+    /// A hovering SVG is announced as an import and never as a picture replace; a mix
+    /// is counted as files.
+    #[test]
+    fn a_hovering_svg_is_an_import() {
+        assert_eq!(drop_label(1, 1, None), "Import SVG");
+        assert_eq!(drop_label(2, 2, None), "Import 2 SVGs");
+        assert_eq!(drop_label(3, 1, None), "Place 3 files");
+        assert_eq!(drop_label(2, 0, None), "Place 2 images");
+        let svg = egui::HoveredFile {
+            path: Some("C:/art/Logo.SVG".into()),
+            ..Default::default()
+        };
+        let png = egui::HoveredFile {
+            path: Some("C:/art/logo.png".into()),
+            ..Default::default()
+        };
+        assert!(hovers_svg(&svg) && !hovers_svg(&png));
+    }
 
     /// The pill `paint_drop_label` paints, as a screen rect.
     fn pill(canvas: egui::Rect, at: egui::Pos2) -> egui::Rect {

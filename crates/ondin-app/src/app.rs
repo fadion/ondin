@@ -4800,13 +4800,21 @@ impl OndinApp {
     /// armed if something loaded; a placement tool with nothing to place would look hung.
     pub(crate) fn place_image_action(&mut self) {
         let Some(paths) = rfd::FileDialog::new()
-            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif"])
+            .add_filter("Images", &["png", "jpg", "jpeg", "webp", "gif", "svg"])
             .pick_files()
         else {
             return;
         };
-        let (mut loaded, mut failed) = (Vec::new(), Vec::new());
+        let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), Vec::new());
         for path in paths {
+            // Vector art becomes layers now, where a paste would put them; only
+            // pictures go on the Image tool's cursor.
+            if let Ok(bytes) = std::fs::read(&path)
+                && looks_like_svg(&bytes)
+            {
+                vector.push((image_name(&path), bytes));
+                continue;
+            }
             match self.load_image_file(&path) {
                 Ok(image) => loaded.push(image),
                 Err(why) => failed.push(
@@ -4822,16 +4830,16 @@ impl OndinApp {
         if !failed.is_empty() {
             self.session.fail(failed.join("; "));
         }
-        if loaded.is_empty() {
-            return;
-        }
         let n = loaded.len();
-        self.pending_images = loaded;
-        self.choose_tool(Tool::Image);
-        self.session.info(match n {
-            1 => "Click to place the image".to_string(),
-            n => format!("Click to place {n} images"),
-        });
+        if n > 0 {
+            self.pending_images = loaded;
+            self.choose_tool(Tool::Image);
+            self.session.info(match n {
+                1 => "Click to place the image".to_string(),
+                n => format!("Click to place {n} images"),
+            });
+        }
+        self.import_svg_files(vector, None, Vec::new(), n > 0);
     }
 
     /// Pick one file and give it to the picture in `slot`; also the repair for a picture
@@ -4978,7 +4986,7 @@ impl OndinApp {
             return;
         }
         let at = self.drop_point(ctx);
-        let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), 0_usize);
+        let (mut loaded, mut failed, mut vector) = (Vec::new(), Vec::new(), Vec::new());
         for file in dropped {
             let name = file
                 .path
@@ -4992,9 +5000,8 @@ impl OndinApp {
             };
             let ext = file.path.as_deref().and_then(file_extension);
             match bytes {
-                // Vector art is refused, never rasterized, and counted apart so the
-                // message is not "could not read".
-                Some(b) if looks_like_svg(&b) => vector += 1,
+                // Vector art becomes layers, never a rasterized picture.
+                Some(b) if looks_like_svg(&b) => vector.push((name, b)),
                 Some(b) => match self.load_image_bytes(b, ext, Some(name.clone())) {
                     Ok(image) => loaded.push(image),
                     Err(why) => failed.push(why.message(&name)),
@@ -5002,28 +5009,78 @@ impl OndinApp {
                 None => failed.push(ImageRefusal::NotAnImage.message(&name)),
             }
         }
-        if vector > 0 {
-            self.session.fail(
-                "SVG is vector art, not an image — dropping one will create layers \
-                 once the parser is built"
-                    .to_string(),
-            );
+        if !failed.is_empty() {
+            self.session.fail(failed.join("; "));
+        }
+        let mut selected = Vec::new();
+        let pictures = !loaded.is_empty();
+        if pictures {
+            self.drop_images_at(loaded, at);
+            selected.extend_from_slice(self.session.selection.ids());
+        }
+        self.import_svg_files(vector, at, selected, pictures);
+    }
+
+    /// Import dropped or picked SVG files as layers, cascaded from `at` as dropped
+    /// pictures are, and select them beside `selected` (what the same gesture placed
+    /// already). Each file says what it made, after the gesture's own report when
+    /// `reported` says it wrote one; a file that will not read says why.
+    fn import_svg_files(
+        &mut self,
+        files: Vec<(String, Vec<u8>)>,
+        at: Option<Point>,
+        mut selected: Vec<NodeId>,
+        reported: bool,
+    ) {
+        if files.is_empty() {
+            return;
+        }
+        let (mut said, mut failed) = (Vec::new(), Vec::new());
+        for (i, (name, bytes)) in files.into_iter().enumerate() {
+            let step = DROP_CASCADE * i as f64;
+            let stem = std::path::Path::new(&name)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.clone());
+            let outcome = match String::from_utf8(bytes) {
+                Ok(text) => {
+                    self.import_svg(&text, at.map(|p| p + Vec2::new(step, step)), Some(&stem))
+                }
+                Err(_) => crate::canvas::SvgImport::Unreadable,
+            };
+            match outcome {
+                crate::canvas::SvgImport::Placed(made) => {
+                    said.push(format!("Imported {name} — {made}"));
+                    selected.extend_from_slice(self.session.selection.ids());
+                }
+                crate::canvas::SvgImport::TooDeep => {
+                    failed.push(format!("{name} is nested too deeply to read"))
+                }
+                crate::canvas::SvgImport::Unreadable => {
+                    failed.push(format!("{name} could not be read as SVG"))
+                }
+            }
         }
         if !failed.is_empty() {
             self.session.fail(failed.join("; "));
         }
-        if loaded.is_empty() {
+        if said.is_empty() {
             return;
         }
-        self.drop_images_at(loaded, at);
+        // The gesture's own report goes first; an error joins on its own.
+        let shown = self.session.status();
+        let placed = (reported && shown.kind == StatusKind::Info)
+            .then(|| shown.text.clone())
+            .filter(|t| !t.is_empty());
+        said.splice(0..0, placed);
+        self.session.selection.set(selected);
+        self.session.info(said.join(crate::session::STATUS_JOIN));
     }
 
     /// Place dropped images, or hand one to the shape under the pointer: onto a shape it
     /// replaces that shape's picture, keeping the framing; onto bare canvas it makes
     /// layers, cascaded since N files arrive at one point.
     fn drop_images_at(&mut self, loaded: Vec<LoadedImage>, at: Option<Point>) {
-        /// World units between one dropped layer and the next, not scaled by zoom.
-        const CASCADE: f64 = 24.0;
         let n = loaded.len();
         // A single picture replaces the fill under it, only with a real drop point:
         // the paste's selection-only `None` arm would replace whatever was selected.
@@ -5046,7 +5103,7 @@ impl OndinApp {
         let mut ops = Vec::new();
         let mut made = Vec::new();
         for (i, image) in loaded.iter().enumerate() {
-            let step = CASCADE * i as f64;
+            let step = DROP_CASCADE * i as f64;
             let (tx, node) = self.image_tx(Some(&advanced), image, p + Vec2::new(step, step));
             if advanced.apply(&tx).is_ok() {
                 ops.extend(tx.0);
@@ -5211,6 +5268,9 @@ pub(crate) fn bound_families(
 fn file_extension(path: &std::path::Path) -> Option<String> {
     path.extension().and_then(|e| e.to_str()).map(str::to_owned)
 }
+
+/// World units between one dropped layer and the next, not scaled by zoom.
+const DROP_CASCADE: f64 = 24.0;
 
 /// What a layer made from this file is called: its own name.
 fn image_name(path: &std::path::Path) -> String {
@@ -12528,6 +12588,76 @@ mod library_wiring_tests {
                  D464's keyboard hole, for the pointer"
             );
         }
+        let _ = std::fs::remove_dir_all(&root_dir);
+    }
+
+    /// One drop of an SVG, a picture and a file that is neither: the SVG becomes layers
+    /// in a group named for the file, the picture is placed, both end selected, and the
+    /// status keeps the refusal ahead of both reports.
+    /// flip: `take_dropped_images` skipping `import_svg_files` → fails at the group.
+    #[test]
+    fn a_dropped_svg_becomes_layers_beside_a_dropped_picture() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root_dir = temp_root("drop-svg");
+        let mut app = app_at(&ctx, root_dir.clone());
+        let mut png = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut png),
+            &[255u8, 0, 0, 255],
+            1,
+            1,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .expect("a 1×1 red PNG");
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>"#;
+        let file = |name: &str, bytes: &[u8]| egui::DroppedFile {
+            name: name.to_string(),
+            bytes: Some(bytes.to_vec().into()),
+            ..Default::default()
+        };
+        let input = egui::RawInput {
+            dropped_files: vec![
+                file("logo.svg", svg),
+                file("drop.png", &png),
+                file("fake.png", b"not a picture"),
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            app.session.next_status_pass();
+            app.take_dropped_images(ui.ctx());
+        });
+
+        let doc = &app.session.doc;
+        let group = ondin_core::subtree_nodes(doc, &[doc.root()])
+            .into_iter()
+            .find(|&id| doc.get(id).unwrap().name() == "logo")
+            .expect("the SVG became a group named for its file");
+        assert!(
+            !doc.get(group).unwrap().children().is_empty(),
+            "with its shape"
+        );
+        assert_eq!(
+            app.session.selection.ids().len(),
+            2,
+            "the picture and the group"
+        );
+        assert!(app.session.selection.ids().contains(&group));
+        let status = app.session.status();
+        assert_eq!(status.kind, crate::session::StatusKind::Error);
+        assert!(
+            status.text.starts_with("Could not read: fake.png"),
+            "{}",
+            status.text
+        );
+        assert!(status.text.contains("Placed image"), "{}", status.text);
+        assert!(
+            status.text.contains("Imported logo.svg — 1 layer"),
+            "{}",
+            status.text
+        );
         let _ = std::fs::remove_dir_all(&root_dir);
     }
 

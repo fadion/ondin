@@ -949,6 +949,55 @@ fn combining_mains_makes_a_set_of_their_names() {
     assert_eq!(variant::set_of(&doc, a), Some(set));
 }
 
+/// *Combine as variants* reads `Key=Value` names as properties: keys in the order
+/// first written, a key a name leaves out reading `Default`, the shared path
+/// naming the set. One name that is not all pairs keeps the whole-name property.
+///
+/// flip: `named_values` answering `None` always → fails at the property names.
+#[test]
+fn combining_mains_named_as_properties_makes_those_properties() {
+    let combined = |names: &[&str]| {
+        let mut ids = IdSource::new(0xBD);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let mains: Vec<NodeId> = names.iter().map(|_| ids.mint()).collect();
+        let mut ops = Vec::new();
+        for (i, (m, n)) in mains.iter().zip(names).enumerate() {
+            ops.push(create(*m, root, i, frame(10.0, 10.0), n));
+            ops.push(Operation::SetComponent {
+                id: *m,
+                component: true,
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        let res = Resolved::rebuild(&doc);
+        let (tx, set) = variant::combine(&doc, &res, &mut ids, &mains).unwrap();
+        doc.apply(&tx).expect("a set");
+        (doc, set, mains)
+    };
+    let (doc, set, m) = combined(&[
+        "Button/Size=L, State=Hover",
+        "Button/Size=S,State=Rest",
+        "Button/ Size = S",
+    ]);
+    let s = doc.get(set).unwrap();
+    assert_eq!(s.name(), "Button");
+    let props = &s.set().unwrap().props;
+    assert_eq!(
+        props.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        ["Size", "State"]
+    );
+    assert_eq!(props[0].values, strs(&["L", "S"]));
+    assert_eq!(props[1].values, strs(&["Hover", "Rest", "Default"]));
+    assert_eq!(doc.get(m[0]).unwrap().variant(), strs(&["L", "Hover"]));
+    assert_eq!(doc.get(m[2]).unwrap().variant(), strs(&["S", "Default"]));
+
+    let (doc, set, _) = combined(&["Size=L", "Large"]);
+    let s = doc.get(set).unwrap();
+    assert_eq!(s.set().unwrap().props[0].name, "Property 1");
+    assert_eq!(s.set().unwrap().props[0].values, strs(&["Size=L", "Large"]));
+}
+
 /// **A new set leaves `SET_PAD` of air round its variants** (§15 D998): one 40×20
 /// main at (100, 50) becomes a 60×40 set at (90, 40), and the main stays where it
 /// was on the page — 10 in from each of the set's edges. The maintainer's report:

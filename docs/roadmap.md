@@ -17,8 +17,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   colours** beside the document swatches (`picker::document_swatches`).
 - **Adding layout to a loose selection** should infer direction, gap and padding from where the
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
-- **Combine as variants** should parse `Size=L, State=Hover` names into properties
-  (`variant::combine` makes one *Property 1*).
 - **Groups in the styles browser** for slash paths (`variables.rs` `styles_tab`), as variables have
   (`Menu::Group`).
 - **Descriptions** on components, styles and variables — no field on `Style`, `Variable` or a main.

@@ -669,9 +669,11 @@ pub const VARIANT_GAP: f64 = 24.0;
 /// maintainer's number, so the set's own frame can be seen and picked.
 pub const SET_PAD: f64 = 10.0;
 
-/// *Combine as variants*: wrap `mains` in a new frame and make it a set whose one
-/// property, `Property 1`, takes each main's name as a value (§15 D982). Mains
-/// whose names repeat share a value and so clash, which the set then shows.
+/// *Combine as variants*: wrap `mains` in a new frame and make it a set. Names
+/// written as properties (`Size=L, State=Hover`) become the set's properties
+/// (`named_values`); otherwise its one property, `Property 1`, takes each main's
+/// name as a value (§15 D982). Mains whose values repeat clash, which the set
+/// then shows.
 /// Answers the transaction and the set's id; refused unless every member is a
 /// main not already in a set, all of one kind ([`one_kind`], §15 D1003 (5)), and
 /// all share a parent (`build::frame`'s rule).
@@ -743,32 +745,98 @@ pub fn combine(
             }
         })
         .collect();
-    let mut values: Vec<String> = Vec::new();
-    for n in &names {
-        if !values.contains(n) {
-            values.push(n.clone());
-        }
-    }
-    tx.0.push(Operation::SetVariantSet {
-        id: set,
-        set: Some(VariantSet {
-            props: vec![VariantProp {
+    let (props, rows, name) = match named_values(&names) {
+        Some(parsed) => parsed,
+        None => {
+            let mut values: Vec<String> = Vec::new();
+            for n in &names {
+                if !values.contains(n) {
+                    values.push(n.clone());
+                }
+            }
+            let props = vec![VariantProp {
                 name: "Property 1".into(),
                 values,
-            }],
-        }),
-    });
-    for (m, n) in ordered.iter().zip(&names) {
-        tx.0.push(Operation::SetVariant {
-            id: *m,
-            values: vec![n.clone()],
-        });
-    }
-    tx.0.push(Operation::SetName {
+            }];
+            let rows = names.iter().map(|n| vec![n.clone()]).collect();
+            (props, rows, set_name(&names))
+        }
+    };
+    tx.0.push(Operation::SetVariantSet {
         id: set,
-        name: set_name(&names),
+        set: Some(VariantSet { props }),
     });
+    for (m, values) in ordered.iter().zip(rows) {
+        tx.0.push(Operation::SetVariant { id: *m, values });
+    }
+    tx.0.push(Operation::SetName { id: set, name });
     Ok((tx, set))
+}
+
+/// The value a combined main takes for a property its name does not mention.
+pub const MISSING_VALUE: &str = "Default";
+
+/// Names written as properties — `Size=L, State=Hover`, after an optional
+/// `Button/` path — read as a set: its properties in the order the names first
+/// mention them, each main's values, and the set's name (the path every name
+/// shares, else `Component`). `None` unless every name reads that way, so a
+/// half-written set keeps `combine`'s one property of whole names.
+fn named_values(names: &[String]) -> Option<(Vec<VariantProp>, Vec<Vec<String>>, String)> {
+    let mut parsed: Vec<(&str, Vec<(String, String)>)> = Vec::new();
+    for n in names {
+        let (path, tail) = n.rsplit_once('/').unwrap_or(("", n));
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for piece in tail.split(',') {
+            let (k, v) = piece.split_once('=')?;
+            let (k, v) = (k.trim(), v.trim());
+            if k.is_empty() || v.is_empty() || v.contains('=') || pairs.iter().any(|p| p.0 == k) {
+                return None;
+            }
+            pairs.push((k.to_string(), v.to_string()));
+        }
+        parsed.push((path.trim(), pairs));
+    }
+    let mut props: Vec<VariantProp> = Vec::new();
+    for (_, pairs) in &parsed {
+        for (k, v) in pairs {
+            match props.iter_mut().find(|p| p.name == *k) {
+                Some(p) if !p.values.contains(v) => p.values.push(v.clone()),
+                Some(_) => {}
+                None => props.push(VariantProp {
+                    name: k.clone(),
+                    values: vec![v.clone()],
+                }),
+            }
+        }
+    }
+    let rows: Vec<Vec<String>> = parsed
+        .iter()
+        .map(|(_, pairs)| {
+            props
+                .iter()
+                .map(|p| {
+                    pairs
+                        .iter()
+                        .find(|(k, _)| *k == p.name)
+                        .map_or_else(|| MISSING_VALUE.to_string(), |(_, v)| v.clone())
+                })
+                .collect()
+        })
+        .collect();
+    for (i, p) in props.iter_mut().enumerate() {
+        if rows.iter().any(|r| r[i] == MISSING_VALUE)
+            && !p.values.iter().any(|v| v == MISSING_VALUE)
+        {
+            p.values.push(MISSING_VALUE.to_string());
+        }
+    }
+    let path = parsed[0].0;
+    let name = if !path.is_empty() && parsed.iter().all(|(p, _)| *p == path) {
+        path.to_string()
+    } else {
+        "Component".to_string()
+    };
+    Some((props, rows, name))
 }
 
 /// A new set's name: the part its variants' names share before a separator, or

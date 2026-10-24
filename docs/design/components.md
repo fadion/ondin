@@ -558,10 +558,19 @@ and prunes stale bindings. Gated so an edit that cannot break a variant rule pay
 properties). Over a property with no values it leaves the refusal to `apply` (`SetNames`).
 
 **Verbs**: `combine` (*Combine as variants* — mains framed with `SET_PAD` (10) of air on every side,
-nothing moving on the page, one property *Property 1*, each name a value); `add_variant` (duplicates a
+nothing moving on the page, properties read from the names as below); `add_variant` (duplicates a
 variant as a main `VARIANT_GAP` (24) below, grows the set to `SET_PAD` past it, first free
 combination, set bindings extended); the set's property/value renames, adds, moves, deletes
 (`delete_value` deletes the variants holding it through `relink_for_delete`).
+
+**`combine` reads properties from the mains' names** (`named_values`). When every name, after its last
+`/`, is comma-separated `Key=Value` pairs (keys non-empty and unique within the name, values non-empty,
+no second `=`), the set takes those keys as properties, in the order the names first mention them, each
+value list in first-mention order; a main whose name leaves a key out takes `Default`
+(`variant::MISSING_VALUE`), appended to that property's values. The set is named the path before the
+last `/` when every main shares one, else `Component`. If any name is not all pairs, the set gets one
+property, *Property 1*, each whole name a value, and is named by the names' common prefix
+(`set_name`). Either way `settle` then names each variant by its values.
 
 **A set holds one kind**: `variant::switch` refuses a main of another kind (`variant::same_kind`); the
 doors refuse first with a message — *Combine as variants* over two kinds (`variant::one_kind`, row

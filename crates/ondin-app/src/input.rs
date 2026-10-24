@@ -33,6 +33,23 @@ impl Mode {
     }
 }
 
+/// What *Select same* compares between the key layer and every other layer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Same {
+    /// The whole fill list, by value.
+    Fill,
+    /// The whole stroke list, by value.
+    Stroke,
+    /// A text layer's family, its own or any run's.
+    Font,
+    /// The whole effect stack, by value.
+    Effect,
+}
+
+impl Same {
+    pub const ALL: [Same; 4] = [Same::Fill, Same::Stroke, Same::Font, Same::Effect];
+}
+
 /// A resolved intent. Actions are produced by [`resolve`] and consumed by the
 /// app; no key handling happens anywhere else, so the whole keymap is readable
 /// in one place.
@@ -86,6 +103,9 @@ pub enum Action {
     /// (`docs/shortcuts.md` §0). A separate variant because `dispatch` no longer
     /// has the frame to re-derive the modifier.
     PasteInPlace,
+    /// *Paste to replace* (`OndinApp::paste_to_replace`). Unbound: the layer menu and
+    /// the palette are its doors.
+    PasteToReplace,
     /// A paste witnessed only by `Ctrl`+`V` coming back **up**.
     ///
     /// The weaker signal: it must stand down whenever `Event::Paste` fired, which
@@ -93,8 +113,8 @@ pub enum Action {
     /// ([`crate::app::OndinApp::dispatch`] tests that). It exists because an
     /// image-only clipboard produces no event at all (§15 D183).
     PasteRelease,
-    /// `Ctrl`+`Alt`+`C`: lift the key layer's appearance — fills, strokes, opacity
-    /// — into [`crate::app::OndinApp::property_clipboard`] (`docs/shortcuts.md`
+    /// `Ctrl`+`Alt`+`C`: lift the key layer's appearance — fills, strokes, effects,
+    /// opacity — into [`crate::app::OndinApp::property_clipboard`] (`docs/shortcuts.md`
     /// §7, Figma's chord).
     ///
     /// Resolved from `Event::Copy` plus the frame's `Alt`, for the reason
@@ -109,6 +129,12 @@ pub enum Action {
     Duplicate,
     Delete,
     SelectAll,
+    /// Select every layer in the document that shares the key layer's `Same`
+    /// (`OndinApp::select_same`). Unbound: the palette is its door.
+    SelectSame(Same),
+    /// Select the siblings of the selection that are not in it
+    /// (`OndinApp::select_inverse`). Unbound.
+    SelectInverse,
     Group,
     /// *Use as mask*: make the selection a mask, or release the one it already
     /// has — `inspector::mask_action` decides which, and it is the same toggle

@@ -225,7 +225,8 @@ before adding another.
 | `Ctrl+V` | text on the clipboard becomes a text layer | ✅ at the centre of the selection's frame, else the view (§15 D218, D221) |
 | ~~`Ctrl+V`~~ | ~~paste at the pointer~~ | **decided non-goal** (§15 D300): the chord is position-free by choice (`paste_at` could take a point); *Paste here* is the positional door |
 | `Ctrl+Shift+V` | paste in place | ✅ Illustrator (§15 D248) |
-| `Ctrl+Alt+C` | copy properties | ✅ Figma (§15 D257): fills, strokes, opacity off the key layer or a lone selection |
+| `Ctrl+V` · `Ctrl+Shift+V` | with one unlocked frame selected, paste **inside** it | ✅ `paste_into_selected_frame`; rules in `design/app-frames-and-copies.md` |
+| `Ctrl+Alt+C` | copy properties | ✅ Figma (§15 D257): fills, strokes, effects, opacity off the key layer or a lone selection |
 | `Ctrl+Alt+V` | paste properties | ✅ Figma; read from the **release** |
 | `Ctrl+D` | duplicate | ✅ Figma |
 
@@ -484,8 +485,10 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 
 ## Deliberately unbound
 
-- **Select-all-with-same** — no convention; belongs in the palette, which can enumerate *which*
-  "same".
+- **Select same… and Select inverse** — no convention; built as palette verbs (*Select same fill /
+  stroke / font / effects*), since the palette can enumerate *which* "same".
+- **Paste to replace** — a layer-menu row (and so a palette row), no chord. `Ctrl+Shift+R` is not spent on it: `Ctrl+R` is
+  rename.
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural
   conversion no reference app binds. `Ctrl+E` is *Flatten*, a different verb, and must not cover
   this one by having the only key. The third reason an `Item` is not an `Action`: "no key was spent".

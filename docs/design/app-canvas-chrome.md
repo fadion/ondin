@@ -58,7 +58,12 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   *Show toolbar*, *Show status messages*, *Present mode*.
 - **Snap**: *Snap to shapes*, *Snap to guides*, *Snap to grid*, *Snap to baselines* (last: no
   accelerator, not Illustrator's).
-- Both render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
+- **Zoom** (`zoom_control`): a text field on top, focused at open, empty with the current zoom as
+  its hint; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
+  centre, clamped like every zoom; anything else says *"Type a zoom percentage, like 150"*) and
+  closes the menu. Below it *Zoom in*, *Zoom out*, *Actual size*, *Fit to page*, *Fit selection*.
+  `OndinApp::zoom_entry` holds the typed text, `None` while the menu is shut.
+- View and Snap render rows from `input::ViewSwitch`, the enum chords name, so label, order and state come from
   one place. `ViewSwitch::accel` is `None` for *Snap to baselines*, *Show layout grid*, *Show status
   messages*.
 - All are **view state**, not document state. All but present mode are kept in `prefs.view`
@@ -104,7 +109,8 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   *Kits used…*, *Stop sharing as kit…*, *Show in library*) are registry items the menu draws its
   labels from, offered always and dimmed with a reason where the menu would leave them out (their
   `Action`s re-ask the menu's guards); the Transform card's quarter turns are
-  `Item::RotateQuarter`, dimmed without a selection.
+  `Item::RotateQuarter`, dimmed without a selection. *Select same …* (`Item::SelectSame`) dims with
+  `select_same_source`'s reason and *Select inverse* without a selection (`app-selection.md`).
 - **The target** (`palette_target`, re-read every frame): a text session → `Target::TextSession`; a
   point or segment selection on the edited path → `Target::Points`; selected layers →
   `Target::Layer { id, door: Panel }`, `id` the key layer, else the topmost selected in

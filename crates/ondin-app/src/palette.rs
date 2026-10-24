@@ -563,6 +563,13 @@ impl OndinApp {
                 Cmd::verb(Item::RotateQuarter(clockwise), need_sel),
             );
         }
+        for same in crate::input::Same::ALL {
+            push(
+                &mut out,
+                Cmd::verb(Item::SelectSame(same), self.select_same_source(same).err()),
+            );
+        }
+        push(&mut out, Cmd::verb(Item::SelectInverse, need_sel));
         for t in [
             ondin_export::code::Target::Html,
             ondin_export::code::Target::React,

@@ -7,7 +7,7 @@
 use crate::canvas::CanvasRenderer;
 use crate::cursor::Cursors;
 use crate::fonts::FontService;
-use crate::input::{self, Action, Mode, ViewSwitch};
+use crate::input::{self, Action, Mode, Same, ViewSwitch};
 use crate::panels::{ImageCard, LayerDrag, PaintSlot, Picker};
 use crate::preview::{Drag, PenState, PointSet, TextSession};
 use crate::session::{EditorSession, StatusKind};
@@ -656,6 +656,9 @@ pub struct OndinApp {
     /// Which of the top bar's dropdowns is open, if any; one field so two menus
     /// can never overlap.
     pub(crate) open_menu: TopMenu,
+    /// What is typed in the zoom dropdown's field; `None` while the dropdown is shut,
+    /// so each opening starts empty and focused.
+    zoom_entry: Option<String>,
     /// The floating insert picker, while it is open.
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
     /// The revision the bound families were last loaded at: a bind, a string cell, a new
@@ -1235,6 +1238,7 @@ impl OndinApp {
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
+            zoom_entry: None,
             kit_picker: None,
             bound_fonts_at: None,
             kit_placing: None,
@@ -1744,6 +1748,7 @@ impl OndinApp {
             Action::Cut => self.cut_selection(ctx),
             Action::Paste => self.paste(),
             Action::PasteInPlace => self.paste_in_place(),
+            Action::PasteToReplace => self.paste_to_replace(),
             // `egui_winit` sends `Event::Paste` exactly when the clipboard has text,
             // so only a text-less clipboard needs this release to paste.
             Action::PasteRelease => {
@@ -1763,6 +1768,8 @@ impl OndinApp {
             }
             Action::Delete => self.delete_selection(),
             Action::SelectAll => self.select_all(),
+            Action::SelectSame(same) => self.select_same(same),
+            Action::SelectInverse => self.select_inverse(),
             // The pen reads Enter itself in `pen_input`.
             Action::Enter if self.pen.is_some() => {}
             Action::Enter => self.enter_action(),
@@ -2279,6 +2286,144 @@ impl OndinApp {
                 .filter(|id| self.may_select_in_bulk(*id))
                 .collect(),
         );
+    }
+
+    /// The layer *Select same* compares against: the key layer, else a lone selected
+    /// one, when it has the property `same` names — else the sentence the palette
+    /// dims the row with.
+    pub(crate) fn select_same_source(&self, same: Same) -> Result<NodeId, &'static str> {
+        let sel = &self.session.selection;
+        let Some(id) = sel.key().or_else(|| sel.single()) else {
+            return Err(if sel.is_empty() {
+                crate::menu::NEEDS_SELECTION
+            } else {
+                "Make one of these the key layer to match it"
+            });
+        };
+        let doc = &self.session.doc;
+        let node = doc.get(id).ok_or(crate::menu::NEEDS_SELECTION)?;
+        let has = match same {
+            Same::Fill => !node.paint().fills.is_empty(),
+            Same::Stroke => !node.paint().strokes.is_empty(),
+            Same::Font => !text_families(doc, id).is_empty(),
+            Same::Effect => !node.effects().is_empty(),
+        };
+        if has {
+            return Ok(id);
+        }
+        Err(match same {
+            Same::Fill => "This layer has no fill",
+            Same::Stroke => "This layer has no stroke",
+            Same::Font => "This is not a text layer",
+            Same::Effect => "This layer has no effects",
+        })
+    }
+
+    /// Replace the selection with every layer in the document sharing the source
+    /// layer's fills, strokes, font or effects ([`Self::select_same_source`]),
+    /// the source included. Locked layers are left out and counted, as
+    /// `select_by_color` does.
+    pub(crate) fn select_same(&mut self, same: Same) {
+        let Ok(source) = self.select_same_source(same) else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let key = doc.get(source).expect("the source is in the document");
+        let families = text_families(doc, source);
+        let matches = |id: NodeId| -> bool {
+            let Some(n) = doc.get(id) else { return false };
+            match same {
+                Same::Fill => {
+                    n.paint().fills.len() == key.paint().fills.len()
+                        && n.paint()
+                            .fills
+                            .iter()
+                            .zip(&key.paint().fills)
+                            .all(|(a, b)| a.value == b.value)
+                }
+                Same::Stroke => {
+                    n.paint().strokes.len() == key.paint().strokes.len()
+                        && n.paint()
+                            .strokes
+                            .iter()
+                            .zip(&key.paint().strokes)
+                            .all(|(a, b)| a.value == b.value)
+                }
+                Same::Font => text_families(doc, id).iter().any(|f| families.contains(f)),
+                Same::Effect => {
+                    n.effects().len() == key.effects().len()
+                        && n.effects()
+                            .iter()
+                            .zip(key.effects())
+                            .all(|(a, b)| a.value == b.value)
+                }
+            }
+        };
+        let mut found = Vec::new();
+        let mut stack: Vec<NodeId> = doc
+            .get(doc.root())
+            .map(|r| r.children().iter().rev().copied().collect())
+            .unwrap_or_default();
+        while let Some(id) = stack.pop() {
+            // The vault's vendored mains are never selected.
+            if Some(id) == doc.vault() {
+                continue;
+            }
+            let Some(node) = doc.get(id) else { continue };
+            if matches(id) {
+                found.push(id);
+            }
+            stack.extend(node.children().iter().rev().copied());
+        }
+        let counted = found.len();
+        found.retain(|id| self.may_select_in_bulk(*id));
+        let locked = counted - found.len();
+        let what = match same {
+            Same::Fill => "fill",
+            Same::Stroke => "stroke",
+            Same::Font => "font",
+            Same::Effect => "effects",
+        };
+        let n = found.len();
+        self.entered_group = None;
+        self.session.selection.set(found);
+        self.session.info(match (n, locked) {
+            (1, 0) => format!("Selected 1 layer with this {what}"),
+            (n, 0) => format!("Selected {n} layers with the same {what}"),
+            (n, l) => format!("Selected {n} of {counted} layers with the same {what} — {l} locked"),
+        });
+    }
+
+    /// Replace the selection with the layers beside it that it leaves out: every child
+    /// of each selected layer's parent that is not selected, locked ones skipped.
+    pub(crate) fn select_inverse(&mut self) {
+        let doc = &self.session.doc;
+        let ids = build::outermost(doc, self.session.selection.ids());
+        if ids.is_empty() {
+            return;
+        }
+        let mut parents: Vec<NodeId> = Vec::new();
+        for p in ids
+            .iter()
+            .filter_map(|id| doc.get(*id).and_then(|n| n.parent()))
+        {
+            if !parents.contains(&p) {
+                parents.push(p);
+            }
+        }
+        let others: Vec<NodeId> = parents
+            .iter()
+            .filter_map(|p| doc.get(*p))
+            .flat_map(|p| p.children().iter().copied())
+            .filter(|c| !ids.contains(c) && Some(*c) != doc.vault())
+            .filter(|c| self.may_select_in_bulk(*c))
+            .collect();
+        if others.is_empty() {
+            self.session
+                .info("Nothing else to select beside these layers");
+            return;
+        }
+        self.session.selection.set(others);
     }
 
     /// The layers a marquee or Ctrl+A can pick: the direct children of every frame and
@@ -3183,7 +3328,11 @@ impl OndinApp {
             return;
         }
         match self.take_clipboard() {
-            Clipboard::Layers if self.paste_clipboard() => return,
+            Clipboard::Layers
+                if self.paste_into_selected_frame(PASTE_OFFSET, true) || self.paste_clipboard() =>
+            {
+                return;
+            }
             Clipboard::Unreadable => return,
             _ => {}
         }
@@ -3207,7 +3356,9 @@ impl OndinApp {
                 if self.paste_guides(0.0) {
                     return;
                 }
-                if self.paste_clipboard_at(Vec2::ZERO) {
+                if self.paste_into_selected_frame(Vec2::ZERO, false)
+                    || self.paste_clipboard_at(Vec2::ZERO)
+                {
                     return;
                 }
             }
@@ -3603,18 +3754,26 @@ impl OndinApp {
         Some((id, props))
     }
 
-    /// Lift the source layer's fills, strokes and opacity into
+    /// Lift the source layer's fills, strokes, effects and opacity into
     /// [`Self::property_clipboard`] (`Ctrl`+`Alt`+`C`). Reads the committed node, not a
     /// gesture's preview.
     fn copy_properties(&mut self) {
         let Some((_, props)) = self.properties_source() else {
             return;
         };
-        let what = match (props.fills.len(), props.strokes.len()) {
-            (0, 0) => "opacity",
-            (_, 0) => "fill and opacity",
-            (0, _) => "stroke and opacity",
-            _ => "fill, stroke and opacity",
+        let mut parts: Vec<&str> = [
+            (!props.fills.is_empty()).then_some("fill"),
+            (!props.strokes.is_empty()).then_some("stroke"),
+            (!props.effects.is_empty()).then_some("effects"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        parts.push("opacity");
+        let what = match parts.split_last() {
+            Some((last, [])) => last.to_string(),
+            Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+            None => unreachable!("opacity is always copied"),
         };
         self.property_clipboard = Some(props);
         self.session.info(format!("Copied {what}"));
@@ -3718,6 +3877,147 @@ impl OndinApp {
             placements,
             "Pasted",
             offset,
+            &clip.images,
+            &clip.kits,
+            &clip.vars.tokens,
+        );
+        true
+    }
+
+    /// Where a clipboard template drew, in world space: its original's placement while
+    /// that is still in the document, else its stored transform under its old parent
+    /// (the canvas for a parent that is gone or foreign, as [`Self::paste_clipboard_at`]
+    /// falls back).
+    fn template_world(&self, template: &[Node]) -> Option<ondin_core::kurbo::Affine> {
+        let root = template.first()?;
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        if doc.contains(root.id())
+            && let Some(world) = res.world_transform(root.id())
+        {
+            return Some(world);
+        }
+        let parent = root
+            .parent()
+            .filter(|p| doc.contains(*p))
+            .and_then(|p| res.world_transform(p))
+            .unwrap_or(ondin_core::kurbo::Affine::IDENTITY);
+        Some(parent * root.transform())
+    }
+
+    /// The box the clipboard's layers occupy where [`Self::template_world`] places them:
+    /// their originals' boxes now, while every one is still in the document, else the
+    /// box recorded at the copy. A copy-time box alone would aim off by however far an
+    /// original moved since.
+    fn clip_box(&self, clip: &Clip) -> Option<Rect> {
+        let now: Option<Vec<Rect>> = clip
+            .subtrees
+            .iter()
+            .map(|t| {
+                let id = t.first()?.id();
+                self.session.doc.contains(id).then_some(())?;
+                self.session.resolved.world_bounds(id)
+            })
+            .collect();
+        match now {
+            Some(boxes) if !boxes.is_empty() => boxes.into_iter().reduce(|a, b| a.union(b)),
+            _ => self.clipboard_from,
+        }
+    }
+
+    /// `templates`, landed for this document, each root re-placed under `parent` at
+    /// where it drew moved by `shift` (world space), at `index` of each.
+    fn rebased_placements(
+        &self,
+        clip: &Clip,
+        parent: NodeId,
+        shift: Vec2,
+        index: impl Fn(&[Node]) -> Option<usize>,
+    ) -> Vec<build::Placement> {
+        let Some(parent_world) = self.session.resolved.world_transform(parent) else {
+            return Vec::new();
+        };
+        clip.subtrees
+            .iter()
+            .filter_map(|template| {
+                let root = template.first()?.id();
+                let world = self.template_world(template)?;
+                let local =
+                    parent_world.inverse() * ondin_core::kurbo::Affine::translate(shift) * world;
+                let mut nodes =
+                    ondin_core::variable::land(&self.session.doc, &clip.vars, template.clone());
+                let landed = nodes.iter_mut().find(|n| n.id() == root)?;
+                *landed = landed.with_transform(local);
+                Some(build::Placement {
+                    nodes,
+                    parent,
+                    index: index(template),
+                })
+            })
+            .collect()
+    }
+
+    /// `Ctrl+V` and `Ctrl+Shift+V` with one frame selected: the clipboard goes inside
+    /// it, on top. Pasted layers that would overlap the frame keep their place,
+    /// `offset` from it; with `centre`, layers that would land outside it are centred
+    /// on it instead.
+    ///
+    /// `false` leaves the ordinary paste to run: no layers on the clipboard, no lone
+    /// unlocked frame, a clipboard holding that frame or what holds it (a duplicate,
+    /// not a nesting), every layer copied from inside it already, or a paste the
+    /// component rules refuse there.
+    fn paste_into_selected_frame(&mut self, offset: Vec2, centre: bool) -> bool {
+        let Some(clip) = self.clipboard.clone() else {
+            return false;
+        };
+        let doc = &self.session.doc;
+        let Some(frame) = self.session.selection.single() else {
+            return false;
+        };
+        if !matches!(
+            doc.get(frame).map(|n| n.kind()),
+            Some(NodeKind::Artboard { .. })
+        ) || ondin_core::is_effectively_locked(doc, frame)
+        {
+            return false;
+        }
+        let roots: Vec<NodeId> = clip
+            .subtrees
+            .iter()
+            .filter_map(|t| t.first().map(|n| n.id()))
+            .collect();
+        let holds_frame = std::iter::successors(Some(frame), |c| doc.get(*c)?.parent())
+            .any(|c| roots.contains(&c));
+        let from_inside = clip
+            .subtrees
+            .iter()
+            .all(|t| t.first().and_then(|n| n.parent()) == Some(frame));
+        if holds_frame || from_inside {
+            return false;
+        }
+        let Some(frame_box) = self.session.resolved.world_bounds(frame) else {
+            return false;
+        };
+        let shift = match self.clip_box(&clip) {
+            Some(from) if centre && !(from + offset).overlaps(frame_box) => {
+                frame_box.center() - from.center()
+            }
+            _ => offset,
+        };
+        let placements = self.rebased_placements(&clip, frame, shift, |template| {
+            // A layer copied from this frame still lands above its original.
+            let id = template.first()?.id();
+            let siblings = self.session.doc.get(frame)?.children();
+            siblings.iter().position(|c| *c == id).map(|i| i + 1)
+        });
+        if placements.is_empty()
+            || !self.paste_is_held(&placements, &clip.images, &clip.kits, &clip.vars.tokens)
+        {
+            return false;
+        }
+        self.insert_all(
+            placements,
+            "Pasted",
+            Vec2::ZERO,
             &clip.images,
             &clip.kits,
             &clip.vars.tokens,
@@ -4076,6 +4376,82 @@ impl OndinApp {
             (0, _, _) => format!("Deleted {} layer(s)", d.count),
             (n, _, _) => format!("Deleted {} layer(s) and {n} guide(s)", d.count),
         });
+    }
+
+    /// *Paste to replace*: each selected layer gives way to a copy of the whole clipboard,
+    /// the copy's box centred on the layer's and in its slot of its parent, so several
+    /// copied layers replace each target together. Locked targets are skipped. One undo
+    /// step; the copies end selected.
+    pub(crate) fn paste_to_replace(&mut self) {
+        if matches!(self.take_clipboard(), Clipboard::Layers) {
+            self.replace_with_clipboard();
+        }
+    }
+
+    /// [`Self::paste_to_replace`] once the clipboard is known to hold layers.
+    fn replace_with_clipboard(&mut self) {
+        let Some(clip) = self.clipboard.clone() else {
+            return;
+        };
+        let Some(from) = self.clip_box(&clip) else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let targets: Vec<NodeId> = build::outermost(doc, self.session.selection.ids())
+            .into_iter()
+            .filter(|id| !ondin_core::is_effectively_locked(doc, *id))
+            .collect();
+        let mut placements = Vec::new();
+        for target in &targets {
+            let Some(parent) = doc.get(*target).and_then(|n| n.parent()) else {
+                continue;
+            };
+            let Some(bounds) = self.session.resolved.world_bounds(*target) else {
+                continue;
+            };
+            // Above the target, which goes: the copies take its slot.
+            let index = doc
+                .get(parent)
+                .and_then(|p| p.children().iter().position(|c| c == target))
+                .map(|i| i + 1);
+            placements.extend(self.rebased_placements(
+                &clip,
+                parent,
+                bounds.center() - from.center(),
+                |_| index,
+            ));
+        }
+        if placements.is_empty() {
+            return;
+        }
+        let (tx, created) = match ondin_core::kit::insert_carrying(
+            &self.session.doc,
+            &mut self.session.ids,
+            &clip.kits,
+            &clip.vars.tokens,
+            &placements,
+            Vec2::ZERO,
+        ) {
+            Ok(built) => built,
+            Err(e) => {
+                let why = self.carry_refused(&e);
+                return self.session.fail(why);
+            }
+        };
+        let doc = &self.session.doc;
+        let mut ops = build::missing_image_ops(doc, &clip.images);
+        ops.extend(tx.0);
+        // A frame's guides go before the frame, as `delete_layers` orders them.
+        ops.extend(build::guides_of(doc, &targets));
+        ops.extend(targets.iter().map(|id| Operation::DeleteNode { id: *id }));
+        ops.extend(ondin_core::component::relink_for_delete(doc, &targets));
+        if self.session.commit(Transaction(ops)) {
+            self.session.info(match targets.len() {
+                1 => "Replaced 1 layer".to_string(),
+                n => format!("Replaced {n} layers"),
+            });
+            self.session.selection.set(created);
+        }
     }
 
     /// Delete the selected layers in one commit and say what that did; `None` when
@@ -5395,6 +5771,34 @@ impl LoadedImage {
     }
 }
 
+/// A zoom typed as `150`, `150%` or `37.5 %`; `None` for anything that is not a
+/// positive finite number.
+fn parse_zoom_percent(typed: &str) -> Option<f64> {
+    let n: f64 = typed.trim().trim_end_matches('%').trim_end().parse().ok()?;
+    (n.is_finite() && n > 0.0).then_some(n)
+}
+
+/// The families text layer `id` is set in, lowercased: its own (through a bound
+/// family) and every run's. Empty for any other kind — what *Select same font* matches.
+fn text_families(doc: &ondin_core::Document, id: NodeId) -> Vec<String> {
+    let Some(kind) = doc.resolved_kind(id) else {
+        return Vec::new();
+    };
+    let NodeKind::Text { style, spans, .. } = kind.as_ref() else {
+        return Vec::new();
+    };
+    let mut out = vec![style.font_family.to_lowercase()];
+    for span in spans.as_slice() {
+        if let ondin_core::CharAttr::Family(name) = &span.attr {
+            let name = name.to_lowercase();
+            if !out.contains(&name) {
+                out.push(name);
+            }
+        }
+    }
+    out
+}
+
 /// What *Paste properties*' bindings land as in `doc` (`variable::rebind`): the
 /// names rebound to another variable of the same name or kit origin, and the names
 /// detached where `doc` has none. A binding kept as itself is neither.
@@ -5410,6 +5814,12 @@ fn properties_landing(
         .chain(props.strokes.iter().map(|s| &s.brush))
         .filter_map(ondin_core::BrushSource::var)
         .chain(props.strokes.iter().filter_map(|s| s.width_var))
+        .chain(
+            props
+                .effects
+                .iter()
+                .flat_map(|e| e.vars.into_iter().flatten()),
+        )
         .chain(props.opacity_var);
     let (mut rebound, mut detached) = (Vec::new(), Vec::new());
     for v in bound {
@@ -5430,8 +5840,9 @@ fn properties_landing(
     (rebound, detached)
 }
 
-/// The variables `tx`'s fill, stroke and opacity writes take off the layers they write
-/// (a target's own bound paint, stroke width or opacity), which the commit cannot name.
+/// The variables `tx`'s fill, stroke, effect and opacity writes take off the layers they
+/// write (a target's own bound paint, stroke width, effect number or opacity), which the
+/// commit cannot name.
 fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<String> {
     use ondin_core::BrushSource;
     let t = doc.variables();
@@ -5467,6 +5878,19 @@ fn paints_overwritten(doc: &ondin_core::Document, tx: &Transaction) -> Vec<Strin
                 Some(n) => (
                     n.opacity_var().into_iter().collect(),
                     var.iter().copied().collect(),
+                ),
+                None => continue,
+            },
+            Operation::SetEffects { id, effects } => match doc.get(*id) {
+                Some(n) => (
+                    n.effects()
+                        .iter()
+                        .flat_map(|e| e.vars.into_iter().flatten())
+                        .collect(),
+                    effects
+                        .iter()
+                        .flat_map(|e| e.vars.into_iter().flatten())
+                        .collect(),
                 ),
                 None => continue,
             },
@@ -5794,8 +6218,10 @@ impl OndinApp {
             self.toggle_menu(TopMenu::Zoom);
         }
         if self.open_menu != TopMenu::Zoom {
+            self.zoom_entry = None;
             return;
         }
+        let opening = self.zoom_entry.is_none();
 
         // Right-aligned under the readout.
         let anchor = egui::pos2(
@@ -5803,6 +6229,25 @@ impl OndinApp {
             head.rect.bottom() + crate::ui::MENU_GAP,
         );
         self.dropdown(&ctx, "zoom-menu", anchor, MENU_W, &head, |app, ui| {
+            // A typed percentage, the current one as the hint; Enter applies it.
+            let mut text = app.zoom_entry.take().unwrap_or_default();
+            let field = crate::ui::text_field(
+                ui,
+                egui::vec2(ui.available_width(), ITEM_H),
+                &mut text,
+                &format!("{zoom}%"),
+                11.5,
+            );
+            if opening {
+                field.request_focus();
+            }
+            app.zoom_entry = Some(text);
+            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let typed = app.zoom_entry.take().unwrap_or_default();
+                app.apply_typed_zoom(&typed);
+                app.open_menu = TopMenu::None;
+            }
+            ui.add_space(3.0);
             for (glyph, text, action) in [
                 (
                     icon::MAGNIFYING_GLASS_PLUS,
@@ -5837,6 +6282,22 @@ impl OndinApp {
                 }
             }
         });
+    }
+
+    /// Zoom to the percentage typed in the zoom dropdown, about the canvas's centre;
+    /// clamped as every zoom is. Anything that does not read as a percentage says so.
+    pub(crate) fn apply_typed_zoom(&mut self, typed: &str) {
+        let Some(percent) = parse_zoom_percent(typed) else {
+            if !typed.trim().is_empty() {
+                self.session
+                    .info("Type a zoom percentage, like 150".to_string());
+            }
+            return;
+        };
+        let factor = percent / 100.0 / self.session.camera.zoom;
+        self.session
+            .camera
+            .zoom_by(factor, self.canvas_center(), self.canvas_px);
     }
 
     /// Open `which`, or close it if it is already showing; [`TopMenu`] holds one
@@ -16337,5 +16798,324 @@ mod clone_chain_tests {
             vec![Point::new(10.0, 30.0), Point::new(50.0, 30.0)],
             "the third pair repeats the move"
         );
+    }
+}
+
+#[cfg(test)]
+mod select_same_tests {
+    use super::OndinApp;
+    use crate::input::{Action, Same};
+    use ondin_core::kurbo::Size;
+    use ondin_core::peniko::Color;
+    use ondin_core::{Fill, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    struct F {
+        app: OndinApp,
+        ctx: eframe::egui::Context,
+        frame: NodeId,
+        /// Red, red, blue inside the frame; red loose at the root; red and locked.
+        r: [NodeId; 5],
+    }
+
+    fn fixture() -> F {
+        let ctx = eframe::egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x5A3E);
+        let root = app.session.doc.root();
+        let frame = ids.mint();
+        let r = [(); 5].map(|_| ids.mint());
+        let mut ops = vec![Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 400.0),
+            },
+            transform: None,
+            name: None,
+        }];
+        let red = Color::from_rgba8(255, 0, 0, 255);
+        let blue = Color::from_rgba8(0, 0, 255, 255);
+        for (i, id) in r.iter().enumerate() {
+            let parent = if i == 3 { root } else { frame };
+            ops.push(Operation::CreateNode {
+                id: *id,
+                parent,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+            let colour = if i == 2 { blue } else { red };
+            ops.push(Operation::SetFills {
+                id: *id,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: ondin_core::Brush::Solid(colour).into(),
+                    visible: true,
+                }]),
+            });
+        }
+        ops.push(Operation::SetLocked {
+            id: r[4],
+            locked: true,
+        });
+        assert!(app.session.commit(Transaction(ops)));
+        F { app, ctx, frame, r }
+    }
+
+    fn selected(app: &OndinApp) -> Vec<NodeId> {
+        let mut ids = app.session.selection.ids().to_vec();
+        ids.sort();
+        ids
+    }
+
+    /// *Select same fill* finds every layer with the key's fill list, inside frames and
+    /// out, and leaves a locked match out.
+    /// flip: `select_same` dropping its `may_select_in_bulk` filter → fails at the
+    /// selection holding the locked rect.
+    #[test]
+    fn select_same_fill_reaches_across_the_document_and_skips_the_locked() {
+        let F {
+            mut app, ctx, r, ..
+        } = fixture();
+        app.session.selection.set_one(r[0]);
+        app.dispatch(&ctx, Action::SelectSame(Same::Fill));
+        let mut want = vec![r[0], r[1], r[3]];
+        want.sort();
+        assert_eq!(selected(&app), want);
+    }
+
+    /// The palette dims *Select same stroke* on a layer with no stroke, with the reason.
+    #[test]
+    fn select_same_names_what_the_source_lacks() {
+        let F { mut app, r, .. } = fixture();
+        app.session.selection.set_one(r[0]);
+        assert_eq!(
+            app.select_same_source(Same::Stroke),
+            Err("This layer has no stroke")
+        );
+        assert_eq!(app.select_same_source(Same::Fill), Ok(r[0]));
+    }
+
+    /// *Select inverse* takes the selection's unselected siblings, not the whole
+    /// document, and skips a locked one.
+    /// flip: `select_inverse` dropping its `may_select_in_bulk` filter → fails at the
+    /// selection holding the locked rect.
+    #[test]
+    fn select_inverse_takes_the_siblings_left_out() {
+        let F {
+            mut app,
+            ctx,
+            frame,
+            r,
+        } = fixture();
+        app.session.selection.set_one(r[0]);
+        app.dispatch(&ctx, Action::SelectInverse);
+        let mut want = vec![r[1], r[2]];
+        want.sort();
+        assert_eq!(selected(&app), want);
+        assert!(!selected(&app).contains(&frame));
+    }
+}
+
+#[cfg(test)]
+mod paste_target_tests {
+    use super::{OndinApp, PASTE_OFFSET};
+    use ondin_core::kurbo::{Affine, Point, Size};
+    use ondin_core::{IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    struct F {
+        app: OndinApp,
+        ctx: eframe::egui::Context,
+        /// Frames at (0, 0) and (500, 0), 200 square.
+        a: NodeId,
+        b: NodeId,
+        /// 20 square at (10, 10) in `a`.
+        r: NodeId,
+        /// 40 square at (1000, 1000) on the canvas.
+        q: NodeId,
+    }
+
+    fn fixture() -> F {
+        let ctx = eframe::egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x9A57);
+        let root = app.session.doc.root();
+        let [a, b, r, q] = [(); 4].map(|_| ids.mint());
+        let at = |id, parent, kind, x: f64, y: f64| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate((x, y))),
+            name: None,
+        };
+        let square = |s: f64| NodeKind::Rect {
+            size: Size::new(s, s),
+            corner_radii: Default::default(),
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(200.0, 200.0),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            at(a, root, frame(), 0.0, 0.0),
+            at(b, root, frame(), 500.0, 0.0),
+            at(r, a, square(20.0), 10.0, 10.0),
+            at(q, root, square(40.0), 1000.0, 1000.0),
+        ])));
+        F {
+            app,
+            ctx,
+            a,
+            b,
+            r,
+            q,
+        }
+    }
+
+    fn centre(app: &OndinApp, id: NodeId) -> Point {
+        app.session.resolved.world_bounds(id).unwrap().center()
+    }
+
+    /// A paste with one other frame selected lands inside it, centred on it when its own
+    /// place is outside the frame.
+    /// flip: `paste_into_selected_frame` keeping `offset` whatever the overlap → fails at
+    /// "centred on the frame".
+    #[test]
+    fn a_paste_onto_a_selected_frame_lands_inside_it() {
+        let F {
+            mut app, ctx, b, r, ..
+        } = fixture();
+        app.session.selection.set_one(r);
+        app.copy_selection(&ctx);
+        app.session.selection.set_one(b);
+        assert!(app.paste_into_selected_frame(PASTE_OFFSET, true));
+        let pasted = app
+            .session
+            .selection
+            .single()
+            .expect("the paste is selected");
+        assert_ne!(pasted, r);
+        assert_eq!(app.session.doc.get(pasted).unwrap().parent(), Some(b));
+        let c = centre(&app, pasted);
+        assert!(
+            (c - Point::new(600.0, 100.0)).hypot() < 1e-6,
+            "centred on the frame: {c:?}"
+        );
+    }
+
+    /// The frame a layer was copied from, and a copied frame itself, take the ordinary
+    /// paste: above the original, and a duplicate beside, not a nesting.
+    #[test]
+    fn a_frame_holding_the_copy_takes_the_ordinary_paste() {
+        let F {
+            mut app,
+            ctx,
+            a,
+            b,
+            r,
+            ..
+        } = fixture();
+        app.session.selection.set_one(r);
+        app.copy_selection(&ctx);
+        app.session.selection.set_one(a);
+        assert!(
+            !app.paste_into_selected_frame(PASTE_OFFSET, true),
+            "its own frame"
+        );
+        app.session.selection.set_one(b);
+        app.copy_selection(&ctx);
+        assert!(
+            !app.paste_into_selected_frame(PASTE_OFFSET, true),
+            "the frame itself"
+        );
+    }
+
+    /// *Paste to replace* puts the copy where the target was — centred on it, in its
+    /// slot, even with the original moved since the copy — and takes the target away,
+    /// in one undo step.
+    /// flip: `clip_box` answering the copy-time box → fails at "centred on the target".
+    #[test]
+    fn paste_to_replace_takes_the_targets_place() {
+        let F {
+            mut app, ctx, r, q, ..
+        } = fixture();
+        let root = app.session.doc.root();
+        let slot = app
+            .session
+            .doc
+            .get(root)
+            .unwrap()
+            .children()
+            .iter()
+            .position(|c| *c == q);
+        app.session.selection.set_one(r);
+        app.copy_selection(&ctx);
+        // Moved after the copy: the aim must follow where the original is now.
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: r,
+                    transform: Affine::translate((60.0, 80.0)),
+                }]))
+        );
+        app.session.selection.set_one(q);
+        app.replace_with_clipboard();
+        assert!(app.session.doc.get(q).is_none(), "the target is gone");
+        let copy = app
+            .session
+            .selection
+            .single()
+            .expect("the copy is selected");
+        assert_eq!(app.session.doc.get(copy).unwrap().parent(), Some(root));
+        assert_eq!(
+            app.session
+                .doc
+                .get(root)
+                .unwrap()
+                .children()
+                .iter()
+                .position(|c| *c == copy),
+            slot,
+            "in its slot"
+        );
+        let c = centre(&app, copy);
+        assert!(
+            (c - Point::new(1020.0, 1020.0)).hypot() < 1e-6,
+            "centred on the target: {c:?}"
+        );
+        app.undo();
+        assert!(app.session.doc.get(q).is_some() && app.session.doc.get(copy).is_none());
+    }
+}
+
+#[cfg(test)]
+mod zoom_entry_tests {
+    use super::{OndinApp, parse_zoom_percent};
+
+    /// The zoom field reads a bare number or a percentage and refuses the rest.
+    #[test]
+    fn a_typed_zoom_reads_as_a_percentage() {
+        assert_eq!(parse_zoom_percent("150"), Some(150.0));
+        assert_eq!(parse_zoom_percent(" 37.5 % "), Some(37.5));
+        assert_eq!(parse_zoom_percent("0"), None);
+        assert_eq!(parse_zoom_percent("-20%"), None);
+        assert_eq!(parse_zoom_percent("big"), None);
+    }
+
+    /// Applying a typed zoom lands the camera on it, clamped at the ceiling.
+    #[test]
+    fn a_typed_zoom_lands_the_camera_there() {
+        let ctx = eframe::egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.apply_typed_zoom("250%");
+        assert!((app.session.camera.zoom - 2.5).abs() < 1e-9);
+        app.apply_typed_zoom("1000000");
+        assert_eq!(app.session.camera.zoom, crate::view::MAX_ZOOM);
+        app.apply_typed_zoom("nonsense");
+        assert_eq!(app.session.camera.zoom, crate::view::MAX_ZOOM, "unchanged");
     }
 }

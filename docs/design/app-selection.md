@@ -41,6 +41,14 @@ The canvas never selects a locked layer by a gesture that describes a **set**:
   asked of the range **before** the lock filter (`marquee_range`).
 - `inspector::select_by_color` (Group Colors reticle, §9.2) excludes locked layers and reports
   *"Selected 2 of 3 layers with this colour — 1 locked"*.
+- *Select same fill / stroke / font / effects* (palette only, `OndinApp::select_same`) does the
+  same over the whole tree but the vault, the source included. The source is the key layer, else a
+  lone selected layer; without one, or when it lacks the property, the row dims with the reason
+  (`select_same_source`). Fills, strokes and effects match on the whole list by value; a font
+  matches any text layer whose own family (through a bound one) or any run's equals one of the
+  source's, case-insensitively (`text_families`).
+- *Select inverse* (palette only, `OndinApp::select_inverse`): the unselected children of each
+  selected outermost layer's parent, locked ones skipped; it needs a selection.
 - The frame edge (`canvas::frame_edge_at`) checks both lock and visibility.
 - **Exception**: a layers-panel row selects a locked layer (`layers::select_from_row` reads no lock);
   once selected, inspector rules apply (a lock stops dragging, not recolouring).

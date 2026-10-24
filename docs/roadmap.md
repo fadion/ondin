@@ -1,15 +1,12 @@
 # Ondin — Roadmap
 
-Open work only. **Now · Immediately** is defects and dead ends on shipped features, **Now · Soon** is
-what a designer reaches for and does not find, **Later · Before MCP** is larger work that lands before
-MCP and Command Mode, and the other **Later** sections are deferred with a stated reason or trigger.
-Decided non-goals are in `non-goals.md`; built work is described in `architecture.md`. Refs are file +
-function name, never line numbers. Read the code before picking an item up — an item's premise can go
-stale while its ask still reads true.
+Open work only. **Now · Immediately** is what a designer reaches for and does not find, **Later ·
+Before MCP** is larger work that lands before MCP and Command Mode, and the other **Later** sections are
+deferred with a stated reason or trigger. Decided non-goals are in `non-goals.md`; built work is
+described in `architecture.md`. Refs are file + function name, never line numbers. Read the code before
+picking an item up — an item's premise can go stale while its ask still reads true.
 
 ## Now · Immediately
-
-## Now · Soon
 
 - **Outline stroke** — a verb turning a stroke into a filled path. `scene::lay_stroke` already expands
   outlines with `kurbo::stroke`.
@@ -22,11 +19,6 @@ stale while its ask still reads true.
   beside *Variables* at 10pt).
 - **Colour entry beyond hex** — RGB/HSL/HSB fields and CSS `rgb()`/`hsl()` input — and **recent
   colours** beside the document swatches (`picker::document_swatches`).
-- **Select same** (fill, stroke, font, effect) and **select inverse**, in the palette
-  (`shortcuts.md` *Deliberately unbound*).
-- **Paste into the selected frame** (`app.rs` `paste_clipboard_at` returns a paste to its original
-  parent) and **paste to replace** (`context-menus.md` §7: owes a rule for mismatched layer counts).
-- **Paste properties carrying effects** — `build::Properties` takes fills, strokes and opacity only.
 - **Adding layout to a loose selection** should infer direction, gap and padding from where the
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
 - **The insert picker drops at the top level only** (`kits/picker.rs`); a drop over a frame or flex
@@ -54,7 +46,6 @@ stale while its ask still reads true.
   specs).
 - **Present mode**: step between frames, fit to frame, fullscreen, and no selection chrome. It only
   hides the panels today.
-- **A typed zoom percentage** in `app.rs` `zoom_control`.
 
 ## Later · Before MCP
 

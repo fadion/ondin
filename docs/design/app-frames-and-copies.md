@@ -67,10 +67,23 @@ between windows), and the hand-kept lists of transient state. Part of §9.4.
 - **`Ctrl+D` remembers** (`CloneChain`: the last clones, the first one's placement, the step): move
   the duplicates and duplicate again, and the step repeats, for one layer or several (measured on
   the first clone, since a selection moves as one). Duplicating any other set restarts at zero.
-- `Ctrl+V` offsets by 20 on each axis.
+- `Ctrl+V` offsets by 20 on each axis (`PASTE_OFFSET`); `Ctrl+Shift+V` by nothing.
 - **Every copy lands one step above its original** (duplicate, paste, Alt-drag), under whatever was
   above it. Paste can name the slot because a captured subtree keeps the original's ids until
   `insert_subtrees` remaps them; if the original is gone or the parent differs, append.
+- **With one unlocked frame selected, `Ctrl+V` and `Ctrl+Shift+V` paste inside it**, on top
+  (`OndinApp::paste_into_selected_frame`, tried first by `paste` and `paste_in_place`); a layer
+  copied from that frame still lands one step above its original. Each root is re-based through
+  world space (`template_world`, `rebased_placements`): where the pasted box, offset applied,
+  overlaps the frame it keeps its place; otherwise `Ctrl+V` centres it on the frame. The ordinary
+  paste runs instead when the clipboard holds no layers, holds that frame or an ancestor of it (a
+  duplicate, not a nesting), holds only layers copied from inside it, or `paste_is_held` refuses.
+  *Paste here* and the panel's *Paste* do not take this path.
+- **Paste to replace** (`OndinApp::paste_to_replace`, the layer menu's row, no chord): each selected outermost
+  unlocked layer is replaced by a copy of the **whole** clipboard, its union box
+  (`clipboard_from`) centred on the target's box, in the target's slot of its parent. Targets go as
+  `delete_layers` deletes them (a frame's guides first, `relink_for_delete`); one undo step, and the
+  copies end selected. The counts of copied layers and targets never need to match.
 - Several copies from one parent: `insert_subtrees` advances each index only past earlier inserts at or
   below it. Alt-drag builds its own `InsertSubtree` but uses the same accumulator.
 - Names: typed names kept, numbered names increment per destination parent (`build::CopyNames`, §5.7b).

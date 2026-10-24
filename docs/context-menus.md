@@ -76,7 +76,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | # | Group | Contents |
 |---|---|---|
 | 1 | Head | the kind's own verbs (§5) |
-| 2 | Clipboard | Cut · Copy · Paste here · Duplicate · Delete |
+| 2 | Clipboard | Cut · Copy · Paste here · Paste to replace · Duplicate · Delete |
 | 3 | Properties | Copy properties · Paste properties |
 | 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions |
 | 5 | Order | four restack rows |
@@ -93,9 +93,9 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 24 rows, text 28, a boolean 30, railed text 30; component roles reach
-  32 (measured) and 33 (by arithmetic). The ceiling is "needs no scrollbar"; if trimmed, Navigate
-  goes first, then Export.
+- **Length**: a primitive is 25 rows, text 29, a boolean 31, railed text 31; component roles reach
+  33 (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
+  Navigate goes first, then Export.
 
 ---
 
@@ -108,6 +108,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | Cut | `Ctrl+X` | dims on lock |
 | Copy | `Ctrl+C` | always live |
 | Paste here (canvas) / Paste (panel) | `Ctrl+V` | dims *"Nothing has been copied yet"* unless the OS clipboard has a picture, the app's own payload is still current, or the OS clipboard has text. Canvas: at the pointer; a picture is aimed like a drop |
+| Paste to replace | — | dims *"No layers have been copied"* unless the app's own layers are on the clipboard and current (`Context::can_replace`); dims on lock. Each selected layer gives way to a copy of the whole clipboard, centred on it, in its slot (`app-frames-and-copies.md`). `Ctrl+Shift+R` is not spent on it: `Ctrl+R` is rename |
 | Duplicate | `Ctrl+D` | dims on lock |
 | Delete | `Del` | dims on lock; destructive styling |
 
@@ -115,7 +116,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 
 | Row | Chord | Shown / enabled |
 |---|---|---|
-| Copy properties | `Ctrl+Alt+C` | fills, strokes and opacity off the key layer (or the lone layer). Dims when the source has no paint of its own (three sentences: lone layer, no key layer, key layer without paint). Live on a lock |
+| Copy properties | `Ctrl+Alt+C` | fills, strokes, effects and opacity off the key layer (or the lone layer). Dims when the source has no paint of its own (three sentences: lone layer, no key layer, key layer without paint). Live on a lock |
 | Paste properties | `Ctrl+Alt+V` | dims when nothing copied; dims on lock (lock sentence wins) |
 
 ### Structure
@@ -364,8 +365,7 @@ No variable is offered on a field's label badge (it scrubs).
 - **Align and distribute** — the inspector's cluster and `Alt`+letter own them; reconsider only
   if submenus exist.
 - **Reveal in layers panel** — built and removed: selecting already scrolls the tree to the row.
-- **Select all with same…** — belongs in the palette.
-- **Paste to replace** — planned (`roadmap.md`); its row waits on a rule for mismatched layer counts.
+- **Select same… and Select inverse** — palette-only verbs (`app-selection.md`).
 - **Rotate 90°** — the inspector's quarter-turn buttons (`inspector::rotate_selection_quarter`); the
   palette entry is in `roadmap.md`.
 - **Keep proportions** — the inspector's chain link; a modifier, not a verb.
@@ -413,6 +413,6 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 32–33-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
+- Whether a 33-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

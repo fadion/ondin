@@ -177,11 +177,14 @@ pub enum Item {
     ///
     /// Not a door on [`Self::PasteHere`]: both are offered on empty canvas at once.
     PasteInPlace,
+    /// Each selected layer gives way to a copy of the whole clipboard, centred where it
+    /// was, in its slot (`OndinApp::paste_to_replace`).
+    PasteToReplace,
     Duplicate,
     Delete,
 
     // --- properties (§3's third group) ------------------------------------
-    /// Lift the key layer's appearance — fills, strokes, opacity — onto a
+    /// Lift the key layer's appearance — fills, strokes, effects, opacity — onto a
     /// clipboard of its own (`Ctrl+Alt+C`, `build::properties_of`).
     ///
     /// Both chord and row go through [`crate::app::OndinApp::properties_source`],
@@ -365,6 +368,10 @@ pub enum Item {
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
     RotateQuarter(bool),
+    /// *Select same fill* and its siblings (`OndinApp::select_same`).
+    SelectSame(crate::input::Same),
+    /// *Select inverse* (`OndinApp::select_inverse`).
+    SelectInverse,
     /// One of the chords a live text session admits.
     TextChord(crate::input::TextChord),
     /// Scroll the inspector to the card with this title and open it.
@@ -476,6 +483,7 @@ impl Item {
         Item::Copy,
         Item::PasteHere,
         Item::PasteInPlace,
+        Item::PasteToReplace,
         Item::Duplicate,
         Item::Delete,
         Item::CopyProperties,
@@ -586,6 +594,7 @@ impl Item {
                 Some("Ctrl+Shift+V"),
                 Group::Clipboard,
             ),
+            Item::PasteToReplace => s("Paste to replace", icon::CLIPBOARD, None, Group::Clipboard),
             Item::Duplicate => s(
                 "Duplicate",
                 icon::COPY_SIMPLE,
@@ -1030,6 +1039,17 @@ impl Item {
                 None,
                 Group::Transform,
             ),
+            Item::SelectSame(same) => {
+                use crate::input::Same;
+                let label = match same {
+                    Same::Fill => "Select same fill",
+                    Same::Stroke => "Select same stroke",
+                    Same::Font => "Select same font",
+                    Same::Effect => "Select same effects",
+                };
+                s(label, icon::SELECTION_ALL, None, Group::Clipboard)
+            }
+            Item::SelectInverse => s("Select inverse", icon::SELECTION, None, Group::Clipboard),
             Item::TextChord(chord) => {
                 use crate::input::TextChord;
                 use ondin_core::TextAlign;
@@ -1115,6 +1135,8 @@ impl Item {
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
             Item::ZoomFit => &["fit", "all"],
+            Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
+            Item::SelectInverse => &["invert", "others", "rest"],
             Item::TextChord(_) => &["text", "type"],
             Item::Tool(Tool::Rect) => &["square", "box"],
             Item::Tool(Tool::Node) => &["node", "direct"],
@@ -1133,6 +1155,7 @@ impl Item {
             Item::Copy => Action::Copy,
             Item::PasteHere => Action::Paste,
             Item::PasteInPlace => Action::PasteInPlace,
+            Item::PasteToReplace => Action::PasteToReplace,
             Item::CopyProperties => Action::CopyProperties,
             Item::PasteProperties => Action::PasteProperties,
             Item::Duplicate => Action::Duplicate,
@@ -1176,6 +1199,8 @@ impl Item {
             Item::ShowInLibrary => Action::ShowInLibrary,
             Item::VersionHistory => Action::VersionHistory,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
+            Item::SelectSame(same) => Action::SelectSame(same),
+            Item::SelectInverse => Action::SelectInverse,
             Item::TextChord(chord) => Action::TextStyle(chord),
             Item::Palette => Action::Palette,
             Item::Cheatsheet => Action::Cheatsheet,
@@ -1255,6 +1280,9 @@ pub struct Context<'a> {
     /// the text session's. Composed over three payloads (picture, in-app, OS text)
     /// in [`crate::app::OndinApp::menu_context`].
     pub can_paste: bool,
+    /// Whether the app's own layers are on the clipboard and still current — what
+    /// dims *Paste to replace*, which has no answer for a picture or text.
+    pub can_replace: bool,
     /// The kind of every selected layer, in `selection` order. A head row appears
     /// only when every member qualifies; a tail row when any does.
     pub kinds: &'a [Kind],
@@ -1585,6 +1613,9 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         Row::new(Item::PasteHere)
             .label(if panel { "Paste" } else { "Paste here" })
             .dim_if(!cx.can_paste, "Nothing has been copied yet"),
+        Row::new(Item::PasteToReplace)
+            .dim_if(!cx.can_replace, "No layers have been copied")
+            .dim_if(locked, why),
         Row::new(Item::Duplicate).dim_if(locked, why),
         Row::new(Item::Delete).dim_if(locked, why),
     ]);
@@ -2335,6 +2366,7 @@ impl OndinApp {
                 || (self.clipboard.is_some() || self.guide_clipboard.is_some())
                     && open.payload_current
                 || open.system_text,
+            can_replace: self.clipboard.is_some() && open.payload_current,
             kinds,
             state,
             any_guides: !self.session.doc.guides().is_empty(),
@@ -2647,6 +2679,7 @@ impl OndinApp {
             },
             // "In place" does not depend on where the menu was opened.
             Item::PasteInPlace => self.dispatch(ctx, Action::PasteInPlace),
+            Item::PasteToReplace => self.dispatch(ctx, Action::PasteToReplace),
             // The same two steps as `double_click_pick`'s group arm; `Enter` is the
             // second door onto `enter_container`.
             Item::EnterGroup | Item::EnterBoolean => {
@@ -2759,6 +2792,8 @@ impl OndinApp {
             | Item::ShowInLibrary
             | Item::VersionHistory
             | Item::RotateQuarter(_)
+            | Item::SelectSame(_)
+            | Item::SelectInverse
             | Item::TextChord(_)
             | Item::Palette
             | Item::Cheatsheet => {
@@ -2870,6 +2905,7 @@ mod tests {
             target,
             selection,
             can_paste: false,
+            can_replace: false,
             kinds,
             state: LayerState::default(),
             any_guides: false,
@@ -3114,11 +3150,11 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 24 rows in the canonical group order, with the empty
+    /// A primitive's menu is 25 rows in the canonical group order, with the empty
     /// head collapsed. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_four_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_twenty_five_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3129,7 +3165,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 25, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         assert_eq!(
@@ -3138,6 +3174,7 @@ mod tests {
                 "Cut",
                 "Copy",
                 "Paste here",
+                "Paste to replace",
                 "Duplicate",
                 "Delete",
                 "Copy properties",
@@ -3202,7 +3239,7 @@ mod tests {
         assert_eq!(ticked, ["Subtract"]);
     }
 
-    /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 5 ·
+    /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
     /// Properties 2 · Structure 8 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
     /// Export 2.
     #[test]
@@ -3217,11 +3254,11 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The last two are 32, past the boolean's 30.
+    /// arithmetic in each case's message. The last two are 33, past the boolean's 31.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3238,41 +3275,41 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 28, plus *Flip to other side* and \
+                "text on a rail: the plain 29, plus *Flip to other side* and \
                  *Detach from path*",
-                30,
+                31,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
                 }),
             ),
             (
-                "a main frame: head 1 · Clipboard 5 · Properties 2 · Structure 4 \
+                "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 4 \
                  (*Group selection*, *Frame selection*, *Duplicate as component*, \
                  *Select all instances*) · Order 4 · Transform 2 · State 3 · \
                  Navigate 1 · Export 2",
-                24,
+                25,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                25,
+                26,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 24, with *Go to \
+                "a linked shape in an instance: the primitive's 25, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                25,
+                26,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 28, with *Go to main component*, \
+                "a bound text child: text's 29, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                30,
+                31,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -3281,9 +3318,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 30, with the bound \
+                "a bound text child on a rail: the railed 31, with the bound \
                  child's three rows for *Create component* — the long end",
-                32,
+                33,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3294,9 +3331,9 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 30, with the bound child's three rows for *Create component* — \
+                 31, with the bound child's three rows for *Create component* — \
                  the long end too",
-                32,
+                33,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3349,11 +3386,11 @@ mod tests {
         assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
-    /// A text layer's menu is 28 rows: head 4 · Clipboard 5 · Properties 2 ·
+    /// A text layer's menu is 29 rows: head 4 · Clipboard 6 · Properties 2 ·
     /// Structure 5 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2. The
     /// fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_twenty_eight_rows() {
+    fn a_text_layers_menu_is_twenty_nine_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -3369,7 +3406,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Frame selection*, one
@@ -3489,7 +3526,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 25, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -4086,7 +4123,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 24, "{:?}", labels(&groups));
+        assert_eq!(all, 25, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

@@ -257,6 +257,7 @@ when a sentence happened to be copied elsewhere. The event arm only silences the
 | `Ctrl+W` | **close the document** | ✅ Figma's meaning, not the window's: lands where `Ctrl+O` does (`go_to_dashboard` autosaves, drops the crash snapshot, re-scans). Another door onto one screen, differing in intent ("I am done" vs "my files"). The window-close reading (reusing `handle_close_request`'s modal) was put to the maintainer and not taken |
 | `Ctrl+Shift+E` | ~~export~~ | ⛔ *Export as…* was removed when the inspector's Export panel (§15 D274) answered where, format and size from the layer. ⚠️ **Unbound but not free**: plain `Ctrl+E` is *Flatten*, so `!m.shift` on that arm is all that stands between a stray hand and a dissolved selection. `a_stray_shift_on_ctrl_e_does_nothing_rather_than_flattening` pins it |
 | `Ctrl+Alt+E` | export all | ✅ not Figma's. Re-runs every layer's saved export settings into the last export folder, asking only the first time (`architecture.md` §7). Alt **and** not-Shift: `Ctrl+Alt+Shift+E` is neither this nor `Ctrl+Shift+E` |
+| `Ctrl+Alt+Enter` | **present** | ✅ Figma's. `Action::Present`, normal mode only, `cmd && alt && !shift`; plain `Ctrl+Enter` stays unbound. Present mode reads only its own keys (§8b) |
 | `Ctrl+,` | **settings** | ✅ VS Code's; `,` was unspent. ⚠️ **Opens, cannot close**: `resolve` is not called while a modal is up (`Action::OpenSettings` is named for that). Escape, ✕, *Cancel*, backdrop close it. `cmd_only && !m.shift` |
 | `Ctrl+Shift+K` | place image | ✅ Figma's (`architecture.md` §5.5a) |
 | `Ctrl+K` | **command palette** | ✅ editor only, this file's choice; the library keeps `Ctrl+K` for its file search. Opens and closes (`Action::Palette`, read by `input::discovery_chord` in both modes, so in a text session too; while open, `palette::read_keys` reads it). `Ctrl` without Alt and Shift |
@@ -295,6 +296,18 @@ still refused by one line.
 
 Unbound: `Home`/`End`, and `Ctrl+A` with anything needing a **multiple** selection — a **decided
 non-goal**; `DashboardState::selected` is one path and every verb takes one document.
+
+### 8b. Present mode's own keys
+
+| Key | Action |
+|---|---|
+| `→` `↓` `Space` `Page Down` `Enter` · click | next frame |
+| `←` `↑` `Page Up` `Backspace` · right-click | previous frame |
+| `Home` / `End` | first / last frame |
+| `Escape` | leave |
+
+Stepping stops at either end. `present_ui` reads these and nothing else: `OndinApp::ui` returns
+before `input::resolve` while presenting, so no editor chord runs (`design/app-canvas-chrome.md`).
 
 ## 9. Gesture modifiers
 

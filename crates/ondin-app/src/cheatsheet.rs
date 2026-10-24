@@ -267,6 +267,7 @@ fn sections(lead: Lead) -> Vec<Section> {
                 Item::Library,
                 Item::CloseDocument,
                 Item::ExportAll,
+                Item::Present,
                 Item::Settings,
                 Item::Palette,
                 Item::Cheatsheet,

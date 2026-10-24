@@ -70,6 +70,7 @@ ondin-app/src/
 ├─ menu.rs          command registry (Item, Spec, Group, build): context menus, palette, cheatsheet + app half (see context-menus.md)
 ├─ palette.rs       the command palette (app-canvas-chrome.md)
 ├─ cheatsheet.rs    the shortcut cheatsheet (app-canvas-chrome.md)
+├─ present.rs       present mode: top-level frames one at a time, fullscreen (app-canvas-chrome.md)
 ├─ preview.rs       in-flight gesture state (Drag, Handle, Pen*, TextSession) + PointSet
 ├─ prefs.rs         Prefs in config_dir()/ondin/prefs.json (the window's geometry is eframe's, in window.ron beside it)
 ├─ rulers.rs        ruler bars + ruler guides

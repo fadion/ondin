@@ -264,6 +264,7 @@ pub mod icon {
     pub const SQUARE: &str = "\u{e45e}";
     pub const TRIANGLE: &str = "\u{e4b0}"; // the polygon tool — it starts as one
     pub const STAR: &str = "\u{e46a}";
+    pub const PLAY: &str = "\u{e3d0}"; // present mode
     pub const ASTERISK: &str = "\u{e0aa}"; // a star's point count
     pub const ANGLE: &str = "\u{e7bc}"; // a star's inner ratio
     pub const EYE: &str = "\u{e220}";
@@ -625,6 +626,7 @@ pub mod icon {
         ("square", SQUARE),
         ("triangle", TRIANGLE),
         ("star", STAR),
+        ("play", PLAY),
         ("asterisk", ASTERISK),
         ("angle", ANGLE),
         ("eye", EYE),

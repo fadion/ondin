@@ -19,8 +19,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
 - **More number bindings**: font size, line height, letter spacing, weight, paragraph spacing,
   min/max W/H (`binding::FieldKey`).
-- **Present mode**, view-only and separate from focus mode: fullscreen, one top-level frame at a
-  time fitted to the window, stepping between frames, and no selection chrome.
 
 ## Later · Before MCP
 

@@ -60,6 +60,7 @@ mod menu;
 mod palette;
 mod panels;
 mod prefs;
+mod present;
 mod preview;
 mod rulers;
 mod session;

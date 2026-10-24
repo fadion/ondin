@@ -594,6 +594,11 @@ impl OndinApp {
         ] {
             push(&mut out, Cmd::verb(item, None));
         }
+        let no_frames = self.presentable().is_empty();
+        push(
+            &mut out,
+            Cmd::verb(Item::Present, no_frames.then_some("No frames to present")),
+        );
         // The cards the inspector drew last frame, then the ones it can draw for
         // another selection.
         let focus = self

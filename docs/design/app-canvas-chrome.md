@@ -1,8 +1,8 @@
-# Canvas chrome, the top bar's menus, the command palette, the cheatsheet and focus mode
+# Canvas chrome, the top bar's menus, the command palette, the cheatsheet, focus and present mode
 
 Overlay chrome drawn during gestures (escaping clip, create box, size pill, Alt-drag ghost), the
 pixel grid, the top bar's View/Snap menus and Settings button, the command palette, the shortcut
-cheatsheet, and focus mode. Part of §9.4.
+cheatsheet, focus mode and present mode. Part of §9.4.
 
 ## 9.4 Gesture chrome
 
@@ -55,7 +55,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   widest row (`ui::menu_check_width`, 8pt inset both sides). The 13pt accent tick keeps its column when
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show layers*,
-  *Show toolbar*, *Show status messages*, *Focus mode*.
+  *Show toolbar*, *Show status messages*, *Focus mode*, then *Present* — a verb, not a switch: a
+  check row that never ticks, which closes the menu and dispatches `Action::Present`.
 - **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
   grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
@@ -101,7 +102,7 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 
 - **One registry.** A row is a `menu::Item`, with the context menu's label, glyph, chord, tick and
   dim reason. The app verbs no context menu shows are `Item`s too (undo and redo, save, new and
-  close document, the library, settings, *Export as …*, tools, place image, zoom, align,
+  close document, the library, settings, *Export as …*, *Present*, tools, place image, zoom, align,
   distribute, insert, styles and variables, publish kit, the text chords, *Show ‹card›*, the palette
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
@@ -237,6 +238,41 @@ rules below are its.
 - **Every flag `modal_is_up` reads must be a card drawn whenever it is set**, or an undrawn card holds
   every key.
 
+## Present mode (`present.rs`)
+
+The document's top-level frames shown one at a time, fitted to a fullscreen window, with nothing of
+the editor around them and nothing to edit with. `OndinApp::presenting` holds a `Presenting {
+frames, at, was_fullscreen, stepped_at }` while it runs.
+
+- **Doors.** `Action::Present`: `Ctrl+Alt+Enter` in normal mode, `menu::Item::Present` (*Present*,
+  `PLAY`, `Group::View`) in the palette and the cheatsheet's File section, and the View menu's last
+  row. The palette row dims *"No frames to present"* on the same test `start_presenting` makes
+  (`presentable`: visible top-level frames with bounds).
+- **Starting** (`start_presenting`). The frames are the visible `root_artboards` with world bounds,
+  in `reading_order`: rows top to bottom, each left to right, a frame joining the row above while
+  its top is above that row's first frame's middle. It opens on the frame holding the selection,
+  else the one with most area in the current view, else the first. It finishes a live text session,
+  closes the context menu and palette, and sends `ViewportCommand::Fullscreen(true)`, remembering
+  whether the window already was. With nothing to show, the status line says *"No frames to
+  present"* and nothing changes.
+- **Its own branch of `OndinApp::ui`**, after the font poll and before keyboard routing: it runs
+  `disk_results`, `autosave_tick` and `recovery_tick`, draws `present_ui` in a frameless
+  `CentralPanel` and returns. No other key, panel, overlay or command runs, so nothing else needs to
+  know the mode exists. A modal up ends it first, since a modal holds every key (closing the window
+  asks one, which is how a close gets out of fullscreen); so does the dashboard's branch, which
+  comes earlier.
+- **Keys** (`present_ui`). → ↓ Space Page Down Enter and a click step on; ← ↑ Page Up Backspace
+  and a right-click step back, stopping at either end; Home and End jump; Escape leaves.
+  `stop_presenting` leaves fullscreen unless the window was fullscreen before. A shown frame that no
+  longer resolves ends it.
+- **Drawing.** The scene goes through `canvas.render` with present mode's own camera, centred on
+  the frame at `fit_zoom` (the tighter axis, no margin, clamped to `MIN_ZOOM..MAX_ZOOM`). The
+  editing camera and selection are untouched, so leaving restores the view. A matte in the canvas
+  background colour then covers everything outside the frame: its neighbours, and a child
+  overflowing an unclipped frame. No selection, guides, grids, frame tags, rulers or status bar.
+- **The counter**, a pill at the bottom with the frame's name and *n / total*, shows for
+  `COUNTER_HOLD` (1.5 s) after a step and fades over `COUNTER_FADE` (0.4 s).
+
 ## Traps
 
 - Folding `focus` into some overlay's predicate: focus mode does not hide overlays; read §15 D750
@@ -246,3 +282,6 @@ rules below are its.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one
   frame's input; `just_opened` is all that stops the opening press closing it.
   `the_chord_opens_the_sheet_and_closes_it` pins it.
+- The `return` after `present_ui` is what makes present mode view-only: without it the editor runs
+  below and `Delete` deletes the selection nobody can see. `present_mode_steps_frames_and_edits_nothing`
+  pins it.

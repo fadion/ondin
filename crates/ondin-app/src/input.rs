@@ -85,6 +85,9 @@ pub enum Action {
     /// `Ctrl+Shift+E` is deliberately unbound; `Ctrl+E`'s `!m.shift` guard keeps it
     /// from falling through to *Flatten*.
     ExportAll,
+    /// Show the top-level frames one at a time, fullscreen (`present.rs`).
+    /// `Ctrl+Alt+Enter`.
+    Present,
     /// *Export as HTML / React / Vue…*: the selection's code export, one zip
     /// through a save dialog (`OndinApp::export_code`). No chord and no menu row:
     /// the command palette is its door.
@@ -753,6 +756,12 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd && m.alt && !m.shift && i.key_pressed(egui::Key::E),
             Action::ExportAll,
+            &mut out,
+        );
+        // `Ctrl+Alt+Enter` — present (Figma's chord). Plain `Ctrl+Enter` stays unbound.
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::Enter),
+            Action::Present,
             &mut out,
         );
 

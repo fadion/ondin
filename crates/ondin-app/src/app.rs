@@ -423,6 +423,9 @@ pub struct OndinApp {
     /// Whether the window had the OS focus last frame; its regaining it is when the
     /// machine's fonts are scanned again (`FontService::rescan_system`).
     window_focused: bool,
+    /// A presentation in progress (`present.rs`). While it is, `ui` draws nothing
+    /// but the frame and reads no key but its own.
+    pub(crate) presenting: Option<crate::present::Presenting>,
     /// Whether an open popover's own `Escape` handler ran this frame; written by the
     /// handler, read and cleared by the key router next frame. Read instead of the open
     /// flag, because a flag whose panel was skipped would swallow `Escape` with nothing
@@ -1351,6 +1354,7 @@ impl OndinApp {
             chrome_focus: false,
             // Starts focused: the launch scan is already under way.
             window_focused: true,
+            presenting: None,
             popover_heard: false,
         }
     }
@@ -1429,6 +1433,8 @@ impl eframe::App for OndinApp {
         if self.view == View::Dashboard {
             // The palette is the editor's; one left open must not greet the next file.
             self.palette = None;
+            // So is present mode, and the fullscreen it took.
+            self.stop_presenting(ui.ctx());
             self.dashboard_ui(ui);
             self.cheatsheet_ui(ui.ctx());
             // Last of the library's frame, after every card (the editor's twin is at
@@ -1479,6 +1485,21 @@ impl eframe::App for OndinApp {
         }
         if fonts.any() {
             ctx.request_repaint();
+        }
+
+        // Present mode draws its frame and reads its own keys, nothing else. A modal
+        // (closing the window asks one) ends it: a modal holds every key.
+        if self.presenting.is_some() && self.modal_is_up() {
+            self.stop_presenting(&ctx);
+        }
+        if self.presenting.is_some() {
+            self.disk_results();
+            self.autosave_tick(&ctx);
+            self.recovery_tick(&ctx);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| self.present_ui(ui));
+            return;
         }
 
         // A pointer press ends any run of coalescing edits: a click is a new intent.
@@ -1744,6 +1765,7 @@ impl OndinApp {
             Action::Cheatsheet => self.open_cheatsheet(crate::cheatsheet::Opened::Editor),
             // No dialog once a destination is known this session.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
+            Action::Present => self.start_presenting(ctx),
             Action::ExportCode(target) => self.export_code(target),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
@@ -6423,7 +6445,11 @@ impl OndinApp {
             );
             // 160, or wider when a label needs it.
             let labels: Vec<&str> = match which {
-                TopMenu::View => ViewSwitch::VIEW_MENU.iter().map(|s| s.label()).collect(),
+                TopMenu::View => ViewSwitch::VIEW_MENU
+                    .iter()
+                    .map(|s| s.label())
+                    .chain(["Present"])
+                    .collect(),
                 _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
             };
             let width = crate::ui::menu_check_width(&ctx, &labels, MENU_PAD, MENU_W);
@@ -6447,6 +6473,13 @@ impl OndinApp {
                         if crate::ui::menu_check(ui, sw.label(), on, ITEM_H) {
                             app.set_view_switch(*sw, !on);
                         }
+                    }
+                    // A verb after the switches, in their column: no tick, ever.
+                    if which == TopMenu::View && crate::ui::menu_check(ui, "Present", false, ITEM_H)
+                    {
+                        app.open_menu = TopMenu::None;
+                        let ctx = ui.ctx().clone();
+                        app.dispatch(&ctx, crate::input::Action::Present);
                     }
                 },
             );
@@ -13402,6 +13435,92 @@ mod library_wiring_tests {
             !app.focus,
             "the second Escape leaves the mode, which is the rung underneath"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// Present mode, through whole frames and real keys: `Ctrl+Alt+Enter` opens it
+    /// on the selected frame, the arrows step, an editing key does nothing, and
+    /// Escape leaves with the selection and the view as they were.
+    ///
+    /// flip: `ui` running the editor below the present branch (the `return`
+    /// dropped) → fails at "Delete edits nothing while presenting".
+    #[test]
+    fn present_mode_steps_frames_and_edits_nothing() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("present");
+        let mut app = app_at(&ctx, root.clone());
+        let page = app.session.doc.root();
+        let (b, c) = (app.session.ids.mint(), app.session.ids.mint());
+        let frame = |id, index, x: f64, name: &str| ondin_core::Operation::CreateNode {
+            id,
+            parent: page,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(400.0, 300.0),
+            },
+            transform: Some(ondin_core::kurbo::Affine::translate((x, 0.0))),
+            name: Some(name.into()),
+        };
+        let n = app.root_artboards().len();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            frame(b, n, 5000.0, "B"),
+            frame(c, n + 1, 9000.0, "C"),
+        ])));
+        app.session.selection.set_one(c);
+        let camera = app.session.camera;
+        let shown = |app: &OndinApp| app.presenting.as_ref().map(|p| p.frames[p.at]);
+
+        whole_frame(&ctx, &mut app, Vec::new());
+        let ctrl_alt = egui::Modifiers {
+            alt: true,
+            ..egui::Modifiers::COMMAND
+        };
+        // `i.modifiers` is read off the raw input, not the event, so both carry it.
+        let mut eframe_frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1320.0, 820.0),
+            )),
+            modifiers: ctrl_alt,
+            events: vec![key(egui::Key::Enter, ctrl_alt)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut eframe_frame));
+        assert_eq!(shown(&app), Some(c), "opens on the selected frame");
+
+        whole_frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::ArrowLeft, Default::default())],
+        );
+        assert_eq!(shown(&app), Some(b), "the frame to its left");
+
+        whole_frame(
+            &ctx,
+            &mut app,
+            vec![key(egui::Key::Delete, Default::default())],
+        );
+        assert!(
+            app.session.doc.contains(c),
+            "Delete edits nothing while presenting (the selected frame stands)"
+        );
+
+        whole_frame(&ctx, &mut app, vec![escape()]);
+        assert!(app.presenting.is_none(), "Escape leaves");
+        assert_eq!(app.session.selection.ids(), &[c], "the selection as it was");
+        assert_eq!(app.session.camera, camera, "and the view");
         let _ = std::fs::remove_dir_all(&root);
     }
 

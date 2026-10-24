@@ -361,6 +361,8 @@ pub enum Item {
     Library,
     Settings,
     ExportCode(ondin_export::code::Target),
+    /// `Action::Present`: the top-level frames one at a time, fullscreen.
+    Present,
     Tool(Tool),
     PlaceImage,
     ZoomIn,
@@ -1122,6 +1124,7 @@ impl Item {
                 Some("Ctrl+Shift+/"),
                 Group::File,
             ),
+            Item::Present => s("Present", icon::PLAY, Some("Ctrl+Alt+Enter"), Group::View),
         }
     }
 
@@ -1160,6 +1163,7 @@ impl Item {
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
+            Item::Present => &["play", "slideshow", "presentation", "fullscreen"],
             Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
             Item::ZoomFit => &["fit", "all"],
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
@@ -1231,6 +1235,7 @@ impl Item {
             Item::TextChord(chord) => Action::TextStyle(chord),
             Item::Palette => Action::Palette,
             Item::Cheatsheet => Action::Cheatsheet,
+            Item::Present => Action::Present,
             Item::ViewSwitch(sw) => Action::ToggleView(sw),
             Item::ZoomFit => Action::ZoomFit,
             Item::ZoomSelection => Action::ZoomSelection,
@@ -2855,6 +2860,7 @@ impl OndinApp {
             | Item::Library
             | Item::Settings
             | Item::ExportCode(_)
+            | Item::Present
             | Item::Tool(_)
             | Item::PlaceImage
             | Item::ZoomIn

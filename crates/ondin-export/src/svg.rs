@@ -1045,6 +1045,23 @@ fn report_node(
             report.round_trip("flipped type on a path, written as a reversed rail");
         }
     }
+    // `run_attrs` writes these four; the reader takes none of them back.
+    if let Some(parts) = ondin_core::TextRef::of(node.kind()) {
+        let runs = parts.spans.runs(parts.style, parts.content.len());
+        let any = |f: &dyn Fn(&ondin_core::TextStyle) -> bool| runs.iter().any(|(_, s)| f(s));
+        if any(&|s| !s.variations.is_empty()) {
+            report.round_trip("font variation settings, which this app does not read back");
+        }
+        if any(&|s| !s.features.is_empty()) {
+            report.round_trip("OpenType features, which this app does not read back");
+        }
+        if any(&|s| s.baseline_shift.resolve(s.font_size) != 0.0) {
+            report.round_trip("a baseline shift, which this app does not read back");
+        }
+        if any(&|s| s.locale.is_some()) {
+            report.round_trip("a text language, which this app does not read back");
+        }
+    }
 }
 
 /// Emit a node (if visible) and recurse into its children in z-order.
@@ -1798,6 +1815,46 @@ fn run_attrs(style: &ondin_core::TextStyle) -> String {
     );
     if style.italic {
         out.push_str(r#" font-style="italic""#);
+    }
+    // Axes and features have no presentation attribute, so they ride CSS in `style`,
+    // spelled as the code export spells them. A tag is any four printable bytes, so
+    // it is quoted as a CSS string; the XML escape then leaves `'` raw.
+    let tag = |t: &ondin_core::Tag| {
+        format!(
+            "'{}'",
+            t.as_str().replace('\\', "\\\\").replace('\'', "\\'")
+        )
+    };
+    let mut css = Vec::new();
+    if !style.variations.is_empty() {
+        let axes: Vec<String> = style
+            .variations
+            .iter()
+            .map(|a| format!("{} {}", tag(&a.tag), fmt(a.value)))
+            .collect();
+        css.push(format!("font-variation-settings:{}", axes.join(", ")));
+    }
+    if !style.features.is_empty() {
+        let tags: Vec<String> = style
+            .features
+            .iter()
+            .map(|f| format!("{} {}", tag(&f.tag), f.value))
+            .collect();
+        css.push(format!("font-feature-settings:{}", tags.join(", ")));
+    }
+    if !css.is_empty() {
+        let css = css.join(";");
+        let attr = escape_xml(&css).replace("&apos;", "'");
+        let _ = write!(out, r#" style="{attr}""#);
+    }
+    // An attribute, not a `dy`: a positioned `<tspan>` would read back as a node of
+    // its own. Positive raises, as the model's does.
+    let shift = style.baseline_shift.resolve(style.font_size);
+    if shift != 0.0 {
+        let _ = write!(out, r#" baseline-shift="{}""#, fmt(shift));
+    }
+    if let Some(lang) = &style.locale {
+        let _ = write!(out, r#" xml:lang="{}""#, escape_xml(lang));
     }
     // A run's own ink overrides the `<text>`'s; `None` inherits. Alpha rides
     // `fill-opacity`.

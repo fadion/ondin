@@ -17,10 +17,6 @@ stale while its ask still reads true.
 - **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an
   outer instance; `components.md` says a root "changes main by relinking", but nothing writes
   `SetLink` except cut-move (`app.rs` `paste_cut_move`).
-- **SVG export drops text properties without reporting them**: `svg::run_attrs` writes no
-  `font-variation-settings` beyond weight, no `font-feature-settings`, no baseline shift and no
-  `xml:lang`, and `svg::report_node` names none of them. The code export writes the first two
-  (`code::walk`).
 - **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
   kit* and *Show in library* are not registry `Item`s, and quarter turns
   (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.

@@ -940,6 +940,71 @@ fn a_decorations_colour_thickness_and_style_are_exported() {
     );
 }
 
+/// A run's variation axes, OpenType features, baseline shift and language reach the
+/// file, and the report names each as a round-trip loss; a plain run writes none.
+/// flip: `run_attrs` without the `style` attribute → fails at the variation settings.
+#[test]
+fn variations_features_shift_and_language_are_exported_and_reported() {
+    use ondin_core::{
+        AxisSetting, FeatureSetting, Length, Operation, Resolved, Tag, TextStyle, Transaction,
+    };
+
+    let plain = common::fixture();
+    let out = ondin_export::svg::svg_of_reported(&plain.doc, &plain.res, &[plain.doc.root()]);
+    for absent in [
+        "font-variation",
+        "font-feature",
+        "baseline-shift",
+        "xml:lang",
+    ] {
+        assert!(
+            !out.svg.contains(absent),
+            "{absent} on a plain run:\n{}",
+            out.svg
+        );
+    }
+    assert!(out.round_trip.is_empty(), "{:?}", out.round_trip);
+
+    let mut f = common::fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetTextStyle {
+            id: f.text,
+            spans: None,
+            style: TextStyle {
+                font_family: "Inter".into(),
+                font_size: 16.0,
+                variations: vec![AxisSetting {
+                    tag: Tag::parse("wdth").unwrap(),
+                    value: 80.0,
+                }],
+                features: vec![FeatureSetting {
+                    tag: Tag::parse("ss01").unwrap(),
+                    value: 1,
+                }],
+                baseline_shift: Length::Px(4.0),
+                locale: Some("de".into()),
+                ..Default::default()
+            },
+        }]))
+        .expect("style the text");
+    f.res = Resolved::rebuild(&f.doc);
+    let out = ondin_export::svg::svg_of_reported(&f.doc, &f.res, &[f.doc.root()]);
+    for want in [
+        r#"style="font-variation-settings:'wdth' 80;font-feature-settings:'ss01' 1""#,
+        r#"baseline-shift="4""#,
+        r#"xml:lang="de""#,
+    ] {
+        assert!(out.svg.contains(want), "{want} missing:\n{}", out.svg);
+    }
+    for named in ["variation", "OpenType", "baseline shift", "language"] {
+        assert!(
+            out.round_trip.iter().any(|s| s.contains(named)),
+            "{named} not reported: {:?}",
+            out.round_trip
+        );
+    }
+}
+
 /// An em thickness resolves against the font size, the way `letter-spacing`
 /// already does — SVG has no em for the value to stay in.
 #[test]

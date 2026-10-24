@@ -9,9 +9,6 @@ stale while its ask still reads true.
 
 ## Now · Immediately
 
-- **Drag-reorder of the effects card's rows**, as the fill and stroke rows have (`paint::PaintDrag`,
-  `inspector.md` *Live reorder*). The effects stack is ordered and `SetEffects` writes it whole, so
-  only the card's drag is missing.
 - **Version history has no door.** `Ctrl+S` pins a copy under `.versions/`, but `library::store::versions`
   has no production caller, so pins are never offered back. Browse and restore.
 - **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an

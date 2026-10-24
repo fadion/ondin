@@ -443,6 +443,8 @@ struct EffectRowOut {
     open: bool,
     /// An instance's overridden effect asked for its main's back.
     reset: bool,
+    /// Its grip began a drag: the row is being carried to a new place in the stack.
+    grabbed: bool,
 }
 /// The glyph an effect row wears; the design's four read as one set.
 fn effect_glyph(kind: &EffectKind) -> &'static str {
@@ -5598,6 +5600,50 @@ impl OndinApp {
         let drag = self.in_flight.paint_drag.take()?;
         (drag.to != drag.from).then_some((drag.from, drag.to))
     }
+    /// [`Self::paint_order`] for the Effects card, which draws its stack top-first.
+    fn effect_order(&mut self, ui: &egui::Ui, anchor: NodeId, n: usize) -> Vec<usize> {
+        let y = ui.ctx().input(|i| i.pointer.interact_pos()).map(|p| p.y);
+        let Some(drag) = self
+            .in_flight
+            .effect_drag
+            .as_mut()
+            .filter(|d| d.anchor == anchor)
+        else {
+            return paint::forward_order(n, None);
+        };
+        if let Some(y) = y
+            && !drag.slots.is_empty()
+            && n > 0
+        {
+            let shown_at = drag.to.min(n - 1);
+            drag.to = paint::forward_landing(n, shown_at, drag.slots.gap(y));
+        }
+        paint::forward_order(n, Some((drag.from, drag.to)))
+    }
+    /// [`Self::finish_paint_drag`] for the Effects card. A drag carried from another
+    /// layer's card lands nothing and ends at the release, so it cannot stay in flight.
+    fn finish_effect_drag(
+        &mut self,
+        ui: &egui::Ui,
+        anchor: NodeId,
+        slots: paint::Slots,
+    ) -> Option<(usize, usize)> {
+        self.in_flight.effect_drag.as_ref()?;
+        if let Some(drag) = self
+            .in_flight
+            .effect_drag
+            .as_mut()
+            .filter(|d| d.anchor == anchor)
+        {
+            drag.slots = slots;
+        }
+        if ui.ctx().input(|i| i.pointer.primary_down()) {
+            ui.ctx().request_repaint();
+            return None;
+        }
+        let drag = self.in_flight.effect_drag.take()?;
+        (drag.anchor == anchor && drag.to != drag.from).then_some((drag.from, drag.to))
+    }
     /// Put a paint panel in the state its contents call for: closed with nothing in
     /// it, open with something.
     ///
@@ -7773,6 +7819,7 @@ impl OndinApp {
         self.sync_paint_collapse("Effects", !mixed && effects.is_empty() && !ghosts, fresh);
         let mut out = EffectRowOut::default();
         let mut acted: Option<usize> = None;
+        let mut reorder: Option<(usize, usize)> = None;
         let source = match subjects {
             [one] => self.source_list(*one, |n| n.effects()),
             _ => None,
@@ -7822,11 +7869,35 @@ impl OndinApp {
                     .doc
                     .resolved_effects(anchor, &effects)
                     .into_owned();
-                for (index, effect) in effects.iter().enumerate() {
+                let carrying = app
+                    .in_flight
+                    .effect_drag
+                    .as_ref()
+                    .filter(|d| d.anchor == anchor)
+                    .map(|d| d.from);
+                let order = app.effect_order(ui, anchor, effects.len());
+                let mut slots = paint::Slots::default();
+                for &index in &order {
+                    let effect = &effects[index];
                     let open = app.effect_menu == Some((anchor, index));
                     let item = states.as_ref().map(|s| s[index]);
                     let shown = drawn.get(index).unwrap_or(effect);
-                    let (row, resp) = Self::effect_row(ui, index, shown, open, item);
+                    let reorderable = effects.len() > 1;
+                    let ((row, resp), rect) =
+                        carried_unit(ui, carrying == Some(index), ("effect-row", index), |ui| {
+                            Self::effect_row(ui, index, shown, open, item, reorderable)
+                        });
+                    slots.push(rect.top(), rect.bottom());
+                    if row.grabbed {
+                        app.in_flight.effect_drag = Some(paint::EffectDrag {
+                            anchor,
+                            from: index,
+                            to: index,
+                            slots: paint::Slots::default(),
+                        });
+                        // Its `Area` would not follow the row.
+                        app.effect_menu = None;
+                    }
                     if row.remove || row.toggle || row.open || row.reset {
                         out = row;
                         acted = Some(index);
@@ -7835,6 +7906,7 @@ impl OndinApp {
                         head = Some(resp);
                     }
                 }
+                reorder = app.finish_effect_drag(ui, anchor, slots);
                 for gone in source
                     .as_deref()
                     .map(|s| ondin_core::reset::removed_items(s, &effects))
@@ -7865,6 +7937,18 @@ impl OndinApp {
             self.write_effects(subjects, next);
             // Straight open: the popover anchors on the row's response next frame.
             self.effect_menu = Some((anchor, at));
+            return;
+        }
+        if let Some((from, to)) = reorder {
+            self.write_effects(subjects, paint::reordered(&effects, from, to));
+            // The picker and hex buffer follow their effect to its new place; the
+            // popover closed at the grab.
+            let n = effects.len();
+            let moved = |i| paint::reordered_index(n, from, to, i);
+            self.remap_slots(anchor, |slot| match slot {
+                PaintSlot::Effect(i) => moved(i).map(PaintSlot::Effect),
+                untouched => Some(untouched),
+            });
             return;
         }
         // Written verbatim, not through `write_effects`, so a restored effect keeps
@@ -8167,10 +8251,12 @@ impl OndinApp {
         effect: &Effect,
         open: bool,
         item: Option<ondin_core::reset::ItemState>,
+        reorderable: bool,
     ) -> (EffectRowOut, egui::Response) {
         /// The `×`'s box, the paint rows' size so the cards' right edges line up.
         const CLOSE_W: f32 = 18.0;
         let mut out = EffectRowOut::default();
+        let mut grip_right = f32::NEG_INFINITY;
         let head = ui
             .scope(|ui| {
                 ui.multiply_opacity(if effect.visible { 1.0 } else { HIDDEN_OPACITY });
@@ -8183,6 +8269,11 @@ impl OndinApp {
                     let field = ui.scope(|ui| {
                         field_row_active(ui, size, open, |ui| {
                             ui.spacing_mut().item_spacing.x = 9.0;
+                            // The paint rows' grip; only the start is read, since a
+                            // carried row's responses are empty.
+                            let grip = ui::grip(ui, reorderable, size.y);
+                            out.grabbed = grip.drag_started();
+                            grip_right = grip.rect.right();
                             ui.label(theme::icon_text(
                                 effect_glyph(&effect.kind),
                                 15.0,
@@ -8216,7 +8307,9 @@ impl OndinApp {
                     });
                     // The whole row opens the popover, minus the `×`'s corner: this
                     // later claimant would otherwise win every press on the button.
+                    // Nor the grip's, which is a drag of its own.
                     let mut hit = field.response.rect;
+                    hit.min.x = hit.min.x.max(grip_right);
                     hit.max.x -= CLOSE_W + ui::FIELD_PAD_X;
                     if item.is_some() {
                         hit.max.x -= 14.0 + 9.0;
@@ -21707,5 +21800,113 @@ mod multi_xy_flex_tests {
             "a mixed selection is not"
         );
         assert_eq!(said(&[free, free2]), None, "no laid member: X and Y are on");
+    }
+}
+
+#[cfg(test)]
+mod effect_reorder_tests {
+    use super::*;
+
+    /// An Effects row carried below the last one lands at the bottom of the stack on
+    /// release, in one undo step, and a picker on its shadow colour follows it; the
+    /// stack reads top-first, so the first effect becomes the last.
+    /// flip: `effect_order` built with `paint::display_order` (bottom-first) → fails
+    /// at the order.
+    #[test]
+    fn an_effect_row_dragged_to_the_bottom_lands_last() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xEF0);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let id = ids.mint();
+        let kinds = EffectKind::all_defaults();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetEffects {
+                id,
+                effects: ondin_core::keyed_by_position(kinds[..3].iter().cloned().map(Effect::new)),
+            },
+        ]))
+        .expect("three effects");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        let labels = |app: &OndinApp| -> Vec<&'static str> {
+            app.session
+                .doc
+                .get(id)
+                .unwrap()
+                .effects()
+                .iter()
+                .map(|e| e.kind.label())
+                .collect()
+        };
+        let before = labels(&app);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 2400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                ui.set_max_width(296.0);
+                app.inspector_ui(ui)
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut app, vec![]);
+        }
+        // As the first row's grip leaves it on the press, its shadow's picker open.
+        app.picker = Some(crate::panels::Picker::new(
+            id,
+            PaintSlot::Effect(0),
+            egui::pos2(900.0, 300.0),
+        ));
+        app.in_flight.effect_drag = Some(paint::EffectDrag {
+            anchor: id,
+            from: 0,
+            to: 0,
+            slots: paint::Slots::default(),
+        });
+        let low = egui::pos2(100.0, 2300.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: low,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![egui::Event::PointerMoved(low), button(true)]);
+        frame(&mut app, vec![]);
+        let depth = app.session.history.undo_depth();
+        frame(&mut app, vec![button(false)]);
+        assert!(
+            app.in_flight.effect_drag.is_none(),
+            "the release ends the carry"
+        );
+        assert_eq!(
+            labels(&app),
+            vec![before[1], before[2], before[0]],
+            "the first effect is now last"
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
+        assert_eq!(
+            app.picker.as_ref().map(|p| p.slot),
+            Some(PaintSlot::Effect(2)),
+            "the picker follows its effect"
+        );
     }
 }

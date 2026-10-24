@@ -170,6 +170,8 @@ pub(crate) struct InFlight {
     pub(crate) settings_scrub: Option<crate::input::NudgeStep>,
     /// A Fill or Stroke row being dragged up or down its list.
     pub(crate) paint_drag: Option<crate::panels::PaintDrag>,
+    /// An Effects row being dragged up or down its card.
+    pub(crate) effect_drag: Option<crate::panels::paint::EffectDrag>,
     /// The JPEG quality being scrubbed, and which spec it belongs to; `RenderOverrides`
     /// cannot preview `SetExports`, and committing every frame would make it uncancellable.
     pub(crate) export_quality_scrub: Option<(usize, f64)>,
@@ -264,6 +266,18 @@ mod in_flight_tests {
                     paint_drag: Some(crate::panels::PaintDrag {
                         anchor: id,
                         list: crate::panels::paint::PaintList::Fill,
+                        from: 0,
+                        to: 1,
+                        slots: Default::default(),
+                    }),
+                    ..Default::default()
+                },
+            ),
+            (
+                "effect_drag",
+                InFlight {
+                    effect_drag: Some(crate::panels::paint::EffectDrag {
+                        anchor: id,
                         from: 0,
                         to: 1,
                         slots: Default::default(),
@@ -1985,6 +1999,7 @@ impl OndinApp {
         self.var_cell_preview = None;
         self.layer_drag = None;
         self.in_flight.paint_drag = None;
+        self.in_flight.effect_drag = None;
         // `gesture_cancelled` stops the release placing it.
         if let Some(p) = self.kit_picker.as_mut() {
             p.cancel_drag();

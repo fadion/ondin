@@ -63,6 +63,33 @@ pub struct PaintDrag {
     pub slots: Slots,
 }
 
+/// An Effects row being dragged up or down its card: [`PaintDrag`] for a list drawn
+/// in model order, first at the top ([`forward_order`], [`forward_landing`]).
+#[derive(PartialEq)]
+pub struct EffectDrag {
+    /// The layer the card is anchored on; the drag is dropped when it stops matching.
+    pub anchor: NodeId,
+    pub from: usize,
+    pub to: usize,
+    pub slots: Slots,
+}
+
+/// The model indices to draw a top-first list in, with `moved`'s entry shown at
+/// its landing.
+pub fn forward_order(n: usize, moved: Option<(usize, usize)>) -> Vec<usize> {
+    let base: Vec<usize> = (0..n).collect();
+    match moved {
+        Some((from, to)) if from != to && from < n && to < n => reordered(&base, from, to),
+        _ => base,
+    }
+}
+
+/// [`landing`] for a top-first list, where a display slot is a model index.
+pub fn forward_landing(n: usize, shown_at: usize, gap: usize) -> usize {
+    let landing = if gap > shown_at { gap - 1 } else { gap };
+    landing.min(n.saturating_sub(1))
+}
+
 /// Where each display slot of a list landed, top-first.
 ///
 /// Slot-based rather than keyed by item: contents move while slots stay put, so a

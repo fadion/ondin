@@ -717,6 +717,8 @@ pub struct OndinApp {
     pub(crate) kit_return: Option<(std::path::PathBuf, String)>,
     /// *Kits used…*, while it is open.
     pub(crate) kits_used_open: bool,
+    /// *Version history…*, while it is open (`versions.rs`).
+    pub(crate) versions_open: bool,
     /// The kit *Make all local*'s confirmation is asking about.
     pub(crate) making_all_local: Option<String>,
     /// *Stop sharing as kit*'s confirmation: `Some(None)` asks about the open document,
@@ -1257,6 +1259,7 @@ impl OndinApp {
             making_local: None,
             kit_return: None,
             kits_used_open: false,
+            versions_open: false,
             making_all_local: None,
             unsharing_kit: None,
             context_menu: None,
@@ -1565,6 +1568,7 @@ impl eframe::App for OndinApp {
         self.publish_dialog(&ctx);
         self.make_local_dialog(&ctx);
         self.kits_used_dialog(&ctx);
+        self.version_history_dialog(&ctx);
         self.stop_sharing_dialog(&ctx);
         // After every door, so a right-click that replaced the open menu has already
         // written the slot (R4); unguarded, a context menu opens in present mode.
@@ -1718,6 +1722,7 @@ impl OndinApp {
             }
             Action::MakeKit | Action::KitsUsed | Action::StopSharingKit => {}
             Action::ShowInLibrary => self.go_to_dashboard(),
+            Action::VersionHistory => self.versions_open = true,
             Action::RotateQuarter(clockwise) => {
                 let turn = std::f64::consts::FRAC_PI_2;
                 self.rotate_selection_quarter(if clockwise { turn } else { -turn });
@@ -4630,7 +4635,7 @@ impl OndinApp {
 
     /// The half of an open after the bytes are a document: the library's bookkeeping, the
     /// session, and the editor.
-    fn adopt_opened(&mut self, path: &std::path::Path, doc: ondin_core::Document) {
+    pub(crate) fn adopt_opened(&mut self, path: &std::path::Path, doc: ondin_core::Document) {
         if let Some(id) = doc.meta().id.clone() {
             self.library.local.mark_opened(&id);
             self.library.local.save();
@@ -4678,6 +4683,7 @@ impl OndinApp {
         self.kit_return = None;
         self.making_local = None;
         self.kits_used_open = false;
+        self.versions_open = false;
         self.making_all_local = None;
         self.unsharing_kit = None;
         self.paint_hex = None;
@@ -5942,6 +5948,7 @@ impl OndinApp {
             || self.publishing.is_some()
             || self.making_local.is_some()
             || self.kits_used_open
+            || self.versions_open
             || self.making_all_local.is_some()
             || self.unsharing_kit.is_some()
             || self.cheatsheet.is_some()

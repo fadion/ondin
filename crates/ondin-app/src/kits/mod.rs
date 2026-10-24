@@ -55,12 +55,12 @@ impl OndinApp {
     /// The document's title as the **document menu's head** (§5.3e, 1A) — the
     /// caret beside the name.
     ///
-    /// ⚠️ **The menu holds only rows whose verbs exist** (§15 D1013): the mockup's
-    /// *Rename*, *Duplicate*, *Version history* and *Export…* have no editor verb
-    /// behind them yet, and a row that does nothing is worse than a short menu.
-    /// On a kit, *Publish kit…* comes first, disabled with *No changes* when there
-    /// is nothing to publish (2D, §15 D1015); *Kits used…* joined with its verb
-    /// (§15 D1016), offered while the vault holds anything.
+    /// ⚠️ **The menu holds only rows whose verbs exist**: the mockup's *Rename*,
+    /// *Duplicate* and *Export…* have no editor verb behind them yet, and a row that
+    /// does nothing is worse than a short menu. *Version history…* leads, as the
+    /// document's own verb above a separator; on a kit, *Publish kit…* heads the kit
+    /// rows, disabled with *No changes* when there is nothing to publish; *Kits
+    /// used…* is offered while the vault holds anything.
     pub(crate) fn document_menu(&mut self, ui: &mut egui::Ui, title: String) {
         let ctx = ui.ctx().clone();
         let open = self.open_menu == TopMenu::Document;
@@ -99,6 +99,12 @@ impl OndinApp {
         };
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
+            // The document's own verbs, above the kit's (1A).
+            if item(ui, Item::VersionHistory).clicked() {
+                app.open_menu = TopMenu::None;
+                app.versions_open = true;
+            }
+            crate::ui::menu_sep(ui);
             if shared {
                 // *Publish kit…*, disabled with its reason when nothing would go
                 // out (2D).

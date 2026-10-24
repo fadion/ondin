@@ -361,6 +361,7 @@ pub enum Item {
     KitsUsed,
     StopSharingKit,
     ShowInLibrary,
+    VersionHistory,
     /// A quarter turn of each selected layer about its own origin, as the Transform
     /// card's buttons do; `true` is clockwise.
     RotateQuarter(bool),
@@ -1011,6 +1012,12 @@ impl Item {
             Item::KitsUsed => s("Kits used…", icon::PACKAGE, None, Group::Kits),
             Item::StopSharingKit => s("Stop sharing as kit…", icon::PACKAGE, None, Group::Kits),
             Item::ShowInLibrary => s("Show in library", icon::FOLDER_OPEN, None, Group::File),
+            Item::VersionHistory => s(
+                "Version history…",
+                icon::CLOCK_COUNTER_CLOCKWISE,
+                None,
+                Group::File,
+            ),
             Item::RotateQuarter(false) => s(
                 "Rotate 90° counter-clockwise",
                 icon::ARROW_COUNTER_CLOCKWISE,
@@ -1167,6 +1174,7 @@ impl Item {
             Item::KitsUsed => Action::KitsUsed,
             Item::StopSharingKit => Action::StopSharingKit,
             Item::ShowInLibrary => Action::ShowInLibrary,
+            Item::VersionHistory => Action::VersionHistory,
             Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::TextChord(chord) => Action::TextStyle(chord),
             Item::Palette => Action::Palette,
@@ -2749,6 +2757,7 @@ impl OndinApp {
             | Item::KitsUsed
             | Item::StopSharingKit
             | Item::ShowInLibrary
+            | Item::VersionHistory
             | Item::RotateQuarter(_)
             | Item::TextChord(_)
             | Item::Palette

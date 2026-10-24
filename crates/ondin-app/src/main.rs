@@ -71,6 +71,7 @@ mod thumbs;
 mod tools;
 mod ui;
 mod update;
+mod versions;
 mod view;
 
 use ondin_core::ExportScale;

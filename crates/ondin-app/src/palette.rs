@@ -556,6 +556,7 @@ impl OndinApp {
             ),
         );
         push(&mut out, Cmd::verb(Item::ShowInLibrary, None));
+        push(&mut out, Cmd::verb(Item::VersionHistory, None));
         for clockwise in [false, true] {
             push(
                 &mut out,
@@ -1833,6 +1834,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no {item:?} row"))
         };
         assert!(row(Item::MakeKit).enabled && row(Item::ShowInLibrary).enabled);
+        assert!(row(Item::VersionHistory).enabled);
         assert!(!row(Item::StopSharingKit).enabled && !row(Item::KitsUsed).enabled);
         for clockwise in [false, true] {
             assert!(

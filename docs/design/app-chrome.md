@@ -54,6 +54,7 @@ ondin-app/src/
 ├─ bin/ondin-cli.rs console twin (ondin.com on Windows)
 ├─ chrome.rs        caption buttons, drag strip, resize edges per host; present strip
 ├─ update.rs        Velopack updater and top-bar chip
+├─ versions.rs      Version history: the card listing pinned copies, and restore
 ├─ logging.rs       config_dir()/ondin/ondin.log
 ├─ machine_dir.rs   cache_dir()/ondin (OndinData on Windows)
 ├─ instances.rs     lock file per running Ondin

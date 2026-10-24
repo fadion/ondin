@@ -319,14 +319,8 @@ pub fn pin_version(root: &Path, entry: &Entry) -> io::Result<Option<PathBuf>> {
     Ok(Some(target))
 }
 
-/// A document's pinned versions, newest first.
-///
-/// Allow-listed on the item rather than the module: [`pin_version`] writes the
-/// `.versions/` tree but the app has no path that lists it, so every caller of
-/// this reader is in a `#[cfg(test)]` module. A module-level allow would hide the
-/// next dead item in `library`, and `#[cfg(test)]` would delete the item that
-/// `pin_version`'s doc links to. Delete the attribute when a real caller lands.
-#[allow(dead_code)]
+/// A document's pinned versions, newest first — *Version history…*'s list
+/// (`versions.rs`).
 pub fn versions(root: &Path, id: &str) -> Vec<PathBuf> {
     let dir = root.join(VERSIONS_DIR).join(id);
     let Ok(read) = std::fs::read_dir(&dir) else {
@@ -337,11 +331,18 @@ pub fn versions(root: &Path, id: &str) -> Vec<PathBuf> {
         .map(|e| e.path())
         .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(DOCUMENT_EXT))
         .collect();
-    // By filename, which is the stamp — and therefore by time, without a stat
-    // per file. Reversed for newest first.
-    out.sort();
-    out.reverse();
+    // By the stamp in the name, numerically — time without a stat per file. A byte
+    // sort would put a same-second `S-1` before the `S` it followed. Newest first.
+    out.sort_by_key(|p| std::cmp::Reverse(version_stamp(p)));
     out
+}
+
+/// A pinned copy's `(unix seconds, same-second counter)`, from the name
+/// [`pin_version`] gives it; `None` for any other name.
+pub fn version_stamp(path: &Path) -> Option<(u64, u64)> {
+    let stem = path.file_stem()?.to_str()?;
+    let (secs, n) = stem.split_once('-').unwrap_or((stem, "0"));
+    Some((secs.parse().ok()?, n.parse().ok()?))
 }
 
 /// Read a document off disk.
@@ -685,6 +686,29 @@ mod tests {
             1,
             "history is keyed on the id, not the filename"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Versions list newest first by their stamps, a same-second pin after the one it
+    /// followed; a byte sort of the names would put `S-1` before `S`.
+    /// flip: `versions` sorting by path → fails at the same-second pair.
+    #[test]
+    fn versions_list_newest_first_including_within_one_second() {
+        let root = temp_root("version-order");
+        let dir = root
+            .join(VERSIONS_DIR)
+            .join("0ba9f11ce0ba9f11ce0ba9f11ce0ba9f");
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["100", "200", "200-1", "200-2", "99"] {
+            std::fs::write(dir.join(format!("{name}.{DOCUMENT_EXT}")), b"{}").unwrap();
+        }
+        let names: Vec<String> = versions(&root, "0ba9f11ce0ba9f11ce0ba9f11ce0ba9f")
+            .iter()
+            .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["200-2", "200-1", "200", "100", "99"]);
+        assert_eq!(version_stamp(Path::new("200-2.ondin")), Some((200, 2)));
+        assert_eq!(version_stamp(Path::new("notes.ondin")), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -147,6 +147,8 @@ pub enum Action {
     KitsUsed,
     StopSharingKit,
     ShowInLibrary,
+    /// *Version history…*, the Document menu's first row.
+    VersionHistory,
     /// A quarter turn of the selection, each layer about its own origin; `true` is
     /// clockwise. Unbound, as the Transform card's buttons are.
     RotateQuarter(bool),

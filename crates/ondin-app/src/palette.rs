@@ -522,10 +522,7 @@ impl OndinApp {
             );
         }
         for sw in SWITCHES {
-            let mut cmd = Cmd::verb(
-                Item::ViewSwitch(sw),
-                (sw == ViewSwitch::Rulers && self.focus).then_some("Focus mode hides the rulers"),
-            );
+            let mut cmd = Cmd::verb(Item::ViewSwitch(sw), None);
             cmd.checked = Some(self.view_switch(sw));
             push(&mut out, cmd);
         }

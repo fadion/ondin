@@ -7,8 +7,8 @@ scoped, copied, drawn and inspected, and the canvas's press-priority ladder. Sna
 ## 9.4 Rulers
 
 - Two 20pt bars, view state (`OndinApp::show_rulers`, on by default, `Shift+R`, *View ▸ Show
-  rulers*). Every reader asks `OndinApp::rulers_on()` (which includes `!focus`), so hit test and
-  paint agree.
+  rulers*). Every reader asks `OndinApp::rulers_on()` (`show_rulers` alone; focus mode keeps the
+  bars), so hit test and paint agree.
 - **Selection band**: a tinted `ACCENT_900` band spans the selection's world extent on each bar's
   axis, its two end coordinates in `ACCENT_200`, read through the preview layer. A tick number under a
   band number is dropped (`EXTENT_LABEL_CLEAR`). Band numbers use the tick fallback — plain, then

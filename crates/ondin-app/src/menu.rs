@@ -1325,8 +1325,8 @@ pub struct Context<'a> {
     pub any_guides: bool,
     /// Each of the five View switches this menu can show, as it stands.
     pub view: ViewState,
-    /// Whether focus mode is on — read by *Show rulers* and *Rename*, whose
-    /// effects focus mode hides. Not in [`ViewState`]: no context menu draws a
+    /// Whether focus mode is on — read by *Rename*, whose field focus mode
+    /// hides. Not in [`ViewState`]: no context menu draws a
     /// *Focus mode* row (the top bar's View menu does), so `ViewState::get` must
     /// not answer for it.
     pub focus: bool,
@@ -2011,10 +2011,7 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
 }
 
 /// The five View switches §6.1 and §6.3 share, each carrying its own state.
-///
-/// Only *Show rulers* is dimmed in focus mode, because `rulers_on()` is
-/// `show_rulers && !self.focus`; the other four stay live there. Dimmed rather
-/// than absent, with a reason naming what would have to change.
+/// All five stay live in focus mode, which hides none of what they switch.
 fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     [
         ViewSwitch::Rulers,
@@ -2024,14 +2021,7 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
         ViewSwitch::LayoutGrid,
     ]
     .into_iter()
-    .map(|sw| {
-        Row::new(Item::ViewSwitch(sw))
-            .checked(cx.view.get(sw))
-            .dim_if(
-                sw == ViewSwitch::Rulers && cx.focus,
-                "Focus mode hides the rulers",
-            )
-    })
+    .map(|sw| Row::new(Item::ViewSwitch(sw)).checked(cx.view.get(sw)))
     .collect()
 }
 
@@ -3671,20 +3661,19 @@ mod tests {
             labels(&groups)
         );
         // *Lock guides* must be reversible from the canvas (C7); the full set is
-        // pinned by `the_canvas_menu_carries_every_view_row_and_focus_dims_only_the_rulers`.
+        // pinned by `the_canvas_menu_carries_every_view_row_live_in_focus_mode_too`.
         assert!(rows.contains(&Item::ViewSwitch(ViewSwitch::GuideLock)));
     }
 
     /// The canvas menu's View rows are the View menu's less the four chrome-wide
-    /// switches §6.1 keeps out, and focus mode dims only `Rulers`. The expected
-    /// set is derived from `ViewSwitch::VIEW_MENU`, so a new switch either appears
-    /// here or fails here.
+    /// switches §6.1 keeps out, all live in focus mode too. The expected set is
+    /// derived from `ViewSwitch::VIEW_MENU`, so a new switch either appears here
+    /// or fails here.
     ///
     /// flip: dropping `LayoutGrid` from `view_rows` → fails at the set assertion;
-    /// widening the dim to `cx.focus` alone → fails at "focus mode overrides
-    /// only the rulers".
+    /// dimming *Show rulers* on `cx.focus` → fails at "and every one live".
     #[test]
-    fn the_canvas_menu_carries_every_view_row_and_focus_dims_only_the_rulers() {
+    fn the_canvas_menu_carries_every_view_row_live_in_focus_mode_too() {
         let view_rows_of = |cx: &Context<'_>| -> Vec<(ViewSwitch, bool, Option<&'static str>)> {
             build(cx)
                 .iter()
@@ -3726,38 +3715,12 @@ mod tests {
         assert_eq!(
             got.iter().map(|(sw, _, _)| *sw).collect::<Vec<_>>(),
             expected,
-            "focus mode removes a row rather than dimming it — §6 says kind \
-             decides presence and state decides enabled"
+            "focus mode keeps every row — §6 says kind decides presence"
         );
-        let rulers = got
-            .iter()
-            .find(|(sw, _, _)| *sw == ViewSwitch::Rulers)
-            .expect("the rulers row");
         assert!(
-            !rulers.1,
-            "Show rulers cannot do anything in focus mode — `rulers_on()` is \
-             `show_rulers && !focus`, so the tick would move and the bars would not"
-        );
-        assert_eq!(
-            rulers.2,
-            Some("Focus mode hides the rulers"),
-            "a dimmed row has to say why, and the reason names the thing that would \
-             have to change (§5.9)"
-        );
-        let live: Vec<ViewSwitch> = got
-            .iter()
-            .filter(|(_, enabled, _)| *enabled)
-            .map(|(sw, _, _)| *sw)
-            .collect();
-        assert_eq!(
-            live,
-            expected
-                .iter()
-                .copied()
-                .filter(|sw| *sw != ViewSwitch::Rulers)
-                .collect::<Vec<_>>(),
-            "focus mode overrides only the rulers — guides and both grids stay \
-             live there by §15 D750, and Lock guides is a property, not a visibility"
+            got.iter().all(|(_, enabled, _)| *enabled),
+            "and every one live: focus mode hides panels, not the rulers, guides \
+             or grids these rows switch"
         );
     }
 

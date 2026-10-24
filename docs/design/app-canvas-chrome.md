@@ -218,19 +218,21 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
 ## Focus mode
 
 Focus mode (`OndinApp::focus`, `ViewSwitch::Focus`, `Ctrl+\`, the palette's *focus* or *zen*) is
-the editing mode that hides the chrome. Present mode is a separate, view-only mode and none of the
-rules below are its.
+a normal editing mode with the panels out of the way. Present mode is a separate, view-only mode and
+none of the rules below are its.
 
-- Hides exactly: top bar, layers pane, tool rail, inspector, picker, ruler bars. Everything edited
-  *with* stays — guides, layout grids, selection box, handles, size badge, hover outline, frame tags —
-  and the canvas works normally. The **floating status bar stays** (it carries *"Focus mode — Escape
-  to leave"*).
+- Hides exactly: top bar, layers pane, tool rail, inspector, and the inspector's popups (picker,
+  kit picker, var browser, field menu, var autocomplete, mode menu, style popups). Everything edited
+  *with* stays — ruler bars, guides, layout grids, selection box, handles, size badge, hover outline,
+  frame tags — and the canvas works normally, so a guide can be pulled out of a ruler. The rulers
+  are an editing aid like guides and layout grids, not app chrome. The **floating status bar stays**
+  (it carries *"Focus mode — Escape to leave"*).
 - On Windows/Linux the top bar is the title bar, so caption buttons go too; `chrome::focus_strip`
   shows them in a 32pt strip when the pointer reaches the window's top edge with no button held, keeps
   it while hovered or a button is down. Approaching from the canvas below shows nothing.
-- It **overrides** the switches it reads (rulers, layers, toolbar) without changing them, so leaving
-  restores the user's workspace. The canvas menu opens in focus mode with *Show rulers* dimmed
-  (*"Focus mode hides the rulers"*); the other View rows stay live.
+- It **overrides** the switches it reads (layers, toolbar) without changing them, so leaving
+  restores the user's workspace. Every View row stays live in the canvas menu and the palette; the
+  layer menu's *Rename* dims (*"Leave focus mode to rename"*), since its field is in the hidden panel.
 - Escape is handled **first** in `OndinApp::escape`. A context menu open in focus mode takes the
   first Escape (R3 returns before `escape`), the second leaves the mode. The popover arm asks for a
   popover heard last frame (focus mode draws none). Kit dialogs are drawn outside the `!focus`
@@ -275,8 +277,9 @@ frames, at, was_fullscreen, stepped_at }` while it runs.
 
 ## Traps
 
-- Folding `focus` into some overlay's predicate: focus mode does not hide overlays; read §15 D750
-  first.
+- Folding `focus` into some overlay's predicate, or back into `rulers_on()`: focus mode hides
+  panels, not what the canvas is edited with; read §15 D750 first.
+  `focus_mode_leaves_the_guides_and_rulers_on_screen_and_live` pins the rulers and guides.
 - A modal flag set behind a `!focus` draw guard swallows all keys in focus mode.
 - Deriving the escape clip from overrides makes resized children pop out of their frame.
 - The cheatsheet's chord both opens it (at its door) and closes it (in `cheatsheet_ui`), in one

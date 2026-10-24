@@ -410,8 +410,8 @@ pub struct GuideDrag {
     pub copying: bool,
     /// Whether the rulers were on when the press happened.
     ///
-    /// Latched because `rulers_on()` is two live chords (`Shift+R` and `Ctrl+\`)
-    /// and `OndinApp` dispatches them mid-drag; reading it live turned a guide
+    /// Latched because `rulers_on()` is a live chord (`Shift+R`) and `OndinApp`
+    /// dispatches it mid-drag; reading it live turned a guide
     /// **cancel** into a **create**. Both consumers read this field:
     /// `over_own_ruler`, which decides the commit, and `off_rulers`, which feeds
     /// [`Self::left_ruler`]. This latches the bars' existence, where `left_ruler`

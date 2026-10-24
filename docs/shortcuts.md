@@ -204,15 +204,15 @@ one is designated (§15 D113).
 | `Ctrl+Shift+;` | snap to guides | ✅ both spellings |
 | — | snap to baselines | **unbound** (§15 D355) |
 | `Ctrl+Alt+;` | lock guides | ✅ Illustrator |
-| `Ctrl+\` | focus mode (hide all chrome) | ✅ Figma's show/hide-UI |
+| `Ctrl+\` | focus mode (hide the panels) | ✅ Figma's show/hide-UI |
 | `Ctrl+Alt+\` | layers panel | ✅ |
 | `Ctrl+Shift+\` | toolbar | ✅ both spellings |
 | — | show status messages | **unbound** (§15 D1025) |
 
 `ViewSwitch::accel` answers `None` for exactly the three unbound rows (`LayoutGrid`,
 `StatusMessages`, `SnapBaselines`): no convention to match, a menu one click away. They are listed
-so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide all
-chrome, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
+so nobody calls a free chord parity. `Ctrl+\` maps to focus mode, which already is "hide the
+panels, restore on leaving"; Escape still leaves it. `Ctrl+U` is underline in TextInsert (§10).
 Guide lock is a workspace toggle on `OndinApp`, not a per-guide property (`architecture.md` §9.4).
 `theme::install` switches `zoom_with_keyboard` off, the only egui chord that collided; check it
 before adding another.

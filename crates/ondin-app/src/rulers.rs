@@ -323,12 +323,12 @@ fn ruler_at(rect: egui::Rect, p: egui::Pos2) -> Option<GuideAxis> {
 }
 
 impl OndinApp {
-    /// Whether the ruler bars are on screen: switched on (*View ▸ Show rulers*)
-    /// and not suppressed by focus mode.
+    /// Whether the ruler bars are on screen: switched on (*View ▸ Show rulers*),
+    /// focus mode or not — the bars are an editing aid, not the app's chrome.
     ///
     /// Every reader goes through this, so the hit test and the paint agree.
     pub(crate) fn rulers_on(&self) -> bool {
-        self.show_rulers && !self.focus
+        self.show_rulers
     }
 
     /// Which ruler bar a screen position is over, or `None` — including when the
@@ -343,14 +343,9 @@ impl OndinApp {
     /// Whether the guide **lines** are drawn: switched on (*View ▸ Show guides*),
     /// and that is the whole of it.
     ///
-    /// Focus mode is deliberately not folded in: it hides the app's chrome while
-    /// the canvas keeps working, and guides, like the selection box and layout
-    /// grids, belong to the canvas. [`Self::rulers_on`] folds it in because the
-    /// bars are window furniture.
-    ///
-    /// So in focus mode the lines stay drawn and pickable (through
-    /// [`Self::guides_pickable`]) and only creating one, a drag off a bar, is
-    /// lost; the Guide panel's position field is the way in.
+    /// Focus mode is deliberately not folded in: it hides the app's panels while
+    /// the canvas keeps working, and guides, like the selection box, layout grids
+    /// and ruler bars, belong to the canvas.
     pub(crate) fn guides_on(&self) -> bool {
         self.show_guides
     }
@@ -2537,19 +2532,20 @@ mod guide_grab_tests {
         );
     }
 
-    /// Focus mode hides the app's chrome and leaves the canvas working: the
-    /// guide lines stay drawn, pickable, nudgeable and deletable, while the ruler
-    /// bars (the control) go. Three claims, because `guides_on()` alone would pass
-    /// a version that drew the line and refused the drag.
+    /// Focus mode hides the app's panels and leaves the canvas working: the
+    /// guide lines stay drawn, pickable, nudgeable and deletable, and the ruler
+    /// bars stay, so a guide can still be pulled out of one. Several claims,
+    /// because `guides_on()` alone would pass a version that drew the line and
+    /// refused the drag.
     ///
     /// flip: restore `!self.focus` in `guides_on` → fails at the first
-    /// assertion. The layout grids have their own guard in `draw_layout_grids`
-    /// and do not read `guides_on`.
+    /// assertion; in `rulers_on` → fails at "the bars stay". The layout grids
+    /// have their own guard in `draw_layout_grids` and do not read `guides_on`.
     #[test]
-    fn focus_mode_leaves_the_guides_on_screen_and_live() {
+    fn focus_mode_leaves_the_guides_and_rulers_on_screen_and_live() {
         let ctx = egui::Context::default();
         let down = ondin_core::kurbo::Vec2::new(0.0, 1.0);
-        let (mut app, id, _, _) = app_with_guide(&ctx, GuideAxis::Horizontal, 100.0);
+        let (mut app, id, rect, _) = app_with_guide(&ctx, GuideAxis::Horizontal, 100.0);
         app.session.selection.set_guide(id);
         app.show_rulers = true;
         app.focus = true;
@@ -2578,24 +2574,23 @@ mod guide_grab_tests {
             "and Delete still removes it"
         );
 
-        // Control: focus mode still takes the bars away.
-        assert!(
-            !app.rulers_on(),
-            "control: the ruler bars are window furniture and focus mode still \
-             takes them away — without this the test is green for a focus mode \
-             that does nothing"
+        let on_top_bar = egui::pos2(rect.center().x, rect.top() + THICKNESS / 2.0);
+        assert_eq!(
+            app.ruler_at(on_top_bar, rect),
+            Some(GuideAxis::Horizontal),
+            "the bars stay, and a press on one is a press on a ruler"
         );
     }
 
     /// Toggling the rulers mid-drag does not change what the release means:
-    /// `Shift+R` or `Ctrl+\` with the button down must not turn a cancel into a
-    /// create, nor a bar appearing delete a guide never dropped on one, nor
-    /// announce a discard for a new guide still on its bar. The control asserts
-    /// the bin cursor (`announces_discard`), since a version that never creates
-    /// guides would pass an empty-list check.
+    /// `Shift+R` with the button down must not turn a cancel into a create, nor a
+    /// bar appearing delete a guide never dropped on one, nor announce a discard
+    /// for a new guide still on its bar. The control asserts the bin cursor
+    /// (`announces_discard`), since a version that never creates guides would
+    /// pass an empty-list check.
     ///
     /// flip: `d.rulers_shown` back to `self.rulers_on()` in `update_guide_drag` →
-    /// fails at the focus-mode row and at row 3. Reverting only one of the two
+    /// fails at row 1 and at row 3. Reverting only one of the two
     /// readers (`over_own_ruler`, `off_rulers`) leaves the other silencing the
     /// `dead_code` lint, which counts readers and proves nothing about the rule.
     #[test]
@@ -2625,7 +2620,7 @@ mod guide_grab_tests {
             "control: and dropping on the bar deletes the guide"
         );
 
-        // 1 and 2: a new guide pulled out of the bar, where cancelling must create
+        // 1: a new guide pulled out of the bar, where cancelling must create
         // nothing (an existing guide dropped on the bar is a legitimate edit).
         let pull = |flip: fn(&mut OndinApp)| {
             let ctx = egui::Context::default();
@@ -2649,33 +2644,23 @@ mod guide_grab_tests {
             (app, depth)
         };
 
-        for (what, flip) in [
-            (
-                "`Ctrl+\\` (focus mode)",
-                (|a: &mut OndinApp| a.focus = true) as fn(&mut OndinApp),
-            ),
-            ("`Shift+R` (show rulers)", |a: &mut OndinApp| {
-                a.show_rulers = false
-            }),
-        ] {
-            let (app, depth) = pull(flip);
-            assert!(
-                !app.rulers_on(),
-                "{what}: the fixture has to actually take the bars away, or this \
-                 row is the control again"
-            );
-            assert!(
-                app.session.doc.guides().is_empty(),
-                "{what} pressed mid-drag turned the cancel gesture into a create \
-                 gesture — a guide committed at whatever coordinate the vanished \
-                 bar sat over, on a release that meant 'throw this away'"
-            );
-            assert_eq!(
-                app.session.history.undo_depth(),
-                depth,
-                "{what}: and it spent an undo step and dirtied the document doing it"
-            );
-        }
+        let (app, depth) = pull(|a| a.show_rulers = false);
+        assert!(
+            !app.rulers_on(),
+            "the fixture has to actually take the bars away, or this row is the \
+             control again"
+        );
+        assert!(
+            app.session.doc.guides().is_empty(),
+            "`Shift+R` pressed mid-drag turned the cancel gesture into a create \
+             gesture — a guide committed at whatever coordinate the vanished bar \
+             sat over, on a release that meant 'throw this away'"
+        );
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth,
+            "and it spent an undo step and dirtied the document doing it"
+        );
 
         // Control: the identical pull with nothing toggled creates nothing either.
         let (app, depth) = pull(|_| {});
@@ -2720,7 +2705,7 @@ mod guide_grab_tests {
              announce yet — which is the whole of what `left_ruler` is for"
         );
         // The pointer does not move. Only the bars go.
-        app.focus = true;
+        app.show_rulers = false;
         app.update_guide_drag(bar(rect), rect, ppp, false);
         assert!(
             !announced(&app),

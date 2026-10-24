@@ -293,14 +293,15 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Export all | `Ctrl+Alt+E` | re-runs every saved export spec; dims *"No layer in this document has export settings"* |
 | Export all frames… | — | every visible top-level frame: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
 | *—* | | |
-| Show rulers ✓ | `Shift+R` | dims *"Focus mode hides the rulers"* in focus mode |
+| Show rulers ✓ | `Shift+R` | |
 | Show guides ✓ | `Ctrl+;` | |
 | Lock guides ✓ | `Ctrl+Alt+;` | the way back once guides are locked (C7) |
 | Show grid ✓ | `Ctrl+'` | |
 | Show layout grid ✓ | — | |
 
 No selection rows, even while something is selected (C3). The View rows are the View menu's
-switches less *Show layers*, *Show toolbar*, *Show status messages* and *Focus mode*.
+switches less *Show layers*, *Show toolbar*, *Show status messages* and *Focus mode*. Every View
+row is live in focus mode, which hides none of what they switch.
 
 ### 6.2 Layers panel background
 

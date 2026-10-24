@@ -26,10 +26,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
 - **`Ctrl+B` / `Ctrl+I`** (`shortcuts.md` §10). Decide what bold and italic mean for a family with
   named faces, a `wght` axis or a `slnt` axis (`typography::bold_toggle` is a 400↔700 switch), then
   bind them (`input::TextChord`).
-- **WebP export** (`export::ExportFormat`); WebP already imports.
-- **Copy as PNG at a scale** (1× only, `context-menus.md`) and **copy as CSS** of a layer.
-- **Export all frames** without first giving each an export row (`Ctrl+Alt+E` runs layers that carry
-  specs).
 - **Present mode**: step between frames, fit to frame, fullscreen, and no selection chrome. It only
   hides the panels today.
 

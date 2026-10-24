@@ -585,6 +585,7 @@ fn run_export_all(
         ondin_export::PlanOptions {
             folders_from_names: folders,
             scale_override,
+            unset: None,
         },
     );
 

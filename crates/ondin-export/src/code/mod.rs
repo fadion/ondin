@@ -57,6 +57,54 @@ impl Target {
     }
 }
 
+/// *Copy as CSS*: each of `ids`' own declarations, under a comment naming the
+/// layer — what the HTML export writes on its class, without its children's rules.
+///
+/// Placement (`position`, `left`, `top`) is left out: each layer is written as
+/// its own page, so it would always read as the origin. A variable stays a
+/// `var(--…)`.
+pub fn css_of(doc: &Document, res: &Resolved, ids: &[NodeId]) -> String {
+    let mut out = String::new();
+    for id in ids {
+        let Some(node) = doc.get(*id) else { continue };
+        let page = walk::page(doc, res, &[*id], false);
+        let Some(dom::Child::Element(el)) = page.root.children.first() else {
+            continue;
+        };
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!("/* {} */\n", node.name().replace("*/", "* /")));
+        for (prop, value) in &el.style {
+            if !matches!(*prop, "position" | "left" | "top") {
+                out.push_str(&format!("{prop}: {};\n", lone_solid(value)));
+            }
+        }
+    }
+    out
+}
+
+/// A background of one solid layer as its colour: the walk writes a solid as a
+/// one-colour gradient so it can stack, which a pasted rule does not need. Split
+/// at the middle, not the first comma: a colour can hold one (`color-mix(…)`).
+fn lone_solid(value: &str) -> &str {
+    let Some(inner) = value
+        .strip_prefix("linear-gradient(")
+        .and_then(|v| v.strip_suffix(')'))
+    else {
+        return value;
+    };
+    let half = inner.len().saturating_sub(2) / 2;
+    match (
+        inner.get(..half),
+        inner.get(half..half + 2),
+        inner.get(half + 2..),
+    ) {
+        (Some(a), Some(", "), Some(b)) if a == b && !a.is_empty() => a,
+        _ => value,
+    }
+}
+
 /// One file of a code export, at its path inside the export's folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeFile {
@@ -337,5 +385,65 @@ mod tests {
         ] {
             assert_eq!(relative(dir, path), import, "{dir} -> {path}");
         }
+    }
+
+    /// *Copy as CSS* names the layer and writes its own box and paint, without
+    /// the placement every one-layer page puts at the origin.
+    #[test]
+    fn css_of_writes_the_layers_own_declarations() {
+        use ondin_core::kurbo::{Affine, Size};
+        use ondin_core::peniko::Color;
+        use ondin_core::{Brush, Fill, IdSource, NodeKind, Operation, Transaction};
+        let mut ids = IdSource::new(0x5C);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let rect = ids.mint();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(120.0, 40.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((300.0, 200.0))),
+                name: Some("Card */ x".into()),
+            },
+            Operation::SetFills {
+                id: rect,
+                fills: ondin_core::keyed_by_position([Fill {
+                    brush: Brush::Solid(Color::from_rgba8(255, 0, 0, 255)).into(),
+                    visible: true,
+                }]),
+            },
+        ]))
+        .unwrap();
+        let res = Resolved::rebuild(&doc);
+        let css = css_of(&doc, &res, &[rect]);
+        assert!(css.starts_with("/* Card * / x */\n"), "{css}");
+        assert!(css.contains("width: 120px;"), "{css}");
+        assert!(css.contains("height: 40px;"), "{css}");
+        assert!(css.contains("background: #ff0000;"), "{css}");
+        assert!(
+            !css.contains("position:") && !css.contains("left:"),
+            "{css}"
+        );
+    }
+
+    /// The collapse takes a colour holding commas whole and leaves a real
+    /// two-colour ramp alone.
+    ///
+    /// flip: `lone_solid` splitting at the first `", "` → fails at the
+    /// `color-mix` case.
+    #[test]
+    fn a_lone_solid_collapses_whatever_its_colour_holds() {
+        let mix = "color-mix(in srgb, var(--c) 50%, transparent)";
+        assert_eq!(lone_solid(&format!("linear-gradient({mix}, {mix})")), mix);
+        assert_eq!(lone_solid("linear-gradient(#fff, #fff)"), "#fff");
+        let ramp = "linear-gradient(#fff, #000)";
+        assert_eq!(lone_solid(ramp), ramp);
+        let two = "linear-gradient(#fff, #fff), linear-gradient(#000, #000)";
+        assert_eq!(lone_solid(two), two, "two stacked layers stay as written");
     }
 }

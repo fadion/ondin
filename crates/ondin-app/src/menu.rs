@@ -75,7 +75,8 @@ pub enum Group {
     Transform,
     State,
     Navigate,
-    /// *Copy as SVG* · *Copy as PNG*, semantic then raster.
+    /// *Copy as SVG* · *Copy as CSS* · *Copy as PNG* · *Copy as PNG 2×*, semantic
+    /// then raster.
     Export,
     /// The workspace switches §6.1 and §6.3 carry (rulers, guides, grid). Last.
     View,
@@ -295,19 +296,25 @@ pub enum Item {
     /// (`ondin_export::svg::svg_of`), so the other application receives editable
     /// groups and shapes.
     CopyAsSvg,
-    /// The selection as a picture on the clipboard, 1:1 (`ondin_export::png::raster_of`).
+    /// Each selected layer's own CSS declarations as text, under a comment naming
+    /// it (`ondin_export::code::css_of`).
+    CopyAsCss,
+    /// The selection as a picture on the clipboard at this multiplier, 1 or 2
+    /// (`ondin_export::png::raster_of`).
     ///
     /// It does not encode a PNG: `arboard::ImageData` takes the raw RGBA that
     /// `raster_of` returns, and handing it `png_of`'s bytes pastes as garbage.
-    /// There is no scale submenu; multipliers belong to the Export panel.
-    CopyAsPng,
+    CopyAsPng(u8),
 
     // --- canvas and panel background (§6.1, §6.2) -------------------------
     SelectAll,
     ZoomFit,
     /// Re-run every export setting in the document, into the folder the last
-    /// export went to (§7). Asks nothing, and is the only menu row that writes a file.
+    /// export went to (§7). Asks nothing.
     ExportAll,
+    /// Every top-level frame into a folder the user picks: a frame's own export
+    /// settings, else a 1× PNG.
+    ExportFrames,
     ViewSwitch(ViewSwitch),
 
     // --- guides (§6.3) ----------------------------------------------------
@@ -534,10 +541,13 @@ impl Item {
         Item::Rename,
         Item::ZoomSelection,
         Item::CopyAsSvg,
-        Item::CopyAsPng,
+        Item::CopyAsCss,
+        Item::CopyAsPng(1),
+        Item::CopyAsPng(2),
         Item::SelectAll,
         Item::ZoomFit,
         Item::ExportAll,
+        Item::ExportFrames,
         Item::ViewSwitch(ViewSwitch::Rulers),
         Item::ViewSwitch(ViewSwitch::Guides),
         Item::ViewSwitch(ViewSwitch::GuideLock),
@@ -826,14 +836,17 @@ impl Item {
             ),
 
             Item::CopyAsSvg => s("Copy as SVG", icon::SHARE_NETWORK, None, Group::Export),
+            Item::CopyAsCss => s("Copy as CSS", icon::BRACKETS_CURLY, None, Group::Export),
             // `FILE_IMAGE` is the Export panel's raster-format glyph.
-            Item::CopyAsPng => s("Copy as PNG", icon::FILE_IMAGE, None, Group::Export),
+            Item::CopyAsPng(2) => s("Copy as PNG 2×", icon::FILE_IMAGE, None, Group::Export),
+            Item::CopyAsPng(_) => s("Copy as PNG", icon::FILE_IMAGE, None, Group::Export),
             Item::ExportAll => s(
                 "Export all",
                 icon::EXPORT,
                 Some("Ctrl+Alt+E"),
                 Group::Export,
             ),
+            Item::ExportFrames => s("Export all frames…", icon::EXPORT, None, Group::Export),
 
             Item::SelectAll => s("Select all", icon::SCAN, Some("Ctrl+A"), Group::Clipboard),
             Item::ZoomFit => s(
@@ -1129,7 +1142,9 @@ impl Item {
     pub fn aliases(self) -> &'static [&'static str] {
         match self {
             Item::CopyAsSvg => &["svg", "vector"],
-            Item::CopyAsPng => &["png", "bitmap", "raster"],
+            Item::CopyAsCss => &["css", "style", "code"],
+            Item::CopyAsPng(_) => &["png", "bitmap", "raster", "image"],
+            Item::ExportFrames => &["artboards", "png", "export"],
             Item::ExportCode(_) => &["code", "html", "react", "vue", "zip"],
             Item::ToggleHidden => &["hide", "show", "visibility"],
             Item::ToggleLocked => &["lock", "unlock"],
@@ -1349,6 +1364,9 @@ pub struct Context<'a> {
     /// Whether any layer carries export settings — what makes *Export all* offered
     /// (§7). A document question: it reads neither the selection nor the pointer.
     pub any_exports: bool,
+    /// Whether a frame sits straight on the canvas — what makes *Export all
+    /// frames…* offered.
+    pub any_frames: bool,
     /// `build::can_frame` said yes — the selection has one parent that can hold a
     /// frame. The builder's own predicate; an `Artboard` may sit under neither a
     /// boolean nor a mask.
@@ -1526,6 +1544,7 @@ fn canvas_menu(cx: &Context<'_>) -> Vec<Row> {
             !cx.any_exports,
             "No layer in this document has export settings",
         ),
+        Row::new(Item::ExportFrames).dim_if(!cx.any_frames, "No frames on the canvas"),
     ];
     // *Lock guides* is here because with guides locked a guide is not a target (C7).
     rows.extend(view_rows(cx));
@@ -1893,8 +1912,13 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // --- navigate ---------------------------------------------------------
     rows.push(Row::new(Item::ZoomSelection));
 
-    // Export group: never dim, since neither row changes the layer.
-    rows.extend([Row::new(Item::CopyAsSvg), Row::new(Item::CopyAsPng)]);
+    // Export group: never dim, since no row changes the layer.
+    rows.extend([
+        Row::new(Item::CopyAsSvg),
+        Row::new(Item::CopyAsCss),
+        Row::new(Item::CopyAsPng(1)),
+        Row::new(Item::CopyAsPng(2)),
+    ]);
 
     rows
 }
@@ -2069,7 +2093,9 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     (Item::Rename, NEEDS_SELECTION),
     (Item::ZoomSelection, NEEDS_SELECTION),
     (Item::CopyAsSvg, NEEDS_SELECTION),
-    (Item::CopyAsPng, NEEDS_SELECTION),
+    (Item::CopyAsCss, NEEDS_SELECTION),
+    (Item::CopyAsPng(1), NEEDS_SELECTION),
+    (Item::CopyAsPng(2), NEEDS_SELECTION),
 ];
 
 /// Why a layer verb is not offered with nothing selected.
@@ -2514,6 +2540,7 @@ impl OndinApp {
             }),
             // A tree walk per frame that stops at the first layer with a spec.
             any_exports: self.document_exports_anything(),
+            any_frames: !self.exported_frames().is_empty(),
         }
     }
 
@@ -2706,7 +2733,9 @@ impl OndinApp {
             Item::PasteProperties => self.dispatch(ctx, Action::PasteProperties),
             Item::ExportAll => self.dispatch(ctx, Action::ExportAll),
             Item::CopyAsSvg => self.copy_as_svg(ctx),
-            Item::CopyAsPng => self.copy_as_png(),
+            Item::CopyAsCss => self.copy_as_css(ctx),
+            Item::CopyAsPng(scale) => self.copy_as_png(scale),
+            Item::ExportFrames => self.export_frames(),
             Item::ReverseSubpaths => self.dispatch(ctx, Action::ReverseSubpaths),
 
             // --- the ones a keyboard cannot express ------------------------
@@ -2984,6 +3013,7 @@ mod tests {
             combine_refused: None,
             property_reset: None,
             any_exports: true,
+            any_frames: true,
         }
     }
 
@@ -3197,11 +3227,11 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 26 rows in the canonical group order, with the empty
+    /// A primitive's menu is 28 rows in the canonical group order, with the empty
     /// head collapsed. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_six_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_twenty_eight_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3212,7 +3242,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 26, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         assert_eq!(
@@ -3243,7 +3273,9 @@ mod tests {
                 "Rename",
                 "Zoom to selection",
                 "Copy as SVG",
+                "Copy as CSS",
                 "Copy as PNG",
+                "Copy as PNG 2×",
             ]
         );
     }
@@ -3289,7 +3321,7 @@ mod tests {
 
     /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
     /// Properties 2 · Structure 9 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
-    /// Export 2.
+    /// Export 4.
     #[test]
     fn a_booleans_menu_is_the_long_end_of_the_range() {
         let sel = [id(1)];
@@ -3302,11 +3334,11 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 32, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 34, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The linked boolean is the long end, at 34.
+    /// arithmetic in each case's message. The linked boolean is the long end, at 36.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3323,9 +3355,9 @@ mod tests {
         };
         let cases: [(&str, usize, (usize, String)); 7] = [
             (
-                "text on a rail: the plain 29, plus *Flip to other side* and \
+                "text on a rail: the plain 31, plus *Flip to other side* and \
                  *Detach from path*",
-                31,
+                33,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3335,29 +3367,29 @@ mod tests {
                 "a main frame: head 1 · Clipboard 6 · Properties 2 · Structure 4 \
                  (*Group selection*, *Frame selection*, *Duplicate as component*, \
                  *Select all instances*) · Order 4 · Transform 2 · State 3 · \
-                 Navigate 1 · Export 2",
-                25,
+                 Navigate 1 · Export 4",
+                27,
                 count(Kind::Frame, &|cx| cx.role = Role::Main),
             ),
             (
                 "an instance frame: a main's, with *Go to main component*, *Reset \
                  all* and *Detach instance* for its two",
-                26,
+                28,
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 26, with *Go to \
+                "a linked shape in an instance: the primitive's 28, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                27,
+                29,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
                 }),
             ),
             (
-                "a bound text child: text's 29, with *Go to main component*, \
+                "a bound text child: text's 31, with *Go to main component*, \
                  *Reset <property>* and *Reset <layer>* for *Create component*",
-                31,
+                33,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.role = Role::Member;
@@ -3366,9 +3398,9 @@ mod tests {
                 }),
             ),
             (
-                "a bound text child on a rail: the railed 31, with the bound \
+                "a bound text child on a rail: the railed 33, with the bound \
                  child's three rows for *Create component*",
-                33,
+                35,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
                     cx.on_a_rail = true;
@@ -3379,9 +3411,9 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 32, with the bound child's three rows for *Create component* — \
+                 34, with the bound child's three rows for *Create component* — \
                  the long end",
-                34,
+                36,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3434,11 +3466,11 @@ mod tests {
         assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
-    /// A text layer's menu is 29 rows: head 4 · Clipboard 6 · Properties 2 ·
-    /// Structure 5 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2. The
+    /// A text layer's menu is 31 rows: head 4 · Clipboard 6 · Properties 2 ·
+    /// Structure 5 · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 4. The
     /// fixture must carry a `text_sizing`, which a real text layer always has.
     #[test]
-    fn a_text_layers_menu_is_twenty_nine_rows() {
+    fn a_text_layers_menu_is_thirty_one_rows() {
         let sel = [id(1)];
         let kinds = [Kind::Text];
         let mut cx = open(
@@ -3454,7 +3486,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
     }
 
     /// The component rows sit in Structure directly after *Frame selection*, one
@@ -3574,7 +3606,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 26, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -4171,7 +4203,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 26, "{:?}", labels(&groups));
+        assert_eq!(all, 28, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

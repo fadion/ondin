@@ -3698,25 +3698,41 @@ impl OndinApp {
         });
     }
 
-    /// *Copy as PNG* — the selection as a picture on the clipboard, 1:1 and transparent.
+    /// Put each selected layer's own CSS on the clipboard as text, under a comment
+    /// naming it — the declarations code export writes on its class, without the
+    /// children's rules.
+    pub(crate) fn copy_as_css(&mut self, ctx: &egui::Context) {
+        let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
+        if ids.is_empty() {
+            return;
+        }
+        let css = ondin_export::code::css_of(&self.session.doc, &self.session.resolved, &ids);
+        ctx.copy_text(css);
+        self.session
+            .info(format!("Copied {} layer(s) as CSS", ids.len()));
+    }
+
+    /// *Copy as PNG* — the selection as a picture on the clipboard at `scale`×,
+    /// transparent.
     ///
     /// `raster_of`, not `png_of`: `arboard::ImageData` takes raw RGBA, and encoded PNG
     /// bytes would paste as noise. Ordered as in [`Self::copy_as_svg`]. No
     /// `clipboard_stamp`: it would make `owns_the_clipboard` answer yes for a flat picture.
-    pub(crate) fn copy_as_png(&mut self) {
+    pub(crate) fn copy_as_png(&mut self, scale: u8) {
         let ids = build::in_document_order(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {
             return;
         }
         let Some(raster) =
-            Self::png_for_the_clipboard(&self.session.doc, &self.session.resolved, &ids)
+            Self::png_for_the_clipboard(&self.session.doc, &self.session.resolved, &ids, scale)
         else {
             self.session.info("Nothing to copy as PNG");
             return;
         };
+        let (w, h) = (raster.width, raster.height);
         let image = arboard::ImageData {
-            width: raster.width as usize,
-            height: raster.height as usize,
+            width: w as usize,
+            height: h as usize,
             bytes: raster.rgba.into(),
         };
         // `arboard` directly, since egui's clipboard is text-only; refused on a headless app.
@@ -3730,21 +3746,27 @@ impl OndinApp {
         match wrote {
             Ok(()) => self
                 .session
-                .info(format!("Copied {} layer(s) as PNG", ids.len())),
+                .info(format!("Copied {} layer(s) as PNG, {w}×{h}", ids.len())),
             Err(e) => self
                 .session
                 .info(format!("Could not copy the picture: {e}")),
         }
     }
 
-    /// The picture *Copy as PNG* hands the clipboard: raw RGBA at 1:1. Takes no `self`,
-    /// so it is testable without the OS clipboard.
+    /// The picture *Copy as PNG* hands the clipboard: raw RGBA at `scale` device
+    /// pixels per world unit. Takes no `self`, so it is testable without the OS
+    /// clipboard.
     fn png_for_the_clipboard(
         doc: &ondin_core::Document,
         res: &ondin_core::Resolved,
         ids: &[ondin_core::NodeId],
+        scale: u8,
     ) -> Option<ondin_export::png::Raster> {
-        ondin_export::png::raster_of(doc, res, ids, &ondin_export::png::RasterOpts::default())
+        let opts = ondin_export::png::RasterOpts {
+            scale: f64::from(scale.max(1)),
+            ..Default::default()
+        };
+        ondin_export::png::raster_of(doc, res, ids, &opts)
     }
 
     /// The layer *Copy properties* would lift an appearance off: the key layer, else a
@@ -8599,7 +8621,7 @@ mod copy_as_png_tests {
             "the fixture is not the rect this test thinks it is"
         );
 
-        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &[rect])
+        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &[rect], 1)
             .expect("a rect with bounds rasterizes");
 
         assert_eq!(
@@ -8614,12 +8636,23 @@ mod copy_as_png_tests {
         );
     }
 
+    /// *Copy as PNG 2×* doubles both sides.
+    ///
+    /// flip: `png_for_the_clipboard` ignoring `scale` → fails at the size.
+    #[test]
+    fn the_2x_row_copies_twice_the_pixels() {
+        let (doc, res, rect) = one_rect();
+        let raster = OndinApp::png_for_the_clipboard(&doc, &res, &[rect], 2)
+            .expect("a rect with bounds rasterizes");
+        assert_eq!((raster.width, raster.height), (200, 120));
+    }
+
     /// An empty selection has no extent, and the row says so instead of putting a
     /// 1×1 or a panic on the clipboard.
     #[test]
     fn nothing_selected_is_no_picture_rather_than_an_empty_one() {
         let (doc, res, _) = one_rect();
-        assert!(OndinApp::png_for_the_clipboard(&doc, &res, &[]).is_none());
+        assert!(OndinApp::png_for_the_clipboard(&doc, &res, &[], 1).is_none());
     }
 }
 

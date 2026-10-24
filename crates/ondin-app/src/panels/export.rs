@@ -598,15 +598,7 @@ impl OndinApp {
         // Rasterized once, then both encoded and drawn, not rendered twice per edit.
         let opts = ondin_export::plan::raster_opts(doc, res, key.node, &key.spec);
         let raster = ondin_export::png::raster_of(doc, res, &[key.node], &opts)?;
-        let bytes = match key.spec.format {
-            ExportFormat::Jpeg => ondin_export::jpeg::encode_rgba8(
-                &raster.rgba,
-                raster.width,
-                raster.height,
-                key.spec.quality,
-            ),
-            _ => ondin_export::png::encode_rgba8(&raster.rgba, raster.width, raster.height),
-        };
+        let bytes = ondin_export::plan::encode(&raster, &key.spec);
         let summary = format!(
             "{} · {}×{}{} · {}",
             key.spec.format.label(),
@@ -1585,6 +1577,7 @@ impl OndinApp {
                 // Every row carries its own scale; the override is for the CLI
                 // (§15 D361).
                 scale_override: None,
+                unset: None,
             },
         )
     }
@@ -1804,6 +1797,41 @@ impl OndinApp {
                 }
             }
         }
+    }
+
+    /// *Export all frames…* — every visible top-level frame through the ordinary
+    /// dialog: its own export rows when it has any, else a 1× PNG.
+    pub(crate) fn export_frames(&mut self) {
+        let files = self.frames_plan();
+        if files.is_empty() {
+            self.session.info("No frames to export");
+            return;
+        }
+        self.run_export(files, false);
+    }
+
+    /// The frames *Export all frames…* writes: the top-level ones, less the hidden
+    /// ones, which draw nothing.
+    pub(crate) fn exported_frames(&self) -> Vec<NodeId> {
+        let doc = &self.session.doc;
+        self.root_artboards()
+            .into_iter()
+            .filter(|id| doc.get(*id).is_some_and(|n| n.visible()))
+            .collect()
+    }
+
+    /// What *Export all frames…* writes.
+    pub(crate) fn frames_plan(&self) -> Vec<PlannedFile> {
+        ondin_export::plan(
+            &self.session.doc,
+            &self.session.resolved,
+            &self.exported_frames(),
+            PlanOptions {
+                folders_from_names: self.prefs.export_folders_from_names,
+                scale_override: None,
+                unset: Some(ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))),
+            },
+        )
     }
 
     /// Where a dialog opens: the last export's folder, else the document's own,
@@ -2868,6 +2896,51 @@ mod export_all_scope_tests {
             ids,
             "three exporting siblings come out in the order the document holds them"
         );
+    }
+
+    /// *Export all frames…* plans each visible top-level frame — its own rows, else
+    /// a 1× PNG — and neither a hidden frame nor one nested in another.
+    ///
+    /// flip: `frames_plan` dropping the `visible` filter → fails at the paths.
+    #[test]
+    fn export_frames_plans_the_visible_top_level_frames() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = crate::app::OndinApp::headless(&ctx);
+        let root = app.session.doc.root();
+        let ids: Vec<_> = (0..4).map(|_| app.session.ids.mint()).collect();
+        let frame = |id, parent, index, name: &str| ondin_core::Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(40.0, 30.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let ops = vec![
+            frame(ids[0], root, 0, "Home"),
+            frame(ids[1], root, 1, "Hidden"),
+            frame(ids[2], root, 2, "Icons"),
+            frame(ids[3], ids[0], 0, "Nested"),
+            ondin_core::Operation::SetVisible {
+                id: ids[1],
+                visible: false,
+            },
+            ondin_core::Operation::SetExports {
+                id: ids[2],
+                exports: ondin_core::keyed_by_position([ExportSpec::new(
+                    ExportFormat::Svg,
+                    ExportScale::Times(1.0),
+                )]),
+            },
+        ];
+        assert!(app.session.commit(ondin_core::Transaction(ops)));
+
+        let paths: Vec<String> = app.frames_plan().into_iter().map(|f| f.path).collect();
+        // `Frame 1` is the new document's own frame, now last.
+        assert_eq!(paths, ["Home.png", "Icons.svg", "Frame 1.png"]);
     }
 
     /// Export on save never opens a modal (§15 D626); the remembered-folder arm is

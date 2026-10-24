@@ -13,7 +13,7 @@ use ondin_core::{
 };
 
 /// How a set of layers is laid out under the destination folder.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PlanOptions {
     /// Read `/` in a layer's name as a folder separator, so a layer called
     /// `icons/close` writes `icons/close.png`.
@@ -29,6 +29,9 @@ pub struct PlanOptions {
     /// names saying `@2x`. Specs that become identical collapse to one file, only
     /// under an override, instead of de-colliding into `Close (2).png` junk.
     pub scale_override: Option<ExportScale>,
+    /// What a subject with no specs of its own exports as — *Export all frames*'
+    /// 1× PNG. `None` plans nothing for it.
+    pub unset: Option<ExportSpec>,
 }
 
 /// One file an export will produce.
@@ -53,7 +56,7 @@ pub struct PlannedFile {
 /// Everything `subjects` would produce, in order, with no two files sharing a
 /// name.
 ///
-/// A layer with no specs contributes nothing, not a default PNG. The caller
+/// A layer with no specs contributes [`PlanOptions::unset`], by default nothing. The caller
 /// filters and orders `subjects` (`build::in_document_order` keeps a group and its
 /// own child from both being planned) (§15 D267).
 pub fn plan(
@@ -70,6 +73,9 @@ pub fn plan(
         // equal. Per node: two layers may share a spec and their names separate
         // the files. Values, not keyed items, since equal specs carry different ids.
         let mut specs: Vec<ExportSpec> = ondin_core::item::values(n.exports());
+        if specs.is_empty() {
+            specs.extend(opts.unset.clone());
+        }
         if let Some(forced) = opts.scale_override {
             for spec in &mut specs {
                 spec.scale = forced;
@@ -86,7 +92,7 @@ pub fn plan(
         for spec in &specs {
             // Composed first, sanitized second: the prefix and the name are two
             // halves of one path, so the folder rule must see both.
-            let stem = path_stem(&spec.compose(n.name()), opts);
+            let stem = path_stem(&spec.compose(n.name()), &opts);
             let wanted = format!("{stem}.{}", spec.format.extension());
             let path = de_collide(wanted, &mut taken);
             let (pixels, clamped) = match spec.format.is_raster() {
@@ -135,15 +141,23 @@ pub fn render(doc: &Document, res: &Resolved, file: &PlannedFile) -> Option<Vec<
     let origins = [file.node];
     match file.spec.format {
         ExportFormat::Svg => Some(crate::svg::svg_of(doc, res, &origins).into_bytes()),
-        ExportFormat::Png | ExportFormat::Jpeg => {
+        ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp => {
             let opts = raster_opts(doc, res, file.node, &file.spec);
             let r = crate::png::raster_of(doc, res, &origins, &opts)?;
-            Some(match file.spec.format {
-                ExportFormat::Jpeg => {
-                    crate::jpeg::encode_rgba8(&r.rgba, r.width, r.height, file.spec.quality)
-                }
-                _ => crate::png::encode_rgba8(&r.rgba, r.width, r.height),
-            })
+            Some(encode(&r, &file.spec))
+        }
+    }
+}
+
+/// A raster encoded in `spec`'s format. Public because the panel's preview
+/// rasterizes once and both encodes and draws the buffer. An SVG spec has no
+/// encoder and gets PNG bytes.
+pub fn encode(r: &crate::png::Raster, spec: &ExportSpec) -> Vec<u8> {
+    match spec.format {
+        ExportFormat::Jpeg => crate::jpeg::encode_rgba8(&r.rgba, r.width, r.height, spec.quality),
+        ExportFormat::Webp => crate::webp::encode_rgba8(&r.rgba, r.width, r.height),
+        ExportFormat::Png | ExportFormat::Svg => {
+            crate::png::encode_rgba8(&r.rgba, r.width, r.height)
         }
     }
 }
@@ -237,7 +251,7 @@ fn frame_background(doc: &Document, node: NodeId) -> Option<Color> {
 /// characters, a trailing dot or space and device names (`CON`, `NUL`, `COM1`) are
 /// refused or silently transformed by the filesystem. A name that sanitizes away
 /// to nothing becomes `Layer`.
-fn path_stem(name: &str, opts: PlanOptions) -> String {
+fn path_stem(name: &str, opts: &PlanOptions) -> String {
     let parts: Vec<&str> = match opts.folders_from_names {
         true => name.split('/').collect(),
         false => vec![name],
@@ -383,6 +397,52 @@ mod tests {
         (doc, res, frame, rect)
     }
 
+    /// `unset` stands in only for a layer with no specs: the frame gets it, the
+    /// rect keeps its own SVG row.
+    ///
+    /// flip: `plan` filling `unset` whatever `specs` holds → fails at
+    /// "a layer's own rows win".
+    #[test]
+    fn unset_plans_only_the_layers_without_specs() {
+        let (doc, res, frame, rect) = doc_with_rect(vec![ExportSpec::new(
+            ExportFormat::Svg,
+            ExportScale::Times(1.0),
+        )]);
+        let opts = PlanOptions {
+            unset: Some(ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))),
+            ..PlanOptions::default()
+        };
+        let paths: Vec<String> = plan(&doc, &res, &[frame, rect], opts)
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        assert_eq!(paths, ["Board.png", "Button.svg"], "a layer's own rows win");
+        assert!(
+            plan(&doc, &res, &[frame], PlanOptions::default()).is_empty(),
+            "and without `unset` a bare layer plans nothing"
+        );
+    }
+
+    /// A WebP row renders a `.webp` that is WebP bytes at the planned size.
+    ///
+    /// flip: `encode` sending `Webp` to the PNG arm → fails at the format check.
+    #[test]
+    fn a_webp_spec_renders_webp_at_the_planned_size() {
+        let (doc, res, _, rect) = doc_with_rect(vec![ExportSpec::new(
+            ExportFormat::Webp,
+            ExportScale::Times(2.0),
+        )]);
+        let file = &plan(&doc, &res, &[rect], PlanOptions::default())[0];
+        assert_eq!(file.path, "Button@2x.webp");
+        let bytes = render(&doc, &res, file).expect("a rect has bounds");
+        assert_eq!(
+            image::guess_format(&bytes).ok(),
+            Some(image::ImageFormat::WebP)
+        );
+        let img = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(Some((img.width(), img.height())), file.pixels);
+    }
+
     /// 2× of a 100×50 is 200×100, and `Width(512)` scales the unpinned axis too.
     #[test]
     fn the_planned_pixel_size_is_the_scale_applied_to_the_box() {
@@ -479,20 +539,20 @@ mod tests {
     #[test]
     fn a_slash_is_a_folder_only_when_asked_for() {
         assert_eq!(
-            path_stem("icons/close", PlanOptions::default()),
+            path_stem("icons/close", &PlanOptions::default()),
             "icons-close"
         );
         assert_eq!(
             path_stem(
                 "icons/close",
-                PlanOptions {
+                &PlanOptions {
                     folders_from_names: true,
                     ..PlanOptions::default()
                 }
             ),
             "icons/close"
         );
-        assert_eq!(path_stem("  ", PlanOptions::default()), "Layer");
+        assert_eq!(path_stem("  ", &PlanOptions::default()), "Layer");
     }
 
     /// `Frame` reaches past a group to the enclosing artboard; a layer outside one

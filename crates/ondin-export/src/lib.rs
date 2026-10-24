@@ -1,9 +1,9 @@
-//! ondin-export — SVG, PNG, JPEG, the AI-handoff JSON snapshot, and code export's
-//! HTML/CSS ([`mod@code`]) (§7).
+//! ondin-export — SVG, PNG, JPEG, WebP, the AI-handoff JSON snapshot, and code
+//! export's HTML/CSS ([`mod@code`]) (§7).
 //!
-//! SVG is a pure function of core state (also a model-completeness gate). PNG and
-//! JPEG go through the CPU renderer (no GPU) and differ only in the encoder at the
-//! end. The snapshot is the stable public projection MCP read tools return,
+//! SVG is a pure function of core state (also a model-completeness gate). PNG,
+//! JPEG and WebP go through the CPU renderer (no GPU) and differ only in the
+//! encoder at the end. The snapshot is the stable public projection MCP read tools return,
 //! versioned independently of the save format.
 //!
 //! All the writers take a *set of subtrees* as well as the whole page — `svg_of`,
@@ -43,6 +43,7 @@ pub mod plan;
 pub mod png;
 pub mod snapshot;
 pub mod svg;
+pub mod webp;
 
 pub use plan::{PlanOptions, PlannedFile, plan};
 pub use snapshot::{Snapshot, snapshot};

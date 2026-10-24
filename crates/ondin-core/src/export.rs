@@ -214,17 +214,25 @@ pub enum ExportFormat {
     #[default]
     Png,
     Jpeg,
+    /// Lossless WebP: `image`'s encoder writes VP8L only, so there is no quality.
+    Webp,
     Svg,
 }
 
 impl ExportFormat {
-    pub const ALL: [ExportFormat; 3] = [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::Svg];
+    pub const ALL: [ExportFormat; 4] = [
+        ExportFormat::Png,
+        ExportFormat::Jpeg,
+        ExportFormat::Webp,
+        ExportFormat::Svg,
+    ];
 
     /// The extension, lowercase and without the dot.
     pub fn extension(self) -> &'static str {
         match self {
             ExportFormat::Png => "png",
             ExportFormat::Jpeg => "jpg",
+            ExportFormat::Webp => "webp",
             ExportFormat::Svg => "svg",
         }
     }
@@ -234,6 +242,7 @@ impl ExportFormat {
         match self {
             ExportFormat::Png => "PNG",
             ExportFormat::Jpeg => "JPEG",
+            ExportFormat::Webp => "WebP",
             ExportFormat::Svg => "SVG",
         }
     }
@@ -241,7 +250,10 @@ impl ExportFormat {
     /// Whether this goes through the CPU rasterizer, and so whether a scale, trim
     /// and pad mean anything for it.
     pub fn is_raster(self) -> bool {
-        matches!(self, ExportFormat::Png | ExportFormat::Jpeg)
+        matches!(
+            self,
+            ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Webp
+        )
     }
 
     /// Whether the format can carry transparency. JPEG cannot, so

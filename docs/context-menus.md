@@ -83,7 +83,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 6 | Transform | Flip H · Flip V · Reset origin |
 | 7 | State | Hide/Show · Lock/Unlock · Rename |
 | 8 | Navigate | Zoom to selection |
-| 9 | Export | Copy as SVG · Copy as PNG |
+| 9 | Export | Copy as SVG · Copy as CSS · Copy as PNG · Copy as PNG 2× |
 | 10 | View | the page's view switches (§6.1, §6.3 only) |
 
 - **Head at the top**: it holds the "one level in" verbs that are otherwise double-click only.
@@ -93,8 +93,8 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 26 rows, text 29, a boolean 32, railed text 31; component roles reach
-  34, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
+- **Length**: a primitive is 28 rows, text 31, a boolean 34, railed text 33; component roles reach
+  36, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
   Navigate goes first, then Export.
 
 ---
@@ -193,7 +193,9 @@ and *Duplicate as component* draw the filled hexagon.
 | Row | Chord | Shown / enabled |
 |---|---|---|
 | Copy as SVG | — | always live; the committed document, in document order |
-| Copy as PNG | — | always live; `RasterOpts::default()` (1×, no background), no scale submenu |
+| Copy as CSS | — | always live; each layer's own declarations under a `/* name */` comment, no placement (`export.md`) |
+| Copy as PNG | — | always live; 1×, transparent, raw RGBA; the status line gives the pixel size |
+| Copy as PNG 2× | — | as above at 2× (`Item::CopyAsPng(2)`); a flat row, since the menu has no submenus |
 
 ---
 
@@ -237,7 +239,7 @@ The four operations stay in Structure as checkable rows (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 26 rows.
+No head. The baseline menu, 28 rows.
 
 ### 5.6 Text
 
@@ -269,7 +271,7 @@ needs a single layer.
 ### 5.9 Locked and hidden layers (panel only, per C4)
 
 The whole menu is present and every editing row dims. Live over a lock: *Copy*, *Paste*, *Copy
-properties*, *Unlock*, *Show*/*Hide*, *Rename*, *Zoom to selection*, *Copy as SVG/PNG*, *Enter
+properties*, *Unlock*, *Show*/*Hide*, *Rename*, *Zoom to selection*, *Copy as SVG/CSS/PNG*, *Enter
 group/boolean*, *Make this the key layer*, *Go to main*, *Select all instances*. A layer inside a
 locked group is treated as locked, with the group's sentence; *Lock/Unlock* reads the layer's own
 flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
@@ -289,6 +291,7 @@ flag. A hidden, unlocked layer gets an ordinary menu reading *Show*.
 | Zoom to fit | `Ctrl+1` | everything, not the selection |
 | *—* | | |
 | Export all | `Ctrl+Alt+E` | re-runs every saved export spec; dims *"No layer in this document has export settings"* |
+| Export all frames… | — | every visible top-level frame: its own export rows, else a 1× PNG (`export.md`); dims *"No frames on the canvas"* |
 | *—* | | |
 | Show rulers ✓ | `Shift+R` | dims *"Present mode hides the rulers"* in present mode |
 | Show guides ✓ | `Ctrl+;` | |
@@ -374,8 +377,8 @@ No variable is offered on a field's label badge (it scrubs).
 - **Corner radius, side count, star ratio** — numbers belong to the inspector.
 - **Blend modes, effects, container layout** — authored in their inspector cards.
 - **Frame *Background…*** — the inspector's Fill row does it for every layer.
-- **Export frame as…, Export selection… / Export as…** — the inspector's Export panel is the file
-  door; *Ctrl+Shift+E* is unbound.
+- **Export frame as…, Export selection… / Export as…** — the inspector's Export panel is a layer's
+  file door; *Ctrl+Shift+E* is unbound.
 - **Reset crop, Replace…** — image editing's Settings tab only. **Export original…** — removed.
 - **The four image fit modes** — image editing's card owns them.
 - **Text on path** — the Text tool's gesture; the menu has only the way out (*Detach from path*).
@@ -384,7 +387,7 @@ No variable is offered on a field's label badge (it scrubs).
   chrome-wide switches, one click away in the View menu.
 - **Collapse all / Expand all** — the layers panel header has the button.
 - **Guide colour and position** — the inspector, for a selected guide.
-- **Submenus**, including *Copy as ▸* and a PNG scale choice; **type-ahead** in menus.
+- **Submenus**, including *Copy as ▸* (the PNG scales are flat rows); **type-ahead** in menus.
 - **A ruler menu** (units are px only).
 
 ---
@@ -415,6 +418,6 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 34-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
+- Whether a 36-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

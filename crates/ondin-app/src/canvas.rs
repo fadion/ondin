@@ -1130,6 +1130,11 @@ impl OndinApp {
                         || pointer.is_some_and(|p| self.on_pivot(p, rect, ppp).is_some())
                     {
                         (egui::CursorIcon::Move, None)
+                    } else if matches!(self.drag, Drag::Move { .. } | Drag::Marquee { .. }) {
+                        // A move or marquee passes over handles and guides it will
+                        // never grab; zoomed out, the dragged layer's own handles
+                        // sit under the pointer the whole way.
+                        self.rest_cursor()
                     } else {
                         let handle = self.select_cursor(resp, rect, ppp);
                         match (handle, pointer) {
@@ -12885,6 +12890,50 @@ mod headless_app_tests {
             "Space during a create drag repositions the shape rather than panning, \
              so the cursor stays the tool's own"
         );
+    }
+
+    /// A move dragged across the moved layer's own corner keeps the arrow; the
+    /// same spot at rest shows the resize arrow.
+    /// flip: drop the `Drag::Move` arm in `canvas_cursor` → fails at the move assert.
+    #[test]
+    fn a_move_shows_no_resize_cursor_over_a_handle() {
+        let ctx = egui::Context::default();
+        let (mut app, a, _) = app_with_two_rects(&ctx);
+        app.canvas_px = (800, 600);
+        app.session.selection.set(vec![a]);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let corner = app.to_screen(Point::new(100.0, 100.0), area, 1.0);
+
+        let icon = |app: &mut OndinApp| {
+            let mut last = egui::CursorIcon::Default;
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(area),
+                    events: vec![egui::Event::PointerMoved(corner)],
+                    ..Default::default()
+                };
+                let out = ctx.run_ui(input, |ui| {
+                    let resp = ui.interact(
+                        area,
+                        egui::Id::new("cursor-probe"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    app.canvas_cursor(ui, &resp, area, 1.0);
+                });
+                last = out.platform_output.cursor_icon;
+            }
+            last
+        };
+
+        assert_eq!(
+            icon(&mut app),
+            egui::CursorIcon::ResizeNwSe,
+            "the fixture's pointer has to sit on the corner handle"
+        );
+        app.drag = Drag::Move {
+            anchor: Point::new(50.0, 50.0),
+        };
+        assert_eq!(icon(&mut app), egui::CursorIcon::Default);
     }
 
     /// `cancel_gesture` is armed by each of our own witnesses without egui's

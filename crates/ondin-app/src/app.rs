@@ -1696,6 +1696,18 @@ impl OndinApp {
             Action::InsertPicker => self.toggle_kit_picker(),
             Action::VariablesBrowser => self.toggle_var_browser(),
             Action::PublishKit => self.open_publish(),
+            // The Document menu's own guards, so a palette row asks the same questions.
+            Action::MakeKit if self.shared_kit().is_none() => self.make_kit(),
+            Action::KitsUsed if self.uses_kits() => self.kits_used_open = true,
+            Action::StopSharingKit if self.shared_kit().is_some() => {
+                self.unsharing_kit = Some(None);
+            }
+            Action::MakeKit | Action::KitsUsed | Action::StopSharingKit => {}
+            Action::ShowInLibrary => self.go_to_dashboard(),
+            Action::RotateQuarter(clockwise) => {
+                let turn = std::f64::consts::FRAC_PI_2;
+                self.rotate_selection_quarter(if clockwise { turn } else { -turn });
+            }
             Action::Copy => {
                 self.copy_selection(ctx);
             }

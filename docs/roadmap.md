@@ -17,9 +17,6 @@ stale while its ask still reads true.
 - **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an
   outer instance; `components.md` says a root "changes main by relinking", but nothing writes
   `SetLink` except cut-move (`app.rs` `paste_cut_move`).
-- **Command palette coverage.** The Document menu's *Make this a kit*, *Kits used…*, *Stop sharing as
-  kit* and *Show in library* are not registry `Item`s, and quarter turns
-  (`inspector::rotate_selection_quarter`) are not in `palette::palette_commands`.
 
 ## Now · Soon
 

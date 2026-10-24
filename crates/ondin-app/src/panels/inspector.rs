@@ -2883,7 +2883,7 @@ impl OndinApp {
     /// Turn every outermost selected layer a whole quarter about **its own** origin.
     ///
     /// One transaction, so one undo step.
-    fn rotate_selection_quarter(&mut self, angle: f64) {
+    pub(crate) fn rotate_selection_quarter(&mut self, angle: f64) {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let mut ops = Vec::new();
         for id in build::outermost(doc, self.session.selection.ids()) {

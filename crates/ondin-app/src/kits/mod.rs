@@ -19,6 +19,7 @@ pub(crate) mod used;
 pub(crate) mod users;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
+use crate::menu::Item;
 use crate::theme::{self, color, icon};
 use eframe::egui;
 use ondin_core::meta::KitMark;
@@ -26,7 +27,19 @@ use ondin_core::meta::KitMark;
 /// The document menu's width, from the mockup (1A).
 const MENU_W: f32 = 232.0;
 
+/// *Make this a kit*'s tooltip, in the menu and the palette alike.
+pub(crate) const MAKE_KIT_TIP: &str = "Other documents can use its components once you publish it";
+
 impl OndinApp {
+    /// Whether the document vendors anything from a kit — when *Kits used…* is offered.
+    pub(crate) fn uses_kits(&self) -> bool {
+        self.session
+            .doc
+            .vault()
+            .and_then(|v| self.session.doc.get(v))
+            .is_some_and(|v| !v.children().is_empty())
+    }
+
     /// This document's kit mark, when it is a kit that is sharing — what the top
     /// bar's tag and the menu's kit rows ask. A mark that stopped sharing is kept
     /// for its version (1D) and answers `None` here.
@@ -78,12 +91,12 @@ impl OndinApp {
         let anchor = egui::pos2(head.rect.left(), head.rect.bottom() + crate::ui::MENU_GAP);
         let shared = self.shared_kit().is_some();
         let publishable = self.kit_changes().is_some_and(|c| c.any());
-        let uses_kits = self
-            .session
-            .doc
-            .vault()
-            .and_then(|v| self.session.doc.get(v))
-            .is_some_and(|v| !v.children().is_empty());
+        let uses_kits = self.uses_kits();
+        // Labels and glyphs from the registry the palette reads too.
+        let item = |ui: &mut egui::Ui, item: Item| {
+            let spec = item.spec();
+            crate::ui::menu_item(ui, spec.glyph, spec.label, crate::ui::MENU_ITEM_H)
+        };
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
             if shared {
@@ -105,26 +118,26 @@ impl OndinApp {
             }
             // *Kits used…* (6A), between the publish and the mark (7A) — offered
             // when the document vendors from any kit.
-            if uses_kits && crate::ui::menu_item(ui, icon::PACKAGE, "Kits used…", H).clicked() {
+            if uses_kits && item(ui, Item::KitsUsed).clicked() {
                 app.open_menu = TopMenu::None;
                 app.kits_used_open = true;
             }
             if shared {
                 // Asks first (1D), as the card's row does — so an ellipsis, as on
-                // this menu's other dialog rows (D1011's name for it).
-                if crate::ui::menu_item(ui, icon::PACKAGE, "Stop sharing as kit…", H).clicked() {
+                // this menu's other dialog rows.
+                if item(ui, Item::StopSharingKit).clicked() {
                     app.unsharing_kit = Some(None);
                     app.open_menu = TopMenu::None;
                 }
-            } else if crate::ui::menu_item(ui, icon::PACKAGE, "Make this a kit", H)
-                .on_hover_text("Other documents can use its components once you publish it")
+            } else if item(ui, Item::MakeKit)
+                .on_hover_text(MAKE_KIT_TIP)
                 .clicked()
             {
                 app.make_kit();
                 app.open_menu = TopMenu::None;
             }
             crate::ui::menu_sep(ui);
-            if crate::ui::menu_item(ui, icon::FOLDER_OPEN, "Show in library", H).clicked() {
+            if item(ui, Item::ShowInLibrary).clicked() {
                 app.open_menu = TopMenu::None;
                 app.go_to_dashboard();
             }

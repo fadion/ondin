@@ -532,6 +532,36 @@ impl OndinApp {
             push(&mut out, Cmd::verb(item, None));
         }
         push(&mut out, Cmd::verb(Item::PublishKit, pal.publish_why));
+        // The Document menu's rows, each refused where the menu would not offer it.
+        let shared = self.shared_kit().is_some();
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::MakeKit,
+                shared.then_some("This document is already a kit"),
+            ),
+        );
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::StopSharingKit,
+                (!shared).then_some("This document is not a kit"),
+            ),
+        );
+        push(
+            &mut out,
+            Cmd::verb(
+                Item::KitsUsed,
+                (!self.uses_kits()).then_some("This document uses no kit"),
+            ),
+        );
+        push(&mut out, Cmd::verb(Item::ShowInLibrary, None));
+        for clockwise in [false, true] {
+            push(
+                &mut out,
+                Cmd::verb(Item::RotateQuarter(clockwise), need_sel),
+            );
+        }
         for t in [
             ondin_export::code::Target::Html,
             ondin_export::code::Target::React,
@@ -1783,5 +1813,59 @@ mod tests {
             .expect("a publish row");
         assert!(!publish.enabled);
         assert_eq!(publish.why, Some("Make this document a kit first"));
+    }
+
+    /// The Document menu's rows and the quarter turns are commands: *Make this a kit*
+    /// and *Show in library* live in a plain document, the two that need a kit or a
+    /// vendored main dim, the turns dim with nothing selected, and a turn runs.
+    /// flip: `palette_commands` without the quarter turns → fails at the turn rows.
+    #[test]
+    fn the_document_menu_and_the_quarter_turns_are_in_the_palette() {
+        use ondin_core::{IdSource, NodeKind, Operation, Transaction};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.toggle_palette(&ctx);
+        let pal = app.palette.take().expect("open");
+        let cmds = app.palette_commands(&pal);
+        let row = |item: Item| {
+            cmds.iter()
+                .find(|c| c.item == item)
+                .unwrap_or_else(|| panic!("no {item:?} row"))
+        };
+        assert!(row(Item::MakeKit).enabled && row(Item::ShowInLibrary).enabled);
+        assert!(!row(Item::StopSharingKit).enabled && !row(Item::KitsUsed).enabled);
+        for clockwise in [false, true] {
+            assert!(
+                !row(Item::RotateQuarter(clockwise)).enabled,
+                "nothing selected"
+            );
+        }
+        assert_eq!(
+            row(Item::MakeKit).label,
+            "Make this a kit",
+            "the menu's own words"
+        );
+
+        let mut ids = IdSource::new(0x9A1);
+        let id = ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(20.0, 10.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }])));
+        app.session.selection.set_one(id);
+        app.dispatch(&ctx, crate::input::Action::RotateQuarter(true));
+        let c = app.session.doc.get(id).unwrap().transform().as_coeffs();
+        assert!(
+            (c[0]).abs() < 1e-9 && (c[1] - 1.0).abs() < 1e-9,
+            "a quarter turn clockwise, got {c:?}"
+        );
     }
 }

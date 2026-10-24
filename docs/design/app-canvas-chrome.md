@@ -100,7 +100,11 @@ modal that opens closes the palette. App actions only; typed syntax belongs to C
   and the cheatsheet), each in a `Group` whose `Group::label` is the row's side note.
   `Item::action` maps each to its chord's `Action`, which `perform_menu_item` dispatches, so row and
   chord are one verb; `Item::aliases` holds the extra words. `palette_commands` chooses which verbs
-  are offered; their words live in the registry.
+  are offered; their words live in the registry. The Document menu's rows (*Make this a kit*,
+  *Kits used…*, *Stop sharing as kit…*, *Show in library*) are registry items the menu draws its
+  labels from, offered always and dimmed with a reason where the menu would leave them out (their
+  `Action`s re-ask the menu's guards); the Transform card's quarter turns are
+  `Item::RotateQuarter`, dimmed without a selection.
 - **The target** (`palette_target`, re-read every frame): a text session → `Target::TextSession`; a
   point or segment selection on the edited path → `Target::Points`; selected layers →
   `Target::Layer { id, door: Panel }`, `id` the key layer, else the topmost selected in

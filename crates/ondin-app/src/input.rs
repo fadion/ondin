@@ -141,6 +141,15 @@ pub enum Action {
     VariablesBrowser,
     /// *Publish kit…* (`Ctrl+Alt+P` — §5.3e).
     PublishKit,
+    /// The Document menu's rows, unbound: *Make this a kit*, *Kits used…*, *Stop
+    /// sharing as kit…* and *Show in library*.
+    MakeKit,
+    KitsUsed,
+    StopSharingKit,
+    ShowInLibrary,
+    /// A quarter turn of the selection, each layer about its own origin; `true` is
+    /// clockwise. Unbound, as the Transform card's buttons are.
+    RotateQuarter(bool),
     /// Move the selection by a world-space delta (arrow keys).
     Nudge(Vec2),
     /// Grow or shrink the selection's box by this many points on each axis —

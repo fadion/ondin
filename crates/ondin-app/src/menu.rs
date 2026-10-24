@@ -356,6 +356,14 @@ pub enum Item {
     InsertPicker,
     VariablesBrowser,
     PublishKit,
+    /// The Document menu's kit rows and its way back to the library.
+    MakeKit,
+    KitsUsed,
+    StopSharingKit,
+    ShowInLibrary,
+    /// A quarter turn of each selected layer about its own origin, as the Transform
+    /// card's buttons do; `true` is clockwise.
+    RotateQuarter(bool),
     /// One of the chords a live text session admits.
     TextChord(crate::input::TextChord),
     /// Scroll the inspector to the card with this title and open it.
@@ -999,6 +1007,22 @@ impl Item {
                 Some("Ctrl+Alt+P"),
                 Group::Kits,
             ),
+            Item::MakeKit => s("Make this a kit", icon::PACKAGE, None, Group::Kits),
+            Item::KitsUsed => s("Kits used…", icon::PACKAGE, None, Group::Kits),
+            Item::StopSharingKit => s("Stop sharing as kit…", icon::PACKAGE, None, Group::Kits),
+            Item::ShowInLibrary => s("Show in library", icon::FOLDER_OPEN, None, Group::File),
+            Item::RotateQuarter(false) => s(
+                "Rotate 90° counter-clockwise",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                None,
+                Group::Transform,
+            ),
+            Item::RotateQuarter(true) => s(
+                "Rotate 90° clockwise",
+                icon::ARROW_CLOCKWISE,
+                None,
+                Group::Transform,
+            ),
             Item::TextChord(chord) => {
                 use crate::input::TextChord;
                 use ondin_core::TextAlign;
@@ -1139,6 +1163,11 @@ impl Item {
             Item::InsertPicker => Action::InsertPicker,
             Item::VariablesBrowser => Action::VariablesBrowser,
             Item::PublishKit => Action::PublishKit,
+            Item::MakeKit => Action::MakeKit,
+            Item::KitsUsed => Action::KitsUsed,
+            Item::StopSharingKit => Action::StopSharingKit,
+            Item::ShowInLibrary => Action::ShowInLibrary,
+            Item::RotateQuarter(clockwise) => Action::RotateQuarter(clockwise),
             Item::TextChord(chord) => Action::TextStyle(chord),
             Item::Palette => Action::Palette,
             Item::Cheatsheet => Action::Cheatsheet,
@@ -2716,6 +2745,11 @@ impl OndinApp {
             | Item::InsertPicker
             | Item::VariablesBrowser
             | Item::PublishKit
+            | Item::MakeKit
+            | Item::KitsUsed
+            | Item::StopSharingKit
+            | Item::ShowInLibrary
+            | Item::RotateQuarter(_)
             | Item::TextChord(_)
             | Item::Palette
             | Item::Cheatsheet => {

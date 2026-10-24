@@ -324,11 +324,11 @@ fn ruler_at(rect: egui::Rect, p: egui::Pos2) -> Option<GuideAxis> {
 
 impl OndinApp {
     /// Whether the ruler bars are on screen: switched on (*View ▸ Show rulers*)
-    /// and not suppressed by present mode.
+    /// and not suppressed by focus mode.
     ///
     /// Every reader goes through this, so the hit test and the paint agree.
     pub(crate) fn rulers_on(&self) -> bool {
-        self.show_rulers && !self.present
+        self.show_rulers && !self.focus
     }
 
     /// Which ruler bar a screen position is over, or `None` — including when the
@@ -343,12 +343,12 @@ impl OndinApp {
     /// Whether the guide **lines** are drawn: switched on (*View ▸ Show guides*),
     /// and that is the whole of it.
     ///
-    /// Present mode is deliberately not folded in: it hides the app's chrome while
+    /// Focus mode is deliberately not folded in: it hides the app's chrome while
     /// the canvas keeps working, and guides, like the selection box and layout
     /// grids, belong to the canvas. [`Self::rulers_on`] folds it in because the
     /// bars are window furniture.
     ///
-    /// So in present mode the lines stay drawn and pickable (through
+    /// So in focus mode the lines stay drawn and pickable (through
     /// [`Self::guides_pickable`]) and only creating one, a drag off a bar, is
     /// lost; the Guide panel's position field is the way in.
     pub(crate) fn guides_on(&self) -> bool {
@@ -2537,26 +2537,26 @@ mod guide_grab_tests {
         );
     }
 
-    /// Present mode hides the app's chrome and leaves the canvas working: the
+    /// Focus mode hides the app's chrome and leaves the canvas working: the
     /// guide lines stay drawn, pickable, nudgeable and deletable, while the ruler
     /// bars (the control) go. Three claims, because `guides_on()` alone would pass
     /// a version that drew the line and refused the drag.
     ///
-    /// flip: restore `!self.present` in `guides_on` → fails at the first
+    /// flip: restore `!self.focus` in `guides_on` → fails at the first
     /// assertion. The layout grids have their own guard in `draw_layout_grids`
     /// and do not read `guides_on`.
     #[test]
-    fn present_mode_leaves_the_guides_on_screen_and_live() {
+    fn focus_mode_leaves_the_guides_on_screen_and_live() {
         let ctx = egui::Context::default();
         let down = ondin_core::kurbo::Vec2::new(0.0, 1.0);
         let (mut app, id, _, _) = app_with_guide(&ctx, GuideAxis::Horizontal, 100.0);
         app.session.selection.set_guide(id);
         app.show_rulers = true;
-        app.present = true;
+        app.focus = true;
 
         assert!(
             app.guides_on(),
-            "present mode is a chrome switch: the guide lines stay on the canvas"
+            "focus mode is a chrome switch: the guide lines stay on the canvas"
         );
         assert!(
             app.guides_pickable(),
@@ -2578,11 +2578,11 @@ mod guide_grab_tests {
             "and Delete still removes it"
         );
 
-        // Control: present mode still takes the bars away.
+        // Control: focus mode still takes the bars away.
         assert!(
             !app.rulers_on(),
-            "control: the ruler bars are window furniture and present mode still \
-             takes them away — without this the test is green for a present mode \
+            "control: the ruler bars are window furniture and focus mode still \
+             takes them away — without this the test is green for a focus mode \
              that does nothing"
         );
     }
@@ -2595,7 +2595,7 @@ mod guide_grab_tests {
     /// guides would pass an empty-list check.
     ///
     /// flip: `d.rulers_shown` back to `self.rulers_on()` in `update_guide_drag` →
-    /// fails at the present-mode row and at row 3. Reverting only one of the two
+    /// fails at the focus-mode row and at row 3. Reverting only one of the two
     /// readers (`over_own_ruler`, `off_rulers`) leaves the other silencing the
     /// `dead_code` lint, which counts readers and proves nothing about the rule.
     #[test]
@@ -2651,8 +2651,8 @@ mod guide_grab_tests {
 
         for (what, flip) in [
             (
-                "`Ctrl+\\` (present mode)",
-                (|a: &mut OndinApp| a.present = true) as fn(&mut OndinApp),
+                "`Ctrl+\\` (focus mode)",
+                (|a: &mut OndinApp| a.focus = true) as fn(&mut OndinApp),
             ),
             ("`Shift+R` (show rulers)", |a: &mut OndinApp| {
                 a.show_rulers = false
@@ -2720,7 +2720,7 @@ mod guide_grab_tests {
              announce yet — which is the whole of what `left_ruler` is for"
         );
         // The pointer does not move. Only the bars go.
-        app.present = true;
+        app.focus = true;
         app.update_guide_drag(bar(rect), rect, ppp, false);
         assert!(
             !announced(&app),

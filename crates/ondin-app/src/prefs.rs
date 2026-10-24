@@ -29,7 +29,7 @@ pub struct ExportPreset {
 }
 
 /// The View and Snap menus' switches as last set, so a launch opens on them.
-/// Present mode is not here: it is a mode a launch should never open in.
+/// Focus mode is not here: it is a mode a launch should never open in.
 ///
 /// Container-level `#[serde(default)]`, as on [`Prefs`]: a missing key is on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

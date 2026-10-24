@@ -351,7 +351,7 @@ const SWITCHES: [ViewSwitch; 13] = [
     ViewSwitch::Layers,
     ViewSwitch::Toolbar,
     ViewSwitch::StatusMessages,
-    ViewSwitch::Present,
+    ViewSwitch::Focus,
     ViewSwitch::SnapShapes,
     ViewSwitch::SnapGuides,
     ViewSwitch::SnapGrid,
@@ -524,8 +524,7 @@ impl OndinApp {
         for sw in SWITCHES {
             let mut cmd = Cmd::verb(
                 Item::ViewSwitch(sw),
-                (sw == ViewSwitch::Rulers && self.present)
-                    .then_some("Present mode hides the rulers"),
+                (sw == ViewSwitch::Rulers && self.focus).then_some("Focus mode hides the rulers"),
             );
             cmd.checked = Some(self.view_switch(sw));
             push(&mut out, cmd);
@@ -597,12 +596,12 @@ impl OndinApp {
         }
         // The cards the inspector drew last frame, then the ones it can draw for
         // another selection.
-        let present = self
-            .present
-            .then_some("Leave present mode to see the inspector");
+        let focus = self
+            .focus
+            .then_some("Leave focus mode to see the inspector");
         let shown: Vec<&'static str> = self.cards_shown.clone();
         for title in &shown {
-            let mut cmd = Cmd::verb(Item::ShowCard(title), present);
+            let mut cmd = Cmd::verb(Item::ShowCard(title), focus);
             cmd.label = format!("Show {title}");
             push(&mut out, cmd);
         }

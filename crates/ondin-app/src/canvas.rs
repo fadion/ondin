@@ -6994,7 +6994,7 @@ impl OndinApp {
     /// clipped to the frame's box here, in local space so bands turn with a
     /// rotated frame.
     fn draw_layout_grids(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        // Present mode does not hide the grids, as `rulers::guides_on` for guides.
+        // Focus mode does not hide the grids, as `rulers::guides_on` for guides.
 
         // An outer gate, never a write to each `LayoutGrid::visible`, so turning
         // it back on restores every eye.
@@ -10265,11 +10265,11 @@ mod layout_grid_tests {
         );
     }
 
-    /// A hidden grid and a hidden frame draw nothing; present mode is a chrome
+    /// A hidden grid and a hidden frame draw nothing; focus mode is a chrome
     /// switch and the grid still draws.
-    /// flip: reinstate `if self.present { return; }` → fails at "present mode is a chrome switch"
+    /// flip: reinstate `if self.focus { return; }` → fails at "focus mode is a chrome switch"
     #[test]
-    fn a_hidden_grid_and_a_hidden_frame_draw_nothing_and_present_mode_draws_anyway() {
+    fn a_hidden_grid_and_a_hidden_frame_draw_nothing_and_focus_mode_draws_anyway() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let visible = LayoutGrid::new(GridAxis::Columns);
@@ -10283,14 +10283,14 @@ mod layout_grid_tests {
 
         let (mut app, frame) = app_with_grids(&ctx, vec![visible]);
         assert!(!bands(&app, &ctx).is_empty(), "the control case draws");
-        app.present = true;
+        app.focus = true;
         assert!(
             !bands(&app, &ctx).is_empty(),
-            "present mode is a chrome switch, not an overlay switch — the grid is \
+            "focus mode is a chrome switch, not an overlay switch — the grid is \
              on the canvas and a designer editing with the panels out of the way \
              is still aligning to it (§15 D750)"
         );
-        app.present = false;
+        app.focus = false;
 
         assert!(app.session.commit(Transaction(vec![Operation::SetVisible {
             id: frame,

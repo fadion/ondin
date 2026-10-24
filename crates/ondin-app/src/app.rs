@@ -769,10 +769,10 @@ pub struct OndinApp {
     /// *View ▸ Show status messages*: whether the floating status bar reports what just
     /// happened. With it off, a message is still written and read by nothing.
     pub(crate) show_status: bool,
-    /// *View ▸ Present mode*: the panels hidden while the canvas and its overlays keep
+    /// *View ▸ Focus mode*: the panels hidden while the canvas and its overlays keep
     /// working. Escape comes back. Overrides `Rulers`, `Layers` and `Toolbar` without
     /// changing them, so leaving restores the user's workspace.
-    pub(crate) present: bool,
+    pub(crate) focus: bool,
     /// Whether the transform-origin marker is editable — the Transform panel's crosshair.
     /// Sticky and app-wide; the pivots themselves are per node and saved. Escape turns it
     /// off after cancelling any gesture ([`Self::escape`]).
@@ -1289,7 +1289,7 @@ impl OndinApp {
             show_layers: view.layers,
             show_toolbar: view.toolbar,
             show_status: view.status,
-            present: false,
+            focus: false,
             // Off: a marker on every selection would be permanent chrome.
             show_pivot: false,
             snap_shapes: view.snap_shapes,
@@ -1557,8 +1557,8 @@ impl eframe::App for OndinApp {
         // After `disk_results`, so a landed save drops the snapshot before a new one.
         self.recovery_tick(&ctx);
 
-        // Present mode overrides the chrome switches without changing them.
-        if !self.present {
+        // Focus mode overrides the chrome switches without changing them.
+        if !self.focus {
             self.top_bar(ui);
             if self.show_layers {
                 self.layers_panel(ui);
@@ -1569,7 +1569,7 @@ impl eframe::App for OndinApp {
         } else {
             // The top bar is the title bar too; this brings the window's buttons
             // back on hover at the top edge.
-            crate::chrome::present_strip(&ctx, crate::chrome::Chrome::current());
+            crate::chrome::focus_strip(&ctx, crate::chrome::Chrome::current());
         }
 
         // Before the canvas, which reads the answer; the note was left by the
@@ -1588,7 +1588,7 @@ impl eframe::App for OndinApp {
         self.status_bar(&ctx, canvas);
 
         self.watch_kits(&ctx);
-        if !self.present {
+        if !self.focus {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
@@ -1598,19 +1598,19 @@ impl eframe::App for OndinApp {
             self.mode_menu_ui(&ctx);
             self.style_popups_ui(&ctx);
         }
-        // Outside the `!present` guard: shortcuts and the canvas menu open the kit
-        // dialogs in present mode, and every flag `modal_is_up` reads must be drawn.
+        // Outside the `!focus` guard: shortcuts and the canvas menu open the kit
+        // dialogs in focus mode, and every flag `modal_is_up` reads must be drawn.
         self.publish_dialog(&ctx);
         self.make_local_dialog(&ctx);
         self.kits_used_dialog(&ctx);
         self.version_history_dialog(&ctx);
         self.stop_sharing_dialog(&ctx);
         // After every door, so a right-click that replaced the open menu has already
-        // written the slot (R4); unguarded, a context menu opens in present mode.
+        // written the slot (R4); unguarded, a context menu opens in focus mode.
         self.context_menu_ui(&ctx, nav);
-        // Unguarded: its chord works in present mode, over the canvas alone.
+        // Unguarded: its chord works in focus mode, over the canvas alone.
         self.palette_ui(&ctx, canvas, palette_keys);
-        // Last, and unguarded: `Ctrl+,` and the palette open it in present mode too.
+        // Last, and unguarded: `Ctrl+,` and the palette open it in focus mode too.
         self.settings_ui(&ctx);
         self.cheatsheet_ui(&ctx);
 
@@ -1933,9 +1933,9 @@ impl OndinApp {
     /// by `layers::layer_rename_field`). The panel is shown if hidden; with several
     /// layers selected it renames nothing and says so.
     fn rename_selection(&mut self) {
-        // Present mode draws no layers panel: the field would never render.
-        if self.present {
-            self.session.info("Leave present mode to rename");
+        // Focus mode draws no layers panel: the field would never render.
+        if self.focus {
+            self.session.info("Leave focus mode to rename");
             return;
         }
         let ids = self.session.selection.ids();
@@ -2086,10 +2086,10 @@ impl OndinApp {
     /// An in-flight pen path is committed, not discarded. It happens here rather than in
     /// `pen_input`, because keyboard actions dispatch before the canvas runs.
     pub(crate) fn escape(&mut self, ctx: &egui::Context) {
-        // Present mode first: its own way out is hidden by the state itself.
-        if self.present {
-            self.present = false;
-            self.session.info("Left present mode");
+        // Focus mode first: its own way out is hidden by the state itself.
+        if self.focus {
+            self.focus = false;
+            self.session.info("Left focus mode");
         } else if self.field_menu.take().is_some()
             || self.var_complete.take().is_some()
             || self.mode_menu.take().is_some()
@@ -6388,7 +6388,7 @@ impl OndinApp {
     }
 
     /// The **View** and **Snap** dropdowns, each an icon and a caret over a column of
-    /// checkable rows. Present mode is not a peer of the other switches: it hides all
+    /// checkable rows. Focus mode is not a peer of the other switches: it hides all
     /// chrome and leaves them untouched, so Escape (this menu being hidden) restores them.
     fn view_and_snap_menus(&mut self, ui: &mut egui::Ui) {
         const ITEM_H: f32 = crate::ui::MENU_ITEM_H;
@@ -6505,7 +6505,7 @@ impl OndinApp {
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::Toolbar => self.show_toolbar,
             ViewSwitch::StatusMessages => self.show_status,
-            ViewSwitch::Present => self.present,
+            ViewSwitch::Focus => self.focus,
             ViewSwitch::SnapShapes => self.snap_shapes,
             ViewSwitch::SnapGuides => self.snap_guides,
             ViewSwitch::SnapGrid => self.snap_grid,
@@ -6514,7 +6514,7 @@ impl OndinApp {
     }
 
     /// Set a workspace switch, and say so — a chord has no tick to show. Guide lock
-    /// and present mode report their own.
+    /// and focus mode report their own.
     pub(crate) fn set_view_switch(&mut self, sw: ViewSwitch, on: bool) {
         match sw {
             ViewSwitch::Rulers => self.show_rulers = on,
@@ -6534,14 +6534,14 @@ impl OndinApp {
                     return;
                 }
             }
-            ViewSwitch::Present => {
-                self.present = on;
+            ViewSwitch::Focus => {
+                self.focus = on;
                 // The menu goes with the chrome it lives in.
                 self.open_menu = TopMenu::None;
                 self.session.info(if on {
-                    "Present mode — Escape to leave"
+                    "Focus mode — Escape to leave"
                 } else {
-                    "Left present mode"
+                    "Left focus mode"
                 });
                 return;
             }
@@ -6649,7 +6649,7 @@ impl OndinApp {
 
     /// The floating status bar at the canvas's bottom left: the mode when not the
     /// default, and the last status message for [`status_hold`], then a fade.
-    /// *View ▸ Show status messages* hides the message, never the mode. Drawn in present
+    /// *View ▸ Show status messages* hides the message, never the mode. Drawn in focus
     /// mode too (its Escape hint). Not interactable; truncated so it never runs under the
     /// inspector.
     fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) {
@@ -13367,17 +13367,17 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A context menu outranks present mode on Escape: the first press closes the
-    /// menu and returns before `escape` runs, the second leaves present mode.
+    /// A context menu outranks focus mode on Escape: the first press closes the
+    /// menu and returns before `escape` runs, the second leaves focus mode.
     ///
     /// flip: moving the `context_menu` arm below the `input::resolve` call → fails at "the first Escape closed the menu"
     #[test]
-    fn escape_in_present_mode_closes_the_menu_first_and_the_mode_second() {
+    fn escape_in_focus_mode_closes_the_menu_first_and_the_mode_second() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let root = temp_root("present-menu-escape");
+        let root = temp_root("focus-menu-escape");
         let mut app = app_at(&ctx, root.clone());
-        app.present = true;
+        app.focus = true;
         app.open_context_menu(&ctx, crate::menu::Target::Canvas, None);
         assert!(
             app.context_menu.is_some(),
@@ -13392,28 +13392,28 @@ mod library_wiring_tests {
             "the first Escape closed the menu"
         );
         assert!(
-            app.present,
-            "and left present mode alone: one rung per press, and the menu is the \
+            app.focus,
+            "and left focus mode alone: one rung per press, and the menu is the \
              rung the user can see"
         );
 
         whole_frame(&ctx, &mut app, vec![escape()]);
         assert!(
-            !app.present,
+            !app.focus,
             "the second Escape leaves the mode, which is the rung underneath"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// A kit dialog opened in present mode is drawn, so Escape still gets out.
+    /// A kit dialog opened in focus mode is drawn, so Escape still gets out.
     /// Driven through whole frames with the real `Ctrl+Alt+P` chord.
     ///
-    /// flip: the four kit dialogs back inside the `!present` guard → fails at "the first Escape closed the card"
+    /// flip: the four kit dialogs back inside the `!focus` guard → fails at "the first Escape closed the card"
     #[test]
-    fn a_kit_dialog_in_present_mode_is_drawn_and_escape_leaves() {
+    fn a_kit_dialog_in_focus_mode_is_drawn_and_escape_leaves() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let root = temp_root("present-publish");
+        let root = temp_root("focus-publish");
         let mut app = app_at(&ctx, root.clone());
         let main = app.session.ids.mint();
         let page = app.session.doc.root();
@@ -13441,7 +13441,7 @@ mod library_wiring_tests {
                 opacity: 0.5,
             }
         ])));
-        app.present = true;
+        app.focus = true;
 
         let chord = egui::Modifiers {
             alt: true,
@@ -13474,7 +13474,7 @@ mod library_wiring_tests {
         whole_frame(&ctx, &mut app, Vec::new());
         assert!(app.publishing.is_none(), "the first Escape closed the card");
         whole_frame(&ctx, &mut app, vec![escape()]);
-        assert!(!app.present, "and the second left present mode");
+        assert!(!app.focus, "and the second left focus mode");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -13973,7 +13973,7 @@ mod context_menu_rule_tests {
     }
 
     /// A popover flag nothing is drawing does not own `Escape` (B: the selection
-    /// leaves the text layer; A: present mode hides the inspector).
+    /// leaves the text layer; A: focus mode hides the inspector).
     ///
     /// flip: dropping `popover_heard` from the gate → fails case B at "the press reaches the ladder"
     /// flip: dropping the dead-flag clearing → fails at "and the dead flag is cleared"
@@ -14003,16 +14003,16 @@ mod context_menu_rule_tests {
         whole_frame(&ctx, &mut app, Vec::new());
         app.type_menu = Some(crate::app::TypeTab::Character);
         whole_frame(&ctx, &mut app, Vec::new());
-        app.set_view_switch(ViewSwitch::Present, true);
+        app.set_view_switch(ViewSwitch::Focus, true);
         whole_frame(&ctx, &mut app, Vec::new());
         assert!(
-            app.present && app.type_menu.is_some(),
-            "the fixture reached the state: presenting, with the flag still set"
+            app.focus && app.type_menu.is_some(),
+            "the fixture reached the state: in focus mode, with the flag still set"
         );
         whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
         assert!(
-            !app.present,
-            "one Escape leaves present mode, as its toast says"
+            !app.focus,
+            "one Escape leaves focus mode, as its toast says"
         );
     }
 }
@@ -16799,7 +16799,7 @@ mod view_prefs_tests {
     use super::*;
 
     /// A switch set this session, by its menu or by a side door, is in the prefs the
-    /// next app is built from, and that app opens with it; present mode is not kept.
+    /// next app is built from, and that app opens with it; focus mode is not kept.
     /// flip: `remember_view_switches` not called from `ui` → fails at the prefs.
     #[test]
     fn view_and_snap_switches_survive_a_relaunch() {
@@ -16807,7 +16807,7 @@ mod view_prefs_tests {
         let mut app = OndinApp::headless(&ctx);
         app.set_view_switch(ViewSwitch::SnapGrid, false);
         app.set_view_switch(ViewSwitch::Rulers, false);
-        app.set_view_switch(ViewSwitch::Present, true);
+        app.set_view_switch(ViewSwitch::Focus, true);
         // A side door: pulling a guide out turns guides on without the switch.
         app.show_guides = false;
         let mut frame = eframe::Frame::_new_kittest();
@@ -16823,7 +16823,7 @@ mod view_prefs_tests {
         );
         assert!(!next.snap_grid && !next.show_rulers && !next.show_guides);
         assert!(next.snap_shapes && next.show_layers, "the rest stay on");
-        assert!(!next.present, "a launch never opens in present mode");
+        assert!(!next.focus, "a launch never opens in focus mode");
     }
 }
 

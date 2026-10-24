@@ -316,9 +316,9 @@ pub enum ViewSwitch {
     StatusMessages,
     /// `Ctrl+\` — Figma's show/hide-UI chord.
     ///
-    /// Mapped onto present mode, which already hides all chrome and restores it on
+    /// Mapped onto focus mode, which already hides all chrome and restores it on
     /// leaving. Escape still leaves it.
-    Present,
+    Focus,
     /// `Ctrl+U` — Illustrator's Smart Guides. Clear of `Ctrl+Alt+U` (union); it
     /// means underline in `Mode::TextInsert`, and only the mode tells them apart.
     SnapShapes,
@@ -343,7 +343,7 @@ impl ViewSwitch {
             Self::Layers => "Show layers",
             Self::Toolbar => "Show toolbar",
             Self::StatusMessages => "Show status messages",
-            Self::Present => "Present mode",
+            Self::Focus => "Focus mode",
             Self::SnapShapes => "Snap to shapes",
             Self::SnapGuides => "Snap to guides",
             Self::SnapGrid => "Snap to grid",
@@ -368,7 +368,7 @@ impl ViewSwitch {
             Self::Grid => "Ctrl+'",
             Self::Layers => "Ctrl+Alt+\\",
             Self::Toolbar => "Ctrl+Shift+\\",
-            Self::Present => "Ctrl+\\",
+            Self::Focus => "Ctrl+\\",
             Self::SnapShapes => "Ctrl+U",
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
@@ -388,7 +388,7 @@ impl ViewSwitch {
         Self::Layers,
         Self::Toolbar,
         Self::StatusMessages,
-        Self::Present,
+        Self::Focus,
     ];
 
     /// Every variant, for the tests that have to walk them.
@@ -410,7 +410,7 @@ impl ViewSwitch {
         Self::Layers,
         Self::Toolbar,
         Self::StatusMessages,
-        Self::Present,
+        Self::Focus,
         Self::SnapShapes,
         Self::SnapGuides,
         Self::SnapGrid,
@@ -1062,10 +1062,10 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         );
 
         // Chrome visibility. `Ctrl+\` is Figma's show/hide-UI chord and lands on
-        // present mode; the other two are this app's.
+        // focus mode; the other two are this app's.
         on(
             cmd_only && !m.shift && i.key_pressed(egui::Key::Backslash),
-            Action::ToggleView(ViewSwitch::Present),
+            Action::ToggleView(ViewSwitch::Focus),
             &mut out,
         );
         on(
@@ -2861,7 +2861,7 @@ mod consolidated_chord_tests {
         let cmd = egui::Modifiers::COMMAND;
         assert_eq!(
             actions(Mode::Normal, vec![key(egui::Key::Backslash, cmd)], cmd),
-            vec![Action::ToggleView(ViewSwitch::Present)]
+            vec![Action::ToggleView(ViewSwitch::Focus)]
         );
         assert_eq!(
             actions(
@@ -2876,7 +2876,7 @@ mod consolidated_chord_tests {
                 actions(Mode::Normal, vec![key(spelling, cmd_shift())], cmd_shift()),
                 vec![Action::ToggleView(ViewSwitch::Toolbar)],
                 "Ctrl+Shift+backslash is the toolbar, spelled {spelling:?} — and \
-                 it must not also toggle present mode"
+                 it must not also toggle focus mode"
             );
         }
     }

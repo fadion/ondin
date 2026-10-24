@@ -20,7 +20,7 @@ on the [Releases](https://github.com/fadion/ondin/releases) page.
 ## Features
 
 - **Canvas.** Frames (artboards) on an infinite canvas, nested frames and groups,
-  frame presets, rulers, guides, pixel and layout grids, and *Present mode*
+  frame presets, rulers, guides, pixel and layout grids, and *Focus mode*
   (`Ctrl+\`) to hide every panel.
 - **Snapping.** To shapes, equal gaps, text baselines, guides, the grid and
   pixels.

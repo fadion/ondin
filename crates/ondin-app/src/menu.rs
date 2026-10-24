@@ -449,7 +449,7 @@ impl ViewState {
             ViewSwitch::Layers
             | ViewSwitch::Toolbar
             | ViewSwitch::StatusMessages
-            | ViewSwitch::Present
+            | ViewSwitch::Focus
             | ViewSwitch::SnapShapes
             | ViewSwitch::SnapGuides
             | ViewSwitch::SnapGrid
@@ -869,7 +869,7 @@ impl Item {
                     ViewSwitch::Layers
                     | ViewSwitch::Toolbar
                     | ViewSwitch::StatusMessages
-                    | ViewSwitch::Present
+                    | ViewSwitch::Focus
                     | ViewSwitch::SnapShapes
                     | ViewSwitch::SnapGuides
                     | ViewSwitch::SnapGrid
@@ -1160,6 +1160,7 @@ impl Item {
             Item::Boolean(_) | Item::Flatten => &["boolean", "combine"],
             Item::Restack(_) => &["order", "arrange", "z"],
             Item::Cheatsheet => &["shortcuts", "keys", "keymap", "help"],
+            Item::ViewSwitch(ViewSwitch::Focus) => &["zen"],
             Item::ZoomFit => &["fit", "all"],
             Item::SelectSame(_) => &["matching", "similar", "colour", "color", "family"],
             Item::SelectInverse => &["invert", "others", "rest"],
@@ -1319,10 +1320,11 @@ pub struct Context<'a> {
     pub any_guides: bool,
     /// Each of the five View switches this menu can show, as it stands.
     pub view: ViewState,
-    /// Whether present mode is on — read by *Show rulers* and *Rename*, whose
-    /// effects present mode hides. Not in [`ViewState`]: no menu draws a *Present
-    /// mode* row, so `ViewState::get` must not answer for it.
-    pub present: bool,
+    /// Whether focus mode is on — read by *Show rulers* and *Rename*, whose
+    /// effects focus mode hides. Not in [`ViewState`]: no context menu draws a
+    /// *Focus mode* row (the top bar's View menu does), so `ViewState::get` must
+    /// not answer for it.
+    pub focus: bool,
     /// Whether a segment (rather than only anchors) is part of the point
     /// selection — what separates §6.5's two Delete rows.
     pub segment_selected: bool,
@@ -1904,11 +1906,11 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     rows.extend([
         Row::new(Item::ToggleHidden).label(if st.all_hidden { "Show" } else { "Hide" }),
         Row::new(Item::ToggleLocked).label(if st.all_locked { "Unlock" } else { "Lock" }),
-        // One layer only, and not in present mode, which hides the panel holding
+        // One layer only, and not in focus mode, which hides the panel holding
         // the field. Never dimmed by the lock: a name is not the layer's artwork.
         Row::new(Item::Rename)
             .dim_if(!one, "Pick one layer to rename it")
-            .dim_if(cx.present, "Leave present mode to rename"),
+            .dim_if(cx.focus, "Leave focus mode to rename"),
     ]);
 
     // --- navigate ---------------------------------------------------------
@@ -2005,8 +2007,8 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
 
 /// The five View switches §6.1 and §6.3 share, each carrying its own state.
 ///
-/// Only *Show rulers* is dimmed in present mode, because `rulers_on()` is
-/// `show_rulers && !self.present`; the other four stay live there. Dimmed rather
+/// Only *Show rulers* is dimmed in focus mode, because `rulers_on()` is
+/// `show_rulers && !self.focus`; the other four stay live there. Dimmed rather
 /// than absent, with a reason naming what would have to change.
 fn view_rows(cx: &Context<'_>) -> Vec<Row> {
     [
@@ -2021,8 +2023,8 @@ fn view_rows(cx: &Context<'_>) -> Vec<Row> {
         Row::new(Item::ViewSwitch(sw))
             .checked(cx.view.get(sw))
             .dim_if(
-                sw == ViewSwitch::Rulers && cx.present,
-                "Present mode hides the rulers",
+                sw == ViewSwitch::Rulers && cx.focus,
+                "Focus mode hides the rulers",
             )
     })
     .collect()
@@ -2221,7 +2223,7 @@ impl OndinApp {
     ///
     /// A press that cancelled a gesture spends the click (R1): one right-click
     /// cancels or opens a menu, never both. The menu must open on the release,
-    /// otherwise that release would land inside it and pick a row. Present mode
+    /// otherwise that release would land inside it and pick a row. Focus mode
     /// does not refuse a menu; R3 gives an open menu the keyboard before `escape`.
     pub(crate) fn open_context_menu(
         &mut self,
@@ -2443,7 +2445,7 @@ impl OndinApp {
                 grid: self.view_switch(ViewSwitch::Grid),
                 layout_grid: self.view_switch(ViewSwitch::LayoutGrid),
             },
-            present: self.present,
+            focus: self.focus,
             segment_selected: self
                 .edited_path()
                 .is_some_and(|id| self.points.segments(id).next().is_some()),
@@ -2936,22 +2938,22 @@ mod tests {
         );
     }
 
-    /// Present mode opens a menu, and a cancelled gesture still refuses (R1).
+    /// Focus mode opens a menu, and a cancelled gesture still refuses (R1).
     ///
-    /// flip: restoring `|| self.present` in `open_context_menu` → fails at "present
+    /// flip: restoring `|| self.focus` in `open_context_menu` → fails at "focus
     /// mode is a chrome switch"; deleting the whole condition → fails at "a press
     /// that cancelled a gesture still spends the click".
     #[test]
-    fn present_mode_opens_a_menu_and_a_cancelled_gesture_still_does_not() {
+    fn focus_mode_opens_a_menu_and_a_cancelled_gesture_still_does_not() {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
 
         let mut app = crate::app::OndinApp::headless(&ctx);
-        app.present = true;
+        app.focus = true;
         app.open_context_menu(&ctx, Target::Canvas, None);
         assert!(
             app.context_menu.is_some(),
-            "present mode is a chrome switch, not a switch over what the canvas \
+            "focus mode is a chrome switch, not a switch over what the canvas \
              answers — the menu is the canvas answering a click (§15 D750, D756)"
         );
 
@@ -2964,12 +2966,12 @@ mod tests {
         );
 
         let mut app = crate::app::OndinApp::headless(&ctx);
-        app.present = true;
+        app.focus = true;
         app.gesture_cancelled = true;
         app.open_context_menu(&ctx, Target::Canvas, None);
         assert!(
             app.context_menu.is_none(),
-            "a cancelled gesture refuses in present mode too"
+            "a cancelled gesture refuses in focus mode too"
         );
     }
 
@@ -2987,7 +2989,7 @@ mod tests {
             state: LayerState::default(),
             any_guides: false,
             view: ViewState::default(),
-            present: false,
+            focus: false,
             segment_selected: false,
             on_segment: false,
             can_join: false,
@@ -3663,20 +3665,20 @@ mod tests {
             labels(&groups)
         );
         // *Lock guides* must be reversible from the canvas (C7); the full set is
-        // pinned by `the_canvas_menu_carries_every_view_row_and_present_dims_only_the_rulers`.
+        // pinned by `the_canvas_menu_carries_every_view_row_and_focus_dims_only_the_rulers`.
         assert!(rows.contains(&Item::ViewSwitch(ViewSwitch::GuideLock)));
     }
 
     /// The canvas menu's View rows are the View menu's less the four chrome-wide
-    /// switches §6.1 keeps out, and present mode dims only `Rulers`. The expected
+    /// switches §6.1 keeps out, and focus mode dims only `Rulers`. The expected
     /// set is derived from `ViewSwitch::VIEW_MENU`, so a new switch either appears
     /// here or fails here.
     ///
     /// flip: dropping `LayoutGrid` from `view_rows` → fails at the set assertion;
-    /// widening the dim to `cx.present` alone → fails at "present mode overrides
+    /// widening the dim to `cx.focus` alone → fails at "focus mode overrides
     /// only the rulers".
     #[test]
-    fn the_canvas_menu_carries_every_view_row_and_present_dims_only_the_rulers() {
+    fn the_canvas_menu_carries_every_view_row_and_focus_dims_only_the_rulers() {
         let view_rows_of = |cx: &Context<'_>| -> Vec<(ViewSwitch, bool, Option<&'static str>)> {
             build(cx)
                 .iter()
@@ -3695,7 +3697,7 @@ mod tests {
                     ViewSwitch::Layers
                         | ViewSwitch::Toolbar
                         | ViewSwitch::StatusMessages
-                        | ViewSwitch::Present
+                        | ViewSwitch::Focus
                 )
             })
             .collect();
@@ -3709,16 +3711,16 @@ mod tests {
         );
         assert!(
             got.iter().all(|(_, enabled, _)| *enabled),
-            "every View row is live when present mode is off"
+            "every View row is live when focus mode is off"
         );
 
         let mut cx = open(Target::Canvas, &[], &[]);
-        cx.present = true;
+        cx.focus = true;
         let got = view_rows_of(&cx);
         assert_eq!(
             got.iter().map(|(sw, _, _)| *sw).collect::<Vec<_>>(),
             expected,
-            "present mode removes a row rather than dimming it — §6 says kind \
+            "focus mode removes a row rather than dimming it — §6 says kind \
              decides presence and state decides enabled"
         );
         let rulers = got
@@ -3727,12 +3729,12 @@ mod tests {
             .expect("the rulers row");
         assert!(
             !rulers.1,
-            "Show rulers cannot do anything in present mode — `rulers_on()` is \
-             `show_rulers && !present`, so the tick would move and the bars would not"
+            "Show rulers cannot do anything in focus mode — `rulers_on()` is \
+             `show_rulers && !focus`, so the tick would move and the bars would not"
         );
         assert_eq!(
             rulers.2,
-            Some("Present mode hides the rulers"),
+            Some("Focus mode hides the rulers"),
             "a dimmed row has to say why, and the reason names the thing that would \
              have to change (§5.9)"
         );
@@ -3748,7 +3750,7 @@ mod tests {
                 .copied()
                 .filter(|sw| *sw != ViewSwitch::Rulers)
                 .collect::<Vec<_>>(),
-            "present mode overrides only the rulers — guides and both grids stay \
+            "focus mode overrides only the rulers — guides and both grids stay \
              live there by §15 D750, and Lock guides is a property, not a visibility"
         );
     }
@@ -4968,9 +4970,9 @@ mod view_switch_registry_tests {
 
     /// Every switch is on exactly one of `VIEW_MENU` and `SNAP_MENU`. Membership,
     /// not cardinality: a length sum passes for two arrays that both hold `Grid`
-    /// and neither holds `Present`.
+    /// and neither holds `Focus`.
     ///
-    /// flip: dropping `Present` from `VIEW_MENU` → fails naming "Present mode" on 0 menus.
+    /// flip: dropping `Focus` from `VIEW_MENU` → fails naming "Focus mode" on 0 menus.
     #[test]
     fn every_view_switch_is_on_exactly_one_menu() {
         for sw in ViewSwitch::ALL {
@@ -5127,10 +5129,10 @@ mod restore_children_tests {
     }
 
     /// *Hide*/*Show* and *Lock*/*Unlock* say what the action does over the whole
-    /// selection, and *Rename* dims in present mode.
+    /// selection, and *Rename* dims in focus mode.
     ///
     /// flip: `layer_menu_state` reading the right-clicked layer's own flags → fails
-    /// at the mixed selection's *Hide*; dropping *Rename*'s present-mode dim →
+    /// at the mixed selection's *Hide*; dropping *Rename*'s focus-mode dim →
     /// fails at the last assertion.
     #[test]
     fn the_toggle_labels_read_the_whole_selection() {
@@ -5223,10 +5225,10 @@ mod restore_children_tests {
                 .2
         };
         assert!(rename(&rows(&mut app, vec![a], a)), "live on one layer");
-        app.present = true;
+        app.focus = true;
         assert!(
             !rename(&rows(&mut app, vec![a], a)),
-            "dim in present mode, where the field's panel is hidden"
+            "dim in focus mode, where the field's panel is hidden"
         );
     }
 

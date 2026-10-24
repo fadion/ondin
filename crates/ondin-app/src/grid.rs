@@ -138,7 +138,7 @@ mod tests {
 
     /// The lattice stops at the ruler bars. The rulers-off control matters because
     /// the line count barely changes; the leftmost vertical's position does. The
-    /// fixture sets `present` too, since `rulers_on()` is `show_rulers && !present`.
+    /// fixture sets `focus` too, since `rulers_on()` is `show_rulers && !focus`.
     ///
     /// flip: delete the `rulers_on()` branch in `draw_pixel_grid` → fails at "the
     /// first vertical clears the ruler bar".
@@ -152,7 +152,7 @@ mod tests {
         let ppp = 1.0;
 
         app.show_rulers = false;
-        app.present = false;
+        app.focus = false;
         let without = grid_lines(&app, &ctx, rect, ppp);
         assert!(
             without.len() > 8,

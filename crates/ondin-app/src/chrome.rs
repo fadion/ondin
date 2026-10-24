@@ -47,11 +47,11 @@ const POINTER_ONLY: Sense = Sense::CLICK.union(Sense::DRAG);
 /// The close button's hover fill — Windows' caption red, under a white glyph.
 const CLOSE_HOVER: Color32 = Color32::from_rgb(0xC4, 0x2B, 0x1C);
 
-/// The height of present mode's strip ([`present_strip`]) — Windows 11's caption
+/// The height of focus mode's strip ([`focus_strip`]) — Windows 11's caption
 /// height.
 const STRIP_H: f32 = 32.0;
 
-/// How close to the window's top edge the pointer must come to bring present
+/// How close to the window's top edge the pointer must come to bring focus
 /// mode's strip out. A band, not the top row: a hand-moved pointer on a
 /// non-maximized window stops wherever the hand does.
 const REVEAL: f32 = 6.0;
@@ -402,12 +402,12 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
     }
 }
 
-/// **Present mode's way to the window's buttons**: a slim strip across the top —
+/// **Focus mode's way to the window's buttons**: a slim strip across the top —
 /// the drag strip and caption buttons over the top bar's fill — shown while the
 /// pointer is at the top edge and for as long as it stays on the strip. Call
-/// once a frame while present mode is on.
+/// once a frame while focus mode is on.
 ///
-/// Present mode hides the top bar, which on a host that draws its own controls
+/// Focus mode hides the top bar, which on a host that draws its own controls
 /// is the title bar. Nothing on macOS ([`Chrome::draws_own_controls`]).
 ///
 /// Revealed only from the edge, and only with no button held: a drag carrying a
@@ -418,11 +418,11 @@ fn three_buttons(ui: &mut egui::Ui, act: bool) {
 /// Its layer is [`Order::Middle`], not [`Order::Foreground`] where the resize
 /// zones are ([`resize_zones`]): on top, the edge that reveals the strip could
 /// no longer resize the window.
-pub(crate) fn present_strip(ctx: &egui::Context, chrome: Chrome) {
+pub(crate) fn focus_strip(ctx: &egui::Context, chrome: Chrome) {
     if !chrome.draws_own_controls() {
         return;
     }
-    let id = Id::new("present-strip");
+    let id = Id::new("focus-strip");
     let screen = ctx.content_rect();
     let strip = Rect::from_min_size(screen.min, Vec2::new(screen.width(), STRIP_H));
     let (pointer, down) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.any_down()));
@@ -883,9 +883,9 @@ mod tests {
         assert!(sent.contains(&C::Close), "and the corner is close's again");
     }
 
-    /// One frame of present mode: a canvas over the whole window, the resize
+    /// One frame of focus mode: a canvas over the whole window, the resize
     /// zones and the strip. Returns the commands sent and whether the canvas was clicked.
-    fn present_frame(
+    fn focus_frame(
         ctx: &egui::Context,
         events: Vec<egui::Event>,
         maximized: bool,
@@ -910,7 +910,7 @@ mod tests {
                 .interact(SCREEN, Id::new("canvas"), Sense::click_and_drag())
                 .clicked();
             resize_zones(ui.ctx(), chrome);
-            present_strip(ui.ctx(), chrome);
+            focus_strip(ui.ctx(), chrome);
         });
         let sent = out
             .viewport_output
@@ -921,7 +921,7 @@ mod tests {
     }
 
     /// The pointer moved through `path`, then a click at its last point.
-    fn present_click(
+    fn focus_click(
         ctx: &egui::Context,
         path: &[Pos2],
         maximized: bool,
@@ -933,44 +933,44 @@ mod tests {
             .map(|p| vec![egui::Event::PointerMoved(*p)])
             .chain([vec![press(at, true)], vec![press(at, false)], Vec::new()]);
         for e in events {
-            let (s, c) = present_frame(ctx, e, maximized);
+            let (s, c) = focus_frame(ctx, e, maximized);
             sent.extend(s);
             canvas |= c;
         }
         (sent, canvas)
     }
 
-    fn fresh_present() -> egui::Context {
+    fn fresh_focus() -> egui::Context {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let _ = present_frame(&ctx, Vec::new(), false);
+        let _ = focus_frame(&ctx, Vec::new(), false);
         ctx
     }
 
-    /// Present mode's strip comes out only at the top edge and its close button
+    /// Focus mode's strip comes out only at the top edge and its close button
     /// closes; a pointer arriving from the canvas below finds the canvas, and one
     /// that left the strip has hidden it.
     /// flip: revealed from anywhere on the strip (`strip.contains(p)` in the
     /// unrevealed arm) → fails at "the canvas keeps its click there", not at
     /// "not from below".
     #[test]
-    fn the_present_strip_comes_out_at_the_top_edge_and_closes() {
+    fn the_focus_strip_comes_out_at_the_top_edge_and_closes() {
         use egui::ViewportCommand as C;
         let close = Pos2::new(790.0, 16.0);
         let middle = Pos2::new(400.0, 300.0);
 
-        let ctx = fresh_present();
-        let (sent, canvas) = present_click(&ctx, &[middle, close], false);
+        let ctx = fresh_focus();
+        let (sent, canvas) = focus_click(&ctx, &[middle, close], false);
         assert!(!sent.contains(&C::Close), "not from below: {sent:?}");
         assert!(canvas, "the canvas keeps its click there");
 
-        let ctx = fresh_present();
-        let (sent, canvas) = present_click(&ctx, &[Pos2::new(790.0, 2.0), close], false);
+        let ctx = fresh_focus();
+        let (sent, canvas) = focus_click(&ctx, &[Pos2::new(790.0, 2.0), close], false);
         assert!(sent.contains(&C::Close), "from the edge: {sent:?}");
         assert!(!canvas, "and the canvas under it saw nothing");
 
-        let ctx = fresh_present();
-        let (sent, _) = present_click(&ctx, &[Pos2::new(790.0, 2.0), middle, close], false);
+        let ctx = fresh_focus();
+        let (sent, _) = focus_click(&ctx, &[Pos2::new(790.0, 2.0), middle, close], false);
         assert!(!sent.contains(&C::Close), "left, and hidden: {sent:?}");
     }
 
@@ -978,18 +978,18 @@ mod tests {
     /// flip: the `!down` dropped from the reveal → fails at the assertion.
     #[test]
     fn a_held_button_does_not_bring_the_strip_out() {
-        let ctx = fresh_present();
+        let ctx = fresh_focus();
         let start = Pos2::new(400.0, 300.0);
-        let _ = present_frame(&ctx, vec![egui::Event::PointerMoved(start)], false);
-        let _ = present_frame(&ctx, vec![press(start, true)], false);
+        let _ = focus_frame(&ctx, vec![egui::Event::PointerMoved(start)], false);
+        let _ = focus_frame(&ctx, vec![press(start, true)], false);
         for y in [200.0, 60.0, 2.0] {
-            let _ = present_frame(
+            let _ = focus_frame(
                 &ctx,
                 vec![egui::Event::PointerMoved(Pos2::new(400.0, y))],
                 false,
             );
         }
-        let out = ctx.data(|d| d.get_temp::<bool>(Id::new("present-strip")));
+        let out = ctx.data(|d| d.get_temp::<bool>(Id::new("focus-strip")));
         assert_eq!(out, Some(false), "a held button reveals nothing");
     }
 
@@ -1000,15 +1000,15 @@ mod tests {
     fn the_top_edge_still_resizes_under_the_strip() {
         use egui::ViewportCommand as C;
         let edge = Pos2::new(400.0, 1.0);
-        let ctx = fresh_present();
-        let (sent, _) = present_click(&ctx, &[edge], false);
+        let ctx = fresh_focus();
+        let (sent, _) = focus_click(&ctx, &[edge], false);
         assert!(
             sent.contains(&C::BeginResize(ResizeDirection::North)),
             "the top edge resizes: {sent:?}"
         );
 
-        let ctx = fresh_present();
-        let (sent, canvas) = present_click(&ctx, &[edge, Pos2::new(731.0, 16.0)], true);
+        let ctx = fresh_focus();
+        let (sent, canvas) = focus_click(&ctx, &[edge, Pos2::new(731.0, 16.0)], true);
         assert!(
             sent.contains(&C::Maximized(false)),
             "maximized, the strip restores: {sent:?}"

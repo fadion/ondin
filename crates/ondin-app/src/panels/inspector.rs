@@ -1950,6 +1950,25 @@ impl OndinApp {
         }
     }
 
+    /// *Outline stroke*: `id`'s strokes become filled paths (`build::outline_stroke`);
+    /// what it made is selected.
+    pub(crate) fn outline_stroke(&mut self, id: NodeId) {
+        match build::outline_stroke(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            id,
+        ) {
+            Ok((tx, made)) => {
+                if self.commit_edit(tx) {
+                    self.session.selection.set_one(made);
+                    self.session.info("Outlined the stroke");
+                }
+            }
+            Err(e) => self.session.fail(format!("Cannot outline the stroke: {e}")),
+        }
+    }
+
     /// *Convert to path*: a text layer becomes the `Path` its glyphs trace
     /// (`build::outline_text`, `context-menus.md` §5.6).
     ///

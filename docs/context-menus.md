@@ -78,7 +78,7 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
 | 1 | Head | the kind's own verbs (§5) |
 | 2 | Clipboard | Cut · Copy · Paste here · Paste to replace · Duplicate · Delete |
 | 3 | Properties | Copy properties · Paste properties |
-| 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions |
+| 4 | Structure | Group · Frame · component rows · Ungroup · mask · even-odd · booleans · Flatten · conversions · Join paths |
 | 5 | Order | four restack rows |
 | 6 | Transform | Flip H · Flip V · Reset origin |
 | 7 | State | Hide/Show · Lock/Unlock · Rename |
@@ -93,8 +93,8 @@ Precedence on canvas: text session → point edit → guide → layer → empty 
   Head rows: see §5.8.
 - **Lock**: editing rows dim with *"This layer is locked"*, or *"A group containing this layer is
   locked"* when only an ancestor is (§5.9).
-- **Length**: a primitive is 25 rows, text 29, a boolean 31, railed text 31; component roles reach
-  33 (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
+- **Length**: a primitive is 26 rows, text 29, a boolean 32, railed text 31; component roles reach
+  34, a linked boolean in an instance (`the_menus_the_two_ends_do_not_count`). The ceiling is "needs no scrollbar"; if trimmed,
   Navigate goes first, then Export.
 
 ---
@@ -138,6 +138,8 @@ In emitted order. Kind-gated; the component rows are gated by role (`menu::Role`
 | Flip to other side ✓ | — | one text layer on a rail; ticked when flipped; dims on lock |
 | Detach from path | — | one text layer on a rail; dims on lock |
 | Outline shape | — | one primitive or `Path`; on a path dims *"This path is already an outline"* when it has no radii to bake; dims on lock |
+| Outline stroke | — | one primitive, `Path` or boolean; dims *"This layer has no stroke"* without a visible stroke (`build::can_outline_stroke`); dims on lock. Each visible stroke becomes a filled path (`app-booleans.md`) |
+| Join paths | — | exactly two `Path` layers (not line-tool lines); dims *"Both paths need an open end"* unless each has an open subpath of two or more anchors, and *"One of these paths is locked"* when either is (`join_layers_subject`); the target's own lock dims with the lock sentence. The nearest pair of open ends splices into one layer (`app-pen-and-nodes.md`) |
 
 *Outline shape* and *Convert to path* never share a menu; neither appears beside *Flatten*.
 
@@ -231,11 +233,11 @@ The four operations stay in Structure as checkable rows (§4).
 |---|---|
 | Edit points | one `Path`; dims on lock (the mode refuses a locked path too) |
 
-*Outline shape* and *Even-odd fill* reach a path from Structure (§4).
+*Outline shape*, *Outline stroke*, *Even-odd fill* and *Join paths* reach a path from Structure (§4).
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-No head. The baseline menu, 24 rows.
+No head. The baseline menu, 26 rows.
 
 ### 5.6 Text
 
@@ -413,6 +415,6 @@ The inspector field menu (§6.7) is drawn with the same row and frame functions 
 
 ## Open
 
-- Whether a 33-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
+- Whether a 34-row component menu is past the no-scrollbar ceiling, and if so what is trimmed.
 - Whether the canvas menu should carry *Canvas background…* (a second door to the inspector's
   no-selection field).

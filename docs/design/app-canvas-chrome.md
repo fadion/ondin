@@ -56,8 +56,8 @@ Between undo/redo and the zoom readout: **View** (eye + caret) and **Snap** (mag
   off; "off" also dims the label.
 - **View**: *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show layers*,
   *Show toolbar*, *Show status messages*, *Present mode*.
-- **Snap**: *Snap to shapes*, *Snap to guides*, *Snap to grid*, *Snap to baselines* (last: no
-  accelerator, not Illustrator's).
+- **Snap**: *Snap to shapes*, *Snap to guides* (ruler guides, and layout grids while shown), *Snap to
+  grid*, *Snap to baselines* (last: no accelerator, not Illustrator's).
 - **Zoom** (`zoom_control`): a text field on top, unfocused at open, holding the live zoom as its
   value; Enter applies `OndinApp::apply_typed_zoom` (`150`, `150%`, `37.5 %`; about the canvas
   centre, clamped like every zoom; anything else says *"Type a zoom percentage, like 150"*) and

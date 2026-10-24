@@ -1,7 +1,7 @@
 # Pen and node tools
 
-Drawing paths with the pen, resuming them, editing their points with the node tool (`A`), and
-per-anchor corner radii. Part of §9.4.
+Drawing paths with the pen, resuming them, editing their points with the node tool (`A`), joining
+two path layers, and per-anchor corner radii. Part of §9.4.
 
 ## 9.4 The pen
 
@@ -61,6 +61,13 @@ per-anchor corner radii. Part of §9.4.
   disarms the bias one rung above the points.
 - `Shift+D` (`canvas::reverse_subpaths`) reverses the runs the selected points are on, or every run;
   also works on a selected path outside point editing (non-zero fill makes winding matter).
+- **Join paths** (layer menu, `canvas::join_layers`; subject `join_layers_subject`) joins two path
+  layers: exactly two `NodeKind::Path` selected, both unlocked, each with an open subpath of two or
+  more anchors (a line-tool `Line` is not offered). The key layer, else the first selected, is kept
+  with its paint and name; the other's subpaths move into it in world space, re-expressed in the kept
+  layer's space by `tools::rewrite_path`; the nearest pair of open ends between the two (world
+  distance) splice through `tools::join_ends`, the point-level *Join*'s splice; the other layer is
+  deleted (with `component::relink_for_delete`). One undo step.
 - **A locked path is not a subject**: `canvas::edited_path` refuses it (the tool still arms, finds
   nothing); `enter_action`'s `Path` arm refuses with a sentence; `reverse_subpaths`' fallback arm asks
   `query::is_effectively_locked` itself.

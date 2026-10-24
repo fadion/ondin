@@ -1,6 +1,6 @@
 # Snapping
 
-What a gesture snaps to (shapes, ruler guides, text baselines, equal gaps, the pixel grid), the
+What a gesture snaps to (shapes, ruler guides, layout grids, text baselines, equal gaps, the pixel grid), the
 precedence between them, and how moves, resizes, guide drags and creation each use them (`snap.rs`).
 Part of §9.4.
 
@@ -20,6 +20,7 @@ taken whole by every snap function.
 | --- | --- | --- |
 | Shape targets | `snap::targets` | edges and centres of nodes in view; excludes the **gesture's own subtree** (§15 D43); capped by `SNAP_TARGET_LIMIT` |
 | Ruler guides | `OndinApp::guide_lines` → `snap::GuideLines { x, y }` | via `shown_guide` (a dragged guide snaps where it looks); frame-scoped guides projected only if the frame is `rulers::upright` (angle and skew ≈ 0, mirrors allowed; a quarter turn is not upright). No culling. |
+| Layout grids | `OndinApp::layout_grid_lines`, appended to the guide lines | under *Snap to guides*, and only while *Show layout grid* is on (`show_layout_grids`): both edges of every visible track of a shown frame, clipped to the frame, x for columns and y for rows (swapped under a quarter turn), in world space; they match as ruler guides do (tie wins, no mark). A frame that is moving or inside what moves is skipped (its grid travels with it), and so is one turned off the axes; a mirrored frame snaps. No culling. |
 | Baselines | `canvas::baseline_lines` → `Vec<f64>` world ys | from cached `TextLayout::baselines` of visible text in view, excluding the gesture's whole subtree (`snap::is_inside_any`); rotated/skewed text contributes nothing, a half-turn is admitted (off-diagonal test); own switch, on by default, unbound |
 | Pixel grid | `snap::pixel_delta` | fallback only |
 
@@ -31,8 +32,8 @@ quote a guide, so snap, extend and measure cannot drift apart.
 **node / guide / baseline match > pixel grid > nothing**, with an equal-gap match competing on
 distance at the top rung and losing ties to alignments.
 
-- A ruler guide wins a tie with a node and with a baseline (it was placed on purpose; also prevents
-  flicker). A node edge beats a baseline too.
+- A ruler guide (or layout-grid edge, which arrives in the same list) wins a tie with a node and with
+  a baseline (it was placed on purpose; also prevents flicker). A node edge beats a baseline too.
 - Pixel rounding is consulted only for an axis nothing else claimed — an alignment at 100.5 stays at
   100.5.
 - Private `Matched { Node(Rect), RulerGuide, Baseline(f64), Spacing(..) }` decides what is drawn,

@@ -492,6 +492,8 @@ The command palette also lists both (*Insert*, *Publish kit…*). `Ctrl+Alt+P` i
 - **Outline shape** — built, in the context menu (§15 D230), no chord: a one-way structural
   conversion no reference app binds. `Ctrl+E` is *Flatten*, a different verb, and must not cover
   this one by having the only key. The third reason an `Item` is not an `Action`: "no key was spent".
+- **Outline stroke** and **Join paths** — layer-menu rows (and so palette rows), no chord, as
+  *Outline shape*.
 - **Numeric distribute spacing** — a panel affordance.
 - **`Tab` to hide panels** (Adobe) — `Tab` steps the point selection and `Ctrl+\` covers the intent.
   `Tab` is egui's focus key and costs a frame to claim (§15 D123): the last key worth a second

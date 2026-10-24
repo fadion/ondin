@@ -256,6 +256,11 @@ pub enum Item {
     /// set's operands; `build::flatten` refuses a lone non-boolean, so the two rows
     /// are never both offered.
     OutlineShape,
+    /// Each visible stroke becomes a filled `Path` (`build::outline_stroke`).
+    OutlineStroke,
+    /// Two path layers become one, their nearest open ends spliced
+    /// (`OndinApp::join_layers`). The point menu's [`Self::Join`] fuses ends within one.
+    JoinPaths,
     /// §5.6 — a text layer becomes the `Path` its glyphs trace (`build::outline_text`).
     ///
     /// A separate item from [`Self::OutlineShape`] because text's outline needs the
@@ -512,6 +517,8 @@ impl Item {
         Item::Boolean(BoolOp::Exclude),
         Item::Flatten,
         Item::OutlineShape,
+        Item::OutlineStroke,
+        Item::JoinPaths,
         Item::OutlineText,
         Item::DetachTextPath,
         Item::FlipTextPath,
@@ -747,6 +754,8 @@ impl Item {
             ),
             // Deliberately unbound: a one-way conversion is not one keystroke away.
             Item::OutlineShape => s("Outline shape", icon::POLYGON, None, Group::Structure),
+            Item::OutlineStroke => s("Outline stroke", icon::POLYGON, None, Group::Structure),
+            Item::JoinPaths => s("Join paths", icon::ARROWS_MERGE, None, Group::Structure),
             // A verb whose whole result is a kind wears that kind's picture (§8):
             // `POLYGON` for the two that make a `Path`, `TEXT_T` for the two that keep text.
             Item::OutlineText => s("Convert to path", icon::POLYGON, None, Group::Structure),
@@ -1307,6 +1316,9 @@ pub struct Context<'a> {
     /// `tools::joinable_ends` said yes — the point selection is exactly two open
     /// ends. The builder's own predicate, so the row cannot offer what `join_ends` declines.
     pub can_join: bool,
+    /// Why `OndinApp::join_layers_subject` refused the two selected paths, if it did
+    /// (a lock on either, no open end) — what dims *Join paths*, in its words.
+    pub join_paths_refused: Option<&'static str>,
     /// `OndinApp::properties_source` found a layer to lift an appearance off. Two
     /// refusals sit behind it; the row's sentence picks between them on the
     /// selection's size.
@@ -1458,6 +1470,8 @@ pub struct LayerState {
     /// from this one. State rather than kind: a `Path` answers yes only while its
     /// corner radii are still in the model rather than in its geometry.
     pub outlineable: bool,
+    /// `build::can_outline_stroke` said yes — the layer has a visible stroke.
+    pub stroke_outlineable: bool,
 }
 
 impl LayerState {
@@ -1818,6 +1832,28 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 .dim_if(locked, why),
         );
     }
+    if one
+        && matches!(
+            cx.kinds.first(),
+            Some(Kind::Shape | Kind::Path | Kind::Boolean(_))
+        )
+    {
+        rows.push(
+            Row::new(Item::OutlineStroke)
+                .dim_if(!st.stroke_outlineable, "This layer has no stroke")
+                .dim_if(locked, why),
+        );
+    }
+    if cx.kinds == [Kind::Path, Kind::Path] {
+        rows.push(
+            Row::new(Item::JoinPaths)
+                .dim_if(
+                    cx.join_paths_refused.is_some(),
+                    cx.join_paths_refused.unwrap_or_default(),
+                )
+                .dim_if(locked, why),
+        );
+    }
 
     // --- order ------------------------------------------------------------
     // Never dimmed for being already frontmost: `z_order` reports an empty transaction as an info line.
@@ -2009,6 +2045,8 @@ pub const KIND_VERBS: &[(Item, &str)] = &[
     ),
     (Item::Flatten, "Needs two layers or a boolean"),
     (Item::OutlineShape, "Needs one shape"),
+    (Item::OutlineStroke, "Needs one stroked shape"),
+    (Item::JoinPaths, "Needs two path layers"),
     (Item::OutlineText, "Needs one text layer"),
     (Item::DetachTextPath, "Needs text on a path"),
     (Item::FlipTextPath, "Needs text on a path"),
@@ -2385,6 +2423,7 @@ impl OndinApp {
             // row go dark as the hand travels down the menu.
             on_segment: open.world.is_some_and(|p| self.segment_at(p).is_some()),
             can_join: self.join_subject().is_some(),
+            join_paths_refused: self.join_layers_subject().err(),
             can_copy_props: self.properties_source().is_some(),
             has_key: self.session.selection.key().is_some(),
             has_props: self.property_clipboard.is_some(),
@@ -2509,6 +2548,7 @@ impl OndinApp {
             }),
             // Core's own predicate, so the row never offers what `build::outline` refuses.
             outlineable: build::can_outline(node.kind()),
+            stroke_outlineable: build::can_outline_stroke(&self.session.doc, id),
             // The display node, so a live text session's uncommitted mode is what
             // the ticks report, as `set_text_sizing` reads it.
             text_sizing: match self.session.display_node(id).map(|n| n.kind()) {
@@ -2636,6 +2676,12 @@ impl OndinApp {
                     self.outline_shape(id);
                 }
             }
+            Item::OutlineStroke => {
+                if let Some(id) = hit {
+                    self.outline_stroke(id);
+                }
+            }
+            Item::JoinPaths => self.join_layers(),
             Item::Restack(mv) => self.dispatch(ctx, Action::Restack(mv)),
             Item::Flip(axis) => self.dispatch(ctx, Action::Flip(axis)),
             Item::ToggleHidden => self.dispatch(ctx, Action::ToggleHidden),
@@ -2914,6 +2960,7 @@ mod tests {
             segment_selected: false,
             on_segment: false,
             can_join: false,
+            join_paths_refused: None,
             text_outlineable: true,
             on_a_rail: false,
             rail_flipped: false,
@@ -3150,11 +3197,11 @@ mod tests {
         }
     }
 
-    /// A primitive's menu is 25 rows in the canonical group order, with the empty
+    /// A primitive's menu is 26 rows in the canonical group order, with the empty
     /// head collapsed. Asserts the label sequence, since `build` buckets by
     /// `Spec::group` and only a wrong assignment in `spec()` can still break order.
     #[test]
-    fn a_primitives_menu_is_twenty_five_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_twenty_six_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3165,7 +3212,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 25, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 26, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         assert_eq!(
@@ -3184,6 +3231,7 @@ mod tests {
                 "Create component",
                 "Use as mask",
                 "Outline shape",
+                "Outline stroke",
                 "Bring to front",
                 "Bring forward",
                 "Send backward",
@@ -3240,7 +3288,7 @@ mod tests {
     }
 
     /// A boolean's menu is the long end of §3's range: head 3 · Clipboard 6 ·
-    /// Properties 2 · Structure 8 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
+    /// Properties 2 · Structure 9 · Order 4 · Transform 2 · State 3 · Navigate 1 ·
     /// Export 2.
     #[test]
     fn a_booleans_menu_is_the_long_end_of_the_range() {
@@ -3254,11 +3302,11 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 31, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 32, "{:?}", labels(&groups));
     }
 
     /// Row counts for a text layer on a rail and the component roles, with the
-    /// arithmetic in each case's message. The last two are 33, past the boolean's 31.
+    /// arithmetic in each case's message. The linked boolean is the long end, at 34.
     #[test]
     fn the_menus_the_two_ends_do_not_count() {
         let sel = [id(1)];
@@ -3298,9 +3346,9 @@ mod tests {
                 count(Kind::Frame, &|cx| cx.role = Role::Instance),
             ),
             (
-                "a linked shape in an instance: the primitive's 25, with *Go to \
+                "a linked shape in an instance: the primitive's 26, with *Go to \
                  main component* and *Reset <layer>* for *Create component*",
-                26,
+                27,
                 count(Kind::Shape, &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3319,7 +3367,7 @@ mod tests {
             ),
             (
                 "a bound text child on a rail: the railed 31, with the bound \
-                 child's three rows for *Create component* — the long end",
+                 child's three rows for *Create component*",
                 33,
                 count(Kind::Text, &|cx| {
                     cx.state.text_sizing = Some(0);
@@ -3331,9 +3379,9 @@ mod tests {
             ),
             (
                 "a linked boolean whose bound visibility differs: the boolean's \
-                 31, with the bound child's three rows for *Create component* — \
-                 the long end too",
-                33,
+                 32, with the bound child's three rows for *Create component* — \
+                 the long end",
+                34,
                 count(Kind::Boolean(BoolOp::Union), &|cx| {
                     cx.role = Role::Member;
                     cx.layer_name = "Label".into();
@@ -3526,7 +3574,7 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        assert_eq!(flat(&groups).len(), 25, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 26, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -4123,7 +4171,7 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 25, "{:?}", labels(&groups));
+        assert_eq!(all, 26, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",
@@ -4254,6 +4302,57 @@ mod tests {
             row(&menu(&[Kind::Path, Kind::Path], false)),
             None,
             "nor on two, which have no one answer to tick"
+        );
+    }
+
+    /// *Join paths* appears on exactly two path layers, dim with the reason where
+    /// `join_layers_subject` refused, in its words; *Outline stroke* on one stroked shape.
+    /// flip: the *Join paths* condition reading `kinds.len() == 2` → fails at "a path
+    /// and a shape".
+    #[test]
+    fn join_paths_and_outline_stroke_appear_on_their_subjects() {
+        let two = [id(1), id(2)];
+        let menu = |kinds: &[Kind], f: &dyn Fn(&mut Context<'_>)| {
+            let mut cx = open(
+                Target::Layer {
+                    id: id(1),
+                    door: Door::Canvas,
+                },
+                &two[..kinds.len()],
+                kinds,
+            );
+            f(&mut cx);
+            build(&cx)
+        };
+        let row = |groups: &[Vec<Row>], item: Item| {
+            groups
+                .iter()
+                .flatten()
+                .find(|r| r.item == item)
+                .map(|r| (r.enabled, r.why))
+        };
+        let m = menu(&[Kind::Path, Kind::Path], &|_| {});
+        assert_eq!(row(&m, Item::JoinPaths), Some((true, None)));
+        let m = menu(&[Kind::Path, Kind::Path], &|cx| {
+            cx.join_paths_refused = Some("Both paths need an open end")
+        });
+        assert_eq!(
+            row(&m, Item::JoinPaths),
+            Some((false, Some("Both paths need an open end")))
+        );
+        let m = menu(&[Kind::Path, Kind::Shape], &|_| {});
+        assert_eq!(row(&m, Item::JoinPaths), None, "a path and a shape");
+
+        let m = menu(&[Kind::Shape], &|cx| cx.state.stroke_outlineable = true);
+        assert_eq!(row(&m, Item::OutlineStroke), Some((true, None)));
+        let m = menu(&[Kind::Shape], &|_| {});
+        assert_eq!(
+            row(&m, Item::OutlineStroke),
+            Some((false, Some("This layer has no stroke")))
+        );
+        assert_eq!(
+            row(&menu(&[Kind::Text], &|_| {}), Item::OutlineStroke),
+            None
         );
     }
 

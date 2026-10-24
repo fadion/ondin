@@ -8,10 +8,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
 
 ## Now · Immediately
 
-- **Outline stroke** — a verb turning a stroke into a filled path. `scene::lay_stroke` already expands
-  outlines with `kurbo::stroke`.
-- **Joining the ends of two path layers.** Join works only between open ends of one path
-  (`tools::joinable_ends`, `canvas::join_points`).
 - **Gradient editing.** On-canvas handles; a linear gradient's two ends (only an angle today, spanning
   the box: `paint::with_linear_angle`); a radial's radius and ellipse (`paint::with_radial_centre`,
   `GradientBrush::transform`); conic in the picker (`paint::PaintKind::Sweep` has no tab and no
@@ -21,9 +17,6 @@ picking an item up — an item's premise can go stale while its ask still reads 
   colours** beside the document swatches (`picker::document_swatches`).
 - **Adding layout to a loose selection** should infer direction, gap and padding from where the
   children sit and order them visually (`panels/layout.rs` `set_display` writes `Flex::default()`).
-- **The insert picker drops at the top level only** (`kits/picker.rs`); a drop over a frame or flex
-  container should land inside it.
-- **Snapping to layout grids** — `snap.rs` never reads `Node::grids`.
 - **Combine as variants** should parse `Size=L, State=Hover` names into properties
   (`variant::combine` makes one *Property 1*).
 - **Groups in the styles browser** for slash paths (`variables.rs` `styles_tab`), as variables have

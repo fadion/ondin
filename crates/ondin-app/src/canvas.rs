@@ -2690,7 +2690,11 @@ impl OndinApp {
                 Vec::new()
             },
             guides: if self.snap_guides {
-                self.guide_lines()
+                let mut lines = self.guide_lines();
+                let grids = self.layout_grid_lines(moving);
+                lines.x.extend(grids.x);
+                lines.y.extend(grids.y);
+                lines
             } else {
                 snap::GuideLines::default()
             },
@@ -2702,6 +2706,60 @@ impl OndinApp {
             pixel: self.snap_grid,
             zoom,
         }
+    }
+
+    /// The edges of every visible layout-grid track, in world space, for
+    /// [`snap::Snapping`]'s guide source: drawn lines, as ruler guides are, so a match
+    /// needs no mark of its own. Empty while layout grids are hidden. A frame being
+    /// carried is skipped, its grid moving with it, and so is one turned off the axes:
+    /// snapping is axis-aligned.
+    fn layout_grid_lines(&self, moving: &[NodeId]) -> snap::GuideLines {
+        let mut out = snap::GuideLines::default();
+        if !self.show_layout_grids {
+            return out;
+        }
+        let doc = &self.session.doc;
+        for id in self.artboards() {
+            let Some(node) = doc.get(id) else { continue };
+            if node.grids().is_empty()
+                || !self.shown_visible(id)
+                || moving.contains(&id)
+                || snap::is_inside_any(doc, id, moving)
+            {
+                continue;
+            }
+            let NodeKind::Artboard { size } = node.kind() else {
+                continue;
+            };
+            let Some(world) = self.session.resolved.world_transform(id) else {
+                continue;
+            };
+            // Axis-aligned: straight or mirrored, or a quarter turn that swaps the axes.
+            let c = world.as_coeffs();
+            let swapped = match (
+                c[1].abs() < 1e-9 && c[2].abs() < 1e-9,
+                c[0].abs() < 1e-9 && c[3].abs() < 1e-9,
+            ) {
+                (true, _) => false,
+                (false, true) => true,
+                (false, false) => continue,
+            };
+            let box_ = KRect::new(0.0, 0.0, size.width, size.height);
+            for grid in node.grids().iter().filter(|g| g.visible) {
+                for track in ondin_core::grid_tracks(grid, *size) {
+                    let band = track.intersect(box_);
+                    if band.width() <= 0.0 || band.height() <= 0.0 {
+                        continue;
+                    }
+                    let (a, b) = (world * band.origin(), world * Point::new(band.x1, band.y1));
+                    match (grid.axis == ondin_core::GridAxis::Columns) != swapped {
+                        true => out.x.extend([a.x, b.x]),
+                        false => out.y.extend([a.y, b.y]),
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Every text baseline in view, in world space, for [`snap::Snapping`].
@@ -4655,6 +4713,83 @@ impl OndinApp {
         let points: Vec<PointRef> = self.points.on(id).collect();
         let (a, b) = tools::joinable_ends(&subpaths, &points)?;
         Some((id, a, b))
+    }
+
+    /// What *Join paths* would fuse: two selected, unlocked path layers, the one kept
+    /// (the key layer, else the first selected) and the one folded into it, with the
+    /// nearest pair of open ends between them in world space. Else the sentence the
+    /// menu row dims with.
+    pub(crate) fn join_layers_subject(
+        &self,
+    ) -> Result<(NodeId, NodeId, PointRef, PointRef), &'static str> {
+        const NO_ENDS: &str = "Both paths need an open end";
+        let sel = &self.session.selection;
+        let [a, b] = sel.ids() else {
+            return Err("Needs two path layers");
+        };
+        let keep = sel.key().filter(|k| k == a || k == b).unwrap_or(*a);
+        let other = if keep == *a { *b } else { *a };
+        let doc = &self.session.doc;
+        if [keep, other]
+            .iter()
+            .any(|id| ondin_core::is_effectively_locked(doc, *id))
+        {
+            return Err("One of these paths is locked");
+        }
+        let (_, ka) = self.edited_subpaths(keep).ok_or(NO_ENDS)?;
+        let (_, kb) = self.edited_subpaths(other).ok_or(NO_ENDS)?;
+        let ends = |subs: &[crate::preview::PenSubpath]| -> Vec<(PointRef, Point)> {
+            let mut out = Vec::new();
+            for (s, sub) in subs.iter().enumerate() {
+                if sub.closed || sub.anchors.len() < 2 {
+                    continue;
+                }
+                let last = sub.anchors.len() - 1;
+                out.push(((s, 0), sub.anchors[0].at));
+                out.push(((s, last), sub.anchors[last].at));
+            }
+            out
+        };
+        let mut best: Option<(f64, PointRef, PointRef)> = None;
+        for (ra, pa) in ends(&ka) {
+            for (rb, pb) in ends(&kb) {
+                let d = (pa - pb).hypot();
+                if best.is_none_or(|(bd, ..)| d < bd) {
+                    best = Some((d, ra, (rb.0 + ka.len(), rb.1)));
+                }
+            }
+        }
+        let (_, ra, rb) = best.ok_or(NO_ENDS)?;
+        Ok((keep, other, ra, rb))
+    }
+
+    /// *Join paths*: the second path layer's subpaths move into the first, and the
+    /// nearest pair of open ends between them splice into one run
+    /// ([`Self::join_layers_subject`], `tools::join_ends`). The kept layer keeps its
+    /// paint and name; the other goes. One undo step.
+    pub(crate) fn join_layers(&mut self) {
+        let Ok((keep, other, a, b)) = self.join_layers_subject() else {
+            return;
+        };
+        let (Some((world, mut list)), Some((_, theirs))) =
+            (self.edited_subpaths(keep), self.edited_subpaths(other))
+        else {
+            return;
+        };
+        list.extend(theirs);
+        let Some((list, _)) = tools::join_ends(&list, a, b) else {
+            return;
+        };
+        let mut tx = tools::rewrite_path(keep, world, &list, None);
+        tx.0.push(Operation::DeleteNode { id: other });
+        tx.0.extend(ondin_core::component::relink_for_delete(
+            &self.session.doc,
+            &[other],
+        ));
+        if self.session.commit(tx) {
+            self.session.selection.set_one(keep);
+            self.session.info("Joined two paths");
+        }
     }
 
     /// Join the two selected open ends — `context-menus.md` §6.5's last row, the
@@ -20411,5 +20546,152 @@ mod bound_resize_tests {
         assert!((w - 140.0).abs() < 1e-6, "resized to 140, got {w}");
         assert_eq!(doc.get(id).unwrap().size_vars()[0], None, "W detached");
         assert_eq!(app.session.status().text, "Detached size/w", "and said so");
+    }
+}
+
+#[cfg(test)]
+mod join_and_grid_snap_tests {
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::{Affine, BezPath, Point};
+    use ondin_core::{IdSource, NodeKind, Operation, Transaction};
+
+    fn line(from: (f64, f64), to: (f64, f64)) -> NodeKind {
+        let mut path = BezPath::new();
+        path.move_to(from);
+        path.line_to(to);
+        NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+        }
+    }
+
+    /// *Join paths* folds the second layer into the key layer, splicing the two ends
+    /// that sit nearest — here A's end and B's end, so B runs backwards into A — and
+    /// keeps the world positions though the layers sit at different origins.
+    /// flip: `join_layers_subject` taking the first pair of ends instead of the
+    /// nearest → fails at the anchor order.
+    #[test]
+    fn join_paths_splices_the_nearest_ends_into_the_key_layer() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x701);
+        let root = app.session.doc.root();
+        let [a, b] = [(); 2].map(|_| ids.mint());
+        let make = |id, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        assert!(app.session.commit(Transaction(vec![
+            make(a, line((0.0, 0.0), (10.0, 0.0)), (0.0, 0.0)),
+            // World (30, 0) → (20, 0): its end sits nearest A's end at (10, 0).
+            make(b, line((10.0, 0.0), (0.0, 0.0)), (20.0, 0.0)),
+        ])));
+        app.session.selection.set(vec![a, b]);
+        app.session.selection.set_key(a);
+        assert!(app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: b,
+            locked: true,
+        }])));
+        assert_eq!(
+            app.join_layers_subject().err(),
+            Some("One of these paths is locked"),
+            "the other one's lock is named"
+        );
+        assert!(app.session.commit(Transaction(vec![Operation::SetLocked {
+            id: b,
+            locked: false,
+        }])));
+        assert!(app.join_layers_subject().is_ok());
+        app.join_layers();
+        assert!(app.session.doc.get(b).is_none(), "b folded in");
+        let NodeKind::Path { path, .. } = app.session.doc.get(a).unwrap().kind() else {
+            panic!("a is still a path");
+        };
+        let xs: Vec<f64> = path
+            .elements()
+            .iter()
+            .filter_map(|el| el.end_point())
+            .map(|p: Point| p.x)
+            .collect();
+        assert_eq!(xs, [0.0, 10.0, 20.0, 30.0], "one run, in order: {path:?}");
+    }
+
+    /// A shown layout grid's track edges join the guide snap source, in world space,
+    /// and leave it while grids are hidden or the frame is the thing moving.
+    /// flip: `snapping` leaving `layout_grid_lines` out of `guides` → fails at "snaps".
+    #[test]
+    fn a_shown_layout_grid_is_snapped_to() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x702);
+        let root = app.session.doc.root();
+        let frame = ids.mint();
+        let mut grid = ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns);
+        grid.count = 2;
+        grid.gutter = 20.0;
+        grid.margin = 10.0;
+        grid.align = ondin_core::GridAlign::Stretch;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                },
+                transform: Some(Affine::translate((100.0, 0.0))),
+                name: None,
+            },
+            Operation::SetLayoutGrids {
+                id: frame,
+                grids: ondin_core::keyed_by_position([grid]),
+            },
+        ])));
+        app.show_layout_grids = true;
+        app.snap_guides = true;
+        let xs = app.snapping(&[]).guides.x;
+        for x in [110.0, 190.0, 210.0, 290.0] {
+            assert!(
+                xs.iter().any(|v| (v - x).abs() < 1e-9),
+                "snaps to {x}: {xs:?}"
+            );
+        }
+        assert!(
+            app.snapping(&[frame]).guides.x.is_empty(),
+            "not while it moves"
+        );
+        // A quarter turn keeps the lines on the axes, swapped: its columns pin ys.
+        let turned = ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: turned,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(200.0, 200.0),
+                },
+                transform: Some(
+                    Affine::translate((1000.0, 0.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2)
+                ),
+                name: None,
+            },
+            Operation::SetLayoutGrids {
+                id: turned,
+                grids: ondin_core::keyed_by_position([grid]),
+            },
+        ])));
+        let ys = app.snapping(&[frame]).guides.y;
+        for y in [10.0, 90.0, 110.0, 190.0] {
+            assert!(
+                ys.iter().any(|v| (v - y).abs() < 1e-9),
+                "snaps to y {y}: {ys:?}"
+            );
+        }
+        app.show_layout_grids = false;
+        assert!(app.snapping(&[]).guides.x.is_empty(), "not while hidden");
     }
 }

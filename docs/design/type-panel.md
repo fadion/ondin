@@ -10,7 +10,7 @@ slider and the switch row. Code: `panels/typography.rs`.
 
 **The card holds the daily controls; the popup is overflow.** The card has four rows:
 
-- family and variant;
+- family and variant (a family with fewer than two variants, or families mixed across layers, gets a Bold/Italic pair instead; both toggles run `toggle_face`, as `Ctrl+B`/`Ctrl+I` do, `text.md` §5.4);
 - size;
 - line height and letter spacing;
 - both alignments.

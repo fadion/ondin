@@ -1,13 +1,14 @@
 # Inspector cards
 
 The inspector's cards for v1 tools: Transform (single and multi), Position, Item and Container,
-the frame cards, Effects, Export, Appearance, Fill and Stroke with their mixed states, and Group
-Colors. The Type card is in `type-panel.md`.
+the frame cards, Effects, Export, Appearance, Fill and Stroke with their mixed states, Group
+Colors and Missing fonts. The Type card is in `type-panel.md`.
 
 ## 9.4 v1 tools — inspector
 
 ### Card order and composition
 
+- **Nothing selected:** the canvas — its Appearance card (ground colour and reset), then *Missing fonts* while the document has any.
 - **Single layer:** identity, *Frame templates* (frames only), Align, Transform, Position, Item, Container, *Layout grid*, Appearance, Type (text), Fill, Stroke, Effects, Export.
 - **Multi-selection:** the whole inspector, not a count. Transform, Appearance, Fill, Stroke, Group Colors and Export, all on §5.7a's bulk builders, so the app, MCP and CLI agree on what "set the fill of these" means.
   - Text layers add the Type card (the several-layer card writes per layer, §15 D1077). Frames add *Frame templates* and *Layout grid*. Pinnable layers add Position; frames, groups or children of laid containers add Container and Item.
@@ -255,6 +256,15 @@ stroke using it, in one transaction.
 
 **Group vs frame.** A group gets Fill and Stroke in `PaintScope::Selection` over its contents plus
 Group Colors. A frame gets its own `PaintScope::Node` Fill and Stroke plus Group Colors for its contents.
+
+### Missing fonts
+
+The document's families this machine can never have, and a replace-all for each
+(`OndinApp::missing_fonts_card`). The count is in the header.
+
+- **Listing.** `ondin_core::families::families_in_use` names every family text layers draw with — a layer's own family, or every value of its bound family variable, plus its runs' — each with its layers, the vault left out. It is memoized by revision (`font_uses`) and filtered by `FamilyStatus::Missing`.
+- **Row.** The family's name after a `TEXT_AA` glyph in `color::WARN` (a click selects the layers set in it that are not locked, `may_select_in_bulk`), *N layers* right-aligned, then a *Replace with…* dropdown over the Type panel's family list (`family_list`).
+- **Replacing** is `families::replace_family`, one transaction through `commit_edit`, with the status line *Replaced X with Y*. It rewrites the document's own text styles (their users follow through `style::settle`); a layer's own family, from that layer's own style so a copy's other overrides stand, except under a text style, where writing the defaults would detach it; matching runs on every layer; and matching cells of bound family variables. A style or a layer's defaults that change family drop their axis and feature settings, as a family pick in the Type panel does; a run's stay. Kit styles and variables and the vault are left: a kit's mains are rewritten by its next update, and a family named only there says so on the status line instead. Names match without case. Through the commit door, instances whose family follows their main keep following.
 
 ### Clip content
 

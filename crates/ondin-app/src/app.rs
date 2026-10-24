@@ -420,6 +420,9 @@ pub struct OndinApp {
     /// focus in `Memory::begin_pass`, before `input::resolve`, so [`Self::escape`] cannot
     /// ask it, and `Escape` out of a rename field would clear the selection.
     pub(crate) chrome_focus: bool,
+    /// Whether the window had the OS focus last frame; its regaining it is when the
+    /// machine's fonts are scanned again (`FontService::rescan_system`).
+    window_focused: bool,
     /// Whether an open popover's own `Escape` handler ran this frame; written by the
     /// handler, read and cleared by the key router next frame. Read instead of the open
     /// flag, because a flag whose panel was skipped would swallow `Escape` with nothing
@@ -666,6 +669,9 @@ pub struct OndinApp {
     /// The revision the bound families were last loaded at: a bind, a string cell, a new
     /// variable or a paste can name a family not yet requested.
     bound_fonts_at: Option<u64>,
+    /// `families::families_in_use` at a revision, for the *Missing fonts* card,
+    /// which would otherwise walk the document every frame.
+    pub(crate) font_uses: Option<(u64, ondin_core::families::FamilyUses)>,
     /// A picker placement waiting one painted frame; here, not on the picker, so closing
     /// it in the wait keeps the click.
     pub(crate) kit_placing: Option<crate::kits::picker::Placing>,
@@ -1244,6 +1250,7 @@ impl OndinApp {
             zoom_entry: None,
             kit_picker: None,
             bound_fonts_at: None,
+            font_uses: None,
             kit_placing: None,
             kit_shelf: Default::default(),
             kit_summary: None,
@@ -1342,6 +1349,8 @@ impl OndinApp {
             library_settings: None,
             stranded: None,
             chrome_focus: false,
+            // Starts focused: the launch scan is already under way.
+            window_focused: true,
             popover_heard: false,
         }
     }
@@ -1404,6 +1413,14 @@ impl eframe::App for OndinApp {
         // Both screens are the same window, and the updater reports to both bars.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
         self.updater.poll();
+
+        // Before the dashboard's early return, so a font installed while the library
+        // was up is found; the scan lands at the editor's font poll.
+        let focused = ui.ctx().input(|i| i.focused);
+        if focused && !self.window_focused {
+            self.fonts.rescan_system(ui.ctx());
+        }
+        self.window_focused = focused;
 
         // The dashboard returns early: no keyboard routing, no panels, no font poll,
         // `disk_results` or ticks (`go_to_dashboard` compensates one). A library file
@@ -14687,6 +14704,46 @@ mod font_arrival_tests {
             "invalidating the document must re-shape every text node — this is the \
              work an unrelated preview face used to cost"
         );
+    }
+
+    /// A family nothing can supply is listed with its layers, and replacing it is
+    /// one undo step that empties the list.
+    ///
+    /// flip: `missing_fonts` keeping every family whatever its status → fails at
+    /// "Inter is not missing".
+    #[test]
+    fn a_missing_family_is_listed_and_replaced_in_one_step() {
+        let ctx = egui::Context::default();
+        let (mut app, text) = app_with_text_in(&ctx, "Gone Sans", 3);
+        // The third layer in Inter, so the list has a family to leave out.
+        let mut style = match app.session.doc.get(text[2]).map(|n| n.kind()) {
+            Some(NodeKind::Text { style, .. }) => (**style).clone(),
+            _ => panic!("the fixture is text"),
+        };
+        style.font_family = "Inter".into();
+        app.session
+            .try_commit(Transaction(vec![Operation::SetTextStyle {
+                id: text[2],
+                style,
+                spans: None,
+            }]))
+            .expect("the fixture");
+        app.fonts.settle_for_test();
+        assert_eq!(
+            ondin_core::families::families_in_use(&app.session.doc).len(),
+            2,
+            "the fixture: two families in use"
+        );
+        let missing = app.missing_fonts();
+        assert_eq!(missing.len(), 1, "Inter is not missing: {missing:?}");
+        assert_eq!(missing[0].0, "Gone Sans");
+        assert_eq!(missing[0].1.len(), 2, "both layers set in it");
+
+        let tx = ondin_core::families::replace_family(&app.session.doc, "Gone Sans", "Inter");
+        app.commit_edit(tx);
+        assert!(app.missing_fonts().is_empty(), "replaced everywhere");
+        assert!(app.session.undo(), "one step");
+        assert_eq!(app.missing_fonts().len(), 1, "and undone in one");
     }
 }
 

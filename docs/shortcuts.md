@@ -5,7 +5,7 @@ The whole keymap: ✅ bound, ➕ agreed and unbuilt, ⛔ deliberately unbound. T
 `ViewSwitch::accel`) for the editor, `panels/dashboard.rs` (`dashboard_keys`, `search_field`) for
 the library.
 
-**Unbuilt:** §10's `Ctrl+B` / `Ctrl+I`. The cheatsheet (`Ctrl+Shift+/`, `app-canvas-chrome.md`)
+**Unbuilt:** nothing. The cheatsheet (`Ctrl+Shift+/`, `app-canvas-chrome.md`)
 renders the editor's bindings from the command registry, plus hand-kept Mouse and Library
 sections. Its tests check every registry chord it shows against `input::resolve`, and every
 action `input::resolve` binds against the sheet; the hand-kept sections and this file are not
@@ -359,14 +359,22 @@ in a place §0 did not predict; the C/X/V test rule now covers a non-clipboard b
 | `Alt+↑` `↓` | line height ∓ | ✅ |
 | `Ctrl+Shift+L` `C` `R` `J` | align left / centre / right / justify | ✅ `C` from the **release** |
 | `Ctrl+Z`, `Ctrl+Shift+Z`/`Ctrl+Y`, `Ctrl+S`, `Ctrl+O` | undo, redo, save, open | ✅ since §15 D815; guards match `normal_mode` term for term; `dispatch` calls `finish_text_first` |
-| `Ctrl+B` | ➕ bold | ⚠️ **not a toggle here** |
-| `Ctrl+I` | ➕ italic | ⚠️ **not a toggle here** |
+| `Ctrl+B` | bold on / off | ✅ `TextChord::Bold`, the family's own face (`text::bold_step`) |
+| `Ctrl+I` | italic on / off | ✅ `TextChord::Italic`, the family's own face (`text::italic_step`) |
 
-**`Ctrl+B`/`Ctrl+I` are real work.** Weight lives on the `wght` axis or a named instance; italic is
-*derived* (`text.rs` reads a named instance's `ital` or parley's `FontStyle`), so there is no flag
-to flip. Both must select the family's bold/italic face or move the axis, with a defined answer for
-a family with neither. A family expressing italic via `slnt` never reports italic, and `slnt` is
-counter-clockwise-positive, so a naive `Ctrl+I` can lean the wrong way.
+**`Ctrl+B`/`Ctrl+I` pick one of the family's own faces; they never flip a bare flag on a family that
+cannot draw it.** Both go through `OndinApp::toggle_face`, as the Type panel's Bold/Italic toggles
+do, and apply the result as picking a variant does (weight, italic and axis coordinates merged).
+The rule is core's (`text.md` §5.4, *Bold and italic*):
+
+- **Bold** reads as on at `text::BOLD_FROM` (600) and up, unless the selection's weights are mixed,
+  which is made bold. Off steps toward 400 and on toward 700, to the nearest variant of the same
+  slope in that direction, else along `wght`.
+- **Italic** takes the other slope's variant nearest in weight, else the bare flag when an `ital` or
+  `slnt` axis can carry it. A mixed selection is made italic; upright is always reachable.
+- **Nothing that way** refuses with a status line: *X has no bold*, *X has nothing lighter*, *X has
+  no italic*. No faux bold or oblique is drawn, so a family with no slope has no italic.
+- A family core has not been handed gets the bare weight or flag.
 
 **Underline is exclusive with strikethrough**, so `Ctrl+U` on struck-through text *replaces* the
 decoration — the one row whose semantics differ from every app it is borrowed from.

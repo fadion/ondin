@@ -364,6 +364,100 @@ fn ordered_cuts(out: &mut Vec<FontVariant>) {
     out.dedup_by(|a, b| a.weight == b.weight && a.italic == b.italic);
 }
 
+/// What `family` can do about weight and slope — what *Bold* and *Italic* choose
+/// from ([`bold_step`], [`italic_step`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FaceOffer {
+    /// [`family_variants`]: named instances, else the registered faces.
+    pub variants: Vec<FontVariant>,
+    /// The default face's `wght` axis, when it has one.
+    pub wght: Option<FontAxis>,
+    /// Whether an `ital` or `slnt` axis slopes the default face.
+    pub slope_axis: bool,
+}
+
+impl FaceOffer {
+    /// Read off the registered faces of `family`. Empty for a family core has
+    /// not been handed, which the steps treat as "unknown", not "lacking".
+    pub fn of(family: &str) -> Self {
+        let axes = family_axes(family);
+        FaceOffer {
+            variants: family_variants(family),
+            wght: axes.iter().find(|a| a.tag == WGHT).cloned(),
+            slope_axis: axes.iter().any(|a| a.tag == ITAL || a.tag == SLNT),
+        }
+    }
+
+    fn is_unknown(&self) -> bool {
+        self.variants.is_empty() && self.wght.is_none() && !self.slope_axis
+    }
+}
+
+/// The weight at which *Bold* reads as on: semibold and up.
+pub const BOLD_FROM: u16 = 600;
+
+/// What *Bold* (`Ctrl+B`, the panel's toggle) writes over text at `weight` and
+/// `italic`: the face to apply, or `None` when the family has nothing in that
+/// direction.
+///
+/// On at [`BOLD_FROM`] and up, unless `mixed` (a selection of several weights
+/// is made bold, never un-bolded). Off steps toward 400 and on toward 700: to
+/// the variant of the same slope nearest the target in that direction, else
+/// along `wght`. A family core knows nothing of gets the bare weight.
+pub fn bold_step(offer: &FaceOffer, weight: u16, italic: bool, mixed: bool) -> Option<FontVariant> {
+    let on = weight >= BOLD_FROM && !mixed;
+    let target: u16 = if on { 400 } else { 700 };
+    let toward = |w: u16| if on { w < weight } else { w > weight };
+    let bare = |w: u16| FontVariant {
+        name: face_name(w, italic),
+        weight: w,
+        italic,
+        coords: Vec::new(),
+    };
+    if offer.is_unknown() {
+        return Some(bare(target));
+    }
+    let same_slope = offer.variants.iter().filter(|v| v.italic == italic);
+    if let Some(v) = same_slope
+        .filter(|v| toward(v.weight))
+        .min_by_key(|v| v.weight.abs_diff(target))
+    {
+        return Some(v.clone());
+    }
+    let w = offer.wght.as_ref()?.clamp(f64::from(target)).round() as u16;
+    toward(w).then(|| bare(w))
+}
+
+/// What *Italic* (`Ctrl+I`, the panel's toggle) writes over text at `weight` and
+/// `italic`: the face to apply, or `None` when the family has no slope at all.
+///
+/// Prefers a variant of the other slope, nearest in weight; else the bare flag
+/// when an `ital` or `slnt` axis can carry it ([`axis_settings`] leans `slnt`
+/// itself). Upright is always reachable. A family core knows nothing of gets the
+/// bare flag. Nothing is synthesized: a slanted copy of an upright face is not drawn.
+pub fn italic_step(
+    offer: &FaceOffer,
+    weight: u16,
+    italic: bool,
+    mixed: bool,
+) -> Option<FontVariant> {
+    let target = !(italic && !mixed);
+    if let Some(v) = offer
+        .variants
+        .iter()
+        .filter(|v| v.italic == target)
+        .min_by_key(|v| v.weight.abs_diff(weight))
+    {
+        return Some(v.clone());
+    }
+    (!target || offer.slope_axis || offer.is_unknown()).then(|| FontVariant {
+        name: face_name(weight, target),
+        weight,
+        italic: target,
+        coords: Vec::new(),
+    })
+}
+
 fn axis_of(coords: &[AxisSetting], tag: Tag) -> Option<f64> {
     coords.iter().find(|a| a.tag == tag).map(|a| a.value)
 }
@@ -1469,8 +1563,24 @@ fn axis_settings(style: &TextStyle, axes: &[FontAxis]) -> Vec<FontVariation> {
         let value = axis.clamp(style.font_size);
         out.push(FontVariation::new(parley_tag(OPSZ), value as f32));
     }
+    // Italic on a face that slopes only through `slnt`: fontique's synthesis
+    // writes `slnt = +14`, which is a backslant (the axis is counter-clockwise
+    // positive) and clamps to 0 on the usual −15…0 range. Written here, after
+    // synthesis in parley's order, so it wins; a hand-set `slnt` wins over this.
+    if style.italic
+        && !axes.iter().any(|a| a.tag == ITAL)
+        && !style.variations.iter().any(|a| a.tag == SLNT)
+        && let Some(axis) = axes.iter().find(|a| a.tag == SLNT)
+    {
+        let value = axis.clamp(-ITALIC_SLANT);
+        out.push(FontVariation::new(parley_tag(SLNT), value as f32));
+    }
     out
 }
+
+/// The lean, in degrees, a `slnt`-only face is given for italic — CSS's
+/// synthesized oblique, and fontique's.
+const ITALIC_SLANT: f64 = 14.0;
 
 /// Push one style's properties onto the builder — as defaults when `range` is
 /// `None`, otherwise over that byte range — so the two sets cannot drift.
@@ -6551,6 +6661,182 @@ mod tests {
             Some(200.0),
             "a stored coordinate reaches the shaper raw — the panel shows what the \
              file holds (§15 D425) and the shaper clamps it for itself"
+        );
+    }
+
+    /// Italic on a `slnt`-only face leans right (negative), clamped to the axis,
+    /// and yields to an `ital` axis and to a hand-set `slnt`.
+    ///
+    /// flip: `axis.clamp(-ITALIC_SLANT)` → `axis.clamp(ITALIC_SLANT)` → fails at
+    /// "leans right".
+    #[test]
+    fn italic_on_a_slnt_face_leans_right_unless_told_otherwise() {
+        let axis = |tag, min| FontAxis {
+            tag,
+            min,
+            default: 0.0,
+            max: if tag == ITAL { 1.0 } else { 0.0 },
+            name: tag.to_string(),
+            hidden: false,
+        };
+        let slnt = |v: &[FontVariation]| {
+            v.iter()
+                .find(|x| x.tag == parley_tag(SLNT))
+                .map(|x| f64::from(x.value))
+        };
+        let mut s = style(16.0);
+        s.italic = true;
+        assert_eq!(
+            slnt(&axis_settings(&s, &[axis(SLNT, -10.0)])),
+            Some(-10.0),
+            "leans right, as far as the axis goes"
+        );
+        assert_eq!(slnt(&axis_settings(&s, &[axis(SLNT, -20.0)])), Some(-14.0));
+        assert_eq!(
+            slnt(&axis_settings(&s, &[axis(SLNT, -10.0), axis(ITAL, 0.0)])),
+            None,
+            "an ital axis is fontique's to set"
+        );
+        s.italic = false;
+        assert_eq!(slnt(&axis_settings(&s, &[axis(SLNT, -10.0)])), None);
+        s.italic = true;
+        s.set(CharAttr::Variations(vec![AxisSetting::new(SLNT, -3.0)]));
+        assert_eq!(
+            slnt(&axis_settings(&s, &[axis(SLNT, -10.0)])),
+            Some(-3.0),
+            "a hand-set slnt is the only one written"
+        );
+    }
+
+    fn variant(weight: u16, italic: bool) -> FontVariant {
+        FontVariant {
+            name: face_name(weight, italic),
+            weight,
+            italic,
+            coords: Vec::new(),
+        }
+    }
+
+    /// *Bold* steps to the nearest face of the same slope toward 700 or 400, else
+    /// along `wght`, and refuses where the family has nothing that way.
+    ///
+    /// flip: dropping the `toward` filter in `bold_step` → fails at "mixed is made
+    /// bold, nothing above 900" (it steps down to 600).
+    #[test]
+    fn bold_steps_to_the_nearest_face_that_way() {
+        let statics = FaceOffer {
+            variants: vec![
+                variant(300, false),
+                variant(400, false),
+                variant(600, false),
+                variant(900, false),
+                variant(800, true),
+            ],
+            ..FaceOffer::default()
+        };
+        let w = |o: &FaceOffer, weight, italic, mixed| {
+            bold_step(o, weight, italic, mixed).map(|v| (v.weight, v.italic))
+        };
+        assert_eq!(
+            w(&statics, 400, false, false),
+            Some((600, false)),
+            "nearest to 700 above"
+        );
+        assert_eq!(
+            w(&statics, 600, false, false),
+            Some((400, false)),
+            "on at 600: off to 400"
+        );
+        assert_eq!(
+            w(&statics, 900, false, true),
+            None,
+            "mixed is made bold, nothing above 900"
+        );
+        assert_eq!(
+            w(&statics, 400, true, false),
+            Some((800, true)),
+            "the slope is kept"
+        );
+
+        let one = FaceOffer {
+            variants: vec![variant(400, false)],
+            ..FaceOffer::default()
+        };
+        assert_eq!(
+            w(&one, 400, false, false),
+            None,
+            "a family with one weight has no bold"
+        );
+
+        let axis = FaceOffer {
+            variants: vec![variant(400, false)],
+            wght: Some(FontAxis {
+                tag: WGHT,
+                min: 100.0,
+                default: 400.0,
+                max: 650.0,
+                name: "Weight".into(),
+                hidden: false,
+            }),
+            slope_axis: false,
+        };
+        assert_eq!(
+            w(&axis, 400, false, false),
+            Some((650, false)),
+            "along wght, clamped"
+        );
+        assert_eq!(
+            w(&FaceOffer::default(), 400, false, false),
+            Some((700, false)),
+            "an unknown family gets the bare weight"
+        );
+    }
+
+    /// *Italic* takes the other slope's face nearest in weight, else the bare flag
+    /// on a sloping axis; a family with no slope refuses, and upright is always
+    /// reachable.
+    ///
+    /// flip: `italic_step` returning the bare flag without the `slope_axis`
+    /// guard → fails at "no italic to be had".
+    #[test]
+    fn italic_takes_the_other_slope_or_refuses() {
+        let i = |o: &FaceOffer, weight, italic| {
+            italic_step(o, weight, italic, false).map(|v| (v.weight, v.italic))
+        };
+        let pair = FaceOffer {
+            variants: vec![variant(400, false), variant(700, false), variant(600, true)],
+            ..FaceOffer::default()
+        };
+        assert_eq!(
+            i(&pair, 700, false),
+            Some((600, true)),
+            "nearest italic weight"
+        );
+        assert_eq!(
+            i(&pair, 600, true),
+            Some((700, false)),
+            "and back, nearest upright"
+        );
+
+        let upright = FaceOffer {
+            variants: vec![variant(400, false)],
+            ..FaceOffer::default()
+        };
+        assert_eq!(i(&upright, 400, false), None, "no italic to be had");
+        assert_eq!(
+            i(&upright, 400, true),
+            Some((400, false)),
+            "upright is reachable"
+        );
+
+        let slanted = FaceOffer {
+            slope_axis: true,
+            ..upright
+        };
+        assert_eq!(
+            i(&slanted, 400, false),
+            Some((400, true)),
+            "a slnt axis carries it"
         );
     }
 

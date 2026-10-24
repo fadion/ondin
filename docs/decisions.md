@@ -82,6 +82,7 @@ Decided non-goals are in `docs/non-goals.md`.
 - **D405** Type on a path is a rail on the text node: shaped flat, then bent by a warp pass.
 - **Alignment never uses ink bounds**: they depend on the string, so labels aligned by ink jump apart when edited. Font-metric box trim is the datum. Optical margins move the ink to meet the datum; they don't move the datum.
 - **D356** Underlines skip ink per run (`Decoration::skip_ink`, default on).
+- **Bold and italic are the family's own faces or axes; nothing is synthesized.** No faux bold or oblique is drawn, so `Ctrl+B`/`Ctrl+I` refuse a family with nothing that way rather than write a flag that would draw unchanged (`text::bold_step`, `italic_step`).
 - **D83** The Google Fonts catalog is fetched online and disk-cached, not shipped with the build.
 - **D330/D720** *Load web fonts* is one switch, and off means no request leaves the machine.
 

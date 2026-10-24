@@ -167,6 +167,8 @@ fn sections(lead: Lead) -> Vec<Section> {
     .map(Item::ViewSwitch)
     .collect();
     let text: Vec<Item> = [
+        TextChord::Bold,
+        TextChord::Italic,
         TextChord::Underline,
         TextChord::Size(1),
         TextChord::Size(-1),

@@ -154,6 +154,10 @@ const POPULAR: &[&str] = &[
 /// fresh one. The gate is in [`spawn_catalog`]; Google adds families monthly.
 const CATALOG_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
+/// The least time between two re-scans of the machine's fonts. A scan reads
+/// every font file's header, so focus flicking between windows must not repeat it.
+const RESCAN_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// How much of a family to load.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 enum Want {
@@ -490,6 +494,11 @@ pub struct FontService {
     /// A scan in flight. Its own channel rather than a message on `msg_rx`, so the
     /// answer cannot be mistaken for a face.
     size_rx: Option<Receiver<u64>>,
+    /// A re-scan of the machine's fonts in flight ([`Self::rescan_system`]). Apart
+    /// from `system_rx`, whose being taken is what "the scan has landed" means.
+    rescan_rx: Option<Receiver<SystemScan>>,
+    /// When the last re-scan started, for [`RESCAN_EVERY`].
+    rescanned_at: Option<std::time::Instant>,
 }
 
 impl FontService {
@@ -519,21 +528,7 @@ impl FontService {
 
         // Enumerate system fonts off the startup path; nothing needs the answer
         // until a picker is opened.
-        let (system_tx, system_rx) = channel();
-        let system_ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let mut db = fontdb::Database::new();
-            db.load_system_fonts();
-            let mut families = BTreeSet::new();
-            for face in db.faces() {
-                for (name, _lang) in &face.families {
-                    families.insert(name.clone());
-                }
-            }
-            if system_tx.send(SystemScan { db, families }).is_ok() {
-                system_ctx.request_repaint();
-            }
-        });
+        let system_rx = spawn_system_scan(ctx);
 
         // The catalog — see [`spawn_catalog`]. With web fonts off the thread is never
         // started; the dropped sender is the same "stopped arriving" signal a
@@ -611,6 +606,8 @@ impl FontService {
             catalog_path,
             cache_bytes: None,
             size_rx: None,
+            rescan_rx: None,
+            rescanned_at: None,
         }
     }
 
@@ -663,7 +660,17 @@ impl FontService {
             catalog_path: std::env::temp_dir().join("ondin-headless-never-read.json"),
             cache_bytes: None,
             size_rx: None,
+            rescan_rx: None,
+            rescanned_at: None,
         }
+    }
+
+    /// Mark both sources as landed with nothing in them, so a family nothing lists
+    /// is `Missing` rather than `Pending`.
+    #[cfg(test)]
+    pub(crate) fn settle_for_test(&mut self) {
+        self.system_rx = None;
+        self.catalog_done = true;
     }
 
     /// The attributes new text nodes start with. Inter is bundled in core, so it
@@ -729,6 +736,35 @@ impl FontService {
         self.ensure(family, Want::Full, Lane::Urgent);
     }
 
+    /// Look at the machine's fonts again, so a family installed while the app was
+    /// open is offered and drawn. Called when the window regains focus — where a
+    /// user comes back from installing one. At most once per [`RESCAN_EVERY`],
+    /// never while a scan is out; the answer lands in [`Self::poll`].
+    pub fn rescan_system(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        let recent = self
+            .rescanned_at
+            .is_some_and(|t| now.duration_since(t) < RESCAN_EVERY);
+        if recent || self.system_rx.is_some() || self.rescan_rx.is_some() {
+            return;
+        }
+        self.rescanned_at = Some(now);
+        self.rescan_rx = Some(spawn_system_scan(ctx));
+    }
+
+    /// Take a re-scan's answer: a different family list replaces the old one and
+    /// reports `families_changed`, which has the app ask for the document's
+    /// families again. An identical list changes nothing, so no repaint follows.
+    fn land_rescan(&mut self, scan: SystemScan, out: &mut FontPoll) {
+        // The new database either way: a re-installed file may have moved.
+        self.db = Some(scan.db);
+        if scan.families != self.system {
+            self.system = scan.families;
+            self.rebuild_families();
+            out.families_changed = true;
+        }
+    }
+
     /// Warm [`POPULAR`] on the prefetch lane, once per session (§15 D352).
     ///
     /// Fired when the catalog has finished arriving, not from `new`: before it
@@ -779,7 +815,9 @@ impl FontService {
     /// Whether a face of `family` is on its way. The family field says so, so a
     /// slow download reads as slow rather than as broken.
     pub fn is_loading(&self, family: &str) -> bool {
-        self.state.get(family).is_some_and(|s| s.outstanding > 0)
+        self.state
+            .get(&self.spelled(family))
+            .is_some_and(|s| s.outstanding > 0)
     }
 
     /// Ready, pending or missing — the question a UI warning has to ask
@@ -789,6 +827,7 @@ impl FontService {
     /// this is the verdict, consulting the family list and whether the sources
     /// have stopped arriving.
     pub fn family_status(&self, family: &str) -> FamilyStatus {
+        let family = &self.spelled(family);
         let state = self.state.get(family);
         status_of(FamilyFacts {
             drawable: ondin_core::text::is_family_available(family),
@@ -796,7 +835,7 @@ impl FontService {
             // The scan's receiver is taken when it lands, so `None` *is* "landed".
             sources_settled: self.system_rx.is_none() && self.catalog_done,
             // `families` is sorted, so this costs no `fontdb` query per frame.
-            listed: self.families.binary_search(&family.to_string()).is_ok(),
+            listed: self.families.binary_search(family).is_ok(),
             // A family whose italic failed and whose upright arrived is not missing.
             tried_and_failed: state.is_some_and(|s| s.failed > 0 && s.faces.is_empty()),
         })
@@ -912,7 +951,25 @@ impl FontService {
         }
     }
 
+    /// `family` as the family list spells it, matched without case — a document
+    /// can name `roboto` and `document_families` lowercases — else as given.
+    fn spelled(&self, family: &str) -> String {
+        if self
+            .families
+            .binary_search_by(|f| f.as_str().cmp(family))
+            .is_ok()
+        {
+            return family.to_string();
+        }
+        let lower = family.to_lowercase();
+        self.keys
+            .iter()
+            .position(|k| *k == lower)
+            .map_or_else(|| family.to_string(), |i| self.families[i].clone())
+    }
+
     fn ensure(&mut self, family: &str, want: Want, lane: Lane) {
+        let family = &self.spelled(family);
         let specs: Vec<FaceSpec> = self
             .faces_of(family, want)
             .into_iter()
@@ -986,6 +1043,16 @@ impl FontService {
             self.system_rx = None;
             self.rebuild_families();
             out.families_changed = true;
+        }
+        if let Some(rx) = &self.rescan_rx {
+            match rx.try_recv() {
+                Ok(scan) => {
+                    self.rescan_rx = None;
+                    self.land_rescan(scan, &mut out);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.rescan_rx = None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
         }
 
         // Up to two batches: the disk copy, then the refreshed one. `Disconnected` is
@@ -1162,6 +1229,27 @@ fn families_over_budget(
         drop.push(family);
     }
     drop
+}
+
+/// Enumerate the machine's fonts on a background thread; the receiver gets one
+/// [`SystemScan`] and then closes.
+fn spawn_system_scan(ctx: &egui::Context) -> Receiver<SystemScan> {
+    let (tx, rx) = channel();
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        let mut families = BTreeSet::new();
+        for face in db.faces() {
+            for (name, _lang) in &face.families {
+                families.insert(name.clone());
+            }
+        }
+        if tx.send(SystemScan { db, families }).is_ok() {
+            ctx.request_repaint();
+        }
+    });
+    rx
 }
 
 /// Start the catalog thread and hand back the receiver it will send on: the disk
@@ -2530,6 +2618,91 @@ mod tests {
             "`{name}` is installed on this machine, so warming it registers a face \
              the picker was never going to ask the network for"
         );
+    }
+
+    /// The bundled icon font as a one-face system scan, and its family name.
+    fn phosphor_scan() -> (SystemScan, String) {
+        let mut db = fontdb::Database::new();
+        db.load_font_file(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/Phosphor.ttf"
+        ))
+        .expect("the bundled icon font is in the tree");
+        let name = db.faces().next().expect("one face").families[0].0.clone();
+        let families = [name.clone()].into_iter().collect();
+        (SystemScan { db, families }, name)
+    }
+
+    /// A family asked for in another case loads the installed one —
+    /// `document_families` lowercases every name it hands `ensure_loaded`.
+    ///
+    /// flip: `ensure` skipping `spelled` → fails at "queued under its own spelling".
+    #[test]
+    fn a_family_named_in_another_case_still_loads() {
+        let (scan, name) = phosphor_scan();
+        let mut service = FontService::inert();
+        service.system = scan.families;
+        service.db = Some(scan.db);
+        service.rebuild_families();
+        assert_ne!(
+            name.to_lowercase(),
+            name,
+            "the fixture: a name with capitals"
+        );
+
+        service.ensure_loaded(&name.to_lowercase());
+        assert!(
+            service.state.get(&name).is_some_and(|s| s.outstanding > 0),
+            "queued under its own spelling: {:?}",
+            service.state.keys().collect::<Vec<_>>()
+        );
+        assert!(service.is_loading(&name.to_lowercase()));
+    }
+
+    /// A re-scan that finds a new family lists it and says so, which turns a
+    /// missing family into one that can be fetched; the same list again says
+    /// nothing.
+    ///
+    /// flip: `land_rescan` reporting `families_changed` unconditionally → fails
+    /// at "an unchanged machine is not news".
+    #[test]
+    fn a_rescan_lists_a_font_installed_since_launch() {
+        let (scan, name) = phosphor_scan();
+        let mut service = FontService::inert();
+        // Both sources landed: a family nothing lists is missing, not pending.
+        service.system_rx = None;
+        service.catalog_done = true;
+        assert_eq!(service.family_status(&name), FamilyStatus::Missing);
+
+        let mut out = FontPoll::default();
+        service.land_rescan(scan, &mut out);
+        assert!(out.families_changed, "the new family is news");
+        assert_ne!(
+            service.family_status(&name),
+            FamilyStatus::Missing,
+            "and is no longer missing"
+        );
+
+        let (again, _) = phosphor_scan();
+        let mut out = FontPoll::default();
+        service.land_rescan(again, &mut out);
+        assert!(!out.families_changed, "an unchanged machine is not news");
+    }
+
+    /// A second re-scan inside `RESCAN_EVERY` is refused, as is one while a scan
+    /// is out.
+    ///
+    /// flip: dropping `recent` from `rescan_system`'s guard → fails at "too soon".
+    #[test]
+    fn rescans_are_throttled() {
+        let ctx = egui::Context::default();
+        let mut service = FontService::inert();
+        service.system_rx = None;
+        service.rescan_system(&ctx);
+        assert!(service.rescan_rx.is_some(), "the first one starts");
+        service.rescan_rx = None;
+        service.rescan_system(&ctx);
+        assert!(service.rescan_rx.is_none(), "too soon");
     }
 
     /// A catalog entry whose `id` or `subset` is a path is dropped, and the

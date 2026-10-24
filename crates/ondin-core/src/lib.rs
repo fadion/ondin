@@ -27,6 +27,7 @@ pub mod container;
 pub mod document;
 pub mod effect;
 pub mod export;
+pub mod families;
 pub mod geometry;
 pub mod guide;
 pub mod history;

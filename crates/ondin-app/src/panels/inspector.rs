@@ -99,6 +99,9 @@ fn key_color([r, g, b, a]: [u8; 4]) -> ondin_core::peniko::Color {
 /// The vertical pitch between every control in image editing's card — the
 /// panel's own row gap.
 const IMAGE_CARD_GAP: f32 = ui::CARD_ROW_GAP;
+/// The air under each family's replace dropdown in *Missing fonts*, before the
+/// next family's name.
+const MISSING_FONT_GAP: f32 = ui::CARD_ROW_GAP;
 
 /// Which tab of image editing's card is showing (§5.5a): framing and colour are
 /// separate jobs, and stacking them makes the card too tall.
@@ -1004,6 +1007,122 @@ impl OndinApp {
                 }])
             },
         );
+        self.missing_fonts_card(ui);
+    }
+
+    /// The families the document draws with that this machine can never have,
+    /// each with the layers set in it.
+    pub(crate) fn missing_fonts(&mut self) -> ondin_core::families::FamilyUses {
+        let revision = self.session.revision();
+        if self
+            .font_uses
+            .as_ref()
+            .is_none_or(|(at, _)| *at != revision)
+        {
+            let uses = ondin_core::families::families_in_use(&self.session.doc);
+            self.font_uses = Some((revision, uses));
+        }
+        let uses = self
+            .font_uses
+            .as_ref()
+            .map(|(_, u)| u.clone())
+            .unwrap_or_default();
+        uses.into_iter()
+            .filter(|(name, _)| {
+                self.fonts.family_status(name) == crate::fonts::FamilyStatus::Missing
+            })
+            .collect()
+    }
+
+    /// *Missing fonts*, on the canvas's inspector while the document has any: a
+    /// row per family — its name selects the layers set in it — and a dropdown
+    /// that replaces it everywhere (`families::replace_family`), one undo step.
+    fn missing_fonts_card(&mut self, ui: &mut egui::Ui) {
+        let missing = self.missing_fonts();
+        if missing.is_empty() {
+            return;
+        }
+        let mut pick: Option<(String, String)> = None;
+        let mut select: Option<Vec<NodeId>> = None;
+        self.panel_head(
+            ui,
+            "Missing fonts",
+            Some(missing.len()),
+            None,
+            None,
+            |app, ui| {
+                for (name, layers) in &missing {
+                    // The count first, from the right, so a long name truncates
+                    // into what it leaves rather than pushing it off the card.
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(
+                                egui::RichText::new(match layers.len() {
+                                    1 => "1 layer".to_string(),
+                                    n => format!("{n} layers"),
+                                })
+                                .size(11.0)
+                                .color(theme::text::FAINT),
+                            );
+                            ui.with_layout(
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    let label =
+                                        ui::glyph_and_text_tinted(icon::TEXT_AA, name, color::WARN);
+                                    let resp = ui
+                                        .add(
+                                            egui::Label::new(label)
+                                                .sense(egui::Sense::click())
+                                                .truncate(),
+                                        )
+                                        .on_hover_text("Select the layers set in it");
+                                    if resp.clicked() {
+                                        select = Some(layers.clone());
+                                    }
+                                },
+                            );
+                        });
+                    });
+                    ui.scope(|ui| {
+                        ui.spacing_mut().interact_size.y = ui::CONTROL_H;
+                        ui.spacing_mut().button_padding.y = 0.0;
+                        egui::ComboBox::from_id_salt(("replace-font", name.as_str()))
+                            .icon(ui::combo_chevron)
+                            .width(ui.available_width())
+                            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                            .selected_text(
+                                egui::RichText::new("Replace with…").color(theme::text::FAINT),
+                            )
+                            .show_ui(ui, |ui| {
+                                ui::menu_rows(ui);
+                                ui.spacing_mut().item_spacing.y = 3.0;
+                                if let Some(to) = app.family_list(ui, "") {
+                                    pick = Some((name.clone(), to));
+                                }
+                            });
+                    });
+                    ui.add_space(MISSING_FONT_GAP);
+                }
+            },
+        );
+        if let Some(mut ids) = select {
+            ids.retain(|id| self.may_select_in_bulk(*id));
+            self.session.selection.set(ids);
+        }
+        if let Some((from, to)) = pick {
+            self.fonts.ensure_loaded(&to);
+            let tx = ondin_core::families::replace_family(&self.session.doc, &from, &to);
+            if tx.0.is_empty() {
+                // What is left names it through a kit's style or variable.
+                self.session.info(format!(
+                    "{from} is set by a kit; its next update replaces it"
+                ));
+            } else {
+                self.commit_edit(tx);
+                self.session.info(format!("Replaced {from} with {to}"));
+            }
+        }
     }
     /// An Appearance card holding one colour and the reset beside it — the guide
     /// card's and the canvas card's.

@@ -520,6 +520,10 @@ pub fn resolve(ctx: &egui::Context, mode: Mode, nudge: NudgeStep) -> Vec<Action>
 /// `Ctrl+Shift+L` lock, `Alt`+arrows nudge); only the mode tells them apart.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TextChord {
+    /// `Ctrl+B` — the family's bold face on or off (`text::bold_step`).
+    Bold,
+    /// `Ctrl+I` — the family's italic on or off (`text::italic_step`).
+    Italic,
     /// `Ctrl+U` — underline on or off.
     ///
     /// Exclusive with strikethrough: the model carries two attributes but the UI
@@ -558,6 +562,16 @@ fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
             }
         };
 
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::B),
+            TextChord::Bold,
+            &mut out,
+        );
+        on(
+            cmd_only && !m.shift && i.key_pressed(egui::Key::I),
+            TextChord::Italic,
+            &mut out,
+        );
         on(
             cmd_only && !m.shift && i.key_pressed(egui::Key::U),
             TextChord::Underline,
@@ -2934,6 +2948,20 @@ mod consolidated_chord_tests {
             actions(Mode::TextInsert, vec![key(egui::Key::U, cmd)], cmd),
             vec![Action::TextStyle(TextChord::Underline)]
         );
+        for (k, chord) in [
+            (egui::Key::B, TextChord::Bold),
+            (egui::Key::I, TextChord::Italic),
+        ] {
+            assert_eq!(
+                actions(Mode::TextInsert, vec![key(k, cmd)], cmd),
+                vec![Action::TextStyle(chord)],
+                "{k:?} in a session"
+            );
+            assert!(
+                !actions(Mode::Normal, vec![key(k, cmd)], cmd).contains(&Action::TextStyle(chord)),
+                "{k:?} styles text only in a session"
+            );
+        }
 
         assert_eq!(
             actions(

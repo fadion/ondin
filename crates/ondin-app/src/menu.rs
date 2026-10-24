@@ -1076,6 +1076,8 @@ impl Item {
                 use crate::input::TextChord;
                 use ondin_core::TextAlign;
                 let (label, glyph, accel) = match chord {
+                    TextChord::Bold => ("Bold", icon::TEXT_BOLD, "Ctrl+B"),
+                    TextChord::Italic => ("Italic", icon::TEXT_ITALIC, "Ctrl+I"),
                     TextChord::Underline => ("Underline", icon::TEXT_UNDERLINE, "Ctrl+U"),
                     TextChord::Size(n) if n > 0 => ("Larger text", icon::TEXT_AA, "Ctrl+Shift+."),
                     TextChord::Size(_) => ("Smaller text", icon::TEXT_AA, "Ctrl+Shift+,"),

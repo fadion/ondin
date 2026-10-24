@@ -1121,26 +1121,7 @@ impl OndinApp {
                         reset = true;
                         ui.close();
                     }
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.font_filter)
-                            .margin(ui::SEARCH_PAD)
-                            .hint_text("Search…"),
-                    );
-                    let total = self.fonts.match_count(&self.font_filter);
-                    egui::ScrollArea::vertical().max_height(320.0).show_rows(
-                        ui,
-                        FAMILY_ROW_H,
-                        total,
-                        |ui, rows| {
-                            let names = self.fonts.matched_names(&self.font_filter, rows);
-                            for name in names {
-                                if self.family_row(ui, &name, &current) {
-                                    chosen = Some(name);
-                                    ui.close();
-                                }
-                            }
-                        },
-                    );
+                    chosen = self.family_list(ui, &current);
                 })
                 .response;
             if mark.is_some() {
@@ -1187,6 +1168,33 @@ impl OndinApp {
                 ],
             );
         }
+    }
+
+    /// The family dropdown's body: a search field over every family, each row in
+    /// its own face. Returns the row clicked, having closed the popup.
+    pub(crate) fn family_list(&mut self, ui: &mut egui::Ui, current: &str) -> Option<String> {
+        let mut chosen = None;
+        ui.add(
+            egui::TextEdit::singleline(&mut self.font_filter)
+                .margin(ui::SEARCH_PAD)
+                .hint_text("Search…"),
+        );
+        let total = self.fonts.match_count(&self.font_filter);
+        egui::ScrollArea::vertical().max_height(320.0).show_rows(
+            ui,
+            FAMILY_ROW_H,
+            total,
+            |ui, rows| {
+                let names = self.fonts.matched_names(&self.font_filter, rows);
+                for name in names {
+                    if self.family_row(ui, &name, current) {
+                        chosen = Some(name);
+                        ui.close();
+                    }
+                }
+            },
+        );
+        chosen
     }
 
     /// One row of the family list: the name, set in the family it names, falling
@@ -1338,6 +1346,36 @@ impl OndinApp {
         }
     }
 
+    /// *Bold* (`bold`) or *Italic* over `subject`, as `Ctrl+B`/`Ctrl+I` and the
+    /// panel's two toggles do it: the family's own face in that direction
+    /// (`text::bold_step`, `text::italic_step`), or a status line saying it has none.
+    pub(crate) fn toggle_face(&mut self, subject: &TypeSubject, bold: bool) {
+        let family = attr!(subject, Family, Family);
+        let weight = attr!(subject, Weight, Weight);
+        let italic = attr!(subject, Italic, Italic);
+        // Over several families one family's faces would land on the others' layers,
+        // so mixed is the bare weight or flag, as for a family core does not know.
+        let offer = match subject.mixed(CharAttrKind::Family) {
+            true => text::FaceOffer::default(),
+            false => text::FaceOffer::of(&family),
+        };
+        let mixed_weight = subject.mixed(CharAttrKind::Weight);
+        let step = match bold {
+            true => text::bold_step(&offer, weight, italic, mixed_weight),
+            false => text::italic_step(&offer, weight, italic, subject.mixed(CharAttrKind::Italic)),
+        };
+        match step {
+            Some(v) => self.apply_variant(subject, &v),
+            None => self.session.info(match bold {
+                true if weight >= text::BOLD_FROM && !mixed_weight => {
+                    format!("{family} has nothing lighter")
+                }
+                true => format!("{family} has no bold"),
+                false => format!("{family} has no italic"),
+            }),
+        }
+    }
+
     /// The bold/italic pair, for a family that offers no variant list.
     ///
     /// Each button carries an instance's override mark on its own value (weight on
@@ -1370,7 +1408,7 @@ impl OndinApp {
         let side = egui::Vec2::splat(cell.min(size.y));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            let (bold_on, bold_next) = bold_toggle(weight, subject.mixed(CharAttrKind::Weight));
+            let bold_on = bold_lit(weight, subject.mixed(CharAttrKind::Weight));
             let (resp, reset) = ui::field_button_marked(
                 ui,
                 icon::TEXT_BOLD,
@@ -1382,7 +1420,7 @@ impl OndinApp {
             if reset {
                 self.reset_marked(true, &bold_mark);
             } else if tip_unless_marked(resp, &bold_mark, "Bold").clicked() {
-                self.apply_char_attrs(subject, vec![CharAttr::Weight(bold_next)]);
+                self.toggle_face(subject, true);
             }
             let italic_on = italic && !subject.mixed(CharAttrKind::Italic);
             let (resp, reset) = ui::field_button_marked(
@@ -1396,7 +1434,7 @@ impl OndinApp {
             if reset {
                 self.reset_marked(true, &italic_mark);
             } else if tip_unless_marked(resp, &italic_mark, "Italic").clicked() {
-                self.apply_char_attrs(subject, vec![CharAttr::Italic(!italic_on)]);
+                self.toggle_face(subject, false);
             }
         });
     }
@@ -3621,6 +3659,8 @@ impl OndinApp {
             return;
         };
         match chord {
+            TextChord::Bold => self.toggle_face(&subject, true),
+            TextChord::Italic => self.toggle_face(&subject, false),
             // Exclusive with strikethrough, as clicking the track is.
             TextChord::Underline => {
                 let under = decoration_of(&subject, CharAttrKind::Underline);
@@ -4156,14 +4196,11 @@ fn decoration_write(i: usize, carried: Decoration) -> Vec<CharAttr> {
     }
 }
 
-/// Whether the Bold toggle is lit, and the weight a click on it writes.
-///
-/// The lit threshold is 600 (a reading of an arbitrary weight) while a click
-/// chooses between 400 and 700. A mixed selection is never lit, or the next click
+/// Whether the Bold toggle is lit: at `text::BOLD_FROM` and up, the line
+/// `text::bold_step` turns on. A mixed selection is never lit, or the next click
 /// would un-bold runs that were never bold.
-fn bold_toggle(weight: u16, mixed: bool) -> (bool, u16) {
-    let on = weight >= 600 && !mixed;
-    (on, if on { 400 } else { 700 })
+fn bold_lit(weight: u16, mixed: bool) -> bool {
+    weight >= text::BOLD_FROM && !mixed
 }
 
 /// Whether a variant describes the current weight, slope and axis settings.
@@ -5489,18 +5526,17 @@ mod tests {
             );
         }
 
-        /// The bold toggle lights from semibold up, writes the other end, and is never lit when mixed.
+        /// The bold toggle lights from semibold up and is never lit when mixed.
         ///
-        /// flip: `>= 600` → `>= 100` in `bold_toggle` → fails at the 400 case
+        /// flip: `>= BOLD_FROM` → `>= 100` in `bold_lit` → fails at the 400 case
         #[test]
-        fn the_bold_toggle_lights_at_semibold_and_writes_the_other_end() {
-            assert_eq!(bold_toggle(400, false), (false, 700), "regular offers bold");
-            assert_eq!(bold_toggle(599, false), (false, 700), "one under the line");
-            assert_eq!(bold_toggle(600, false), (true, 400), "semibold reads bold");
-            assert_eq!(bold_toggle(700, false), (true, 400), "and so does bold");
-            assert_eq!(
-                bold_toggle(900, true),
-                (false, 700),
+        fn the_bold_toggle_lights_at_semibold() {
+            assert!(!bold_lit(400, false), "regular offers bold");
+            assert!(!bold_lit(599, false), "one under the line");
+            assert!(bold_lit(600, false), "semibold reads bold");
+            assert!(bold_lit(700, false), "and so does bold");
+            assert!(
+                !bold_lit(900, true),
                 "a mixed selection is never lit, however heavy its runs"
             );
         }
@@ -9988,6 +10024,38 @@ mod valve_arm_tests {
             other => panic!("the fixture is a text node, not {other:?}"),
         };
         assert_eq!(size, 20.0, "and does not write its rewritten value either");
+    }
+
+    /// `Ctrl+B` and `Ctrl+I` in a session on bundled Inter reach its Bold and
+    /// Italic faces and come back.
+    ///
+    /// flip: the `Bold` arm of `text_chord` calling `toggle_face(.., false)` →
+    /// fails at "Ctrl+B makes it bold".
+    #[test]
+    fn bold_and_italic_chords_reach_the_familys_faces_and_back() {
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        assert!(
+            app.text.as_ref().is_some_and(|s| s.id == id),
+            "a live session"
+        );
+        let face = |app: &OndinApp| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            (
+                attr!(subject, Weight, Weight),
+                attr!(subject, Italic, Italic),
+            )
+        };
+        assert_eq!(face(&app), (400, false), "the fixture: Inter Regular");
+
+        app.text_chord(TextChord::Bold);
+        assert_eq!(face(&app), (700, false), "Ctrl+B makes it bold");
+        app.text_chord(TextChord::Italic);
+        assert_eq!(face(&app), (700, true), "Ctrl+I keeps the weight");
+        app.text_chord(TextChord::Bold);
+        assert_eq!(face(&app), (400, true), "and Ctrl+B again un-bolds");
+        app.text_chord(TextChord::Italic);
+        assert_eq!(face(&app), (400, false));
     }
 
     /// A held `Alt`+`→` stops at `MAX_TRACKING_PCT` and `Alt`+`←` at the min, in px and em.

@@ -326,7 +326,9 @@ const TOOLS: [Tool; 13] = [
     Tool::Eyedropper,
 ];
 
-const TEXT_CHORDS: [TextChord; 11] = [
+const TEXT_CHORDS: [TextChord; 13] = [
+    TextChord::Bold,
+    TextChord::Italic,
     TextChord::Underline,
     TextChord::Size(1),
     TextChord::Size(-1),

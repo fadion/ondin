@@ -382,6 +382,9 @@ fn swap_picker(
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)
+            // A long main's name is cut, or the combo grows past `width` and the
+            // card with it.
+            .truncate()
             // A popup you click into, the font family's case (`typography.rs`):
             // `CloseOnClick` would dismiss it on the click into the search field,
             // so a pick closes it by hand below.
@@ -1527,6 +1530,41 @@ impl OndinApp {
                         });
                     }
                     None => {}
+                }
+            });
+        }
+        // **Main**, on an instance linked straight to a main: the same picker, but the
+        // pick relinks (`variant::switch`), carrying overrides by name path. Not an
+        // override, so no mark; not inside a shown group.
+        if !group && roots.iter().all(|r| swap::can_relink(doc, *r)) {
+            let shows: Vec<Option<NodeId>> =
+                roots.iter().map(|r| component::main_of(doc, *r)).collect();
+            let mixed = shows.iter().any(|m| *m != shows[0]);
+            let shown = match (mixed, shows[0]) {
+                (true, _) => "Mixed".to_string(),
+                (false, Some(m)) => name_of(m),
+                (false, None) => String::new(),
+            };
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                row_label(ui, "Main", None);
+                let w = ui.available_width();
+                let current = (!mixed).then_some(shows[0]).flatten();
+                let options = |search: &str| swap_list(first, "", search);
+                let (pick, open) =
+                    swap_picker(ui, ("main-pick", first), w, &shown, current, options, None);
+                swap_open |= open;
+                if let Some(SwapTarget::Here(m)) = pick {
+                    let ops: Vec<ondin_core::Operation> = roots
+                        .iter()
+                        .filter(|r| swap::can_relink_to(doc, **r, m))
+                        .filter_map(|r| variant::switch(doc, *r, m, &mut self.session.ids))
+                        .flat_map(|tx| tx.0)
+                        .collect();
+                    // The main it already shows relinks nothing.
+                    if !ops.is_empty() {
+                        out.push(Transaction(ops));
+                    }
                 }
             });
         }
@@ -3400,6 +3438,59 @@ mod tests {
         slot: NodeId,
         row_copy: NodeId,
         nested: NodeId,
+    }
+
+    /// **A top-level instance changes main from the card**: *Row*'s instance gets a
+    /// *Main* row (and no *Swap* row), its dropdown lists the frame mains, and the
+    /// pick relinks it to *Glyph* in one undo step.
+    /// flip: the *Main* row's guard as `swap::can_swap` → fails at "the Main row".
+    #[test]
+    fn a_top_level_instance_changes_main_from_its_card() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let Slotted {
+            glyph,
+            row,
+            row_copy,
+            ..
+        } = slotted(&mut app);
+        app.session.selection.set_one(row_copy);
+        let mut painted = Vec::new();
+        for _ in 0..4 {
+            painted = drawn(&mut app, &ctx, vec![]);
+        }
+        let label = painted
+            .iter()
+            .find(|(t, _)| t == "Main")
+            .unwrap_or_else(|| panic!("the Main row: {painted:?}"))
+            .1;
+        assert!(
+            !painted.iter().any(|(t, _)| t == "Swap"),
+            "a root does not swap"
+        );
+        let combo = painted
+            .iter()
+            .find(|(t, r)| {
+                t == "Row"
+                    && (r.center().y - label.center().y).abs() < 4.0
+                    && r.left() > label.right()
+            })
+            .map(|(_, r)| r.center())
+            .unwrap_or_else(|| panic!("the Main row's dropdown, reading Row: {painted:?}"));
+        let open = click_at(&mut app, &ctx, combo);
+        let offer = open
+            .iter()
+            .filter(|(t, r)| t == "Glyph" && r.top() > label.bottom())
+            .map(|(_, r)| r.center())
+            .next()
+            .unwrap_or_else(|| panic!("Glyph offered: {open:?}"));
+        let depth = app.session.history.undo_depth();
+        click_at(&mut app, &ctx, offer);
+        assert_eq!(app.session.doc.get(row_copy).unwrap().link(), Some(glyph));
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one undo step");
+        assert!(app.session.undo());
+        assert_eq!(app.session.doc.get(row_copy).unwrap().link(), Some(row));
     }
 
     fn slotted(app: &mut OndinApp) -> Slotted {

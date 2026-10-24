@@ -1641,3 +1641,40 @@ fn a_swap_to_a_main_holding_the_outer_main_is_not_offered() {
         Err(OpError::BadLink(_, LinkRule::ComponentCycle))
     ));
 }
+
+/// A top-level instance changes main by relinking: it cannot swap, it is offered every
+/// main of its kind (its own included, no group), the relink lands in one undoable
+/// step with the new main's layers, and a nested instance inside a main is refused the
+/// main that holds it.
+/// flip: `options` without the `can_relink_to` term → fails at the offered mains.
+#[test]
+fn a_top_level_instance_changes_main_by_relinking() {
+    let mut f = fixture();
+    assert!(swap::can_relink(&f.doc, f.b1) && !swap::can_swap(&f.doc, f.b1));
+    assert!(
+        !swap::can_relink(&f.doc, f.r),
+        "a nested copy swaps instead"
+    );
+    let offered = swap::options(&f.doc, f.b1, "", "");
+    for frame_main in [f.button, f.star, f.heart] {
+        assert!(offered.contains(&frame_main), "{frame_main:?} offered");
+    }
+    assert!(!offered.contains(&f.dot), "a group main is another kind");
+    assert!(
+        swap::can_relink(&f.doc, f.n) && !swap::can_relink_to(&f.doc, f.n, f.button),
+        "the Star inside Button cannot become a Button"
+    );
+
+    let tx = variant::switch(&f.doc, f.b1, f.heart, &mut f.ids).expect("a relink");
+    f.commit_undoable(tx.0);
+    assert_eq!(f.doc.get(f.b1).unwrap().link(), Some(f.heart));
+    let kids: Vec<Option<NodeId>> = f
+        .doc
+        .get(f.b1)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|c| f.doc.get(*c).and_then(|n| n.link()))
+        .collect();
+    assert_eq!(kids, vec![Some(f.hshape), Some(f.hshine)], "Heart's layers");
+}

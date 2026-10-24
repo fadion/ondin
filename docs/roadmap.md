@@ -9,10 +9,6 @@ stale while its ask still reads true.
 
 ## Now · Immediately
 
-- **A top-level instance cannot change main.** `swap::can_swap` admits only a nested copy inside an
-  outer instance; `components.md` says a root "changes main by relinking", but nothing writes
-  `SetLink` except cut-move (`app.rs` `paste_cut_move`).
-
 ## Now · Soon
 
 - **Outline stroke** — a verb turning a stroke into a filled path. `scene::lay_stroke` already expands

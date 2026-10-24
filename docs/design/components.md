@@ -428,7 +428,8 @@ any other pass that recomputes a copy's value.
 
 ### Not built / open
 
-- Changing a top-level instance's main: designed as a relink, with no door (`roadmap.md` *Now*).
+- Relinking a top-level instance to a kit main not yet vendored (the *Main* row offers the
+  document's mains, vendored kit mains among them).
 - *Preferred mains* for swap (`roadmap.md` *Now*).
 - Pushing an instance's changes to its main, and a verb that un-makes a component (it would owe a
   detach) — `roadmap.md` *Later*.
@@ -597,7 +598,12 @@ a switch carries properties with other overrides, and undo, preview and propagat
 **The link keeps the slot, the swap brings the contents.** `Node::swap` names the main a nested copy
 inside an outer instance shows instead of its link's; `link` keeps the slot's identity (what places,
 orders and scopes its resets). Only a nested copy can swap (`swap::can_swap`); a root linked straight
-to a main changes main by relinking.
+to a main changes main by relinking (`swap::can_relink`, `can_relink_to`: a main of its kind that
+would not put a main inside itself), through `variant::switch`'s rewrite, so overrides carry by name
+path. The Component card gives such a root a **Main** row in the Swap row's place: the same picker
+over `swap::options` (which lists relink targets too), no override mark, since a relink is not an
+override. Kit mains not yet vendored are offered to a swap only (`kit::swap_offers` requires
+`can_swap`).
 
 - The slot keeps the root's placement (transform, insets, layout item), size and visibility
   (`swap::is_slot_field`), following its link; **everything else comes from the swap** (fill, stroke,

@@ -97,6 +97,26 @@ pub fn can_swap_to(doc: &Document, root: NodeId, main: NodeId) -> bool {
         && !would_cycle(doc, root, main)
 }
 
+/// Whether `root` changes main by relinking: an instance root linked straight to a
+/// main, which [`can_swap`] refuses. The rewrite is the variant switch's
+/// (`variant::switch`), so overrides carry by name path.
+pub fn can_relink(doc: &Document, root: NodeId) -> bool {
+    doc.get(root).is_some_and(|n| !n.component) && crate::propagate::linked_to_main(doc, root)
+}
+
+/// Whether relinking `root` to `main` is allowed: [`can_relink`], a main of the same
+/// kind, and no main inside itself. True for the main it shows now, so a picker can
+/// mark it; relinking to it writes nothing.
+pub fn can_relink_to(doc: &Document, root: NodeId, main: NodeId) -> bool {
+    let (Some(r), Some(m)) = (doc.get(root), doc.get(main)) else {
+        return false;
+    };
+    m.component
+        && can_relink(doc, root)
+        && std::mem::discriminant(&r.kind) == std::mem::discriminant(&m.kind)
+        && !would_cycle(doc, root, main)
+}
+
 /// Whether showing `main` at `root` would put a main inside itself: `root` sits
 /// in a main that `main` already reaches, through the instances inside it.
 fn would_cycle(doc: &Document, root: NodeId, main: NodeId) -> bool {
@@ -138,10 +158,11 @@ pub fn swap(doc: &Document, root: NodeId, main: NodeId) -> Option<Transaction> {
     })
 }
 
-/// The mains a swap at `root` offers, filtered by a property's `filter` (a name
-/// prefix) and the picker's `search` (anywhere in the name), both without case.
-/// Only mains [`can_swap_to`] accepts, the one `root` shows now included; sorted
-/// by name, then id.
+/// The mains a swap at `root` offers, or a relink at a root linked straight to a
+/// main, filtered by a property's `filter` (a name prefix) and the picker's
+/// `search` (anywhere in the name), both without case. Only mains [`can_swap_to`]
+/// or [`can_relink_to`] accepts, the one `root` shows now included; sorted by name,
+/// then id.
 pub fn options(doc: &Document, root: NodeId, filter: &str, search: &str) -> Vec<NodeId> {
     let filter = filter.trim().to_lowercase();
     let search = search.trim().to_lowercase();
@@ -153,7 +174,7 @@ pub fn options(doc: &Document, root: NodeId, filter: &str, search: &str) -> Vec<
             let name = n.name.to_lowercase();
             name.starts_with(&filter) && name.contains(&search)
         })
-        .filter(|n| can_swap_to(doc, root, n.id))
+        .filter(|n| can_swap_to(doc, root, n.id) || can_relink_to(doc, root, n.id))
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
     out.into_iter().map(|n| n.id).collect()
